@@ -2,7 +2,8 @@
 // back, never offered as a piece (pieces/seeds.ts codeTextSeeds, worker/session.ts labelSeeds).
 //   1 crafted controls on the rule, one per evidence — each guarded by a mutation switch
 //     (`off`), which makes its check FAIL: the type (smaller than the piece numbers), the string
-//     (more digits beside it on one line), its own parts (a joined "015" holds its "1")
+//     (its line of digits reads 4+ digits), its own box (a copy over it is no string), the
+//     length (a real number split in two text runs is ≤ 3 digits)
 //   2 a crafted SVG through the session: a code printed inside a closed outline — the code is
 //     held, the outline is NOT lost (seeded, or listed as set aside: D3)
 //   3 the corpus at the automatic pieces run: every hold is one reviewed by eye (TRUTH.md:
@@ -130,19 +131,34 @@ function rule() {
       held([...L, a, x, b], [...L, a]).size === 0,
     );
   }
-  // own parts: a joined "015" whose only digits beside it are its own "0" "1" "5"
+  // own copies: an OCG per size prints "15" again at the same spot (kombinezon repeats every label)
   {
     const L = labels();
-    const j = txt('015', 600, 900, 11.1);
-    const parts = ['0', '1', '5'].map((s, i) => txt(s, 600 + 0.6 * 11.1 * (i - 1), 900, 11.1));
-    const texts = [...L, ...parts];
+    const a = txt('15', 600, 900, 11.1);
+    const copy = txt('15', 600.2, 900, 11.1);
+    const all = [...L, a, copy];
     check(
-      '1 parts · a joined number beside only its own digits: not held',
-      held(texts, [...L, j]).size === 0,
+      '1 parts · a number over its own copy ("15"+"15" in one box): not held',
+      held(all, [...L, a]).size === 0,
     );
     check(
-      '1 parts · …mutation (own parts count as a string): it is held → the guard is real',
-      held(texts, [...L, j], new Set(['parts'])).has('015'),
+      '1 parts · …mutation (its own box counts as the string): it is held → the guard is real',
+      held(all, [...L, a], new Set(['parts'])).has('15'),
+    );
+  }
+  // a real smaller label split in two text runs past the digit join ("1" + "5", 0.4 type apart)
+  {
+    const L = labels();
+    const a = txt('1', 600, 900, 11.1);
+    const b = txt('5', 600 + 0.6 * 11.1 + 0.4 * 11.1, 900, 11.1);
+    const all = [...L, a, b];
+    check(
+      '1 long · a split piece number ("1" + "5" = 15, ≤ 3 digits): not held',
+      held(all, all).size === 0,
+    );
+    check(
+      '1 long · …mutation (any run length): both held → the guard is real',
+      same(held(all, all, new Set(['long'])), ['1', '5']),
     );
   }
   // no label type: two number seeds only — nothing to compare a print size with

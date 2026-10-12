@@ -270,15 +270,16 @@ export const proposeSeedsFrom = (sheet: Sheet, set?: ChainSet): Seed[] => {
  * independent evidences, both required (D3):
  *   type    the sheet prints its piece numbers in one type (the print size most number seeds share,
  *           ≥ 3 of them), and this one is clearly smaller (≤ 80 % of it);
- *   string  another run of digits in its own type sits on its baseline, close enough to read as
- *           one number with it ("00" + "15" = "0015"), and is not one of its own parts (a
- *           joined "015" holds its "1") — a piece number stands alone.
+ *   string  the digits on its baseline, in its type, each within half a type height of the next,
+ *           read as one number of 4+ digits ("00" + "15" = "0015") — longer than any piece
+ *           number (≤ 3 digits), with digits outside its own box (a joined "015" holds its own
+ *           "1"): a piece number stands alone, and one split in two ("1" + "5") is 2 digits.
  * Explicit labels ("Piece 3", "A - TOP BACK") are never codes. The result is a reason per seed
  * id; the session holds such a seed back as a set-aside (D3: listed, one click from a piece), and
  * the outline it sits in, if any, is seeded as an outline of its own.
  */
-/** Probe switches (mutation): drop one evidence, or count a joined number's own digits. */
-export type CodeTextSwitch = 'type' | 'string' | 'parts';
+/** Probe switches (mutation): drop an evidence, count a number's own digits, any run length. */
+export type CodeTextSwitch = 'type' | 'string' | 'parts' | 'long';
 export function codeTextSeeds(
   sheet: Pick<Sheet, 'texts'>,
   seeds: readonly Seed[],
@@ -303,31 +304,54 @@ export function codeTextSeeds(
     const fs = t.fontSizeMm;
     const small = labelCount >= 3 && fs <= 0.8 * labelMm;
     if (!small && !o.off?.has('type')) continue;
-    // a run of digits on its baseline, in its type, within half a type height of its box (the
-    // burda strip: 0.25; a cut count "15 X 2" sits a whole type height and more away)
+    // the run of digits on its baseline, in its type, each within half a type height of the run
+    // (the burda strip: 0.25; a cut count "15 X 2" sits a whole type height and more away)
     const r = (t.rotationDeg * Math.PI) / 180;
     const u = { x: Math.cos(r), y: Math.sin(r) };
     const c = centre(t);
-    const half = (b: IRText['bbox']) =>
-      (Math.abs(u.x) * (b.maxX - b.minX) + Math.abs(u.y) * (b.maxY - b.minY)) / 2;
-    const beside = digits.find((d) => {
-      if (d.id === t.id || Math.abs(d.fontSizeMm - fs) > 0.05 * fs) return false;
-      if (Math.abs(d.rotationDeg - t.rotationDeg) > 2) return false;
-      const dc = centre(d);
-      const along = (dc.x - c.x) * u.x + (dc.y - c.y) * u.y;
-      const across = -(dc.x - c.x) * u.y + (dc.y - c.y) * u.x;
-      const gap = Math.abs(along) - half(t.bbox) - half(d.bbox);
-      // a digit inside its own box is one of its own parts (a joined "015" = "0" + "1" + "5")
-      return (
-        Math.abs(across) <= 0.3 * fs &&
-        (gap > -0.25 * fs || !!o.off?.has('parts')) &&
-        gap <= 0.5 * fs
-      );
-    });
-    if (!beside && !o.off?.has('string')) continue;
+    const span = (b: IRText['bbox']): [number, number] => {
+      const h = (Math.abs(u.x) * (b.maxX - b.minX) + Math.abs(u.y) * (b.maxY - b.minY)) / 2;
+      const m = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+      const along = (m.x - c.x) * u.x + (m.y - c.y) * u.y;
+      return [along - h, along + h];
+    };
+    const own = span(t.bbox);
+    const line = digits
+      .filter((d) => {
+        if (Math.abs(d.fontSizeMm - fs) > 0.05 * fs) return false;
+        if (Math.abs(d.rotationDeg - t.rotationDeg) > 2) return false;
+        const dc = centre(d);
+        return Math.abs(-(dc.x - c.x) * u.y + (dc.y - c.y) * u.x) <= 0.3 * fs;
+      })
+      .map((d) => ({ d, s: span(d.bbox) }));
+    const run = new Set<(typeof line)[number]>();
+    let [lo, hi] = own;
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const x of line) {
+        if (run.has(x) || x.s[1] < lo - 0.5 * fs || x.s[0] > hi + 0.5 * fs) continue;
+        run.add(x);
+        lo = Math.min(lo, x.s[0]);
+        hi = Math.max(hi, x.s[1]);
+        grew = true;
+      }
+    }
+    // its own parts (a joined "015" = "0" + "1" + "5", or the text itself) lie inside its box
+    const outside = [...run].filter(
+      (x) =>
+        x.d.id !== t.id &&
+        (o.off?.has('parts') || x.s[1] > own[1] + 0.25 * fs || x.s[0] < own[0] - 0.25 * fs),
+    );
+    const reads = [...run]
+      .sort((p, q) => p.s[0] - q.s[0])
+      .map((x) => x.d.text.trim())
+      .join('');
+    // longer than any piece number (PIECE_NO_SRC: ≤ 3 digits) — a split "1" + "5" stays a label
+    const string = outside.length > 0 && (reads.length >= 4 || !!o.off?.has('long'));
+    if (!string && !o.off?.has('string')) continue;
     out.set(
       s.id,
-      `“${t.text.trim()}” in ${fs.toFixed(1)} mm type (the piece numbers: ${labelMm.toFixed(1)} mm)${beside ? `, beside “${beside.text.trim()}” on one line` : ''}`,
+      `“${t.text.trim()}” in ${fs.toFixed(1)} mm type (the piece numbers: ${labelMm.toFixed(1)} mm)${outside.length ? `, one line of digits reads “${reads}”` : ''}`,
     );
   }
   return out;
