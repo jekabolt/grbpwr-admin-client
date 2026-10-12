@@ -79,17 +79,12 @@ function lookOf(c: Chain, styles: ReadonlyMap<number, Style>): Look | null {
 }
 
 /**
- * The pens a size class is identified by: its dominant declared-dash / recovered-motif evidence,
- * plus a further look only when it is the size's own second look — the operator merged or
- * confirmed the row (confidence 1: `mergeSameSize`, `confirmRows`) or it carries ≥ 35 % of the
- * class's length. recover lists up to three looks per rank by length (≥ 5 %): a minor one may be
- * another size's lines ranked into it, never a pen. [] = none.
+ * The pens a size class is identified by: its dominant declared-dash / recovered-motif evidence;
+ * a further look only when the operator merged or confirmed the row (confidence 1:
+ * `mergeSameSize`, `confirmRows`). recover lists up to three looks per rank by length (≥ 5 %): a
+ * minor one may be another size's lines ranked into it — its share is no identity. [] = none.
  */
-export function classLooks(
-  c: LineClass | undefined,
-  set?: ChainSet,
-  styles?: ReadonlyMap<number, Style>,
-): Look[] {
+export function classLooks(c: LineClass | undefined): Look[] {
   const all: Look[] = [];
   for (const e of c?.evidence ?? []) {
     if (e.kind === 'declared-dash' && e.dash.some((v) => v > 0.01))
@@ -97,20 +92,7 @@ export function classLooks(
     if (e.kind === 'recovered-motif' && e.motif.length >= 2)
       all.push({ kind: 'motif', m: e.motif });
   }
-  if (all.length <= 1 || !c || c.confidence >= 1) return all;
-  if (!set || !styles) return all.slice(0, 1);
-  let total = 0;
-  const len = all.map(() => 0);
-  for (const id of c.chains) {
-    const ch = set.chains[id];
-    if (!ch) continue;
-    total += ch.lengthMm;
-    const cl = chainLook(ch, styles);
-    if (!cl) continue;
-    const k = all.findIndex((l) => sameLook(cl, l));
-    if (k >= 0) len[k] += ch.lengthMm;
-  }
-  return all.filter((_, k) => k === 0 || (total > 0 && len[k] >= 0.35 * total));
+  return c && c.confidence >= 1 ? all : all.slice(0, 1);
 }
 
 /** A pen = the looks one size is drawn with ([] = not known). */
@@ -199,7 +181,7 @@ export function rankLooks(
   const gone = keyed ? keyAbsent(set) : new Set<string>();
   const absent = run.sizes.map((z) => gone.has(z.label.trim().toUpperCase()));
   const looks = classes.map((c, r): Pen => {
-    const l = classLooks(c, set, styles);
+    const l = classLooks(c);
     if (absent[r]) return [];
     if (l.length || !c || c.role !== 'size') return l;
     // one look carried by ≥ 75 % of the class's length
