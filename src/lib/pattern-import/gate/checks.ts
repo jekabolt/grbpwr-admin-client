@@ -600,6 +600,10 @@ export function g15(ctx: GateCtx): DerivedVerdict {
 
 // ── G5 ─────────────────────────────────────────────────────────────────────────────────────
 
+/** W3: AAMA layers the R12 writer adds (write/r12.ts). */
+const AAMA_MIRROR_LAYER = '6';
+const AAMA_DRILL_LAYER = '13';
+
 export function g5(ctx: GateCtx): GateCheck {
   const failed: string[] = [];
   const notes: string[] = [];
@@ -617,10 +621,10 @@ export function g5(ctx: GateCtx): GateCheck {
       continue;
     }
     const cut = rawCut(ctx, b.block);
-    // notches
-    const notches = onLayer(ents, LAYERS.notch).filter((e) =>
-      r12 ? e.type === 'POINT' : e.type === 'LINE',
-    );
+    // notches: one LINE from the cut line inward in both dialects (W3: AAMA layer 4 slit notch)
+    const notches = onLayer(ents, LAYERS.notch).filter((e) => e.type === 'LINE');
+    if (onLayer(ents, LAYERS.notch).length !== notches.length)
+      bad('layer 4 carries something other than notch LINEs');
     if (notches.length !== s.notches.length)
       bad(`notches ${notches.length} ≠ source ${s.notches.length}`);
     if (b.mb.notches !== notches.length)
@@ -630,7 +634,7 @@ export function g5(ctx: GateCtx): GateCheck {
         const d = closestOnPolyline(n.pts[0], cut, true).d;
         if (d > PATIMPORT.snapMm) bad(`notch ${d.toFixed(2)} mm off the cut line`);
       }
-      const depth = r12 ? n.z ?? 0 : n.pts.length === 2 ? dist(n.pts[0], n.pts[1]) : 0;
+      const depth = n.pts.length === 2 ? dist(n.pts[0], n.pts[1]) : 0;
       if (!(depth > 0 && depth < 10)) bad(`notch depth ${depth.toFixed(2)} mm (must be < 1 cm)`);
     }
     // grain: exactly one L7 entity; R2000 = CLO 3-vertex arrow, R12 = 2-point LINE, 180 mm shaft
@@ -672,7 +676,26 @@ export function g5(ctx: GateCtx): GateCheck {
     // drills / internal (layer 8)
     const l8 = onLayer(ents, LAYERS.internal).filter(isPoly);
     const drills = l8.filter(isDrill);
-    const internal = l8.filter((e) => !isDrill(e));
+    // W3 (R12): a half's fold line is the AAMA mirror line on layer 6 — still one of the piece's
+    // internal lines for the manifest; every drill square has its AAMA drill POINT on layer 13
+    const mirror = onLayer(ents, AAMA_MIRROR_LAYER).filter(isPoly);
+    const internal = [...l8.filter((e) => !isDrill(e)), ...mirror];
+    if (r12) {
+      const holes = onLayer(ents, AAMA_DRILL_LAYER).filter((e) => e.type === 'POINT');
+      const unmatched = drills.filter((q) => {
+        const xs = q.pts.map((p) => p.x);
+        const ys = q.pts.map((p) => p.y);
+        const c = {
+          x: (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+        return !holes.some((h) => h.pts[0] && dist(h.pts[0], c) <= 0.01);
+      });
+      if (holes.length !== drills.length || unmatched.length)
+        bad(`drill POINTs on layer 13: ${holes.length}, drill squares: ${drills.length}`);
+      if (mirror.length !== (s.fold && !b.spec.unfoldedFold ? 1 : 0))
+        bad(`${mirror.length} mirror line(s) on layer 6 (a half's fold line only)`);
+    }
     if (drills.length !== s.drills.length)
       bad(`drills ${drills.length} ≠ source ${s.drills.length}`);
     const wantInternal = s.internal.length + (s.fold ? 1 : 0);

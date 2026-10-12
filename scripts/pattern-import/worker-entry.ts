@@ -2323,7 +2323,7 @@ async function roundTripCase() {
     const out: string[] = [];
     for (let i = 0; i + 1 < L.length; i += 2) {
       if (L[i].trim() === '999') continue;
-      out.push(L[i], L[i + 1].replace(/^(CREATION (DATE|TIME)): .*/, '$1: —'));
+      out.push(L[i], L[i + 1].replace(/^(CREATION (DATE|TIME)): .*/i, '$1: —'));
     }
     return out.join('\n');
   };
@@ -2357,18 +2357,33 @@ async function roundTripCase() {
   for (const k of cases) {
     const L = `${C} · ${k.label}`;
     const a = await importAndWrite(`${L} · source`, 'src.dxf', k.text, k.sizes, k.dialect, PPG);
+    // W1: one INSERT per block; × per garment rides only in the AAMA `QUANTITY:` label
     const ia = inserts(a.text);
-    const want = Object.entries(PPG).every(([id, n]) =>
-      [...ia].some(([b, c]) => b.startsWith(`${id}_`) && c === n),
-    );
+    const qtyOf = new Map<string, string>(); // block → its QUANTITY label
+    {
+      const ls = a.text.split(/\r?\n/);
+      let blk = '';
+      let ent = '';
+      for (let i = 0; i + 1 < ls.length; i += 2) {
+        const code = ls[i].trim();
+        if (code === '0') ent = ls[i + 1];
+        if (ent === 'BLOCK' && code === '2') blk = ls[i + 1];
+        if (ent === 'TEXT' && code === '1' && /^quantity:/i.test(ls[i + 1]))
+          qtyOf.set(blk, ls[i + 1].replace(/^quantity:\s*/i, ''));
+      }
+    }
+    const labelled = Object.entries(PPG).every(([id, n]) => {
+      const mine = [...qtyOf].filter(([b]) => b.startsWith(`${id}_`));
+      return mine.length > 0 && mine.every(([, q]) => q === String(n));
+    });
     check(
       L,
-      'first write: SL_L / SL_R / BP_1 inserted twice per size',
-      want,
+      'first write: every block inserted once, SL_L / SL_R / BP_1 labelled QUANTITY 2',
+      [...ia].every(([, c]) => c === 1) && labelled,
       [...ia]
         .filter(([, c]) => c > 1)
         .map(([b, c]) => `${b}×${c}`)
-        .join(' '),
+        .join(' ') || `${ia.size} blocks × 1`,
     );
     const b = await importAndWrite(
       `${L} · re-import`,
@@ -2411,7 +2426,7 @@ async function roundTripCase() {
         if (code === '999') continue;
         if (ent === 'INSERT' && code === '2') out.push(`INSERT ${v}`);
         if (ent === 'INSERT' && code === '10') out[out.length - 1] += ` @${Number(v).toFixed(1)}`;
-        if (code === '1') out.push(v.replace(/^(CREATION (DATE|TIME)): .*/, '$1: —'));
+        if (code === '1') out.push(v.replace(/^(CREATION (DATE|TIME)): .*/i, '$1: —'));
       }
       return out;
     };
@@ -2444,9 +2459,9 @@ async function roundTripCase() {
       `${b.w.scopes[0]?.manifest.pieces.length} pieces · ${b.w.scopes[0]?.manifest.blocks.length} blocks`,
     );
   }
-  // controls on BP_1 «cut 2» (single size, R12): (a) without its QUANTITY label the two INSERTs
-  // alone carry the cut quantity; (b) the second INSERT mirrored (x scale −1) is NOT a copy — it
-  // stays a candidate of its own, as before
+  // controls on BP_1 «cut 2» (single size, R12), on the pre-W1 shape (the block inserted twice):
+  // (a) without its QUANTITY label the two INSERTs alone carry the cut quantity; (b) the second
+  // INSERT mirrored (x scale −1) is NOT a copy — it stays a candidate of its own, as before
   {
     const L = `${C} · control`;
     const a = await importAndWrite(
@@ -2459,7 +2474,24 @@ async function roundTripCase() {
         BP_1: 2,
       },
     );
-    const noLabel = a.text.replace(/QUANTITY: 2/g, 'NOTE: copy');
+    // the old writer's second INSERT of BP_1_M (a copy column to the right)
+    const twice = (() => {
+      const ls = a.text.split(/\r?\n/);
+      for (let i = 0; i + 1 < ls.length; i += 2)
+        if (ls[i].trim() === '0' && ls[i + 1] === 'INSERT') {
+          let j = i + 2;
+          let mine = false;
+          for (; j + 1 < ls.length && ls[j].trim() !== '0'; j += 2)
+            if (ls[j].trim() === '2' && ls[j + 1] === 'BP_1_M') mine = true;
+          if (!mine) continue;
+          const copy = ls
+            .slice(i, j)
+            .map((v, k) => (k % 2 === 1 && ls[i + k - 1].trim() === '10' ? '5000.000000' : v));
+          return [...ls.slice(0, j), ...copy, ...ls.slice(j)].join('\r\n');
+        }
+      return a.text;
+    })();
+    const noLabel = twice.replace(/QUANTITY: 2/gi, 'NOTE: copy');
     const lines = noLabel.split(/\r?\n/);
     let seen = 0;
     let at = -1;
@@ -2473,7 +2505,7 @@ async function roundTripCase() {
     check(
       L,
       '(a) no QUANTITY label: two identical INSERTs alone read as cut 2',
-      !/QUANTITY: 2/.test(noLabel) && bp1?.piecesPerGarment === 2,
+      !/QUANTITY: 2/i.test(noLabel) && bp1?.piecesPerGarment === 2,
       `BP_1 ×${bp1?.piecesPerGarment}`,
     );
     const s = new Session(1, [{ name: 'm.dxf', bytes: enc(mirrored) }]);

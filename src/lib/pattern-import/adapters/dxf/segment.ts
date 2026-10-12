@@ -708,11 +708,10 @@ function blockPiece(
       const h = bb.maxY - bb.minY;
       if (w <= 12 && h <= 12 && w > 0 && h > 0 && w / h > 0.75 && w / h < 1.33) {
         roles[p.id] = 'drill';
-        drills.push({
-          at: { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 },
-          path: p.id,
-          form: p.pts.length === 4 ? 'square' : 'circle',
-        });
+        const at = { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+        // W3: our R12 writes each drill twice — CLO's square here and the AAMA POINT on 13
+        if (!drills.some((d) => Math.hypot(d.at.x - at.x, d.at.y - at.y) <= 0.05))
+          drills.push({ at, path: p.id, form: p.pts.length === 4 ? 'square' : 'circle' });
         continue;
       }
     }
