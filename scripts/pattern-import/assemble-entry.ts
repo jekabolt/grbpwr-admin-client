@@ -309,6 +309,8 @@ type SheetOut = {
   place: SheetReport['place'];
   alignment: SheetReport['alignment'];
   png: string;
+  /** D3 refusals (Sheet.refused): a corpus sheet is assembled right, so none may stand. */
+  refused: string[];
   warnings: string[];
 };
 
@@ -426,6 +428,7 @@ async function runSample(s: Sample): Promise<SampleOut> {
       place: report.place,
       alignment: report.alignment,
       png: png.file,
+      refused: sheet.refused ?? [],
       warnings: sheet.warnings,
     });
   }
@@ -820,7 +823,7 @@ export async function main(args: string[]): Promise<number> {
           r.sheets
             .map(
               (sh) =>
-                `#${sh.sheet} ${sh.pages}p ${sh.layout.map((l) => l.lines.join('/')).join(' | ')} ${sh.exactLattice ? `exact ${sh.exactLattice.maxDevMm}` : ''} ov ${sh.overview ? `${(sh.overview.errX * 100).toFixed(2)}%/${(sh.overview.errY * 100).toFixed(2)}%` : '—'} ${sh.ms}ms`,
+                `#${sh.sheet} ${sh.pages}p ${sh.layout.map((l) => l.lines.join('/')).join(' | ')} ${sh.exactLattice ? `exact ${sh.exactLattice.maxDevMm}` : ''} ov ${sh.overview ? `${(sh.overview.errX * 100).toFixed(2)}%/${(sh.overview.errY * 100).toFixed(2)}%` : '—'} ${sh.ms}ms${sh.refused.length ? ` REFUSED ${sh.refused.join(' · ')}` : ''}`,
             )
             .join('; '),
         );
@@ -871,6 +874,7 @@ export async function main(args: string[]): Promise<number> {
         r.sheets.some(
           (s) =>
             s.layout.some((l) => l.ok === false) ||
+            s.refused.length > 0 ||
             s.exactLattice?.ok === false ||
             s.overviewOk === false,
         ),

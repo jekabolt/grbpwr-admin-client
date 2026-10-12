@@ -343,6 +343,12 @@ export type Sheet = {
   bbox: BoxMm;
   /** Pages the grid says exist but no file provides. */
   missing: { row: number; col: number }[];
+  /**
+   * D3: why this placement must not be used as it stands (the placement contradicts the printed
+   * cell labels, tile pages left off a label grid, two pages naming one cell). Non-empty blocks
+   * the sheet step; there is no "accept" — the operator fixes the pages or the grid.
+   */
+  refused?: string[];
   /** Overview page, if one was found: its own scale relative to the sheet, for the gate. */
   overview?: { file: FileId; page: PageIndex; factor: number; bbox: BoxMm };
   /** Paths of every tile already in sheet frame and deduplicated across overlaps. */

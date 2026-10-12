@@ -302,6 +302,16 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
 
           {out.clean && <SheetCleanRows api={api} clean={out.clean} />}
 
+          {!!sheet.refused?.length && (
+            <CalloutBox tone='error' className='mt-2'>
+              {sheet.refused.map((w) => (
+                <Text key={w} size='micro' component='p'>
+                  {w}
+                </Text>
+              ))}
+            </CalloutBox>
+          )}
+
           {sheet.warnings.length > 0 && (
             <CalloutBox tone='warning' className='mt-2 max-h-40 overflow-y-auto'>
               {sheet.warnings.map((w) => (

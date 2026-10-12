@@ -115,23 +115,29 @@ const isScan = (f: PageFeatures) => f.rasterCover >= 0.9 && f.strokes <= 2;
 
 type Cls = PageClassification;
 
-/** Links between pages of one run: recurrence anywhere, edge stitch between consecutive pages. */
-function linkedPages(run: IRPage[]): Set<number> {
+/**
+ * Links between pages of one run: recurrence anywhere, edge stitch between consecutive pages.
+ * The set of linked pages; `partners` (when given) collects who each page links with.
+ */
+function linkedPages(run: IRPage[], partners?: Map<number, Set<number>>): Set<number> {
   const fur = furnitureOf(run);
   const regs = run.map((p, i) => buildRegPage(p, i, 0, fur));
   const linked = new Set<number>();
-  for (const l of recurrenceLinks(regs)) {
-    linked.add(l.a.page);
-    linked.add(l.b.page);
-  }
+  const pair = (a: number, b: number) => {
+    linked.add(a);
+    linked.add(b);
+    if (!partners) return;
+    partners.set(a, (partners.get(a) ?? new Set()).add(b));
+    partners.set(b, (partners.get(b) ?? new Set()).add(a));
+  };
+  for (const l of recurrenceLinks(regs)) pair(l.a.page, l.b.page);
   for (let i = 0; i + 1 < regs.length; i++) {
     if (linked.has(regs[i].page) && linked.has(regs[i + 1].page)) continue;
     for (const rel of ['right', 'below'] as const) {
       const st = run[i].calibration ? TRACED_STITCH : DEFAULT_STITCH;
       const l = stitchFree(regs[i], regs[i + 1], rel, st);
       if (accepted(l, st)) {
-        linked.add(regs[i].page);
-        linked.add(regs[i + 1].page);
+        pair(regs[i].page, regs[i + 1].page);
         break;
       }
     }
@@ -211,13 +217,30 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
     const runs: Run[] = [];
     for (const c of cands) {
       // Evidence first, then trim non-tiles off the run's ends.
-      const linked = c.length > 1 ? linkedPages(c) : new Set<number>();
+      const partners = new Map<number, Set<number>>();
+      const linked = c.length > 1 ? linkedPages(c, partners) : new Set<number>();
+      // A labelled run (most tiles print their cell, A1…L8): a page before the first labelled
+      // tile or after the last one, without a label of its own, is a tile only when it links with
+      // a LABELLED tile. Alghero's draping-guide pages 4–8 link with each other (the same logo,
+      // the same frame) and nothing else — on a label grid they have no cell to go to.
+      const labelledIdx = c.flatMap((p, i) => (F(p).cellLabel ? [i] : []));
+      const linkedCount = c.filter((p) => linked.has(p.page) || F(p).cellLabel).length;
+      const labelGrid =
+        labelledIdx.length >= 3 &&
+        2 * labelledIdx.length > linkedCount &&
+        new Set(labelledIdx.map((i) => F(c[i]).cellLabel)).size === labelledIdx.length;
+      const labelledPages = new Set(labelledIdx.map((i) => c[i].page));
+      const offGrid = (p: IRPage, i: number) =>
+        labelGrid &&
+        !F(p).cellLabel &&
+        (i < labelledIdx[0] || i > labelledIdx[labelledIdx.length - 1]) &&
+        ![...(partners.get(p.page) ?? [])].some((q) => labelledPages.has(q));
       // Traced raster pages register poorly in the quick check (resampled vertices): every
       // drawing page of a traced run counts as a tile.
       const tracedRun = c.every((p) => F(p).traced);
       const isTile = c.map(
-        (p) =>
-          linked.has(p.page) ||
+        (p, i) =>
+          (linked.has(p.page) && !offGrid(p, i)) ||
           !!F(p).cellLabel ||
           (tracedRun && F(p).strokeLenM >= 0.2 && !textHeavy(F(p))),
       );

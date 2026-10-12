@@ -96,6 +96,119 @@ function rulingPaths(page: IRPage): Set<number> {
 const posKey = (x: number, y: number) => `${Math.round(x * 10)},${Math.round(y * 10)}`;
 
 /**
+ * Furniture within ±0.3 mm: a row of tiles may print its frame a hair off the others' (Alghero
+ * rows K–L sit 0.2 mm lower — their corner crosses would otherwise read as drawing on the edge).
+ */
+export function nearFurniture(furniture: Set<string>, v: { x: number; y: number }): boolean {
+  if (!furniture.size) return false;
+  const kx = Math.round(v.x * 10);
+  const ky = Math.round(v.y * 10);
+  for (let dx = -3; dx <= 3; dx++)
+    for (let dy = -3; dy <= 3; dy++) if (furniture.has(`${kx + dx},${ky + dy}`)) return true;
+  return false;
+}
+
+export type Side = 'L' | 'R' | 'T' | 'B';
+
+// The clean stage's background flags are not read: registration works on the page as printed
+// (the overlap strip a tile repeats may be flagged on one tile and not its neighbour).
+const drawable = (path: IRPage['paths'][number], furniture: Set<string>) =>
+  path.pts.length >= 2 && !path.pts.every((v) => nearFurniture(furniture, v));
+
+/**
+ * Where the drawing meets one edge of the page: endpoints of open strokes within 1 mm of it (a
+ * line cut at the tile edge) and points where a segment crosses it (a line drawn whole, the page a
+ * window onto it — Alghero's column lines run the length of the sheet on every tile — or a dash
+ * mark straddling the edge). Page furniture (±0.3 mm), lines lying along the edge, and the first
+ * and last `marginMm` of the edge (the overlap corners: registration targets) are left out.
+ * Drawing that meets a tile's edge goes on in the tile beyond it — the evidence for a missing
+ * tile, and against a misplaced one.
+ */
+export function edgeCrossings(
+  pg: IRPage,
+  side: Side,
+  furniture: Set<string>,
+  marginMm = 0,
+): (PtMm & { mark: boolean })[] {
+  const W = pg.widthMm;
+  const H = pg.heightMm;
+  const vertical = side === 'L' || side === 'R';
+  const at = side === 'R' ? W : side === 'T' ? H : 0;
+  const len = vertical ? H : W;
+  const across = (v: { x: number; y: number }) => (vertical ? v.x : v.y) - at;
+  const along = (v: { x: number; y: number }) => (vertical ? v.y : v.x);
+  const out: (PtMm & { mark: boolean })[] = [];
+  let mark = false;
+  const push = (t: number) => {
+    if (t < marginMm || t > len - marginMm) return;
+    const v = vertical ? { x: at, y: t } : { x: t, y: at };
+    if (!nearFurniture(furniture, v)) out.push({ ...v, mark });
+  };
+  for (const path of pg.paths) {
+    if (!drawable(path, furniture)) continue;
+    // a line along the edge (a frame side, a trim line) — not a mark that straddles it
+    if (path.pts.every((v) => Math.abs(across(v)) < 1)) {
+      const ts = path.pts.map(along);
+      if (Math.max(...ts) - Math.min(...ts) > 3) continue;
+    }
+    const pts = path.closed ? [...path.pts, path.pts[0]] : path.pts;
+    const st = pg.styles[path.style];
+    const stroke = !(st?.fill && !st.widthMm);
+    // a dash mark (Alghero draws its dashed lines as rows of tiny filled triangles): it says the
+    // line goes on, but the next tile prints its own marks at their own phase
+    const xs = path.pts.map((v) => v.x);
+    const ys = path.pts.map((v) => v.y);
+    mark = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < 5;
+    if (!path.closed && stroke)
+      for (const v of [pts[0], pts[pts.length - 1]])
+        if (Math.abs(across(v)) < 1 && !nearFurniture(furniture, v)) push(along(v));
+    for (let i = 1; i < pts.length; i++) {
+      const a = across(pts[i - 1]);
+      const b = across(pts[i]);
+      if (!(a < -1e-6 && b > 1e-6) && !(a > 1e-6 && b < -1e-6)) continue;
+      const t = along(pts[i - 1]) + ((along(pts[i]) - along(pts[i - 1])) * a) / (a - b);
+      push(t);
+    }
+  }
+  return out;
+}
+
+const segCache = new WeakMap<IRPage, Map<Set<string>, Float64Array>>();
+
+/** Does the page's drawing (furniture aside) pass within `tolMm` of the point? */
+export function drawsThrough(
+  pg: IRPage,
+  q: { x: number; y: number },
+  furniture: Set<string>,
+  tolMm: number,
+): boolean {
+  let byFur = segCache.get(pg);
+  if (!byFur) segCache.set(pg, (byFur = new Map()));
+  let segs = byFur.get(furniture);
+  if (!segs) {
+    const list: number[] = [];
+    for (const path of pg.paths) {
+      if (!drawable(path, furniture)) continue;
+      const pts = path.closed ? [...path.pts, path.pts[0]] : path.pts;
+      for (let i = 1; i < pts.length; i++)
+        list.push(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    segs = Float64Array.from(list);
+    byFur.set(furniture, segs);
+  }
+  for (let k = 0; k < segs.length; k += 4) {
+    const ax = segs[k];
+    const ay = segs[k + 1];
+    const dx = segs[k + 2] - ax;
+    const dy = segs[k + 3] - ay;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 ? Math.max(0, Math.min(1, ((q.x - ax) * dx + (q.y - ay) * dy) / L2)) : 0;
+    if (Math.hypot(ax + t * dx - q.x, ay + t * dy - q.y) <= tolMm) return true;
+  }
+  return false;
+}
+
+/**
  * Vertices that sit at the same PAGE position on many pages of a group are page furniture — the
  * frame, overlap rulers, corner ticks, glue triangles, logos. They vote for the page pitch between
  * ANY two pages (reef: every pair "agrees" on dy = −266.7 through its frame), so they are removed

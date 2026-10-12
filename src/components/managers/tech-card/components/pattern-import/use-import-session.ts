@@ -1416,6 +1416,10 @@ export function useImportSession(deps: {
         const n = tileSheets(s.pages);
         if (n > 1 && inputs.sheetPicked === null)
           return `the file carries ${n} tile sheets — pick the one this card is`;
+        // D3: a placement the printed labels contradict (or pages left off their grid) has no
+        // "accept" — the pages or the grid change first
+        const refused = s.sheet?.sheet.refused ?? [];
+        if (refused.length) return `the tile placement is refused — ${refused[0]}`;
         const miss = s.sheet?.sheet.missing.length ?? 0;
         if (miss) return `${miss} pages are missing — set the grid by hand`;
         const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
