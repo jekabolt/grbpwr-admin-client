@@ -117,6 +117,8 @@ type Work = {
   closure?: boolean;
   /** Not solved: free edges facing each other, welded only for the loop topology, drawn open. */
   virtual?: boolean;
+  /** The sewn stretch of end parts of a composite (mm along each such edge), for the report. */
+  partRange?: Record<EdgeId, [number, number]>;
   /** Found from the technologist's order (a declared join the graph had no seam for). */
   fromOrder?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
@@ -589,15 +591,10 @@ export function solveDoll(input: DollInput): DollReport {
           );
         return !no;
       });
-    // A strip the graph sews by both long edges to one piece: the weaker pairing is refused, said.
-    const stripRefused = new Set(r.refused);
-    for (const s of r.refused) {
-      const strip =
-        [pk(s.a), pk(s.b)].find((k) => {
-          const g = graph.pieces.find((p) => p.pieceKey === k);
-          return !!g && !!stripLongEdges(g);
-        }) ?? pk(s.a);
-      const note = `not sewn — the graph sews both long edges of the strip ${strip} to the same piece; a strip (a gusset, a binding) runs between two pieces: this weaker pairing is refused, the order places the edge`;
+    // Graph seams the order's reading refuses (a strip sewn by both long edges to one piece, a ply
+    // of a two-ply strip sewn elsewhere, a pairing on edges a notched strip fits round): said.
+    const stripRefused = new Set(r.refused.map((x) => x.seam));
+    for (const { seam: s, note } of r.refused) {
       ringNotSewn.push({ id: `${s.a}~${s.b}`, a: edgeIdsOf(s.a), b: edgeIdsOf(s.b), note });
       warnings.push(`${s.a}~${s.b}: ${note}`);
     }
@@ -2694,8 +2691,11 @@ export function solveDoll(input: DollInput): DollReport {
   };
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
-    const A = conf ? sidePath(s, 'a') : pathOf(s.a);
-    const B = conf ? sidePath(s, 'b') : pathOf(s.b);
+    // (a proposed composite whose end parts are sewn over a stretch — a strip round a panel's
+    // lower U — is cut to its stretches like a stored one)
+    const cut = conf || !!s.seam.partRange;
+    const A = cut ? sidePath(s, 'a') : pathOf(s.a);
+    const B = cut ? sidePath(s, 'b') : pathOf(s.b);
     if (!A || !B) return null;
     const lenA = A.len;
     const lenB = B.len;
@@ -2751,6 +2751,7 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (s.seam.partRange) w0.partRange = s.seam.partRange;
     if (crotchOf(s)) {
       w0.crotch = true;
       for (const v of w0.A.v) midPlane.add(v);
@@ -5369,6 +5370,7 @@ export function solveDoll(input: DollInput): DollReport {
       note,
       pathA: Uint32Array.from(w.A.v),
       pathB: Uint32Array.from(w.B.v),
+      ...(w.partRange ? { partRange: w.partRange } : {}),
       ...(l4
         ? {
             decidedBy: w.confirmed

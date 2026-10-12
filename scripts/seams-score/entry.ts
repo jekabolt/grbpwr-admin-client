@@ -514,10 +514,17 @@ function candidateSewn(c: SeamCandidate, G: Geo, N: Names): Sewn {
 function dollSewn(s: DollReport['seams'][number], G: Geo, N: Names): Sewn {
   const A = s.a.flatMap(edgeIdsOf);
   const B = s.b.flatMap(edgeIdsOf);
+  // (a composite whose end parts are sewn over a stretch: that stretch, as candidateSewn reads it)
+  const run = (id: string) => {
+    const pr = s.partRange?.[id];
+    if (!pr) return G.run([id]);
+    const L = G.edges.get(id)?.lenMm ?? 1;
+    return G.run([id], [pr[0] / L, pr[1] / L]);
+  };
   return {
     id: s.id,
-    a: G.flat(A.flatMap((id) => G.run([id]))),
-    b: G.flat(B.flatMap((id) => G.run([id]))),
+    a: G.flat(A.flatMap(run)),
+    b: G.flat(B.flatMap(run)),
     aIds: A,
     bIds: B,
     kind: String(s.kind),
