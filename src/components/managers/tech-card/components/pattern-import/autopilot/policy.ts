@@ -1468,6 +1468,22 @@ function meaningStep(snap: Snap): AutopilotDecision {
   for (const b of sem.blocked.filter(
     (x) => x.reason === 'fold-question' || x.reason === 'fold-unresolved',
   )) {
+    // an answered fold that does not hold in every size: never re-answered here (D3) — say where
+    if (b.reason === 'fold-unresolved') {
+      const m = sem.foldMisses?.find((f) => f.seed === b.seed);
+      return stopAt(
+        'meaning',
+        `${subj(b.seed)}: ${
+          !m
+            ? `the fold does not hold in every size — ${b.detail}`
+            : m.kind === 'no-edge'
+              ? `the fold edge you picked is not found in size ${m.size} — pick again or say not a fold`
+              : m.picked
+                ? `unfolding across the fold edge you picked fails in size ${m.size} (${m.problem}) — pick again or say not a fold`
+                : `the fold line drawn in the source does not unfold in size ${m.size} (${m.problem}) — say not a fold or fix the drawing`
+        }`,
+      );
+    }
     const q = sem.folds?.find((f) => f.seed === b.seed);
     const e = q && q.suggested != null ? q.edges[q.suggested] : null;
     const second = [

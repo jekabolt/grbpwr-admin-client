@@ -6,13 +6,16 @@
 // drawn with one evidence, or the outline's fold / symmetry axis / straight edge). D3: proposals
 // are accepted only from the overview that shows every one of them on its piece — "review N"
 // opens it, "accept these N" there applies them (two clicks, nothing accepted unseen).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   FoldAsk,
+  FoldMiss,
   LineMeaning,
   NameDecision,
+  PieceFamily,
   PtMm,
+  SemanticsOutput,
   SeedId,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -79,10 +82,45 @@ const REASON: Record<string, string> = {
   'size-unmapped': 'size not mapped',
   'fold-unresolved': 'fold edge not found',
   'fold-question': 'fold?',
+  'sizes-not-distinguished': 'sizes drawn alike',
+  'size-count': 'size count open',
+  'grade-ambiguous': 'two size layouts fit',
 };
 
+/**
+ * The blocked row the footer's "N pieces …" points at — in table order, the same priority as the
+ * footer's sentence (grainlines, then fold questions, then any); null = nothing blocked.
+ */
+export function firstBlockedSeed(
+  sem: Pick<SemanticsOutput, 'blocked'> | null | undefined,
+  families: readonly PieceFamily[],
+): SeedId | null {
+  const blocked = sem?.blocked ?? [];
+  if (!blocked.length) return null;
+  const order = families.filter((f) => f.candidates.every((c) => c.outcome !== 'tiny'));
+  const first = (ok: (r: string) => boolean) =>
+    order.find((f) => blocked.some((b) => b.seed === f.seed && ok(b.reason)))?.seed ??
+    blocked.find((b) => ok(b.reason))?.seed ??
+    null;
+  const has = (r: string) => blocked.some((b) => b.reason === r);
+  return has('no-grain')
+    ? first((r) => r === 'no-grain')
+    : has('fold-question')
+      ? first((r) => r === 'fold-question')
+      : first(() => true);
+}
+
+/** 'fold-unresolved' in words: which size fails, and why, against which pick. */
+function foldMissWords(m: FoldMiss): string {
+  if (m.kind === 'no-edge')
+    return `size ${m.size}: its outline has no straight edge where the fold you picked on size ${m.refSize} is (a loose match was tried too)`;
+  return m.picked
+    ? `size ${m.size}: unfolding across the fold you picked fails — ${m.problem}`
+    : `size ${m.size}: the fold line drawn in the source does not unfold — ${m.problem}`;
+}
+
 /** The candidate edge nearest a click, within 30 mm; null = the click missed every edge. */
-function edgeAt(ask: FoldAsk, pt: PtMm): FoldAsk['edges'][number] | null {
+function edgeAt(ask: { edges: FoldAsk['edges'] }, pt: PtMm): FoldAsk['edges'][number] | null {
   let best: { e: FoldAsk['edges'][number]; d: number } | null = null;
   for (const e of ask.edges) {
     const dx = e.b.x - e.a.x;
@@ -101,18 +139,20 @@ export function DetailsStep({
   api,
   card,
   onFixInPieces,
+  jump,
 }: {
   api: ImportSessionApi;
   card: CardContext;
   /** Back to the pieces step with this piece selected and the reason on screen (M5). */
   onFixInPieces?: (f: PieceFocus) => void;
+  /** The footer's "N pieces are blocked": select this row and focus its actions (a new `n` each click). */
+  jump?: { seed: SeedId; n: number } | null;
 }) {
   const { session, inputs, patchInputs } = api;
   const sem = session.semantics;
   const families = useMemo(() => session.pieces?.families ?? [], [session.pieces]);
-  const [sel, setSel] = useState<SeedId | null>(
-    () => sem?.blocked.find((b) => b.reason === 'no-grain')?.seed ?? null,
-  );
+  // a blocked piece opens selected: its next action is on screen without a click
+  const [sel, setSel] = useState<SeedId | null>(() => firstBlockedSeed(sem, families));
   const [grainA, setGrainA] = useState<PtMm | null>(null);
   // A1: the overview of every proposed grainline (accepting happens only there)
   const [reviewing, setReviewing] = useState(false);
@@ -120,6 +160,28 @@ export function DetailsStep({
   const open = useOpenQuestions(api);
   // E1a: the fold question's click tool (pick the edge the half is unfolded across)
   const [pickingFold, setPickingFold] = useState(false);
+  // a blocked state clicked (the row's pill, the footer): the panel's first action takes focus
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [focusN, setFocusN] = useState(0);
+  const showActions = (seed: SeedId) => {
+    setSel(seed);
+    setReviewing(false);
+    setDrawing(false);
+    setGrainA(null);
+    setPickingFold(false);
+    setFocusN((k) => k + 1);
+  };
+  const [seenJump, setSeenJump] = useState(jump ?? null);
+  if ((jump ?? null) !== seenJump) {
+    setSeenJump(jump ?? null);
+    if (jump) showActions(jump.seed);
+  }
+  useEffect(() => {
+    if (!focusN) return;
+    const el = actionsRef.current;
+    el?.scrollIntoView?.({ block: 'nearest' });
+    el?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+  }, [focusN]);
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
@@ -222,6 +284,8 @@ export function DetailsStep({
   const setName = (seed: SeedId, p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>) =>
     void api.editName(seed, p);
   const foldAskOf = (seed: SeedId) => sem.folds?.find((q) => q.seed === seed);
+  /** 'fold-unresolved': the size the answered fold fails in, and the edges to pick again from. */
+  const foldMissOf = (seed: SeedId) => sem.foldMisses?.find((m) => m.seed === seed);
   /** Unfold across the picked edge: every size takes its own matching edge (semantics). */
   const pickFold = (seed: SeedId, e: { a: PtMm; b: PtMm }) => {
     setPickingFold(false);
@@ -251,9 +315,15 @@ export function DetailsStep({
   const selSpec = sel != null ? specsOf(sel)[0] : undefined;
   const selRank = selSpec?.sizes[0]?.rank ?? Math.min(2, (selFamily?.candidates.length ?? 1) - 1);
   const selAsk = sel != null ? foldAskOf(sel) : undefined;
+  const selMiss = sel != null && !selAsk ? foldMissOf(sel) : undefined;
+  // the edges a click picks from: the open question's, or (a pick not found in every size) the
+  // edges of the size the pick was made on — never for a fold line the source draws itself
+  const selPick: { rank: number; edges: FoldAsk['edges'] } | undefined =
+    selAsk ?? (selMiss?.picked && selMiss.edges.length ? selMiss : undefined);
   // a fold question is asked on its own size: show that one, so the edges sit on the outline
-  const selCand = selAsk
-    ? selFamily?.candidates.find((c) => c.rank === selAsk.rank)
+  const selOn = selAsk ?? selMiss;
+  const selCand = selOn
+    ? selFamily?.candidates.find((c) => c.rank === selOn.rank) ?? selFamily?.candidates[selRank]
     : selFamily?.candidates[selRank];
   const selOuter = selCand?.outer;
   const selGrain =
@@ -291,6 +361,145 @@ export function DetailsStep({
         REASON[b.reason] ?? b.reason,
         families.find((f) => f.seed === seed),
       ),
+    );
+  };
+
+  /**
+   * The next action of a blocked row, in the side panel: every reason has a button, or a sentence
+   * that says where it is answered — a red word alone is a dead end (owner, 12.10).
+   */
+  const blockedActions = (seed: SeedId) => {
+    const b = blockedOf(seed)!;
+    const say = (t: string) => (
+      <Text size='micro' variant='label' component='p'>
+        {t}
+      </Text>
+    );
+    let body: React.ReactNode;
+    switch (b.reason) {
+      case 'fold-unresolved': {
+        const m = foldMissOf(seed);
+        // a pick again needs the edges of the size the pick lies on, and a pick to replace
+        const noPick = !m
+          ? 'the candidate edges are not known for this piece'
+          : !m.picked
+            ? 'the fold line is drawn in the source: a picked edge does not replace it'
+            : !m.edges.length
+              ? `size ${m.refSize} has no straight edge to unfold across`
+              : null;
+        body = (
+          <>
+            {m && (
+              <Text size='micro' component='p'>
+                {foldMissWords(m)}
+              </Text>
+            )}
+            <ChipRow>
+              <Chip
+                disabled={!!noPick}
+                title={noPick ?? undefined}
+                onClick={() => {
+                  setDrawing(false);
+                  setGrainA(null);
+                  setPickingFold(true);
+                }}
+              >
+                pick the edge again
+              </Chip>
+              <Chip onClick={() => notFold(seed)}>not a fold — export as drawn</Chip>
+            </ChipRow>
+            {noPick && say(noPick)}
+            {say(
+              m?.kind === 'no-edge'
+                ? 'pick an edge every size has, or say it is not a fold — then the outline is cut exactly as drawn, so only if it is the whole piece'
+                : 'not a fold: the outline is cut exactly as drawn — only if it is the whole piece',
+            )}
+          </>
+        );
+        break;
+      }
+      case 'no-grain': {
+        const pr = proposalOf(seed);
+        body = (
+          <>
+            <ChipRow>
+              {pr && <Chip onClick={() => setReviewing(true)}>review proposed grainline</Chip>}
+              <Chip onClick={() => startGrain(seed)}>draw grainline</Chip>
+            </ChipRow>
+            {say(
+              pr
+                ? `proposed · ${pr.why} — accept it with the others in the review, or draw your own (two clicks)`
+                : 'two clicks on the piece: the two ends of the grainline',
+            )}
+          </>
+        );
+        break;
+      }
+      case 'fold-question':
+        body = (
+          <ChipRow>
+            <Chip onClick={() => notFold(seed)}>not a fold</Chip>
+          </ChipRow>
+        );
+        break;
+      case 'grammar':
+      case 'duplicate-identity':
+        body = (
+          <>
+            {bulk.has(seed) && (
+              <ChipRow>
+                <Chip onClick={nameAll}>
+                  name {bulk.size} piece{bulk.size === 1 ? '' : 's'}
+                </Chip>
+              </ChipRow>
+            )}
+            {say(`type a code in the code column of row ${mark(seed)}`)}
+          </>
+        );
+        break;
+      case 'size-unmapped':
+      case 'size-count':
+        body = (
+          <>
+            <ChipRow>
+              <Chip onClick={() => void api.dispatch({ type: 'back', to: 'sizes' })}>
+                ← fix in sizes
+              </Chip>
+            </ChipRow>
+            {say(
+              b.reason === 'size-count'
+                ? 'say how many sizes the sheet draws on the sizes step'
+                : 'map this size to a card size on the sizes step',
+            )}
+          </>
+        );
+        break;
+      case 'offset-hull':
+      case 'offset-self-intersection':
+      case 'offset-topology':
+        body = say(
+          'the allowance cannot be laid around this outline: check this row’s line and allowance, or the outline on the pieces step',
+        );
+        break;
+      default:
+        body = PIECES_REASONS.has(b.reason) ? (
+          onFixInPieces ? (
+            <Button variant='secondary' size='xs' onClick={() => fixInPieces(seed)}>
+              ← fix in pieces
+            </Button>
+          ) : (
+            say('fixed on the pieces step')
+          )
+        ) : null;
+    }
+    return (
+      <div className='mt-1 flex flex-col items-start gap-1'>
+        <Text size='micro' component='p' className='text-error'>
+          ! {REASON[b.reason] ?? b.reason}
+          {b.reason === 'fold-unresolved' && foldMissOf(seed) ? '' : ` — ${b.detail}`}
+        </Text>
+        {body}
+      </div>
     );
   };
 
@@ -709,6 +918,7 @@ export function DetailsStep({
                             word={REASON[b.reason] ?? b.reason}
                             onGrain={() => startGrain(seed)}
                             onFold={() => startFold(seed)}
+                            onShow={() => showActions(seed)}
                             onPieces={
                               onFixInPieces && PIECES_REASONS.has(b.reason)
                                 ? () => fixInPieces(seed)
@@ -781,8 +991,8 @@ export function DetailsStep({
                   focus={selCand?.bbox ?? null}
                   tool={drawing || pickingFold ? 'point' : 'pan'}
                   onPoint={(pt) => {
-                    if (pickingFold && selAsk) {
-                      const e = edgeAt(selAsk, pt);
+                    if (pickingFold && selPick) {
+                      const e = edgeAt(selPick, pt);
                       if (e) pickFold(sel, e);
                       return;
                     }
@@ -833,6 +1043,33 @@ export function DetailsStep({
                           />
                         );
                       })}
+                      {selMiss &&
+                        pickingFold &&
+                        selMiss.edges.map((e, i) => (
+                          <line
+                            key={`m${i}`}
+                            x1={e.a.x}
+                            y1={vy(e.a.y)}
+                            x2={e.b.x}
+                            y2={vy(e.b.y)}
+                            stroke={SHEET_INK.red}
+                            strokeWidth={unit * 2.5}
+                            strokeDasharray={`${unit * 6} ${unit * 4}`}
+                            pointerEvents='none'
+                          />
+                        ))}
+                      {selMiss?.picked && (
+                        // the pick that is not found in every size: solid, the candidates dashed
+                        <line
+                          x1={selMiss.picked.a.x}
+                          y1={vy(selMiss.picked.a.y)}
+                          x2={selMiss.picked.b.x}
+                          y2={vy(selMiss.picked.b.y)}
+                          stroke={SHEET_INK.red}
+                          strokeWidth={unit * 4}
+                          pointerEvents='none'
+                        />
+                      )}
                       {selGrain && (
                         <GrainMark
                           a={selGrain.a}
@@ -862,17 +1099,19 @@ export function DetailsStep({
                   )}
                 </SheetViewport>
               </div>
-              <div className='shrink-0 border-t border-hairline p-2'>
+              <div ref={actionsRef} className='shrink-0 border-t border-hairline p-2'>
                 {drawing ? (
                   <Text size='micro' component='p' className='text-warning'>
                     {grainA
                       ? '! click the second end of the grainline'
                       : '! click the first end of the grainline'}
                   </Text>
-                ) : pickingFold && selAsk ? (
+                ) : pickingFold && selPick ? (
                   <div className='flex items-center gap-2'>
                     <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
-                      ! click the fold edge (solid = suggested)
+                      {selAsk
+                        ? '! click the fold edge (solid = suggested)'
+                        : `! click the fold edge on size ${selMiss!.refSize} (solid = your pick, not found in ${selMiss!.size})`}
                     </Text>
                     <Chip quiet onClick={() => setPickingFold(false)}>
                       cancel
@@ -940,18 +1179,7 @@ export function DetailsStep({
                         )}
                       </div>
                     )}
-                    {blockedOf(sel) && !selAsk && (
-                      <div className='mt-1 flex flex-col items-start gap-1'>
-                        <Text size='micro' component='p' className='text-error'>
-                          ! {blockedOf(sel)!.detail}
-                        </Text>
-                        {onFixInPieces && PIECES_REASONS.has(blockedOf(sel)!.reason) && (
-                          <Button variant='secondary' size='xs' onClick={() => fixInPieces(sel)}>
-                            ← fix in pieces
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                    {blockedOf(sel) && !selAsk && blockedActions(sel)}
                   </>
                 )}
               </div>
@@ -982,6 +1210,7 @@ function BlockedState({
   word,
   onGrain,
   onFold,
+  onShow,
   onPieces,
   onSizes,
 }: {
@@ -993,6 +1222,8 @@ function BlockedState({
   word: string;
   onGrain: () => void;
   onFold: () => void;
+  /** Select the row and focus its actions in the side panel. */
+  onShow: () => void;
   onPieces?: () => void;
   onSizes?: () => void;
 }) {
@@ -1036,12 +1267,29 @@ function BlockedState({
         ! fold?
       </Button>
     );
+  if (reason === 'fold-unresolved')
+    return (
+      <Button
+        variant='secondary'
+        size='xs'
+        className='whitespace-nowrap border-error text-error'
+        title={`${detail} — pick the edge again or "not a fold"`}
+        onClick={stop(onShow)}
+      >
+        ! {word}
+      </Button>
+    );
   const go = onPieces ?? onSizes;
   return (
     <span className='flex flex-col items-start gap-1'>
-      <Pill tone='warn' title={detail}>
-        {word}
-      </Pill>
+      <button
+        type='button'
+        className='cursor-pointer'
+        title={`${detail} — what to do: in the panel on the right`}
+        onClick={stop(onShow)}
+      >
+        <Pill tone='warn'>{word}</Pill>
+      </button>
       {go && (
         <Button
           variant='underline'

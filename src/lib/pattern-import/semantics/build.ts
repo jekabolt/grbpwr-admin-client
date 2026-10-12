@@ -39,6 +39,7 @@ import type {
   Feature,
   FoldAsk,
   FoldFeature,
+  FoldMiss,
   GrainFeature,
   InternalFeature,
   IRText,
@@ -548,6 +549,8 @@ export function buildPieceSpecsDetailed(
   const operatorFold = input.operatorFold ?? {};
   const foldHints = new Set(input.foldHints ?? []);
   const foldAsks: FoldAsk[] = [];
+  /** Per seed blocked 'fold-unresolved': the size the answered fold fails in, and the edges to ask again on. */
+  const foldMisses: FoldMiss[] = [];
   /** A1: per seed blocked 'no-grain', what the drawing or the outline proposes (D3: a click). */
   const grainProposals: SeedGrainProposal[] = [];
   const warnings: string[] = [];
@@ -930,6 +933,8 @@ export function buildPieceSpecsDetailed(
     const sizes: PieceSizeSpec[] = [];
     const wallMaps: WallMap[] = [];
     let blockedHere: { reason: BlockReason; detail: string } | null = null;
+    /** 'fold-unresolved': where the answered fold fails (the details step asks again from it). */
+    let missHere: Pick<FoldMiss, 'size' | 'kind' | 'problem' | 'picked'> | null = null;
     let anyFold = false;
     let lastGrain: GrainFeature | null = null;
     const opGrain = operatorGrain[seed];
@@ -1004,6 +1009,7 @@ export function buildPieceSpecsDetailed(
                 reason: 'fold-unresolved',
                 detail: `${card.token}: no straight edge of this size matches the fold edge you picked`,
               };
+              missHere = { size: card.token, kind: 'no-edge', problem: null, picked: opFold };
               break;
             }
             askWhy = `${card.token}: ${refWhy}, but this size has no such edge`;
@@ -1056,6 +1062,13 @@ export function buildPieceSpecsDetailed(
             blockedHere = {
               reason: 'fold-unresolved',
               detail: `${card.token}: cannot unfold — ${t.problem}`,
+            };
+            // a fold line drawn in the source wins over any pick (see `fold` above)
+            missHere = {
+              size: card.token,
+              kind: 'unfold',
+              problem: t.problem,
+              picked: foldFeat ? null : opFold,
             };
             break;
           }
@@ -1279,6 +1292,15 @@ export function buildPieceSpecsDetailed(
     }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
+      if (blockedHere.reason === 'fold-unresolved' && missHere)
+        foldMisses.push({
+          seed,
+          rank: largest.rank,
+          refSize: p.cands[p.cands.length - 1].card.token,
+          ...missHere,
+          picked: missHere.picked ? { a: missHere.picked.a, b: missHere.picked.b } : null,
+          edges: foldEdges(ccw(largest.outer)).map((e) => ({ a: e.a, b: e.b, lenMm: e.lenMm })),
+        });
       if (blockedHere.reason === 'fold-question')
         foldAsks.push(
           foldAskOf(
@@ -1679,6 +1701,15 @@ export function buildPieceSpecsDetailed(
       warnings,
       unproven: unproven.filter((u) => written.has(u.seed)),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
+      ...(foldMisses.some((m) =>
+        blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
+      )
+        ? {
+            foldMisses: foldMisses.filter((m) =>
+              blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
+            ),
+          }
+        : {}),
       ...(foldList ? { foldList } : {}),
       ...(grainProposals.length
         ? {
