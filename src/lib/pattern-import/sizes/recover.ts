@@ -1531,7 +1531,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (e.against < 3 || e.against < 2 * e.agree || !rankOf.has(c)) continue;
       const from = rankOf.get(c)!;
       const top = [...e.to].sort((x, y) => y[1] - x[1])[0];
-      const to = top && top[1] >= 0.7 * e.against ? top[0] : -1;
+      // a fragment (< 15 mm) is not worth a question on a whole row: it only loses its rank
+      const to = top && top[1] >= 0.7 * e.against && chains[c].lengthMm >= 15 ? top[0] : -1;
       if (to >= 0) {
         rankOf.set(c, to);
         into.add(to);
@@ -1546,7 +1547,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       moved.set(k, m);
     }
     for (const [k, m] of moved) {
-      if (m.len < 50) continue;
+      // every move is asked, however short: its size comes from nesting alone (D3)
       const [from, to] = k.split('|').map(Number);
       const name = (r: number) => labels[r] ?? `rank ${r}`;
       ambiguities.push({
@@ -1740,10 +1741,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     // R7: a key told apart from another only by nesting — one evidence: the legend asks; so does a
     // rank whose lines are mostly ones moved there by nesting against their look
     if (legendId?.perKey[r]?.nestingOnly) conf = Math.min(conf, 0.5);
-    if (movedByNesting.has(r)) {
-      const own = ids.filter((c) => unit[c] >= 0 && unitRank[unit[c]] === r);
-      if (lenOf(chains, own) < 0.5 * lenOf(chains, ids)) conf = Math.min(conf, 0.5);
-    }
+    if (movedByNesting.has(r)) conf = Math.min(conf, 0.5);
     sizes.push({
       rank: r,
       label: labels[r] ?? null,
@@ -2071,6 +2069,16 @@ function alignedLegend<
     const cl = Math.min(...col.map(pos));
     const ch = Math.max(...col.map(pos));
     if (Math.min(hi, ch) - Math.max(lo, cl) < 0.5 * Math.min(hi - lo, ch - cl)) continue;
+    // a key column draws a different pen per label; leaders of a table are one rule repeated
+    const pens = new Set(
+      col.map((h) => `${chains[h.chain].style}|${chains[h.chain].motif?.join('/') ?? '-'}`),
+    );
+    if (pens.size < Math.min(3, col.length)) continue;
+    // the column continues the key as one BLOCK of its run (00 … 14 | 16 … 32), never interleaved
+    // with it (a key 34 38 42 46 beside table numbers 36 40 44 48 is no run of eight)
+    const cMin = Math.min(...col.map((h) => h.value));
+    const cMax = Math.max(...col.map((h) => h.value));
+    if (out.some((h) => h.value >= cMin && h.value <= cMax)) continue;
     const union = [...out, ...col];
     const ur = labelRun(union, 1, 2);
     if (ur.size <= run || union.some((h) => !ur.has(h.label))) continue;

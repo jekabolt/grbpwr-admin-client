@@ -52,7 +52,14 @@ export const defaultTokensOf: SizeTokensOf = (card) => {
 
 type Hit = { card: CardSize; confidence: number; why: string };
 
-function bestHit(label: string, card: readonly CardSize[], tokensOf: SizeTokensOf): Hit | null {
+const paired = (l: string) => /^\d+\s*[/\-–]\s*\d+$/.test(l.trim());
+
+function bestHit(
+  label: string,
+  card: readonly CardSize[],
+  tokensOf: SizeTokensOf,
+  usRun = false,
+): Hit | null {
   const src = parseSizeToken(label);
   let best: Hit | null = null;
   const take = (h: Hit) => {
@@ -79,13 +86,22 @@ function bestHit(label: string, card: readonly CardSize[], tokensOf: SizeTokensO
         src.kind === 'num' &&
         ct.kind === 'num' &&
         src.value === ct.value &&
-        bare(t) !== bare(c.token)
-      )
+        bare(t) !== bare(c.token) &&
+        // a paired size (28/30) is not its lower half (28)
+        paired(label) === paired(t)
+      ) {
+        // a US run (00 … 32, paired sizes) onto a LETTER card size: the sheet does not say
+        // which letter its numbers are (MOOD-DIAG Ф6) — a suggestion, never taken silently
+        const letterCard = parseSizeToken(c.token, true)?.kind === 'letter';
         take({
           card: c,
-          confidence: 0.9,
-          why: `${label} is the numeric equivalent of ${c.token} (${t})`,
+          confidence: usRun && letterCard ? 0.6 : 0.9,
+          why:
+            usRun && letterCard
+              ? `${label} is written ${t} on the card's ${c.token}: a US size onto a letter size — confirm`
+              : `${label} is the numeric equivalent of ${c.token} (${t})`,
         });
+      }
     }
   }
   return best;
@@ -127,8 +143,12 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
   const tokensOf = opts.tokensOf ?? defaultTokensOf;
   return (run: SizeRun, card: CardSize[]): SizeMap => {
     const cards = [...card].sort((a, b) => a.rank - b.rank);
+    // US misses' sizes (00 … 32, or paired 0/2 · 00-0 …): their letter equivalents are not the
+    // sheet's to say
+    const usRun = run.sizes.some((s) => /^0{2,}$/.test(s.label.trim()) || paired(s.label));
     const hits: (Hit | null)[] = run.sizes.map(
-      (s) => bestHit(s.label, cards, tokensOf) ?? tallShortHit(s.label, run, cards, tokensOf),
+      (s) =>
+        bestHit(s.label, cards, tokensOf, usRun) ?? tallShortHit(s.label, run, cards, tokensOf),
     );
     // nothing spells alike at all: align by rank only when both runs have the same length
     if (hits.every((h) => !h) && run.sizes.length === cards.length && cards.length > 0) {

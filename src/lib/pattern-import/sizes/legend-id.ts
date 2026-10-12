@@ -262,7 +262,13 @@ export function legendIdentity(
     for (const i of g.members) {
       const one = { ...g, vec: sigs[i].vec, dash: null, decor: sigs[i].decorPer10 };
       const cd = own.get(i) ?? null;
-      const pick = cd?.ok ? cd : groupPick?.ok && !own.has(i) ? groupPick : null;
+      // a chain read on its own but inconclusively still takes the look's one key — unless its own
+      // element order / dot size says it is not that key
+      const pick = cd?.ok
+        ? cd
+        : groupPick?.ok && (!own.has(i) || secondOf(groupPick.k, sigs[i]) !== -1)
+          ? groupPick
+          : null;
       if (typeof process !== 'undefined' && process.env?.F3_LEGEND_CH && chains[i].lengthMm >= 20)
         console.log(
           `legend-ch c${i} ${chains[i].lengthMm.toFixed(0)}mm ${g.name} → ${pick ? key[pick.k] : '-'} cd=${cd ? `${key[cd.k]}:${cd.s.toFixed(3)}${cd.ok ? '' : '?'}` : '-'} per=${sigs[i].period} beads=${(
