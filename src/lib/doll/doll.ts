@@ -119,6 +119,8 @@ type Work = {
   virtual?: boolean;
   /** The sewn stretch of end parts of a composite (mm along each such edge), for the report. */
   partRange?: Record<EdgeId, [number, number]>;
+  /** Intake on side B folded closed before the lengths were compared (pleats, darts), mm. */
+  foldedMm?: number;
   /** Found from the technologist's order (a declared join the graph had no seam for). */
   fromOrder?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
@@ -3875,6 +3877,13 @@ export function solveDoll(input: DollInput): DollReport {
     maxEase = 0.25,
     /** Pull of the proposal (a band on the legs' top holds on, never drags the crotch round). */
     stiff = 0.7,
+    /**
+     * A band onto a pleated / darted edge: the intake marked on B (notch pairs, dart slits —
+     * foldPlanFor) is folded closed before the lengths are compared, and the band is mapped by
+     * anchored arc length so each fold lands on one point of it. Paper cannot gather: the fold
+     * shows as strain on the body side, said in the words.
+     */
+    foldB = false,
   ) => {
     const cutIdx = (L: { verts: number[] }, ref?: Vec3) => {
       let best = 0;
@@ -3910,9 +3919,14 @@ export function solveDoll(input: DollInput): DollReport {
       A = loopPath(A0.verts, uv, panelOf, 0, false, ringInfo);
       B = loopPath(B0.verts, uv, panelOf, 0, false, ringInfo);
     }
-    const ratio = Math.min(A.len, B.len) / Math.max(A.len, B.len, 1e-9);
+    const plan = foldB ? foldPlanFor(A.len, B) : null;
+    const Le = plan ? plan.Le : B.len;
+    const ratio = Math.min(A.len, Le) / Math.max(A.len, Le, 1e-9);
     const ease = 1 - ratio;
-    const words = `${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)} mm, ${ease < 0.015 ? 'equal' : `eased ${(ease * 100).toFixed(0)} %`}`;
+    const foldWords = plan
+      ? ` − ${(B.len - plan.Le).toFixed(0)} mm folded closed (${plan.folds.length} pleat${plan.folds.length > 1 ? 's' : ''} / dart${plan.folds.length > 1 ? 's' : ''} marked on it: ${plan.folds.map((f) => (f[1] - f[0]).toFixed(0)).join(' + ')} mm) = ${plan.Le.toFixed(0)}`
+      : '';
+    const words = `${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)}${foldWords} mm, ${ease < 0.015 ? 'equal' : `eased ${(ease * 100).toFixed(0)} %`}`;
     if (ease > maxEase) {
       proposals.push({
         gid,
@@ -3925,6 +3939,53 @@ export function solveDoll(input: DollInput): DollReport {
       );
       return null;
     }
+    const note = `proposed by the doll · ${label} · ${words} · not in the pattern`;
+    if (plan) {
+      // Anchors (arc on the band, arc on the path): the folded path's arc scaled onto the band;
+      // each fold's two ends meet at one point of the band (0.3 mm apart, strictly increasing).
+      const anchorsFor = (Ap: Path): [number, number][] => {
+        const eff = (sv: number) => {
+          let out = sv;
+          for (const [f0, f1] of plan.folds) {
+            if (sv >= f1) out -= f1 - f0;
+            else if (sv > f0) out -= sv - f0;
+          }
+          return out;
+        };
+        const sc = Ap.len / Math.max(1e-9, plan.Le);
+        const an: [number, number][] = [[0, 0]];
+        for (const [f0, f1] of plan.folds) {
+          const x = eff(f0) * sc;
+          an.push([x - 0.3, f0], [x + 0.3, f1]);
+        }
+        an.push([Ap.len, B.len]);
+        const out: [number, number][] = [];
+        for (const q of an)
+          if (
+            !out.length ||
+            (q[0] > out[out.length - 1][0] + 0.1 && q[1] > out[out.length - 1][1] + 0.1)
+          )
+            out.push(q);
+        return out;
+      };
+      // Which way round the band runs along the path: the way its points lie nearer now.
+      const meanGap = (Ap: Path) => {
+        const g = rowGaps(pos, anchoredRows(Ap, B, anchorsFor(Ap)));
+        return g.reduce((x, y) => x + y, 0) / Math.max(1, g.length);
+      };
+      const Ar = revPath(A);
+      const A1 = meanGap(Ar) < meanGap(A) ? Ar : A;
+      const w = anchoredWork(label, A1, B, anchorsFor(A1), note, stiff);
+      w.foldedMm = B.len - plan.Le;
+      if (l4 && isExcluded(w.a, w.b)) {
+        w.rejectedByPerson = true;
+        w.released = true;
+        w.solver.active = false;
+        warnings.push(`${w.id}: not proposed — a person rejected this pair`);
+      }
+      proposals.push({ gid, label, ok: true, note: w.note });
+      return w;
+    }
     const w = addWork(
       {
         id: label,
@@ -3935,7 +3996,7 @@ export function solveDoll(input: DollInput): DollReport {
         A,
         B,
         target: stiff,
-        note: `proposed by the doll · ${label} · ${words} · not in the pattern`,
+        note,
       },
       passes,
       120,
@@ -4616,49 +4677,91 @@ export function solveDoll(input: DollInput): DollReport {
     return P.geom.edges.find((e) => inE(e, ia) && inE(e, ib)) ?? null;
   };
   /**
+   * Intake marks ON a path (04-COLLAR K2 + intake), as arc ranges to fold closed before a unit or
+   * a band is fitted: notch pairs 15–80 mm apart on one piece (a pleat, a dart's two legs), and
+   * runs of short edges (< 35 mm, two or more: a stepped tuck or a dart slit drawn in the outline).
+   */
+  const foldsOnPath = (P: Path) => {
+    const notchK: number[] = [];
+    for (let k = 0; k < P.v.length; k++)
+      if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
+        notchK.push(k);
+    const pairs: [number, number][] = [];
+    for (let i = 0; i + 1 < notchK.length; i++) {
+      const a = notchK[i];
+      const b = notchK[i + 1];
+      const d = P.s[b] - P.s[a];
+      if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
+        pairs.push([P.s[a], P.s[b]]);
+        i++;
+      }
+    }
+    const stairs: [number, number][] = [];
+    let run: { s0: number; s1: number; edges: Set<string> } | null = null;
+    const flush = () => {
+      if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) stairs.push([run.s0, run.s1]);
+      run = null;
+    };
+    for (let k = 1; k < P.v.length; k++) {
+      const e = edgeOfSeg(P.v[k - 1], P.v[k]);
+      if (e && e.lenMm < 35) {
+        if (!run) run = { s0: P.s[k - 1], s1: P.s[k], edges: new Set([e.id]) };
+        else {
+          run.s1 = P.s[k];
+          run.edges.add(e.id);
+        }
+      } else flush();
+    }
+    flush();
+    return { pairs, stairs };
+  };
+  /**
+   * The reading of a path's intake that fits a run of `lenA` mm best (a waistband onto the top of
+   * pleated / darted legs — 11.10 corpus: SS26-007, the band 877 mm onto a flat waist of 1077): the
+   * path as drawn, its notch pairs folded, its short-edge runs folded, or both (overlapping ranges
+   * merged: a dart's slit lies between its two notches), the length ratio nearest 1 within
+   * 0.90–1.15. Null when the path as drawn reads best — or nothing folded brings it in.
+   */
+  const foldPlanFor = (lenA: number, B: Path): { folds: [number, number][]; Le: number } | null => {
+    const f = foldsOnPath(B);
+    if (!f.pairs.length && !f.stairs.length) return null;
+    const merged = (F: [number, number][]) => {
+      const out: [number, number][] = [];
+      for (const x of [...F].sort((p, q) => p[0] - q[0])) {
+        const last = out[out.length - 1];
+        if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
+        else out.push([x[0], x[1]]);
+      }
+      return out;
+    };
+    const r0 = lenA / Math.max(1, B.len);
+    let best: { si: number; folds: [number, number][]; Le: number; score: number } = {
+      si: 0,
+      folds: [],
+      Le: B.len,
+      score: r0 >= 0.9 && r0 <= 1.15 ? Math.abs(Math.log(r0)) : Infinity,
+    };
+    [f.pairs, f.stairs, [...f.pairs, ...f.stairs]].forEach((F, k) => {
+      const si = k + 1;
+      if (!F.length || (si === 3 && (!f.pairs.length || !f.stairs.length))) return;
+      const Fs = merged(F);
+      const Le = B.len - Fs.reduce((t, x) => t + x[1] - x[0], 0);
+      const r = lenA / Math.max(1, Le);
+      if (r < 0.9 || r > 1.15) return;
+      const score = Math.abs(Math.log(r)) + 0.003 * si;
+      if (score < best.score) best = { si, folds: Fs, Le, score };
+    });
+    return best.folds.length ? { folds: best.folds, Le: best.Le } : null;
+  };
+  /**
    * L4 (04-COLLAR K2 + intake): tucks and pleats ON the neck path folded closed before the unit is
-   * mapped — notch pairs 15–80 mm apart on one piece, and runs of short edges (< 35 mm, two or more:
-   * a stepped tuck drawn in the outline). Which folds, whether the path is cut at its CF notches and
-   * which notch pair of the unit is sewn: the reading whose length ratio is nearest 1 within
-   * 0.90–1.15. None → the mismatch is reported, never crammed.
+   * mapped (foldsOnPath). Which folds, whether the path is cut at its CF notches and which notch
+   * pair of the unit is sewn: the reading whose length ratio is nearest 1 within 0.90–1.15. None →
+   * the mismatch is reported, never crammed.
    */
   const foldedPlan = (U: Unit, cn: NonNullable<typeof confNeck>) => {
     const m = runMarks(cctx, U.attach);
-    const foldsOf = (N: NeckPath) => {
-      const P = N.path;
-      const notchK: number[] = [];
-      for (let k = 0; k < P.v.length; k++)
-        if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
-          notchK.push(k);
-      const pairs: [number, number][] = [];
-      for (let i = 0; i + 1 < notchK.length; i++) {
-        const a = notchK[i];
-        const b = notchK[i + 1];
-        const d = P.s[b] - P.s[a];
-        if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
-          pairs.push([P.s[a], P.s[b]]);
-          i++;
-        }
-      }
-      const stairs: [number, number][] = [];
-      let run: { s0: number; s1: number; edges: Set<string> } | null = null;
-      const flush = () => {
-        if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) stairs.push([run.s0, run.s1]);
-        run = null;
-      };
-      for (let k = 1; k < P.v.length; k++) {
-        const e = edgeOfSeg(P.v[k - 1], P.v[k]);
-        if (e && e.lenMm < 35) {
-          if (!run) run = { s0: P.s[k - 1], s1: P.s[k], edges: new Set([e.id]) };
-          else {
-            run.s1 = P.s[k];
-            run.edges.add(e.id);
-          }
-        } else flush();
-      }
-      flush();
-      return { pairs, stairs };
-    };
+    const foldsOf = (N: NeckPath) => foldsOnPath(N.path);
     type Opt = {
       N: NeckPath;
       folds: [number, number][];
@@ -5270,6 +5373,8 @@ export function solveDoll(input: DollInput): DollReport {
         gid,
         0.25,
         legInfo.length ? 0.3 : 0.7,
+        // The body's edge may carry pleats / darts the band is sewn over (fold them closed).
+        true,
       );
     }
   }
@@ -5441,7 +5546,7 @@ export function solveDoll(input: DollInput): DollReport {
   /** Length mismatch the seam must absorb (a partial seam's short side lies on part of the long one). */
   const easeOf = (w: Work) => {
     const a = w.A.len * (w.aRange[1] - w.aRange[0]);
-    const b = w.B.len * (w.bRange[1] - w.bRange[0]);
+    const b = (w.B.len - (w.foldedMm ?? 0)) * (w.bRange[1] - w.bRange[0]);
     return Math.abs(a - b) / Math.max(a, b, 1e-9);
   };
   const seams: DollSeamReport[] = [];
