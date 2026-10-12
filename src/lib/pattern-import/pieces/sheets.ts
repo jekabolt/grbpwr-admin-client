@@ -84,7 +84,8 @@ export type SheetPieces = {
    * Seeds per sheet (families present after the edits) and its piece-sized outlines set aside —
    * a sheet with outlines but no piece is asked (none is dropped silently).
    */
-  parts: { sheet: number; seeds: SeedId[]; asides: number }[];
+  /** `sig`: the sheet's number + page set (`sheetSig`) — what an answer about the sheet is bound to. */
+  parts: { sheet: number; sig: string; seeds: SeedId[]; asides: number }[];
   copies: SheetCopy[];
   alternatives: SheetAlternative[];
   splits: SheetSplit[];
@@ -265,15 +266,15 @@ function partOf(parts: readonly SheetPart[], p: PtMm): number {
 const r0 = (v: number, q: number) => Math.round(v / q);
 
 /**
- * A sheet's identity in an answer key: its number and its page set (a short hash of the page
- * numbers) — a sheet whose pages changed is another sheet, and its answers do not land.
+ * A sheet's identity in an answer key: its number and its page set (a short hash of the file +
+ * page of every tile) — a sheet whose pages changed is another sheet, and its answers do not land.
  */
 function sheetSig(part: SheetPart | undefined, k: number): string {
   if (!part) return `${k}`;
   let h = 0x811c9dc5;
   for (const c of part.pages
-    .map((q) => q.page)
-    .sort((a, b) => a - b)
+    .map((q) => `${q.file}:${q.page}`)
+    .sort()
     .join('.')) {
     h ^= c.charCodeAt(0);
     h = Math.imul(h, 0x01000193) >>> 0;
@@ -440,6 +441,7 @@ export function sheetPieces(
   return {
     parts: parts.map((p) => ({
       sheet: p.sheet,
+      sig: sheetSig(p, p.sheet),
       seeds: ps.filter((x) => x.sheet === p.sheet).map((x) => x.seed),
       asides: asides.filter((a) => partOf(parts, a.at) === p.sheet).length,
     })),
@@ -450,7 +452,7 @@ export function sheetPieces(
 }
 
 /** The questions a reading leaves open under these answers (keys of the answered ones). */
-export const emptyKey = (sheet: number) => `empty|${sheet}`;
+export const emptyKey = (part: { sig: string }) => `empty|${part.sig}`;
 
 export function openSheetQuestions(
   r: SheetPieces | null | undefined,
@@ -464,7 +466,7 @@ export function openSheetQuestions(
   if (!r) return { copies: [], alternatives: [], splits: [], empty: [] };
   return {
     empty: r.parts.filter(
-      (p) => !p.seeds.length && p.asides > 0 && answers[emptyKey(p.sheet)] !== 'empty',
+      (p) => !p.seeds.length && p.asides > 0 && answers[emptyKey(p)] !== 'empty',
     ),
     alternatives: r.alternatives.filter((a) => answers[a.key] !== 'union'),
     copies: r.copies.filter((c) => answers[c.key] !== 'both'),
@@ -502,10 +504,10 @@ export function sheetQuestion(
 } | null {
   if (!r) return null;
   // a sheet whose every outline was set aside: nothing of it would be exported
-  const e = r.parts.find((p) => !p.seeds.length && p.asides > 0 && !answers[emptyKey(p.sheet)]);
+  const e = r.parts.find((p) => !p.seeds.length && p.asides > 0 && !answers[emptyKey(p)]);
   if (e)
     return {
-      key: emptyKey(e.sheet),
+      key: emptyKey(e),
       kind: 'empty',
       strong: false,
       text: `tile sheet ${e.sheet + 1} has ${e.asides} ${e.asides === 1 ? 'outline' : 'outlines'} set aside and no piece — make its pieces pieces ("this is a piece"), or say the sheet carries none`,

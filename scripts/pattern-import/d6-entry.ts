@@ -18,6 +18,7 @@ import type {
   SheetPart,
 } from 'lib/pattern-import/types';
 import {
+  emptyKey,
   openSheetQuestions,
   sheetAnswerEdits,
   sheetCoverOf,
@@ -337,6 +338,12 @@ const read = (ps: P[], parts: SheetPart[] = PARTS): SheetPieces | null => {
     },
   ];
   const k2 = read(ps, repaged)?.copies[0]?.key;
+  const e0 = read(ps)?.parts[1];
+  const e1 = read(ps, repaged)?.parts[1];
+  check(
+    '4f an empty-sheet answer is bound to the page set too',
+    !!e0 && !!e1 && emptyKey(e0) !== emptyKey(e1),
+  );
   check(
     '4f mutation: the sheet has other pages → another key (the answer does not land)',
     !!k2 && k2 !== k0,
