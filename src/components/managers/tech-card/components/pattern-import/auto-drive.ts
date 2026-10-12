@@ -95,6 +95,16 @@ export type DriveTick =
       reason?: string;
     };
 
+/**
+ * The audit-only part of an answer: the autopilot's assumption record (`autopilot`), nothing that
+ * answers the step. null when there is none.
+ */
+export function auditOnly<I>(patch: Partial<I> | undefined): Partial<I> | null {
+  const rec = (patch as { autopilot?: unknown } | undefined)?.autopilot;
+  if (!Array.isArray(rec)) return null;
+  return { autopilot: rec } as unknown as Partial<I>;
+}
+
 /** One tick of the drive (see the header). The caller disarms on 'stopped'. */
 export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<DriveTick> {
   const s = c.session;
@@ -130,7 +140,11 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
     question,
   })) as DriveAnswer<I> | null;
   if (!c.live()) return { kind: 'stopped', why: 'stale', step, question };
-  if (!a || a.stop)
+  if (!a || a.stop) {
+    // a stop still keeps what the autopilot assumed on the way (a size left out as not drawn):
+    // only the audit record, never an answer — after the operator resumes, the manifest has it
+    const audit = auditOnly(a?.patch);
+    if (audit) await c.patch(audit);
     return {
       kind: 'stopped',
       why: 'resolver',
@@ -138,6 +152,7 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
       question,
       reason: a?.reason?.reason ?? question,
     };
+  }
   const problem = answerProblem(step, a);
   if (problem)
     return {

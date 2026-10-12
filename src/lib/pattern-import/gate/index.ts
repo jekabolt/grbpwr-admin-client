@@ -14,6 +14,7 @@
 
 import type {
   ChromeLine,
+  ContinuityGeometry,
   DerivedEdge,
   EmbedManifestFn,
   GateCheck,
@@ -46,6 +47,7 @@ import {
   g18,
   g19,
   g20,
+  g21,
   g2From,
   g3g4,
   g5,
@@ -212,6 +214,7 @@ export function createRunGate(
       g18(ctx),
       g19(ctx),
       g20(ctx),
+      g21(ctx),
     ];
     return {
       passed: passedOf(checks),
@@ -256,6 +259,24 @@ export function derivedByBlockFor(
       pts: map(e.pts),
       ...(e.along ? { along: e.along.map(map) } : {}),
     }));
+  }
+  return out;
+}
+
+/** P1: the continuity stretches (source frame) → `continuityByBlock` in the written frame (G21). */
+export function continuityByBlockFor(
+  detail: WriteDetail,
+  continuityOf: (sourceIdentity: string, rank: number) => ContinuityGeometry | undefined,
+): Record<string, ContinuityGeometry> {
+  const out: Record<string, ContinuityGeometry> = {};
+  for (const b of detail.plan.blocks) {
+    const g = continuityOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!g) continue;
+    const T = detail.transforms[b.name];
+    const map = (ls: PtMm[][]) => ls.map((l) => l.map((p) => applyAffine(T, p)));
+    out[b.name] = {
+      edges: g.edges.map((e) => ({ pts: map(e.pts), chainLines: map(e.chainLines) })),
+    };
   }
   return out;
 }
@@ -307,6 +328,8 @@ export type WriteAndGateCtx = {
    * `wallsOf` — G15 checks them; G3/G4 never use them as walls (F14b, Codex C1).
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
+  /** P1 (G21): the continuity stretches of a size closed through them (same frame). */
+  continuityOf?: (sourceIdentity: string, rank: number) => ContinuityGeometry | undefined;
   /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
   chrome?: readonly ChromeLine[];
   overview?: GateExpectation['overview'];
@@ -343,6 +366,9 @@ export async function writeAndGate(
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
     coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
     derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
+    continuityByBlock: ctx.continuityOf
+      ? continuityByBlockFor(detail, ctx.continuityOf)
+      : undefined,
     chromeByBlock:
       ctx.chrome?.length && ctx.wallsOf
         ? chromeByBlockFor(detail, ctx.wallsOf, ctx.chrome)

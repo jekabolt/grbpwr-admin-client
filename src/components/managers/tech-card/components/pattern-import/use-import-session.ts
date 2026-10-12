@@ -1718,14 +1718,23 @@ export function useImportSession(deps: {
     seed: SeedId,
     p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>,
   ) {
+    await editNames(new Map([[seed, p]]));
+  }
+
+  /** CODE lane: several names in one answer ("name N pieces") — each as if typed (editName). */
+  async function editNames(
+    edits: ReadonlyMap<SeedId, Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>>,
+  ) {
+    if (!edits.size) return;
     const i = iRef.current;
+    const seeds = [...edits.keys()];
     // C7: the AI's fabric call was for the AI's name — an edited name drops it, and an assignment
     // the operator already kept is proposed again without it
-    const staleFabric = !!i.assignment?.aiOnly?.some((x) => x.seed === seed);
+    const staleFabric = !!i.assignment?.aiOnly?.some((x) => edits.has(x.seed));
     const next = {
       ...i,
-      editedNames: [...new Set([...i.editedNames, seed])],
-      confirmedNames: [...new Set([...i.confirmedNames, seed])],
+      editedNames: [...new Set([...i.editedNames, ...seeds])],
+      confirmedNames: [...new Set([...i.confirmedNames, ...seeds])],
       ...(staleFabric ? { assignment: null } : {}),
     };
     iRef.current = next;
@@ -1737,9 +1746,16 @@ export function useImportSession(deps: {
     const names = sRef.current.names;
     // A piece nobody named yet (no AI answer — not logged in, or the AI is off) gets its first
     // name from what the operator typed, on top of what the sheet text gave the spec.
-    const decisions = names.some((n) => n.seed === seed)
-      ? names.map((n) => (n.seed === seed ? { ...n, ...p } : n))
-      : [...names, { ...textNameOf(seed, sRef.current.semantics, i.overrides[seed]), ...p }];
+    const known = new Set(names.map((n) => n.seed));
+    const decisions = [
+      ...names.map((n) => (edits.has(n.seed) ? { ...n, ...edits.get(n.seed)! } : n)),
+      ...seeds
+        .filter((sd) => !known.has(sd))
+        .map((sd) => ({
+          ...textNameOf(sd, sRef.current.semantics, i.overrides[sd]),
+          ...edits.get(sd)!,
+        })),
+    ];
     await dispatch({ type: 'names', decisions });
   }
 
@@ -1761,6 +1777,26 @@ export function useImportSession(deps: {
     await dispatch({
       type: 'size-map',
       entries: [...own, { ...hit, card: cardSize, origin: 'operator' }],
+    });
+  }
+
+  /**
+   * Cause E override: "this size is drawn — use the common outline". The size the sheet reads as
+   * not drawn is mapped back (to the card size it would have taken) and filled on its walls as they
+   * are; nothing is copied from a neighbour.
+   */
+  async function drawnAnyway(rank: number) {
+    const entries = sRef.current.sizes?.map.entries ?? [];
+    const own = (iRef.current.sizeMap ?? []).filter((e) => e.source.rank !== rank);
+    const hit = entries.find((e) => e.source.rank === rank);
+    if (!hit?.notDrawn) return;
+    const { notDrawn, ...rest } = hit;
+    await dispatch({
+      type: 'size-map',
+      entries: [
+        ...own,
+        { ...rest, card: notDrawn.wouldMap, origin: 'operator', drawnAnyway: true },
+      ],
     });
   }
 
@@ -1891,8 +1927,10 @@ export function useImportSession(deps: {
     promoteAside,
     editPieces,
     editName,
+    editNames,
     confirmSize,
     setSize,
+    drawnAnyway,
     setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
     confirmShown,
     answerOutline,

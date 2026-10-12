@@ -34,6 +34,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
+import { notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
@@ -56,6 +57,7 @@ import { seedPoints } from './seeds';
 import { modelFromCard, sheetFromCard, weakReason } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 import { aiAsideAssumptions } from './ai-pages';
+import { layerWordConflict, outlineByLayerWord } from './outline-word';
 
 /** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
 export type AutopilotSnapshot = {
@@ -1062,23 +1064,60 @@ function sizesStep(snap: Snap): AutopilotDecision {
       }),
     };
   }
+  // a size the sheet lists but draws no line of its own for is left out of the export (never filled
+  // from a neighbour): a strong assumption naming it — and a stop when the card has that size,
+  // which would then get no pattern from this sheet
+  const undrawn = entries.filter((e) => e.notDrawn);
+  const dropped = undrawn.map((e) => {
+    const would = e.notDrawn?.wouldMap ?? null;
+    return A(
+      'sizes',
+      'size-dropped',
+      sizeSubject(e),
+      'not written (not drawn on this sheet)',
+      'a size the sheet lists but draws no line of its own for is left out, never copied from a neighbour',
+      [
+        notDrawnLine(e.source.label),
+        would
+          ? `the card's ${would.token} gets no pattern from this sheet`
+          : 'no card size takes it',
+      ],
+      1,
+      true,
+      undefined,
+      sizeRef(e),
+    );
+  });
+  const needed = undrawn.flatMap((e) => {
+    const w = e.notDrawn?.wouldMap;
+    return w && card.sizes.some((c) => c.sizeId === w.sizeId) ? [w.token] : [];
+  });
+  if (needed.length)
+    return stopAt(
+      'sizes',
+      `${undrawn.map((e) => notDrawnLine(e.source.label)).join('; ')} — the card's ${needed.join(', ')} would get no pattern`,
+      dropped,
+    );
   // the offer: flags the reader could not settle — gone on with, each a strong assumption
   const flags = sizeFlags(s.chains?.ambiguities, sz.expected?.n);
-  if (!flags.length) return NONE;
+  if (!flags.length && !dropped.length) return NONE;
   return {
     actions: [{ kind: 'proceed' }],
-    assumptions: flags.map((f, k) =>
-      A(
-        'sizes',
-        'size-flag',
-        `flag ${k + 1} · ${f.kind}`,
-        'gone on as read',
-        'a reader flag on the sizes step is left as the reader settled it',
-        [JSON.stringify(f).slice(0, 160)],
-        0.4,
-        true,
+    assumptions: [
+      ...dropped,
+      ...flags.map((f, k) =>
+        A(
+          'sizes',
+          'size-flag',
+          `flag ${k + 1} · ${f.kind}`,
+          'gone on as read',
+          'a reader flag on the sizes step is left as the reader settled it',
+          [JSON.stringify(f).slice(0, 160)],
+          0.4,
+          true,
+        ),
       ),
-    ),
+    ],
   };
 }
 
@@ -1462,26 +1501,36 @@ function meaningStep(snap: Snap): AutopilotDecision {
   // 4 · the outline: what the sheet says (text, or a drawn seam line inside the cut line) for
   //     some pieces holds for the rest; nothing said → a one-click question (prefilled "cut line")
   const open = openQuestions(sem, s.names, i, snap.answersNow);
+  const sheetSaid = sem.pieces.find(
+    (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
+  )?.allowance;
+  // PASSPORT Ф1 (c): the file's own layer word against what the sheet says — never one silently
+  const clash = layerWordConflict(s, sheetSaid);
+  if (clash) return stopAt('meaning', clash);
+  const word = outlineByLayerWord(s);
   if (open.allowance.length) {
-    const said = sem.pieces.find(
-      (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
-    )?.allowance;
+    // layers that disagree are a question even where the sheet's text says something (Codex P1 #3)
+    if (word?.kind === 'stop' && word.conflict) return stopAt('meaning', word.reason);
+    const said = sheetSaid;
     if (!said) {
       // the source's own prior: a production / pattern-CAD export draws the cut line (its pieces
-      // carry their allowance); a printed home-sewing sheet (tiles, an overview page) does not say
-      // — a question. Text or a drawn seam line (above) always wins over both.
+      // carry their allowance), and so does a file that names the layer of every outline "cut
+      // line" (PASSPORT (c)); a printed home-sewing sheet (tiles, an overview page) does not say —
+      // a question. Text or a drawn seam line (above) always wins over both.
+      if (word?.kind === 'stop') return stopAt('meaning', word.reason);
       const cad = cadExport(s);
-      if (!cad)
+      if (!cad && !word)
         return stopAt(
           'meaning',
           'nothing on the sheet says what the drawn outline is — the cut line (allowance included) or the seam line?',
         );
+      const evidence = [...(word?.evidence ?? []), ...(cad ?? [])];
       const fileAllowance: AllowanceDecision = {
         meaning: 'cut',
         // what the one-click "cut line · as drawn" answer sends
         allowanceMm: PATIMPORT.defaultAllowanceMm,
         origin: 'operator',
-        evidence: cad,
+        evidence,
       };
       return {
         actions: [{ kind: 'semantics', patch: { fileAllowance } }],
@@ -1491,8 +1540,10 @@ function meaningStep(snap: Snap): AutopilotDecision {
             'outline',
             'the file',
             'the drawn outline is the cut line',
-            'CAD export → cut line',
-            cad,
+            word
+              ? `the file names the layer of every outline: ${word.layers.map((l) => `«${l.slice(0, 40)}»`).join(', ')} → cut line${cad ? ' (and a CAD export)' : ''}`
+              : 'CAD export → cut line',
+            evidence.slice(0, 4),
             0.6,
             true,
           ),

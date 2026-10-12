@@ -19,6 +19,7 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
+import { notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
@@ -428,6 +429,22 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             run read from {sizes.run.encoding.replace('-', ' ')}
             {sizes.run.evidence.length ? ` · ${sizes.run.evidence.join(' · ')}` : ''}
           </Text>
+          {sizes.map.entries
+            .filter((e) => e.notDrawn)
+            .map((e) => (
+              <span key={`nd-${e.source.rank}`} className='mt-1 flex items-center gap-1.5'>
+                <Text size='micro' component='span' className='text-warning'>
+                  ! {notDrawnLine(e.source.label)}
+                </Text>
+                <Chip
+                  className='h-[22px]'
+                  title='the sheet draws this size on the shared (common) lines — fill it on them; a piece they do not close stays open'
+                  onClick={() => void api.drawnAnyway(e.source.rank)}
+                >
+                  this size is drawn — use the common outline
+                </Chip>
+              </span>
+            ))}
           {sizes.map.unmapped.length > 0 && (
             <Text size='micro' component='p' className='mt-1 text-warning'>
               ! card sizes with no source: {sizes.map.unmapped.map((c) => c.name).join(', ')} — the

@@ -827,9 +827,11 @@ export async function runCase(c: Case, mutate: string | null) {
     if (mine !== JSON.stringify(api.answersNow)) fingerprintDrift++;
     const a = autopilotAnswer(snap);
     // the control's operator: the page-role question of the files step, answered as TRUTH reads
-    // those pages (they stay aside) — the question the control is not about
+    // those pages (they stay aside) — the question the control is not about. PASSPORT Ф1
+    // diagnostic: env AUTOPILOT_ORACLE_PAGES=1 answers it so on every case, to see the NEXT stop
+    // (never in the suite's numbers)
     if (
-      c.operatorPages &&
+      (c.operatorPages || !!process.env.AUTOPILOT_ORACLE_PAGES) &&
       a.stop &&
       a.reason?.step === 'files' &&
       /is it a pattern page\?/.test(a.reason.reason)
