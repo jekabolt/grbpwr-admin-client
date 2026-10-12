@@ -218,6 +218,11 @@ export function groupPieces(
         if (!other || other === k) continue;
         const og = group.get(other);
         if (!og) continue;
+        // A composite onto the body (a sleeve cap over several body pieces) never recruits one of
+        // those body pieces into the tube / ring group: only body groups take a vote from it.
+        const composite =
+          s.kind === 'composite' || (s.aParts?.length ?? 1) > 1 || (s.bParts?.length ?? 1) > 1;
+        if (composite && og !== 'BODY' && og !== 'LEG_L' && og !== 'LEG_R') continue;
         const len = Math.max(s.evidence.aLenMm ?? 0, s.evidence.bLenMm ?? 0, 100);
         votes.set(og, (votes.get(og) ?? 0) + len);
       }

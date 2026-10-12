@@ -3232,6 +3232,9 @@ export function solveDoll(input: DollInput): DollReport {
     const rise = (ids: EdgeId[]) => ids.some((id) => legPanelsOf.get(pk(id))?.rise.id === id);
     return rise(s.a) && rise(s.b);
   };
+  /** Tube groups set onto the body by the graph's own seams (no free loop): their composite seams
+   *  take their direction by the gap and are judged by gapSide. */
+  const graphPlaced = new Set<DollGroupId>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
     // (a proposed composite whose end parts are sewn over a stretch — a strip round a panel's
@@ -3242,8 +3245,10 @@ export function solveDoll(input: DollInput): DollReport {
     if (!A || !B) return null;
     const lenA = A.len;
     const lenB = B.len;
-    // A stored partial carries its sewn stretch (mm along each run): no guessing the aligned end.
-    const rg = conf && s.seam.range && s.a.length === 1 && s.b.length === 1 ? s.seam.range : null;
+    // A partial that carries its sewn stretch (mm along each run — a stored row, or the engine's
+    // own reading since assignment phase 4) is pulled together over that stretch only: no guessing
+    // the aligned end.
+    const rg = s.seam.range && s.a.length === 1 && s.b.length === 1 ? s.seam.range : null;
     const ranges = rg
       ? {
           aR: [rg.a[0] / Math.max(1e-9, lenA), rg.a[1] / Math.max(1e-9, lenA)].map((x) =>
@@ -3254,7 +3259,13 @@ export function solveDoll(input: DollInput): DollReport {
           ) as [number, number],
         }
       : undefined;
-    const multi = conf && (s.a.length > 1 || s.b.length > 1);
+    // A composite side walked in order (a stored row, or the engine's onto a tube the graph itself
+    // placed) has no direction of its own: by the smaller gap, not the mirrored flags.
+    const multi =
+      (conf ||
+        graphPlaced.has(panelByKey.get(pk(s.a[0]))?.group as DollGroupId) ||
+        graphPlaced.has(panelByKey.get(pk(s.b[0]))?.group as DollGroupId)) &&
+      (s.a.length > 1 || s.b.length > 1);
     const w0 = addWork(
       {
         id: `${s.seam.a}~${s.seam.b}`,
@@ -4373,11 +4384,24 @@ export function solveDoll(input: DollInput): DollReport {
     if (!A || !B) return Infinity;
     return Math.min(meanDist(A, B, true, [0, 1], [0, 1]), meanDist(A, B, false, [0, 1], [0, 1]));
   };
+  /**
+   * The same gap with each composite side walked in order (sidePath: parts turned to meet where
+   * they lie, cut to their sewn stretches) — a side of several parts concatenated in their own ring
+   * directions zigzags, and its mean distance says nothing about the seam.
+   */
+  const gapSide = (sm: GroupedSeam) => {
+    const A = sidePath(sm, 'a');
+    const B = sidePath(sm, 'b');
+    if (!A || !B) return Infinity;
+    return Math.min(meanDist(A, B, true, [0, 1], [0, 1]), meanDist(A, B, false, [0, 1], [0, 1]));
+  };
+  const gapOf = (sm: GroupedSeam, ga?: DollGroupId, gb?: DollGroupId) =>
+    (ga && graphPlaced.has(ga)) || (gb && graphPlaced.has(gb)) ? gapSide(sm) : gapNow(sm);
   const sewnNear = (g1: DollGroupId, g2: DollGroupId) =>
     G.seams.some((sm) => {
       const ga = panelByKey.get(pk(sm.a[0]))?.group;
       const gb = panelByKey.get(pk(sm.b[0]))?.group;
-      return ((ga === g1 && gb === g2) || (gb === g1 && ga === g2)) && gapNow(sm) < FAR;
+      return ((ga === g1 && gb === g2) || (gb === g1 && ga === g2)) && gapOf(sm, ga, gb) < FAR;
     });
   const a = (Math.PI / 180) * ARM_DEG;
   const sleeveFrames: Partial<Record<'L' | 'R', Frame>> = {};
@@ -4434,9 +4458,32 @@ export function solveDoll(input: DollInput): DollReport {
         const v = P.offset + r;
         if (cuv[2 * v + 1] > best) [best, uApex] = [cuv[2 * v + 1], cuv[2 * v]];
       }
+    // Where the tube goes: the body's free armhole loop; without one (open shoulders — SS26-008:
+    // the front and back armholes never join into a loop) the graph's own seams from this
+    // sleeve onto body pieces say where the opening is — the sleeve is set on their body side and
+    // the seam judged after, instead of a guess 290 mm away that the far-apart rule then refuses.
+    const graphArm: number[] = [];
+    if (!armLoop[side])
+      for (const sm of G.seams) {
+        const bodySide = inGroups(sm.a, new Set([gid]))
+          ? inGroups(sm.b, new Set(['BODY']))
+            ? sm.b
+            : null
+          : inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))
+            ? sm.a
+            : null;
+        const B = bodySide ? pathOf(bodySide) : null;
+        if (B) graphArm.push(...B.v);
+      }
+    if (!armLoop[side] && graphArm.length)
+      warnings.push(
+        `${s === 'L' ? 'left' : 'right'} sleeve: the body has no ${side === 'L' ? 'left' : 'right'} armhole loop — set on the body edges the graph sews it to`,
+      );
     const J: Vec3 = armLoop[side]
       ? centroid(armLoop[side]!.verts)
-      : [sg * aArmNow * 0.95, vArm + 0.5 * (vSh - vArm), 0];
+      : graphArm.length
+        ? centroid(graphArm)
+        : [sg * aArmNow * 0.95, vArm + 0.5 * (vSh - vArm), 0];
     const d: Vec3 = [sg * Math.sin(a), -Math.cos(a), 0];
     const up: Vec3 = [-d[0], -d[1], -d[2]];
     const e0: Vec3 = [sg * Math.cos(a), Math.sin(a), 0];
@@ -4471,17 +4518,54 @@ export function solveDoll(input: DollInput): DollReport {
     };
     const pi = proxies.push(armProxy) - 1;
     proxyReport.push({ group: gid, kind: 'capsule', profile: [[0, Rw, Rw]], origin: F.c, axis: d });
-    for (const P of list) {
-      buildPanelLater.push(P);
-      const inMain = main.includes(P);
-      for (let i = 0; i < P.count; i++) {
-        const v = P.offset + i;
-        const u = cuv[2 * v];
-        const vv = cuv[2 * v + 1];
-        const th = (TAU * (u - uApex)) / Wv(Math.min(vv, vW));
-        setPos(v, fromFrame(F, th, vv - hi, R(vv) + CLEAR + (inMain ? 0 : 3)));
-        proxyOf[v] = pi;
-        placed[v] = 1;
+    for (const P of list) buildPanelLater.push(P);
+    const placeAt = (th0: number) => {
+      for (const P of list) {
+        const inMain = main.includes(P);
+        for (let i = 0; i < P.count; i++) {
+          const v = P.offset + i;
+          const u = cuv[2 * v];
+          const vv = cuv[2 * v + 1];
+          const th = (TAU * (u - uApex)) / Wv(Math.min(vv, vW)) + th0;
+          setPos(v, fromFrame(F, th, vv - hi, R(vv) + CLEAR + (inMain ? 0 : 3)));
+          proxyOf[v] = pi;
+          placed[v] = 1;
+        }
+      }
+    };
+    placeAt(0);
+    // Set by the graph's seams: turned about its axis to where those seams' two sides lie nearest
+    // (the cap's apex has no landmark of its own on the body side), then moved so the two sides'
+    // centroids coincide (the cap ring's centre is not the apex).
+    if (!armLoop[side] && graphArm.length) {
+      const comps = G.seams.filter(
+        (sm) =>
+          (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set(['BODY']))) ||
+          (inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))),
+      );
+      graphPlaced.add(gid);
+      let bestTh = 0;
+      let bestD = comps.reduce((t, sm) => t + gapSide(sm), 0);
+      for (let k = 1; k < 24; k++) {
+        placeAt((TAU * k) / 24);
+        const d = comps.reduce((t, sm) => t + gapSide(sm), 0);
+        if (d < bestD - 1e-6) [bestTh, bestD] = [(TAU * k) / 24, d];
+      }
+      placeAt(bestTh);
+      const shift: Vec3 = [0, 0, 0];
+      let n = 0;
+      for (const sm of comps) {
+        const sleeveSide = inGroups(sm.a, new Set([gid])) ? 'a' : 'b';
+        const A = sidePath(sm, sleeveSide);
+        const B = sidePath(sm, sleeveSide === 'a' ? 'b' : 'a');
+        if (!A || !B) continue;
+        const d = sub(centroid([...B.v]), centroid([...A.v]));
+        for (let q = 0; q < 3; q++) shift[q] += d[q];
+        n++;
+      }
+      if (n) {
+        F.c = add(F.c, [shift[0] / n, shift[1] / n, shift[2] / n]);
+        placeAt(bestTh);
       }
     }
   }
@@ -5759,7 +5843,7 @@ export function solveDoll(input: DollInput): DollReport {
     const gb = panelByKey.get(pk(sm.b[0]))?.group;
     if (!ga || !gb || ga === gb || ga === 'FLOAT' || gb === 'FLOAT') continue;
     if (bodyLike.has(ga) && bodyLike.has(gb)) continue;
-    const far = gapNow(sm);
+    const far = gapOf(sm, ga, gb);
     const w = graphWork(sm, passes);
     if (w && far >= FAR && !w.confirmed) {
       w.released = true;
