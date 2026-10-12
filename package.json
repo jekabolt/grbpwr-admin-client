@@ -137,6 +137,7 @@
     "patimport:count": "node scripts/pattern-import/count-evidence.mjs",
     "patimport:p23": "node scripts/pattern-import/p23.mjs",
     "patimport:page-roles": "node scripts/pattern-import/page-roles.mjs",
+    "patimport:passport": "node scripts/pattern-import/passport.mjs",
     "seams:score": "node scripts/seams-score/score.mjs"
   },
   "devDependencies": {
