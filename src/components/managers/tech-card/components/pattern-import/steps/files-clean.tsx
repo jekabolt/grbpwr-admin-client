@@ -449,12 +449,22 @@ export function CleanBlock({
   const clean = session.clean;
   const [hover, setHover] = useState<BackgroundKind | null>(null);
   // owner 12.10: the set-aside pages picked for one bulk answer — nothing picked by default (D3)
-  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  // — bound to the clean output it was made on: `file:page` keys are positional and get reused
+  // (a rerun with fresh AI answers, a replaced file), so a pick never outlives its snapshot
+  const [pickedOn, setPickedOn] = useState<{ of: unknown; keys: ReadonlySet<string> }>(() => ({
+    of: null,
+    keys: new Set(),
+  }));
   const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
   if (!clean) return null;
   const dropped = clean.dropped;
   const keys = dropped.map(pageKey);
-  // a pick of a page no longer set aside (read as a tile by now) is not a pick
+  const picked = pickedOn.of === clean ? pickedOn.keys : new Set<string>();
+  const setPicked = (next: (prev: ReadonlySet<string>) => ReadonlySet<string>) =>
+    setPickedOn((cur) => ({
+      of: clean,
+      keys: next(cur.of === clean ? cur.keys : new Set()),
+    }));
   const sel = new Set(keys.filter((k) => picked.has(k)));
   const selectable = dropped.length > 1;
   const toggle = (k: string) =>
@@ -468,7 +478,7 @@ export function CleanBlock({
   const readPicked = bulkRead(dropped, sel);
   const aiPicks = dropped.filter(aiKeepSuggested).map(pageKey);
   const applyBulk = (pages: readonly PageRole[]) => {
-    setPicked(new Set());
+    setPicked(() => new Set());
     void api.dispatch({ type: 'clean', edits: rolesEdit(inputs.cleanEdits, pages) });
   };
   const tilePreviews = clean.previews.filter((p) =>
@@ -526,7 +536,7 @@ export function CleanBlock({
                 <CheckboxCommon
                   name='pi-aside-all'
                   checked={sel.size === dropped.length}
-                  onChange={(on) => setPicked(on ? new Set(keys) : new Set())}
+                  onChange={(on) => setPicked(() => (on ? new Set(keys) : new Set()))}
                 />
                 <label htmlFor='pi-aside-all' className='cursor-pointer'>
                   <Text size='micro' variant='label' component='span'>
@@ -540,7 +550,7 @@ export function CleanBlock({
               {aiPicks.length > 0 && (
                 <Chip
                   tone='attention'
-                  onClick={() => setPicked(new Set(aiPicks))}
+                  onClick={() => setPicked(() => new Set(aiPicks))}
                   title={`pick the pages to check that the AI reads as not pattern at ${AI_PAGES.autoMin} or more — nothing is set aside until you press "keep aside"`}
                 >
                   select AI suggestions ({aiPicks.length})
