@@ -156,7 +156,11 @@ export class Board {
           ib >= 0 &&
           ia !== ib &&
           op.inputs[ia].length === 1 &&
-          op.inputs[ib].length === 1
+          op.inputs[ib].length === 1 &&
+          // (two identical sleeves set onto the body in one step are the left and the right
+          // sleeve, not two plies — card 9, names unreadable)
+          op.classes[ia] !== 'sleeve' &&
+          op.classes[ib] !== 'sleeve'
         );
       });
     for (const p of P.pieces) {
