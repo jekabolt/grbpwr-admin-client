@@ -21,6 +21,7 @@ import {
   type SeamGraph,
 } from '../types';
 import { MARGIN_LIKELY, MARGIN_SURE, type Solution, type Variable } from './model';
+import { withRange } from './partials';
 
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
 
@@ -110,7 +111,7 @@ export function graphOf(
       }
       const margin = sol.margin.get(v);
       const alts = alternativesOf(P, v.cand, chosenC).map((q) => toCandidate(q));
-      const c = toCandidate(v.cand, alts);
+      const c = withRange(toCandidate(v.cand, alts), v.cand);
       const words = `assigned in «${s.op.label}»${
         margin === undefined
           ? ''
