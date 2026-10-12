@@ -1724,9 +1724,12 @@ export function solveDoll(input: DollInput): DollReport {
    * converges (its chord under half its length: a slit, a V), spanning the notches within 15 mm
    * either side when the piece carries them (the dart's legs). Overlaps merged.
    */
-  const foldEvidence = (B: Path): { folds: [number, number][]; Le: number } | null => {
+  type FoldKind = 'pleat' | 'dart';
+  const foldEvidence = (
+    B: Path,
+  ): { folds: [number, number][]; kinds: FoldKind[]; Le: number } | null => {
     const f = foldsOnPath(B);
-    const out: [number, number][] = [];
+    const out: { r: [number, number]; kind: FoldKind }[] = [];
     const byPanel = new Map<number, [number, number][]>();
     f.pairs.forEach((p, i) => {
       const list = byPanel.get(f.pairPanel[i]) ?? [];
@@ -1738,7 +1741,7 @@ export function solveDoll(input: DollInput): DollReport {
       for (const p of list) {
         const w = p[1] - p[0];
         const alike = list.filter((q) => Math.abs(q[1] - q[0] - w) <= Math.max(3, 0.15 * w));
-        if (alike.length >= 2) out.push(p);
+        if (alike.length >= 2) out.push({ r: p, kind: 'pleat' });
       }
     }
     f.stairs.forEach((st, i) => {
@@ -1754,18 +1757,121 @@ export function solveDoll(input: DollInput): DollReport {
         if (n.s < st[0] && st[0] - n.s <= 15) lo = Math.min(lo, n.s);
         if (n.s > st[1] && n.s - st[1] <= 15) hi = Math.max(hi, n.s);
       }
-      out.push([lo, hi]);
+      out.push({ r: [lo, hi], kind: 'dart' });
     });
     if (!out.length) return null;
     const folds: [number, number][] = [];
-    for (const x of [...out].sort((p, q) => p[0] - q[0])) {
+    const kinds: FoldKind[] = [];
+    for (const x of [...out].sort((p, q) => p.r[0] - q.r[0])) {
       const last = folds[folds.length - 1];
-      if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
-      else folds.push([x[0], x[1]]);
+      if (last && x.r[0] <= last[1]) {
+        last[1] = Math.max(last[1], x.r[1]);
+        // (a dart drawn inside a notch pair: sewn, not tucked)
+        if (x.kind === 'dart') kinds[kinds.length - 1] = 'dart';
+      } else {
+        folds.push([x.r[0], x.r[1]]);
+        kinds.push(x.kind);
+      }
     }
     const Le = B.len - folds.reduce((t, x) => t + x[1] - x[0], 0);
-    return Le > 0 ? { folds, Le } : null;
+    return Le > 0 ? { folds, kinds, Le } : null;
   };
+  /**
+   * The folds on a path FORMED in 3D (N9, 06-TROUSERS-SHAPE.md): what the pattern's intake marks
+   * mean once sewn. A PLEAT's two notch points coincide in the seam — the tuck is sewn into the
+   * waist seam only, so below it the pleat releases: the two sides may stand no farther apart than
+   * w·d/D at depth d under the notches (unilateral limits), D = 4 w within 80–160 mm — never
+   * pinned all the way down; the depth comes from the notches alone. A DART's two legs are sewn to
+   * each other from the edge to its point (a self-seam: the vertex t mm in from one end of the run
+   * meets the one t mm in from the other). Internal constraints, never seams: nothing is reported,
+   * nothing is scored. Returns the intake taken in, mm.
+   */
+  const formFolds = (B: Path, ev: NonNullable<ReturnType<typeof foldEvidence>>): number => {
+    const tie = (a: number, b: number) => {
+      if (a === b) return;
+      di.push(a);
+      dj.push(b);
+      dr.push(0);
+      dk.push(1);
+    };
+    const atArc = (s0: number, k0: number, k1: number) => {
+      let best = k0;
+      for (let k = k0; k <= k1; k++) if (Math.abs(B.s[k] - s0) < Math.abs(B.s[best] - s0)) best = k;
+      return best;
+    };
+    let taken = 0;
+    ev.folds.forEach(([f0, f1], fi) => {
+      const k0 = atArc(f0, 0, B.v.length - 1);
+      const k1 = atArc(f1, 0, B.v.length - 1);
+      if (k1 <= k0) return;
+      const va = B.v[k0];
+      const vb = B.v[k1];
+      const pn = panelOf[va];
+      if (pn < 0 || pn !== panelOf[vb]) return;
+      const w = f1 - f0;
+      taken += w;
+      if (ev.kinds[fi] === 'dart') {
+        for (let k = k0; k <= k1; k++) {
+          const t = B.s[k] - f0;
+          if (t > w / 2) break;
+          const kk = atArc(f1 - t, k, k1);
+          if (B.v[kk] !== B.v[k]) tie(B.v[k], B.v[kk]);
+        }
+        return;
+      }
+      tie(va, vb);
+      // The release under the tuck: the inward normal of the edge in the piece's own frame.
+      const P = panels[pn];
+      const ring = P.mesh.pts.slice(0, P.nb);
+      const ax = uv[2 * va];
+      const ay = uv[2 * va + 1];
+      const bx = uv[2 * vb];
+      const by = uv[2 * vb + 1];
+      const tl = Math.hypot(bx - ax, by - ay) || 1;
+      let nx = -(by - ay) / tl;
+      let ny = (bx - ax) / tl;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      if (!pointInPolygon([mx + 10 * nx, my + 10 * ny], ring)) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const nearest = (x: number, y: number) => {
+        let best = -1;
+        let bd = (0.9 * h) ** 2;
+        for (let i = 0; i < P.count; i++) {
+          const d = (P.mesh.pts[i][0] - x) ** 2 + (P.mesh.pts[i][1] - y) ** 2;
+          if (d < bd) [best, bd] = [i, d];
+        }
+        return best < 0 ? -1 : P.offset + best;
+      };
+      const D = Math.max(80, Math.min(160, 4 * w));
+      for (let d = h; d < D; d += h) {
+        const ia = nearest(ax + nx * d, ay + ny * d);
+        const ib = nearest(bx + nx * d, by + ny * d);
+        if (ia < 0 || ib < 0 || ia === ib) continue;
+        li.push(ia);
+        lj.push(ib);
+        lr.push((w * d) / D);
+      }
+    });
+    return taken;
+  };
+
+  // ── constraint arrays (filled by the folds at placement and by buildPanel) ──────────────
+  /** Stretch (rest length, stiffness) and bending (opposite vertices) distance constraints. */
+  const di: number[] = [];
+  const dj: number[] = [];
+  const dr: number[] = [];
+  const dk: number[] = [];
+  const bi: number[] = [];
+  const bj: number[] = [];
+  const br: number[] = [];
+  const bk: number[] = [];
+  /** Long-range unilateral limits: never farther apart than lrest. */
+  const li: number[] = [];
+  const lj: number[] = [];
+  const lr: number[] = [];
 
   // ── BODY / LEGS placement ───────────────────────────────────────────────────────────────
   const legPanelsOf = legPanels(G.pieces.map((P) => P.geom));
@@ -3040,15 +3146,123 @@ export function solveDoll(input: DollInput): DollReport {
           `debug: ${gid} inseam uRef ${uRef.toFixed(0)} ends ${eEnds?.map((x) => x.toFixed(0)).join('..')} rise u ${riseU.map((x) => x.toFixed(0)).join(',')} chart seam ${used ?? '-'}`,
         );
     }
+    // The waist FOLDED (N9, 06-TROUSERS-SHAPE.md): each panel's top edges (both ends within the top
+    // 12 % of its height; never its rise / inseam / outseam) walked as one path; the pleats and
+    // darts on it — by evidence alone (foldEvidence) — are formed as constraints (formFolds), and
+    // their intake comes off the width the pelvis guide is sized by at the top.
+    let waistTopMm = 0;
+    let waistFoldMm = 0;
+    const foldWords: string[] = [];
+    // Edges a graph seam sews INSIDE the legs / body (a yoke onto the back, a panel to a panel) are
+    // structure, not the waist: the waist is the FREE run along the top.
+    const sewnInside = new Set<EdgeId>();
+    for (const sm of G.seams) {
+      const ga = panelByKey.get(pk(sm.a[0]))?.group;
+      const gb = panelByKey.get(pk(sm.b[0]))?.group;
+      const inside = (g?: DollGroupId) => g === 'LEG_L' || g === 'LEG_R' || g === 'BODY';
+      if (inside(ga) && inside(gb)) for (const id of [...sm.a, ...sm.b]) sewnInside.add(id);
+    }
+    for (const P of list) {
+      const n = P.geom.rs.length;
+      const vOf = (rsI: number) => {
+        const r = P.ringPos.get(((rsI % n) + n) % n);
+        return r === undefined ? NaN : cuv[2 * (P.offset + r) + 1];
+      };
+      let pLo = Infinity;
+      let pHi = -Infinity;
+      for (let r = 0; r < P.nb; r++) {
+        const y = cuv[2 * (P.offset + r) + 1];
+        if (y < pLo) pLo = y;
+        if (y > pHi) pHi = y;
+      }
+      // (a yoke is a short piece: its waist edge's slant is a share of a larger height)
+      const top = pHi - Math.max(30, 0.12 * (pHi - pLo));
+      const L = legPanelsOf.get(P.key);
+      const skip = new Set(L ? [L.rise.id, L.inseam.id, L.outseam.id] : []);
+      const free = P.geom.edges.filter(
+        (e) => e.kind === 'edge' && !skip.has(e.id) && !sewnInside.has(e.id),
+      );
+      let edges = free.filter((e) => vOf(e.s) >= top && vOf(e.e) >= top);
+      // A short piece whose top edge slants more than the band (a curved yoke): its highest free
+      // edge by its points' mean height.
+      if (!edges.length && free.length) {
+        const meanV = (e: Edge) => {
+          let t = 0;
+          let c = 0;
+          for (let i = 0; i <= e.pts.length; i += Math.max(1, Math.floor(e.pts.length / 8))) {
+            const v = vOf(e.s + i);
+            if (Number.isFinite(v)) {
+              t += v;
+              c++;
+            }
+          }
+          return c ? t / c : -Infinity;
+        };
+        const best = [...free].sort((a, b) => meanV(b) - meanV(a))[0];
+        if (meanV(best) >= pHi - Math.max(60, 0.25 * (pHi - pLo))) edges = [best];
+      }
+      if (!edges.length) continue;
+      // Chained in ring order from the edge no other selected edge leads into.
+      const byStart = new Map(edges.map((e) => [((e.s % n) + n) % n, e]));
+      const ends = new Set(edges.map((e) => ((e.e % n) + n) % n));
+      let first = edges.find((e) => !ends.has(((e.s % n) + n) % n)) ?? edges[0];
+      const chain: Edge[] = [];
+      const seen = new Set<string>();
+      while (first && !seen.has(first.id)) {
+        seen.add(first.id);
+        chain.push(first);
+        first = byStart.get(((first.e % n) + n) % n)!;
+      }
+      const path = pathOf(chain.map((e) => e.id));
+      if (!path) continue;
+      waistTopMm += path.len;
+      if (opt.debug)
+        warnings.push(
+          `debug: ${gid} ${P.key} top run ${path.len.toFixed(0)} mm over ${chain.length} edge${chain.length > 1 ? 's' : ''} (${chain.map((e) => `#${e.k} ${e.lenMm.toFixed(0)}`).join(', ')}) of ${edges.length} at the top · panel v ${pLo.toFixed(0)}..${pHi.toFixed(0)}`,
+        );
+      const ev = foldEvidence(path);
+      if (!ev) continue;
+      const taken = formFolds(path, ev);
+      waistFoldMm += taken;
+      foldWords.push(
+        `${P.key}: ${ev.folds.map((f, i) => `${ev.kinds[i]} ${(f[1] - f[0]).toFixed(0)} mm`).join(', ')}`,
+      );
+    }
+    if (foldWords.length)
+      warnings.push(
+        `${gid}: the waist's intake formed — ${foldWords.join(' · ')} — ${waistFoldMm.toFixed(0)} mm of ${waistTopMm.toFixed(0)} folded closed (the pelvis is sized by the folded waist at the top)`,
+      );
     // Pelvis: above the crotch both legs wrap ONE elliptic body (the rise seams meet at x = 0 front
-    // and back); below it each leg is its own capsule.
+    // and back); below it each leg is its own capsule. Its girth is the chart's width at each level
+    // — at the top the FOLDED waist, blended in from the seat (3" over the crotch) up.
+    const vSeat = vCr + 76;
+    // The top: the waist edges' own length less the intake folded (the chart's extent at its top
+    // level is no measure of the waist — a slanted waist leaves only a corner up there).
+    const Wtop = waistTopMm > 0 ? waistTopMm - waistFoldMm : W(vSeat);
     const pelvis = (y: number) => {
-      const half = (W(Math.min(y + lo, hi)) * (1 - EPS_WRAP)) / 2; // this leg's arc = half the pelvis
+      const v = Math.min(y + lo, hi);
+      const t0 = hi > vSeat ? Math.max(0, Math.min(1, (v - vSeat) / (hi - vSeat))) : 1;
+      const t = t0 * t0 * (3 - 2 * t0);
+      // This leg's cloth (its chart width) wraps its own half of the pelvis: the half-perimeter IS
+      // that width (12.10: it was half of it — a guide half the cloth, the waist crumpled round a
+      // cone that ran down to nothing where the slanted waist left the chart's top level empty).
+      // Over the seat the chart's extent is no girth (slanted tops laid side by side over-count:
+      // a yoke's level read 4 % over the waist and strained it) — seat to folded waist, blended.
+      const half = (W(Math.min(v, vSeat)) * (1 - t) + Wtop * t) * (1 - EPS_WRAP);
       // Half-perimeter of an ellipse a = 1.25 b ≈ π/2 (3(a+b) − √((3a+b)(a+3b))).
       const k = (Math.PI / 2) * (3 * 2.25 - Math.sqrt((3 * 1.25 + 1) * (1.25 + 3)));
       const b = (2 * half) / (2 * k);
       return { a: 1.25 * b, b };
     };
+    if (opt.debug) {
+      const pr = (v: number) => {
+        const { a, b } = pelvis(v - lo);
+        return `${v.toFixed(0)}: W ${W(v).toFixed(0)} a ${a.toFixed(0)} b ${b.toFixed(0)} perim ${(Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)))).toFixed(0)}`;
+      };
+      warnings.push(
+        `debug: ${gid} pelvis · lo ${lo.toFixed(0)} crotch ${vCr.toFixed(0)} seat ${vSeat.toFixed(0)} top ${hi.toFixed(0)} · Wtop ${Wtop.toFixed(0)} (waist edges ${waistTopMm.toFixed(0)} − folds ${waistFoldMm.toFixed(0)}) · ${[vCr + 30, vSeat, (vSeat + hi) / 2, hi].map(pr).join(' · ')}`,
+      );
+    }
     // The crotch points (each leg panel's rise low end): they rest on the body's crotch, under
     // it — between the front and the back, on the mid-plane — not wherever the shorter rise drags
     // them (SS26-007's front rise pulled the crotch forward, the back's crotch extension bulged).
@@ -3083,11 +3297,12 @@ export function solveDoll(input: DollInput): DollReport {
           const { a, b } = pelvis(y);
           const x = p[3 * i];
           const z = p[3 * i + 2];
-          // Darts take in the waist: a looser guide (0.8). Just above the crotch the body is a
-          // saddle the front and the back rise curve under to meet: the guide there is a thin one,
-          // growing to full over the rises' curved part (~90 mm) — not a body's depth to cross.
+          // Just above the crotch the body is a saddle the front and the back rise curve under to
+          // meet: the guide there is a thin one, growing to full over the rises' curved part
+          // (~90 mm) — not a body's depth to cross. (The waist's intake is folded for real now —
+          // the 0.8 «darts» allowance the guide used to carry is gone.)
           const up = Math.max(0, Math.min(1, (y - (vCr - lo) - 30) / 90));
-          const g = 0.8 * (0.35 + 0.65 * up * up * (3 - 2 * up));
+          const g = 0.35 + 0.65 * up * up * (3 - 2 * up);
           const q = (x / (a * g)) ** 2 + (z / (b * g)) ** 2;
           if (q >= 1 || q < 1e-9) return;
           const f = 1 / Math.sqrt(q);
@@ -3169,18 +3384,7 @@ export function solveDoll(input: DollInput): DollReport {
   }
 
   // ── constraints (distances) ─────────────────────────────────────────────────────────────
-  const di: number[] = [];
-  const dj: number[] = [];
-  const dr: number[] = [];
-  const dk: number[] = [];
-  const bi: number[] = [];
-  const bj: number[] = [];
-  const br: number[] = [];
-  const bk: number[] = [];
   const built = new Set<number>();
-  const li: number[] = [];
-  const lj: number[] = [];
-  const lr: number[] = [];
   const buildPanel = (P: Panel) => {
     if (built.has(P.idx)) return;
     built.add(P.idx);
@@ -4506,7 +4710,9 @@ export function solveDoll(input: DollInput): DollReport {
       };
       const Ar = revPath(A);
       const A1 = meanGap(Ar) < meanGap(A) ? Ar : A;
-      const w = anchoredWork(label, A1, B, anchorsFor(A1), note, stiff);
+      const w = anchoredWork(label, A1, B, anchorsFor(A1), note, stiff, (sb) =>
+        plan.folds.some(([f0, f1]) => sb > f0 + 0.5 && sb < f1 - 0.5),
+      );
       w.foldedMm = B.len - plan.Le;
       if (l4 && isExcluded(w.a, w.b)) {
         w.rejectedByPerson = true;
@@ -5131,8 +5337,22 @@ export function solveDoll(input: DollInput): DollReport {
     anchors: [number, number][],
     note: string,
     target: number,
+    /** Arcs of B not sewn to A (the inside of a fold: a dart's legs run down, not along the seam). */
+    skipB?: (s: number) => boolean,
   ) => {
     const rows = anchoredRows(A, B, anchors);
+    if (skipB) {
+      const sOfB = new Map<number, number>();
+      B.v.forEach((v, k) => sOfB.set(v, B.s[k]));
+      const keep: number[] = [];
+      for (let q = 0; q < rows.v.length; q++) {
+        const sb = sOfB.get(rows.v[q]);
+        if (sb === undefined || !skipB(sb)) keep.push(q);
+      }
+      if (keep.length < rows.v.length)
+        for (const key of ['v', 'b0', 'b1', 'w'] as const)
+          rows[key] = keep.map((q) => rows[key][q]) as number[];
+    }
     const solver: SolverSeam = { rows, k: 0, active: true, gap: 0 };
     const a0 = anchors[0][0];
     const a1 = anchors[anchors.length - 1][0];
@@ -6099,6 +6319,22 @@ export function solveDoll(input: DollInput): DollReport {
     if (w.rejectedByPerson || w.hidden) continue;
     const m = measure(w);
     const sp = seamStretch(w, st, SF) * 100;
+    if (opt.debug && w.origin === 'doll-proposed' && !w.released) {
+      // Where along side A the proposal stays open: 10 bins, max gap in each.
+      const g = rowGaps(pos, w.rows);
+      const idx = new Map<number, number>();
+      w.A.v.forEach((v, k) => idx.set(v, k));
+      const bins = new Array(10).fill(0);
+      for (let q = 0; q < w.rows.v.length; q++) {
+        const k = idx.get(w.rows.v[q]);
+        if (k === undefined) continue;
+        const b = Math.min(9, Math.floor((10 * w.A.s[k]) / Math.max(1, w.A.len)));
+        bins[b] = Math.max(bins[b], g[q]);
+      }
+      warnings.push(
+        `debug: ${w.id} gaps along A (10 bins, max mm): ${bins.map((x) => x.toFixed(0)).join(' ')} · p95 ${m.p95.toFixed(1)} max ${m.max.toFixed(1)}`,
+      );
+    }
     // Twist: the other direction would fit the solved shape much better.
     const alt = seamRows(w.A, w.B, !w.same, w.aRange, w.bRange);
     const ag = rowGaps(pos, alt);
