@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
+import { sizeKey } from 'lib/pattern-import/sizes/map';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { answersNowOf } from 'components/managers/tech-card/components/pattern-import/answers';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
@@ -769,7 +770,8 @@ const norm = (x: string) =>
     .replace(/^piece\s+/, '')
     .replace(/\.$/, '')
     .trim();
-const bare = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+// the wizard's own size key: a paired «4/6» is never the «46» its digits concatenate to
+const bare = sizeKey;
 const fabricOf = (f: unknown): string => {
   const t = String(f ?? '').toLowerCase();
   if (/^lining/.test(t)) return 'TECH_CARD_BOM_PURPOSE_LINING';

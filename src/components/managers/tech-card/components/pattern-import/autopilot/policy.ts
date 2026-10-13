@@ -40,7 +40,7 @@ import {
 } from 'lib/pattern-import/pieces/sheets';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
-import { notDrawnLine } from 'lib/pattern-import/sizes/map';
+import { drawnUnmapped, notDrawnLine, partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
@@ -1088,6 +1088,40 @@ function sizesStep(snap: Snap): AutopilotDecision {
           sizeRef(g),
         );
       }),
+    };
+  }
+  // a partial map — drawn sizes the automatic map left off the card (archive run 13.10: Mimosa wrote
+  // 1 size of 8). With card sizes still free they may be theirs: a stop, never an export of fewer
+  // sizes than drawn unsaid (D3/D5). Past a full card run they are left out, each a strong
+  // assumption naming it.
+  const partial = partialSizeMapQuestion(sz.map);
+  if (partial) return stopAt('sizes', partial);
+  const loose = drawnUnmapped(sz.map);
+  if (loose.length) {
+    const own = (i.sizeMap ?? []).filter(
+      (e) => !loose.some((l) => l.source.rank === e.source.rank),
+    );
+    return {
+      actions: [
+        {
+          kind: 'size-map',
+          entries: [...own, ...loose.map((e): SizeMapEntry => ({ ...e, origin: 'operator' }))],
+        },
+      ],
+      assumptions: loose.map((e) =>
+        A(
+          'sizes',
+          'size-dropped',
+          sizeSubject(e),
+          'not written (no card size for it)',
+          "a drawn size past the card's run (every card size has its source) is left out, never put on a neighbour",
+          [...(e.evidence ?? []), `card run ${cards.map((c) => c.token).join(' ')}`],
+          1,
+          true,
+          undefined,
+          sizeRef(e),
+        ),
+      ),
     };
   }
   // a size the sheet lists but draws no line of its own for is left out of the export (never filled

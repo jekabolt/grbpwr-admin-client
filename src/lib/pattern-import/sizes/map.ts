@@ -8,7 +8,8 @@
 // reads the same two parts off `CardSize.name` / `token`.
 //
 // Matching, strongest first (confidence; < 0.9 = the wizard asks the operator to confirm):
-//   1.00  same token, spelled the same            M ↔ M, 44 ↔ 44, 3-4Y ↔ 3-4Y
+//   1.00  same token, spelled the same            M ↔ M, 44 ↔ 44, 3-4Y ↔ 3-4Y, 4/6 ↔ 4-6
+//         (a separator between digits counts: 4/6 is never 46, 2-4 never 24 — `sizeKey`)
 //   0.95  same letter size, another spelling      2XL ↔ XXL, XXXL ↔ 3XL
 //   0.90  the source number is the card size's numeric equivalent   44 ↔ XS (xs_44ta_m)
 //   0.60  Burda tall/short size of a numeric card size              72 ↔ 36, 18 ↔ 36
@@ -24,7 +25,30 @@ import { parseSizeToken } from './tokens';
 
 export type SizeTokensOf = (card: CardSize) => string[];
 
-const bare = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+// a separator BETWEEN TWO DIGITS is part of the size (marked while the rest is stripped)
+const DIGIT_SEP = /(\p{N})[^\p{L}\p{N}]+(?=\p{N})/gu;
+const MARK = '\uE000';
+
+/**
+ * Comparison key of a size spelling: case and decoration dropped («<M>» ≡ «m», «2XL» ≡ «2xl»), but
+ * a separator between two digits is kept as «/» — a paired size is never the single size its digits
+ * concatenate to: «4/6» ≡ «4-6» ≡ «4 – 6», but «4/6» ≠ «46», «2-4» ≠ «24», «10/12» ≠ «1012»,
+ * «00-0» ≠ «000», «36.5» ≠ «365», «3-4Y» ≠ «34Y» (archive run 13.10: «4/6» went onto the card's
+ * 46 as «same token»).
+ */
+export const sizeKey = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(DIGIT_SEP, `$1${MARK}`)
+    .replace(/[^\p{L}\p{N}\uE000]+/gu, '')
+    .replace(/\uE000/g, '/');
+
+/** The words of a display name, a digit pair («4/6», «36.5») kept as one word. */
+const nameWords = (name: string) =>
+  name
+    .replace(DIGIT_SEP, `$1${MARK}`)
+    .split(/[^\p{L}\p{N}\uE000]+/u)
+    .map((w) => w.replace(/\uE000/g, '/'));
 
 /** The token a card size is written with in block names (manifest `sizes[].token`). */
 export function sizeTokenOf(card: CardSize): string {
@@ -45,7 +69,7 @@ export const defaultTokensOf: SizeTokensOf = (card) => {
     const digits = m[2].match(/\d+/)?.[0];
     if (digits) out.push(digits);
   } else {
-    for (const w of name.split(/[^\p{L}\p{N}]+/u)) if (w && parseSizeToken(w, true)) out.push(w);
+    for (const w of nameWords(name)) if (w && parseSizeToken(w, true)) out.push(w);
   }
   return [...new Set(out.filter(Boolean))];
 };
@@ -73,9 +97,11 @@ function bestHit(
     const toks = tokensOf(c);
     const letterCard = parseSizeToken(c.token, true)?.kind === 'letter';
     for (const t of toks) {
-      if (bare(t) === bare(label))
+      // same spelling: the key keeps a digit pair apart from its concatenation, so a paired sheet
+      // size meets only a card spelling of the same pair («4/6» ↔ «4-6», never «46»)
+      if (sizeKey(t) === sizeKey(label) && paired(t) === paired(label))
         take(
-          bare(t) === bare(c.token)
+          sizeKey(t) === sizeKey(c.token)
             ? { card: c, confidence: 1, why: `same token ${c.token}` }
             : usNum && letterCard
               ? {
@@ -97,9 +123,10 @@ function bestHit(
         src.kind === 'num' &&
         ct.kind === 'num' &&
         src.value === ct.value &&
-        bare(t) !== bare(c.token) &&
+        sizeKey(t) !== sizeKey(c.token) &&
         // a paired size (28/30) is not its lower half (28)
-        paired(label) === paired(t)
+        paired(label) === paired(t) &&
+        !!src.paired === !!ct.paired
       ) {
         // a US size (00 … 32, paired sizes) onto a LETTER card size: the sheet does not say
         // which letter its numbers are (MOOD-DIAG Ф6) — a suggestion, never taken silently
@@ -125,7 +152,9 @@ function tallShortHit(
   tokensOf: SizeTokensOf,
 ): Hit | null {
   const v = parseSizeToken(label);
-  if (!v || v.kind !== 'num') return null;
+  if (!v || v.kind !== 'num' || v.paired) return null;
+  // a paired run (0/2 · 4/6 …) is no tall/short run: its numbers are pairs, not one size each
+  if (run.sizes.some((s) => parseSizeToken(s.label)?.paired)) return null;
   const nums = run.sizes
     .map((s) => parseSizeToken(s.label))
     .filter((t) => t?.kind === 'num')
@@ -288,3 +317,33 @@ export function markNotDrawn(map: SizeMap, ranks: readonly number[], card: CardS
   const used = new Set(entries.flatMap((e) => (e.card ? [e.card.sizeId] : [])));
   return { entries, unmapped: card.filter((c) => !used.has(c.sizeId)) };
 }
+
+/**
+ * Drawn source sizes the AUTOMATIC map left off the card (no card size spells them, or the card
+ * size went to another source): not the operator's "not exported", not a size the sheet lists but
+ * does not draw. A map that writes some sizes and leaves these out exports fewer sizes than the
+ * sheet draws (archive run 13.10: Mimosa wrote 1 size of 8) — never without it being said.
+ */
+export const drawnUnmapped = (map: SizeMap) =>
+  map.entries.filter((e) => e.origin === 'auto' && !e.card && !e.notDrawn);
+
+/**
+ * The partial map the sizes step refuses to move on (D3): some drawn sizes reach the card, others
+ * do not, and the card still has sizes with no source — the missing sizes may be theirs, the sheet
+ * does not prove they are not. null when nothing is open. (Card full: the left-out sizes are past
+ * the card's run — said, not asked: `drawnUnmappedLine`.)
+ */
+export function partialSizeMapQuestion(map: SizeMap): string | null {
+  const loose = drawnUnmapped(map);
+  if (!loose.length || !map.entries.some((e) => e.card) || !map.unmapped.length) return null;
+  return `${drawnUnmappedLine(loose)} while the card's ${list(map.unmapped.map((c) => c.token))} ${map.unmapped.length === 1 ? 'has' : 'have'} no source — map each to its card size or leave it out`;
+}
+
+const list = (xs: readonly string[], n = 6) =>
+  xs.length > n ? `${xs.slice(0, n).join(', ')} … (+${xs.length - n})` : xs.join(', ');
+
+/** "2 drawn sizes not mapped to the card (2/4, 6/8)". */
+export const drawnUnmappedLine = (loose: readonly SizeMapEntry[]) =>
+  `${loose.length} drawn ${loose.length === 1 ? 'size' : 'sizes'} not mapped to the card (${list(
+    loose.map((e) => e.source.label || `rank ${e.source.rank + 1}`),
+  )})`;

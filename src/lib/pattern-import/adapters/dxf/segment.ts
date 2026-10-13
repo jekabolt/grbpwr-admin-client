@@ -110,11 +110,19 @@ const LETTER_ALIAS: Record<string, string> = {
   '5XL': 'XXXXXL',
   '6XL': 'XXXXXXL',
 };
-/** `<S>` → `S`; upper-case, decoration stripped (10-CLO-DXF-FORMAT §2.4-5). */
-export const bareSize = (s: string) => s.replace(/[^\p{L}\p{N}.,]+/gu, '').toUpperCase();
+/**
+ * `<S>` → `S`; upper-case, decoration stripped (10-CLO-DXF-FORMAT §2.4-5). A separator between two
+ * digits stays, as `/`: a paired size `4/6` / `4-6` is never the size `46` its digits concatenate to.
+ */
+export const bareSize = (s: string) =>
+  s
+    .replace(/(\d)[^\p{L}\p{N}.,]+(?=\d)/gu, '$1\uE000')
+    .replace(/[^\p{L}\p{N}.,\uE000]+/gu, '')
+    .replace(/\uE000/g, '/')
+    .toUpperCase();
 const letterRank = (t: string) => LETTER_ORDER.indexOf(LETTER_ALIAS[t] ?? t);
 const isLetterSize = (t: string) => letterRank(t) >= 0;
-const isNumericSize = (t: string) => /^\d{1,3}([.,]\d)?$/.test(t);
+const isNumericSize = (t: string) => /^\d{1,3}([.,]\d)?(\/\d{1,3})?$/.test(t);
 
 function rankSizes(tokens: string[]): string[] {
   const uniq = [...new Set(tokens)];

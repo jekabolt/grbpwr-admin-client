@@ -48,6 +48,7 @@ import {
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
+import { partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
 import {
   buildErrorReport,
   checkFilesBeforeReading,
@@ -1452,6 +1453,10 @@ export function useImportSession(deps: {
         const guesses = guessedSizes(entries);
         if (guesses.length)
           return `${guesses.length} size ${guesses.length === 1 ? 'match is a guess' : 'matches are guesses'} — confirm or change ${guesses.length === 1 ? 'it' : 'them'}`;
+        // a partial map (some drawn sizes off the card while it has sizes with no source) is never
+        // an export of fewer sizes than drawn without the operator saying so
+        const partial = s.sizes ? partialSizeMapQuestion(s.sizes.map) : null;
+        if (partial) return partial;
         return null;
       }
       case 'pieces': {
@@ -2043,9 +2048,11 @@ export { nameOriginOf };
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
   entries.filter((e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9);
 
-/** The map still has a question: a guess, or no size reaching the card at all. */
+/** The map still has a question: a guess, no size reaching the card, or a partial map. */
 const sizeMapOpen = (map: SizeMap) =>
-  guessedSizes(map.entries).length > 0 || !map.entries.some((e) => e.card);
+  guessedSizes(map.entries).length > 0 ||
+  !map.entries.some((e) => e.card) ||
+  partialSizeMapQuestion(map) != null;
 
 /** Source ranks written to the card (null = no map yet: every rank counts). */
 export function exportedRanks(map: SizeMap | undefined): Set<number> | null {

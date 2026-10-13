@@ -242,14 +242,14 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   // (reef draws S and 3XL as loose marks), the size run the file states that holds them all
   let legendRun = labelRun(legendHits0, 1, 2);
   {
-    // compare by value: the key spells "2XL", the run "XS to 5XL" expands to "XXL"
-    const spelling = new Map<string, string>();
-    for (const h of legendHits0)
-      spelling.set(`${parseSizeToken(h.label, true)?.kind}${h.value}`, h.label);
+    // compare by value: the key spells "2XL", the run "XS to 5XL" expands to "XXL" — a paired
+    // size («4/6», value 4) is never the single size of its lower half («4»)
     const keyOf = (l: string) => {
       const t = parseSizeToken(l, true);
-      return t ? `${t.kind}${t.value}` : l;
+      return t ? `${t.kind}${t.value}${t.paired ? 'p' : ''}` : l;
     };
+    const spelling = new Map<string, string>();
+    for (const h of legendHits0) spelling.set(keyOf(h.label), h.label);
     const stated = runs
       .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
       .filter((r) => {
