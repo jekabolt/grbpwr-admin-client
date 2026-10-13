@@ -107,7 +107,7 @@ export type FaceBlob = {
    * A 'size-copy' / 'seam-line' aside: how it was told a copy, and whether the outline it was
    * attached to (`inside`) was seeded by the face pass.
    */
-  copy?: { how: CopyHow; hostSeeded: boolean };
+  copy?: { how: CopyHow; hostSeeded: boolean; rim?: PtMm[]; cellMm?: number };
 };
 
 /**
@@ -187,6 +187,8 @@ const COPY_RATIO = 0.45;
 /** … when the outer line strays from it by at most max(COPY_MM, COPY_SHARE · √area). */
 const COPY_MM = 30;
 const COPY_SHARE = 0.2;
+/** Edge points a 'lines' / 'fragment' copy carries (SetAsideCopy.rim). */
+const RIM_SAMPLES = 160;
 /** A blob with more piece-sized faces than this is not split (a grid of cells: junk anyway). */
 const MAX_UNIT_FACES = 200;
 /** A piece drawn inside another is outlined in lines at least this long (not glyph strokes). */
@@ -923,6 +925,8 @@ export function judgeBlobs(
     };
     const units: Unit[] = [];
     const asides: { f: number; junk: FaceJunk; host: Unit; how?: CopyHow }[] = [];
+    /** The copy account of each face set aside so far (a copy of one inherits it). */
+    const howOf = new Map<number, CopyHow>();
     /** How a face set aside as a copy beside / inside `head` was told one (SetAside.copy). */
     const howBeside = (f: number): CopyHow => (clearMmOf(f) <= SLIVER_MM ? 'sliver' : 'lines');
     let outlinePens: Set<number> | null = null;
@@ -942,9 +946,22 @@ export function judgeBlobs(
                 farthestMm(P, C, cell) <=
                   Math.max(COPY_MM, COPY_SHARE * Math.sqrt(P.area * pxArea))));
           if (copy) {
+            // of the shape of p: proven only as far as p is — p itself set aside joined across
+            // size lines (wm's sleeve beside the back) passes its account on to its copies
+            const ph = howOf.get(p);
+            const shapeHow: CopyHow =
+              ph == null || ph === 'shape'
+                ? 'shape'
+                : howBeside(head) === 'sliver'
+                  ? 'sliver'
+                  : ph === 'sliver'
+                    ? 'lines'
+                    : ph;
             for (const f of grp) {
               host.members.push(f);
-              asides.push({ f, junk: copyWhy, host, how: f === head ? 'shape' : howBeside(f) });
+              const how = f === head ? shapeHow : howBeside(f);
+              howOf.set(f, how);
+              asides.push({ f, junk: copyWhy, host, how });
               queue.push({ f, u: host });
             }
             continue;
@@ -979,11 +996,13 @@ export function judgeBlobs(
             units.push(v);
             queue.push({ f, u: v });
           } else {
+            const how = why === 'size-copy' || why === 'seam-line' ? howBeside(f) : 'lines';
+            howOf.set(f, how);
             asides.push({
               f,
               junk: why,
               host: u,
-              ...(why === 'size-copy' || why === 'seam-line' ? { how: howBeside(f) } : {}),
+              ...(why === 'size-copy' || why === 'seam-line' ? { how } : {}),
             });
             queue.push({ f, u });
           }
@@ -1093,10 +1112,46 @@ export function judgeBlobs(
         textSeed: null,
         inside: x.host.id >= 0 ? x.host.id : b,
         aside: true,
-        ...(x.how ? { copy: { how: x.how, hostSeeded: x.host.seeded } } : {}),
+        ...(x.how
+          ? {
+              copy: {
+                how: x.how,
+                hostSeeded: x.host.seeded,
+                ...(x.how === 'lines' || x.how === 'fragment'
+                  ? { rim: rimSamples(F), cellMm: cell }
+                  : {}),
+              },
+            }
+          : {}),
       });
     }
     return nextId;
+
+    /** Up to RIM_SAMPLES points along a filled outline's edge (its boundary pixels), mm. */
+    function rimSamples(F: FillMask): PtMm[] {
+      const at: number[] = [];
+      for (let ly = 0; ly < F.h; ly++)
+        for (let lx = 0; lx < F.w; lx++) {
+          if (!F.m[ly * F.w + lx]) continue;
+          const edge =
+            lx === 0 ||
+            ly === 0 ||
+            lx === F.w - 1 ||
+            ly === F.h - 1 ||
+            !F.m[ly * F.w + lx - 1] ||
+            !F.m[ly * F.w + lx + 1] ||
+            !F.m[(ly - 1) * F.w + lx] ||
+            !F.m[(ly + 1) * F.w + lx];
+          if (edge) at.push((ly + F.y0) * W + lx + F.x0);
+        }
+      const step = Math.max(1, Math.ceil(at.length / RIM_SAMPLES));
+      const out: PtMm[] = [];
+      for (let i = 0; i < at.length; i += step) {
+        const c = g.centre(at[i] % W, (at[i] / W) | 0);
+        out.push({ x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10 });
+      }
+      return out;
+    }
 
     /**
      * A unit outlined in one size's line holds a copy of it in another size: inside its filled
@@ -1555,7 +1610,12 @@ export function asidesOf(
     const H = c.hostSeeded ? map.blobs.find((x) => x.id === b.inside && !x.aside) : undefined;
     const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
     const host = !H ? null : t ? t.at : H.junk ? null : H.at;
-    return { how: c.how, clearMm: Math.round(b.clearMm * 10) / 10, host };
+    return {
+      how: c.how,
+      clearMm: Math.round(b.clearMm * 10) / 10,
+      host,
+      ...(c.rim ? { rim: c.rim, cellMm: c.cellMm } : {}),
+    };
   }
   return { held, asides };
 }

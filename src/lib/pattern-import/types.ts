@@ -803,6 +803,12 @@ export type SetAsideCopy = {
   /** Distance from `at` to the nearest wall (half its width), mm. */
   clearMm: number;
   host: PtMm | null;
+  /**
+   * 'lines' / 'fragment': points along its edge (≤ 160) and the face raster's cell — proven part
+   * of the host only when its whole edge runs along the host's own size outlines.
+   */
+  rim?: PtMm[];
+  cellMm?: number;
 };
 
 export type FillOutcome =

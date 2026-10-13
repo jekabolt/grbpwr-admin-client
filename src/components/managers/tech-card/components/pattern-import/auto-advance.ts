@@ -4,6 +4,7 @@
 // pure, so the e2e probe prices the same stops (scripts/pattern-import/e2e-entry.ts, A7).
 // D3: nothing is accepted here; a suggestion waiting for its click is a stop, not a pass.
 import type {
+  BoxMm,
   ChainAmbiguity,
   FabricAssignment,
   ImportSession,
@@ -11,6 +12,7 @@ import type {
   PageClassification,
   PageMaskEdit,
   PieceFamily,
+  PtMm,
   RasterCalibration,
   ScaleCandidate,
   SetAside,
@@ -103,30 +105,22 @@ type Fam = Pick<PieceFamily, 'candidates'>;
  * A 'size-copy' set-aside is "another size of a piece already seeded": proven only as part of a
  * piece that IS seeded, by the face pass's own account (SetAside.copy, pieces/faces CopyHow):
  *   sliver    narrower than any piece (the gap between two sizes' lines) — junk whatever it joins;
- *   shape     of the shape of the outline it lies in — that outline still a seeded piece (its seed
- *             point inside a closed outline of a family);
+ *   shape     of the shape of the outline it lies in (that one proven too) — the piece it belongs
+ *             to still seeded (its seed point inside a closed outline of a family);
  *   lines / fragment  joined across size lines only, or a shape with no copy of its own: proven
- *             only lying in that seeded piece's grading band — inside some of its sizes' outlines
- *             and outside others, no larger than the largest less the smallest — the strips
- *             between its sizes (where sizes cross at a corner too).
+ *             only as a strip of that seeded piece's grading — its point inside some of the
+ *             piece's size outlines and outside others, no larger than the largest less the
+ *             smallest, AND its whole edge running along those size outlines (the strip between
+ *             two sizes, or where sizes cross at a corner).
  * Anything else is a guess like 'unlabelled' / 'joined' (D5: a possible piece is never set aside
  * silently): wm's sleeve beside the back (outside every size of it), wm's collar inside the back
- * (cut in three by the back's lines, inside every size of it), a welt strip inside a piece. An
- * aside without that account (an older session) falls back to its box meeting a seeded outline.
+ * (cut in three by the back's lines, inside every size of it), a welt strip inside a piece, a
+ * small piece drawn against a piece's edge (its own outline is not the piece's). An aside without
+ * that account is a guess too.
  */
 export const provenCopy = (a: SetAside, families: readonly Fam[]): boolean => {
   const c = a.copy;
-  if (!c)
-    return families.some((f) =>
-      f.candidates.some(
-        (x) =>
-          x.outer.length > 2 &&
-          x.bbox.minX <= a.box.maxX + 1 &&
-          x.bbox.maxX >= a.box.minX - 1 &&
-          x.bbox.minY <= a.box.maxY + 1 &&
-          x.bbox.maxY >= a.box.minY - 1,
-      ),
-    );
+  if (!c) return false;
   if (c.how === 'sliver' || c.clearMm <= SLIVER_MM) return true;
   const h = c.host;
   if (!h) return false;
@@ -144,15 +138,60 @@ export const provenCopy = (a: SetAside, families: readonly Fam[]): boolean => {
   if (!fam) return false;
   if (c.how === 'shape') return true;
   const sizes = closed(fam);
-  if (sizes.length < 2) return false;
+  if (sizes.length < 2 || !c.rim?.length) return false;
   const inside = sizes.filter((x) => pointInPoly(a.at, x.outer)).length;
   const areas = sizes.map((x) => x.areaMm2);
-  return (
-    inside > 0 &&
-    inside < sizes.length &&
-    a.areaMm2 <= 1.05 * (Math.max(...areas) - Math.min(...areas))
-  );
+  if (
+    !inside ||
+    inside === sizes.length ||
+    a.areaMm2 > 1.05 * (Math.max(...areas) - Math.min(...areas))
+  )
+    return false;
+  return onOutlines(c.rim, sizes, Math.max(1.5, 2.5 * (c.cellMm ?? 0.5))) >= RIM_ON_SHARE;
 };
+
+/** A grading strip's edge runs along its piece's size outlines at this share of its points. */
+const RIM_ON_SHARE = 0.9;
+
+/** The share of points within `tol` mm of one of the outlines. */
+function onOutlines(
+  pts: readonly PtMm[],
+  outlines: readonly { outer: readonly PtMm[]; bbox: BoxMm }[],
+  tol: number,
+): number {
+  const t2 = tol * tol;
+  let on = 0;
+  for (const p of pts) {
+    let hit = false;
+    for (const o of outlines) {
+      const b = o.bbox;
+      if (p.x < b.minX - tol || p.x > b.maxX + tol || p.y < b.minY - tol || p.y > b.maxY + tol)
+        continue;
+      const q = o.outer;
+      for (let i = 0, j = q.length - 1; i < q.length && !hit; j = i++) {
+        const A = q[j];
+        const B = q[i];
+        if (
+          (p.x < A.x - tol && p.x < B.x - tol) ||
+          (p.x > A.x + tol && p.x > B.x + tol) ||
+          (p.y < A.y - tol && p.y < B.y - tol) ||
+          (p.y > A.y + tol && p.y > B.y + tol)
+        )
+          continue;
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        const L = dx * dx + dy * dy;
+        const u = L ? Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / L)) : 0;
+        const ex = A.x + u * dx - p.x;
+        const ey = A.y + u * dy - p.y;
+        if (ex * ex + ey * ey <= t2) hit = true;
+      }
+      if (hit) break;
+    }
+    if (hit) on++;
+  }
+  return pts.length ? on / pts.length : 0;
+}
 
 /**
  * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or — when the families are given — a size
