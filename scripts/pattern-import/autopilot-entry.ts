@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
-import { PATIMPORT } from 'lib/pattern-import/types';
+import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { answersNowOf } from 'components/managers/tech-card/components/pattern-import/answers';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { toWireError } from 'lib/pattern-import/worker/errors';
@@ -1236,18 +1236,87 @@ export async function runCase(c: Case, mutate: string | null) {
     const asides = as.filter((a) => ['set-aside', 'not-a-piece', 'dropped-piece'].includes(a.kind));
     const labelled = (a: Assumption) =>
       tps.find((t) => a.subject.toLowerCase().includes(`«${norm(t.label)}`)) ?? null;
-    for (let k = 0; k < Math.max(0, want - matched); k++) {
-      const a = asides[k] ?? null;
-      wrong.push({
-        kind: 'piece-set',
-        subject: a
-          ? `${a.subject}${labelled(a) ? ' (a truth label)' : ''}`
-          : `truth piece ${k + 1}`,
-        got: 'missing',
-        want: 'exported',
-        assumed: a ? a.kind : null,
-      });
-    }
+    // with truth points: each missing truth piece pinned to what holds ITS point — the autopilot's
+    // answer on a seed whose outline holds it, else the smallest outline set aside around it (the
+    // autopilot's 'set-aside', or silently by the reader), else never found. Without points: in
+    // order, as before (no geometry to pin by).
+    const missingN = Math.max(0, want - matched);
+    if (pts.length) {
+      const lost = pts
+        .filter((p) => ![...taken].some((t) => norm(t.label) === norm(p.label)))
+        .slice(0, missingN);
+      const outerAt = (sd: SeedId | undefined, p: { x: number; y: number }) => {
+        if (sd == null) return false;
+        const o = outerOf(sd);
+        if (o) return insidePoly(p, o.outer);
+        const b = seeds.find((x) => x.id === sd)?.face?.box;
+        return !!b && p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
+      };
+      const pinned = new Set<Assumption>();
+      for (const p of lost) {
+        const dropped = asides.find(
+          (a) => a.kind !== 'set-aside' && !pinned.has(a) && outerAt(a.seed, p.at),
+        );
+        // the outline set aside around the point: one that could be the piece (piece-sized, wider
+        // than a sliver between two sizes' lines) before a sliver of a nest it crosses; smallest
+        const boxArea = (x: { box: { minX: number; minY: number; maxX: number; maxY: number } }) =>
+          (x.box.maxX - x.box.minX) * (x.box.maxY - x.box.minY);
+        const pieceLike = (x: { areaMm2: number; copy?: { clearMm: number } }) =>
+          x.areaMm2 >= PATIMPORT.minPieceAreaMm2 && (x.copy?.clearMm ?? Infinity) > SLIVER_MM;
+        const box = (s.pieces?.setAside ?? [])
+          .filter(
+            (x) =>
+              x.areaMm2 > 0 &&
+              p.at.x >= x.box.minX &&
+              p.at.x <= x.box.maxX &&
+              p.at.y >= x.box.minY &&
+              p.at.y <= x.box.maxY,
+          )
+          .sort((x, y) => +pieceLike(y) - +pieceLike(x) || boxArea(x) - boxArea(y))[0];
+        const answer =
+          dropped ??
+          (box ? asides.find((a) => a.kind === 'set-aside' && a.ref === `aside:${box.id}`) : null);
+        if (answer) pinned.add(answer);
+        // a seed whose outline holds the point, not exported (the run stopped before, or dropped)
+        const unexported =
+          !answer && !box
+            ? s.pieces?.families.find((f) => !bySeed.has(f.seed) && outerAt(f.seed, p.at))
+            : undefined;
+        wrong.push({
+          kind: 'piece-set',
+          subject: answer
+            ? `${answer.subject}${labelled(answer) ? ' (a truth label)' : ''} · truth «${p.label}»`
+            : box
+              ? `outline ${box.id} set aside silently (${box.reason}${box.copy ? ` ${box.copy.how}` : ''}, ${Math.round(box.areaMm2 / 100)} cm²) · truth «${p.label}»`
+              : unexported
+                ? `seed ${unexported.seed} not exported · truth «${p.label}»`
+                : `truth piece «${p.label}» (never found)`,
+          got: 'missing',
+          want: 'exported',
+          assumed: answer ? answer.kind : box ? `silent ${box.reason}` : null,
+        });
+      }
+      for (let k = lost.length; k < missingN; k++)
+        wrong.push({
+          kind: 'piece-set',
+          subject: `truth piece ${k + 1}`,
+          got: 'missing',
+          want: 'exported',
+          assumed: null,
+        });
+    } else
+      for (let k = 0; k < missingN; k++) {
+        const a = asides[k] ?? null;
+        wrong.push({
+          kind: 'piece-set',
+          subject: a
+            ? `${a.subject}${labelled(a) ? ' (a truth label)' : ''}`
+            : `truth piece ${k + 1}`,
+          got: 'missing',
+          want: 'exported',
+          assumed: a ? a.kind : null,
+        });
+      }
     rec.truth = {
       pieces: want,
       matched,
