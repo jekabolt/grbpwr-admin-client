@@ -10,7 +10,7 @@
 //            sizes of a graded piece nest in its largest outline — the piece is graded.
 // Drawing + label → one piece for all sizes (written once, `<ID>_UNI`, the card's ungraded piece),
 // the reading recorded on the piece. One of them alone, or the outline drawn in ONE size's pen only
-// (that size's piece, or one geometry drawn with it?) → the operator is asked. Against → graded.
+// (that size's piece, or one geometry drawn with it?) → the operator is asked; so is an outline nothing proves either way. Against → graded.
 import type {
   ChainId,
   ChainSet,
@@ -31,8 +31,7 @@ import { closestOnPolyline, dist, pointInPolygon } from './geom';
 export type OneSizeRead =
   | { kind: 'proven'; evidence: string[] }
   | { kind: 'ask'; why: string }
-  | { kind: 'graded'; why: string }
-  | { kind: 'none' };
+  | { kind: 'graded'; why: string };
 
 /** The outline is drawn this much (by length) by the evidence named. */
 const DRAWN_SHARE = 0.9;
@@ -243,5 +242,8 @@ export function oneSizeRead(
       kind: 'ask',
       why: `every size closes on one outline drawn once in size ${oneSizePen}'s pen${label ? `, ${label}` : ''} — that size's piece, or one piece for all sizes?`,
     };
-  return { kind: 'none' };
+  return {
+    kind: 'ask',
+    why: `every size closes on one outline, but no line proves it one piece (not drawn once, not by every size in one place)${label ? `; ${label}` : ''}`,
+  };
 }
