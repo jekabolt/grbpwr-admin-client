@@ -20,8 +20,11 @@ import { overlayShare, type OverlayLines } from '../sizes/overlay';
 import { classOverlayLines } from '../pieces/walls';
 import { closestOnPolyline, dist, pointInPolygon } from './geom';
 
-/** A fold word: "Facing Fold Line", "fold line", "FOLD". */
-export const FOLD_LINE_WORDS = /\bfold\b/i;
+/**
+ * A fold LINE: "Facing Fold Line", "Fold Line". A bare "FOLD" (Mood prints it along a cut-on-fold
+ * edge, beside "Cut 1 on fold") names an edge, not a line across the piece.
+ */
+export const FOLD_LINE_WORDS = /\bfold[\s-]*line\b/i;
 /** …but not a cut-on-fold instruction ("Place on fold", "cut on fold"): that names an EDGE. */
 const PLACE_ON_FOLD = /\b(place[ds]?|cut|lay)\s+(it\s+)?(on|to|at)\s+(the\s+)?fold/i;
 /** The word lies on the line (its box centre this close), mm … */
