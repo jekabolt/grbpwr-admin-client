@@ -255,6 +255,15 @@ function summarize() {
         return /^\d+\s*[-/–]\s*\d+$/.test(src) && tok !== '—' && !/[-/–]/.test(tok);
       }),
     ).length,
+    // …of them, the matches the automatic map made itself (an answer or an assumption excluded):
+    // the silent class of the archive run 13.10 — must be 0
+    pairedOnPlainAuto: rs.filter((r) =>
+      (r.sizesRead?.auto ?? []).some((m) => {
+        const [src, rest] = m.split('→');
+        const tok = rest.replace(/@[\d.]+$/, '');
+        return /^\d+\s*[-/–]\s*\d+$/.test(src) && !/[-/–]/.test(tok);
+      }),
+    ).length,
     crashes: rs
       .filter((r) => r.verdict === 'crashed' || r.verdict === 'timeout')
       .map((r) => ({
@@ -299,7 +308,7 @@ function summarize() {
     `## pieces found on the sheet vs expected (families; closed = every size closes): ${JSON.stringify(found)}`,
     `## pieces written vs expected (passport list or overview letters): ${JSON.stringify(sum.pieces)}`,
     `## printed size key read: ${JSON.stringify(sum.keys)}`,
-    `## paired source size mapped onto a plain card size (files): ${sum.pairedOnPlain} · written: ${sum.sizeTokenWrong.map((x) => `${x.id} ${x.size} (${x.verdict})`).join(', ') || 'none'}`,
+    `## paired source size mapped onto a plain card size (files): ${sum.pairedOnPlain} (by the automatic map itself: ${sum.pairedOnPlainAuto}) · written: ${sum.sizeTokenWrong.map((x) => `${x.id} ${x.size} (${x.verdict})`).join(', ') || 'none'}`,
     `## pen-verified right blocks held back by: ${JSON.stringify(rightBlocked)}`,
     '',
     '## wrongPassing (Mood truth)',

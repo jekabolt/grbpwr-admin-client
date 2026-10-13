@@ -361,6 +361,10 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
         encoding: (s.sizes as { encoding?: string }).encoding ?? null,
         expected: s.sizes.expected ?? null,
         map: s.sizes.map.entries.map((e) => `${e.source.label || '∅'}→${e.card?.token ?? '—'}`),
+        // the matches the automatic map made itself (not an answer, not an assumption)
+        auto: s.sizes.map.entries
+          .filter((e) => e.origin === 'auto' && e.card)
+          .map((e) => `${e.source.label || '∅'}→${e.card!.token}@${e.confidence ?? 1}`),
       }
     : null;
   if (printedKey.length && s.sizes) {
