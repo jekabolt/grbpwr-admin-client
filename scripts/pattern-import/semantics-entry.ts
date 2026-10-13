@@ -884,9 +884,16 @@ export async function main(): Promise<number> {
           'letters XS–XXL (RU 44–54)': 'XS:XS S:S M:M L:L XL:XL',
         },
       },
+      // the wizard gives an unlabelled size line the label '' (sizes/detect.ts): no kind, so it is
+      // still ordered onto the card (Ф6 asks only when the kinds disagree)
       'zhaket 5 unlabelled': {
+        run: run(['', '', '', '', '']),
+        expect: { 'letters XS–XL (no numbers)': ':XS :S :M :L :XL' },
+      },
+      // Ф6: a run that IS labelled with plain numbers is never ordered onto letters — asked
+      'numbers 1–5 on letters (Ф6)': {
         run: run(['1', '2', '3', '4', '5']),
-        expect: { 'letters XS–XL (no numbers)': '1:XS 2:S 3:M 4:L 5:XL' },
+        expect: { 'letters XS–XL (no numbers)': '1:- 2:- 3:- 4:- 5:-' },
       },
     };
     const table: unknown[] = [];

@@ -579,7 +579,12 @@ async function controlsEndToEnd() {
   const run = async (name: string, text: string) => {
     const f = resolve(dir, `${name}.svg`);
     writeFileSync(f, text);
-    const r = (await runCase({ ...base, id: `passport:${name}`, files: [f] } as never, null)) as {
+    // the card carries the sheet's own size 38 (the base case's one-size «M» card is another size
+    // kind — Ф6 stops on the sizes step); these controls test the outline word, not the size map
+    const r = (await runCase(
+      { ...base, id: `passport:${name}`, files: [f], card: ['38'] } as never,
+      null,
+    )) as {
       verdict: string;
       stop?: { step: string; reason: string };
       assumptions?: { list: string[] };
