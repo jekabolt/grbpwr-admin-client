@@ -11,7 +11,8 @@
 //   yarn patimport:archive
 //   env PATIMPORT_ARCHIVE_DIR (the archive), PATIMPORT_ARCHIVE_FILTER (glob on "cat/file.pdf"),
 //   ARCHIVE_OUT (default /private/tmp/patimport-runs/archive; must stay under it),
-//   ARCHIVE_PAR (3), ARCHIVE_CAP_S (600), ARCHIVE_PAGE_PASS=0 (no page-role pass, see the entry)
+//   ARCHIVE_PAR (3), ARCHIVE_CAP_S (600), ARCHIVE_PAGE_PASS=0 (no page-role pass, see the entry),
+//   ARCHIVE_CARD=sheet (a card of the sheet's own printed sizes, see the entry), ARCHIVE_MOOD_ONLY=1
 import { build as esbuild } from 'esbuild';
 import { spawn } from 'node:child_process';
 import {
@@ -31,8 +32,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const ROOT = '/private/tmp/patimport-runs/archive';
 const OUT = resolve(process.env.ARCHIVE_OUT ?? ROOT);
-if (OUT !== ROOT && !OUT.startsWith(`${ROOT}/`)) {
-  console.error(`ARCHIVE_OUT must be under ${ROOT}`);
+// a run's own dir: archive/…, or a sibling archive<tag>/… (archive2 = the re-run on a later beta)
+if (!/^\/private\/tmp\/patimport-runs\/archive[\w-]*(\/|$)/.test(OUT)) {
+  console.error(`ARCHIVE_OUT must be under ${ROOT} or a sibling ${ROOT}<tag>`);
   process.exit(2);
 }
 const DIR = process.env.PATIMPORT_ARCHIVE_DIR ?? '/Users/jekabolt/Downloads/archive 600 pcs';
@@ -75,7 +77,11 @@ function listArchive() {
     for (const f of readdirSync(p).sort()) if (/\.pdf$/i.test(f)) out.push(`${cat}/${f}`);
   }
   const g = process.env.PATIMPORT_ARCHIVE_FILTER;
-  return g ? out.filter((x) => globRe(g).test(x)) : out;
+  const picked = g ? out.filter((x) => globRe(g).test(x)) : out;
+  // ARCHIVE_MOOD_ONLY=1: the Mood Fabrics files only (the matching-card variant)
+  return process.env.ARCHIVE_MOOD_ONLY === '1'
+    ? picked.filter((x) => /^(mdf|moodfabrics)/i.test(x.split('/').pop()))
+    : picked;
 }
 
 // ── the summary ──────────────────────────────────────────────────────────────────────────────

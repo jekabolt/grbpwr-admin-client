@@ -256,9 +256,16 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     ...(text.error ? { textError: text.error } : {}),
   });
 
+  // ARCHIVE_CARD=sheet — the matching card: the card carries exactly the sizes the sheet prints (its
+  // Size Line Key; Mood's old G0 paired run), so the size map is what an operator's matching card
+  // gives and the run shows how far the file gets once sizes are mapped. A file with no printed
+  // key (and not G0) keeps the neutral card.
+  const own = gen === 'G0' ? G0_KEY : printedKey;
+  const matching = process.env.ARCHIVE_CARD === 'sheet' && own.length > 0;
+  rec.card = matching ? { kind: 'sheet', sizes: own } : { kind: 'neutral' };
   const card: CardContext = {
     techCardId: CARD_ID,
-    sizes: cardSizes(NEUTRAL_CARD),
+    sizes: cardSizes(matching ? own : NEUTRAL_CARD),
     scopes: SCOPES,
     existingPieces: [],
     styleLabel: 'archive',
