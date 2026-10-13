@@ -361,14 +361,20 @@ export type SizeKind = 'letter' | 'num' | 'paired';
 /** The kind of a sheet size as printed: letter, plain number, or a pair («4/6»); null = no size. */
 export function sizeKindOf(label: string): SizeKind | null {
   const t = parseSizeToken(label);
-  return !t ? null : t.paired ? 'paired' : t.kind;
+  if (t) return t.paired ? 'paired' : t.kind;
+  // the DXF reader's wider grammar (segment.ts): a decimal size «36,5», an extended letter size
+  // «XXXXS» / «XXXXXL»
+  const u = label.trim().toUpperCase();
+  if (/^\d{1,3}[.,]\d$/.test(u)) return 'num';
+  if (/^X{4,}[SL]$/.test(u)) return 'letter';
+  return null;
 }
 
 /** The kind of a card size: its token first, then its other spellings. */
 export function cardSizeKindOf(c: CardSize): SizeKind | null {
   for (const t of [c.token, ...(c.spellings ?? [])]) {
-    const k = parseSizeToken(t, true);
-    if (k) return k.paired ? 'paired' : k.kind;
+    const k = sizeKindOf(t);
+    if (k) return k;
   }
   return null;
 }
