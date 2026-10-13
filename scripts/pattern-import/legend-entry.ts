@@ -25,6 +25,7 @@ import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { parseSizeToken, runsInText } from 'lib/pattern-import/sizes';
 import {
+  crossKindQuestion,
   defaultTokensOf,
   drawnUnmapped,
   partialSizeMapQuestion,
@@ -197,6 +198,35 @@ function pairedOntoCard() {
   check(
     '«4» ≠ card 4/6, «46» ≠ card 4/6, «10» ≠ card 10/12',
     !m.entries.some((e) => e.card),
+    tok(m),
+  );
+
+  // Ф6: no order-based map across size kinds — the question instead
+  m = proposeSizeMap(run(g0), NEUTRAL);
+  const kq = crossKindQuestion(m, NEUTRAL);
+  check(
+    'Ф6: G0 paired run on a card without pairs → the question, not an order',
+    !!kq && kq.includes('0/2…28/30') && kq.includes('XXS…60'),
+    kq ?? 'null',
+  );
+  m = proposeSizeMap(run(['36', '38', '40']), card(['S', 'M', 'L']));
+  check(
+    'Ф6: numbers on a letter card of the same length are not aligned by rank; asked',
+    !m.entries.some((e) => e.card) && !!crossKindQuestion(m, card(['S', 'M', 'L'])),
+    tok(m),
+  );
+  m = proposeSizeMap(run(['XS', 'S', 'M']), card(['44', '46', '48']));
+  check(
+    'Ф6: letters on a numeric card are not aligned by rank; asked',
+    !m.entries.some((e) => e.card) && !!crossKindQuestion(m, card(['44', '46', '48'])),
+    tok(m),
+  );
+  m = proposeSizeMap(run(['1', '3', '5']), card(['2', '4', '6']));
+  check(
+    'Ф6: same kind (numbers on numbers) keeps the rank alignment as a 0.3 guess, no question',
+    tok(m) === '1→2 3→4 5→6' &&
+      m.entries.every((e) => e.confidence === 0.3) &&
+      crossKindQuestion(m, card(['2', '4', '6'])) === null,
     tok(m),
   );
 

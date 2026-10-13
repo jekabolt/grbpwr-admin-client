@@ -40,7 +40,13 @@ import {
 } from 'lib/pattern-import/pieces/sheets';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
-import { drawnUnmapped, notDrawnLine, partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
+import {
+  crossKindQuestion,
+  drawnUnmapped,
+  notDrawnLine,
+  ordinalTargets,
+  partialSizeMapQuestion,
+} from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
@@ -1008,15 +1014,22 @@ function sizesStep(snap: Snap): AutopilotDecision {
   const entries = sz.map.entries;
   if (!entries.length) return stopAt('sizes', 'no size was read off the sheet');
   const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
-  // nothing reaches the card: by order, from the middle of the card's run
+  // nothing reaches the card: by order, from the middle of the card's run — only within one size
+  // kind (owner rule Ф6): a paired run on a card without pairs, numbers on letters, letters on
+  // numbers is a stop with the question, never an order-based map
   if (!entries.some((e) => e.card)) {
+    const kindQ = crossKindQuestion(sz.map, cards);
+    if (kindQ) return stopAt('sizes', kindQ);
     const src = [...entries].sort((a, b) => a.source.rank - b.source.rank);
+    const same = ordinalTargets(
+      src.map((e) => e.source),
+      cards,
+    );
     const k = src.length;
-    const m = cards.length;
+    const m = same.length;
     const map = new Map<number, (typeof cards)[number]>();
-    if (k <= m) src.forEach((e, j) => map.set(e.source.rank, cards[Math.floor((m - k) / 2) + j]));
-    else
-      for (let j = 0; j < m; j++) map.set(src[Math.floor((k - m) / 2) + j].source.rank, cards[j]);
+    if (k <= m) src.forEach((e, j) => map.set(e.source.rank, same[Math.floor((m - k) / 2) + j]));
+    else for (let j = 0; j < m; j++) map.set(src[Math.floor((k - m) / 2) + j].source.rank, same[j]);
     const next = entries.map(
       (e): SizeMapEntry => ({
         ...e,
@@ -1033,7 +1046,7 @@ function sizesStep(snap: Snap): AutopilotDecision {
           sizeSubject(e),
           e.card ? `→ ${e.card.token}` : 'not exported',
           'no source size spells a card size: mapped by order from the middle of the card run',
-          [`${k} source sizes, card run ${cards.map((c) => c.token).join(' ')}`],
+          [`${k} source sizes, card run ${same.map((c) => c.token).join(' ')}`],
           0.25,
           true,
           undefined,

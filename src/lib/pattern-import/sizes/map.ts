@@ -13,7 +13,9 @@
 //   0.95  same letter size, another spelling      2XL ↔ XXL, XXXL ↔ 3XL
 //   0.90  the source number is the card size's numeric equivalent   44 ↔ XS (xs_44ta_m)
 //   0.60  Burda tall/short size of a numeric card size              72 ↔ 36, 18 ↔ 36
-//   0.30  nothing spells alike and both runs have the same length → aligned by rank
+//   0.30  nothing spells alike and both runs have the same length → aligned by rank — only when
+//         the sizes are of one kind (owner rule Ф6: a paired 0/2 … 28/30 run, a numeric run on a
+//         letter card or a letter run on a numeric card is never ordered onto it — a question)
 //   0.50  the source draws ONE size it names ("SIZE 38") and the card has a run without it → the
 //         card's middle size is suggested (A6 smoke: 38 on an S/M/L card → M); a suggestion the
 //         operator confirms with one click, never accepted silently (D3: the map is a decision)
@@ -189,8 +191,14 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
       (s) =>
         bestHit(s.label, cards, tokensOf, usRun) ?? tallShortHit(s.label, run, cards, tokensOf),
     );
-    // nothing spells alike at all: align by rank only when both runs have the same length
-    if (hits.every((h) => !h) && run.sizes.length === cards.length && cards.length > 0) {
+    // nothing spells alike at all: align by rank only when both runs have the same length and
+    // the same size kind (Ф6)
+    if (
+      hits.every((h) => !h) &&
+      run.sizes.length === cards.length &&
+      cards.length > 0 &&
+      ordinalTargets(run.sizes, cards).length === cards.length
+    ) {
       const src = [...run.sizes].sort((a, b) => a.rank - b.rank);
       src.forEach((s, i) => {
         const k = run.sizes.indexOf(s);
@@ -347,3 +355,52 @@ export const drawnUnmappedLine = (loose: readonly SizeMapEntry[]) =>
   `${loose.length} drawn ${loose.length === 1 ? 'size' : 'sizes'} not mapped to the card (${list(
     loose.map((e) => e.source.label || `rank ${e.source.rank + 1}`),
   )})`;
+
+export type SizeKind = 'letter' | 'num' | 'paired';
+
+/** The kind of a sheet size as printed: letter, plain number, or a pair («4/6»); null = no size. */
+export function sizeKindOf(label: string): SizeKind | null {
+  const t = parseSizeToken(label);
+  return !t ? null : t.paired ? 'paired' : t.kind;
+}
+
+/** The kind of a card size: its token first, then its other spellings. */
+export function cardSizeKindOf(c: CardSize): SizeKind | null {
+  for (const t of [c.token, ...(c.spellings ?? [])]) {
+    const k = parseSizeToken(t, true);
+    if (k) return k.paired ? 'paired' : k.kind;
+  }
+  return null;
+}
+
+/**
+ * Owner rule Ф6 (MOOD-DIAG): a run with no spelled match is ordered onto the card only within one
+ * size kind. The card sizes an order-based map may use — those of the sheet run's kind (all of
+ * them when the sheet's sizes carry no readable label) — and [] when the kinds disagree: a paired
+ * run on a card without paired sizes, numbers on letters, letters on numbers, a run of mixed kinds.
+ */
+export function ordinalTargets(
+  sizes: readonly { label: string }[],
+  cards: readonly CardSize[],
+): CardSize[] {
+  const kinds = new Set(sizes.map((s) => sizeKindOf(s.label)).filter((k) => k != null));
+  if (!kinds.size) return [...cards];
+  if (kinds.size > 1) return [];
+  const [k] = [...kinds];
+  return cards.filter((c) => cardSizeKindOf(c) === k);
+}
+
+const span = (xs: readonly string[]) =>
+  xs.length <= 2 ? xs.join(', ') : `${xs[0]}…${xs[xs.length - 1]}`;
+
+/**
+ * Nothing on the sheet spells a card size and the kinds disagree (Ф6): the question the sizes step
+ * stops on — never an order-based map. null when a size reaches the card, or the kinds agree.
+ */
+export function crossKindQuestion(map: SizeMap, card: readonly CardSize[]): string | null {
+  if (!map.entries.length || map.entries.some((e) => e.card) || !card.length) return null;
+  const src = [...map.entries].sort((a, b) => a.source.rank - b.source.rank).map((e) => e.source);
+  const cards = [...card].sort((a, b) => a.rank - b.rank);
+  if (ordinalTargets(src, cards).length) return null;
+  return `the sheet's sizes ${span(src.map((s) => s.label || '(no label)'))} have no spelled match on the card's ${span(cards.map((c) => c.token))} — map each size`;
+}

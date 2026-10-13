@@ -48,7 +48,11 @@ import {
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
-import { drawnUnmapped, partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
+import {
+  crossKindQuestion,
+  drawnUnmapped,
+  partialSizeMapQuestion,
+} from 'lib/pattern-import/sizes/map';
 import {
   buildErrorReport,
   checkFilesBeforeReading,
@@ -1447,7 +1451,11 @@ export function useImportSession(deps: {
         const lq = sheetLegendQuestion(s.sizes?.sheetLegend, inputs.sheetLegendOk);
         if (lq) return lq;
         const entries = s.sizes?.map.entries ?? [];
-        if (!entries.some((e) => e.card)) return 'map at least one size to the card';
+        if (!entries.some((e) => e.card))
+          return (
+            (s.sizes ? crossKindQuestion(s.sizes.map, rc().sizes) : null) ??
+            'map at least one size to the card'
+          );
         const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
         if (new Set(ids).size !== ids.length) return 'two source sizes point at one card size';
         const guesses = guessedSizes(entries);
