@@ -781,6 +781,28 @@ export type SetAside = {
    * on a file whose layers proved their AAMA/ASTM meaning (chains/layer-role layerLoopAsides).
    */
   layerLoop?: string;
+  /**
+   * A 'size-copy' / 'seam-line' outline (pieces/faces CopyHow): how it was told another size of a
+   * piece, and that piece — the seed point of the outline it was attached to, null when that one
+   * was not seeded itself. Proven junk only as a copy of a piece still seeded (auto-advance
+   * weakAsides); otherwise a guess, "this is a piece" one click away.
+   */
+  copy?: SetAsideCopy;
+};
+
+/**
+ * A face set aside beside / inside a piece with no point further than this from its walls (no
+ * wider than 2 × this anywhere) is a sliver: the gap between two sizes' lines, a seam allowance cut
+ * into strips — narrower than any piece is cut (a belt loop, a bias strip ≥ 25 mm). Wider, it is
+ * set aside on how it was drawn only (SetAside.copy).
+ */
+export const SLIVER_MM = 6;
+
+export type SetAsideCopy = {
+  how: 'shape' | 'sliver' | 'lines' | 'fragment';
+  /** Distance from `at` to the nearest wall (half its width), mm. */
+  clearMm: number;
+  host: PtMm | null;
 };
 
 export type FillOutcome =

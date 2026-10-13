@@ -19,7 +19,8 @@ import type {
   WizardStep,
 } from 'lib/pattern-import/types';
 import { notDrawnLine } from 'lib/pattern-import/sizes/map';
-import { PATIMPORT } from 'lib/pattern-import/types';
+import { pointInPoly } from 'lib/pattern-import/pieces/geom';
+import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { anisotropyOf, squareSidesOf } from './formats';
 
 /** Where the run always stops: the gate is read and apply / download is a deliberate click. */
@@ -96,36 +97,73 @@ export const sizeFlags = (
   expectedN: number | null | undefined,
 ) => (ambiguities ?? []).filter((a) => !(expectedN === 1 && a.kind === 'class-merge'));
 
-/**
- * A 'size-copy' set-aside is "another size of a piece already seeded": proven only where a seeded
- * piece is drawn. One whose box meets no seeded piece's outline copies nothing (wm's sleeve, 700
- * cm² between the front and the back: no label seeds it) — a guess like the others.
- */
-const orphanCopy = (a: SetAside, families: readonly Pick<PieceFamily, 'candidates'>[]) =>
-  a.reason === 'size-copy' &&
-  !families.some((f) =>
-    f.candidates.some(
-      (c) =>
-        c.outer.length > 2 &&
-        c.bbox.minX <= a.box.maxX + 1 &&
-        c.bbox.maxX >= a.box.minX - 1 &&
-        c.bbox.minY <= a.box.maxY + 1 &&
-        c.bbox.maxY >= a.box.minY - 1,
-    ),
-  );
+type Fam = Pick<PieceFamily, 'candidates'>;
 
 /**
- * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or a size copy of no seeded piece when
- * the families are given): "this is a piece" is one click.
+ * A 'size-copy' set-aside is "another size of a piece already seeded": proven only as part of a
+ * piece that IS seeded, by the face pass's own account (SetAside.copy, pieces/faces CopyHow):
+ *   sliver    narrower than any piece (the gap between two sizes' lines) — junk whatever it joins;
+ *   shape     of the shape of the outline it lies in — that outline still a seeded piece (its seed
+ *             point inside a closed outline of a family);
+ *   lines / fragment  joined across size lines only, or a shape with no copy of its own: proven
+ *             only lying in that seeded piece's grading band — inside some of its sizes' outlines
+ *             and outside others, no larger than the largest less the smallest — the strips
+ *             between its sizes (where sizes cross at a corner too).
+ * Anything else is a guess like 'unlabelled' / 'joined' (D5: a possible piece is never set aside
+ * silently): wm's sleeve beside the back (outside every size of it), wm's collar inside the back
+ * (cut in three by the back's lines, inside every size of it), a welt strip inside a piece. An
+ * aside without that account (an older session) falls back to its box meeting a seeded outline.
  */
-export const weakAsides = (
-  asides: readonly SetAside[] | undefined,
-  families?: readonly Pick<PieceFamily, 'candidates'>[],
-) =>
+export const provenCopy = (a: SetAside, families: readonly Fam[]): boolean => {
+  const c = a.copy;
+  if (!c)
+    return families.some((f) =>
+      f.candidates.some(
+        (x) =>
+          x.outer.length > 2 &&
+          x.bbox.minX <= a.box.maxX + 1 &&
+          x.bbox.maxX >= a.box.minX - 1 &&
+          x.bbox.minY <= a.box.maxY + 1 &&
+          x.bbox.maxY >= a.box.minY - 1,
+      ),
+    );
+  if (c.how === 'sliver' || c.clearMm <= SLIVER_MM) return true;
+  const h = c.host;
+  if (!h) return false;
+  const closed = (f: Fam) =>
+    f.candidates.filter((x) => x.outcome === 'closed' && x.outer.length > 2);
+  // the seeded piece the host point is in (the innermost: a collar seeded inside the back)
+  let fam: Fam | null = null;
+  let best = Infinity;
+  for (const f of families)
+    for (const x of closed(f))
+      if (x.areaMm2 < best && pointInPoly(h, x.outer)) {
+        best = x.areaMm2;
+        fam = f;
+      }
+  if (!fam) return false;
+  if (c.how === 'shape') return true;
+  const sizes = closed(fam);
+  if (sizes.length < 2) return false;
+  const inside = sizes.filter((x) => pointInPoly(a.at, x.outer)).length;
+  const areas = sizes.map((x) => x.areaMm2);
+  return (
+    inside > 0 &&
+    inside < sizes.length &&
+    a.areaMm2 <= 1.05 * (Math.max(...areas) - Math.min(...areas))
+  );
+};
+
+/**
+ * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or — when the families are given — a size
+ * copy not proven a copy of a seeded piece, provenCopy): "this is a piece" is one click.
+ */
+export const weakAsides = (asides: readonly SetAside[] | undefined, families?: readonly Fam[]) =>
   (asides ?? []).filter(
     (a) =>
       a.areaMm2 >= PIECE_SIZED_MM2 &&
-      (WEAK_ASIDE.has(a.reason) || (!!families?.length && orphanCopy(a, families))),
+      (WEAK_ASIDE.has(a.reason) ||
+        (!!families && a.reason === 'size-copy' && !provenCopy(a, families))),
   );
 
 /**

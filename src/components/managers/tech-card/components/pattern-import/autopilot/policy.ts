@@ -1318,7 +1318,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
   if (unproven.length)
     return stopAt(
       'pieces',
-      `${unproven.length} piece-sized ${unproven.length === 1 ? 'outline' : 'outlines'} set aside on a guess (${[...new Set(unproven.map((w) => (w.a.reason === 'size-copy' ? 'a size copy of no seeded piece' : w.a.reason)))].join(', ')}) — is it a piece?`,
+      `${unproven.length} piece-sized ${unproven.length === 1 ? 'outline' : 'outlines'} set aside on a guess (${[...new Set(unproven.map((w) => (w.a.reason === 'size-copy' ? 'not proven a size copy of a seeded piece' : w.a.reason)))].join(', ')}) — is it a piece?`,
     );
   return {
     actions: [{ kind: 'proceed' }],

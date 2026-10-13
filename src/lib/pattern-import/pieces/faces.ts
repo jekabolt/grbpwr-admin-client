@@ -58,10 +58,11 @@ import type {
   PtMm,
   Seed,
   SetAside,
+  SetAsideCopy,
   Sheet,
   SizeRun,
 } from 'lib/pattern-import/types';
-import { PATIMPORT } from 'lib/pattern-import/types';
+import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classify';
 
 import { chainView, faceCapBox, partAt, sheetView } from '../assemble/composite';
@@ -102,7 +103,21 @@ export type FaceBlob = {
   inside?: number;
   /** One outline of a blob set aside (not the blob's own seeded outline): no pixels of its own. */
   aside?: boolean;
+  /**
+   * A 'size-copy' / 'seam-line' aside: how it was told a copy, and whether the outline it was
+   * attached to (`inside`) was seeded by the face pass.
+   */
+  copy?: { how: CopyHow; hostSeeded: boolean };
 };
+
+/**
+ * How a face was set aside as another size (or the seam line) of a piece:
+ *   shape     inside it and of its shape (area ratio, outer line close) — a proven copy;
+ *   sliver    joined to it, no wider than 2 × SLIVER_MM (the gap between two sizes' lines);
+ *   lines     joined to it across size lines only, of any shape (proves nothing about its shape);
+ *   fragment  a shape bounded by size lines with no copy of itself in another size.
+ */
+export type CopyHow = SetAsideCopy['how'];
 
 export type FaceOpts = {
   cellMm?: number;
@@ -903,9 +918,13 @@ export function judgeBlobs(
       rim: number[];
       /** The faces of its outline (with a seam ring too thin to be a piece), for hasSizeCopy. */
       near: Set<number>;
+      /** Set aside by the fragments rule: how (a sliver, or a shape with no copy of its own). */
+      how?: CopyHow;
     };
     const units: Unit[] = [];
-    const asides: { f: number; junk: FaceJunk; host: Unit }[] = [];
+    const asides: { f: number; junk: FaceJunk; host: Unit; how?: CopyHow }[] = [];
+    /** How a face set aside as a copy beside / inside `head` was told one (SetAside.copy). */
+    const howBeside = (f: number): CopyHow => (clearMmOf(f) <= SLIVER_MM ? 'sliver' : 'lines');
     let outlinePens: Set<number> | null = null;
     const copyWhy: FaceJunk = o.graded ? 'size-copy' : 'seam-line';
     const queue: { f: number; u: Unit }[] = [];
@@ -925,7 +944,7 @@ export function judgeBlobs(
           if (copy) {
             for (const f of grp) {
               host.members.push(f);
-              asides.push({ f, junk: copyWhy, host });
+              asides.push({ f, junk: copyWhy, host, how: f === head ? 'shape' : howBeside(f) });
               queue.push({ f, u: host });
             }
             continue;
@@ -960,7 +979,12 @@ export function judgeBlobs(
             units.push(v);
             queue.push({ f, u: v });
           } else {
-            asides.push({ f, junk: why, host: u });
+            asides.push({
+              f,
+              junk: why,
+              host: u,
+              ...(why === 'size-copy' || why === 'seam-line' ? { how: howBeside(f) } : {}),
+            });
             queue.push({ f, u });
           }
         }
@@ -982,6 +1006,7 @@ export function judgeBlobs(
         if (!u.rim.length || u.rim.some((id) => o.sizeLine?.has(id))) {
           u.seeded = false;
           u.junk = 'size-copy';
+          u.how = clearMmOf(u.root) <= SLIVER_MM ? 'sliver' : 'fragment';
         }
       }
     // seeded units get blob ids of their own (the first, largest one keeps b); asides do not — a
@@ -1045,7 +1070,12 @@ export function judgeBlobs(
         if (a.px && a.pole >= 0) emit(u.id, a, false, u.host ? hostId : undefined);
         continue;
       }
-      asides.push({ f: u.root, junk: u.junk ?? 'other-pen', host: u.host ?? units[0] });
+      asides.push({
+        f: u.root,
+        junk: u.junk ?? 'other-pen',
+        host: u.host ?? units[0],
+        ...(u.how ? { how: u.how } : {}),
+      });
     }
     for (const x of asides) {
       const F = fillOfF(x.f);
@@ -1063,6 +1093,7 @@ export function judgeBlobs(
         textSeed: null,
         inside: x.host.id >= 0 ? x.host.id : b,
         aside: true,
+        ...(x.how ? { copy: { how: x.how, hostSeeded: x.host.seeded } } : {}),
       });
     }
     return nextId;
@@ -1516,7 +1547,15 @@ export function asidesOf(
       box: b.box,
       areaMm2: Math.round(b.areaMm2),
       reason: b.junk,
+      ...(b.copy ? { copy: copyOf(b, b.copy) } : {}),
     });
+  }
+  /** The piece a copy belongs to: the seed point of its host outline, if that one is seeded. */
+  function copyOf(b: FaceBlob, c: NonNullable<FaceBlob['copy']>): SetAsideCopy {
+    const H = c.hostSeeded ? map.blobs.find((x) => x.id === b.inside && !x.aside) : undefined;
+    const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
+    const host = !H ? null : t ? t.at : H.junk ? null : H.at;
+    return { how: c.how, clearMm: Math.round(b.clearMm * 10) / 10, host };
   }
   return { held, asides };
 }

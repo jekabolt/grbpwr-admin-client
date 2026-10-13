@@ -31,6 +31,7 @@ import { exportedRanks, variantsOf } from '../use-import-session';
 import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
+import { provenCopy } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
 
@@ -293,17 +294,25 @@ export function PiecesStep({
   const asides = out.setAside ?? [];
   // D6: a piece (or a whole tile sheet) drawn twice, or one cut between two sheets — asked here
   const sheetQ = sheetQuestion(out.sheets, api.inputs.sheetAnswers);
-  const asideKey = (a: SetAside) => (a.seed ? `label:${a.reason}` : a.reason);
+  // a size copy not proven a copy of a seeded piece (auto-advance provenCopy) is a guess: apart
+  const asideKey = (a: SetAside) =>
+    a.seed
+      ? `label:${a.reason}`
+      : a.reason === 'size-copy' && !provenCopy(a, families)
+        ? 'size-copy?'
+        : a.reason;
   const asideGroups = [...new Set(asides.map(asideKey))].map((k) => ({
     key: k,
     list: asides.filter((a) => asideKey(a) === k),
   }));
   const asideWords = (a: SetAside) =>
-    a.reason === 'code-text'
-      ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it) — held back as a seed'
-      : a.seed
-        ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
-        : ASIDE_WORD[a.reason];
+    asideKey(a) === 'size-copy?'
+      ? 'between size lines, but not another size of a seeded piece — a piece of its own?'
+      : a.reason === 'code-text'
+        ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it) — held back as a seed'
+        : a.seed
+          ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
+          : ASIDE_WORD[a.reason];
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
