@@ -126,10 +126,11 @@ export function overlayShare(
 }
 
 /**
- * MOOD Ф3.2: walk an overlay from `from` along `dir` in 1 mm steps, each step snapped back onto the
- * nearest overlay line (≤ 0.5 mm, parallel) and proven again (≥ `OVERLAY_MIN_PENS` sizes other
- * than `not` within `OVERLAY_TOL_MM`). Stops where the proof fails (`ended`), where `arrive` says so
- * (`arrived`), or after `maxMm`. Returns the walked points (from `from`) and the lines walked on.
+ * MOOD Ф3.2: walk an overlay from `from` along `dir` in 1 mm steps, each step snapped back onto an
+ * overlay line (≤ 0.5 mm, parallel — the line walked so far while it lasts, else the nearest) and
+ * proven again (≥ `OVERLAY_MIN_PENS` sizes other than `not` within `OVERLAY_TOL_MM`). Stops where
+ * the proof fails, where `arrive` says so (`arrived`), or after `maxMm`. Returns the walk as runs,
+ * one per line walked on (each run starts where the walk stepped onto that line).
  */
 export function walkOverlay(
   from: PtMm,
@@ -138,17 +139,18 @@ export function walkOverlay(
   not: number | null,
   maxMm: number,
   arrive: (p: PtMm) => boolean,
-): { pts: PtMm[]; chains: Set<number>; arrived: boolean } {
+): { runs: { chain: number; pts: PtMm[] }[]; arrived: boolean } {
   const STEP = 1;
   const SNAP = 0.5;
-  const pts: PtMm[] = [from];
-  const chains = new Set<number>();
+  const runs: { chain: number; pts: PtMm[] }[] = [];
   let p = from;
   let d = dir;
   for (let walked = 0; walked < maxMm; walked += STEP) {
     const q0 = { x: p.x + d.x * STEP, y: p.y + d.y * STEP };
-    // the nearest overlay line ahead, parallel to the walk
-    let best: { q: PtMm; t: PtMm; dd: number } | null = null;
+    const cur = runs.length ? runs[runs.length - 1].chain : null;
+    type Hit = { id: number; q: PtMm; t: PtMm; dd: number };
+    let best: Hit | null = null;
+    let same: Hit | null = null;
     L.grid.near(q0, SNAP, (id, s) => {
       const r = L.rank(id);
       if (r === undefined || r === not) return;
@@ -164,17 +166,20 @@ export function walkOverlay(
       if (Math.abs(c) < PARALLEL_COS) return;
       if (c < 0) t = { x: -t.x, y: -t.y };
       const f = foot(q0, a, b);
-      if (f.d <= SNAP && (!best || f.d < best.dd)) best = { q: f.q, t, dd: f.d };
+      if (f.d > SNAP) return;
+      const h = { id, q: f.q, t, dd: f.d };
+      if (!best || f.d < best.dd) best = h;
+      if (id === cur && (!same || f.d < same.dd)) same = h;
     });
-    if (!best) return { pts, chains, arrived: false };
-    const { q, t } = best as { q: PtMm; t: PtMm; dd: number };
-    const here = overlayAt(q, t, L, not);
-    if (here.ranks.size < OVERLAY_MIN_PENS) return { pts, chains, arrived: false };
-    for (const id of here.chains) chains.add(id);
-    pts.push(q);
-    p = q;
-    d = t;
-    if (arrive(q)) return { pts, chains, arrived: true };
+    const pick = (same ?? best) as Hit | null;
+    if (!pick) return { runs, arrived: false };
+    if (overlayAt(pick.q, pick.t, L, not).ranks.size < OVERLAY_MIN_PENS)
+      return { runs, arrived: false };
+    if (pick.id !== cur) runs.push({ chain: pick.id, pts: [p] });
+    runs[runs.length - 1].pts.push(pick.q);
+    p = pick.q;
+    d = pick.t;
+    if (arrive(pick.q)) return { runs, arrived: true };
   }
-  return { pts, chains, arrived: false };
+  return { runs, arrived: false };
 }

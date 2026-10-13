@@ -626,7 +626,52 @@ export function buildPieceSpecsDetailed(
       );
       continue;
     }
-    const bad = mapped.find((m) => m.c.outcome !== 'closed');
+    /** One outline: every candidate's area (± 0.05 %) and box size (± 0.1 mm) alike. */
+    const sameOutline = (ms: typeof mapped) => {
+      const a0 = ms[0].c.areaMm2;
+      const b0 = ms[0].c.bbox;
+      return ms.every(
+        (m) =>
+          Math.abs(m.c.areaMm2 - a0) <= a0 * 5e-4 &&
+          Math.abs(m.c.bbox.maxX - m.c.bbox.minX - (b0.maxX - b0.minX)) <= 0.1 &&
+          Math.abs(m.c.bbox.maxY - m.c.bbox.minY - (b0.maxY - b0.minY)) <= 0.1,
+      );
+    };
+    let bad = mapped.find((m) => m.c.outcome !== 'closed');
+    // MOOD Ф5: some sizes do not close (a motif whose beads are not read), the ones that do all
+    // close on ONE outline and stand on both sides of every one that does not — grading is
+    // monotone, so equal sizes bracket equal sizes. With the drawing and the label (one-size.ts)
+    // the piece is one piece for all sizes, written once from a size that closed; one evidence asks
+    let oneFromClosed: { use: typeof mapped; note: string } | null = null;
+    if (bad && !traced && !f5Off() && ov.ungraded !== false) {
+      const closed = mapped.filter((m) => m.c.outcome === 'closed');
+      const open = mapped.filter((m) => m.c.outcome !== 'closed');
+      const bracketed = open.every(
+        (m) =>
+          m.c.outcome === 'leak' &&
+          closed.some((x) => x.c.rank < m.c.rank) &&
+          closed.some((x) => x.c.rank > m.c.rank),
+      );
+      if (closed.length >= 3 && bracketed && !closed[0].c.dxf && sameOutline(closed)) {
+        const one =
+          ov.ungraded === true ? null : oneSizeRead(closed[closed.length - 1].c, set, sheet, run);
+        const sizesOpen = open.map((m) => m.card.token).join(', ');
+        if (ov.ungraded === true || one?.kind === 'proven') {
+          oneFromClosed = {
+            use: closed,
+            note: `one piece for all sizes: ${ov.ungraded === true ? 'the operator' : (one as { evidence: string[] }).evidence.join('; ')}; ${closed.length} sizes close on it, ${sizesOpen} (between them) not on their own lines`,
+          };
+          bad = undefined;
+        } else if (one?.kind === 'ask') {
+          block(
+            seed,
+            'one-size-question',
+            `${one.why}; ${sizesOpen} (between them) do not close on their own lines — one piece for all sizes?`,
+          );
+          continue;
+        }
+      }
+    }
     if (bad) {
       // H1: a refused size names its own reason (sizes not told apart / count / ambiguous)
       const r: BlockReason =
@@ -646,13 +691,17 @@ export function buildPieceSpecsDetailed(
       );
       continue;
     }
-    const texts = textsOf(sorted[sorted.length - 1], textById);
+    // the largest size that closed (Ф5: a size that did not close has no texts inside)
+    const top = oneFromClosed
+      ? oneFromClosed.use[oneFromClosed.use.length - 1].c
+      : sorted[sorted.length - 1];
+    const texts = textsOf(top, textById);
     const name = readName({
       override: ov,
       dxfIdentity: sorted[0].dxf?.identity ?? null,
       texts,
       isSizeToken,
-      isTitle: titleTest(sorted[sorted.length - 1], textById),
+      isTitle: titleTest(top, textById),
     });
     if (!name) {
       block(
@@ -666,9 +715,10 @@ export function buildPieceSpecsDetailed(
       // proposed grainlines" covers every piece, not a second round after a code is typed. Only
       // when the drawing proves none (a detected grain needs no click once the piece is named).
       if (!operatorGrain[seed]) {
-        const c0 = mapped[0].c;
+        const ms = oneFromClosed?.use ?? mapped;
+        const c0 = ms[0].c;
         const famBox = bboxOf(
-          mapped.flatMap(({ c }) => [
+          ms.flatMap(({ c }) => [
             { x: c.bbox.minX, y: c.bbox.minY },
             { x: c.bbox.maxX, y: c.bbox.maxY },
           ]),
@@ -686,15 +736,11 @@ export function buildPieceSpecsDetailed(
     }
     // ungraded: declared UNI, one contour in a multi-size run, or the same contour in every size
     let ungraded = name.uni || (multiSize && sorted.length === 1);
-    if (!ungraded && mapped.length >= 2) {
-      const a0 = mapped[0].c.areaMm2;
-      const b0 = mapped[0].c.bbox;
-      ungraded = mapped.every(
-        (m) =>
-          Math.abs(m.c.areaMm2 - a0) <= a0 * 5e-4 &&
-          Math.abs(m.c.bbox.maxX - m.c.bbox.minX - (b0.maxX - b0.minX)) <= 0.1 &&
-          Math.abs(m.c.bbox.maxY - m.c.bbox.minY - (b0.maxY - b0.minY)) <= 0.1,
-      );
+    if (oneFromClosed) {
+      ungraded = true;
+      name.notes.push(oneFromClosed.note);
+    } else if (!ungraded && mapped.length >= 2) {
+      ungraded = sameOutline(mapped);
       // MOOD Ф5: under a size key, one outline in every size is ONE evidence — the drawing (drawn
       // once / by every pen in one place) and the label (no size named) make it one piece for all
       // sizes; one of them alone asks; a size's own line beside it makes it graded (semantics/
@@ -716,7 +762,8 @@ export function buildPieceSpecsDetailed(
         if (one.kind === 'graded') name.notes.push(`one outline in every size, but ${one.why}`);
       } else if (ungraded) name.notes.push('same outline in every size: ungraded');
     }
-    preps.push({ fam, seed, cands: ungraded ? [mapped[0]] : mapped, texts, name, ungraded });
+    const use = oneFromClosed?.use ?? mapped;
+    preps.push({ fam, seed, cands: ungraded ? [use[0]] : use, texts, name, ungraded });
   }
 
   // drawn twins (FP_L next to FP_R): same code + mods, opposite hands, mirror-equal areas

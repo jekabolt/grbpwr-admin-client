@@ -939,6 +939,8 @@ export type ContinuityEdge = {
   chains: ChainId[];
   pts: PtMm[];
   bracket?: boolean;
+  /** MOOD Ф3.2: an R1 stretch walked along an overlay of ≥ 3 other sizes' lines. */
+  overlay?: boolean;
 };
 /** P1 · D3: the verdict that kept a continuity closure (recorded, re-checked by gate G21). */
 export type ContinuityVerdict = {

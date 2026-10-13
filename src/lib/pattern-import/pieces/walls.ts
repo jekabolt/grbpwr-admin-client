@@ -1009,6 +1009,22 @@ export function continuityWalls(
   };
   const out: ContinuityWall[] = [];
   const used = new Set<number>();
+  /**
+   * MOOD Ф3.2: a stretch lying on an overlay of ≥ 3 other sizes' pens (≥ 80 % of it). The hops
+   * from r's ends onto the line (the first and last segment of an R1 / R2 stretch) are not judged;
+   * a stretch shorter than 2 mm is judged at its middle.
+   */
+  const onOverlay = (pts: readonly PtMm[]) => {
+    if (!o.overlay || pts.length < 2) return false;
+    const core = pts.length > 3 ? pts.slice(1, -1) : pts;
+    let len = 0;
+    for (let i = 0; i + 1 < core.length; i++) len += dist(core[i], core[i + 1]);
+    if (len >= 2) return overlayShare(core, o.overlay, r) >= OVERLAY_ON_SHARE;
+    const a = core[0];
+    const b = core[core.length - 1];
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return overlayAt(mid, null, o.overlay, r).ranks.size >= OVERLAY_MIN_PENS;
+  };
   // ── R0: chain paths joining two dangling ends ──
   const endGrid = new SegGrid(2);
   ends.forEach((e, k) => endGrid.addSeg(k, 0, e.at, e.at));
@@ -1091,6 +1107,7 @@ export function continuityWalls(
       out.push({
         chain: id,
         pts: set.chains[id].pts,
+        ...(onOverlay(set.chains[id].pts) ? { overlay: true } : {}),
         rule: 'R0',
         chains: [...ids],
         ...(bracket ? { bracket } : {}),
@@ -1177,7 +1194,14 @@ export function continuityWalls(
     const eb = ends[p.b.k].at;
     const first = dist(ea, p.pts[0]) <= dist(eb, p.pts[0]) ? ea : eb;
     const last = first === ea ? eb : ea;
-    out.push({ chain: p.a.id, pts: [first, ...p.pts, last], rule: 'R1', chains: [p.a.id] });
+    const pts = [first, ...p.pts, last];
+    out.push({
+      chain: p.a.id,
+      pts,
+      rule: 'R1',
+      chains: [p.a.id],
+      ...(onOverlay(pts) ? { overlay: true } : {}),
+    });
   }
   // ── R1 over an OVERLAY (MOOD Ф3.2): a stretch where r draws nothing of its own (a motif whose
   //    beads are not read there) but ≥ 3 other sizes draw their lines in one place, each in its own
@@ -1198,7 +1222,7 @@ export function continuityWalls(
       const d = at(k);
       if (d) onOv.set(k, d);
     });
-    type OvPair = { a: number; b: number; pts: PtMm[]; chains: ChainId[] };
+    type OvPair = { a: number; b: number; pts: PtMm[]; runs: { chain: ChainId; pts: PtMm[] }[] };
     const found: OvPair[] = [];
     for (const [k, d] of onOv) {
       const e = ends[k];
@@ -1215,20 +1239,26 @@ export function continuityWalls(
           });
           return hit >= 0;
         });
-        if (!w.arrived || hit < 0) continue;
-        const pts = [...w.pts, ends[hit].at];
-        if (!best || pts.length < best.pts.length)
-          best = { a: k, b: hit, pts, chains: [...w.chains] };
+        if (!w.arrived || hit < 0 || !w.runs.length) continue;
+        const pts = [e.at, ...w.runs.flatMap((x) => x.pts.slice(1)), ends[hit].at];
+        if (!best || pts.length < best.pts.length) {
+          const runs = w.runs.map((x) => ({ chain: x.chain, pts: x.pts.slice() }));
+          runs[runs.length - 1].pts.push(ends[hit].at);
+          best = { a: k, b: hit, pts, runs };
+        }
       }
       if (best) found.push(best);
     }
     found.sort((x, y) => x.pts.length - y.pts.length);
     for (const p of found) {
       if (used.has(p.a) || used.has(p.b)) continue;
-      if (crosses(p.pts) || !smooth(p.pts) || !lonely(p.pts, p.chains)) continue;
+      const lines = p.runs.map((x) => x.chain);
+      if (crosses(p.pts) || !smooth(p.pts) || !lonely(p.pts, lines)) continue;
       used.add(p.a);
       used.add(p.b);
-      out.push({ chain: p.chains[0], pts: p.pts, rule: 'R1', chains: p.chains, overlay: true });
+      // one R1 wall per line walked on: each stretch lies on the one line it names (gate G21)
+      for (const x of p.runs)
+        out.push({ chain: x.chain, pts: x.pts, rule: 'R1', chains: [x.chain], overlay: true });
     }
   }
   // ── R2: spines — a proven boundary several sizes end on ──
@@ -1345,7 +1375,14 @@ export function continuityWalls(
     if (best.b < best.a) st = st.slice().reverse();
     if (!smooth(st) || !lonely(st, [f.id])) continue;
     used.add(f.k);
-    out.push({ chain: f.id, pts: [e.at, ...st], rule: 'R2', chains: [f.id] });
+    const wp = [e.at, ...st];
+    out.push({
+      chain: f.id,
+      pts: wp,
+      rule: 'R2',
+      chains: [f.id],
+      ...(onOverlay(wp) ? { overlay: true } : {}),
+    });
   }
   return out;
 }
