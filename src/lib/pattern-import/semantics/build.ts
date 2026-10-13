@@ -604,6 +604,8 @@ export function buildPieceSpecsDetailed(
     fam: PieceFamily;
     seed: SeedId;
     cands: { c: PieceCandidate & DxfExtra; card: CardSize }[];
+    /** Every size's candidate (an ungraded piece writes one of them: `cands`). */
+    all: { c: PieceCandidate & DxfExtra; card: CardSize }[];
     texts: string[];
     name: NonNullable<ReturnType<typeof readName>>;
     ungraded: boolean;
@@ -779,7 +781,7 @@ export function buildPieceSpecsDetailed(
       } else if (ungraded) name.notes.push('same outline in every size: ungraded');
     }
     const use = oneFromClosed?.use ?? mapped;
-    preps.push({ fam, seed, cands: ungraded ? [use[0]] : use, texts, name, ungraded });
+    preps.push({ fam, seed, cands: ungraded ? [use[0]] : use, all: use, texts, name, ungraded });
   }
 
   // drawn twins (FP_L next to FP_R): same code + mods, opposite hands, mirror-equal areas
@@ -1033,7 +1035,9 @@ export function buildPieceSpecsDetailed(
     // shows it, or none does; an outline that stops at it while the size goes on beyond it has lost
     // its facing. Never either silently. "Not a fold" (the operator's) exports the outline as drawn.
     if (wantFold !== false) {
-      const reads = p.cands.map(({ c, card }) => ({ c, card, r: facingFolds(c, set, sheet) }));
+      // every size, also of a piece written once (UNI): a fold one size shows and another does not
+      // is no fold of the piece
+      const reads = p.all.map(({ c, card }) => ({ c, card, r: facingFolds(c, set, sheet) }));
       const cut = reads.find((x) => x.r.cutOff.length);
       const folded = reads.filter((x) => x.r.interior.length);
       if (cut) {

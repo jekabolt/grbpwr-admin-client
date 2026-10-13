@@ -1424,12 +1424,12 @@ export function overlayLines(set: ChainSet, byRank: readonly ChainId[][]): Overl
   return { grid: g, pts: (id) => set.chains[id]?.pts, rank: (id) => rank.get(id) };
 }
 
-/** A bracketed overlay line: this share of its samples lie between ranks below and above r. */
-const BRACKET_SHARE = 0.8;
+/** A bracketed overlay line: this share of its samples on the overlay, between ranks below and above r. */
+const BRACKET_SHARE = 0.95;
 
 /**
  * MOOD Ф3.1 (R5, bracketed): the orphan lines without a pen (`guard.lookless`) that lie on an
- * overlay (≥ 3 other sizes' lines in one place, `OVERLAY_ON_SHARE` of the line), given to each rank
+ * overlay (≥ 3 other sizes' lines in one place, `BRACKET_SHARE` of the line), given to each rank
  * r for which, along `BRACKET_SHARE` of the line, the overlay holds a rank below r AND a rank above
  * it. Two evidences: three pens prove the edge; nesting puts r's edge between two of them.
  */
@@ -1473,7 +1473,8 @@ export function bracketWalls(
       }
       s0 += l;
     }
-    if (!m || lo.length < OVERLAY_ON_SHARE * m) continue;
+    // the whole line on the overlay (a line that veers off it is not this edge)
+    if (!m || lo.length < BRACKET_SHARE * m) continue;
     for (let r = 1; r + 1 < n; r++) {
       let k = 0;
       for (let j = 0; j < lo.length; j++) if (lo[j] < r && hi[j] > r) k++;
