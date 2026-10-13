@@ -1283,7 +1283,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
     };
   }
   // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
-  const weak = weakAsides(s.pieces?.setAside);
+  const weak = weakAsides(s.pieces?.setAside, fams);
   if (!weak.length) return NONE;
   const host = (box: { minX: number; minY: number; maxX: number; maxY: number }) =>
     Math.max(
@@ -1318,7 +1318,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
   if (unproven.length)
     return stopAt(
       'pieces',
-      `${unproven.length} piece-sized ${unproven.length === 1 ? 'outline' : 'outlines'} set aside on a guess (${[...new Set(unproven.map((w) => w.a.reason))].join(', ')}) — is it a piece?`,
+      `${unproven.length} piece-sized ${unproven.length === 1 ? 'outline' : 'outlines'} set aside on a guess (${[...new Set(unproven.map((w) => (w.a.reason === 'size-copy' ? 'a size copy of no seeded piece' : w.a.reason)))].join(', ')}) — is it a piece?`,
     );
   return {
     actions: [{ kind: 'proceed' }],

@@ -10,6 +10,7 @@ import type {
   MaskItem,
   PageClassification,
   PageMaskEdit,
+  PieceFamily,
   RasterCalibration,
   ScaleCandidate,
   SetAside,
@@ -95,9 +96,37 @@ export const sizeFlags = (
   expectedN: number | null | undefined,
 ) => (ambiguities ?? []).filter((a) => !(expectedN === 1 && a.kind === 'class-merge'));
 
-/** Piece-sized outlines set aside on a guess (WEAK_ASIDE): "this is a piece" is one click. */
-export const weakAsides = (asides: readonly SetAside[] | undefined) =>
-  (asides ?? []).filter((a) => WEAK_ASIDE.has(a.reason) && a.areaMm2 >= PIECE_SIZED_MM2);
+/**
+ * A 'size-copy' set-aside is "another size of a piece already seeded": proven only where a seeded
+ * piece is drawn. One whose box meets no seeded piece's outline copies nothing (wm's sleeve, 700
+ * cm² between the front and the back: no label seeds it) — a guess like the others.
+ */
+const orphanCopy = (a: SetAside, families: readonly Pick<PieceFamily, 'candidates'>[]) =>
+  a.reason === 'size-copy' &&
+  !families.some((f) =>
+    f.candidates.some(
+      (c) =>
+        c.outer.length > 2 &&
+        c.bbox.minX <= a.box.maxX + 1 &&
+        c.bbox.maxX >= a.box.minX - 1 &&
+        c.bbox.minY <= a.box.maxY + 1 &&
+        c.bbox.maxY >= a.box.minY - 1,
+    ),
+  );
+
+/**
+ * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or a size copy of no seeded piece when
+ * the families are given): "this is a piece" is one click.
+ */
+export const weakAsides = (
+  asides: readonly SetAside[] | undefined,
+  families?: readonly Pick<PieceFamily, 'candidates'>[],
+) =>
+  (asides ?? []).filter(
+    (a) =>
+      a.areaMm2 >= PIECE_SIZED_MM2 &&
+      (WEAK_ASIDE.has(a.reason) || (!!families?.length && orphanCopy(a, families))),
+  );
 
 /**
  * Pieces cut from the main fabric only because nothing named a fabric for them, on a card with
@@ -166,7 +195,7 @@ export function stepOffer(s: OfferCtx): string | null {
       return [...undrawn, ...(flags ? [flags] : [])].join(' · ') || null;
     }
     case 'pieces': {
-      const n = weakAsides(s.pieces?.setAside).length;
+      const n = weakAsides(s.pieces?.setAside, s.pieces?.families).length;
       return n
         ? `${n} piece-sized ${n === 1 ? 'outline' : 'outlines'} set aside on a guess — "this is a piece", or go on`
         : null;
