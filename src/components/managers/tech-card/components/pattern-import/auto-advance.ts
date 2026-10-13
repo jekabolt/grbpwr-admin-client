@@ -21,7 +21,7 @@ import type {
   WizardEvent,
   WizardStep,
 } from 'lib/pattern-import/types';
-import { notDrawnLine } from 'lib/pattern-import/sizes/map';
+import { drawnUnmapped, drawnUnmappedLine, notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { pointInPoly } from 'lib/pattern-import/pieces/geom';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { anisotropyOf, squareSidesOf } from './formats';
@@ -283,11 +283,18 @@ export function stepOffer(s: OfferCtx): string | null {
       const undrawn = (s.sizes?.map.entries ?? [])
         .filter((e) => e.notDrawn)
         .map((e) => notDrawnLine(e.source.label));
+      // drawn sizes past the card's run (every card size has its source): left out — said, never
+      // silent (the partial map with card sizes still free is the blocker's question)
+      const loose = s.sizes ? drawnUnmapped(s.sizes.map) : [];
+      const past =
+        loose.length && s.sizes!.map.entries.some((e) => e.card)
+          ? [`${drawnUnmappedLine(loose)} past the card's run — not written; map one, or go on`]
+          : [];
       const n = sizeFlags(s.chains?.ambiguities, s.sizes?.expected?.n).length;
       const flags = n
         ? `${n} ${n === 1 ? 'question' : 'questions'} the reader could not settle — look at the flags, or go on`
         : null;
-      return [...undrawn, ...(flags ? [flags] : [])].join(' · ') || null;
+      return [...undrawn, ...past, ...(flags ? [flags] : [])].join(' · ') || null;
     }
     case 'pieces': {
       const n = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds).length;

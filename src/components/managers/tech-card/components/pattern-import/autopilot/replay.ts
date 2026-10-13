@@ -41,6 +41,7 @@ import type {
   FabricPurposeKey,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { cardSizeKindOf, sizeKindOf } from 'lib/pattern-import/sizes/map';
 import type { CardContext } from '../client';
 import type { Inputs, LegendEdit } from '../use-import-session';
 import { PAGE_SURE, sizeFlags, weakAsides, type AutoResolver } from '../auto-advance';
@@ -1009,6 +1010,17 @@ function sizesStep(c: Ctx): Out | null {
         c.miss(
           `size-map|${p.r}`,
           `size ${p.l || `rank ${p.r}`} went to ${p.c.t}, which is not on the card now`,
+        );
+        continue;
+      }
+      // Ф6: a size across kinds (38 → M, 4/6 → 14) is never replayed — the record does not say
+      // the operator chose it, and the autopilot may not; it is asked again
+      const sk = sizeKindOf(e.source.label);
+      const ck = want ? cardSizeKindOf(want) : null;
+      if (sk != null && ck != null && sk !== ck) {
+        c.miss(
+          `size-map|${p.r}`,
+          `size ${p.l} went to ${want!.token}, another size kind — asked again, not replayed`,
         );
         continue;
       }

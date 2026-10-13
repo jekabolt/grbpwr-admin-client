@@ -24,7 +24,7 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
-import { notDrawnLine } from 'lib/pattern-import/sizes/map';
+import { drawnUnmapped, drawnUnmappedLine, notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { sheetLegendQuestion } from 'lib/pattern-import/pieces/sheets';
 import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
@@ -544,6 +544,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 </Chip>
               </span>
             ))}
+          {drawnUnmapped(sizes.map).length > 0 && sizes.map.entries.some((e) => e.card) && (
+            <Text size='micro' component='p' className='mt-1 text-warning'>
+              ! {drawnUnmappedLine(drawnUnmapped(sizes.map))} — not written unless mapped: pick a
+              card size for each, or &quot;leave out&quot;
+            </Text>
+          )}
           {sizes.map.unmapped.length > 0 && (
             <Text size='micro' component='p' className='mt-1 text-warning'>
               ! card sizes with no source: {sizes.map.unmapped.map((c) => c.name).join(', ')} — the
@@ -742,8 +748,21 @@ function CardSizeCell({
   );
 }
 
-/** A guessed card size waits for one click (the footer counts it); nothing otherwise. */
+/**
+ * A guessed card size waits for one click (the footer counts it); a drawn size the automatic map
+ * left off the card waits for "leave out" (or a card size picked); nothing otherwise.
+ */
 function SizeConfirm({ e, onConfirm }: { e: SizeMapEntry; onConfirm: () => void }) {
+  if (e.origin === 'auto' && !e.card && !e.notDrawn)
+    return (
+      <Chip
+        tone='attention'
+        onClick={onConfirm}
+        title={`${e.evidence?.join(' · ') ?? ''} — the sheet draws this size; it is written only when mapped`}
+      >
+        ! not mapped · leave out
+      </Chip>
+    );
   if (!isGuess(e)) return null;
   return (
     <Chip tone='attention' onClick={onConfirm} title={e.evidence?.join(' · ')}>

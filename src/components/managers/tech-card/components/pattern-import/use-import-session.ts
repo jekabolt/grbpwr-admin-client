@@ -49,6 +49,11 @@ import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import {
+  crossKindQuestion,
+  drawnUnmapped,
+  partialSizeMapQuestion,
+} from 'lib/pattern-import/sizes/map';
+import {
   buildErrorReport,
   checkFilesBeforeReading,
   downloadErrorReport,
@@ -1446,12 +1451,20 @@ export function useImportSession(deps: {
         const lq = sheetLegendQuestion(s.sizes?.sheetLegend, inputs.sheetLegendOk);
         if (lq) return lq;
         const entries = s.sizes?.map.entries ?? [];
-        if (!entries.some((e) => e.card)) return 'map at least one size to the card';
+        if (!entries.some((e) => e.card))
+          return (
+            (s.sizes ? crossKindQuestion(s.sizes.map, rc().sizes) : null) ??
+            'map at least one size to the card'
+          );
         const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
         if (new Set(ids).size !== ids.length) return 'two source sizes point at one card size';
         const guesses = guessedSizes(entries);
         if (guesses.length)
           return `${guesses.length} size ${guesses.length === 1 ? 'match is a guess' : 'matches are guesses'} — confirm or change ${guesses.length === 1 ? 'it' : 'them'}`;
+        // a partial map (some drawn sizes off the card while it has sizes with no source) is never
+        // an export of fewer sizes than drawn without the operator saying so
+        const partial = s.sizes ? partialSizeMapQuestion(s.sizes.map) : null;
+        if (partial) return partial;
         return null;
       }
       case 'pieces': {
@@ -2043,9 +2056,13 @@ export { nameOriginOf };
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
   entries.filter((e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9);
 
-/** The map still has a question: a guess, or no size reaching the card at all. */
+/** The map still has a question: a guess, no size reaching the card, or a drawn size left off. */
 const sizeMapOpen = (map: SizeMap) =>
-  guessedSizes(map.entries).length > 0 || !map.entries.some((e) => e.card);
+  guessedSizes(map.entries).length > 0 ||
+  !map.entries.some((e) => e.card) ||
+  // a drawn size the automatic map left off the card — a question with card sizes free, an offer
+  // past a full card run: either way the sizes step is shown (the DXF fast path stops there too)
+  drawnUnmapped(map).length > 0;
 
 /** Source ranks written to the card (null = no map yet: every rank counts). */
 export function exportedRanks(map: SizeMap | undefined): Set<number> | null {

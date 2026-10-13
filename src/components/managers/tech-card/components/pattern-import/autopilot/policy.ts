@@ -40,7 +40,15 @@ import {
 } from 'lib/pattern-import/pieces/sheets';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
-import { notDrawnLine } from 'lib/pattern-import/sizes/map';
+import {
+  crossKindQuestion,
+  drawnUnmapped,
+  notDrawnLine,
+  cardSizeKindOf,
+  ordinalTargets,
+  partialSizeMapQuestion,
+  sizeKindOf,
+} from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
@@ -1008,15 +1016,22 @@ function sizesStep(snap: Snap): AutopilotDecision {
   const entries = sz.map.entries;
   if (!entries.length) return stopAt('sizes', 'no size was read off the sheet');
   const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
-  // nothing reaches the card: by order, from the middle of the card's run
+  // nothing reaches the card: by order, from the middle of the card's run — only within one size
+  // kind (owner rule Ф6): a paired run on a card without pairs, numbers on letters, letters on
+  // numbers is a stop with the question, never an order-based map
   if (!entries.some((e) => e.card)) {
+    const kindQ = crossKindQuestion(sz.map, cards);
+    if (kindQ) return stopAt('sizes', kindQ);
     const src = [...entries].sort((a, b) => a.source.rank - b.source.rank);
+    const same = ordinalTargets(
+      src.map((e) => e.source),
+      cards,
+    );
     const k = src.length;
-    const m = cards.length;
+    const m = same.length;
     const map = new Map<number, (typeof cards)[number]>();
-    if (k <= m) src.forEach((e, j) => map.set(e.source.rank, cards[Math.floor((m - k) / 2) + j]));
-    else
-      for (let j = 0; j < m; j++) map.set(src[Math.floor((k - m) / 2) + j].source.rank, cards[j]);
+    if (k <= m) src.forEach((e, j) => map.set(e.source.rank, same[Math.floor((m - k) / 2) + j]));
+    else for (let j = 0; j < m; j++) map.set(src[Math.floor((k - m) / 2) + j].source.rank, same[j]);
     const next = entries.map(
       (e): SizeMapEntry => ({
         ...e,
@@ -1033,7 +1048,7 @@ function sizesStep(snap: Snap): AutopilotDecision {
           sizeSubject(e),
           e.card ? `→ ${e.card.token}` : 'not exported',
           'no source size spells a card size: mapped by order from the middle of the card run',
-          [`${k} source sizes, card run ${cards.map((c) => c.token).join(' ')}`],
+          [`${k} source sizes, card run ${same.map((c) => c.token).join(' ')}`],
           0.25,
           true,
           undefined,
@@ -1059,6 +1074,23 @@ function sizesStep(snap: Snap): AutopilotDecision {
   }
   // the guesses (< 0.9) are confirmed as matched
   const guesses = guessedSizes(entries);
+  // Ф6: a guess across size kinds (the one-size middle suggestion «38 → M», a US number written on
+  // a letter size) is the operator's to confirm — never confirmed by the autopilot
+  const across = guesses.filter((g) => {
+    const a = sizeKindOf(g.source.label);
+    const b = g.card ? cardSizeKindOf(g.card) : null;
+    return a != null && b != null && a !== b;
+  });
+  if (across.length)
+    return stopAt(
+      'sizes',
+      `${across
+        .slice(0, 4)
+        .map((g) => `${g.source.label} → ${g.card!.token}`)
+        .join(
+          ', ',
+        )} ${across.length === 1 ? 'is a suggestion' : 'are suggestions'} across size kinds — the sheet does not say which card size ${across.length === 1 ? 'it is' : 'they are'}; map each size`,
+    );
   if (guesses.length) {
     const own = (i.sizeMap ?? []).filter(
       (e) => !guesses.some((g) => g.source.rank === e.source.rank),
@@ -1088,6 +1120,40 @@ function sizesStep(snap: Snap): AutopilotDecision {
           sizeRef(g),
         );
       }),
+    };
+  }
+  // a partial map — drawn sizes the automatic map left off the card (archive run 13.10: Mimosa wrote
+  // 1 size of 8). With card sizes still free they may be theirs: a stop, never an export of fewer
+  // sizes than drawn unsaid (D3/D5). Past a full card run they are left out, each a strong
+  // assumption naming it.
+  const partial = partialSizeMapQuestion(sz.map);
+  if (partial) return stopAt('sizes', partial);
+  const loose = drawnUnmapped(sz.map);
+  if (loose.length) {
+    const own = (i.sizeMap ?? []).filter(
+      (e) => !loose.some((l) => l.source.rank === e.source.rank),
+    );
+    return {
+      actions: [
+        {
+          kind: 'size-map',
+          entries: [...own, ...loose.map((e): SizeMapEntry => ({ ...e, origin: 'operator' }))],
+        },
+      ],
+      assumptions: loose.map((e) =>
+        A(
+          'sizes',
+          'size-dropped',
+          sizeSubject(e),
+          'not written (no card size for it)',
+          "a drawn size past the card's run (every card size has its source) is left out, never put on a neighbour",
+          [...(e.evidence ?? []), `card run ${cards.map((c) => c.token).join(' ')}`],
+          1,
+          true,
+          undefined,
+          sizeRef(e),
+        ),
+      ),
     };
   }
   // a size the sheet lists but draws no line of its own for is left out of the export (never filled

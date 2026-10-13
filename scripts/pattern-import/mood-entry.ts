@@ -633,7 +633,7 @@ function autoKinks(sm: Sample, s: Session, families: PieceFamily[]): Partial<Fil
   };
 }
 
-function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
+export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
   const S = s as unknown as {
     sheet: Sheet;
     wallSet: ChainSet | null;

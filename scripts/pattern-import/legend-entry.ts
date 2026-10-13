@@ -3,6 +3,10 @@
 //   1 crafted tokens (R8): «00» one step below «0», «000» below it; paired sizes «0/2» «00-0»
 //     «28/30» «30-32» keep their spelling and take the lower value; inch fractions and ranges are
 //     no size; a printed key «SIZE 00 … SIZE 32» is one run of 18 in order
+//   1b paired sizes onto the card (archive run 13.10, «4/6» → 46): a paired sheet size never meets
+//     the single card size its digits concatenate to (4/6 ≠ 46, 2-4 ≠ 24, 10/12 ≠ 1012, 00-0 ≠ 000)
+//     nor its lower half; it meets the same pair spelled either way (4/6 ↔ 4-6); the DXF size tail
+//     keeps the pair; a partial map with card sizes still free is the sizes step's question
 //   2 the Mood sample through the worker session (extract → clean → scale → assemble → chains): the
 //     size rows read == the printed key, label for label, in order (R1: the key printed in two
 //     columns is one key); every label has its pen sample in the key (R6: a sample that starts
@@ -20,11 +24,23 @@ import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { parseSizeToken, runsInText } from 'lib/pattern-import/sizes';
+import {
+  crossKindQuestion,
+  defaultTokensOf,
+  sizeKindOf,
+  drawnUnmapped,
+  partialSizeMapQuestion,
+  proposeSizeMap,
+  sizeKey,
+} from 'lib/pattern-import/sizes/map';
+import { bareSize } from 'lib/pattern-import/adapters/dxf';
 import { applyLegend, mergeSameSize, splitRows } from 'lib/pattern-import/chains';
 import {
   PATIMPORT,
+  type CardSize,
   type ChainSet,
   type ClassEvidence,
+  type SizeRun,
   type StageIO,
   type StageName,
 } from 'lib/pattern-import/types';
@@ -89,6 +105,167 @@ function tokens() {
     legend?.labels.join(',') === key.join(','),
     legend?.labels.join(','),
   );
+}
+
+// ── 1b · paired sizes onto the card ─────────────────────────────────────────────────────────
+function pairedOntoCard() {
+  for (const [a, b] of [
+    ['4/6', '46'],
+    ['2-4', '24'],
+    ['10/12', '1012'],
+    ['00-0', '000'],
+    ['28/30', '2830'],
+    ['1/2', '12'],
+    ['36.5', '365'],
+    ['3-4Y', '34Y'],
+  ])
+    check(`key «${a}» ≠ «${b}»`, sizeKey(a) !== sizeKey(b), `${sizeKey(a)} / ${sizeKey(b)}`);
+  for (const [a, b] of [
+    ['4/6', '4/6'],
+    ['4-6', '4/6'],
+    ['4 – 6', '4/6'],
+    ['00-0', '00/0'],
+    ['<M>', 'm'],
+    ['2XL', '2xl'],
+  ])
+    check(`key «${a}» = «${b}»`, sizeKey(a) === sizeKey(b), `${sizeKey(a)} / ${sizeKey(b)}`);
+  check(
+    '«4/6» ≠ «4» as a token',
+    !!parseSizeToken('4/6', true)?.paired && !parseSizeToken('4', true)?.paired,
+  );
+  check('DXF tail «<4-6>» keeps the pair', bareSize('<4-6>') === '4/6', bareSize('<4-6>'));
+  check('DXF tail «36,5» stays', bareSize('36,5') === '36,5', bareSize('36,5'));
+  check('DXF tail «<S>» → S', bareSize('<S>') === 'S', bareSize('<S>'));
+  check(
+    'card display name «4/6 [x]» spells 4/6, not 4 and 6',
+    (() => {
+      const t = defaultTokensOf({ sizeId: 1, name: '4/6 [x]', token: 'K46', rank: 0 });
+      return t.includes('4/6') && !t.includes('4') && !t.includes('6');
+    })(),
+    defaultTokensOf({ sizeId: 1, name: '4/6 [x]', token: 'K46', rank: 0 }).join(','),
+  );
+
+  const card = (tokens: string[]): CardSize[] =>
+    tokens.map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i }));
+  const run = (labels: string[]): SizeRun => ({
+    encoding: 'declared-dash',
+    sizes: labels.map((label, rank) => ({ label, rank, classId: null, file: null })),
+    evidence: [],
+  });
+  // the archive's neutral card: letters XXS–5XL and numbers 00–60 (no paired sizes)
+  const NEUTRAL = card([
+    'XXS',
+    'XS',
+    'S',
+    'M',
+    'L',
+    'XL',
+    'XXL',
+    '3XL',
+    '4XL',
+    '5XL',
+    '00',
+    '0',
+    ...Array.from({ length: 30 }, (_, i) => String(2 + 2 * i)),
+  ]);
+  const tok = (m: ReturnType<typeof proposeSizeMap>) =>
+    m.entries.map((e) => `${e.source.label}→${e.card?.token ?? '·'}`).join(' ');
+  // G0 «0/2 … 28/30» (Mimosa: «4/6» went onto 46 at 1.0)
+  const g0 = ['0/2', '4/6', '8/10', '12/14', '16/18', '20/22', '24/26', '28/30'];
+  let m = proposeSizeMap(run(g0), NEUTRAL);
+  check(
+    'G0 paired run on the neutral card: no size reaches a plain card size',
+    !m.entries.some((e) => e.card),
+    tok(m),
+  );
+  // G2p «00-0 … 30-32» («2-4» went onto 24)
+  const g2p = ['00-0', '2-4', '6-8', '10-12', '14-16', '18-20', '22-24', '26-28', '30-32'];
+  m = proposeSizeMap(run(g2p), card([...NEUTRAL.map((c) => c.token), '1012', '000']));
+  check(
+    'G2p paired run: 2-4 ≠ 24, 10-12 ≠ 1012, 00-0 ≠ 000',
+    !m.entries.some((e) => e.card),
+    tok(m),
+  );
+  // the same pair, spelled either way, does map
+  m = proposeSizeMap(run(['4/6', '8/10', '12/14']), card(['46', '4-6', '8/10', '810', '12', '14']));
+  check(
+    'card «4-6» takes «4/6», «8/10» takes «8/10»; «12/14» meets neither 12 nor 14',
+    tok(m) === '4/6→4-6 8/10→8/10 12/14→·' &&
+      m.entries.slice(0, 2).every((e) => e.confidence === 1),
+    tok(m),
+  );
+  // a single sheet size never meets a paired card size by its lower half or its digits
+  m = proposeSizeMap(run(['4', '46', '10']), card(['4/6', '10/12', 'M', 'L']));
+  check(
+    '«4» ≠ card 4/6, «46» ≠ card 4/6, «10» ≠ card 10/12',
+    !m.entries.some((e) => e.card),
+    tok(m),
+  );
+
+  // every DXF spelling has a kind (a guess across kinds is never confirmed past the Ф6 stop)
+  for (const [l, k] of [
+    ['4XS', 'letter'],
+    ['XXXXXL', 'letter'],
+    ['6XL', 'letter'],
+    ['36,5', 'num'],
+    ['38', 'num'],
+    ['4/6', 'paired'],
+    ['00-0', 'paired'],
+  ] as const)
+    check(`kind of «${l}» = ${k}`, sizeKindOf(l) === k, String(sizeKindOf(l)));
+  // Ф6: no order-based map across size kinds — the question instead
+  m = proposeSizeMap(run(g0), NEUTRAL);
+  const kq = crossKindQuestion(m, NEUTRAL);
+  check(
+    'Ф6: G0 paired run on a card without pairs → the question, not an order',
+    !!kq && kq.includes('0/2…28/30') && kq.includes('XXS…60'),
+    kq ?? 'null',
+  );
+  m = proposeSizeMap(run(['36', '38', '40']), card(['S', 'M', 'L']));
+  check(
+    'Ф6: numbers on a letter card of the same length are not aligned by rank; asked',
+    !m.entries.some((e) => e.card) && !!crossKindQuestion(m, card(['S', 'M', 'L'])),
+    tok(m),
+  );
+  m = proposeSizeMap(run(['XS', 'S', 'M']), card(['44', '46', '48']));
+  check(
+    'Ф6: letters on a numeric card are not aligned by rank; asked',
+    !m.entries.some((e) => e.card) && !!crossKindQuestion(m, card(['44', '46', '48'])),
+    tok(m),
+  );
+  m = proposeSizeMap(run(['1', '3', '5']), card(['2', '4', '6']));
+  check(
+    'Ф6: same kind (numbers on numbers) keeps the rank alignment as a 0.3 guess, no question',
+    tok(m) === '1→2 3→4 5→6' &&
+      m.entries.every((e) => e.confidence === 0.3) &&
+      crossKindQuestion(m, card(['2', '4', '6'])) === null,
+    tok(m),
+  );
+
+  // partial map: some drawn sizes on the card, others off it, card sizes still free → the question
+  m = proposeSizeMap(run(['XS', 'S', 'M', 'L', 'XL']), card(['S', 'M', 'L', 'XXL']));
+  const q = partialSizeMapQuestion(m);
+  check(
+    'partial map with a free card size (XXL) is a question naming the drawn sizes left out',
+    !!q && q.includes('XS') && q.includes('XL') && q.includes('XXL'),
+    q ?? 'null',
+  );
+  m = proposeSizeMap(run(['XS', 'S', 'M', 'L', 'XL']), card(['S', 'M', 'L']));
+  check(
+    'card run full: no question, the two past it are listed (said, not asked)',
+    partialSizeMapQuestion(m) === null &&
+      drawnUnmapped(m)
+        .map((e) => e.source.label)
+        .join(',') === 'XS,XL',
+    tok(m),
+  );
+  // the operator's "not exported" closes it
+  m = proposeSizeMap(run(['XS', 'S', 'M', 'L', 'XL']), card(['S', 'M', 'L', 'XXL']));
+  const said = {
+    ...m,
+    entries: m.entries.map((e) => (e.card ? e : { ...e, origin: 'operator' as const })),
+  };
+  check('the operator leaving them out closes the question', partialSizeMapQuestion(said) === null);
 }
 
 // ── 2 · the Mood sample ─────────────────────────────────────────────────────────────────────
@@ -286,6 +463,7 @@ async function sample(s: (typeof SAMPLES)[number]) {
 
 export async function main(args: string[]): Promise<number> {
   tokens();
+  pairedOntoCard();
   const pick = SAMPLES.filter((s) => !args.length || args.includes(s.id));
   const report = [];
   for (const s of pick) report.push(await sample(s));

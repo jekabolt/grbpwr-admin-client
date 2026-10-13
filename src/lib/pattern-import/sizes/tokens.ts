@@ -13,7 +13,14 @@ const LETTER_ALIAS: Record<string, string> = {
   XXXXL: '4XL',
 };
 
-export type SizeToken = { label: string; kind: 'num' | 'letter'; value: number };
+export type SizeToken = {
+  label: string;
+  kind: 'num' | 'letter';
+  value: number;
+  /** A paired size («4/6», «00-0»): one size line for two sizes; `value` is the lower one. A pair
+   * is never the same size as a single token of its value («4/6» ≠ «4») or of its digits («46»). */
+  paired?: true;
+};
 
 /**
  * Value of a numeric size as printed. US misses' «00» is one step (2) below «0», «000» two: the
@@ -45,7 +52,7 @@ export function parseSizeToken(raw: string, strict = false): SizeToken | null {
     const a = numValue(pair[1]);
     const b = numValue(pair[2]);
     if (b - a === 2 && (a % 2 === 0 || /^0{2,}$/.test(pair[1])) && b <= 200)
-      return { label: t.replace(/\s+/g, ''), kind: 'num', value: a };
+      return { label: t.replace(/\s+/g, ''), kind: 'num', value: a, paired: true };
   }
   const u = t.toUpperCase();
   const canon = LETTER_ALIAS[u] ?? u;
@@ -166,7 +173,13 @@ export function runsInTokens(tokens: string[]): TextRun[] {
     if (cur.length) {
       const prev = cur[cur.length - 1];
       const step = cur.length >= 2 ? cur[1].value - cur[0].value : t.value - prev.value;
-      if (t.kind !== prev.kind || t.value - prev.value !== step || step <= 0 || step > 6) {
+      if (
+        t.kind !== prev.kind ||
+        !!t.paired !== !!prev.paired ||
+        t.value - prev.value !== step ||
+        step <= 0 ||
+        step > 6
+      ) {
         flush();
       }
     }
