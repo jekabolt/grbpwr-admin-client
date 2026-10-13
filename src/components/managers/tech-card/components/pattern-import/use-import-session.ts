@@ -48,7 +48,7 @@ import {
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
-import { partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
+import { drawnUnmapped, partialSizeMapQuestion } from 'lib/pattern-import/sizes/map';
 import {
   buildErrorReport,
   checkFilesBeforeReading,
@@ -2048,11 +2048,13 @@ export { nameOriginOf };
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
   entries.filter((e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9);
 
-/** The map still has a question: a guess, no size reaching the card, or a partial map. */
+/** The map still has a question: a guess, no size reaching the card, or a drawn size left off. */
 const sizeMapOpen = (map: SizeMap) =>
   guessedSizes(map.entries).length > 0 ||
   !map.entries.some((e) => e.card) ||
-  partialSizeMapQuestion(map) != null;
+  // a drawn size the automatic map left off the card — a question with card sizes free, an offer
+  // past a full card run: either way the sizes step is shown (the DXF fast path stops there too)
+  drawnUnmapped(map).length > 0;
 
 /** Source ranks written to the card (null = no map yet: every rank counts). */
 export function exportedRanks(map: SizeMap | undefined): Set<number> | null {
