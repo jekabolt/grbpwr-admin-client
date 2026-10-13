@@ -238,6 +238,23 @@ function summarize() {
         n: r.wrongPassing,
         list: r.judge?.wrongList?.slice(0, 3),
       })),
+    // a written size whose card token is not the printed size: a paired source size («4/6»,
+    // «2-4») on a plain card size («46», «24») — the label check the mood truth does not make
+    sizeTokenWrong: rs.flatMap((r) =>
+      (r.write?.scopes?.[0]?.sizes ?? [])
+        .filter((z) => {
+          const [src, tok] = z.split('→');
+          return /^\d+\s*[-/–]\s*\d+$/.test(src) && !/[-/–]/.test(tok);
+        })
+        .map((z) => ({ id: r.id, verdict: r.verdict, size: z })),
+    ),
+    // the size map as proposed (whether written or not): a paired source size on a plain card size
+    pairedOnPlain: rs.filter((r) =>
+      (r.sizesRead?.map ?? []).some((m) => {
+        const [src, tok] = m.split('→');
+        return /^\d+\s*[-/–]\s*\d+$/.test(src) && tok !== '—' && !/[-/–]/.test(tok);
+      }),
+    ).length,
     crashes: rs
       .filter((r) => r.verdict === 'crashed' || r.verdict === 'timeout')
       .map((r) => ({
@@ -282,6 +299,7 @@ function summarize() {
     `## pieces found on the sheet vs expected (families; closed = every size closes): ${JSON.stringify(found)}`,
     `## pieces written vs expected (passport list or overview letters): ${JSON.stringify(sum.pieces)}`,
     `## printed size key read: ${JSON.stringify(sum.keys)}`,
+    `## paired source size mapped onto a plain card size (files): ${sum.pairedOnPlain} · written: ${sum.sizeTokenWrong.map((x) => `${x.id} ${x.size} (${x.verdict})`).join(', ') || 'none'}`,
     `## pen-verified right blocks held back by: ${JSON.stringify(rightBlocked)}`,
     '',
     '## wrongPassing (Mood truth)',
