@@ -1283,7 +1283,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
     };
   }
   // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
-  const weak = weakAsides(s.pieces?.setAside, fams);
+  const weak = weakAsides(s.pieces?.setAside, fams, s.pieces?.seeds);
   if (!weak.length) return NONE;
   const host = (box: { minX: number; minY: number; maxX: number; maxY: number }) =>
     Math.max(

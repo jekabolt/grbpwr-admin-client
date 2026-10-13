@@ -14,6 +14,7 @@ import type {
   PieceFamily,
   PtMm,
   RasterCalibration,
+  Seed,
   ScaleCandidate,
   SetAside,
   StageIO,
@@ -99,14 +100,15 @@ export const sizeFlags = (
   expectedN: number | null | undefined,
 ) => (ambiguities ?? []).filter((a) => !(expectedN === 1 && a.kind === 'class-merge'));
 
-type Fam = Pick<PieceFamily, 'candidates'>;
+type Fam = Pick<PieceFamily, 'candidates' | 'seed'>;
+type SeedAt = Pick<Seed, 'id' | 'at'>;
 
 /**
  * A 'size-copy' set-aside is "another size of a piece already seeded": proven only as part of a
  * piece that IS seeded, by the face pass's own account (SetAside.copy, pieces/faces CopyHow):
  *   sliver    narrower than any piece (the gap between two sizes' lines) — junk whatever it joins;
  *   shape     of the shape of the outline it lies in (that one proven too) — the piece it belongs
- *             to still seeded (its seed point inside a closed outline of a family);
+ *             to still seeded (the family of the seed standing on its seed point);
  *   lines / fragment  joined across size lines only, or a shape with no copy of its own: proven
  *             only as a strip of that seeded piece's grading — its point inside some of the
  *             piece's size outlines and outside others, no larger than the largest less the
@@ -118,7 +120,11 @@ type Fam = Pick<PieceFamily, 'candidates'>;
  * small piece drawn against a piece's edge (its own outline is not the piece's). An aside without
  * that account is a guess too.
  */
-export const provenCopy = (a: SetAside, families: readonly Fam[]): boolean => {
+export const provenCopy = (
+  a: SetAside,
+  families: readonly Fam[],
+  seeds?: readonly SeedAt[],
+): boolean => {
   const c = a.copy;
   if (!c) return false;
   if (c.how === 'sliver' || c.clearMm <= SLIVER_MM) return true;
@@ -126,15 +132,23 @@ export const provenCopy = (a: SetAside, families: readonly Fam[]): boolean => {
   if (!h) return false;
   const closed = (f: Fam) =>
     f.candidates.filter((x) => x.outcome === 'closed' && x.outer.length > 2);
-  // the seeded piece the host point is in (the innermost: a collar seeded inside the back)
+  // the seeded piece of the host outline: the family of the seed standing on the host's seed
+  // point (a click moved off it, or the seed gone → not proven); without the seeds, the innermost
+  // family whose outline holds the point
   let fam: Fam | null = null;
-  let best = Infinity;
-  for (const f of families)
-    for (const x of closed(f))
-      if (x.areaMm2 < best && pointInPoly(h, x.outer)) {
-        best = x.areaMm2;
-        fam = f;
-      }
+  if (seeds) {
+    const sd = seeds.find((x) => Math.abs(x.at.x - h.x) < 0.01 && Math.abs(x.at.y - h.y) < 0.01);
+    fam =
+      sd == null ? null : families.find((f) => f.seed === sd.id && closed(f).length > 0) ?? null;
+  } else {
+    let best = Infinity;
+    for (const f of families)
+      for (const x of closed(f))
+        if (x.areaMm2 < best && pointInPoly(h, x.outer)) {
+          best = x.areaMm2;
+          fam = f;
+        }
+  }
   if (!fam) return false;
   if (c.how === 'shape') return true;
   const sizes = closed(fam);
@@ -197,12 +211,16 @@ function onOutlines(
  * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or — when the families are given — a size
  * copy not proven a copy of a seeded piece, provenCopy): "this is a piece" is one click.
  */
-export const weakAsides = (asides: readonly SetAside[] | undefined, families?: readonly Fam[]) =>
+export const weakAsides = (
+  asides: readonly SetAside[] | undefined,
+  families?: readonly Fam[],
+  seeds?: readonly SeedAt[],
+) =>
   (asides ?? []).filter(
     (a) =>
       a.areaMm2 >= PIECE_SIZED_MM2 &&
       (WEAK_ASIDE.has(a.reason) ||
-        (!!families && a.reason === 'size-copy' && !provenCopy(a, families))),
+        (!!families && a.reason === 'size-copy' && !provenCopy(a, families, seeds))),
   );
 
 /**
@@ -272,7 +290,7 @@ export function stepOffer(s: OfferCtx): string | null {
       return [...undrawn, ...(flags ? [flags] : [])].join(' · ') || null;
     }
     case 'pieces': {
-      const n = weakAsides(s.pieces?.setAside, s.pieces?.families).length;
+      const n = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds).length;
       return n
         ? `${n} piece-sized ${n === 1 ? 'outline' : 'outlines'} set aside on a guess — "this is a piece", or go on`
         : null;

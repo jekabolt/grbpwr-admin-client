@@ -1333,7 +1333,7 @@ function piecesStep(c: Ctx): Out | null {
   }
   // the outlines kept aside on a guess, gone on past as before
   if (!c.question) return null;
-  const weak = weakAsides(s.pieces.setAside, s.pieces.families);
+  const weak = weakAsides(s.pieces.setAside, s.pieces.families, s.pieces.seeds);
   // D6: the cross-sheet answers kept by key ("copy" / "keep" came back as the piece edits above)
   const sq = sheetQuestion(s.pieces.sheets, i.sheetAnswers);
   const se = c.get('sheet-pieces');

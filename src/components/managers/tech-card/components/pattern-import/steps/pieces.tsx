@@ -298,7 +298,7 @@ export function PiecesStep({
   const asideKey = (a: SetAside) =>
     a.seed
       ? `label:${a.reason}`
-      : a.reason === 'size-copy' && !provenCopy(a, families)
+      : a.reason === 'size-copy' && !provenCopy(a, families, out.seeds)
         ? 'size-copy?'
         : a.reason;
   const asideGroups = [...new Set(asides.map(asideKey))].map((k) => ({

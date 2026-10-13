@@ -461,7 +461,7 @@ export function answerRecordOf(
   const sa = Object.entries(i.sheetAnswers ?? {});
   if (sa.length)
     push('pieces', 'sheet-pieces', `${sa.length} cross-sheet answers`, { answers: sa });
-  const weak = weakAsides(s.pieces?.setAside, s.pieces?.families);
+  const weak = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds);
   if (weak.length)
     push('pieces', 'asides-passed', `${weak.length} outlines kept aside`, {
       asides: weak.map((a) => ({
