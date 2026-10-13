@@ -366,7 +366,9 @@ export function sizeKindOf(label: string): SizeKind | null {
   // «XXXXS» / «XXXXXL»
   const u = label.trim().toUpperCase();
   if (/^\d{1,3}[.,]\d$/.test(u)) return 'num';
-  if (/^X{4,}[SL]$/.test(u)) return 'letter';
+  if (/^\d{1,3}\s*[/\-–]\s*\d{1,3}$/.test(u)) return 'paired';
+  // every letter spelling the DXF reader ranks: M, S/L with X-runs or a count («4XS», «XXXXXL»)
+  if (/^(?:\d?X*[SL]|M)$/.test(u)) return 'letter';
   return null;
 }
 

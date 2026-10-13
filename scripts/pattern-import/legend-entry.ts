@@ -27,6 +27,7 @@ import { parseSizeToken, runsInText } from 'lib/pattern-import/sizes';
 import {
   crossKindQuestion,
   defaultTokensOf,
+  sizeKindOf,
   drawnUnmapped,
   partialSizeMapQuestion,
   proposeSizeMap,
@@ -201,6 +202,17 @@ function pairedOntoCard() {
     tok(m),
   );
 
+  // every DXF spelling has a kind (a guess across kinds is never confirmed past the Ф6 stop)
+  for (const [l, k] of [
+    ['4XS', 'letter'],
+    ['XXXXXL', 'letter'],
+    ['6XL', 'letter'],
+    ['36,5', 'num'],
+    ['38', 'num'],
+    ['4/6', 'paired'],
+    ['00-0', 'paired'],
+  ] as const)
+    check(`kind of «${l}» = ${k}`, sizeKindOf(l) === k, String(sizeKindOf(l)));
   // Ф6: no order-based map across size kinds — the question instead
   m = proposeSizeMap(run(g0), NEUTRAL);
   const kq = crossKindQuestion(m, NEUTRAL);
