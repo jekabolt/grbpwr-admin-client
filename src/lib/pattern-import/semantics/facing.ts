@@ -22,6 +22,8 @@ import { closestOnPolyline, dist, pointInPolygon } from './geom';
 
 /** A fold word: "Facing Fold Line", "fold line", "FOLD". */
 export const FOLD_LINE_WORDS = /\bfold\b/i;
+/** …but not a cut-on-fold instruction ("Place on fold", "cut on fold"): that names an EDGE. */
+const PLACE_ON_FOLD = /\b(place[ds]?|cut|lay)\s+(it\s+)?(on|to|at)\s+(the\s+)?fold/i;
 /** The word lies on the line (its box centre this close), mm … */
 export const FOLD_TEXT_ON_MM = 15;
 /** …or is turned along it (± 10°) this close, mm. */
@@ -158,7 +160,7 @@ export function facingFolds(
   const pad = FOLD_TEXT_ALONG_MM;
   const b = cand.bbox;
   const texts = sheet.texts.filter((t) => {
-    if (!FOLD_LINE_WORDS.test(t.text)) return false;
+    if (!FOLD_LINE_WORDS.test(t.text) || PLACE_ON_FOLD.test(t.text)) return false;
     const c = centre(t);
     return c.x >= b.minX - pad && c.x <= b.maxX + pad && c.y >= b.minY - pad && c.y <= b.maxY + pad;
   });

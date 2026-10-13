@@ -1262,6 +1262,9 @@ export function continuityWalls(
     for (const p of found) {
       if (used.has(p.a) || used.has(p.b)) continue;
       const lines = p.runs.map((x) => x.chain);
+      // every run long enough for gate G21 to find it on the line it names (it trims 1.2 mm off
+      // each end of a stretch): a shorter hop between two lines is proven by nothing it checks
+      if (p.runs.some((x) => polyLen(x.pts) < OVERLAY_RUN_MIN_MM)) continue;
       if (crosses(p.pts) || !smooth(p.pts) || !lonely(p.pts, lines)) continue;
       used.add(p.a);
       used.add(p.b);
@@ -1398,6 +1401,13 @@ export function continuityWalls(
 
 /** MOOD Ф3: a line this much (by length) on an overlay of other sizes' lines lies on it. */
 const OVERLAY_ON_SHARE = 0.8;
+/** MOOD Ф3.2: a walked run on one line at least this long (G21 checks it), mm. */
+const OVERLAY_RUN_MIN_MM = 3;
+const polyLen = (pts: readonly PtMm[]) => {
+  let L = 0;
+  for (let i = 0; i + 1 < pts.length; i++) L += dist(pts[i], pts[i + 1]);
+  return L;
+};
 
 /** MOOD Ф3: the size lines of a wall model as overlay evidence (sizes/overlay.ts). */
 export function overlayLines(set: ChainSet, byRank: readonly ChainId[][]): OverlayLines {

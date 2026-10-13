@@ -38,7 +38,7 @@ import { PATIMPORT } from '../types';
 import { drawnSeam, featuresOf } from './allowance';
 import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
 import { glyphCellKey, undashed } from './glyphs';
-import { facingFolds } from './facing';
+import type { FoldChord } from './facing';
 
 export const NOTCH_MAX_CHAIN_MM = 15;
 export const DRILL_MAX_MM = 15;
@@ -89,7 +89,12 @@ const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
 };
 
 /** What the caller knows beyond the candidate: the sheet's size count and the family's box. */
-export type FeatureOpts = { sizeCount?: number; region?: BoxMm };
+export type FeatureOpts = {
+  sizeCount?: number;
+  region?: BoxMm;
+  /** MOOD Ф3.3: this size's facing fold, as the family's check proved it (build.ts) — layer 8. */
+  folds?: readonly FoldChord[];
+};
 
 const GRAIN_WORDS =
   /grain|fadenlauf|fadenl|долев|droit[\s-]*fil|sens\s+du\s+fil|draadrichting|kierunek\s+nitki|nitka|hilo|dritto\s+filo|trådretning|canal/iu;
@@ -253,8 +258,9 @@ export function classifyFeatures(
       } satisfies InternalFeature);
   }
   // MOOD Ф3.3 (R11): the size's own line across the piece named fold — the facing's fold line
-  // (semantics/facing.ts). Skipped above as the size's own line; it leaves on layer 8.
-  for (const f of facingFolds(cand, set, sheet).interior)
+  // (semantics/facing.ts), proven in every size of the family by build.ts. Skipped above as the
+  // size's own line; it leaves on layer 8.
+  for (const f of opts.folds ?? [])
     out.push({
       kind: 'internal',
       pts: f.pts,

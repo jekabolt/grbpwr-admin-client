@@ -74,10 +74,11 @@ import {
   sharedEdges,
 } from '../pieces/identity';
 import { wallModel } from '../pieces/walls';
+import { hausdorffMm } from '../pieces/fill';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
-import { facingFolds } from './facing';
+import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
 import {
@@ -560,6 +561,9 @@ export function slitNotches(
 }
 
 /** Probe switch (node only): MOOD_F5_OFF reads one outline in every size as before (ungraded). */
+/** MOOD Ф5: two contours within this (symmetric Hausdorff) are one outline, mm. */
+const ONE_OUTLINE_MM = 1;
+
 function f5Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.MOOD_F5_OFF;
 }
@@ -637,6 +641,9 @@ export function buildPieceSpecsDetailed(
           Math.abs(m.c.bbox.maxY - m.c.bbox.minY - (b0.maxY - b0.minY)) <= 0.1,
       );
     };
+    /** MOOD Ф5: one outline point by point — every contour within 1 mm of the first, in place. */
+    const alike = (ms: typeof mapped) =>
+      ms.every((m) => m === ms[0] || hausdorffMm(m.c.outer, ms[0].c.outer) <= ONE_OUTLINE_MM);
     let bad = mapped.find((m) => m.c.outcome !== 'closed');
     // MOOD Ф5: some sizes do not close (a motif whose beads are not read), the ones that do all
     // close on ONE outline and stand on both sides of every one that does not — grading is
@@ -652,7 +659,13 @@ export function buildPieceSpecsDetailed(
           closed.some((x) => x.c.rank < m.c.rank) &&
           closed.some((x) => x.c.rank > m.c.rank),
       );
-      if (closed.length >= 3 && bracketed && !closed[0].c.dxf && sameOutline(closed)) {
+      if (
+        closed.length >= 3 &&
+        bracketed &&
+        !closed[0].c.dxf &&
+        sameOutline(closed) &&
+        alike(closed)
+      ) {
         const one =
           ov.ungraded === true ? null : oneSizeRead(closed[closed.length - 1].c, set, sheet, run);
         const sizesOpen = open.map((m) => m.card.token).join(', ');
@@ -745,10 +758,13 @@ export function buildPieceSpecsDetailed(
       // once / by every pen in one place) and the label (no size named) make it one piece for all
       // sizes; one of them alone asks; a size's own line beside it makes it graded (semantics/
       // one-size.ts). The operator's word stands over both.
-      const one =
+      let one =
         ungraded && !traced && !mapped[0].c.dxf && !f5Off()
           ? oneSizeRead(mapped[mapped.length - 1].c, set, sheet, run)
           : null;
+      // equal areas and boxes, but contours apart: not one outline
+      if (one && !alike(mapped))
+        one = { kind: 'graded', why: 'the sizes close on outlines of one area and box, apart' };
       if (ungraded && ov.ungraded === false) ungraded = false;
       else if (ungraded && ov.ungraded === true)
         name.notes.push('one piece for all sizes: the operator');
@@ -940,6 +956,8 @@ export function buildPieceSpecsDetailed(
     const { seed, name } = p;
     const ov = pieceOverrides[seed] ?? {};
     const pieceNotes: string[] = [...name.notes];
+    /** MOOD Ф3.3: the facing fold per size, once every size of the family shows it */
+    const facingOf = new Map<PieceCandidate, FoldChord[]>();
     const largest = p.cands[p.cands.length - 1].c;
     const symmetric = isMirrorSymmetric(largest.outer);
 
@@ -1015,7 +1033,7 @@ export function buildPieceSpecsDetailed(
     // shows it, or none does; an outline that stops at it while the size goes on beyond it has lost
     // its facing. Never either silently. "Not a fold" (the operator's) exports the outline as drawn.
     if (wantFold !== false) {
-      const reads = p.cands.map(({ c, card }) => ({ card, r: facingFolds(c, set, sheet) }));
+      const reads = p.cands.map(({ c, card }) => ({ c, card, r: facingFolds(c, set, sheet) }));
       const cut = reads.find((x) => x.r.cutOff.length);
       const folded = reads.filter((x) => x.r.interior.length);
       if (cut) {
@@ -1035,10 +1053,12 @@ export function buildPieceSpecsDetailed(
         );
         continue;
       }
-      if (folded.length)
+      if (folded.length) {
+        for (const x of reads) facingOf.set(x.c, x.r.interior);
         pieceNotes.push(
           `«${folded[0].r.interior[0].text}»: each size's own line across the piece — its facing fold, kept as an internal line`,
         );
+      }
     }
     // fold words inside the piece, the AI's reading of the drawing, or the operator's "unfold"
     // without an edge: nothing proves which edge — ask
@@ -1068,7 +1088,7 @@ export function buildPieceSpecsDetailed(
     const featOpts = { sizeCount: run.sizes.length, region: famBox };
 
     for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet, featOpts);
+      const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
