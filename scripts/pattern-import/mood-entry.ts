@@ -411,7 +411,7 @@ export async function probeOne(sm: Sample): Promise<FileRec> {
   return r;
 }
 
-function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
+export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
   const S = s as unknown as {
     sheet: Sheet;
     wallSet: ChainSet | null;
