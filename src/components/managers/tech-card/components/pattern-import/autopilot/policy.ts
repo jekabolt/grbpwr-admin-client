@@ -44,8 +44,10 @@ import {
   crossKindQuestion,
   drawnUnmapped,
   notDrawnLine,
+  cardSizeKindOf,
   ordinalTargets,
   partialSizeMapQuestion,
+  sizeKindOf,
 } from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
@@ -1072,6 +1074,23 @@ function sizesStep(snap: Snap): AutopilotDecision {
   }
   // the guesses (< 0.9) are confirmed as matched
   const guesses = guessedSizes(entries);
+  // Ф6: a guess across size kinds (the one-size middle suggestion «38 → M», a US number written on
+  // a letter size) is the operator's to confirm — never confirmed by the autopilot
+  const across = guesses.filter((g) => {
+    const a = sizeKindOf(g.source.label);
+    const b = g.card ? cardSizeKindOf(g.card) : null;
+    return a != null && b != null && a !== b;
+  });
+  if (across.length)
+    return stopAt(
+      'sizes',
+      `${across
+        .slice(0, 4)
+        .map((g) => `${g.source.label} → ${g.card!.token}`)
+        .join(
+          ', ',
+        )} ${across.length === 1 ? 'is a suggestion' : 'are suggestions'} across size kinds — the sheet does not say which card size ${across.length === 1 ? 'it is' : 'they are'}; map each size`,
+    );
   if (guesses.length) {
     const own = (i.sizeMap ?? []).filter(
       (e) => !guesses.some((g) => g.source.rank === e.source.rank),
