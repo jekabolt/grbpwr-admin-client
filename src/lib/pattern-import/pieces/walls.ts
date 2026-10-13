@@ -22,6 +22,13 @@ import type {
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
 import { chainLook, onPen, rankGuard, rankLooks, type RankGuard } from './identity';
 import type { WallItem } from './snap';
+import {
+  OVERLAY_MIN_PENS,
+  overlayAt,
+  overlayShare,
+  walkOverlay,
+  type OverlayLines,
+} from '../sizes/overlay';
 
 export type WallMode = 'graded' | 'single' | 'file';
 
@@ -744,6 +751,8 @@ export type ContinuityWall = WallItem & {
   chains: ChainId[];
   /** R0 through an ignore / unclassified line: the closure needs anchor ranks on both sides. */
   bracket?: boolean;
+  /** MOOD Ф3.2: an R1 stretch walked along an overlay of ≥ 3 other sizes' lines. */
+  overlay?: boolean;
 };
 
 export type ContinuityOpts = {
@@ -764,6 +773,11 @@ export type ContinuityOpts = {
   sideMm?: number;
   /** Further effective walls of r for that test (lines reranked to r, the operator's lines). */
   beside?: readonly WallItem[];
+  /**
+   * MOOD Ф3.2 (identity runs only): the size lines as overlay evidence — R1 then also walks an
+   * overlay (≥ 3 other sizes' pens in one place) between two of r's dangling ends.
+   */
+  overlay?: OverlayLines | null;
 };
 
 /**
@@ -1165,6 +1179,58 @@ export function continuityWalls(
     const last = first === ea ? eb : ea;
     out.push({ chain: p.a.id, pts: [first, ...p.pts, last], rule: 'R1', chains: [p.a.id] });
   }
+  // ── R1 over an OVERLAY (MOOD Ф3.2): a stretch where r draws nothing of its own (a motif whose
+  //    beads are not read there) but ≥ 3 other sizes draw their lines in one place, each in its own
+  //    pen — the edge is proven there. From one dangling end of r the walk follows the overlay (from
+  //    one of its lines to the next where one stops), every millimetre proven again, to another
+  //    dangling end of r; the stretch is then judged like R1's (no crossing, smooth, nothing of r's
+  //    beside it), and the closure by the family's anchors (fill.ts `continuityVerdicts`) ──
+  if (o.overlay) {
+    const L = o.overlay;
+    const at = (k: number) => {
+      const e = ends[k];
+      const ov = overlayAt(e.at, null, L, r, J);
+      return ov.ranks.size >= OVERLAY_MIN_PENS ? ov.dir : null;
+    };
+    const onOv = new Map<number, PtMm>();
+    ends.forEach((_, k) => {
+      if (used.has(k)) return;
+      const d = at(k);
+      if (d) onOv.set(k, d);
+    });
+    type OvPair = { a: number; b: number; pts: PtMm[]; chains: ChainId[] };
+    const found: OvPair[] = [];
+    for (const [k, d] of onOv) {
+      const e = ends[k];
+      let best: OvPair | null = null;
+      for (const sgn of [1, -1]) {
+        const dir = { x: d.x * sgn, y: d.y * sgn };
+        // not back into r's own line: the walk leaves the end along or across it, never against it
+        if (dir.x * e.t.x + dir.y * e.t.y < -0.5) continue;
+        let hit = -1;
+        const w = walkOverlay(e.at, dir, L, r, maxStretch, (q) => {
+          endGrid.near(q, J, (k2) => {
+            if (hit >= 0 || k2 === k || used.has(k2) || !onOv.has(k2)) return;
+            if (dist(ends[k2].at, q) <= J) hit = k2;
+          });
+          return hit >= 0;
+        });
+        if (!w.arrived || hit < 0) continue;
+        const pts = [...w.pts, ends[hit].at];
+        if (!best || pts.length < best.pts.length)
+          best = { a: k, b: hit, pts, chains: [...w.chains] };
+      }
+      if (best) found.push(best);
+    }
+    found.sort((x, y) => x.pts.length - y.pts.length);
+    for (const p of found) {
+      if (used.has(p.a) || used.has(p.b)) continue;
+      if (crosses(p.pts) || !smooth(p.pts) || !lonely(p.pts, p.chains)) continue;
+      used.add(p.a);
+      used.add(p.b);
+      out.push({ chain: p.chains[0], pts: p.pts, rule: 'R1', chains: p.chains, overlay: true });
+    }
+  }
   // ── R2: spines — a proven boundary several sizes end on ──
   const rest = feet.filter((f) => !used.has(f.k));
   if (!rest.length) return out;
@@ -1284,6 +1350,24 @@ export function continuityWalls(
   return out;
 }
 
+/** MOOD Ф3: a line this much (by length) on an overlay of other sizes' lines lies on it. */
+const OVERLAY_ON_SHARE = 0.8;
+
+/** MOOD Ф3: the size lines of a wall model as overlay evidence (sizes/overlay.ts). */
+export function overlayLines(set: ChainSet, byRank: readonly ChainId[][]): OverlayLines {
+  const g = new SegGrid(2);
+  const rank = new Map<ChainId, number>();
+  byRank.forEach((ids, r) =>
+    ids.forEach((id) => {
+      const c = set.chains[id];
+      if (!c || c.pts.length < 2) return;
+      rank.set(id, r);
+      g.addPolyline(id, c.pts, c.closed);
+    }),
+  );
+  return { grid: g, pts: (id) => set.chains[id]?.pts, rank: (id) => rank.get(id) };
+}
+
 /** Arc length from the start of a polyline to (segment i, parameter u). */
 function arcTo(pts: PtMm[], i: number, u: number): number {
   let L = 0;
@@ -1394,6 +1478,11 @@ export function connectRanks(
     else comps.set(r, [id]);
   }
   const byRank = m.byRank.map((a) => a.slice());
+  let ovl: OverlayLines | null = null;
+  const overlaid = (id: ChainId) => {
+    if (!ovl) ovl = overlayLines(set, m.byRank);
+    return overlayShare(set.chains[id].pts, ovl) >= OVERLAY_ON_SHARE;
+  };
   let moved = 0;
   const conflicts: ChainId[] = [];
   const undecided: ChainId[][] = [];
@@ -1423,6 +1512,13 @@ export function connectRanks(
       const r = rankOf.get(id);
       if (r === best) continue;
       if (guard && !guard.ok(id, best)) {
+        conflicts.push(id);
+        continue;
+      }
+      // MOOD Ф3 (R5): an unranked line of no pen lying on an overlay — where ≥ 3 other sizes'
+      // lines run — touches the ends of every one of them: its ends meeting one rank's is no
+      // evidence of that rank (ONE evidence, and the pen says nothing): it stays asked
+      if (guard?.lookless?.(id) && r === undefined && !probeOff('MOOD_F3_OFF') && overlaid(id)) {
         conflicts.push(id);
         continue;
       }

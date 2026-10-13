@@ -77,6 +77,8 @@ import { wallModel } from '../pieces/walls';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
+import { facingFolds } from './facing';
+import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
 import {
   FOLD_TEXT_MAX_MM,
@@ -557,6 +559,11 @@ export function slitNotches(
   return { notches, dropped };
 }
 
+/** Probe switch (node only): MOOD_F5_OFF reads one outline in every size as before (ungraded). */
+function f5Off(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.MOOD_F5_OFF;
+}
+
 export function buildPieceSpecsDetailed(
   input: SemanticsInput,
   progress?: Progress,
@@ -688,7 +695,26 @@ export function buildPieceSpecsDetailed(
           Math.abs(m.c.bbox.maxX - m.c.bbox.minX - (b0.maxX - b0.minX)) <= 0.1 &&
           Math.abs(m.c.bbox.maxY - m.c.bbox.minY - (b0.maxY - b0.minY)) <= 0.1,
       );
-      if (ungraded) name.notes.push('same outline in every size: ungraded');
+      // MOOD Ф5: under a size key, one outline in every size is ONE evidence — the drawing (drawn
+      // once / by every pen in one place) and the label (no size named) make it one piece for all
+      // sizes; one of them alone asks; a size's own line beside it makes it graded (semantics/
+      // one-size.ts). The operator's word stands over both.
+      const one =
+        ungraded && !traced && !mapped[0].c.dxf && !f5Off()
+          ? oneSizeRead(mapped[mapped.length - 1].c, set, sheet, run)
+          : null;
+      if (ungraded && ov.ungraded === false) ungraded = false;
+      else if (ungraded && ov.ungraded === true)
+        name.notes.push('one piece for all sizes: the operator');
+      else if (one?.kind === 'proven')
+        name.notes.push(`one piece for all sizes: ${one.evidence.join('; ')}`);
+      else if (one?.kind === 'ask') {
+        block(seed, 'one-size-question', `${one.why} — one piece for all sizes?`);
+        continue;
+      } else if (one) {
+        ungraded = false;
+        if (one.kind === 'graded') name.notes.push(`one outline in every size, but ${one.why}`);
+      } else if (ungraded) name.notes.push('same outline in every size: ungraded');
     }
     preps.push({ fam, seed, cands: ungraded ? [mapped[0]] : mapped, texts, name, ungraded });
   }
@@ -938,6 +964,35 @@ export function buildPieceSpecsDetailed(
       ),
       ...(foldHints.has(seed) ? ['AI: cut on fold'] : []),
     ];
+    // MOOD Ф3.3 (R11): a facing fold line across the piece (semantics/facing.ts) — every size
+    // shows it, or none does; an outline that stops at it while the size goes on beyond it has lost
+    // its facing. Never either silently. "Not a fold" (the operator's) exports the outline as drawn.
+    if (wantFold !== false) {
+      const reads = p.cands.map(({ c, card }) => ({ card, r: facingFolds(c, set, sheet) }));
+      const cut = reads.find((x) => x.r.cutOff.length);
+      const folded = reads.filter((x) => x.r.interior.length);
+      if (cut) {
+        block(
+          seed,
+          'facing-fold',
+          `size ${cut.card.token}: the outline stops at «${cut.r.cutOff[0].text}» while the size's own lines go on beyond it — its facing is not closed`,
+        );
+        continue;
+      }
+      if (folded.length && folded.length < reads.length) {
+        const miss = reads.filter((x) => !x.r.interior.length).map((x) => x.card.token);
+        block(
+          seed,
+          'facing-fold',
+          `«${folded[0].r.interior[0].text}» crosses the piece in size ${folded.map((x) => x.card.token).join(', ')} but no such line is read in ${miss.join(', ')} — every size folds its facing, or none`,
+        );
+        continue;
+      }
+      if (folded.length)
+        pieceNotes.push(
+          `«${folded[0].r.interior[0].text}»: each size's own line across the piece — its facing fold, kept as an internal line`,
+        );
+    }
     // fold words inside the piece, the AI's reading of the drawing, or the operator's "unfold"
     // without an edge: nothing proves which edge — ask
     const askFold =

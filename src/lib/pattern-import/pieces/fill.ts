@@ -62,12 +62,15 @@ import {
   itemsOf,
   landingPlugs,
   lonePortions,
+  overlayLines,
   rescuedIgnored,
   cornerSources,
   sheetModule,
   wallModel,
   type WallModel,
 } from './walls';
+import { rankLooks } from './identity';
+import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
 
@@ -425,6 +428,11 @@ function contOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.P1_NOCONT;
 }
 
+/** Probe switch (node only): MOOD_F3_OFF turns the Ф3 overlay readings off (the "before" column). */
+function f3Off(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.MOOD_F3_OFF;
+}
+
 /** Share of a polyline (sampled every 0.5 mm) within `tol` of a closed outline. */
 function alongShare(pts: readonly PtMm[], outer: readonly PtMm[], tol: number): number {
   if (pts.length < 2 || outer.length < 3) return 0;
@@ -532,9 +540,18 @@ function fillOneSheet(
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = solved
-    ? SOLVER_MODEL
-    : wallModel(set, run, sheet.texts, new Map(sheet.styles.map((s) => [s.id, s])));
+  const styleMap = new Map(sheet.styles.map((s) => [s.id, s]));
+  const model = solved ? SOLVER_MODEL : wallModel(set, run, sheet.texts, styleMap);
+  // MOOD Ф3.2: the size lines as overlay evidence for continuity — identity runs only (a rank by
+  // nesting alone proves no pen); built on first use
+  let overlayEv: OverlayLines | null | undefined;
+  const overlayOf = () =>
+    overlayEv !== undefined
+      ? overlayEv
+      : (overlayEv =
+          model.mode === 'graded' && !f3Off() && rankLooks(set, run, styleMap).identity
+            ? overlayLines(set, model.byRank)
+            : null);
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
@@ -708,6 +725,7 @@ function fillOneSheet(
                       const reranked = itemsOf(set, rerank().model.byRank[r] ?? []);
                       contWalls = continuityWalls(set, model, r, plugged.items, contSkip(excl), {
                         beside: reranked,
+                        overlay: overlayOf(),
                       });
                       return contWalls.length
                         ? buildRank(box, cell, [...plugged.items, ...contWalls])

@@ -10,7 +10,10 @@
 //              style) and its evidence (A1): a grain class (counts two), arrowheads (barbs ≤ 25 mm
 //              at 15–60° at both ends or a symmetric pair — not among lettering), a grain word
 //              ("grain", "Fadenlauf", "долевая", "droit fil"…) beside it, the same line in every
-//              size copy (a grainline is not graded), the dashes themselves. Two or more evidences →
+//              size copy (a grainline is not graded), the dashes themselves, a bias cross (MOOD Ф3.4:
+//              two straight lines of one look crossing near both middles at ~90°, "cut on bias" —
+//              a grain word beside an arm or a bias word in the piece is its second evidence; the
+//              other arm is the same mark, never an internal line). Two or more evidences →
 //              'detected'; exactly one → 'proposed' (D3: shown, accepted only by a click);
 //   • internal — every other chain inside of an internal/common class (darts, pocket placement).
 // Size lines of OTHER ranks run inside a multi-size outline too; they are size-classed and skipped.
@@ -34,6 +37,7 @@ import { PATIMPORT } from '../types';
 import { drawnSeam, featuresOf } from './allowance';
 import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
 import { glyphCellKey, undashed } from './glyphs';
+import { facingFolds } from './facing';
 
 export const NOTCH_MAX_CHAIN_MM = 15;
 export const DRILL_MAX_MM = 15;
@@ -75,6 +79,7 @@ const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
   word: 2,
   ungraded: 1,
   dashes: 0.5,
+  cross: 4,
   'dxf-layer': 8,
   operator: 8,
   borrowed: 0,
@@ -87,6 +92,13 @@ export type FeatureOpts = { sizeCount?: number; region?: BoxMm };
 
 const GRAIN_WORDS =
   /grain|fadenlauf|fadenl|долев|droit[\s-]*fil|sens\s+du\s+fil|draadrichting|kierunek\s+nitki|nitka|hilo|dritto\s+filo|trådretning|canal/iu;
+/** MOOD Ф3.4: "cut on bias" in a piece's own text — the second evidence of a bias cross. */
+const BIAS_WORDS = /\bbias\b|schräg|по\s+косой|biais|al\s+bies|sbieco/iu;
+/** A bias cross: arms this long, alike within this share, crossing within this share of each middle. */
+const CROSS_LEN_TOL = 0.15;
+const CROSS_MID_TOL = 0.15;
+/** …at this angle or squarer, degrees. */
+const CROSS_MIN_DEG = 75;
 
 /** Max distance of a polyline's vertices from its chord, mm. */
 function straightness(pts: readonly PtMm[]): number {
@@ -239,6 +251,18 @@ export function classifyFeatures(
         confidence: 0.8,
       } satisfies InternalFeature);
   }
+  // MOOD Ф3.3 (R11): the size's own line across the piece named fold — the facing's fold line
+  // (semantics/facing.ts). Skipped above as the size's own line; it leaves on layer 8.
+  for (const f of facingFolds(cand, set, sheet).interior)
+    out.push({
+      kind: 'internal',
+      pts: f.pts,
+      closed: false,
+      origin: 'detected',
+      ranges: set.chains[f.chain]?.ranges ?? [],
+      confidence: 0.9,
+      label: 'fold line',
+    } satisfies InternalFeature);
   return out;
 }
 
@@ -278,6 +302,19 @@ function trimBarbs(pts: readonly PtMm[]): { body: PtMm[]; barbs: [PtMm, PtMm][] 
       return { body, barbs };
     }
   return null;
+}
+
+/** Where segments a–b and c–d cross: their parameters (0..1 each), or null. */
+function crossing(a: PtMm, b: PtMm, c: PtMm, d: PtMm): { t: number; u: number } | null {
+  const rx = b.x - a.x;
+  const ry = b.y - a.y;
+  const sx = d.x - c.x;
+  const sy = d.y - c.y;
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+  const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? { t, u } : null;
 }
 
 /** Smallest angle between two directions, degrees, 0..90 (lines have no sense). */
@@ -603,9 +640,40 @@ function bestGrain(
     if (near.d <= GRAIN_TEXT_MM || (near.d <= GRAIN_TEXT_ALONG_MM && turned)) worded.add(near.l);
     if (turned && near.d <= GRAIN_TEXT_ON_LINE_MM) along.add(near.l);
   }
+  // MOOD Ф3.4: bias crosses — two single straight lines of one style, alike in length, crossing
+  // near both middles at ~90° ("Cut 1 on bias", either arm is the grain). The cross is one evidence;
+  // a grain word labelling either arm, or a bias word among the piece's own texts, the second.
+  const crossOf = new Map<GrainLine, GrainLine>();
+  const single = live.filter((l) => !l.dashed && l.ids.length === 1);
+  for (let i = 0; i < single.length; i++)
+    for (let j = i + 1; j < single.length; j++) {
+      const p = single[i];
+      const q = single[j];
+      if (crossOf.has(p) || crossOf.has(q)) continue;
+      if (set.chains[p.ids[0]]?.style !== set.chains[q.ids[0]]?.style) continue;
+      if (Math.abs(p.len - q.len) > CROSS_LEN_TOL * Math.max(p.len, q.len)) continue;
+      if (lineAngleDiff(angleDeg(p.a, p.b), angleDeg(q.a, q.b)) < CROSS_MIN_DEG) continue;
+      const x = crossing(p.a, p.b, q.a, q.b);
+      if (!x || Math.abs(x.t - 0.5) > CROSS_MID_TOL || Math.abs(x.u - 0.5) > CROSS_MID_TOL)
+        continue;
+      crossOf.set(p, q);
+      crossOf.set(q, p);
+    }
+  const biasSaid =
+    crossOf.size > 0 &&
+    (sheet?.texts ?? []).some(
+      (t) =>
+        BIAS_WORDS.test(t.text) &&
+        (cand.textsInside.includes(t.id) ||
+          pointInPolygon(
+            { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 },
+            cand.outer,
+          )),
+    );
   for (const l of live) {
     const heads = arrowheads(l, headChains, lettered);
-    const word = worded.has(l);
+    const cross = crossOf.get(l);
+    const word = worded.has(l) || (!!cross && (worded.has(cross) || biasSaid));
     const ungraded = ungradedOf(l);
     const evidence: GrainEvidenceKind[] = [
       ...(l.grainClass ? (['class'] as const) : []),
@@ -613,6 +681,7 @@ function bestGrain(
       ...(word ? (['word'] as const) : []),
       ...(ungraded ? (['ungraded'] as const) : []),
       ...(l.dashed ? (['dashes'] as const) : []),
+      ...(cross ? (['cross'] as const) : []),
     ];
     // a grain class is the legend's (operator's, a DXF layer's) word: it counts two
     const weight = evidence.length + (l.grainClass ? 1 : 0);
@@ -622,7 +691,8 @@ function bestGrain(
       evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0) +
       (word && along.has(l) ? GRAIN_ALONG_BONUS : 0);
     if (!best || strength > best.strength || (strength === best.strength && l.len > best.l.len))
-      best = { l, evidence, weight, strength, heads: heads ?? [] };
+      // the other arm of a cross is the same mark: taken with it, never an internal line
+      best = { l, evidence, weight, strength, heads: [...(heads ?? []), ...(cross?.ids ?? [])] };
   }
   if (!best) return null;
   const { l, evidence, weight, heads } = best;
