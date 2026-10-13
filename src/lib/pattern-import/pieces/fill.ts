@@ -633,6 +633,54 @@ function fillOneSheet(
   const cornerItems = (r: number): WallItem[] =>
     (model.corners ?? []).filter((c) => c.rank === r).map((c) => ({ chain: -4, pts: c.pts }));
 
+  // MOOD TICKS: each size's proven end tick across a strip (pieces/ticks.ts)
+  const endTicks = model.endTicks ?? [];
+  const tickItems = (r: number): WallItem[] =>
+    itemsOf(
+      set,
+      endTicks.filter((t) => t.rank === r).map((t) => t.chain),
+    );
+  /**
+   * Rank r's region cut along its own end ticks (each carried to the strip's sides), the body side
+   * kept; null = the region runs past one of r's ticks after the cut (the knife did not part it) or
+   * past a larger size's proven end tick. The same region when no tick of the sheet crosses it.
+   */
+  const cutAtTicks = (
+    gg: Grid,
+    mask0: Uint8Array,
+    r: number,
+  ): { mask: Uint8Array; keep: number } | null => {
+    const px = (p: PtMm) => {
+      const x = gg.ix(p.x);
+      const y = gg.iy(p.y);
+      return gg.inside(x, y) ? y * gg.W + x : -1;
+    };
+    const inM = (m: Uint8Array, p: PtMm) => {
+      const k = px(p);
+      return k >= 0 && m[k] === 1;
+    };
+    let mask = mask0;
+    let keep = -1;
+    for (const t of endTicks) {
+      if (t.rank !== r || !inM(mask, t.inPt) || !inM(mask, t.outPt)) continue;
+      const kn = new Uint8Array(mask.length);
+      drawPolyline(gg, kn, t.knife);
+      const blocked = new Uint8Array(mask.length);
+      for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
+      const k0 = px(t.inPt);
+      if (k0 < 0 || blocked[k0]) return null;
+      const part = new Uint8Array(mask.length);
+      flood(gg, blocked, [k0], part);
+      if (inM(part, t.outPt)) return null;
+      mask = part;
+      keep = k0;
+    }
+    // the region runs past a larger size's end: it closed on another size's lines
+    for (const t of endTicks)
+      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt)) return null;
+    return { mask, keep: keep >= 0 ? keep : -1 };
+  };
+
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
     const ownIds = model.mode === 'single' ? [] : model.byRank[r];
@@ -770,6 +818,17 @@ function fillOneSheet(
       const regionAt = (c: RankCtx, kk: number) => {
         const { g: gg } = c;
         let { mask } = regionOf(gg, c.ext, kk);
+        // MOOD TICKS: rank r's proven end ticks cut its region; r keeps its body side. A region of
+        // r that still runs past an end tick (a gap the knife cannot part), or past a LARGER size's
+        // proven end, is no outline of r — a leak
+        if (endTicks.length) {
+          const cut = cutAtTicks(gg, mask, r);
+          if (!cut) return null;
+          if (cut.mask !== mask) {
+            mask = cut.mask;
+            kk = cut.keep;
+          }
+        }
         // knives (variant cutting lines) crossing the region: cut and keep the seed's side
         const kis = knivesOf(r);
         if (kis.length) {
@@ -936,7 +995,7 @@ function fillOneSheet(
         out.set(seed.id, cand);
         continue;
       }
-      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r)), {
+      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r), tickItems(r)), {
         stepMm: 1,
         reachMm: 2.5,
         snapMm: opts.snapMm || PATIMPORT.snapMm,
