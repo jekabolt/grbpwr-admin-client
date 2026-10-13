@@ -20,7 +20,7 @@ import type {
 } from 'lib/pattern-import/types';
 
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
-import { rankGuard, type RankGuard } from './identity';
+import { chainLook, onPen, rankGuard, rankLooks, type RankGuard } from './identity';
 import type { WallItem } from './snap';
 
 export type WallMode = 'graded' | 'single' | 'file';
@@ -50,7 +50,47 @@ export type WallModel = {
   bandCuts?: { rank: number; from: PtMm; to: PtMm; ticks: ChainId[] }[];
   /** Rank by continuity: chains moved to their outline's rank, and undecided components. */
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
+  /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges — walls of `rank`. */
+  corners?: { rank: number; pts: PtMm[]; chains: ChainId[] }[];
 };
+
+/**
+ * MOOD Ф2: the corner walls recover found (sizes/corners.ts), kept only where they still hang on
+ * lines of ONE rank of the final model drawn with that rank's pen (the legend step may have moved
+ * a line since): the rank's identity, re-checked.
+ */
+function cornerWalls(
+  set: ChainSet,
+  run: SizeRun,
+  ranks: ChainId[][],
+  styles: ReadonlyMap<number, Style> | undefined,
+): Pick<WallModel, 'corners'> {
+  if (!set.cornerWalls?.length || !styles || probeOff('MOOD_F2_OFF')) return {};
+  const { identity, looks } = rankLooks(set, run, styles);
+  if (!identity) return {};
+  const rankOfChain = new Map<ChainId, number>();
+  ranks.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
+  const corners: NonNullable<WallModel['corners']> = [];
+  for (const w of set.cornerWalls) {
+    const rs = new Set(w.own.map((id) => rankOfChain.get(id)));
+    if (rs.size !== 1) continue;
+    const r = [...rs][0];
+    if (r === undefined || !looks[r]?.length) continue;
+    const onOwnPen = w.own.every((id) => {
+      const c = set.chains[id];
+      const l = c ? chainLook(c, styles) : null;
+      return !!l && onPen(l, looks[r]);
+    });
+    if (!onOwnPen) continue;
+    corners.push({ rank: r, pts: w.pts, chains: w.chains });
+  }
+  return corners.length ? { corners } : {};
+}
+
+/** MOOD Ф2: the stub / ramp chains a validated corner wall stands for — no rescue, no foreign line. */
+export function cornerSources(m: WallModel): Set<ChainId> {
+  return new Set((m.corners ?? []).flatMap((k) => k.chains));
+}
 
 /**
  * FOLD EDGES and other shared straight edges: a straight line (≥ 40 mm, ≤ 0.5 mm off its chord) on
@@ -247,16 +287,26 @@ export function wallModel(
   const kept = [...kept0, ...[...band.edges].filter((id) => !kept0.includes(id))];
   const folds =
     mode === 'graded' && !probeOff('F4_NOFOLDS') ? sharedFolds(set, ranks, new Set(kept)) : [];
+  // MOOD Ф2: a stub or ramp read as rank r's corner is r's alone — never a common wall nor
+  // another rank's line (Codex r2: another size closing on r's stub)
+  const cw = mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {};
+  const owner = new Map<ChainId, number>();
+  for (const k of cw.corners ?? []) for (const id of k.chains) owner.set(id, k.rank);
+  const commonF = [...kept, ...folds].filter((id) => !owner.has(id));
+  const ranksF = owner.size
+    ? ranks.map((ids, r) => ids.filter((id) => (owner.get(id) ?? r) === r))
+    : ranks;
   return {
     mode,
     n,
-    common: [...kept, ...folds],
+    common: commonF,
     folds,
     relinked: cr
       ? { moved: cr.moved, conflicts: cr.conflicts, labelled: labelled.size }
       : undefined,
-    byRank: ranks,
-    emptyRanks: ranks.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
+    byRank: ranksF,
+    ...cw,
+    emptyRanks: ranksF.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
     // chains ranked here (continuity, labels, nesting) are size lines too
     graded: [...new Set([...graded, ...ranks.flat()])],
     loopFamily: new Set([...(cr?.loopFamily ?? []), ...bands.keys()]),

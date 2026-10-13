@@ -11,6 +11,7 @@
 // (6) is `wrongPassing` — must be 0. `closed` = closed candidates / family × size candidates.
 //   node scripts/pattern-import/mood.mjs [id…]   env PATIMPORT_MOOD_DIR (default: the archive),
 //   PATIMPORT_REPORTS (reports go there only), MOOD_PAR (parallel children), MOOD_CAP_S (per file)
+import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type {
@@ -33,6 +34,8 @@ import {
   signedArea,
 } from 'lib/pattern-import/pieces/geom';
 import type { Session } from 'lib/pattern-import/worker/session';
+import { buildChainsDetailed } from 'lib/pattern-import/chains';
+import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { runCase } from './e2e-entry';
 
@@ -298,6 +301,8 @@ type BlockTruth = {
   by: string[];
   areaCm2: number;
   pen: { own: number | null; best: string | null; bestShare: number };
+  /** (4) stretches off its own pen's lines (null: no key sample for its label). */
+  kinks: number | null;
   wrong: string[];
   unverified?: string;
 };
@@ -354,6 +359,132 @@ function sharesOn(outer: PtMm[], set: ChainSet, styles: Map<number, Style>, key:
   return share;
 }
 
+/**
+ * The kink reference: the sheet's chains as drawn, read again with the Ф2 corner pass off — the
+ * points a corner pass adds to a size's line (stub, ramp, vertex) must not vouch for themselves.
+ */
+const refMemo = new WeakMap<object, ChainSet>();
+function drawnChains(s: Session): ChainSet {
+  const S = s as unknown as { sheet: Sheet; docTexts: string[]; fileNames: Map<string, string> };
+  const hit = refMemo.get(S.sheet);
+  if (hit) return hit;
+  const prev = process.env.MOOD_F2_OFF;
+  process.env.MOOD_F2_OFF = '1';
+  try {
+    const set = buildChainsDetailed(
+      S.sheet,
+      {
+        joinGapMm: PATIMPORT.joinGapMm,
+        joinAngleDeg: PATIMPORT.joinAngleDeg,
+        joinLateralMm: PATIMPORT.joinLateralMm,
+      },
+      { extraTexts: S.docTexts, fileNames: S.fileNames },
+    ).set;
+    refMemo.set(S.sheet, set);
+    return set;
+  } finally {
+    if (prev === undefined) delete process.env.MOOD_F2_OFF;
+    else process.env.MOOD_F2_OFF = prev;
+  }
+}
+
+/** A corner's own closure (stub, ramp, extended edge) lies on its edges' tangents within this. */
+const KINK_EXT_MM = 12;
+const KINK_OFF_MM = 0.5;
+const KINK_RUN_MM = 2;
+
+/**
+ * (4) KINKS (MOOD-DIAG §4 Ф2): stretches longer than 2 mm where the outline is more than 0.5 mm
+ * off its own pen's lines — the key sample's look — and off their end tangents carried 12 mm (a
+ * corner closed by its own stub, ramp or extended edges lies on them; a step onto a neighbouring
+ * size's line does not). Count of such stretches per outline.
+ */
+function kinksOf(
+  outer: PtMm[],
+  set: ChainSet,
+  styles: Map<number, Style>,
+  look: Look,
+  /** Where each kink is ("x,y/length"), when given. */
+  at?: string[],
+): number {
+  const at0: string[] = [];
+  const b = bboxOf(outer);
+  const pad = KINK_EXT_MM + 2;
+  const segs: [PtMm, PtMm][] = [];
+  const grid = new SegGrid(4);
+  const add = (a: PtMm, c: PtMm) => {
+    grid.addSeg(segs.length, 0, a, c);
+    segs.push([a, c]);
+  };
+  for (const c of set.chains) {
+    if (c.pts.length < 2) continue;
+    const cb = bboxOf(c.pts);
+    if (
+      cb.maxX < b.minX - pad ||
+      cb.minX > b.maxX + pad ||
+      cb.maxY < b.minY - pad ||
+      cb.minY > b.maxY + pad
+    )
+      continue;
+    const l = chainLook(c, styles);
+    if (!l || !looseSame(l, look)) continue;
+    const pts = c.closed ? [...c.pts, c.pts[0]] : c.pts;
+    for (let i = 0; i + 1 < pts.length; i++) add(pts[i], pts[i + 1]);
+    if (c.closed || c.lengthMm < 3) continue;
+    for (const end of [0, 1] as const) {
+      const p = end ? pts[pts.length - 1] : pts[0];
+      // the tangent from ~2 mm back
+      let k = end ? pts.length - 1 : 0;
+      const step = end ? -1 : 1;
+      let acc = 0;
+      while (k + step >= 0 && k + step < pts.length && acc < 2) {
+        acc += Math.hypot(pts[k].x - pts[k + step].x, pts[k].y - pts[k + step].y);
+        k += step;
+      }
+      const q = pts[k];
+      const L = Math.hypot(p.x - q.x, p.y - q.y);
+      if (L < 1e-6) continue;
+      add(p, {
+        x: p.x + ((p.x - q.x) / L) * KINK_EXT_MM,
+        y: p.y + ((p.y - q.y) / L) * KINK_EXT_MM,
+      });
+    }
+  }
+  // samples every 0.25 mm; off = farther than 0.5 mm from every own segment
+  const off: boolean[] = [];
+  const STEP = 0.25;
+  for (let i = 0; i < outer.length; i++) {
+    const p = outer[i];
+    const q = outer[(i + 1) % outer.length];
+    const L = Math.hypot(q.x - p.x, q.y - p.y);
+    for (let t = 0; t < L; t += STEP) {
+      const x = { x: p.x + ((q.x - p.x) * t) / L, y: p.y + ((q.y - p.y) * t) / L };
+      let on = false;
+      grid.near(x, KINK_OFF_MM, (s) => {
+        if (!on && segNearest(x, segs[s][0], segs[s][1]).d <= KINK_OFF_MM) on = true;
+      });
+      off.push(!on);
+      at0.push(`${x.x.toFixed(0)},${x.y.toFixed(0)}`);
+    }
+  }
+  const n = off.length;
+  const first = off.indexOf(false);
+  if (first < 0) return n ? 1 : 0;
+  let kinks = 0;
+  let run = 0;
+  for (let k = 1; k <= n; k++) {
+    if (off[(first + k) % n]) run++;
+    else {
+      if (run * STEP > KINK_RUN_MM) {
+        kinks++;
+        at?.push(`${at0[(first + k - Math.ceil(run / 2)) % n]}/${(run * STEP).toFixed(1)}`);
+      }
+      run = 0;
+    }
+  }
+  return kinks;
+}
+
 /** Per written block (scope|block): the failing block-severity checks that name it ([] = passes). */
 function blockingOf(out: StageIO['write']['out']): Map<string, string[]> {
   const by = new Map<string, string[]>();
@@ -378,9 +509,17 @@ export async function probeOne(sm: Sample): Promise<FileRec> {
   const file = resolve(DIR, sm.path);
   const card = sm.key;
   let analysis: Partial<FileRec> = {};
+  let autoK: Partial<FileRec> = {};
   const rec = await runCase(
     { id: `mood:${sm.id}`, group: 'pdf', files: [file], card } as Parameters<typeof runCase>[0],
     {
+      onAutoPieces: (s: Session, pc) => {
+        try {
+          autoK = autoKinks(sm, s, pc.families);
+        } catch (e) {
+          autoK = { autoKinkError: String((e as Error)?.stack ?? e).slice(0, 400) };
+        }
+      },
       onWrite: (s: Session, out) => {
         try {
           analysis = analyse(sm, s, out);
@@ -398,6 +537,7 @@ export async function probeOne(sm: Sample): Promise<FileRec> {
     gen: sm.gen,
     verdict: rec.verdict,
     reason: rec.reason ?? (rec.error as string | undefined)?.split('\n')[0],
+    ...(rec.error ? { error: rec.error } : {}),
     encoding: (rec.sizes as { encoding?: string } | undefined)?.encoding,
     found: ((rec.sizes as { found?: string[] } | undefined)?.found ?? []).length,
     keyN: sm.key.length,
@@ -406,9 +546,91 @@ export async function probeOne(sm: Sample): Promise<FileRec> {
     closed: auto?.closedCandidates ?? 0,
     ms: rec.totalMs,
     wrongPassing: 0,
+    ...autoK,
     ...analysis,
   };
   return r;
+}
+
+/**
+ * (4) over every CLOSED candidate of the first automatic pieces run (written or not — a file the
+ * wizard stops on writes nothing): kinks per closed outline whose label has a key sample.
+ */
+function autoKinks(sm: Sample, s: Session, families: PieceFamily[]): Partial<FileRec> {
+  const S = s as unknown as {
+    sheet: Sheet;
+    wallSet: ChainSet | null;
+    chains: ChainSet;
+    run: { sizes: { label: string }[] } | null;
+  };
+  const set = S.wallSet ?? S.chains;
+  const styles = new Map(S.sheet.styles.map((x) => [x.id, x]));
+  const key = readKey(S.sheet, set, sm.key, styles);
+  let judged = 0;
+  let kinks = 0;
+  let outlines = 0;
+  const per: string[] = [];
+  const at: string[] = [];
+  for (const f of families)
+    for (const c of f.candidates) {
+      if (c.outcome !== 'closed' || c.outer.length < 3) continue;
+      const label = canon(S.run?.sizes[c.rank]?.label ?? '');
+      const row = key.find((r) => r.label === label && r.look);
+      if (!row?.look) continue;
+      const where: string[] = [];
+      const k = kinksOf(c.outer, drawnChains(s), styles, row.look, where);
+      judged++;
+      kinks += k;
+      if (k) outlines++;
+      per.push(`${f.seed}:${label}:${k}`);
+      if (k) at.push(`${f.seed}:${label}:r${c.rank} ${where.join(' ')}`);
+    }
+  // MOOD_DUMP=<dir>: the first automatic pieces run as the diagnosis scripts read it
+  const dump = process.env.MOOD_DUMP;
+  if (dump) {
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const P = (p: PtMm) => [r2(p.x), r2(p.y)];
+    const w = (k: string, v: unknown) =>
+      writeFileSync(resolve(dump, `${sm.id}-${k}.json`), JSON.stringify(v));
+    w('rawchains', {
+      styles: S.sheet.styles,
+      texts: [],
+      chains: set.chains.map((c) => ({
+        style: c.style,
+        len: r2(c.lengthMm),
+        closed: c.closed,
+        pts: c.pts.map(P),
+      })),
+    });
+    w('chains', {
+      classes: set.classes.map((k) => ({
+        id: k.id,
+        role: k.role,
+        sizeLabel: k.sizeLabel,
+        chains: k.chains,
+      })),
+    });
+    w('rec', { sizes2: { labels: (S.run?.sizes ?? []).map((z, r) => `${z.label}:r${r}`) } });
+    w(
+      'pieces',
+      families.map((f) => ({
+        seed: f.seed,
+        cands: f.candidates.map((c) => ({
+          rank: c.rank,
+          outcome: c.outcome,
+          outer: c.outer.map(P),
+          walls: c.walls,
+        })),
+      })),
+    );
+  }
+  return {
+    autoKinkJudged: judged,
+    autoKinks: kinks,
+    autoKinkOutlines: outlines,
+    autoKinkPer: per,
+    autoKinkAt: at,
+  };
 }
 
 function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
@@ -465,7 +687,8 @@ function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<
       seenCand.add(k);
       const label = canon(z.sourceLabel || z.token);
       const sh = sharesOn(cand.outer, set, styles, key);
-      const own = key.some((r) => r.label === label && r.look) ? sh.get(label) ?? 0 : null;
+      const ownRow = key.find((r) => r.label === label && r.look);
+      const own = ownRow ? sh.get(label) ?? 0 : null;
       let best: string | null = null;
       let bestShare = 0;
       for (const [l, v] of sh)
@@ -482,6 +705,7 @@ function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<
         by: [...new Set(blocking.get(`${sc.target.scopeKey}|${mb.block}`) ?? ['?'])],
         areaCm2: Math.round(Math.abs(signedArea(cand.outer)) / 100),
         pen: { own: own == null ? null : +own.toFixed(2), best, bestShare: +bestShare.toFixed(2) },
+        kinks: ownRow?.look ? kinksOf(cand.outer, drawnChains(s), styles, ownRow.look) : null,
         wrong: [],
       };
       if (uni) t.unverified = 'one-size piece';
@@ -572,6 +796,11 @@ function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<
     passingUnverified: passing.filter((t) => !t.wrong.length && t.unverified).length,
     wrongPassing: wrongPassing.length,
     wrongBlocked: truths.filter((t) => !t.passes && t.wrong.length).length,
+    // (4) kinks over the written outlines judged by their own pen, and over the passing ones
+    kinkJudged: truths.filter((t) => t.kinks != null).length,
+    kinks: truths.reduce((a, t) => a + (t.kinks ?? 0), 0),
+    kinkOutlines: truths.filter((t) => (t.kinks ?? 0) > 0).length,
+    kinksPassing: passing.reduce((a, t) => a + (t.kinks ?? 0), 0),
     // pen-verified right blocks the gate holds back, by check
     rightBlockedBy: truths
       .filter((t) => !t.passes && !t.wrong.length && !t.unverified)
@@ -584,7 +813,7 @@ function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<
       .map((t) => `${t.block}[${t.label}]: ${t.wrong.join('; ')}`),
     truth: truths.map(
       (t) =>
-        `${t.block}${t.passes ? '✓' : `✗${t.by.join('+')}`} ${t.label} own=${t.pen.own} best=${t.pen.best}:${t.pen.bestShare}${t.wrong.length ? ` WRONG ${t.wrong.join('; ')}` : ''}`,
+        `${t.block}${t.passes ? '✓' : `✗${t.by.join('+')}`} ${t.label} own=${t.pen.own} best=${t.pen.best}:${t.pen.bestShare} kinks=${t.kinks}${t.wrong.length ? ` WRONG ${t.wrong.join('; ')}` : ''}`,
     ),
   };
 }

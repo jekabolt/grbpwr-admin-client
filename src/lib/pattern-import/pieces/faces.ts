@@ -67,7 +67,14 @@ import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classi
 import { chainView, faceCapBox, partAt, sheetView } from '../assemble/composite';
 import { drawPolyline, exterior, Grid } from './raster';
 import type { WallItem } from './snap';
-import { itemsOf, lonePortions, rescuedIgnored, sheetModule, wallModel } from './walls';
+import {
+  cornerSources,
+  itemsOf,
+  lonePortions,
+  rescuedIgnored,
+  sheetModule,
+  wallModel,
+} from './walls';
 
 export type { FaceJunk };
 
@@ -187,7 +194,7 @@ export function faceWalls(
     1.5,
     15,
     sheetModule(sheet),
-    pageMarginIds(set.chains, sheet.poses),
+    new Set([...pageMarginIds(set.chains, sheet.poses), ...cornerSources(model)]),
   );
   const ids = new Set<ChainId>([...model.common, ...model.byRank.flat()]);
   const items: WallItem[] = [

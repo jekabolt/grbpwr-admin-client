@@ -246,6 +246,7 @@ function toChainSet(
     orphans: rec.orphans,
     ambiguities: noSizes ? rec.ambiguities.filter((a) => !sizeQs.has(a.kind)) : rec.ambiguities,
     warnings,
+    ...(rec.cornerWalls?.length && !noSizes ? { cornerWalls: rec.cornerWalls } : {}),
   };
 }
 
