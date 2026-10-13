@@ -262,10 +262,9 @@ export function wallModel(
       ? labelRanks(set, run, texts)
       : new Map<ChainId, number>();
   for (const [id, r] of labelled) byRank[r].push(id);
+  const guard = mode === 'graded' && !probeOff('F4_NOLOOK') ? rankGuard(set, run, styles) : null;
   const cr =
-    mode === 'graded' && !probeOff('F4_NOCONNECT')
-      ? connectRanks(set, base, 0.5, probeOff('F4_NOLOOK') ? null : rankGuard(set, run, styles))
-      : null;
+    mode === 'graded' && !probeOff('F4_NOCONNECT') ? connectRanks(set, base, 0.5, guard) : null;
   const ranks = cr ? cr.byRank : byRank;
   // band ladders: their ticks are size ends (rank by order), never shared walls
   const notchIds = new Set(
@@ -300,9 +299,19 @@ export function wallModel(
   const owner = new Map<ChainId, number>();
   for (const k of cw.corners ?? []) for (const id of k.chains) owner.set(id, k.rank);
   const commonF = [...kept, ...folds].filter((id) => !owner.has(id));
-  const ranksF = owner.size
+  const ranks0 = owner.size
     ? ranks.map((ids, r) => ids.filter((id) => (owner.get(id) ?? r) === r))
     : ranks;
+  // MOOD Ф3.1 (R5): a line without a pen lying on an overlay is no size's and nobody's common wall
+  // (sizes/recover) — but where the sizes BELOW and ABOVE rank r both run on it, r runs there too
+  // (nested outlines: r's edge lies between theirs, and theirs coincide): a wall of those ranks
+  const brk = guard?.lookless && !probeOff('MOOD_F3_OFF') ? bracketWalls(set, ranks0, guard) : null;
+  const ranksF = brk?.size
+    ? ranks0.map((ids, r) => {
+        const add = brk.get(r);
+        return add ? [...ids, ...add.filter((id) => !ids.includes(id))] : ids;
+      })
+    : ranks0;
   return {
     mode,
     n,
@@ -1403,6 +1412,79 @@ export function overlayLines(set: ChainSet, byRank: readonly ChainId[][]): Overl
     }),
   );
   return { grid: g, pts: (id) => set.chains[id]?.pts, rank: (id) => rank.get(id) };
+}
+
+/** A bracketed overlay line: this share of its samples lie between ranks below and above r. */
+const BRACKET_SHARE = 0.8;
+
+/**
+ * MOOD Ф3.1 (R5, bracketed): the orphan lines without a pen (`guard.lookless`) that lie on an
+ * overlay (≥ 3 other sizes' lines in one place, `OVERLAY_ON_SHARE` of the line), given to each rank
+ * r for which, along `BRACKET_SHARE` of the line, the overlay holds a rank below r AND a rank above
+ * it. Two evidences: three pens prove the edge; nesting puts r's edge between two of them.
+ */
+export function bracketWalls(
+  set: ChainSet,
+  byRank: readonly ChainId[][],
+  guard: RankGuard,
+): Map<number, ChainId[]> {
+  const out = new Map<number, ChainId[]>();
+  const n = byRank.length;
+  if (n < 3 || !guard.lookless) return out;
+  let L: OverlayLines | null = null;
+  for (const id of set.orphans) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2 || !guard.lookless(id)) continue;
+    L ??= overlayLines(set, byRank);
+    const pts = c.closed ? [...c.pts, c.pts[0]] : c.pts;
+    let total = 0;
+    for (let i = 0; i + 1 < pts.length; i++) total += dist(pts[i], pts[i + 1]);
+    if (total < 1e-6) continue;
+    const step = Math.max(1, total / 400);
+    const lo: number[] = [];
+    const hi: number[] = [];
+    let m = 0;
+    let next = step / 2;
+    let s0 = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const l = dist(a, b);
+      if (l < 1e-9) continue;
+      const t = { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
+      for (; next <= s0 + l; next += step) {
+        const k = next - s0;
+        m++;
+        const ov = overlayAt({ x: a.x + t.x * k, y: a.y + t.y * k }, t, L, null);
+        if (ov.ranks.size < OVERLAY_MIN_PENS) continue;
+        const rs = [...ov.ranks];
+        lo.push(Math.min(...rs));
+        hi.push(Math.max(...rs));
+      }
+      s0 += l;
+    }
+    if (!m || lo.length < OVERLAY_ON_SHARE * m) continue;
+    for (let r = 1; r + 1 < n; r++) {
+      let k = 0;
+      for (let j = 0; j < lo.length; j++) if (lo[j] < r && hi[j] > r) k++;
+      if (k < BRACKET_SHARE * m) continue;
+      const a = out.get(r);
+      if (a) a.push(id);
+      else out.set(r, [id]);
+    }
+  }
+  return out;
+}
+
+/** MOOD Ф3: the size CLASSES' lines (by their nesting-order rank) as overlay evidence. */
+export function classOverlayLines(set: ChainSet, n: number): OverlayLines {
+  const byRank: ChainId[][] = Array.from({ length: Math.max(0, n) }, () => []);
+  for (const k of set.classes) {
+    if (k.role !== 'size') continue;
+    const r = rankOf(k);
+    if (r != null && r >= 0 && r < byRank.length) byRank[r].push(...k.chains);
+  }
+  return overlayLines(set, byRank);
 }
 
 /** Arc length from the start of a polyline to (segment i, parameter u). */

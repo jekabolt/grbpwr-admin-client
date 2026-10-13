@@ -32,6 +32,7 @@ import type {
   PieceCandidate,
   PtMm,
   Sheet,
+  Style,
 } from '../types';
 import { PATIMPORT } from '../types';
 import { drawnSeam, featuresOf } from './allowance';
@@ -259,7 +260,7 @@ export function classifyFeatures(
       pts: f.pts,
       closed: false,
       origin: 'detected',
-      ranges: set.chains[f.chain]?.ranges ?? [],
+      ranges: set.chains[f.chains[0]]?.ranges ?? [],
       confidence: 0.9,
       label: 'fold line',
     } satisfies InternalFeature);
@@ -644,13 +645,28 @@ function bestGrain(
   // near both middles at ~90° ("Cut 1 on bias", either arm is the grain). The cross is one evidence;
   // a grain word labelling either arm, or a bias word among the piece's own texts, the second.
   const crossOf = new Map<GrainLine, GrainLine>();
+  // one look, not one style id: a pen re-declared under another clip is the same pen
+  const styleById = new Map((sheet?.styles ?? []).map((st) => [st.id, st]));
+  const sameLook = (a?: number, b?: number) => {
+    if (a === undefined || b === undefined) return false;
+    if (a === b) return true;
+    const x = styleById.get(a);
+    const y = styleById.get(b);
+    if (!x || !y) return false;
+    const rgb = (z: Style) => (z.strokeRgb ?? [-1, -1, -1]).join(',');
+    return (
+      rgb(x) === rgb(y) &&
+      Math.abs(x.widthMm - y.widthMm) <= 0.05 &&
+      (x.dash ?? []).join(',') === (y.dash ?? []).join(',')
+    );
+  };
   const single = live.filter((l) => !l.dashed && l.ids.length === 1);
   for (let i = 0; i < single.length; i++)
     for (let j = i + 1; j < single.length; j++) {
       const p = single[i];
       const q = single[j];
       if (crossOf.has(p) || crossOf.has(q)) continue;
-      if (set.chains[p.ids[0]]?.style !== set.chains[q.ids[0]]?.style) continue;
+      if (!sameLook(set.chains[p.ids[0]]?.style, set.chains[q.ids[0]]?.style)) continue;
       if (Math.abs(p.len - q.len) > CROSS_LEN_TOL * Math.max(p.len, q.len)) continue;
       if (lineAngleDiff(angleDeg(p.a, p.b), angleDeg(q.a, q.b)) < CROSS_MIN_DEG) continue;
       const x = crossing(p.a, p.b, q.a, q.b);

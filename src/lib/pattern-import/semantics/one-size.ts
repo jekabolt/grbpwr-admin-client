@@ -24,7 +24,7 @@ import type {
 import { parseSizeToken } from '../sizes/tokens';
 import { OVERLAY_MIN_PENS, overlayAt } from '../sizes/overlay';
 import { chainLook, onPen, rankLooks } from '../pieces/identity';
-import { overlayLines } from '../pieces/walls';
+import { classOverlayLines } from '../pieces/walls';
 import { SegGrid, segNearest } from '../pieces/geom';
 import { closestOnPolyline, dist, pointInPolygon } from './geom';
 
@@ -40,6 +40,9 @@ const DRAWN_SHARE = 0.9;
 const BESIDE_MM = 15;
 /** …and off it by more than this, mm. */
 const OFF_MM = 1.5;
+/** A size drawing this share of the outline (and no more) draws a part of it only. */
+const PART_MIN = 0.3;
+const PART_MAX = 0.85;
 
 const canon = (s: string) => s.trim().toUpperCase().replace(/\s+/g, '');
 
@@ -78,18 +81,16 @@ export function oneSizeRead(
   const { identity, looks } = rankLooks(set, run, styles);
   if (!identity) return null;
   const outer = cand.outer;
-  const byRank: ChainId[][] = run.sizes.map(() => []);
   const rankOfChain = new Map<ChainId, number>();
   const roleOf = new Map<ChainId, string>();
   for (const k of set.classes) {
     for (const id of k.chains) roleOf.set(id, k.role);
     if (k.role !== 'size') continue;
     const r = k.evidence.find((e) => e.kind === 'nesting-order');
-    if (!r || r.kind !== 'nesting-order' || r.rank < 0 || r.rank >= byRank.length) continue;
-    byRank[r.rank].push(...k.chains);
+    if (!r || r.kind !== 'nesting-order' || r.rank < 0 || r.rank >= run.sizes.length) continue;
     for (const id of k.chains) rankOfChain.set(id, r.rank);
   }
-  const L = overlayLines(set, byRank);
+  const L = classOverlayLines(set, run.sizes.length);
   // every chain near the outline, for the nearest-line reading
   const b = cand.bbox;
   const pad = BESIDE_MM + 2;
@@ -120,10 +121,23 @@ export function oneSizeRead(
   // ── the drawing: what lies under every 2 mm of the outline ──
   const smp = ringSamples(outer, 2);
   if (!smp.length) return null;
+  const n = smp.length;
   let overlay = 0;
   let keyless = 0;
   const single = new Map<number, number>();
+  /** per rank: the samples its own lines run on */
+  const cover = new Map<number, number>();
   for (const { p, t } of smp) {
+    const here = new Set<number>();
+    grid.near(p, 0.6, (id, s) => {
+      const r = rankOfChain.get(id);
+      if (r === undefined || here.has(r)) return;
+      const q = set.chains[id].pts;
+      const a = q[s];
+      const z = s + 1 < q.length ? q[s + 1] : q[0];
+      if (a && z && segNearest(p, a, z).d <= 0.6) here.add(r);
+    });
+    for (const r of here) cover.set(r, (cover.get(r) ?? 0) + 1);
     if (overlayAt(p, t, L, null).ranks.size >= OVERLAY_MIN_PENS) {
       overlay++;
       continue;
@@ -144,7 +158,6 @@ export function oneSizeRead(
     if (pr.length === 1) single.set(pr[0], (single.get(pr[0]) ?? 0) + 1);
     else if (!pr.length && roleOf.get(id) !== 'size') keyless++;
   }
-  const n = smp.length;
   const onePen = [...single].sort((x, y) => y[1] - x[1])[0];
   const drawn =
     overlay / n >= DRAWN_SHARE
@@ -156,6 +169,16 @@ export function oneSizeRead(
           : null;
   const oneSizePen =
     !drawn && onePen && onePen[1] / n >= DRAWN_SHARE ? run.sizes[onePen[0]]?.label ?? null : null;
+  // ── against: a size whose lines run on part of the outline and stop (its piece is shorter or
+  //    narrower: cirrus's waistband, each size's sides ending at its own length) ──
+  for (const [r, k] of cover) {
+    const f = k / n;
+    if (f >= PART_MIN && f <= PART_MAX)
+      return {
+        kind: 'graded',
+        why: `size ${run.sizes[r]?.label ?? r} draws ${Math.round(100 * f)} % of the outline and stops`,
+      };
+  }
   // ── against: a size's own line beside the outline, off it ──
   for (const [id, r] of rankOfChain) {
     const c = set.chains[id];
