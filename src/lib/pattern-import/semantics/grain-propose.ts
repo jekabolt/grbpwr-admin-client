@@ -33,6 +33,7 @@ const DRAWN_WHY: Partial<Record<GrainEvidenceKind, string>> = {
   word: 'line by a grain word',
   ungraded: 'line in every size',
   dashes: 'dashed line',
+  cross: 'bias cross',
 };
 
 export function drawnProposal(g: GrainFeature): GrainProposal & { evidence: GrainEvidenceKind[] } {

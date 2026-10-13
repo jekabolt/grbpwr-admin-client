@@ -33,6 +33,7 @@ import { cosine, describeSig, type Signature } from '../chains/motif';
 import { type Group } from './align';
 import { ranksFromCoords, seriate } from './seriate';
 import { closeCorners, type CornerWall } from './corners';
+import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
@@ -1685,6 +1686,33 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     }
     return n >= 1;
   };
+  // MOOD Ф3 (R5): a line lying on an OVERLAY — the lines of ≥ 3 different sizes in one place, each
+  // in its own pen (sizes/overlay.ts) — whose look names no size is not common: a common line is a
+  // wall of every size, the sizes that do not run there included (Mood's 00/4/8/12 before the key
+  // was read whole). It stays without a size and the legend step asks (the 'unassigned' question).
+  const overlayRun = (encoding === 'declared-dash' || !!legendId) && !debugFlag('MOOD_F3_OFF');
+  let overlay: OverlayLines | null = null;
+  const onOverlay = (i: number) => {
+    if (!overlayRun) return false;
+    if (!overlay) {
+      const g = new SegGrid(2);
+      for (const id of rankOf.keys()) {
+        const q = chains[id].pts;
+        g.addPolyline(id, q);
+        if (chains[id].closed && q.length > 2) g.addSeg(id, q.length - 1, q[q.length - 1], q[0]);
+      }
+      overlay = { grid: g, pts: (id) => chains[id]?.pts, rank: (id) => rankOf.get(id) };
+    }
+    return overlayShare(chains[i].pts, overlay) >= OVERLAY_ORPHAN_SHARE;
+  };
+  const overlaid: number[] = [];
+  /** common, unless the line lies on an overlay of other sizes' lines (R5): then an orphan */
+  const toCommon = (i: number) => {
+    if (onOverlay(i)) {
+      orphans.push(i);
+      overlaid.push(i);
+    } else common.push(i);
+  };
   chains.forEach((c, i) => {
     if (rankOf.has(i) || decided.has(i)) return;
     if (sharedFrom.has(i)) {
@@ -1704,7 +1732,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       // never beside another size line: not a graded line at all — an outline drawn once in a
       // size's style when it meets other lines, else a free internal line (grain drawn in w0.35)
       if (!sectioned.has(i)) {
-        if (touchesOthers(i)) common.push(i);
+        if (touchesOthers(i)) toCommon(i);
         else internal.push(i);
       } else if (
         besideRanked.has(i) ||
@@ -1726,9 +1754,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       st.widthMm >= contourWidth * 0.85 &&
       !(st.fill && st.widthMm === 0)
     )
-      common.push(i);
+      toCommon(i);
     else internal.push(i);
   });
+  if (overlaid.length)
+    diag.overlayOrphans = `${overlaid.length}/${(lenOf(chains, overlaid) / 1000).toFixed(2)}m`;
 
   // ── classes ─────────────────────────────────────────────────────────────────────────────────
   const sizes: SizeClassOut[] = [];
@@ -2247,6 +2277,9 @@ function longestMonotone(r: number[]): Set<number> {
 }
 
 /** Probe-only diagnostics (node); the browser worker has no `process`. */
+/** MOOD Ф3 (R5): a line this much (by length) on an overlay of other sizes' lines is on it. */
+const OVERLAY_ORPHAN_SHARE = 0.8;
+
 function debugFlag(k: string): boolean {
   return typeof process !== 'undefined' && !!process.env?.[k];
 }

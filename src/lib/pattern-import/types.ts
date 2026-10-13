@@ -967,6 +967,8 @@ export type ContinuityEdge = {
   chains: ChainId[];
   pts: PtMm[];
   bracket?: boolean;
+  /** MOOD Ф3.2: an R1 stretch walked along an overlay of ≥ 3 other sizes' lines. */
+  overlay?: boolean;
 };
 /** P1 · D3: the verdict that kept a continuity closure (recorded, re-checked by gate G21). */
 export type ContinuityVerdict = {
@@ -1121,6 +1123,9 @@ export type GrainEvidenceKind =
   | 'ungraded'
   // A1: 2–6 collinear dashes of one style read as one line (a dashed grainline)
   | 'dashes'
+  // MOOD Ф3.4: a bias cross — two straight lines of one look crossing near both middles at ~90°
+  // ("Cut 1 on bias": either arm is the grain); the other arm is the same mark, not an internal line
+  | 'cross'
   // A1: proposed from the outline alone (fold line, symmetry axis, straight edge, strip axis)
   | 'geometry'
   // A1: the operator accepted a proposal (with the proposal's own evidence beside it)
@@ -1305,6 +1310,8 @@ export type SemanticsInput = {
           | 'aiConfidence'
           | 'piecesPerGarment'
           | 'fused'
+          // MOOD Ф5: the operator's word on one outline in every size (true: one piece for all)
+          | 'ungraded'
         >
       >
     >
@@ -1493,7 +1500,18 @@ export type BlockReason =
   /** "On fold" declared/detected but no straight fold edge to mirror across — unfold by hand. */
   | 'fold-unresolved'
   /** The sheet says "fold" but no edge is proven (E1a, D3): pick the edge or say "not a fold". */
-  | 'fold-question';
+  | 'fold-question'
+  /**
+   * MOOD Ф3.3 (R11): a facing fold line across the piece is read in some sizes only, or a size's
+   * outline stops at it while its lines go on beyond (the facing cut off): fix the outline on the
+   * pieces step, or say "not a fold" (exported as drawn).
+   */
+  | 'facing-fold'
+  /**
+   * MOOD Ф5: every size closes on one outline, but only one evidence says it is one piece for all
+   * sizes (drawn once / by every pen in one place, a label naming no size): the operator says.
+   */
+  | 'one-size-question';
 
 export type DetectAllowanceFn = (sheet: Sheet, families: PieceFamily[]) => AllowanceDecision;
 export type BuildPieceSpecsFn = (input: SemanticsInput, progress?: Progress) => SemanticsOutput;

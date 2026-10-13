@@ -62,12 +62,15 @@ import {
   itemsOf,
   landingPlugs,
   lonePortions,
+  overlayLines,
   rescuedIgnored,
   cornerSources,
   sheetModule,
   wallModel,
   type WallModel,
 } from './walls';
+import { rankLooks } from './identity';
+import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
 
@@ -90,6 +93,8 @@ export type FillDiag = {
   sharedRank?: number;
   /** Seeds whose piece is drawn identically in every size layer (equal areas accepted). */
   ungraded?: number[];
+  /** MOOD Ф3.2: continuity walls walked along an overlay (built, before the verdicts). */
+  overlayWalls?: number;
   /** Seeds whose family was ranked upside down in its piece and re-ranked (areas shrank). */
   reversed?: number[];
   /** Candidates closed by derived bridges (family-corroborated). */
@@ -425,6 +430,11 @@ function contOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.P1_NOCONT;
 }
 
+/** Probe switch (node only): MOOD_F3_OFF turns the Ф3 overlay readings off (the "before" column). */
+function f3Off(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.MOOD_F3_OFF;
+}
+
 /** Share of a polyline (sampled every 0.5 mm) within `tol` of a closed outline. */
 function alongShare(pts: readonly PtMm[], outer: readonly PtMm[], tol: number): number {
   if (pts.length < 2 || outer.length < 3) return 0;
@@ -532,9 +542,18 @@ function fillOneSheet(
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = solved
-    ? SOLVER_MODEL
-    : wallModel(set, run, sheet.texts, new Map(sheet.styles.map((s) => [s.id, s])));
+  const styleMap = new Map(sheet.styles.map((s) => [s.id, s]));
+  const model = solved ? SOLVER_MODEL : wallModel(set, run, sheet.texts, styleMap);
+  // MOOD Ф3.2: the size lines as overlay evidence for continuity — identity runs only (a rank by
+  // nesting alone proves no pen); built on first use
+  let overlayEv: OverlayLines | null | undefined;
+  const overlayOf = () =>
+    overlayEv !== undefined
+      ? overlayEv
+      : (overlayEv =
+          model.mode === 'graded' && !f3Off() && rankLooks(set, run, styleMap).identity
+            ? overlayLines(set, model.byRank)
+            : null);
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
@@ -708,7 +727,10 @@ function fillOneSheet(
                       const reranked = itemsOf(set, rerank().model.byRank[r] ?? []);
                       contWalls = continuityWalls(set, model, r, plugged.items, contSkip(excl), {
                         beside: reranked,
+                        overlay: overlayOf(),
                       });
+                      const ov = contWalls.filter((w) => w.overlay).length;
+                      if (ov) diag.overlayWalls = (diag.overlayWalls ?? 0) + ov;
                       return contWalls.length
                         ? buildRank(box, cell, [...plugged.items, ...contWalls])
                         : plugged;
@@ -961,6 +983,7 @@ function fillOneSheet(
           chains: [...w.chains],
           pts: w.pts,
           ...(w.bracket ? { bracket: true } : {}),
+          ...(w.overlay ? { overlay: true } : {}),
         }));
       }
       cand.areaMm2 = Math.abs(signedArea(outer));
@@ -1599,6 +1622,55 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJ
     });
   }
   const clean = new Set(pairs.flatMap((p) => [p.lo, p.hi]));
+  // MOOD Ф3.2 · Ф5: ONE outline in every size that closes on its own lines (a cuff, a strap drawn by
+  // every size in one place) — no growth to anchor on. A closure walked along the overlay of those
+  // sizes' pens is kept when it IS that outline: within 1 mm (Hausdorff) and 0.1 % in area of ≥ 2
+  // anchors, every stretch of it on the overlay. Anything else is judged as before (and refused).
+  const flat =
+    anchors.length >= 2 &&
+    anchors.every((x) => Math.abs(x.areaMm2 - anchors[0].areaMm2) <= 5e-4 * anchors[0].areaMm2);
+  if (clean.size < 2 && flat) {
+    const r3f = (v: number) => Math.round(v * 1000) / 1000;
+    const kOfF = (c: PieceCandidate) => perimeterOf(c.outer) / Math.sqrt(Math.max(1, c.areaMm2));
+    for (const c of conts) {
+      if (refused.has(c.rank)) continue;
+      if (!c.continuity?.every((e) => e.overlay)) {
+        refused.set(
+          c.rank,
+          'the sizes that close on their own lines are one outline: only a closure along the overlay of their pens can be that outline',
+        );
+        continue;
+      }
+      const checks: ContinuityVerdict['checks'] = [];
+      let why: string | null = null;
+      for (const n of anchors) {
+        const h = hausdorffMm(c.outer, n.outer);
+        const hu = huDistance(c.outer, n.outer);
+        const g =
+          Math.log(c.areaMm2 / Math.max(1, n.areaMm2)) / Math.max(1, Math.abs(c.rank - n.rank));
+        const dk = Math.abs(Math.log(kOfF(c) / kOfF(n)));
+        if (h > 1 || Math.abs(g) > 1e-3 || hu > 0.05 || dk > CONT_K_MAX) {
+          why = `not the one outline of rank ${n.rank}: ${h.toFixed(1)} mm off, ${(100 * (Math.exp(g) - 1)).toFixed(2)} % in area`;
+          break;
+        }
+        checks.push({
+          vs: n.rank,
+          steps: Math.abs(c.rank - n.rank),
+          hMm: r3f(h),
+          hAllowMm: 1,
+          hu: r3f(hu),
+          huAllow: 0.05,
+          growth: r3f(g),
+          band: [-0.001, 0.001],
+          dk: r3f(dk),
+          kMax: CONT_K_MAX,
+        });
+      }
+      if (why) refused.set(c.rank, why);
+      else kept.set(c.rank, { anchors: anchors.map((x) => x.rank), checks });
+    }
+    return { refused, kept };
+  }
   if (clean.size < 2) {
     for (const c of conts)
       if (!refused.has(c.rank))

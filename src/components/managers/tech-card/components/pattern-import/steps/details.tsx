@@ -82,6 +82,8 @@ const REASON: Record<string, string> = {
   'size-unmapped': 'size not mapped',
   'fold-unresolved': 'fold edge not found',
   'fold-question': 'fold?',
+  'facing-fold': 'facing fold line?',
+  'one-size-question': 'one piece for all sizes?',
   'sizes-not-distinguished': 'sizes drawn alike',
   'size-count': 'size count open',
   'grade-ambiguous': 'two size layouts fit',
@@ -440,6 +442,36 @@ export function DetailsStep({
           <ChipRow>
             <Chip onClick={() => notFold(seed)}>not a fold</Chip>
           </ChipRow>
+        );
+        break;
+      // MOOD Ф3.3: a facing fold line read in some sizes only, or a facing cut off at it
+      case 'facing-fold':
+        body = (
+          <>
+            <ChipRow>
+              {onFixInPieces && <Chip onClick={() => fixInPieces(seed)}>← fix in pieces</Chip>}
+              <Chip onClick={() => notFold(seed)}>not a fold — export as drawn</Chip>
+            </ChipRow>
+            {say(
+              'close the facing of every size on the pieces step, or say the line is not a fold — then the outline is cut exactly as drawn',
+            )}
+          </>
+        );
+        break;
+      // MOOD Ф5: every size closes on one outline, one evidence says it is one piece for all
+      case 'one-size-question':
+        body = (
+          <>
+            <ChipRow>
+              <Chip onClick={() => override(seed, { ungraded: true })}>
+                one piece for all sizes
+              </Chip>
+              {onFixInPieces && (
+                <Chip onClick={() => fixInPieces(seed)}>sizes differ — fix in pieces</Chip>
+              )}
+            </ChipRow>
+            {say('one piece for all sizes: written once, cut alike in every size')}
+          </>
         );
         break;
       case 'grammar':

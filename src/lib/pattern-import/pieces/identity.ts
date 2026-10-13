@@ -209,7 +209,11 @@ export function rankLooks(
  * line, a chain too short or irregular for a rhythm) proves nothing either way: continuity stays
  * as it was, and gate G22 holds a rank of unknown pen. Null when the run is no identity run.
  */
-export type RankGuard = { ok: (id: ChainId, r: number) => boolean };
+export type RankGuard = {
+  ok: (id: ChainId, r: number) => boolean;
+  /** The chain's look names no pen (MOOD Ф3 R5: such a line on an overlay moves nowhere). */
+  lookless?: (id: ChainId) => boolean;
+};
 
 export function rankGuard(
   set: ChainSet,
@@ -233,6 +237,7 @@ export function rankGuard(
       const cl = lookOf(id);
       return !rl?.length || !cl || onPen(cl, rl);
     },
+    lookless: (id) => !lookOf(id),
   };
 }
 
