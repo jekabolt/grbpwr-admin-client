@@ -50,7 +50,7 @@ const MAX_CANDS = 1500;
 /** Strip sides: walked this far at most, in steps, gaps up to SIDE_GAP_MM bridged, mm. */
 const STRIP_MAX_MM = 3000;
 const SIDE_STEP_MM = 2;
-const SIDE_GAP_MM = 12;
+const SIDE_GAP_MM = 6;
 /** Beside points: this far outside the strip's side lines, mm. */
 const BESIDE_MM = 4;
 /** Body / far probe points: this far off the tick's middle, mm. */
@@ -360,7 +360,12 @@ export function endTicks(
       sideGrid.near(p, 1.2, (id, i) => {
         if (hit || id === c.id) return;
         const q = set.chains[id].pts;
-        if (q[i + 1] && segNearest(p, q[i], q[i + 1]).d <= 1.2) hit = true;
+        if (!q[i + 1]) return;
+        // a side line runs along the strip (a cross line over the sample is no side)
+        const d = sub(q[i + 1], q[i]);
+        const dl = Math.hypot(d.x, d.y);
+        if (dl < 1e-6 || Math.abs(dot(d, c.nu)) / dl < 0.98) return;
+        if (segNearest(p, q[i], q[i + 1]).d <= 1.2) hit = true;
       });
       return hit;
     };

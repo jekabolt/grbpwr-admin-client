@@ -728,10 +728,12 @@ function fillOneSheet(
         if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the seed lies past r's end`);
         return null;
       }
-      const part = new Uint8Array(mask.length);
+      // r keeps the body side: the rest of the box leaves the region, in place (regionAt's mask is
+      // a fresh array of this call alone)
+      const part = mask;
       for (let y = 0; y < H; y++) {
         const row = (y + bb.y0) * gg.W + bb.x0;
-        for (let x = 0; x < W; x++) if (local[y * W + x]) part[row + x] = 1;
+        for (let x = 0; x < W; x++) if (!local[y * W + x]) part[row + x] = 0;
       }
       mask = part;
     }
