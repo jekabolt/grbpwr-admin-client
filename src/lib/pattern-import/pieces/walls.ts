@@ -22,6 +22,7 @@ import type {
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
 import { chainLook, onPen, rankGuard, rankLooks, type RankGuard } from './identity';
 import type { WallItem } from './snap';
+import { endTicks, type EndTick } from './ticks';
 import {
   OVERLAY_MIN_PENS,
   overlayAt,
@@ -59,6 +60,8 @@ export type WallModel = {
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
   /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges — walls of `rank`. */
   corners?: { rank: number; pts: PtMm[]; chains: ChainId[] }[];
+  /** MOOD TICKS: a size's proven end tick across a strip — a knife of its rank (pieces/ticks.ts). */
+  endTicks?: EndTick[];
 };
 
 /**
@@ -312,6 +315,10 @@ export function wallModel(
         return add ? [...ids, ...add.filter((id) => !ids.includes(id))] : ids;
       })
     : ranks0;
+  // MOOD TICKS: each size's end tick across a strip, read as that size's end (≥ 2 evidences) — a
+  // knife of its rank in the fill; the stretches carried past a drawn tick are derived band cuts
+  // there (G15), never walls
+  const ticks = mode === 'graded' ? endTicks(set, run, ranksF, styles) : [];
   return {
     mode,
     n,
@@ -329,6 +336,7 @@ export function wallModel(
     bandTicks: bands.size ? bands : undefined,
     bandEdges: band.edges.size ? band.edges : undefined,
     bandCuts: band.cuts.length ? band.cuts : undefined,
+    ...(ticks.length ? { endTicks: ticks } : {}),
     fileOfRank,
   };
 }

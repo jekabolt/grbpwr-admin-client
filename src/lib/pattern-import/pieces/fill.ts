@@ -40,6 +40,7 @@ import {
   flood,
   Grid,
   openMask,
+  maskBox,
   regionOf,
   splitByCells,
   traceOuter,
@@ -633,6 +634,130 @@ function fillOneSheet(
   const cornerItems = (r: number): WallItem[] =>
     (model.corners ?? []).filter((c) => c.rank === r).map((c) => ({ chain: -4, pts: c.pts }));
 
+  // MOOD TICKS: each size's proven end tick across a strip (pieces/ticks.ts)
+  const endTicks = model.endTicks ?? [];
+  const ticksDebug = typeof process !== 'undefined' && !!process.env?.MOOD_TICKS_DEBUG;
+  const tickItems = (r: number): WallItem[] => [
+    ...itemsOf(
+      set,
+      endTicks.filter((t) => t.rank === r).map((t) => t.chain),
+    ),
+    ...tickCarried(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
+  ];
+  /** The stretches a proven tick is carried past its drawn ends to the strip's sides: snapped to
+   *  and listed as derived band cuts on the outline — never walls (Codex: a wall here could close
+   *  another piece of the rank). */
+  const tickCarried = (r: number) =>
+    endTicks
+      .filter((t) => t.rank === r)
+      .flatMap((t) => t.carried.map(([from, to]) => ({ from, to, ticks: [t.chain] })));
+  /**
+   * Rank r's region cut along its own end ticks (each carried to the strip's sides), the body side
+   * kept; null = the region runs past one of r's ticks after the cut (the knife did not part it) or
+   * past a larger size's proven end tick. The same region when no tick of the sheet crosses it.
+   */
+  const cutAtTicks = (
+    gg: Grid,
+    mask0: Uint8Array,
+    r: number,
+    seedAt: PtMm,
+    seedK: number,
+  ): Uint8Array | null => {
+    const px = (p: PtMm) => {
+      const x = gg.ix(p.x);
+      const y = gg.iy(p.y);
+      return gg.inside(x, y) ? y * gg.W + x : -1;
+    };
+    const inM = (m: Uint8Array, p: PtMm) => {
+      const k = px(p);
+      return k >= 0 && m[k] === 1;
+    };
+    // a tick speaks for a region that is its strip: not one holding the strip and more (a strap
+    // drawn inside a dress front, vixen) — the strip's outside at the tick is not in it
+    // …and whose seed lies across the strip (between its sides): a region of several strips joined
+    // at a shared end (nolita's ruffles) answers only to the ticks of its seed's strip
+    const mine = (m: Uint8Array, t: (typeof endTicks)[number]) => {
+      if (inM(m, t.beside[0]) || inM(m, t.beside[1])) return false;
+      const [k0, k1] = t.knife;
+      const L = dist(k0, k1) || 1;
+      const al = ((seedAt.x - k0.x) * (k1.x - k0.x) + (seedAt.y - k0.y) * (k1.y - k0.y)) / L;
+      return al >= 0 && al <= L;
+    };
+    let mask = mask0;
+    for (const t of endTicks) {
+      if (t.rank !== r || !inM(mask, t.inPt) || !inM(mask, t.outPt) || !mine(mask, t)) continue;
+      // the cut runs on the region's own box (a strip, not the sheet: Codex — full-sheet rasters
+      // per seed × rank × retry)
+      const bb = maskBox(gg, mask);
+      const W = bb.x1 - bb.x0 + 1;
+      const H = bb.y1 - bb.y0 + 1;
+      const lg = {
+        W,
+        H,
+        ix: (x: number) => gg.ix(x) - bb.x0,
+        iy: (y: number) => gg.iy(y) - bb.y0,
+      } as unknown as Grid;
+      const lk = (p: PtMm) => {
+        const x = gg.ix(p.x) - bb.x0;
+        const y = gg.iy(p.y) - bb.y0;
+        return x >= 0 && y >= 0 && x < W && y < H ? y * W + x : -1;
+      };
+      const blocked = new Uint8Array(W * H);
+      drawPolyline(lg, blocked, t.knife);
+      for (let y = 0; y < H; y++) {
+        const row = (y + bb.y0) * gg.W + bb.x0;
+        for (let x = 0; x < W; x++) if (!mask[row + x]) blocked[y * W + x] = 1;
+      }
+      const k0 = lk(t.inPt);
+      if (k0 < 0 || blocked[k0]) {
+        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: body point blocked`);
+        return null;
+      }
+      const local = new Uint8Array(W * H);
+      flood(lg, blocked, [k0], local);
+      const ko = lk(t.outPt);
+      if (ko >= 0 && local[ko]) {
+        if (ticksDebug)
+          console.log(`TICKCUT r${r} c${t.chain}: the knife does not part the region`);
+        return null;
+      }
+      // the seed is beyond r's end: its piece is not r's outline here
+      const sx = (seedK % gg.W) - bb.x0;
+      const sy = Math.floor(seedK / gg.W) - bb.y0;
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H || !local[sy * W + sx]) {
+        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the seed lies past r's end`);
+        return null;
+      }
+      // r keeps the body side: the rest of the box leaves the region, in place (regionAt's mask is
+      // a fresh array of this call alone)
+      const part = mask;
+      for (let y = 0; y < H; y++) {
+        const row = (y + bb.y0) * gg.W + bb.x0;
+        for (let x = 0; x < W; x++) if (!local[y * W + x]) part[row + x] = 0;
+      }
+      mask = part;
+    }
+    // the region ENDS at a smaller size's proven end (its body in, the far side out): a larger
+    // size closed on a smaller size's line (cirrus 30 and 32 on 28's tick) — unless r's own end
+    // tick lies there too (two sizes of one length)
+    for (const q of endTicks) {
+      if (q.rank >= r || !inM(mask, q.inPt) || inM(mask, q.outPt) || !mine(mask, q)) continue;
+      const own = endTicks.some(
+        (t) => t.rank === r && t.strip === q.strip && dist(t.inPt, q.inPt) <= 1,
+      );
+      if (own) continue;
+      if (ticksDebug) console.log(`TICKCUT r${r}: ends at c${q.chain} (r${q.rank})`);
+      return null;
+    }
+    // the region runs past a larger size's end: it closed on another size's lines
+    for (const t of endTicks)
+      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt) && mine(mask, t)) {
+        if (ticksDebug) console.log(`TICKCUT r${r}: runs past c${t.chain} (r${t.rank})`);
+        return null;
+      }
+    return mask;
+  };
+
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
     const ownIds = model.mode === 'single' ? [] : model.byRank[r];
@@ -770,6 +895,14 @@ function fillOneSheet(
       const regionAt = (c: RankCtx, kk: number) => {
         const { g: gg } = c;
         let { mask } = regionOf(gg, c.ext, kk);
+        // MOOD TICKS: rank r's proven end ticks cut its region; r keeps its body side. A region of
+        // r that still runs past an end tick (a gap the knife cannot part), or past a LARGER size's
+        // proven end, is no outline of r — a leak
+        if (endTicks.length) {
+          const cut = cutAtTicks(gg, mask, r, pts[si], kk);
+          if (!cut) return null;
+          mask = cut;
+        }
         // knives (variant cutting lines) crossing the region: cut and keep the seed's side
         const kis = knivesOf(r);
         if (kis.length) {
@@ -936,7 +1069,7 @@ function fillOneSheet(
         out.set(seed.id, cand);
         continue;
       }
-      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r)), {
+      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r), tickItems(r)), {
         stepMm: 1,
         reachMm: 2.5,
         snapMm: opts.snapMm || PATIMPORT.snapMm,
@@ -969,7 +1102,7 @@ function fillOneSheet(
       const der = [
         ...usedB.map((b) => ({ kind: 'bridge' as const, pts: [b.from, b.to] })),
         ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
-        ...bandCuts(r)
+        ...[...bandCuts(r), ...tickCarried(r)]
           .filter(onOutline)
           .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to], chains: [...b.ticks] })),
       ];
