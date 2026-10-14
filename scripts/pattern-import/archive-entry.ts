@@ -224,6 +224,20 @@ function compress(xs: string[]): string[] {
 
 type Stop = { step: string; reason: string; why?: string };
 
+/** The size labels an earlier run read on this file (ARCHIVE_CARD_READ), null when any is blank. */
+function readSizesOf(rel: string): string[] | null {
+  const p = process.env.ARCHIVE_CARD_READ;
+  if (!p) return null;
+  for (const l of readFileSync(p, 'utf8').split('\n')) {
+    if (!l.includes(JSON.stringify(rel))) continue;
+    const r = JSON.parse(l) as { id: string; sizesRead?: { labels?: string[] } | null };
+    if (r.id !== rel) continue;
+    const labs = r.sizesRead?.labels ?? [];
+    return labs.length && labs.every((x) => x.trim()) ? labs : null;
+  }
+  return null;
+}
+
 // ── one file ───────────────────────────────────────────────────────────────────────────────
 
 export async function runFile(rel: string): Promise<Record<string, unknown>> {
@@ -260,12 +274,17 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
   // Size Line Key; Mood's old G0 paired run), so the size map is what an operator's matching card
   // gives and the run shows how far the file gets once sizes are mapped. A file with no printed
   // key (and not G0) keeps the neutral card.
+  // ARCHIVE_CARD=read (+ ARCHIVE_CARD_READ=<an earlier results.jsonl>): the card carries the sizes the
+  // wizard READ on this sheet in that run, when every one is labelled — for the G0 files that print
+  // a plain 2…22 run rather than the paired key, and the mixed keys read by their letter column.
   const own = gen === 'G0' ? G0_KEY : printedKey;
-  const matching = process.env.ARCHIVE_CARD === 'sheet' && own.length > 0;
-  rec.card = matching ? { kind: 'sheet', sizes: own } : { kind: 'neutral' };
+  const read = process.env.ARCHIVE_CARD === 'read' ? readSizesOf(rel) : null;
+  const ownSizes = read ?? own;
+  const matching = /^(sheet|read)$/.test(process.env.ARCHIVE_CARD ?? '') && ownSizes.length > 0;
+  rec.card = matching ? { kind: read ? 'read' : 'sheet', sizes: ownSizes } : { kind: 'neutral' };
   const card: CardContext = {
     techCardId: CARD_ID,
-    sizes: cardSizes(matching ? own : NEUTRAL_CARD),
+    sizes: cardSizes(matching ? ownSizes : NEUTRAL_CARD),
     scopes: SCOPES,
     existingPieces: [],
     styleLabel: 'archive',

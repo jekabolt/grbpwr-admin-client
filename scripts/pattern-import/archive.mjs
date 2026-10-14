@@ -12,7 +12,8 @@
 //   env PATIMPORT_ARCHIVE_DIR (the archive), PATIMPORT_ARCHIVE_FILTER (glob on "cat/file.pdf"),
 //   ARCHIVE_OUT (default /private/tmp/patimport-runs/archive; must stay under it),
 //   ARCHIVE_PAR (3), ARCHIVE_CAP_S (600), ARCHIVE_PAGE_PASS=0 (no page-role pass, see the entry),
-//   ARCHIVE_CARD=sheet (a card of the sheet's own printed sizes, see the entry), ARCHIVE_MOOD_ONLY=1
+//   ARCHIVE_CARD=sheet (a card of the sheet's own printed sizes, see the entry) or =read with
+//   ARCHIVE_CARD_READ=<results.jsonl> (a card of the sizes that run read), ARCHIVE_MOOD_ONLY=1
 import { build as esbuild } from 'esbuild';
 import { spawn } from 'node:child_process';
 import {
