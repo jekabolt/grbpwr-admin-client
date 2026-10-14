@@ -682,6 +682,16 @@ function fillOneSheet(
       mask = part;
       keep = k0;
     }
+    // the region ENDS at a smaller size's proven end (its body in, the far side out): a larger
+    // size closed on a smaller size's line (cirrus 30 and 32 on 28's tick) — unless r's own end
+    // tick lies there too (two sizes of one length)
+    for (const q of endTicks) {
+      if (q.rank >= r || !inM(mask, q.inPt) || inM(mask, q.outPt)) continue;
+      const own = endTicks.some((t) => t.rank === r && t.strip === q.strip && dist(t.inPt, q.inPt) <= 1);
+      if (own) continue;
+      if (ticksDebug) console.log(`TICKCUT r${r}: ends at c${q.chain} (r${q.rank})`);
+      return null;
+    }
     // the region runs past a larger size's end: it closed on another size's lines
     for (const t of endTicks)
       if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt)) {

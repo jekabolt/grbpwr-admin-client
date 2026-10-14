@@ -59,6 +59,8 @@ export type EndTick = {
   inPt: PtMm;
   outPt: PtMm;
   evidence: ('pen' | 'sides' | 'trend')[];
+  /** The strip it crosses: proven ticks of one strip share it. */
+  strip: number;
 };
 
 type Cand = {
@@ -455,8 +457,21 @@ export function endTicks(
       inPt: add(mid, c.nu, s * PROBE_MM),
       outPt: add(mid, c.nu, -s * PROBE_MM),
       evidence: pick.ev,
+      strip: c.id,
     });
   }
+  // strips: proven ticks that are each other's strip mates (parallel, over one stretch) share one
+  const byId = new Map(cands.map((c) => [c.id, c]));
+  const root = new Map(out.map((t) => [t.chain, t.chain]));
+  const find = (x: ChainId): ChainId => {
+    while (root.get(x) !== x) x = root.get(x)!;
+    return x;
+  };
+  for (const t of out) {
+    const lad = new Set(ladderOf(byId.get(t.chain)!).map((o) => o.id));
+    for (const o of out) if (o !== t && lad.has(o.chain)) root.set(find(o.chain), find(t.chain));
+  }
+  for (const t of out) t.strip = find(t.chain);
   void n;
   return out;
 }
