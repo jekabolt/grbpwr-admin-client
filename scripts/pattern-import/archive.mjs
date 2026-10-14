@@ -13,7 +13,9 @@
 //   ARCHIVE_OUT (default /private/tmp/patimport-runs/archive; must stay under it),
 //   ARCHIVE_PAR (3), ARCHIVE_CAP_S (600), ARCHIVE_PAGE_PASS=0 (no page-role pass, see the entry),
 //   ARCHIVE_CARD=sheet (a card of the sheet's own printed sizes, see the entry) or =read with
-//   ARCHIVE_CARD_READ=<results.jsonl> (a card of the sizes that run read), ARCHIVE_MOOD_ONLY=1
+//   ARCHIVE_CARD_READ=<results.jsonl> (a card of the sizes that run read), ARCHIVE_MOOD_ONLY=1,
+//   ARCHIVE_WEAK=1 (record each aside set aside on a guess and which proof failed),
+//   ARCHIVE_PNG_DIR=<dir> (a sheet PNG of every file run)
 import { build as esbuild } from 'esbuild';
 import { spawn } from 'node:child_process';
 import {
@@ -460,7 +462,13 @@ await Promise.all(
   Array.from({ length: Math.min(PAR, queue.length) }, async () => {
     while (queue.length) {
       const rel = queue.shift();
-      const r = await runOne(rel);
+      // ARCHIVE_PNG_DIR: a sheet PNG of every file run (with ARCHIVE_WEAK: its guessed asides boxed)
+      const pd = process.env.ARCHIVE_PNG_DIR;
+      if (pd) mkdirSync(pd, { recursive: true });
+      const r = await runOne(
+        rel,
+        pd ? { ARCHIVE_PNG: resolve(pd, `${rel.replace(/[^\w.-]+/g, '_').slice(0, 80)}.png`) } : {},
+      );
       appendFileSync(JSONL, `${JSON.stringify(r)}\n`);
       k++;
       const stop = r.stop ? `${r.stop.step}: ${String(r.stop.reason).slice(0, 100)}` : '';

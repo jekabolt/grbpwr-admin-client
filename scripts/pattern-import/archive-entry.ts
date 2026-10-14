@@ -43,6 +43,13 @@ import { cardSizes, SCOPES } from './autopilot-entry';
 import { analyse as moodAnalyse } from './mood-entry';
 import { mountHook, rerender } from './react-hook-shim';
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
+import {
+  provenCopy,
+  rimTolMm,
+  weakAsides,
+} from 'components/managers/tech-card/components/pattern-import/auto-advance';
+import { pointInPoly } from 'lib/pattern-import/pieces/geom';
+import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 export const ARCHIVE_DIR =
@@ -496,6 +503,80 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       .slice(0, 30)
       .map((a) => `${a.strong ? '!' : ' '}${a.kind} · ${a.subject} → ${a.answer}`),
   };
+  // ARCHIVE_WEAK=1: each piece-sized aside set aside on a guess, and which proof of provenCopy failed
+  if (process.env.ARCHIVE_WEAK && s.pieces) {
+    const weak = weakAsides(s.pieces.setAside, s.pieces.families, s.pieces.seeds);
+    rec.weak = weak.map((a) =>
+      diagnoseAside(a, s.pieces!.families, s.pieces!.seeds, S?.sheet?.texts ?? []),
+    );
+    // ARCHIVE_CROPS=<dir>: a close-up PNG of each (the host's sizes in colour, its rim dotted)
+    if (process.env.ARCHIVE_CROPS && S) {
+      const set = S.wallSet ?? S.chains;
+      weak.forEach((a, i) => {
+        const d = (rec.weak as Record<string, unknown>[])[i];
+        const fam = s.pieces!.families.find((f) => f.seed === d.hostSeed);
+        const m = 40;
+        const box = {
+          minX: a.box.minX - m,
+          minY: a.box.minY - m,
+          maxX: a.box.maxX + m,
+          maxY: a.box.maxY + m,
+        };
+        const strokes: Stroke[] = [];
+        for (const c of set?.chains ?? [])
+          if (c.pts.length > 1)
+            strokes.push({ pts: c.pts, closed: !!c.closed, color: '#bbbbbb', width: 1 });
+        for (const c of fam?.candidates ?? [])
+          if (c.outer.length > 2)
+            strokes.push({
+              pts: c.outer,
+              closed: true,
+              color: PALETTE[c.rank % PALETTE.length],
+              width: 1.5,
+            });
+        for (const p of a.copy?.rim ?? [])
+          strokes.push({
+            pts: [
+              { x: p.x - 0.8, y: p.y },
+              { x: p.x + 0.8, y: p.y },
+            ],
+            closed: false,
+            color: '#000',
+            width: 3,
+          });
+        for (const p of (d.off as PtMm[] | undefined) ?? [])
+          strokes.push({
+            pts: [
+              { x: p.x - 1.5, y: p.y },
+              { x: p.x + 1.5, y: p.y },
+            ],
+            closed: false,
+            color: '#ff0000',
+            width: 6,
+          });
+        const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+        const name = `${rel.replace(/[^\w.-]+/g, '_').slice(0, 60)}__${i}_${d.how}_${d.fail}.png`;
+        try {
+          renderPng(
+            resolve(process.env.ARCHIVE_CROPS!, name),
+            box,
+            strokes,
+            [
+              {
+                at: { x: box.minX + 2, y: box.maxY - 4 },
+                text: `${d.how}/${d.fail} ${d.area}mm² clr ${d.clearMm} in ${d.inside} rim ${d.rimShare}% ${((d.texts as string[]) ?? []).join(' ').slice(0, 50)}`,
+                color: '#000',
+                size: 12,
+              },
+            ],
+            Math.min(8, 900 / span),
+          );
+        } catch {
+          /* a crop is a diagnostic only */
+        }
+      });
+    }
+  }
   if (process.env.ARCHIVE_PNG && S) {
     try {
       rec.png = renderSheet(S as never, process.env.ARCHIVE_PNG, rec);
@@ -507,6 +588,110 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
   rec.peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
   await client.close(1);
   return rec;
+}
+
+type BoxMm2 = { minX: number; minY: number; maxX: number; maxY: number };
+/** Why provenCopy did not prove an aside (probe diagnostics; mirrors its steps). */
+function diagnoseAside(
+  a: SetAside,
+  families: PieceFamily[],
+  seeds: Seed[],
+  texts: { text: string; bbox: { minX: number; minY: number; maxX: number; maxY: number } }[],
+): Record<string, unknown> {
+  const c = a.copy;
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  const out: Record<string, unknown> = {
+    id: a.id,
+    reason: a.reason,
+    at: { x: r1(a.at.x), y: r1(a.at.y) },
+    box: a.box,
+    area: Math.round(a.areaMm2),
+    how: c?.how ?? null,
+    clearMm: c?.clearMm ?? null,
+    host: c?.host ?? null,
+  };
+  const inBox = (p: PtMm, b: typeof a.box) =>
+    p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
+  out.texts = texts
+    .filter((t) =>
+      inBox({ x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 }, a.box),
+    )
+    .map((t) => t.text)
+    .filter((t) => t.trim())
+    .slice(0, 12);
+  const closed = (f: PieceFamily) =>
+    f.candidates.filter((x) => x.outcome === 'closed' && x.outer.length > 2);
+  // the families whose closed outlines hold the aside's point
+  out.holders = families
+    .map((f) => ({
+      seed: f.seed,
+      n: closed(f).length,
+      in: closed(f).filter((x) => pointInPoly(a.at, x.outer)).length,
+    }))
+    .filter((x) => x.in > 0);
+  if (!c) return { ...out, fail: 'no-account' };
+  if (c.ownLabel) return { ...out, fail: 'own-label' };
+  if (a.reason !== 'size-copy') return { ...out, fail: `weak-reason:${a.reason}` };
+  const h = c.host;
+  if (!h) return { ...out, fail: 'no-host' };
+  const sd = seeds.find((x) => Math.abs(x.at.x - h.x) < 0.01 && Math.abs(x.at.y - h.y) < 0.01);
+  if (!sd) {
+    const near = seeds
+      .map((x) => ({ id: x.id, d: Math.hypot(x.at.x - h.x, x.at.y - h.y), o: x.origin }))
+      .sort((p, q) => p.d - q.d)[0];
+    return { ...out, fail: 'host-seed-missing', nearestSeed: near };
+  }
+  const fam = families.find((f) => f.seed === sd.id);
+  if (!fam) return { ...out, fail: 'host-no-family', seed: sd.id };
+  const sizes = closed(fam);
+  out.hostSeed = sd.id;
+  out.hostOutcomes = countBy(fam.candidates.map((x) => x.outcome));
+  if (!sizes.length) return { ...out, fail: 'host-not-closed' };
+  if (c.how === 'shape') return { ...out, fail: 'shape?!' };
+  if (sizes.length < 2) return { ...out, fail: 'host-<2-sizes' };
+  if (!c.rim?.length) return { ...out, fail: 'no-rim' };
+  const inside = sizes.filter((x) => pointInPoly(a.at, x.outer)).length;
+  const areas = sizes.map((x) => x.areaMm2);
+  out.inside = `${inside}/${sizes.length}`;
+  out.spread = Math.round(Math.max(...areas) - Math.min(...areas));
+  // the rim share, re-measured here
+  const tol = rimTolMm(c.cellMm);
+  let on = 0;
+  const off: { x: number; y: number; d: number }[] = [];
+  for (const p of c.rim) {
+    let best = Infinity;
+    for (const o of sizes) {
+      const q = o.outer;
+      for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+        const A = q[j],
+          B = q[i];
+        const dx = B.x - A.x,
+          dy = B.y - A.y;
+        const L = dx * dx + dy * dy;
+        const u = L ? Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / L)) : 0;
+        best = Math.min(best, Math.hypot(A.x + u * dx - p.x, A.y + u * dy - p.y));
+      }
+    }
+    if (best <= tol) on++;
+    else off.push({ x: p.x, y: p.y, d: Math.round(best * 10) / 10 });
+  }
+  // the off points: how far (a hair past tol, or far — another line closes it)
+  out.offNear = off.filter((q) => q.d <= 2 * tol).length;
+  out.offFar = off.length - (out.offNear as number);
+  out.cell = c.cellMm;
+  out.nearD = off.filter((q) => q.d <= 2 * tol).map((q) => q.d);
+  out.off = off.filter((q) => q.d > 2 * tol).slice(0, 6);
+  out.rimShare = Math.round((100 * on) / c.rim.length);
+  out.rimN = c.rim.length;
+  out.tol = tol;
+  if (!inside) return { ...out, fail: 'outside-every-size' };
+  if (inside === sizes.length) return { ...out, fail: 'inside-every-size' };
+  if (a.areaMm2 > 1.05 * (Math.max(...areas) - Math.min(...areas)))
+    return { ...out, fail: 'area>spread' };
+  return {
+    ...out,
+    fail: (out.rimShare as number) >= 90 ? `proven?${provenCopy(a, families, seeds)}` : 'rim<90',
+  };
 }
 
 /** The sheet's lines (grey) and every family's candidates: closed by rank colour, else red. */
@@ -561,6 +746,32 @@ function renderSheet(
         size: 14,
       });
     }
+  }
+  for (const w of (rec.weak as {
+    box: BoxMm2;
+    fail: string;
+    area: number;
+    how: string;
+    texts: string[];
+  }[]) ?? []) {
+    const b = w.box;
+    strokes.push({
+      pts: [
+        { x: b.minX, y: b.minY },
+        { x: b.maxX, y: b.minY },
+        { x: b.maxX, y: b.maxY },
+        { x: b.minX, y: b.maxY },
+      ],
+      closed: true,
+      color: '#ff00cc',
+      width: 2.5,
+    });
+    labels.push({
+      at: { x: b.minX + 2, y: (b.minY + b.maxY) / 2 },
+      text: `${w.how}/${w.fail} ${Math.round(w.area / 100)}cm² ${(w.texts ?? []).join(' ').slice(0, 30)}`,
+      color: '#c00090',
+      size: 13,
+    });
   }
   const st = rec.stop as Stop | undefined;
   labels.push({
