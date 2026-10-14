@@ -315,12 +315,10 @@ export function wallModel(
         return add ? [...ids, ...add.filter((id) => !ids.includes(id))] : ids;
       })
     : ranks0;
-  // MOOD TICKS: each size's end tick across a strip, read as that size's end (≥ 2 evidences); the
-  // stretches carried past a drawn tick to the strip's sides are band cuts of its rank (G15)
+  // MOOD TICKS: each size's end tick across a strip, read as that size's end (≥ 2 evidences) — a
+  // knife of its rank in the fill; the stretches carried past a drawn tick are derived band cuts
+  // there (G15), never walls
   const ticks = mode === 'graded' ? endTicks(set, run, ranksF, styles) : [];
-  for (const t of ticks)
-    for (const [from, to] of t.carried)
-      band.cuts.push({ rank: t.rank, from, to, ticks: [t.chain] });
   return {
     mode,
     n,

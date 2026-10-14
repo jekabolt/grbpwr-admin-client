@@ -45,6 +45,12 @@ const OVERSHOOT_MM = 1;
 /** A strip's two sides are parallel (|cos| at least) and square to its ticks (|cos| at most). */
 const STRIP_PARALLEL = 0.995;
 const STRIP_SQUARE = 0.1;
+/** At most this many tick candidates on a sheet (else no ladder is read). */
+const MAX_CANDS = 1500;
+/** Strip sides: walked this far at most, in steps, gaps up to SIDE_GAP_MM bridged, mm. */
+const STRIP_MAX_MM = 3000;
+const SIDE_STEP_MM = 2;
+const SIDE_GAP_MM = 12;
 /** Beside points: this far outside the strip's side lines, mm. */
 const BESIDE_MM = 4;
 /** Body / far probe points: this far off the tick's middle, mm. */
@@ -335,6 +341,44 @@ export function endTicks(
     });
   }
   if (!cands.length) return [];
+  // a sheet of thousands of straight size-pen cross lines is no strip ladder (Codex: quadratic work)
+  if (cands.length > MAX_CANDS) return [];
+  /**
+   * How far each side line of c's strip runs on, drawn, from the tick along ±nu (gaps ≤ SIDE_GAP_MM
+   * allowed): [toward −nu, toward +nu] — the stretch of the strip its other ticks may lie in.
+   */
+  const reachOf = new Map<Cand, [number, number]>();
+  const stripReach = (c: Cand): [number, number] => {
+    const got = reachOf.get(c);
+    if (got) return got;
+    const xs = [0, 1].map((e) => {
+      const sa = c.sideAt[e as 0 | 1]!;
+      return lineHit(c.a, c.u, sa.p, sa.q) ?? (e ? c.b : c.a);
+    });
+    const covered = (p: PtMm) => {
+      let hit = false;
+      sideGrid.near(p, 1.2, (id, i) => {
+        if (hit || id === c.id) return;
+        const q = set.chains[id].pts;
+        if (q[i + 1] && segNearest(p, q[i], q[i + 1]).d <= 1.2) hit = true;
+      });
+      return hit;
+    };
+    const walk = (dir: number) =>
+      Math.min(
+        ...xs.map((x0) => {
+          let last = 0;
+          for (let d = SIDE_STEP_MM; d <= STRIP_MAX_MM; d += SIDE_STEP_MM) {
+            if (covered(add(x0, c.nu, dir * d))) last = d;
+            else if (d - last > SIDE_GAP_MM) break;
+          }
+          return last;
+        }),
+      );
+    const r: [number, number] = [walk(-1), walk(1)];
+    reachOf.set(c, r);
+    return r;
+  };
 
   // tentative rank of a candidate from pen or sides alone (unique and agreeing)
   const tentative = (c: Cand): number => {
@@ -345,14 +389,26 @@ export function endTicks(
     return sr;
   };
   // ladder: parallel candidates over the same stretch of the strip
-  const ladderOf = (c: Cand) =>
-    cands.filter((o) => {
+  // ladder: parallel candidates across the SAME strip — over one stretch of it, and between them
+  // its two side lines run on drawn (Codex: aligned pieces metres apart are no ladder)
+  const ladders = new Map<Cand, Cand[]>();
+  const ladderOf = (c: Cand): Cand[] => {
+    const got = ladders.get(c);
+    if (got) return got;
+    const [neg, posR] = stripReach(c);
+    const lad = cands.filter((o) => {
+      if (o === c) return true;
       if (Math.abs(dot(o.u, c.u)) < 0.995) return false;
       const lo = Math.min(dot(sub(o.a, c.a), c.u), dot(sub(o.b, c.a), c.u));
       const hi = Math.max(dot(sub(o.a, c.a), c.u), dot(sub(o.b, c.a), c.u));
       const ov = Math.min(hi, c.L) - Math.max(lo, 0);
-      return ov >= 0.6 * Math.min(c.L, hi - lo);
+      if (ov < 0.6 * Math.min(c.L, hi - lo)) return false;
+      const p = pos(o, c);
+      return p >= -neg - 1 && p <= posR + 1;
     });
+    ladders.set(c, lad);
+    return lad;
+  };
   /** Other ticks across the same strip: parallel, at another place, both ends on its side lines. */
   const stripMates = (c: Cand): number => {
     const ps = new Set<number>();
@@ -373,7 +429,16 @@ export function endTicks(
     dot(sub({ x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }, ref.a), ref.nu);
   /** trend(c, r): ≥ 2 other ladder members named in order with r, larger sizes farther from the body. */
   /** The body side (±1 along c.nu) when the ladder's order proves r's place; 0 = not proven. */
+  const trendMemo = new Map<string, number>();
   const trend = (c: Cand, r: number): number => {
+    const key = `${c.id}:${r}`;
+    const got = trendMemo.get(key);
+    if (got !== undefined) return got;
+    const v = trend0(c, r);
+    trendMemo.set(key, v);
+    return v;
+  };
+  const trend0 = (c: Cand, r: number): number => {
     const lad = ladderOf(c);
     const rows: { p: number; r: number; s: number | null }[] = [];
     const pc = pos(c, c);

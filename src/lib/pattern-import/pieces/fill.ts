@@ -40,6 +40,7 @@ import {
   flood,
   Grid,
   openMask,
+  maskBox,
   regionOf,
   splitByCells,
   traceOuter,
@@ -636,11 +637,20 @@ function fillOneSheet(
   // MOOD TICKS: each size's proven end tick across a strip (pieces/ticks.ts)
   const endTicks = model.endTicks ?? [];
   const ticksDebug = typeof process !== 'undefined' && !!process.env?.MOOD_TICKS_DEBUG;
-  const tickItems = (r: number): WallItem[] =>
-    itemsOf(
+  const tickItems = (r: number): WallItem[] => [
+    ...itemsOf(
       set,
       endTicks.filter((t) => t.rank === r).map((t) => t.chain),
-    );
+    ),
+    ...tickCarried(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
+  ];
+  /** The stretches a proven tick is carried past its drawn ends to the strip's sides: snapped to
+   *  and listed as derived band cuts on the outline — never walls (Codex: a wall here could close
+   *  another piece of the rank). */
+  const tickCarried = (r: number) =>
+    endTicks
+      .filter((t) => t.rank === r)
+      .flatMap((t) => t.carried.map(([from, to]) => ({ from, to, ticks: [t.chain] })));
   /**
    * Rank r's region cut along its own end ticks (each carried to the strip's sides), the body side
    * kept; null = the region runs past one of r's ticks after the cut (the knife did not part it) or
@@ -676,26 +686,52 @@ function fillOneSheet(
     let mask = mask0;
     for (const t of endTicks) {
       if (t.rank !== r || !inM(mask, t.inPt) || !inM(mask, t.outPt) || !mine(mask, t)) continue;
-      const kn = new Uint8Array(mask.length);
-      drawPolyline(gg, kn, t.knife);
-      const blocked = new Uint8Array(mask.length);
-      for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
-      const k0 = px(t.inPt);
+      // the cut runs on the region's own box (a strip, not the sheet: Codex — full-sheet rasters
+      // per seed × rank × retry)
+      const bb = maskBox(gg, mask);
+      const W = bb.x1 - bb.x0 + 1;
+      const H = bb.y1 - bb.y0 + 1;
+      const lg = {
+        W,
+        H,
+        ix: (x: number) => gg.ix(x) - bb.x0,
+        iy: (y: number) => gg.iy(y) - bb.y0,
+      } as unknown as Grid;
+      const lk = (p: PtMm) => {
+        const x = gg.ix(p.x) - bb.x0;
+        const y = gg.iy(p.y) - bb.y0;
+        return x >= 0 && y >= 0 && x < W && y < H ? y * W + x : -1;
+      };
+      const blocked = new Uint8Array(W * H);
+      drawPolyline(lg, blocked, t.knife);
+      for (let y = 0; y < H; y++) {
+        const row = (y + bb.y0) * gg.W + bb.x0;
+        for (let x = 0; x < W; x++) if (!mask[row + x]) blocked[y * W + x] = 1;
+      }
+      const k0 = lk(t.inPt);
       if (k0 < 0 || blocked[k0]) {
         if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: body point blocked`);
         return null;
       }
-      const part = new Uint8Array(mask.length);
-      flood(gg, blocked, [k0], part);
-      if (inM(part, t.outPt)) {
+      const local = new Uint8Array(W * H);
+      flood(lg, blocked, [k0], local);
+      const ko = lk(t.outPt);
+      if (ko >= 0 && local[ko]) {
         if (ticksDebug)
           console.log(`TICKCUT r${r} c${t.chain}: the knife does not part the region`);
         return null;
       }
       // the seed is beyond r's end: its piece is not r's outline here
-      if (!part[seedK]) {
+      const sx = (seedK % gg.W) - bb.x0;
+      const sy = Math.floor(seedK / gg.W) - bb.y0;
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H || !local[sy * W + sx]) {
         if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the seed lies past r's end`);
         return null;
+      }
+      const part = new Uint8Array(mask.length);
+      for (let y = 0; y < H; y++) {
+        const row = (y + bb.y0) * gg.W + bb.x0;
+        for (let x = 0; x < W; x++) if (local[y * W + x]) part[row + x] = 1;
       }
       mask = part;
     }
@@ -1064,7 +1100,7 @@ function fillOneSheet(
       const der = [
         ...usedB.map((b) => ({ kind: 'bridge' as const, pts: [b.from, b.to] })),
         ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
-        ...bandCuts(r)
+        ...[...bandCuts(r), ...tickCarried(r)]
           .filter(onOutline)
           .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to], chains: [...b.ticks] })),
       ];
