@@ -1130,7 +1130,7 @@ export function judgeBlobs(
                 ...(x.how === 'lines' || x.how === 'fragment'
                   ? { rim: rimSamples(F), cellMm: cell }
                   : {}),
-                ...labelsIn(x.f),
+                ...labelsIn(x.f, x.host, x.how),
                 ...ownTextIn(x.f, x.host, x.how),
               },
             }
@@ -1140,25 +1140,24 @@ export function judgeBlobs(
     return nextId;
 
     /**
-     * The text seeds standing in face f itself (a seed on the wall round it counts too): a label
-     * of its own. A face's FILLED outline holds the label of the piece nested in it — a size copy
-     * around the piece's middle — so only the face's own pixels are asked.
+     * The text seeds (piece numbers / names) standing in face f itself — its own label. Told by
+     * the faces, not by the blob a seed was later given to (an aside keeps its host's blob, so a
+     * label inside it would read as the host's). A face's FILLED outline holds the label of the
+     * piece nested in it, so only the face's own pixels are asked; and a 'shape' copy whose host
+     * holds no text seed in its other faces carries the piece's own label (the innermost size).
      */
-    function labelsIn(f: number): { labels?: number[] } {
-      const ids: number[] = [];
-      for (const s of textSeeds) {
-        const k = pixelOf(s.at);
-        if (k < 0) continue;
-        const x = k % W;
-        const y = (k / W) | 0;
-        let hit = face[k] === f;
-        if (!hit && face[k] < 0)
-          for (let dy = -1; dy <= 1 && !hit; dy++)
-            for (let dx = -1; dx <= 1 && !hit; dx++)
-              if (g.inside(x + dx, y + dy) && face[(y + dy) * W + x + dx] === f) hit = true;
-        if (hit) ids.push(s.id);
+    function labelsIn(f: number, host: Unit, how: CopyHow): { labels?: number[] } {
+      const ids = textSeeds.filter((s) => inFace(pixelOf(s.at), f)).map((s) => s.id);
+      if (!ids.length) return {};
+      if (how === 'shape') {
+        const others = new Set([host.root, ...host.members].filter((h) => h !== f));
+        const hostHas = textSeeds.some((s) => {
+          const k = pixelOf(s.at);
+          return k >= 0 && others.has(face[k]);
+        });
+        if (!hostHas) return {};
       }
-      return ids.length ? { labels: ids } : {};
+      return { labels: ids };
     }
 
     /** Is pixel k in face f, or a wall pixel touching it (a text centred on a line)? */
@@ -1218,10 +1217,39 @@ export function judgeBlobs(
       const step = Math.max(1, Math.ceil(at.length / RIM_SAMPLES));
       const out: PtMm[] = [];
       for (let i = 0; i < at.length; i += step) {
-        const c = g.centre(at[i] % W, (at[i] / W) | 0);
+        const c = onWall(at[i]);
         out.push({ x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10 });
       }
       return out;
+    }
+
+    /**
+     * An edge pixel's sample on the line that bounds it: across the wall beside it (walls are
+     * drawn 3 px wide round a line), the middle of that wall run (≤ 2 px in: a thicker run is two
+     * lines side by side) — the drawn line itself, so its distance to a size outline says whether
+     * this is that line. No wall beside it (the raster's edge, a weak line): the pixel's centre.
+     */
+    function onWall(k: number): PtMm {
+      const x = k % W;
+      const y = (k / W) | 0;
+      for (const [dx, dy] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ]) {
+        let n = 0;
+        while (n < 5 && g.inside(x + dx * (n + 1), y + dy * (n + 1))) {
+          if (!wall[(y + dy * (n + 1)) * W + x + dx * (n + 1)]) break;
+          n++;
+        }
+        if (!n) continue;
+        const t = 1 + Math.min(2, (n - 1) / 2);
+        const a = g.centre(x, y);
+        const b = g.centre(x + dx, y + dy);
+        return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      }
+      return g.centre(x, y);
     }
 
     /**
@@ -1697,7 +1725,7 @@ export function asidesOf(
     const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
     const host = !H ? null : t ? t.at : H.junk ? null : H.at;
     // a label in its own face that is not its host's: its own piece
-    const seed = (c.labels ?? []).find((id) => id !== H?.textSeed);
+    const seed = c.labels?.[0];
     const own =
       seed != null
         ? textSeeds.find((x) => x.id === seed)?.text?.text ?? `text seed ${seed}`

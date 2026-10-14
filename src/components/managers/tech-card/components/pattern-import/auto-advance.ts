@@ -169,13 +169,11 @@ export const provenCopy = (
 const RIM_ON_SHARE = 0.9;
 
 /**
- * How far a strip's edge sample may lie from a size outline and still be on it: the sample is a
- * face pixel's centre across the drawn wall from the outline's polyline, measured at 2.5–2.9 cells
- * on G0 sheets (≈ 1200 samples on 18 sheets, cells 0.89–1.24 mm: a large sheet's coarser face
- * raster), then a tail from 3 cells on (lines that are no size outline). 3 cells, never under
- * 1.5 mm — the 0.5 mm cell's 1.5 mm (wm) unchanged.
+ * How far a strip's edge sample (pieces/faces rimSamples: on the wall that bounds it — the drawn
+ * line) may lie from a size outline and still be that outline's line: 2.5 face cells, never under
+ * 1.5 mm.
  */
-export const rimTolMm = (cellMm: number | undefined) => Math.max(1.5, 3 * (cellMm ?? 0.5));
+export const rimTolMm = (cellMm: number | undefined) => Math.max(1.5, 2.5 * (cellMm ?? 0.5));
 
 /** The share of points within `tol` mm of one of the outlines. */
 function onOutlines(
