@@ -635,6 +635,7 @@ function fillOneSheet(
 
   // MOOD TICKS: each size's proven end tick across a strip (pieces/ticks.ts)
   const endTicks = model.endTicks ?? [];
+  const ticksDebug = typeof process !== 'undefined' && !!process.env?.MOOD_TICKS_DEBUG;
   const tickItems = (r: number): WallItem[] =>
     itemsOf(
       set,
@@ -668,16 +669,25 @@ function fillOneSheet(
       const blocked = new Uint8Array(mask.length);
       for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
       const k0 = px(t.inPt);
-      if (k0 < 0 || blocked[k0]) return null;
+      if (k0 < 0 || blocked[k0]) {
+        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: body point blocked`);
+        return null;
+      }
       const part = new Uint8Array(mask.length);
       flood(gg, blocked, [k0], part);
-      if (inM(part, t.outPt)) return null;
+      if (inM(part, t.outPt)) {
+        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the knife does not part the region`);
+        return null;
+      }
       mask = part;
       keep = k0;
     }
     // the region runs past a larger size's end: it closed on another size's lines
     for (const t of endTicks)
-      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt)) return null;
+      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt)) {
+        if (ticksDebug) console.log(`TICKCUT r${r}: runs past c${t.chain} (r${t.rank})`);
+        return null;
+      }
     return { mask, keep: keep >= 0 ? keep : -1 };
   };
 

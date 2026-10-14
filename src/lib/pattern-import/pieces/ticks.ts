@@ -42,6 +42,9 @@ const SIDE_MIN_MM = 20;
 const PAST_MM = 3;
 /** The knife overshoots the side lines by this much (the raster cut must part the region), mm. */
 const OVERSHOOT_MM = 1;
+/** A strip's two sides are parallel (|cos| at least) and square to its ticks (|cos| at most). */
+const STRIP_PARALLEL = 0.995;
+const STRIP_SQUARE = 0.1;
 /** Body / far probe points: this far off the tick's middle, mm. */
 const PROBE_MM = 2;
 
@@ -276,6 +279,17 @@ export function endTicks(
       sideAt[end] = best ? { p: best.p, q: best.q } : null;
     }
     if (!sideAt[0] || !sideAt[1]) continue;
+    // a strip has two parallel sides, square to its ticks (a size's short corner edge in a nest
+    // meets two lines at an angle)
+    {
+      const d0 = sub(sideAt[0].q, sideAt[0].p);
+      const d1 = sub(sideAt[1].q, sideAt[1].p);
+      const l0 = Math.hypot(d0.x, d0.y) || 1;
+      const l1 = Math.hypot(d1.x, d1.y) || 1;
+      if (Math.abs(dot(d0, d1)) / (l0 * l1) < STRIP_PARALLEL) continue;
+      if (Math.abs(dot(d0, u)) / l0 > STRIP_SQUARE || Math.abs(dot(d1, u)) / l1 > STRIP_SQUARE)
+        continue;
+    }
     // a strip: at each end a side line runs on PAST the tick on both sides (the larger sizes' sides
     // overlaid there) — the tick is a size's end inside the strip, not the strip's own end
     const passing: [Set<ChainId>, Set<ChainId>] = [new Set(), new Set()];
@@ -368,21 +382,27 @@ export function endTicks(
     // copies at one place carry one rank; several sizes at one place are an overlay (the strip's
     // shared start end, every size drawing it): no place in the order. A rank at two places breaks it
     const seq: { p: number; r: number }[] = [];
+    const kept: typeof rows = [];
     for (let i = 0; i < rows.length; ) {
       let j = i;
       while (j + 1 < rows.length && Math.abs(rows[j + 1].p - rows[i].p) <= 0.5) j++;
-      const rs = new Set(rows.slice(i, j + 1).map((x) => x.r));
-      if (rs.size === 1) seq.push({ p: rows[i].p, r: rows[i].r });
-      else if (rows.slice(i, j + 1).some((x) => x.p === pc)) return 0;
+      const grp = rows.slice(i, j + 1);
+      const rs = new Set(grp.map((x) => x.r));
+      if (rs.size === 1) {
+        seq.push({ p: rows[i].p, r: rows[i].r });
+        kept.push(...grp);
+      } else if (grp.some((x) => x.p === pc)) return 0;
       i = j + 1;
     }
+    if (probeOff('MOOD_TICKS_DEBUG'))
+      console.log(`TREND c${c.id} r${r} ${seq.map((x) => `${x.r}@${x.p.toFixed(0)}`).join(' ')}`);
     if (new Set(seq.map((x) => x.r)).size !== seq.length || seq.length < 3) return 0;
     const up = seq.every((x, i) => i === 0 || x.r > seq[i - 1].r);
     const down = seq.every((x, i) => i === 0 || x.r < seq[i - 1].r);
     if (!up && !down) return 0;
     // body side: toward the smaller sizes; every sided member must agree
     const bodyDir = up ? -1 : 1; // ranks grow with p (up) → the body lies toward −p
-    return rows.every((x) => x.s == null || x.s === bodyDir) ? bodyDir : 0;
+    return kept.every((x) => x.s == null || x.s === bodyDir) ? bodyDir : 0;
   };
 
   const debug = probeOff('MOOD_TICKS_DEBUG');
