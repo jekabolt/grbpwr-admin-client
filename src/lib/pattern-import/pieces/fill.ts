@@ -650,7 +650,9 @@ function fillOneSheet(
     gg: Grid,
     mask0: Uint8Array,
     r: number,
-  ): { mask: Uint8Array; keep: number } | null => {
+    seedAt: PtMm,
+    seedK: number,
+  ): Uint8Array | null => {
     const px = (p: PtMm) => {
       const x = gg.ix(p.x);
       const y = gg.iy(p.y);
@@ -660,10 +662,20 @@ function fillOneSheet(
       const k = px(p);
       return k >= 0 && m[k] === 1;
     };
+    // a tick speaks for a region that is its strip: not one holding the strip and more (a strap
+    // drawn inside a dress front, vixen) — the strip's outside at the tick is not in it
+    // …and whose seed lies across the strip (between its sides): a region of several strips joined
+    // at a shared end (nolita's ruffles) answers only to the ticks of its seed's strip
+    const mine = (m: Uint8Array, t: (typeof endTicks)[number]) => {
+      if (inM(m, t.beside[0]) || inM(m, t.beside[1])) return false;
+      const [k0, k1] = t.knife;
+      const L = dist(k0, k1) || 1;
+      const al = ((seedAt.x - k0.x) * (k1.x - k0.x) + (seedAt.y - k0.y) * (k1.y - k0.y)) / L;
+      return al >= 0 && al <= L;
+    };
     let mask = mask0;
-    let keep = -1;
     for (const t of endTicks) {
-      if (t.rank !== r || !inM(mask, t.inPt) || !inM(mask, t.outPt)) continue;
+      if (t.rank !== r || !inM(mask, t.inPt) || !inM(mask, t.outPt) || !mine(mask, t)) continue;
       const kn = new Uint8Array(mask.length);
       drawPolyline(gg, kn, t.knife);
       const blocked = new Uint8Array(mask.length);
@@ -676,29 +688,36 @@ function fillOneSheet(
       const part = new Uint8Array(mask.length);
       flood(gg, blocked, [k0], part);
       if (inM(part, t.outPt)) {
-        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the knife does not part the region`);
+        if (ticksDebug)
+          console.log(`TICKCUT r${r} c${t.chain}: the knife does not part the region`);
+        return null;
+      }
+      // the seed is beyond r's end: its piece is not r's outline here
+      if (!part[seedK]) {
+        if (ticksDebug) console.log(`TICKCUT r${r} c${t.chain}: the seed lies past r's end`);
         return null;
       }
       mask = part;
-      keep = k0;
     }
     // the region ENDS at a smaller size's proven end (its body in, the far side out): a larger
     // size closed on a smaller size's line (cirrus 30 and 32 on 28's tick) — unless r's own end
     // tick lies there too (two sizes of one length)
     for (const q of endTicks) {
-      if (q.rank >= r || !inM(mask, q.inPt) || inM(mask, q.outPt)) continue;
-      const own = endTicks.some((t) => t.rank === r && t.strip === q.strip && dist(t.inPt, q.inPt) <= 1);
+      if (q.rank >= r || !inM(mask, q.inPt) || inM(mask, q.outPt) || !mine(mask, q)) continue;
+      const own = endTicks.some(
+        (t) => t.rank === r && t.strip === q.strip && dist(t.inPt, q.inPt) <= 1,
+      );
       if (own) continue;
       if (ticksDebug) console.log(`TICKCUT r${r}: ends at c${q.chain} (r${q.rank})`);
       return null;
     }
     // the region runs past a larger size's end: it closed on another size's lines
     for (const t of endTicks)
-      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt)) {
+      if (t.rank > r && inM(mask, t.inPt) && inM(mask, t.outPt) && mine(mask, t)) {
         if (ticksDebug) console.log(`TICKCUT r${r}: runs past c${t.chain} (r${t.rank})`);
         return null;
       }
-    return { mask, keep: keep >= 0 ? keep : -1 };
+    return mask;
   };
 
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
@@ -842,12 +861,9 @@ function fillOneSheet(
         // r that still runs past an end tick (a gap the knife cannot part), or past a LARGER size's
         // proven end, is no outline of r — a leak
         if (endTicks.length) {
-          const cut = cutAtTicks(gg, mask, r);
+          const cut = cutAtTicks(gg, mask, r, pts[si], kk);
           if (!cut) return null;
-          if (cut.mask !== mask) {
-            mask = cut.mask;
-            kk = cut.keep;
-          }
+          mask = cut;
         }
         // knives (variant cutting lines) crossing the region: cut and keep the seed's side
         const kis = knivesOf(r);

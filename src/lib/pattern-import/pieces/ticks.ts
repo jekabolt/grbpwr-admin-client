@@ -45,6 +45,8 @@ const OVERSHOOT_MM = 1;
 /** A strip's two sides are parallel (|cos| at least) and square to its ticks (|cos| at most). */
 const STRIP_PARALLEL = 0.995;
 const STRIP_SQUARE = 0.1;
+/** Beside points: this far outside the strip's side lines, mm. */
+const BESIDE_MM = 4;
 /** Body / far probe points: this far off the tick's middle, mm. */
 const PROBE_MM = 2;
 
@@ -58,6 +60,8 @@ export type EndTick = {
   /** A point just inside rank r's body (its kept side) and one just past the tick. */
   inPt: PtMm;
   outPt: PtMm;
+  /** Points just outside the strip's two sides at the tick: a region holding one is not the strip. */
+  beside: [PtMm, PtMm];
   evidence: ('pen' | 'sides' | 'trend')[];
   /** The strip it crosses: proven ticks of one strip share it. */
   strip: number;
@@ -97,7 +101,10 @@ function walkFrom(pts: readonly PtMm[], end: 0 | 1, mm: number): PtMm {
     const l = dist(seq[i - 1], seq[i]);
     if (l >= left) {
       const k = left / (l || 1);
-      return { x: seq[i - 1].x + (seq[i].x - seq[i - 1].x) * k, y: seq[i - 1].y + (seq[i].y - seq[i - 1].y) * k };
+      return {
+        x: seq[i - 1].x + (seq[i].x - seq[i - 1].x) * k,
+        y: seq[i - 1].y + (seq[i].y - seq[i - 1].y) * k,
+      };
     }
     left -= l;
   }
@@ -248,9 +255,7 @@ export function endTicks(
     }
     // pen
     const l = chainLook(c, styles);
-    const pen = l
-      ? looks.flatMap((pn, r) => (pn.length && onPen(l, pn) ? [r] : []))
-      : [];
+    const pen = l ? looks.flatMap((pn, r) => (pn.length && onPen(l, pn) ? [r] : [])) : [];
     if (pen.length !== 1 && !sides.size) continue;
     // the side segment met at each end: the nearest perpendicular size line (any rank) crossing
     // the tick's line within reach — for the knife
@@ -359,11 +364,13 @@ export function endTicks(
       const e2 = dot(sub(o.b, c.a), c.u);
       const lo = Math.min(e1, e2);
       const hi = Math.max(e1, e2);
-      if (Math.abs(lo) <= TICK_REACH_MM && Math.abs(hi - c.L) <= TICK_REACH_MM) ps.add(Math.round(p));
+      if (Math.abs(lo) <= TICK_REACH_MM && Math.abs(hi - c.L) <= TICK_REACH_MM)
+        ps.add(Math.round(p));
     }
     return ps.size;
   };
-  const pos = (c: Cand, ref: Cand) => dot(sub({ x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }, ref.a), ref.nu);
+  const pos = (c: Cand, ref: Cand) =>
+    dot(sub({ x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }, ref.a), ref.nu);
   /** trend(c, r): ≥ 2 other ladder members named in order with r, larger sizes farther from the body. */
   /** The body side (±1 along c.nu) when the ladder's order proves r's place; 0 = not proven. */
   const trend = (c: Cand, r: number): number => {
@@ -376,7 +383,11 @@ export function endTicks(
       if (t < 0) continue;
       const p = pos(o, c);
       if (Math.abs(p - pc) <= 0.5) continue; // a copy of this tick (a tile overlap)
-      rows.push({ p, r: t, s: o.sides.get(t) != null ? o.sides.get(t)! * Math.sign(dot(o.nu, c.nu)) : null });
+      rows.push({
+        p,
+        r: t,
+        s: o.sides.get(t) != null ? o.sides.get(t)! * Math.sign(dot(o.nu, c.nu)) : null,
+      });
     }
     if (rows.length < 2) return 0;
     rows.push({ p: pc, r, s: c.sides.get(r) ?? null });
@@ -456,6 +467,7 @@ export function endTicks(
       carried,
       inPt: add(mid, c.nu, s * PROBE_MM),
       outPt: add(mid, c.nu, -s * PROBE_MM),
+      beside: [add(xa, c.u, -BESIDE_MM), add(xb, c.u, BESIDE_MM)],
       evidence: pick.ev,
       strip: c.id,
     });
