@@ -64,6 +64,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classify';
+import { parseSizeToken } from 'lib/pattern-import/sizes/tokens';
 
 import { chainView, faceCapBox, partAt, sheetView } from '../assemble/composite';
 import { drawPolyline, exterior, Grid } from './raster';
@@ -114,6 +115,8 @@ export type FaceBlob = {
     cellMm?: number;
     /** The text seeds standing in its own face (not in the faces it holds). */
     labels?: number[];
+    /** A piece label (pieceLabelText) in its own face that its host carries nowhere else. */
+    ownText?: string;
   };
 };
 
@@ -1128,6 +1131,7 @@ export function judgeBlobs(
                   ? { rim: rimSamples(F), cellMm: cell }
                   : {}),
                 ...labelsIn(x.f),
+                ...ownTextIn(x.f, x.host, x.how),
               },
             }
           : {}),
@@ -1155,6 +1159,43 @@ export function judgeBlobs(
         if (hit) ids.push(s.id);
       }
       return ids.length ? { labels: ids } : {};
+    }
+
+    /** Is pixel k in face f, or a wall pixel touching it (a text centred on a line)? */
+    function inFace(k: number, f: number): boolean {
+      if (k < 0) return false;
+      if (face[k] === f) return true;
+      if (face[k] >= 0) return false;
+      const x = k % W;
+      const y = (k / W) | 0;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++)
+          if (g.inside(x + dx, y + dy) && face[(y + dy) * W + x + dx] === f) return true;
+      return false;
+    }
+
+    /**
+     * A piece label standing in face f (pieceLabelText) that the host unit carries in none of its
+     * other faces: a name / letter of its own (D3: such an outline is never set aside silently).
+     * A 'shape' copy (another size nested in the piece, its outline proven the piece's) holds the
+     * piece's own label in the innermost size: its label is its own only when the host carries a
+     * piece label elsewhere and this one differs (a BACK LINING drawn inside the BACK). A sliver
+     * (narrower than any piece is cut) holds a word of the piece printed across its lines («DART»).
+     */
+    function ownTextIn(f: number, host: Unit, how: CopyHow): { ownText?: string } {
+      const mine = textAt.filter(
+        ({ t, k }) => !t.background && inFace(k, f) && pieceLabelText(t.text),
+      );
+      if (!mine.length) return {};
+      const norm = (x: string) => x.trim().replace(/\s+/g, ' ').toUpperCase();
+      const hostFaces = new Set([host.root, ...host.members].filter((h) => h !== f));
+      const hostTexts = textAt
+        .filter(({ t, k }) => !t.background && k >= 0 && hostFaces.has(face[k]))
+        .map(({ t }) => t.text);
+      if (how === 'sliver' || (how === 'shape' && !hostTexts.some(pieceLabelText))) return {};
+      const have = new Set(hostTexts.map(norm));
+      const own = mine.find(({ t }) => !have.has(norm(t.text)));
+      return own ? { ownText: own.t.text.trim().slice(0, 60) } : {};
     }
 
     /** Up to RIM_SAMPLES points along a filled outline's edge (its boundary pixels), mm. */
@@ -1599,6 +1640,21 @@ const TEXT_HELD: ReadonlySet<FaceJunk> = new Set<FaceJunk>([
 ]);
 
 /**
+ * A text that may name a piece (a size copy holding one is not proven, SetAsideCopy.ownLabel): a
+ * word or a letter — not a bare number (tile and page numbers), a size label («SIZE 8/10», «M»),
+ * the pattern's code / title / hashtag, a grainline or the maker's logo. Instructions printed on
+ * a piece («GATHER HERE») count: the doubt goes to a question.
+ */
+export function pieceLabelText(raw: string): boolean {
+  const t = raw.trim().replace(/\s+/g, ' ');
+  if (!/[A-Za-z]/.test(t)) return false;
+  if (/^size\b/i.test(t) || parseSizeToken(t, true)) return false;
+  return !/^#|^[“"”]|\bmdf\s*\d|mood\s*fabrics|^the\s|patterns\s*by|designer\s*fabrics|grain\s*line/i.test(
+    t,
+  );
+}
+
+/**
  * A2 (D3: no closed outline vanishes silently): the outlines the face pass did not seed (≥
  * minPieceAreaMm2, every reason) and the text seeds that sit in junk, held back. Ids: the blob's
  * own for an outline, −1 − seed id for a held text seed.
@@ -1640,14 +1696,18 @@ export function asidesOf(
     const H = c.hostSeeded ? map.blobs.find((x) => x.id === b.inside && !x.aside) : undefined;
     const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
     const host = !H ? null : t ? t.at : H.junk ? null : H.at;
-    // a label in its own face that is not its host's (the host's text seed): its own piece
-    const own = (c.labels ?? []).some((id) => id !== H?.textSeed);
+    // a label in its own face that is not its host's: its own piece
+    const seed = (c.labels ?? []).find((id) => id !== H?.textSeed);
+    const own =
+      seed != null
+        ? textSeeds.find((x) => x.id === seed)?.text?.text ?? `text seed ${seed}`
+        : c.ownText;
     return {
       how: c.how,
       clearMm: Math.round(b.clearMm * 10) / 10,
       host,
       ...(c.rim ? { rim: c.rim, cellMm: c.cellMm } : {}),
-      ...(own ? { ownLabel: true } : {}),
+      ...(own ? { ownLabel: own } : {}),
     };
   }
   return { held, asides };

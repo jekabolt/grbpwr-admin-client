@@ -810,10 +810,11 @@ export type SetAsideCopy = {
   rim?: PtMm[];
   cellMm?: number;
   /**
-   * A text seed (a piece number / name) stands in its own face — not the label of the piece it
-   * was attached to (that one's text seed): a piece of its own, never proven a copy.
+   * A label of its own stands in its own face (pieces/faces pieceLabelText: a text seed that is
+   * not its host's, or a piece name / letter its host does not carry elsewhere): a piece of its
+   * own, never proven a copy. The label, for the question.
    */
-  ownLabel?: boolean;
+  ownLabel?: string;
 };
 
 export type FillOutcome =

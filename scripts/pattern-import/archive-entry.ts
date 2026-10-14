@@ -630,7 +630,7 @@ function diagnoseAside(
     }))
     .filter((x) => x.in > 0);
   if (!c) return { ...out, fail: 'no-account' };
-  if (c.ownLabel) return { ...out, fail: 'own-label' };
+  if (c.ownLabel) return { ...out, fail: 'own-label', ownLabel: c.ownLabel };
   if (a.reason !== 'size-copy') return { ...out, fail: `weak-reason:${a.reason}` };
   const h = c.host;
   if (!h) return { ...out, fail: 'no-host' };
