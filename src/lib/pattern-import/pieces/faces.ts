@@ -1224,10 +1224,10 @@ export function judgeBlobs(
     }
 
     /**
-     * An edge pixel's sample on the line that bounds it: across the wall beside it (walls are
-     * drawn 3 px wide round a line), the middle of that wall run (≤ 2 px in: a thicker run is two
-     * lines side by side) — the drawn line itself, so its distance to a size outline says whether
-     * this is that line. No wall beside it (the raster's edge, a weak line): the pixel's centre.
+     * An edge pixel's sample on the line that bounds it: across the wall beside it (a line is
+     * drawn 3 px wide), the middle of that wall run — the drawn line itself, so its distance to a
+     * size outline says whether this is that line. A run wider than one line's (two lines side by
+     * side, merged — Codex r2), or no wall beside it: the pixel's own centre, as before.
      */
     function onWall(k: number): PtMm {
       const x = k % W;
@@ -1239,12 +1239,13 @@ export function judgeBlobs(
         [0, 1],
       ]) {
         let n = 0;
-        while (n < 5 && g.inside(x + dx * (n + 1), y + dy * (n + 1))) {
+        while (n < 4 && g.inside(x + dx * (n + 1), y + dy * (n + 1))) {
           if (!wall[(y + dy * (n + 1)) * W + x + dx * (n + 1)]) break;
           n++;
         }
         if (!n) continue;
-        const t = 1 + Math.min(2, (n - 1) / 2);
+        if (n > 3) break;
+        const t = 1 + (n - 1) / 2;
         const a = g.centre(x, y);
         const b = g.centre(x + dx, y + dy);
         return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
