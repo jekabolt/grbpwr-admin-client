@@ -107,7 +107,14 @@ export type FaceBlob = {
    * A 'size-copy' / 'seam-line' aside: how it was told a copy, and whether the outline it was
    * attached to (`inside`) was seeded by the face pass.
    */
-  copy?: { how: CopyHow; hostSeeded: boolean; rim?: PtMm[]; cellMm?: number };
+  copy?: {
+    how: CopyHow;
+    hostSeeded: boolean;
+    rim?: PtMm[];
+    cellMm?: number;
+    /** The text seeds standing in its own face (not in the faces it holds). */
+    labels?: number[];
+  };
 };
 
 /**
@@ -1120,12 +1127,35 @@ export function judgeBlobs(
                 ...(x.how === 'lines' || x.how === 'fragment'
                   ? { rim: rimSamples(F), cellMm: cell }
                   : {}),
+                ...labelsIn(x.f),
               },
             }
           : {}),
       });
     }
     return nextId;
+
+    /**
+     * The text seeds standing in face f itself (a seed on the wall round it counts too): a label
+     * of its own. A face's FILLED outline holds the label of the piece nested in it — a size copy
+     * around the piece's middle — so only the face's own pixels are asked.
+     */
+    function labelsIn(f: number): { labels?: number[] } {
+      const ids: number[] = [];
+      for (const s of textSeeds) {
+        const k = pixelOf(s.at);
+        if (k < 0) continue;
+        const x = k % W;
+        const y = (k / W) | 0;
+        let hit = face[k] === f;
+        if (!hit && face[k] < 0)
+          for (let dy = -1; dy <= 1 && !hit; dy++)
+            for (let dx = -1; dx <= 1 && !hit; dx++)
+              if (g.inside(x + dx, y + dy) && face[(y + dy) * W + x + dx] === f) hit = true;
+        if (hit) ids.push(s.id);
+      }
+      return ids.length ? { labels: ids } : {};
+    }
 
     /** Up to RIM_SAMPLES points along a filled outline's edge (its boundary pixels), mm. */
     function rimSamples(F: FillMask): PtMm[] {
@@ -1610,11 +1640,14 @@ export function asidesOf(
     const H = c.hostSeeded ? map.blobs.find((x) => x.id === b.inside && !x.aside) : undefined;
     const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
     const host = !H ? null : t ? t.at : H.junk ? null : H.at;
+    // a label in its own face that is not its host's (the host's text seed): its own piece
+    const own = (c.labels ?? []).some((id) => id !== H?.textSeed);
     return {
       how: c.how,
       clearMm: Math.round(b.clearMm * 10) / 10,
       host,
       ...(c.rim ? { rim: c.rim, cellMm: c.cellMm } : {}),
+      ...(own ? { ownLabel: true } : {}),
     };
   }
   return { held, asides };

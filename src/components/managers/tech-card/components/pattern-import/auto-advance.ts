@@ -118,7 +118,8 @@ type SeedAt = Pick<Seed, 'id' | 'at'>;
  * silently): wm's sleeve beside the back (outside every size of it), wm's collar inside the back
  * (cut in three by the back's lines, inside every size of it), a welt strip inside a piece, a
  * small piece drawn against a piece's edge (its own outline is not the piece's). An aside without
- * that account is a guess too.
+ * that account is a guess too, and so is one holding a piece label of its own (a text seed in its
+ * own face that is not its host's — SetAsideCopy.ownLabel), however it was told a copy.
  */
 export const provenCopy = (
   a: SetAside,
@@ -126,7 +127,7 @@ export const provenCopy = (
   seeds?: readonly SeedAt[],
 ): boolean => {
   const c = a.copy;
-  if (!c) return false;
+  if (!c || c.ownLabel) return false;
   if (c.how === 'sliver' || c.clearMm <= SLIVER_MM) return true;
   const h = c.host;
   if (!h) return false;
@@ -161,11 +162,20 @@ export const provenCopy = (
     a.areaMm2 > 1.05 * (Math.max(...areas) - Math.min(...areas))
   )
     return false;
-  return onOutlines(c.rim, sizes, Math.max(1.5, 2.5 * (c.cellMm ?? 0.5))) >= RIM_ON_SHARE;
+  return onOutlines(c.rim, sizes, rimTolMm(c.cellMm)) >= RIM_ON_SHARE;
 };
 
 /** A grading strip's edge runs along its piece's size outlines at this share of its points. */
 const RIM_ON_SHARE = 0.9;
+
+/**
+ * How far a strip's edge sample may lie from a size outline and still be on it: the sample is a
+ * face pixel's centre across the drawn wall from the outline's polyline, measured at 2.5–2.9 cells
+ * on G0 sheets (≈ 1200 samples on 18 sheets, cells 0.89–1.24 mm: a large sheet's coarser face
+ * raster), then a tail from 3 cells on (lines that are no size outline). 3 cells, never under
+ * 1.5 mm — the 0.5 mm cell's 1.5 mm (wm) unchanged.
+ */
+export const rimTolMm = (cellMm: number | undefined) => Math.max(1.5, 3 * (cellMm ?? 0.5));
 
 /** The share of points within `tol` mm of one of the outlines. */
 function onOutlines(
