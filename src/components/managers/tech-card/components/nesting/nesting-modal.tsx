@@ -198,6 +198,7 @@ const FIELD = 'w-[84px] shrink-0';
 const LAY_FIELDS = new Set(['nest-gap', 'nest-margin', 'nest-allowance', 'nest-crossgrain']);
 const TABLE_FIELDS = new Set([
   'nest-table',
+  'nest-table-width',
   'nest-end-loss',
   'nest-plies',
   'nest-spread-mode',
@@ -288,7 +289,7 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
 // «per ply N» под ячейкой итога в режиме стола: в ячейке 10, на холсте 1 — и это не ошибка.
 function PerPlyNote({ q }: { q: number }) {
   return (
-    <span className='pointer-events-none absolute top-full left-[7px] mt-px text-[9px] leading-none whitespace-nowrap text-labelColor'>
+    <span className='pointer-events-none absolute top-full left-[7px] mt-px text-micro leading-none whitespace-nowrap text-labelColor'>
       per ply {q}
     </span>
   );
@@ -2652,6 +2653,13 @@ export function NestingModal({
   // У готового прогона — стол из его снимка (как ширина): результат считался под него.
   // Новый маркер: настил своим полем (layout.spread), конец стола = стол − 2·запас.
   const storedSpread = viewData ? storedSpreadOf(view?.layout) : null;
+  // «norm from a 1·2·2·1 lay × 10 plies» — у маркера, снятого под настил больше одного слоя.
+  const storedNormLabel =
+    storedSpread && storedSpread.plies > 1 && view?.summary
+      ? `norm from a ${compositionOf(view.summary)
+          .map((c) => c.quantity)
+          .join('·')} lay × ${storedSpread.plies} plies`
+      : '';
   const storedUsableCm =
     storedSpread?.tableCm != null && storedSpread.tableCm - 2 * storedSpread.endLossCm > 0
       ? Math.round((storedSpread.tableCm - 2 * storedSpread.endLossCm) * 100) / 100
@@ -2720,7 +2728,19 @@ export function NestingModal({
       : `${(sizeLabel || 'garments').toLowerCase()} ×${qs[0] ?? 0}`;
   const markerCompText = compText(perPly);
   const cutCompText = compText(perPly.map((q) => q * plies)).replace(/×/g, '');
+  // ПОЛОТНО ШИРЕ СТОЛА: рулон (раскройная ширина + 2 кромки) против ширины стола. Ширина стола
+  // не задана — вердикта нет (не ошибка), пиктограмма рисует только длину.
+  const clothRollCm = Math.round((widthCm + 2 * slotSelvedge(activeSlot)) * 10) / 10;
+  const clothWiderThanTable =
+    !viewData && tableMode && !widthUnset && tableWidthCm != null && clothRollCm > tableWidthCm + 0.05;
   const spreadWarnings: HeaderWarning[] = [];
+  if (clothWiderThanTable && tableWidthCm != null) {
+    spreadWarnings.push({
+      text: `cloth ${clothRollCm} cm wider than the table ${tableWidthCm} cm`,
+      error: true,
+      action: { label: 'table settings', onClick: () => focusField('nest-table-width') },
+    });
+  }
   if (overTableCm > 0.05) {
     spreadWarnings.push({
       text: `longer than the table by ${overTableCm.toFixed(1)} cm`,
@@ -2883,6 +2903,8 @@ export function NestingModal({
   const [piecesOpen, setPiecesOpen] = useState(false);
   // Панель раскладки (gap, margin, allowance, rotate) под шапкой, по умолчанию свёрнута.
   const [layOpen, setLayOpen] = useState(false);
+  // «⋯ table settings» — стол, запас, стопка, лицо, толщина; по умолчанию свёрнуто.
+  const [tableOpen, setTableOpen] = useState(false);
   // СХЕМА ДО ЗАПУСКА: какое поле шапки сейчас под мышью / в фокусе (data-schematic).
   const [hoverView, setHoverView] = useState<SchematicView | null>(null);
   const [focusView, setFocusView] = useState<SchematicView | null>(null);
@@ -2891,12 +2913,32 @@ export function NestingModal({
     return (el?.getAttribute('data-schematic') as SchematicView | null) ?? null;
   };
   const schematicView: SchematicView = hoverView ?? focusView ?? 'compose';
-  const headerHandlers = {
-    onPointerOver: (e: React.PointerEvent) => setHoverView(schematicOf(e.target)),
-    onPointerLeave: () => setHoverView(null),
-    onFocusCapture: (e: React.FocusEvent) => setFocusView(schematicOf(e.target)),
-    onBlurCapture: (e: React.FocusEvent) => setFocusView(schematicOf(e.relatedTarget)),
+  // Ячейка размера под мышью/в фокусе (data-size-key) — схема показывает детали этого размера.
+  const [hoverSizeKey, setHoverSizeKey] = useState<string | null>(null);
+  const [focusSizeKey, setFocusSizeKey] = useState<string | null>(null);
+  const sizeKeyOf = (t: EventTarget | null): string | null => {
+    const el = t instanceof Element ? t.closest('[data-size-key]') : null;
+    return el?.getAttribute('data-size-key') ?? null;
   };
+  const headerHandlers = {
+    onPointerOver: (e: React.PointerEvent) => {
+      setHoverView(schematicOf(e.target));
+      setHoverSizeKey(sizeKeyOf(e.target));
+    },
+    onPointerLeave: () => {
+      setHoverView(null);
+      setHoverSizeKey(null);
+    },
+    onFocusCapture: (e: React.FocusEvent) => {
+      setFocusView(schematicOf(e.target));
+      setFocusSizeKey(sizeKeyOf(e.target));
+    },
+    onBlurCapture: (e: React.FocusEvent) => {
+      setFocusView(schematicOf(e.relatedTarget));
+      setFocusSizeKey(sizeKeyOf(e.relatedTarget));
+    },
+  };
+  const activeSizeKey = hoverView != null ? hoverSizeKey : focusSizeKey;
   const focusField = (id: string) => {
     const go = () => {
       const el = document.getElementById(id);
@@ -2910,8 +2952,9 @@ export function NestingModal({
     if (LAY_FIELDS.has(id) && !layOpen) {
       setLayOpen(true);
       requestAnimationFrame(go);
-    } else if (TABLE_FIELDS.has(id) && !tableMode) {
-      setLayMode('table');
+    } else if (TABLE_FIELDS.has(id) && (!tableMode || (id !== 'nest-plies' && !tableOpen))) {
+      if (!tableMode) setLayMode('table');
+      if (id !== 'nest-plies') setTableOpen(true);
       requestAnimationFrame(go);
     } else go();
   };
@@ -3207,6 +3250,11 @@ export function NestingModal({
     bboxH: p.bboxH,
     checked: !!sel[p.id]?.checked && !!fitsWidth.get(p.id),
   }));
+  // Детали размера под ячейкой: по размерному токену блока (как в блобе, splitPiecesBySize).
+  const sizeRow = activeSizeKey != null ? cellRows.find((r) => r.key === activeSizeKey) : undefined;
+  const sizePieces: SchematicPiece[] = sizeRow
+    ? schematicPieces.filter((q) => sizeRow.tokens.includes(split.codeById.get(q.id)?.size ?? ''))
+    : [];
 
   return (
     <ConfirmationModal
@@ -3295,6 +3343,8 @@ export function NestingModal({
                         <label
                           key={r.key}
                           title={r.label}
+                          data-schematic='size'
+                          data-size-key={r.key}
                           className='relative flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'
                         >
                           <span
@@ -3428,7 +3478,7 @@ export function NestingModal({
                     />
                     <span className='text-labelColor'>cm</span>
                     {widthFrom && (
-                      <span className='whitespace-nowrap text-[9px] leading-none text-labelColor'>
+                      <span className='whitespace-nowrap text-micro leading-none text-labelColor'>
                         {widthFrom}
                       </span>
                     )}
@@ -3439,21 +3489,13 @@ export function NestingModal({
                     data-schematic='lay'
                     aria-expanded={layOpen}
                     aria-controls='nest-lay-panel'
+                    title={`gap ${gapCm} · margin ${marginCm} · allowance ${allowanceMm} mm · rotate ${crossGrain ? 'on' : 'off'}`}
                     onClick={() => setLayOpen((o) => !o)}
                     className={`${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
                       layOpen ? 'border-textColor' : ''
                     }`}
                   >
-                    <span className='text-labelColor'>gap</span> {gapCm}
-                    <span className='text-labelColor'>·</span>
-                    <span className='text-labelColor'>margin</span> {marginCm}
-                    <span className='text-labelColor'>·</span>
-                    <span className={doubleAllowanceRefusal ? 'text-error' : 'text-labelColor'}>
-                      allowance
-                    </span>{' '}
-                    {allowanceMm}
-                    <span className='text-labelColor'>·</span>
-                    <span className='text-labelColor'>↻</span> {crossGrain ? 'on' : 'off'}
+                    <span className={doubleAllowanceRefusal ? 'text-error' : ''}>⋯ nesting</span>
                     <span aria-hidden className='text-labelColor'>
                       {layOpen ? '▴' : '▾'}
                     </span>
@@ -3759,50 +3801,11 @@ export function NestingModal({
           </div>
         )}
 
-        {/* РЯД СТОЛА: только в режиме «table» — настил слоями на раскроечном столе. */}
+        {/* РЯД СТОЛА: только в режиме «table». На виду — слои (auto/своё) и дверь «⋯ table
+            settings»; стол, ширина стола, запас, стопка, лицо, толщина и «save for the workshop»
+            свёрнуты под ней (Fable 07: настройки цеха задают раз, слои — каждый раз). */}
         {!viewData && tableMode && (
           <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-            <label
-              data-schematic='table'
-              className={`${FIELD} space-y-0.5`}
-              title='cutting table length · empty = not set'
-            >
-              <Text
-                size='micro'
-                variant={tableCm == null ? undefined : 'label'}
-                component='span'
-                className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
-              >
-                table cm
-              </Text>
-              <NumBox
-                name='nest-table'
-                decimal
-                value={tableCm}
-                commitOnBlur
-                disabled={busy}
-                onClear={() => setTableEdit(null)}
-                onCommit={(n) => setTableEdit(n > 0 ? n : null)}
-              />
-            </label>
-            <label
-              data-schematic='endLoss'
-              className={`${FIELD} space-y-0.5`}
-              title='spread end loss on each end of the table'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                end loss cm
-              </Text>
-              <NumBox
-                name='nest-end-loss'
-                decimal
-                value={endLossCm}
-                emptyAs={0}
-                commitOnBlur
-                disabled={busy}
-                onCommit={(n) => setEndLossCm(Math.max(0, n))}
-              />
-            </label>
             <label data-schematic='plies' className={`${FIELD} space-y-0.5`}>
               <Text
                 size='micro'
@@ -3835,6 +3838,95 @@ export function NestingModal({
                   </Button>
                 )}
               </span>
+            </label>
+            <div className='shrink-0 space-y-0.5'>
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                &nbsp;
+              </Text>
+              <button
+                type='button'
+                name='nest-table-settings'
+                data-schematic='table'
+                aria-expanded={tableOpen}
+                aria-controls='nest-table-panel'
+                onClick={() => setTableOpen((o) => !o)}
+                className={`${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+                  tableOpen ? 'border-textColor' : ''
+                } ${tableCm == null || clothWiderThanTable ? 'text-error' : ''}`}
+              >
+                ⋯ table settings
+                <span aria-hidden className='text-labelColor'>
+                  {tableOpen ? '▴' : '▾'}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+        {!viewData && tableMode && tableOpen && (
+          <div id='nest-table-panel' className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
+            <label
+              data-schematic='table'
+              className={`${FIELD} space-y-0.5`}
+              title='cutting table width · empty = not set'
+            >
+              <Text
+                size='micro'
+                variant={clothWiderThanTable ? undefined : 'label'}
+                component='span'
+                className={clothWiderThanTable ? `${BOX_LABEL} text-error` : BOX_LABEL}
+              >
+                table w cm
+              </Text>
+              <NumBox
+                name='nest-table-width'
+                decimal
+                value={tableWidthCm}
+                commitOnBlur
+                disabled={busy}
+                onClear={() => setTableWidthEdit(null)}
+                onCommit={(n) => setTableWidthEdit(n > 0 ? n : null)}
+              />
+            </label>
+            <label
+              data-schematic='table'
+              className={`${FIELD} space-y-0.5`}
+              title='cutting table length · empty = not set'
+            >
+              <Text
+                size='micro'
+                variant={tableCm == null ? undefined : 'label'}
+                component='span'
+                className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
+              >
+                table l cm
+              </Text>
+              <NumBox
+                name='nest-table'
+                decimal
+                value={tableCm}
+                commitOnBlur
+                disabled={busy}
+                onClear={() => setTableEdit(null)}
+                onCommit={(n) => setTableEdit(n > 0 ? n : null)}
+              />
+            </label>
+            <label
+              data-schematic='endLoss'
+              className={`${FIELD} space-y-0.5`}
+              title='spread end loss on each end of the table'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                end loss cm
+              </Text>
+              <NumBox
+                name='nest-end-loss'
+                decimal
+                value={endLossCm}
+                emptyAs={0}
+                commitOnBlur
+                disabled={busy}
+                onCommit={(n) => setEndLossCm(Math.max(0, n))}
+              />
             </label>
             <div
               data-schematic='face'
@@ -3939,6 +4031,10 @@ export function NestingModal({
             )}
             {viewData ? (
               <>
+                {/* Норма из смешанного маркера — с подписью настила, под который он снят. */}
+                {storedNormLabel && (
+                  <span className='text-labelColor'>{storedNormLabel} · </span>
+                )}
                 <span className='text-labelColor'>on table </span>
                 {figure(tableEndCm, 1)}
                 <span className='text-labelColor'> cm · plies </span>
@@ -4038,6 +4134,11 @@ export function NestingModal({
               thicknessMm={thicknessMm}
               stackCm={spread.stackCm}
               maxPlies={spread.maxPlies}
+              tableWidthCm={tableWidthCm}
+              clothRollCm={widthUnset ? null : clothRollCm}
+              extra={tableMode ? extraTotal : 0}
+              sizePieces={sizePieces}
+              sizeTitle={sizeRow?.label.toLowerCase()}
             />
           ) : (
             <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>

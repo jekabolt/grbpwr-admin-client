@@ -25,7 +25,9 @@ export type SchematicView =
   | 'face'
   | 'stack'
   | 'thickness'
-  | 'within';
+  | 'within'
+  // Ховер ячейки размера: пиктограммы деталей этого размера (sizePieces).
+  | 'size';
 
 export type SchematicBlock = { label: string; qty: number; share: number };
 export type SchematicPiece = {
@@ -58,6 +60,15 @@ export type MarkerSchematicProps = {
   thicknessMm: number | null;
   stackCm: number | null;
   maxPlies: number | null;
+  // Ширина стола (0413), см; null — не задана: вид сверху рисует только длину.
+  tableWidthCm?: number | null;
+  // Ширина рулона (раскройная + 2 кромки), см — полоса ткани на виде стола сверху.
+  clothRollCm?: number | null;
+  // Перекрой настила по итогам (Σ plies·q − total) — четвёртая строка ограничений.
+  extra?: number;
+  // Ховер ячейки размера: детали размера и его подпись.
+  sizePieces?: SchematicPiece[];
+  sizeTitle?: string;
   className?: string;
 };
 
@@ -90,9 +101,27 @@ const TITLE: Record<SchematicView, string> = {
   stack: 'max stack',
   thickness: 'thickness',
   within: 'within table',
+  size: 'size pieces',
 };
 
-const LIMITS = 'all plies identical · marker ≤ table · stack ≤ knife · face to face = even plies';
+// ЧЕТЫРЕ ОГРАНИЧЕНИЯ НАСТИЛА (Fable 07) — строкой каждое; нарушенное — красным.
+function limitLines(p: MarkerSchematicProps): Array<{ text: string; bad: boolean }> {
+  const n = Math.max(1, Math.round(p.plies));
+  const thick = p.thicknessMm != null && p.thicknessMm > 0 ? p.thicknessMm : null;
+  const over =
+    thick != null && p.stackLimitCm != null ? (n * thick) / 10 > p.stackLimitCm + 1e-9 : false;
+  const ftf = p.spreadMode === 'face_to_face';
+  const extra = p.extra ?? 0;
+  return [
+    { text: 'all plies same sizes', bad: false },
+    { text: 'plies × thickness ≤ stack', bad: over },
+    { text: 'face to face: even plies, no one-way fabric', bad: ftf && (n % 2 === 1 || !p.flipAllowed) },
+    {
+      text: extra > 0 ? `uneven totals → +${extra} extra` : 'uneven totals → +N extra',
+      bad: false,
+    },
+  ];
+}
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const num = (v: number | null | undefined, unit: string) =>
@@ -325,7 +354,8 @@ function ComposeScene({
   const table = p.mode === 'table' && p.tableCm != null;
   const L0 = p.estLengthCm;
   const padL = 88;
-  const padR = 32;
+  // В режиме стола справа — боковой разрез стопки (слои против ножа).
+  const padR = p.mode === 'table' ? 168 : 32;
   const top = table ? 76 : 56;
   const bottom = table ? 80 : 40;
   const availW = Math.max(40, b.w - padL - padR);
@@ -419,6 +449,59 @@ function ComposeScene({
         label={L0 == null ? 'length —' : `≈ ${Math.round(L0)} cm`}
         color={over ? RED : INK}
       />
+      {p.mode === 'table' && <StackInset p={p} x={b.w - 132} y={top} h={availH} />}
+    </g>
+  );
+}
+
+// БОКОВОЙ РАЗРЕЗ СТОПКИ, маленький: слои (до 10 линий), нож пунктиром, подписи слоёв и высоты.
+// Пропорция стопки к ножу честная, когда известны толщина и предел; иначе слои условные.
+function StackInset({ p, x, y, h }: { p: MarkerSchematicProps; x: number; y: number; h: number }) {
+  const n = Math.max(1, Math.round(p.plies));
+  const shown = Math.min(n, 10);
+  const w = 96;
+  const baseY = y + h;
+  const thick = p.thicknessMm != null && p.thicknessMm > 0 ? p.thicknessMm : null;
+  const stackMm = thick != null ? n * thick : null;
+  const limitMm = p.stackLimitCm != null ? p.stackLimitCm * 10 : null;
+  const ref = Math.max(stackMm ?? 0, limitMm ?? 0);
+  const k = ref > 0 && stackMm != null ? (h * 0.7) / ref : 0;
+  const stackPx = k > 0 && stackMm != null ? Math.max(shown * 2, stackMm * k) : shown * 6;
+  const step = stackPx / shown;
+  const limitPx = k > 0 && limitMm != null ? limitMm * k : null;
+  const overStack = limitMm != null && stackMm != null && stackMm > limitMm;
+  return (
+    <g>
+      <T x={x} y={y - 8} anchor='start' color={LABEL} small>
+        stack · side view
+      </T>
+      <L x1={x - 6} y1={px(baseY)} x2={x + w + 6} y2={px(baseY)} />
+      {Array.from({ length: shown }, (_, i) => (
+        <L
+          key={i}
+          x1={x}
+          y1={px(baseY - step * (i + 1))}
+          x2={x + w}
+          y2={px(baseY - step * (i + 1))}
+          color={overStack ? RED : INK}
+        />
+      ))}
+      {limitPx != null && (
+        <L
+          x1={x - 6}
+          y1={px(baseY - limitPx)}
+          x2={x + w + 6}
+          y2={px(baseY - limitPx)}
+          color={LABEL}
+          dash='6 4'
+        />
+      )}
+      <T x={x} y={baseY + 14} anchor='start' color={overStack ? RED : INK}>
+        {`${n} ${n === 1 ? 'ply' : 'plies'} · ${num(p.stackCm, 'cm')}`}
+      </T>
+      <T x={x} y={baseY + 30} anchor='start' color={LABEL}>
+        {`knife ${num(p.stackLimitCm, 'cm')}`}
+      </T>
     </g>
   );
 }
@@ -717,9 +800,18 @@ function RotateScene({ p, b }: { p: MarkerSchematicProps; b: Box }) {
   );
 }
 
-function PiecesScene({ p, b }: { p: MarkerSchematicProps; b: Box }) {
-  const list = p.pieces.slice(0, 32);
-  const checked = p.pieces.filter((q) => q.checked).length;
+function PiecesScene({
+  p,
+  b,
+  only,
+}: {
+  p: MarkerSchematicProps;
+  b: Box;
+  only?: SchematicPiece[];
+}) {
+  const all = only ?? p.pieces;
+  const list = all.slice(0, 32);
+  const checked = all.filter((q) => q.checked).length;
   if (list.length === 0) {
     return (
       <T x={b.w / 2} y={b.h / 2} color={LABEL}>
@@ -744,11 +836,11 @@ function PiecesScene({ p, b }: { p: MarkerSchematicProps; b: Box }) {
   return (
     <g>
       <T x={32} y={36} anchor='start' color={BLUE}>
-        {`${checked} / ${p.pieces.length}`}
+        {`${checked} / ${all.length}`}
       </T>
-      {p.pieces.length > list.length && (
+      {all.length > list.length && (
         <T x={b.w - 32} y={36} anchor='end' color={LABEL}>
-          {`+${p.pieces.length - list.length}`}
+          {`+${all.length - list.length}`}
         </T>
       )}
       {list.map((q, i) => {
@@ -813,6 +905,9 @@ function TableScene({
         </T>
       </g>
     );
+  }
+  if (p.tableWidthCm != null && p.tableWidthCm > 0 && hl !== 'within') {
+    return <TableTopScaled p={p} b={b} hl={hl} T0={T0} W0={p.tableWidthCm} />;
   }
   const tw = T0 * s;
   const el = p.endLossCm * s;
@@ -924,6 +1019,109 @@ function TableScene({
             </>
           )}
         </g>
+      )}
+    </g>
+  );
+}
+
+// СТОЛ СВЕРХУ В МАСШТАБЕ (ширина задана): прямоугольник W×L, на нём полоса полотна (рулон),
+// запас на концах — синим с обеих сторон, полезная длина U подписана; полотно шире стола — красным.
+function TableTopScaled({
+  p,
+  b,
+  hl,
+  T0,
+  W0,
+}: {
+  p: MarkerSchematicProps;
+  b: Box;
+  hl: 'table' | 'endLoss';
+  T0: number;
+  W0: number;
+}) {
+  const padX = 72;
+  const top = 64;
+  const bottom = 56;
+  const roll = p.clothRollCm != null && p.clothRollCm > 0 ? p.clothRollCm : null;
+  const spanW = Math.max(W0, roll ?? 0, 1);
+  const s = Math.min((b.w - 2 * padX) / Math.max(T0, 1), (b.h - top - bottom) / spanW);
+  const x0 = padX;
+  const tw = T0 * s;
+  const th = W0 * s;
+  const y0 = top + (b.h - top - bottom - th) / 2;
+  const el = Math.min(tw / 2, p.endLossCm * s);
+  const cw = roll != null ? roll * s : 0;
+  const cy = y0 + (th - cw) / 2;
+  const wider = roll != null && roll > W0 + 0.05;
+  const U = p.usableCm;
+  return (
+    <g>
+      <T x={x0} y={y0 - 28} anchor='start' color={hl === 'table' ? BLUE : INK}>
+        {`table ${r1(W0)} × ${r1(T0)} cm`}
+      </T>
+      <rect
+        x={px(x0)}
+        y={px(y0)}
+        width={Math.round(tw)}
+        height={Math.round(th)}
+        fill={ZEBRA}
+        stroke={hl === 'table' ? BLUE : INK}
+        shapeRendering='crispEdges'
+        {...NS}
+      />
+      {roll != null && (
+        <rect
+          x={px(x0)}
+          y={px(cy)}
+          width={Math.round(tw)}
+          height={Math.max(1, Math.round(cw))}
+          fill={WHITE}
+          stroke={wider ? RED : EDGE}
+          shapeRendering='crispEdges'
+          {...NS}
+        />
+      )}
+      {el > 0 &&
+        [x0, x0 + tw - el].map((x, i) => (
+          <rect
+            key={i}
+            x={px(x)}
+            y={px(roll != null ? cy : y0)}
+            width={Math.max(1, Math.round(el))}
+            height={Math.max(1, Math.round(roll != null ? cw : th))}
+            fill={BLUE}
+            fillOpacity={0.18}
+            shapeRendering='crispEdges'
+          />
+        ))}
+      {U != null && (
+        <HDim
+          x1={x0 + el}
+          x2={x0 + el + U * s}
+          y={roll != null ? cy + cw / 2 : y0 + th / 2}
+          label={`usable ${r1(U)} cm`}
+        />
+      )}
+      {el > 0 && (
+        <T x={x0 + el / 2} y={y0 + th + 14} color={hl === 'endLoss' ? BLUE : LABEL}>
+          {`${r1(p.endLossCm)}`}
+        </T>
+      )}
+      {el > 0 && (
+        <T x={x0 + tw - el / 2} y={y0 + th + 14} color={hl === 'endLoss' ? BLUE : LABEL}>
+          {`${r1(p.endLossCm)}`}
+        </T>
+      )}
+      <VDim x={x0 - 16} y1={y0} y2={y0 + th} label={`${r1(W0)}`} color={LABEL} />
+      {roll != null && (
+        <VDim
+          x={x0 + tw + 16}
+          y1={cy}
+          y2={cy + cw}
+          label={`cloth ${r1(roll)}`}
+          color={wider ? RED : INK}
+          side='right'
+        />
       )}
     </g>
   );
@@ -1080,7 +1278,12 @@ export function MarkerSchematic(props: MarkerSchematicProps) {
   const { view, mode, className } = props;
   const [ref, box] = useBoxSize<HTMLDivElement>();
   // В режиме стола ячейки — итоги, а схема рисует ОДИН слой (состав маркера).
-  const title = view === 'garments' && mode === 'table' ? 'marker · one ply' : TITLE[view];
+  const title =
+    view === 'garments' && mode === 'table'
+      ? 'marker · one ply'
+      : view === 'size' && props.sizeTitle
+        ? `${props.sizeTitle} pieces`
+        : TITLE[view];
   let scene: ReactNode;
   switch (view) {
     case 'compose':
@@ -1103,6 +1306,9 @@ export function MarkerSchematic(props: MarkerSchematicProps) {
       break;
     case 'pieces':
       scene = <PiecesScene p={props} b={box} />;
+      break;
+    case 'size':
+      scene = <PiecesScene p={props} b={box} only={props.sizePieces ?? []} />;
       break;
     case 'table':
     case 'endLoss':
@@ -1131,9 +1337,13 @@ export function MarkerSchematic(props: MarkerSchematicProps) {
         </svg>
       </div>
       {mode === 'table' && (
-        <p className='border-t border-hairline px-4 py-1.5 text-micro uppercase tracking-label text-labelColor'>
-          {LIMITS}
-        </p>
+        <ul className='border-t border-hairline px-4 py-1.5 text-micro uppercase tracking-label'>
+          {limitLines(props).map((l) => (
+            <li key={l.text} className={l.bad ? 'text-error' : 'text-labelColor'}>
+              {l.text}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
