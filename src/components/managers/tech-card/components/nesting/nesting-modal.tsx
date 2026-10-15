@@ -1662,6 +1662,17 @@ export function NestingModal({
     const scope = markerScopeLines(key, bomLines ?? []);
     return scope.length > 0 ? strictestDirection(scope) : fabricDirection;
   }, [viewData, fabricDirection, lockedSlot, slotKey, bomLines]);
+  // ЛИЦОМ К ЛИЦУ НЕЛЬЗЯ: нечётные слои (пары не сложатся) ИЛИ полотно, которое нельзя
+  // переворачивать (ворс одного направления или направление не задано, allowsFlip). Один предикат
+  // на fit, прогон и сохранение — схема красит ту же строку ограничений.
+  const ftfNoFlip =
+    !viewData && tableMode && spreadMode === 'face_to_face' && !allowsFlip(effectiveDirection);
+  const faceToFaceInvalid = pliesParityBad || ftfNoFlip;
+  // ПОЛОТНО ШИРЕ СТОЛА: рулон (раскройная ширина + 2 кромки) против ширины стола. Ширина стола
+  // не задана — вердикта нет (не ошибка), пиктограмма рисует только длину. Только режим стола.
+  const clothRollCm = Math.round((widthCm + 2 * slotSelvedge(lockedSlot ?? slot)) * 10) / 10;
+  const clothWiderThanTable =
+    !viewData && tableMode && !widthUnset && tableWidthCm != null && clothRollCm > tableWidthCm + 0.05;
 
   // ЗАДАНИЕ ПРОГОНА — собирается ОДИН РАЗ и уезжает в две стороны: в воркер, который его считает,
   // и в оценку, которая говорит его цену ДО запуска (Ф2.3). Раньше конфиг строился внутри
@@ -1759,7 +1770,7 @@ export function NestingModal({
     // Полезная длина, под которую прогон стартует; «fit to the table» передаёт свою U явно.
     runUsableCm: number | null = usableCm,
   ) => {
-    if (parse.phase !== 'ready' || widthUnset || pliesParityBad) return;
+    if (parse.phase !== 'ready' || widthUnset || faceToFaceInvalid || clothWiderThanTable) return;
     setManual(null);
     setRunConfirm(false);
     setSaveError(null);
@@ -2179,7 +2190,8 @@ export function NestingModal({
     !viewData &&
     !widthUnset &&
     !spreadStale &&
-    !pliesParityBad &&
+    !faceToFaceInvalid &&
+    !clothWiderThanTable &&
     canEdit &&
     !fetchFailed &&
     !noSlotChosen &&
@@ -2216,6 +2228,8 @@ export function NestingModal({
     if (widthUnset) out.push('cloth width not set');
     if (spreadStale) out.push('lay or plies changed after the run: run again');
     if (pliesParityBad) out.push('face to face needs an even number of plies');
+    if (ftfNoFlip) out.push('face to face needs a fabric that can be flipped');
+    if (clothWiderThanTable) out.push('cloth wider than the table');
     if (fetchFailed) out.push("some DXF files didn't download");
     if (directionRefusal) out.push(directionRefusal);
     if (doubleAllowanceRefusal) out.push(doubleAllowanceRefusal);
@@ -2709,7 +2723,9 @@ export function NestingModal({
     !overCap &&
     !doubleAllowanceRefusal &&
     !uniRefusal &&
-    !widthUnset;
+    !widthUnset &&
+    !ftfNoFlip &&
+    !clothWiderThanTable;
   const fitAction: HeaderWarningAction | undefined = fitAvailable
     ? {
         label: 'fit to the table',
@@ -2728,11 +2744,6 @@ export function NestingModal({
       : `${(sizeLabel || 'garments').toLowerCase()} ×${qs[0] ?? 0}`;
   const markerCompText = compText(perPly);
   const cutCompText = compText(perPly.map((q) => q * plies)).replace(/×/g, '');
-  // ПОЛОТНО ШИРЕ СТОЛА: рулон (раскройная ширина + 2 кромки) против ширины стола. Ширина стола
-  // не задана — вердикта нет (не ошибка), пиктограмма рисует только длину.
-  const clothRollCm = Math.round((widthCm + 2 * slotSelvedge(activeSlot)) * 10) / 10;
-  const clothWiderThanTable =
-    !viewData && tableMode && !widthUnset && tableWidthCm != null && clothRollCm > tableWidthCm + 0.05;
   const spreadWarnings: HeaderWarning[] = [];
   if (clothWiderThanTable && tableWidthCm != null) {
     spreadWarnings.push({
@@ -2782,6 +2793,24 @@ export function NestingModal({
         onClick: () => guardManual(() => setPlies(Math.max(1, max))),
       },
     });
+  }
+  if (ftfNoFlip) {
+    spreadWarnings.push(
+      effectiveDirection === 'unknown'
+        ? {
+            text: 'face to face: fabric direction not set on the BOM line',
+            error: true,
+            action: directionFix(),
+          }
+        : {
+            text: 'face to face on a one-way fabric',
+            error: true,
+            action: {
+              label: 'face up',
+              onClick: () => guardManual(() => setSpreadMode('face_up')),
+            },
+          },
+    );
   }
   if (!viewData && tableMode && spread.oddFaceToFace) {
     spreadWarnings.push({
@@ -3135,7 +3164,7 @@ export function NestingModal({
       : '',
   ];
   const runBlocked =
-    (!viewData && (widthUnset || pliesParityBad)) ||
+    (!viewData && (widthUnset || faceToFaceInvalid || clothWiderThanTable)) ||
     parse.phase !== 'ready' ||
     checkedCount === 0 ||
     overCap ||
