@@ -2540,7 +2540,7 @@ export function NestingModal({
       snap.marginCm !== marginCm ||
       snap.crossGrain !== crossGrain ||
       // Стол и запас (через полезную U): вердикт «за столом» и сохраняемый стол — от прогона.
-      snap.usableCm !== usableCm);
+      snap.usableCm !== (tableMode ? usableCm : null));
   const figure = (v: number | null, digits = 0) =>
     v == null ? '—' : digits > 0 ? String(Math.round(v * 10 ** digits) / 10 ** digits) : String(v);
   const railS1: RailSectionStatus = {
