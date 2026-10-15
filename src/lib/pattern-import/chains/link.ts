@@ -447,7 +447,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   // line) are one row before any proximity linking: in a dense bundle of sizes the nearest mark is
   // often the next size's (Mood 0 / 2 / 6, 1 mm apart), and proximity alone zigzags across them
   const seq = opRows(pool, styles);
-  const rows = [...seq.rows, ...chainBeads(seq.rest)].filter((row) => {
+  const rows = [...seq.rows, ...chainBeads(seq.rest, seq.runOf)].filter((row) => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
     let near = 0;
     for (const l of row.items) {
@@ -541,6 +541,9 @@ export const OPROW = {
   uTurnDeg: 150,
 };
 
+/** A mark's place in the run of marks drawn one after another that it belongs to. */
+type RunPos = { run: number; idx: number; len: number };
+
 /** The paint operation number of an item (`file|page|op`). */
 const opNo = (it: Item) => {
   const k = it.op.lastIndexOf('|');
@@ -557,9 +560,13 @@ const opNo = (it: Item) => {
  * at a tile seam is two chains, and the fill closes or leaks there as with any gap (stitching the
  * seam by proximity measured worse on Marostica: 44 → 35 closed sizes).
  */
-function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; rest: Item[] } {
+function opRows(
+  pool: Item[],
+  styles: Map<number, Style>,
+): { rows: WChain[]; rest: Item[]; runOf: Map<Item, RunPos> } {
+  const runOf = new Map<Item, RunPos>();
   if (typeof process !== 'undefined' && process.env?.LEAKS_OPROWS_OFF)
-    return { rows: [], rest: pool };
+    return { rows: [], rest: pool, runOf };
   const ink = (it: Item) => {
     const st = styles.get(it.style);
     return st?.strokeRgb ? st.strokeRgb.map((v) => Math.round(v / 24)).join(',') : '-';
@@ -574,7 +581,10 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
   type M = (typeof sorted)[number];
   const rows: M[][] = [];
   let cur: M[] = [];
+  let runs = 0;
   const flush = () => {
+    const run = runs++;
+    cur.forEach((x, idx) => runOf.set(x.it, { run, idx, len: cur.length }));
     const beads = cur.filter((x) => x.it.kind === 'bead' && !x.it.extra?.length).length;
     let L = 0;
     for (let i = 1; i < cur.length; i++) L += dist(cur[i - 1].it.c!, cur[i].it.c!);
@@ -589,15 +599,15 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
       rows.push(cur);
     cur = [];
   };
-  /** signed turn at b on the way a → b → c, degrees (0 when a step is degenerate) */
+  /** signed turn at b on the way a → b → c, degrees, ±180 for a reversal (0 when a step is
+   *  degenerate) — atan2 keeps the sign-less straight-back step a 180° turn (Codex) */
   const turnAt = (a: PtMm, b: PtMm, c: PtMm) => {
     const u = { x: b.x - a.x, y: b.y - a.y };
     const v = { x: c.x - b.x, y: c.y - b.y };
     const lu = Math.hypot(u.x, u.y);
     const lv = Math.hypot(v.x, v.y);
     if (lu < 1e-6 || lv < 1e-6) return 0;
-    const cos = Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / (lu * lv)));
-    return (Math.sign(u.x * v.y - u.y * v.x) * Math.acos(cos) * 180) / Math.PI;
+    return (Math.atan2(u.x * v.y - u.y * v.x, u.x * v.x + u.y * v.y) * 180) / Math.PI;
   };
   let prevTurn = 0;
   for (const x of sorted) {
@@ -642,10 +652,17 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
       dead: false,
     })),
     rest: pool.filter((it) => !taken.has(it)),
+    runOf,
   };
 }
 
-function chainBeads(beads: Item[]): WChain[] {
+/**
+ * Marks to rows by proximity. With `runOf` (the runs of marks drawn one after another), a link
+ * across a tile seam (marks of two pages) is made only between run ends (or marks of no run of
+ * 3+) (Codex): leftover fragments of two sizes' lines meeting at a seam join end to end or not at
+ * all, never zigzag through each other's middles.
+ */
+function chainBeads(beads: Item[], runOf?: Map<Item, RunPos>): WChain[] {
   const n = beads.length;
   if (n < LINK.minDots) return [];
   const grid = new PtGrid(LINK.beadGapMm);
@@ -655,6 +672,7 @@ function chainBeads(beads: Item[]): WChain[] {
     const near: { j: number; d: number }[] = [];
     grid.near(b.c!, LINK.beadGapMm, (j) => {
       if (j === i) return;
+      if (runOf && !runLinkOk(b, beads[j], runOf)) return;
       const d = dist(b.c!, beads[j].c!);
       if (d <= LINK.beadGapMm && d > 0.05) near.push({ j, d });
     });
@@ -698,6 +716,16 @@ function chainBeads(beads: Item[]): WChain[] {
       out.push({ items: path.map((k) => ({ it: beads[k], rev: false })), decor: [], dead: false });
   }
   return out;
+}
+
+/** May two marks be proximity-linked, given the drawn runs they sit in (see chainBeads)? */
+function runLinkOk(a: Item, b: Item, runOf: Map<Item, RunPos>): boolean {
+  // on one page proximity links as it always did; across a tile seam only run ends meet
+  if (opNo(a).page === opNo(b).page) return true;
+  const ra = runOf.get(a);
+  const rb = runOf.get(b);
+  const end = (p: RunPos | undefined) => !p || p.len < 3 || p.idx === 0 || p.idx === p.len - 1;
+  return end(ra) && end(rb);
 }
 
 /** Provenance of a working chain: one range per item (direction inside a range is not kept). */
