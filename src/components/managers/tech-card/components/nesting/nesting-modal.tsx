@@ -247,6 +247,9 @@ type RunSnap = {
   // Прогон шёл в режиме стола (настил слоями): только такой маркер записывает layout.spread.
   // Одиночный настил стола не знает — настил не пишется вовсе.
   layTable: boolean;
+  // Режим настила на старте — часть идентичности прогона: переключение table↔single после
+  // прогона меняет, пишется ли layout.spread, поэтому такой снимок устарел.
+  layMode: 'single' | 'table';
 };
 
 // Заголовок без авто-хвоста: сохранённое имя вида «XS×9 · main fabric main fabric · 140 cm» — это
@@ -499,6 +502,9 @@ export function NestingModal({
   // Raw keystrokes; the min-clamp lands on BLUR (clamping per keystroke makes 90 unreachable
   // — typing «9» snaps to 10).
   const [widthRaw, setWidthRaw] = useState<string | null>(null);
+  // Ширины нет НИГДЕ (ни у пина колорвея, ни у строки BOM): коробка пустая, прогон закрыт, в шапке
+  // дверь туда, где её задают. 140 по умолчанию здесь была бы правдоподобной и неверной длиной.
+  const [widthUnset, setWidthUnset] = useState(false);
   // Целевая длина движком не используется (только SVG/вердикт) — поле скрыто, состояние осталось.
   const [targetCm] = useState<number | ''>('');
   const [gapCm, setGapCm] = useState<number>(NEST_DEFAULTS.gapCm);
@@ -722,6 +728,8 @@ export function NestingModal({
   );
   const plies = pliesEdit ?? autoPliesN;
   const pliesAuto = pliesEdit == null;
+  // Лицом к лицу слои идут парами: нечётное число закрывает прогон и сохранение.
+  const pliesParityBad = tableMode && spreadMode === 'face_to_face' && plies % 2 === 1;
   const perPly = useMemo(
     () => (tableMode ? perPlyQuantities(cutTotals, plies) : cutTotals),
     [tableMode, cutTotals, plies],
@@ -737,7 +745,6 @@ export function NestingModal({
   );
   const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
   const ungradedUnits = graded ? cellUngraded : Math.max(1, perPly[0] ?? 1);
-  const perPlyKey = perPly.join(',');
   // ТИРАЖ НАСТИЛА И ФОРМУЛА БЛОБА — из общего модуля (piece-selection.ts), а не выражением здесь.
   // Ту же формулу собирает очередь раскроя партии на вкладке костинга, БЕЗ этой модалки, и вторая
   // её копия была бы вторым ответом на вопрос «сколько экземпляров этой детали кроят».
@@ -1049,8 +1056,8 @@ export function NestingModal({
     // Состав — параметр прогона наравне с шириной: он решает, какие детали и в скольких
     // экземплярах ложатся на полосу. Готовый результат после его правки описывал бы другой настил.
     qtyByToken,
-    // В режиме стола состав маркера зависит ещё и от слоёв (⌈total/plies⌉).
-    perPlyKey,
+    // Ширина «не задана» — результат на прежней ширине больше ничего не описывает.
+    widthUnset,
     contourLayer,
     grainLayer,
     allowanceMm,
@@ -1564,13 +1571,15 @@ export function NestingModal({
   // на кромку.
   const slotCutWidth = (b?: MarkerBomLine): number => {
     if (!b) return NaN;
+    // Пин колорвея АВТОРИТЕТЕН: приколотый артикул без ширины — это «ширина не задана» (NaN),
+    // а не повод тихо взять ширину строки BOM — та описывает другое полотно.
     const pin = chosenColorway?.widthByLine.get(b.lineKey);
-    if (pin && Number.isFinite(pin.cutCm)) return pin.cutCm;
+    if (pin) return pin.cutCm;
     return slotCutWidthOf(b).cutCm;
   };
   const slotSelvedge = (b?: MarkerBomLine): number => {
     const pin = b ? chosenColorway?.widthByLine.get(b.lineKey) : undefined;
-    if (pin && Number.isFinite(pin.cutCm)) return pin.selvedgeCm;
+    if (pin) return pin.selvedgeCm;
     return b ? slotCutWidthOf(b).selvedgeCm : 0;
   };
   const slotWidth = slotCutWidth(slot);
@@ -1739,7 +1748,7 @@ export function NestingModal({
     // Полезная длина, под которую прогон стартует; «fit to the table» передаёт свою U явно.
     runUsableCm: number | null = usableCm,
   ) => {
-    if (parse.phase !== 'ready') return;
+    if (parse.phase !== 'ready' || widthUnset || pliesParityBad) return;
     setManual(null);
     setRunConfirm(false);
     setSaveError(null);
@@ -1756,6 +1765,7 @@ export function NestingModal({
       tableCm,
       endLossCm,
       layTable: runUsableCm != null || layMode === 'table',
+      layMode: layMode === 'table' ? 'table' : 'single',
     });
     start(parse.parseId, config);
   };
@@ -1893,15 +1903,20 @@ export function NestingModal({
         ? Object.fromEntries(cellRows.map((r, i) => [r.key, q[i] ?? 0]))
         : { '': Math.max(1, q[0] ?? 1) };
     };
-    const pMax = Math.max(1, ...cutTotals);
+    // Лицом к лицу — только чётные N (слои парами).
+    const step = spreadMode === 'face_to_face' ? 2 : 1;
+    const evenUp = (n: number) => (step === 2 && n % 2 === 1 ? n + 1 : n);
+    const pMax = evenUp(Math.max(1, ...cutTotals));
     // Следующее N, при котором слой строго меньше; null — меньше некуда (по одному изделию).
+    // Шаг по N, а не по слою: сумма слоя ступенчатая, и первое N новой ступени — наименьший
+    // перекрой при этом слое. Предел перебора pMax ≤ max итог: дальше слой уже по одному.
     const nextSmaller = (n: number): number | null => {
       const cur = sumAt(n);
       let x = n;
-      while (x < pMax && sumAt(x) >= cur) x++;
+      while (x < pMax && sumAt(x) >= cur) x += step;
       return sumAt(x) < cur ? x : null;
     };
-    let p: number | null = plies;
+    let p: number | null = evenUp(plies);
     while (p != null && sumAt(p) > estimate) p = nextSmaller(p);
     if (p == null) p = pMax;
     fitAbort.current = false;
@@ -1930,7 +1945,7 @@ export function NestingModal({
     } finally {
       setFitting(null);
     }
-    const finalP = fitted ?? p ?? lastTried;
+    const finalP = evenUp(fitted ?? p ?? lastTried);
     const { config, comp } = derivedFor(mapAt(finalP));
     if (config.pieces.length === 0) return;
     setPlies(finalP);
@@ -2006,15 +2021,12 @@ export function NestingModal({
   // перебивается — свой номер оператор ставит осознанно, и подставлять поверх него было бы хуже,
   // чем не подставлять вовсе.
   const [widthTouched, setWidthTouched] = useState(false);
-  // Ширины нет НИГДЕ (ни у пина колорвея, ни у строки BOM): коробка пустая, прогон закрыт, в шапке
-  // дверь туда, где её задают. 140 по умолчанию здесь была бы правдоподобной и неверной длиной.
-  const [widthUnset, setWidthUnset] = useState(false);
   const resolvedSlot = fabricLines.find((b) => b.lineKey === slotKey);
   const widthSrcLine =
     resolvedSlot ??
     (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
   const widthPin = widthSrcLine ? chosenColorway?.widthByLine.get(widthSrcLine.lineKey) : undefined;
-  const widthFromPin = !!widthPin && Number.isFinite(widthPin.cutCm);
+  const widthFromPin = !!widthPin;
   // Откуда число в коробке — подпись под ней.
   const widthFrom = widthUnset
     ? ''
@@ -2026,11 +2038,33 @@ export function NestingModal({
           : 'from BOM'
         : '';
   // Владелец: выбор колорвея (и слота) ВСЕГДА заново берёт ширину из BOM — ручное число живёт
-  // только до следующего выбора. Эффект стоит ДО подстановки: та перезапустится по смене флага.
-  useEffect(() => {
-    if (viewData) return;
-    setWidthTouched(false);
-  }, [viewData, colorwayId, slotKey]);
+  // только до следующего выбора. Смена источника и ширины — ОДНО действие под guardManual: отказ
+  // выбросить ручные правки оставляет и прежний источник, и прежнюю ширину; согласие сразу кладёт
+  // новую ширину (или «не задана») и сбрасывает готовый результат.
+  const chooseSource = (next: { colorwayId?: number; slotKey?: string }) => {
+    const cw = next.colorwayId ?? colorwayId;
+    const key = next.slotKey ?? slotKey;
+    const line =
+      fabricLines.find((b) => b.lineKey === key) ??
+      (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
+    const pin = line ? cwOptions.find((c) => c.colorwayId === cw)?.widthByLine.get(line.lineKey) : undefined;
+    const w = line ? (pin ? pin.cutCm : slotCutWidthOf(line).cutCm) : null;
+    guardManual(() => {
+      setColorwayId(cw);
+      setSlotKey(key);
+      setWidthTouched(false);
+      setWidthRaw(null);
+      if (w == null) {
+        setWidthUnset(false);
+      } else if (!Number.isFinite(w) || w < 10) {
+        setWidthUnset(true);
+      } else {
+        setWidthUnset(false);
+        setWidthCm(Math.round(w * 10) / 10);
+      }
+      resetRun();
+    });
+  };
   useEffect(() => {
     if (viewData || widthTouched) return;
     const src = widthSrcLine;
@@ -2120,8 +2154,21 @@ export function NestingModal({
         ? 'a piece is flipped, fabric direction not set on the BOM line'
         : 'a piece is flipped on a one-way fabric'
       : null;
+  // ИДЕНТИЧНОСТЬ ПРОГОНА ДЛЯ СОХРАНЕНИЯ: режим настила и состав слоя на старте должны совпадать
+  // с текущими — иначе сохранение записало бы layout.spread не того настила (или не записало
+  // бы вовсе) при составе, который движок не укладывал.
+  const compKey = (c: readonly MarkerCompositionEntry[]) =>
+    c.map((e) => `${e.sizeId}:${e.quantity}`).join(',');
+  const spreadStale =
+    !viewData &&
+    run.phase === 'done' &&
+    snap != null &&
+    (snap.layMode !== layMode || compKey(snap.composition) !== compKey(composition));
   const canSave =
     !viewData &&
+    !widthUnset &&
+    !spreadStale &&
+    !pliesParityBad &&
     canEdit &&
     !fetchFailed &&
     !noSlotChosen &&
@@ -2155,6 +2202,9 @@ export function NestingModal({
     if (viewData || canSave) return [];
     const out: string[] = [];
     if (!canEdit) out.push('no rights to edit the card');
+    if (widthUnset) out.push('cloth width not set');
+    if (spreadStale) out.push('lay or plies changed after the run: run again');
+    if (pliesParityBad) out.push('face to face needs an even number of plies');
     if (fetchFailed) out.push("some DXF files didn't download");
     if (directionRefusal) out.push(directionRefusal);
     if (doubleAllowanceRefusal) out.push(doubleAllowanceRefusal);
@@ -2640,7 +2690,8 @@ export function NestingModal({
     checkedCount > 0 &&
     !overCap &&
     !doubleAllowanceRefusal &&
-    !uniRefusal;
+    !uniRefusal &&
+    !widthUnset;
   const fitAction: HeaderWarningAction | undefined = fitAvailable
     ? {
         label: 'fit to the table',
@@ -2696,7 +2747,10 @@ export function NestingModal({
     spreadWarnings.push({
       text: `${plies} plies over the stack limit, max ${max}`,
       error: true,
-      action: { label: 'set plies to max', onClick: () => setPlies(Math.max(1, max)) },
+      action: {
+        label: 'set plies to max',
+        onClick: () => guardManual(() => setPlies(Math.max(1, max))),
+      },
     });
   }
   if (!viewData && tableMode && spread.oddFaceToFace) {
@@ -2706,10 +2760,12 @@ export function NestingModal({
       action: {
         label: 'make even',
         onClick: () =>
-          setPlies(
-            spread.maxPlies != null && plies + 1 > spread.maxPlies
-              ? Math.max(2, plies - 1)
-              : plies + 1,
+          guardManual(() =>
+            setPlies(
+              spread.maxPlies != null && plies + 1 > spread.maxPlies
+                ? Math.max(2, plies - 1)
+                : plies + 1,
+            ),
           ),
       },
     });
@@ -2744,7 +2800,7 @@ export function NestingModal({
       text: `+${extraTotal} extra (${Math.round((extraTotal / cutTotal) * 100)} %) · ${extraDetail}`,
       action:
         !pliesAuto && plies !== autoPliesN
-          ? { label: 'fit plies', onClick: () => setPlies(null) }
+          ? { label: 'fit plies', onClick: () => guardManual(() => setPlies(null)) }
           : undefined,
     });
   }
@@ -2765,7 +2821,8 @@ export function NestingModal({
       snap.marginCm !== marginCm ||
       snap.crossGrain !== crossGrain ||
       // Стол и запас (через полезную U): вердикт «за столом» и сохраняемый стол — от прогона.
-      snap.usableCm !== (tableMode ? usableCm : null));
+      snap.usableCm !== (tableMode ? usableCm : null) ||
+      spreadStale);
   const figure = (v: number | null, digits = 0) =>
     v == null ? '—' : digits > 0 ? String(Math.round(v * 10 ** digits) / 10 ** digits) : String(v);
   const railS1: RailSectionStatus = {
@@ -3025,7 +3082,7 @@ export function NestingModal({
       : '',
   ];
   const runBlocked =
-    (!viewData && widthUnset) ||
+    (!viewData && (widthUnset || pliesParityBad)) ||
     parse.phase !== 'ready' ||
     checkedCount === 0 ||
     overCap ||
@@ -3188,7 +3245,7 @@ export function NestingModal({
                       className={`${BOX} cursor-pointer appearance-none truncate pr-5`}
                       disabled={busy}
                       value={String(colorwayId)}
-                      onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
+                      onChange={(e) => chooseSource({ colorwayId: Number(e.target.value) || 0 })}
                     >
                       <option value='0'>shared</option>
                       {cwOptions.map((c) => (
@@ -3314,7 +3371,7 @@ export function NestingModal({
                         }`}
                         disabled={busy}
                         value={slotKey}
-                        onChange={(e) => setSlotKey(e.target.value)}
+                        onChange={(e) => chooseSource({ slotKey: e.target.value })}
                       >
                         <option value=''>not picked</option>
                         {fabricLines.map((b) => (
@@ -3531,7 +3588,9 @@ export function NestingModal({
                       name={`nest-lay-mode-${m}`}
                       aria-pressed={layMode === m}
                       disabled={busy}
-                      onClick={() => setLayMode(m)}
+                      onClick={() => {
+                        if (m !== layMode) guardManual(() => setLayMode(m));
+                      }}
                       className={`${SEG} ${i > 0 ? '-ml-px' : ''} ${
                         layMode === m
                           ? 'relative border-textColor bg-textColor text-bgColor'
@@ -3752,7 +3811,7 @@ export function NestingModal({
                   emptyAs={1}
                   onCommit={(n) => {
                     const next = Math.max(1, Math.round(n));
-                    if (next !== plies) setPlies(next);
+                    if (next !== plies) guardManual(() => setPlies(next));
                   }}
                 />
                 {!pliesAuto && (
@@ -3760,7 +3819,7 @@ export function NestingModal({
                     type='button'
                     variant='underline'
                     title={`back to auto: ${autoPliesN} plies`}
-                    onClick={() => setPlies(null)}
+                    onClick={() => guardManual(() => setPlies(null))}
                   >
                     auto
                   </Button>
@@ -3779,7 +3838,11 @@ export function NestingModal({
                 type='button'
                 name='nest-spread-mode'
                 aria-pressed={spreadMode === 'face_to_face'}
-                onClick={() => setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up'))}
+                onClick={() =>
+                  guardManual(() =>
+                    setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up')),
+                  )
+                }
                 className={`${BOX} justify-center uppercase ${
                   spreadMode === 'face_to_face'
                     ? 'border-textColor bg-textColor text-bgColor hover:opacity-80'
@@ -3802,8 +3865,11 @@ export function NestingModal({
                 decimal
                 value={stackLimitCm}
                 commitOnBlur
-                onClear={() => setStackEdit(null)}
-                onCommit={(n) => setStackEdit(n > 0 ? n : null)}
+                onClear={() => guardManual(() => setStackEdit(null))}
+                onCommit={(n) => {
+                  const next = n > 0 ? n : null;
+                  if (next !== stackLimitCm) guardManual(() => setStackEdit(next));
+                }}
               />
             </label>
             <div
@@ -4216,7 +4282,7 @@ export function NestingModal({
                   { value: '', label: 'not picked' },
                   ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
                 ]}
-                onChange={(v: string | number) => setSlotKey(String(v))}
+                onChange={(v: string | number) => chooseSource({ slotKey: String(v) })}
               />
             </label>
           )}

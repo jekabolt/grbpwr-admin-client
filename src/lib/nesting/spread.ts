@@ -143,35 +143,49 @@ export function pliesToCover(totals: readonly number[], perPly: readonly number[
   return p;
 }
 
-// Слои по умолчанию (а не своё число оператора):
-//   1. НОД итогов — ноль перекроя;
-//   2. НОД выше предела стопки → наибольший его делитель под пределом (итоги всё ещё ровные);
-//      лицом к лицу — наибольший ЧЁТНЫЙ делитель под пределом;
-//   3. ни один делитель > 1 не влезает → сам предел (перекрой ⌈total/N⌉·N − total);
-//   4. лицом к лицу и всё ещё нечётно → +1 слой (предел лицом к лицу уже чётный, так что влезает).
+// Делители n по возрастанию — перебором до √n (итоги бывают тысячами, линейный скан морозил ввод).
+export function divisorsOf(n: number): number[] {
+  const m = Math.floor(n);
+  if (!(m >= 1)) return [];
+  const lo: number[] = [];
+  const hi: number[] = [];
+  for (let d = 1; d * d <= m; d++) {
+    if (m % d !== 0) continue;
+    lo.push(d);
+    if (d * d !== m) hi.push(m / d);
+  }
+  return lo.concat(hi.reverse());
+}
+
+// Слои по умолчанию (а не своё число оператора). maxPlies: null/undefined = предел НЕИЗВЕСТЕН
+// (нет толщины или предела стопки) — не ограничивает; 0 = стопка не вмещает ни слоя — это не
+// «без предела», и ответ тогда минимальный (1, лицом к лицу 2), а экран скажет «over the stack».
+//   1. НОД итогов — ноль перекроя; выше предела — наибольший делитель НОД под пределом
+//      (итоги всё ещё ровные). Лицом к лицу — только чётные делители.
+//   2. Ни один делитель > 1 не годится:
+//      — лицом к лицу: НОД+1, если влезает под предел, иначе наибольшее чётное ≤ предела;
+//      — иначе: сам предел (перекрой ⌈total/N⌉·N − total).
 export function autoPlies(
   totals: readonly number[],
   maxPlies: number | null | undefined,
   faceToFace: boolean,
 ): number {
   const g = gcdOfTotals(totals);
-  if (g <= 0) return 1;
-  const cap = typeof maxPlies === 'number' && maxPlies >= 1 ? Math.floor(maxPlies) : Infinity;
-  const largestDivisor = (even: boolean): number => {
-    for (let d = Math.min(g, cap); d >= 1; d--) {
-      if (g % d === 0 && (!even || d % 2 === 0)) return d;
-    }
-    return 0;
-  };
+  const known = typeof maxPlies === 'number' && Number.isFinite(maxPlies);
+  const cap = known ? Math.max(0, Math.floor(maxPlies as number)) : Infinity;
+  const floor = faceToFace ? 2 : 1;
+  if (g <= 0) return floor;
+  if (cap < floor) return floor;
+  const fits = divisorsOf(g).filter((d) => d <= cap && (!faceToFace || d % 2 === 0));
+  const best = fits.length ? fits[fits.length - 1] : 0;
+  if (best > 1) return best;
   if (faceToFace) {
-    const even = largestDivisor(true);
-    if (even >= 2) return even;
+    if (g + 1 <= cap) return g + 1; // g нечётный (иначе нашёлся бы чётный делитель 2)
+    return cap % 2 === 0 ? cap : cap - 1; // cap ≥ 2 здесь
   }
-  let p = largestDivisor(false);
-  if (p <= 1 && g > 1 && Number.isFinite(cap)) p = cap;
-  p = Math.max(1, p);
-  if (faceToFace && p % 2 === 1 && p + 1 <= cap) p += 1;
-  return p;
+  // Без лица к лицу best ≥ 1 всегда; > 1 не нашлось.
+  if (g === 1) return 1;
+  return Number.isFinite(cap) ? cap : g;
 }
 
 // Перекрой молчит, пока он в допуске: не больше +1 на размер ИЛИ не больше 10 % итога.
