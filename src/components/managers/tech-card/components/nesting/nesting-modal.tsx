@@ -2044,7 +2044,7 @@ export function NestingModal({
       <div className='mb-2.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
         {!viewData && (
           <>
-            {cwOptions.length > 1 && (
+            {cwOptions.length > 0 && (
               <div className={`${FIELD} space-y-0.5`} title={chosenColorway?.label ?? 'shared'}>
                 <Text size='micro' variant='label' component='span' className='block uppercase'>
                   colourway

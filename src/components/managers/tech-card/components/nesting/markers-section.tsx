@@ -129,11 +129,13 @@ function compositionText(
 
 // АВТОИМЯ НЕ ПОКАЗЫВАЕМ: оно склеено из размера, колорвея и ткани (baseMarkerName) и повторяет то,
 // что строка и так говорит составом и группой. Показываем только имя, которое дал человек.
-function isAutoName(m: common_TechCardMarkerSummary, comp: readonly { sizeId: number }[]): boolean {
-  if (m.source === 'auto') return true;
+function isAutoName(m: common_TechCardMarkerSummary, sizeLabels: readonly string[]): boolean {
+  // Только имя, совпадающее с генерированным образцом «размер · …» — переименованная человеком
+  // раскладка (даже автоматическая по происхождению) остаётся видна по имени (Codex r5).
   const name = (m.name ?? '').trim();
   if (!name.includes(' · ')) return false;
-  return comp.length > 0 || Number(m.sizeId ?? 0) > 0;
+  const head = name.split(' · ')[0].trim().toLowerCase();
+  return sizeLabels.some((l) => l.trim().toLowerCase() === head);
 }
 
 // Всё, что сняли со строки, уезжает в её подсказку — ничего не теряется.
@@ -429,7 +431,12 @@ export function MarkersSection({
     const conflict = (m.normConflict ?? '').trim();
     const changed = pieceSetChanged(m);
     const name = (m.name ?? '').trim();
-    const custom = name && !isAutoName(m, comp);
+    const custom =
+      name &&
+      !isAutoName(
+        m,
+        comp.map((c) => sizeName(c.sizeId)),
+      );
     const colorway = Number(m.colorwayId ?? 0)
       ? colorwayLabelById.get(Number(m.colorwayId)) ?? 'colourway not on the card'
       : '';
