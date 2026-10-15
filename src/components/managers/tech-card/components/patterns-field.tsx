@@ -8,6 +8,17 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { PieceDTO } from 'lib/nesting/types';
+import { fetchMediaBlob } from 'lib/features/media-blob';
+import {
+  INSUNITS_CODE,
+  bytesToLatin1,
+  drawingExtents,
+  isBinaryDxf,
+  latin1ToBytes,
+  unitsMissing,
+  writeInsunits,
+  type DxfLinearUnit,
+} from 'lib/nesting/dxf/insunits';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -20,7 +31,7 @@ import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warning
 import Input from 'ui/components/input';
 import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
-import { uploadPatternFile } from 'ui/components/pattern-upload-button';
+import { patternNameOfFile, uploadPatternFile } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { cn } from 'lib/utility';
@@ -51,6 +62,7 @@ import {
 import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
+import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
@@ -80,10 +92,6 @@ import { useUniPrefill } from './use-uni-prefill';
 // nothing loads until someone actually opens a раскладка.
 const NestingModal = lazy(() =>
   import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
-);
-// Просмотр DXF нашим листом — из того же ленивого чанка: воркер и парсер общие.
-const DxfSheetViewer = lazy(() =>
-  import('./nesting/dxf-sheet-viewer').then((m) => ({ default: m.DxfSheetViewer })),
 );
 // Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
 const PieceMatchModal = lazy(() =>
@@ -145,6 +153,25 @@ const PDF_KEY = '__pdf';
 const SLOT_ACCEPT_DXF = '.dxf,image/vnd.dxf';
 const SLOT_ACCEPT_ALL = `${SLOT_ACCEPT_DXF},.pdf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff`;
 const IMPORT_EXT = new Set(SLOT_ACCEPT_ALL.split(',').filter((x) => x.startsWith('.')));
+
+// The parser's warning for a sheet without $INSUNITS (lib/nesting/worker/parse-files.ts):
+// `${sheet name}: units are not set in the file — mm assumed`. Turned into the `set units` door.
+const UNITS_GUESS = ': units are not set in the file — ';
+
+/** A DXF's bytes with $INSUNITS written, as a File of the same name. */
+function fileWithUnits(text: string, unit: DxfLinearUnit, name: string, type = ''): File {
+  return new File([latin1ToBytes(writeInsunits(text, INSUNITS_CODE[unit])) as BlobPart], name, {
+    type,
+  });
+}
+
+/** ASCII DXF text when the file declares no usable units; null otherwise (binary, set, not DXF). */
+async function unitlessText(blob: Blob): Promise<string | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (isBinaryDxf(bytes)) return null;
+  const text = bytesToLatin1(bytes);
+  return unitsMissing(text) ? text : null;
+}
 
 /** Every message in a react-hook-form error subtree (skips the DOM `ref`). */
 function messagesOf(e: unknown): string[] {
@@ -372,9 +399,17 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
-  // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
-  // this state and split into the two viewers at the bottom.
+  // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
+  // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
+  const [unitsAsk, setUnitsAsk] = useState<{
+    items: UnitsItem[];
+    confirm: (units: Record<string, DxfLinearUnit>) => Promise<void> | void;
+    cancel: () => void;
+  } | null>(null);
+  const [unitsBusy, setUnitsBusy] = useState(false);
+  // Downloading the unitless sheets before the dialog can show their size.
+  const [unitsFetching, setUnitsFetching] = useState(false);
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
   // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
@@ -789,8 +824,63 @@ export function PatternsField({
     return sc ? bindingForScope(sc) : { fabricPurpose: '', bomLineKey: '' };
   };
 
-  // One DXF into one slot: no naming modal (the slot is the material, the name is the file's).
-  async function directUpload(scopeKey: string, file: File) {
+  // Ask the units of the DXFs that declare none; resolves the files to upload (rewritten where
+  // asked) or null on cancel. Binary DXFs and files with units pass through untouched.
+  async function withUnits(files: File[]): Promise<File[] | null> {
+    const texts = await Promise.all(
+      files.map((f) => (isDxfFile(f) ? unitlessText(f) : Promise.resolve(null))),
+    );
+    const need = texts.flatMap((t, i) => (t != null ? [i] : []));
+    if (need.length === 0) return files;
+    const units = await new Promise<Record<string, DxfLinearUnit> | null>((resolve) =>
+      setUnitsAsk({
+        items: need.map((i) => ({
+          key: String(i),
+          name: files[i].name,
+          extents: drawingExtents(texts[i]!),
+        })),
+        confirm: (u) => {
+          setUnitsAsk(null);
+          resolve(u);
+        },
+        cancel: () => {
+          setUnitsAsk(null);
+          resolve(null);
+        },
+      }),
+    );
+    if (!units) return null;
+    return files.map((f, i) =>
+      texts[i] != null ? fileWithUnits(texts[i]!, units[String(i)] ?? 'mm', f.name, f.type) : f,
+    );
+  }
+
+  // New sheets are named by the card, not by the file: `{style number or card name} {material}`,
+  // + ' 2', ' 3'… while the slot already holds that name. Existing rows are never renamed — the
+  // name is the marker's provenance key (nesting/sheet-name.ts).
+  function autoName(scopeKey: string, file: File): string {
+    const sc = scopeOfKey(scopeKey);
+    const material = (sc ? scopeLabel(sc).split(' · ')[0] : '').trim().toLowerCase();
+    const base = clampPatternName(
+      [styleNumber.trim() || cardName.trim(), material].filter(Boolean).join(' '),
+    );
+    if (!base) return patternNameOfFile(file);
+    const taken = new Set(
+      ((getValues('patterns') ?? []) as PatternRow[])
+        .filter((r) => scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey)
+        .map((r) => (r.name ?? '').trim()),
+    );
+    let name = base;
+    for (let n = 2; taken.has(name); n++) name = clampPatternName(`${base} ${n}`);
+    return name;
+  }
+
+  // One DXF into one slot: no naming modal (the slot is the material, the name is the card's).
+  async function directUpload(scopeKey: string, picked: File) {
+    // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
+    const fixed = await withUnits([picked]);
+    if (!fixed) return;
+    const file = fixed[0];
     const bump = (d: number) =>
       setUploading((u) => {
         const n = (u[scopeKey] ?? 0) + d;
@@ -800,7 +890,13 @@ export function PatternsField({
     bump(1);
     try {
       const up = await uploadPatternFile(file);
-      append({ sizeId: storageSizeId, lineKey: ulid(), ...up, ...bindingOf(scopeKey) });
+      append({
+        sizeId: storageSizeId,
+        lineKey: ulid(),
+        ...up,
+        name: autoName(scopeKey, file),
+        ...bindingOf(scopeKey),
+      });
       setPendingView({ scopeKey, urls: [up.url] });
     } catch (e) {
       console.error('UploadPattern failed', e);
@@ -829,11 +925,83 @@ export function PatternsField({
     if (good.length === 0) return;
     setSelectedKey(scopeKey);
     if (good.every(isDxfFile)) {
-      if (good.length === 1) void directUpload(scopeKey, good[0]);
-      else setMerging({ scopeKey, files: good });
+      void (async () => {
+        const ready = await withUnits(good);
+        if (!ready) return;
+        if (ready.length === 1) void directUpload(scopeKey, ready[0]);
+        else setMerging({ scopeKey, files: ready });
+      })();
       return;
     }
     setImporting({ scopeKey, files: good });
+  }
+
+  // Sheets already on the card that the parser read with guessed units.
+  const guessedNames = useMemo(
+    () =>
+      new Set(
+        (geometry.data?.warnings ?? [])
+          .filter((w) => w.includes(UNITS_GUESS))
+          .map((w) => w.slice(0, w.indexOf(UNITS_GUESS))),
+      ),
+    [geometry.data],
+  );
+  const unitless = dxfEntries.filter((e) => guessedNames.has(patternSheetName(e.row)));
+
+  // `set units` on existing sheets: download, ask, rewrite $INSUNITS, upload as a new file and swap
+  // url/filename/size on the SAME row (lineKey, name, binding kept — aliases and pieces stay).
+  async function setUnitsOfExisting() {
+    if (unitsFetching || unitless.length === 0) return;
+    setUnitsFetching(true);
+    const rows = unitless.map((e) => e.row);
+    const got = await Promise.allSettled(
+      rows.map(async (r) => unitlessText(await fetchMediaBlob(r.url!))),
+    );
+    setUnitsFetching(false);
+    const ready = rows.flatMap((row, i) => {
+      const g = got[i];
+      if (g.status === 'rejected') {
+        showMessage(`${labelOf(row)}: download failed`, 'error');
+        return [];
+      }
+      return g.value != null ? [{ row, text: g.value }] : [];
+    });
+    if (ready.length === 0) return;
+    setUnitsAsk({
+      items: ready.map(({ row, text }) => ({
+        key: row.url!,
+        name: labelOf(row),
+        extents: drawingExtents(text),
+      })),
+      cancel: () => setUnitsAsk(null),
+      confirm: async (units) => {
+        for (const { row, text } of ready) {
+          try {
+            const file = fileWithUnits(
+              text,
+              units[row.url!] ?? 'mm',
+              row.filename || 'pattern.dxf',
+              'image/vnd.dxf',
+            );
+            const up = await uploadPatternFile(file, row.name ?? '');
+            const live = (getValues('patterns') ?? []) as PatternRow[];
+            const i = live.findIndex((r) => r.url === row.url);
+            // Removed or replaced meanwhile: the new file is not forced onto another row.
+            if (i < 0) continue;
+            setValue(`patterns.${i}.url`, up.url, { shouldDirty: true });
+            setValue(`patterns.${i}.filename`, up.filename, { shouldDirty: true });
+            setValue(`patterns.${i}.sizeBytes`, up.sizeBytes, { shouldDirty: true });
+            // 0 = "assign one": the server numbers a url it has not seen on this card.
+            setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
+            setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
+          } catch (e) {
+            console.error('UploadPattern failed', e);
+            showMessage(`${labelOf(row)}: ${patternUploadErrorMessage(e)}`, 'error');
+          }
+        }
+        setUnitsAsk(null);
+      },
+    });
   }
 
   // ИНДЕКС РАЗМЕРОВ (Ф6.3) — публикуется САМ, следом за разбором.
@@ -1027,6 +1195,8 @@ export function PatternsField({
     const stray = !!row.sizeId && !inRange.has(row.sizeId);
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    // A DXF name opens the pieces viewer of its slot; a sheet without a material has none.
+    const rowGroup = dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
     const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
     const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
     const meta = [rev != null ? `v${rev}` : '', row.sizeBytes ? formatBytes(row.sizeBytes) : '']
@@ -1060,14 +1230,20 @@ export function PatternsField({
               />
             ) : (
               <span className='flex flex-wrap items-center gap-1.5'>
-                <button
-                  type='button'
-                  onClick={() => setViewing(row)}
-                  title={row.filename || undefined}
-                  className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
-                >
-                  {labelOf(row)}
-                </button>
+                {!dxf || rowGroup ? (
+                  <button
+                    type='button'
+                    onClick={() => (rowGroup ? openPieces(rowGroup) : setViewing(row))}
+                    title={row.filename || undefined}
+                    className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
+                  >
+                    {labelOf(row)}
+                  </button>
+                ) : (
+                  <span title={row.filename || undefined} className='min-w-0 truncate text-micro'>
+                    {labelOf(row)}
+                  </span>
+                )}
                 {!dxf && <Pill tone='mut'>pdf</Pill>}
                 {converted && (
                   <Pill tone='mut' title={convertedTitle(converted)}>
@@ -1539,7 +1715,7 @@ export function PatternsField({
       error: true,
     },
     ...followUpFailures,
-    ...(geometry.data?.warnings ?? []),
+    ...(geometry.data?.warnings ?? []).filter((w) => !w.includes(UNITS_GUESS)),
     ...missingSizeNotes,
     ...materialsWithoutDxf.map((g) => `${scopeLabel(g.scope)}: no pattern`),
     looseDxf.length > 0 && `without a material: ${looseDxf.length}`,
@@ -1561,6 +1737,18 @@ export function PatternsField({
         </HeaderNote>
       )}
       <HeaderWarnings items={warnings} />
+      {canEdit && unitless.length > 0 && (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className={door}
+          disabled={unitsFetching || isSubmitting}
+          onClick={() => void setUnitsOfExisting()}
+        >
+          {unitsFetching ? 'set units…' : 'set units'}
+        </Button>
+      )}
       {canRetry && (
         <Button
           type='button'
@@ -1688,16 +1876,20 @@ export function PatternsField({
         </div>
       </ConfirmationModal>
 
-      {/* Просмотр DXF нашим листом: та же геометрия, что у раскладки. */}
-      {viewing && isDxfUrl(viewing.url) && (
-        <Suspense fallback={null}>
-          <DxfSheetViewer
-            files={[{ name: labelOf(viewing), url: viewing.url! }]}
-            title={labelOf(viewing)}
-            onClose={() => setViewing(null)}
-          />
-        </Suspense>
-      )}
+      <DxfUnitsDialog
+        items={unitsAsk?.items ?? null}
+        busy={unitsBusy}
+        onCancel={() => unitsAsk?.cancel()}
+        onConfirm={async (units) => {
+          if (!unitsAsk) return;
+          setUnitsBusy(true);
+          try {
+            await unitsAsk.confirm(units);
+          } finally {
+            setUnitsBusy(false);
+          }
+        }}
+      />
 
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
       {nesting && (
