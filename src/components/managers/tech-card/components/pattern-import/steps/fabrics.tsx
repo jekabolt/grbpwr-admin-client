@@ -2,21 +2,25 @@
 // sheet's own words ("ПОДКЛАДКА", a cut layout) propose which pieces are cut from what; the
 // operator ticks the matrix. A piece in two fabrics goes into both files. Interlining that is not
 // in the BOM is not a file at all — its pieces get `fused` (decision 14).
+// import-ux PR5: only the rows that ask (AI-only cloth to confirm, a piece the planner refuses or
+// that no file carries, a main-by-default piece on a multi-fabric card) are on screen; every other
+// piece folds into one count line; the sheet's evidence is diagnostics (?debug=1).
 import { useMemo, useState } from 'react';
 import type { FabricAssignment, FabricEvidence, SeedId } from 'lib/pattern-import/types';
 import { PURPOSE, isLiningScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import { cn } from 'lib/utility';
-import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
+import { HeaderWarnings } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, ptsAttr } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
-import { Panel, SplitStage, fmtPct } from '../ui-bits';
+import { defaultedFabrics } from '../auto-advance';
+import { plural } from '../stages';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtPct } from '../ui-bits';
 
 const INTERLINING = PURPOSE.interfacing;
 
@@ -105,21 +109,150 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   const inScope = new Set(focusScope ? a.byPurpose[focusScope] ?? [] : []);
   const rank = Math.min(2, (families[0]?.candidates.length ?? 1) - 1);
 
+  // ── which rows ask: the blocker's order (AI-only first, then the planner), then the offer ──
+  const unassigned = (seed: SeedId) =>
+    card.scopes.length > 0 &&
+    card.scopes.every((s) => !(a.byPurpose[s.scopeKey] ?? []).includes(seed));
+  const defaulted = new Set(
+    defaultedFabrics(a, card.scopes.length, api.inputs.assignment != null, seeds),
+  );
+  const why = (seed: SeedId): 'ai' | 'blocked' | 'defaulted' | null =>
+    aiPending.has(seed)
+      ? 'ai'
+      : unassigned(seed) || blockedSeed.has(seed)
+        ? 'blocked'
+        : defaulted.has(seed)
+          ? 'defaulted'
+          : null;
+  const ORDER = { ai: 0, blocked: 1, defaulted: 2 } as const;
+  const asking = seeds.filter((sd) => why(sd)).sort((x, y) => ORDER[why(x)!] - ORDER[why(y)!]);
+  const settled = seeds.filter((sd) => !why(sd));
+
+  // the sheet named a fabric the BOM does not have: true, but not the question — the header list
+  const warnings = (a.refused ?? []).map(
+    (r) => `${r.label}: not in the BOM — no DXF for ${plural(r.seeds.length, 'piece')}`,
+  );
+
+  const matrix = (rows: SeedId[], answering: boolean) => (
+    <DataTable>
+      <thead>
+        <tr>
+          <th>piece</th>
+          {card.scopes.map((s) => (
+            <th
+              key={s.scopeKey}
+              data-align='left'
+              className={cn(focusScope === s.scopeKey && 'text-textColor')}
+              title={
+                isLiningScope(s)
+                  ? 'lining copies are written LIN_<name> and become their own card pieces, never the shell piece'
+                  : undefined
+              }
+            >
+              {s.label}
+            </th>
+          ))}
+          {!a.interliningInBom && (
+            <th
+              data-align='left'
+              title='interlining is not in the BOM: no DXF for it; ticked pieces carry the fused flag on the card'
+            >
+              fused
+            </th>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((seed) => {
+          const w = answering ? why(seed) : null;
+          const refused = refusedOf(seed);
+          const firstBox = w === 'blocked' || w === 'defaulted';
+          return (
+            <tr key={seed}>
+              <td
+                className={w === 'blocked' ? 'text-error' : undefined}
+                title={
+                  [idsOf(seed).join(' + '), ...refused.map((r) => r.reason)].join('\n') || undefined
+                }
+              >
+                {w === 'blocked' ? '! ' : ''}
+                {nameOf(seed)}
+                {aiPending.has(seed) && (
+                  <Chip
+                    {...ask('fabrics-ai-confirm')}
+                    tone='attention'
+                    className='ml-1'
+                    onClick={() => set(answered(seed))}
+                    title={`the sheet says nothing about this piece's fabric; the AI says ${aiPending
+                      .get(seed)!
+                      .map(purposeName)
+                      .join(' + ')}. Confirm it, or change the ticks.`}
+                  >
+                    ! AI only · confirm
+                  </Chip>
+                )}
+              </td>
+              {card.scopes.map((s, k) => (
+                <td key={s.scopeKey} data-align='left'>
+                  <CheckboxCommon
+                    {...ask(
+                      w === 'blocked' ? 'fabrics-assign' : 'fabrics-defaulted',
+                      firstBox && k === 0,
+                    )}
+                    name={`fab-${s.scopeKey}-${seed}`}
+                    aria-label={`${nameOf(seed)} cut from ${s.label}`}
+                    checked={(a.byPurpose[s.scopeKey] ?? []).includes(seed)}
+                    onChange={(v) => toggle(s.scopeKey, seed, v)}
+                  />
+                </td>
+              ))}
+              {!a.interliningInBom && (
+                <td data-align='left'>
+                  <CheckboxCommon
+                    name={`fused-${seed}`}
+                    aria-label={`${nameOf(seed)} is fused`}
+                    checked={fusedSet.has(seed)}
+                    onChange={(v) => toggleFused(seed, v)}
+                  />
+                </td>
+              )}
+            </tr>
+          );
+        })}
+      </tbody>
+    </DataTable>
+  );
+
   return (
     <SplitStage
-      sideWidth={420}
+      sideWidth={360}
       canvas={
-        <Panel title='fabric → pieces' bodyClassName='flex flex-col gap-2'>
-          {card.downloadOnly && (
-            <CalloutBox tone='note'>
-              <Text size='micro' component='p'>
-                <b>download only.</b> the BOM has no fabric line: every piece goes into one
-                main-fabric DXF that you download. nothing is written to the card.
-              </Text>
-            </CalloutBox>
+        <Panel
+          title='fabric → pieces'
+          bodyClassName='flex flex-col gap-2'
+          aside={<HeaderWarnings items={warnings} />}
+        >
+          {card.scopes.length > 0 && asking.length > 0 && (
+            <div>
+              {/* every planner refusal stays readable (the footer says only the first) */}
+              {problems.map((p, i) => (
+                <Text key={i} size='micro' component='p' className='text-error'>
+                  ! {p.seeds.map(nameOf).join(', ')}: {p.message}
+                </Text>
+              ))}
+              {matrix(asking, true)}
+            </div>
           )}
-          <div>
-            <GroupLabel flush>what the sheet says</GroupLabel>
+          {card.scopes.length > 0 && settled.length > 0 && (
+            <Fold
+              className={asking.length ? undefined : 'mt-0'}
+              label={`${plural(settled.length, 'piece')} assigned`}
+              defaultOpen={asking.length === 0 && settled.length <= 12}
+            >
+              {matrix(settled, false)}
+            </Fold>
+          )}
+          <DebugFold label='what the sheet says'>
             <DataTable>
               <thead>
                 <tr>
@@ -131,155 +264,34 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 </tr>
               </thead>
               <tbody>
-                {a.proposals.map((p) => {
-                  const target = scopeLabel(p.scopeKey);
-                  const fusedHere = p.purpose === INTERLINING && !a.interliningInBom;
-                  const refused = (a.refused ?? []).find((r) => r.purpose === p.purpose);
-                  return (
-                    <tr key={(p.scopeKey ?? p.purpose) + p.label}>
-                      <td data-align='left'>
-                        “{p.label}”
-                        <span className='ml-1 text-labelColor'>
-                          {p.purpose.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()}
-                        </span>
-                      </td>
-                      <td data-align='left'>
-                        {target ? (
-                          target
-                        ) : fusedHere ? (
-                          <Pill
-                            tone='attention'
-                            title='interlining is not in the BOM: these pieces get the fused flag instead of a DXF'
-                          >
-                            not in BOM → fused
-                          </Pill>
+                {a.proposals.map((p) => (
+                  <tr key={(p.scopeKey ?? p.purpose) + p.label}>
+                    <td data-align='left'>
+                      “{p.label}” <span className='text-labelColor'>{purposeName(p.purpose)}</span>
+                    </td>
+                    <td data-align='left'>
+                      {scopeLabel(p.scopeKey) ??
+                        (p.purpose === INTERLINING && !a.interliningInBom ? (
+                          <Pill tone='attention'>not in BOM → fused</Pill>
                         ) : (
-                          <Pill tone='warn' title={refused?.reason ?? 'add this fabric to the BOM'}>
-                            not in BOM · no DXF
-                          </Pill>
-                        )}
-                      </td>
-                      <td data-align='left' className='max-w-[360px] text-labelColor'>
-                        {evidenceLine(p.evidence)}
-                      </td>
-                      <td>{p.seeds.length}</td>
-                      <td>{fmtPct(p.confidence, 0)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </DataTable>
-            {problems.length > 0 && (
-              <CalloutBox tone='error' className='mt-2'>
-                {problems.map((p, i) => (
-                  <Text key={i} size='micro' component='p'>
-                    <b>! {p.seeds.map(nameOf).join(', ')}:</b> {p.message}
-                  </Text>
+                          <Pill tone='warn'>not in BOM · no DXF</Pill>
+                        ))}
+                    </td>
+                    <td data-align='left' className='max-w-[360px] text-labelColor'>
+                      {evidenceLine(p.evidence)}
+                    </td>
+                    <td>{p.seeds.length}</td>
+                    <td>{fmtPct(p.confidence, 0)}</td>
+                  </tr>
                 ))}
-              </CalloutBox>
-            )}
-          </div>
-
-          <div>
-            <GroupLabel>one DXF per fabric scope · tick what is cut from it</GroupLabel>
-            <DataTable>
-              <thead>
-                <tr>
-                  <th>piece</th>
-                  <th data-align='left'>blocks</th>
-                  {card.scopes.map((s) => (
-                    <th
-                      key={s.scopeKey}
-                      data-align='left'
-                      className={cn(focusScope === s.scopeKey && 'text-textColor')}
-                    >
-                      {s.label}
-                      {isLiningScope(s) && (
-                        <span
-                          className='block text-labelColor'
-                          title='lining copies are written LIN_<name> and become their own card pieces, never the shell piece'
-                        >
-                          as LIN_…
-                        </span>
-                      )}
-                    </th>
-                  ))}
-                  {!a.interliningInBom && <th data-align='left'>fused</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {seeds.map((seed) => {
-                  const none = card.scopes.every(
-                    (s) => !(a.byPurpose[s.scopeKey] ?? []).includes(seed),
-                  );
-                  const refused = refusedOf(seed);
-                  const blocked = none || blockedSeed.has(seed);
-                  return (
-                    <tr key={seed}>
-                      <td
-                        className={blocked ? 'text-error' : undefined}
-                        title={refused.map((r) => r.reason).join('\n') || undefined}
-                      >
-                        {blocked ? '! ' : ''}
-                        {nameOf(seed)}
-                        {refused.length > 0 && (
-                          <span className='ml-1 text-labelColor'>
-                            (also {refused.map((r) => r.label).join(', ')}: not in BOM)
-                          </span>
-                        )}
-                        {aiPending.has(seed) && (
-                          <Chip
-                            tone='attention'
-                            className='ml-1'
-                            onClick={() => set(answered(seed))}
-                            title={`the sheet says nothing about this piece's fabric; the AI says ${aiPending
-                              .get(seed)!
-                              .map(purposeName)
-                              .join(' + ')}. Confirm it, or change the ticks.`}
-                          >
-                            ! AI only · confirm
-                          </Chip>
-                        )}
-                      </td>
-                      <td data-align='left' className='text-labelColor'>
-                        {idsOf(seed).join(' + ')}
-                      </td>
-                      {card.scopes.map((s) => (
-                        <td key={s.scopeKey} data-align='left'>
-                          <CheckboxCommon
-                            name={`fab-${s.scopeKey}-${seed}`}
-                            aria-label={`${nameOf(seed)} cut from ${s.label}`}
-                            checked={(a.byPurpose[s.scopeKey] ?? []).includes(seed)}
-                            onChange={(v) => toggle(s.scopeKey, seed, v)}
-                          />
-                        </td>
-                      ))}
-                      {!a.interliningInBom && (
-                        <td data-align='left'>
-                          <CheckboxCommon
-                            name={`fused-${seed}`}
-                            aria-label={`${nameOf(seed)} is fused`}
-                            checked={fusedSet.has(seed)}
-                            onChange={(v) => toggleFused(seed, v)}
-                          />
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
               </tbody>
             </DataTable>
-            <Text size='micro' variant='label' component='p' className='mt-1'>
-              {a.interliningInBom
-                ? 'interlining is in the BOM: its pieces get their own DXF and stay the same card piece as the shell, marked fused.'
-                : 'interlining is not in the BOM: no DXF for it; ticked pieces carry the fused flag on the card.'}
-            </Text>
-          </div>
+          </DebugFold>
         </Panel>
       }
       side={
         <Panel
-          title='scope on the sheet'
+          title='on the sheet'
           bodyClassName='p-0 flex flex-col'
           aside={
             <ChipRow>
@@ -321,16 +333,17 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
               )}
             </SheetViewport>
           </div>
-          <Text
-            size='micro'
-            variant='label'
-            component='p'
-            className='shrink-0 border-t border-hairline p-2'
-          >
-            {focusScope
-              ? `${inScope.size} ${inScope.size === 1 ? 'piece' : 'pieces'} in this file. a scope with no ticks writes no DXF.`
-              : 'the BOM has no fabric lines — add them on the BOM tab.'}
-          </Text>
+          {focusScope && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='shrink-0 border-t border-hairline p-2'
+              title='a scope with no ticks writes no DXF'
+            >
+              {plural(inScope.size, 'piece')} in this file
+            </Text>
+          )}
         </Panel>
       }
     />

@@ -2,7 +2,10 @@
 // naming the blocks it failed and the step where the answer lives. Beside it, the pieces drawn
 // by the card's OWN sheet component (nesting/piece-sheet.tsx) under their block names — what the
 // card will see once the files land, not a second opinion about it.
-import { useMemo, useState } from 'react';
+// import-ux PR5: only the checks that block are rows; the passing ones fold into one count line;
+// warnings and what the files leave out are the header's `! N warnings`; values, limits and the
+// run time are diagnostics (?debug=1).
+import { useContext, useMemo, useState } from 'react';
 import type {
   DraftScope,
   GateCheck,
@@ -14,16 +17,17 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
+import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { PieceSheet } from '../../nesting/piece-sheet';
 import type { ImportSessionApi } from '../use-import-session';
 import { STEPS } from '../use-import-session';
-import { Panel, SplitStage, fmtBytes } from '../ui-bits';
+import { plural } from '../stages';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtBytes } from '../ui-bits';
 import { focusFromGate, type PieceFocus } from '../piece-focus';
-import { NotInFile } from './not-in-file';
+import { DroppedLabels, leftOut } from './not-in-file';
 
 const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G1-roundtrip': { what: 'reads back through the card parser', fix: null },
@@ -93,6 +97,7 @@ export function CheckStep({
   );
   const dtos = useMemo(() => (size ? piecesForCard(specs, size) : []), [specs, size]);
 
+  const { labels } = useContext(DroppedLabels);
   if (!scopes.length)
     return (
       <Panel title='check'>
@@ -110,142 +115,211 @@ export function CheckStep({
     if (f) onFixInPieces!(f);
     else void api.dispatch({ type: 'back', to });
   };
+  const stepWord = (to: WizardStep) => STEPS.find((s) => s.id === to)?.label ?? to;
+  const failing = blocking();
+  // a check that passes, or the G9 single-size note on a passing run: one count line
+  const passing = report?.checks.filter((c) => c.ok || quiet(c)) ?? [];
+
+  // what is true but blocks nothing: the header's `! N warnings`, each text the door to its fix
+  const left = leftOut(api, labels);
+  const warnings: HeaderWarning[] = [
+    ...warns.map((c): HeaderWarning => {
+      const to = CHECK[c.id].fix;
+      return {
+        text: `${CHECK[c.id].what}${c.note ? ` — ${c.note}` : ''}${c.blocks.length ? ` (${c.blocks.join(', ')})` : ''}`,
+        action: to ? { label: `fix in ${stepWord(to)}`, onClick: () => fix(c, to) } : undefined,
+      };
+    }),
+    // FLY-final M2: what the written files leave out must be seen before the download
+    ...left.pieces.map(
+      (p): HeaderWarning => ({
+        text: `not in this file: ${p.what} (${p.why})`,
+        action: {
+          label: 'back to pieces',
+          onClick: () => void api.dispatch({ type: 'back', to: 'pieces' }),
+        },
+      }),
+    ),
+    ...(left.sizes.length
+      ? [
+          {
+            text: `not in this file: card ${left.sizes.length === 1 ? 'size' : 'sizes'} ${left.sizes.join(', ')} (no source)`,
+            action: {
+              label: 'back to sizes',
+              onClick: () => void api.dispatch({ type: 'back', to: 'sizes' as WizardStep }),
+            },
+          },
+        ]
+      : []),
+  ];
+
+  const checkRow = (c: GateCheck, i: number, full: boolean) => {
+    const meta = CHECK[c.id];
+    const failed = !c.ok && c.severity === 'block';
+    return (
+      <tr
+        key={`${c.id}-${i}`}
+        className={failed ? 'bg-error/5' : undefined}
+        title={
+          c.value != null
+            ? `${c.value}${c.threshold != null ? ` · limit ${c.threshold}` : ''}`
+            : undefined
+        }
+      >
+        <td className='whitespace-nowrap'>{c.id.split('-')[0]}</td>
+        <td data-align='left'>
+          {meta.what}
+          {failed && c.note && (
+            <Text size='micro' variant='label' component='span' className='block'>
+              {c.note}
+            </Text>
+          )}
+        </td>
+        {full && (
+          <>
+            <td data-align='left'>
+              {c.ok ? (
+                <Pill tone='ok'>ok</Pill>
+              ) : quiet(c) ? (
+                <Pill tone='mut' title={c.note}>
+                  note
+                </Pill>
+              ) : c.severity === 'block' ? (
+                <Pill tone='warn'>blocks export</Pill>
+              ) : (
+                <Pill tone='attention'>warning</Pill>
+              )}
+            </td>
+            <td>{c.value ?? '—'}</td>
+            <td className='text-labelColor'>{c.threshold ?? '—'}</td>
+          </>
+        )}
+        {!full && (
+          <>
+            <td data-align='left'>
+              {c.blocks.length ? (
+                <span className='flex flex-wrap gap-1'>
+                  {c.blocks.map((b) => (
+                    <button
+                      key={b}
+                      type='button'
+                      className='underline decoration-borderColor hover:decoration-textColor'
+                      onClick={() => setPicked(b.toLowerCase())}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </span>
+              ) : null}
+            </td>
+            <td data-align='left'>
+              {failed && meta.fix && (
+                <Button
+                  {...ask('check-fix')}
+                  variant='underline'
+                  size='xs'
+                  className='whitespace-nowrap text-labelColor hover:text-textColor'
+                  title={
+                    meta.fix === 'pieces' && c.blocks.length
+                      ? `opens pieces with ${c.blocks.length === 1 ? c.blocks[0] : `${c.blocks.length} blocks`} selected`
+                      : undefined
+                  }
+                  onClick={() => fix(c, meta.fix!)}
+                >
+                  ← fix in {stepWord(meta.fix)}
+                </Button>
+              )}
+            </td>
+          </>
+        )}
+      </tr>
+    );
+  };
 
   return (
     <SplitStage
-      sideWidth={520}
+      sideWidth={420}
       canvas={
         <Panel
           title='gate'
           aside={
-            <ChipRow>
-              {scopes.map((s) => {
-                const bad = blocking(session.gate[s.target.scopeKey]).length;
-                return (
-                  <Chip
-                    key={s.target.scopeKey}
-                    quiet
-                    selected={s.target.scopeKey === scope?.target.scopeKey}
-                    tone={bad ? 'error' : 'default'}
-                    onClick={() => setKey(s.target.scopeKey)}
-                  >
-                    {bad ? '! ' : ''}
-                    {s.filename}
-                  </Chip>
-                );
-              })}
-            </ChipRow>
-          }
-        >
-          <NotInFile api={api} className='mb-2' />
-          {scope && report && (
             <>
-              <div className='mb-2 flex flex-wrap items-center gap-2'>
-                <Pill tone={report.passed ? 'ok' : 'warn'}>
-                  {report.passed ? 'passes' : 'blocked'}
-                </Pill>
-                <Text size='micro' variant='label' component='span'>
-                  {blocking().length} blocking · {warns.length}{' '}
-                  {warns.length === 1 ? 'warning' : 'warnings'} · {report.durationMs} ms
-                </Text>
-                {!report.passed && (
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    className='ml-auto whitespace-nowrap text-labelColor hover:text-textColor'
-                    title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
-                    onClick={api.downloadReport}
-                  >
-                    download report
-                  </Button>
-                )}
-              </div>
-              <DataTable>
-                <thead>
-                  <tr>
-                    <th>check</th>
-                    <th data-align='left'>what</th>
-                    <th data-align='left'>result</th>
-                    <th>value</th>
-                    <th>limit</th>
-                    <th data-align='left'>blocks named</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* the gate may report one id twice (G9: the block check + the card-split warning) */}
-                  {report.checks.map((c, i) => {
-                    const meta = CHECK[c.id];
+              {scopes.length > 1 && (
+                <ChipRow>
+                  {scopes.map((s) => {
+                    const bad = blocking(session.gate[s.target.scopeKey]).length;
+                    const here = s.target.scopeKey === scope?.target.scopeKey;
                     return (
-                      <tr
-                        key={`${c.id}-${i}`}
-                        className={!c.ok && c.severity === 'block' ? 'bg-error/5' : undefined}
+                      <Chip
+                        {...ask('check-scope', !!bad && !here)}
+                        key={s.target.scopeKey}
+                        quiet
+                        selected={here}
+                        tone={bad ? 'error' : 'default'}
+                        onClick={() => setKey(s.target.scopeKey)}
                       >
-                        <td className='whitespace-nowrap'>{c.id.split('-')[0]}</td>
-                        <td data-align='left'>
-                          {meta.what}
-                          {!c.ok && (
-                            <Text size='micro' variant='label' component='span' className='block'>
-                              {quiet(c)
-                                ? 'single-size blocks: the card reads their size from the manifest'
-                                : c.note}
-                            </Text>
-                          )}
-                        </td>
-                        <td data-align='left'>
-                          {c.ok ? (
-                            <Pill tone='ok'>ok</Pill>
-                          ) : quiet(c) ? (
-                            <Pill tone='mut' title={c.note}>
-                              note
-                            </Pill>
-                          ) : c.severity === 'block' ? (
-                            <Pill tone='warn'>blocks export</Pill>
-                          ) : (
-                            <Pill tone='attention'>warning</Pill>
-                          )}
-                          {/* the way to the answer sits under the verdict, in a column that is
-                              on screen at 1024 px (it was the last, clipped column) */}
-                          {!c.ok && meta.fix && !quiet(c) && (
-                            <Button
-                              variant='underline'
-                              size='xs'
-                              className='mt-1 whitespace-nowrap text-labelColor hover:text-textColor'
-                              title={
-                                meta.fix === 'pieces' && c.blocks.length
-                                  ? `opens pieces with ${c.blocks.length === 1 ? c.blocks[0] : `${c.blocks.length} blocks`} selected`
-                                  : undefined
-                              }
-                              onClick={() => fix(c, meta.fix!)}
-                            >
-                              ← fix in {STEPS.find((s) => s.id === meta.fix)?.label}
-                            </Button>
-                          )}
-                        </td>
-                        <td>{c.value ?? '—'}</td>
-                        <td className='text-labelColor'>{c.threshold ?? '—'}</td>
-                        <td data-align='left'>
-                          {c.blocks.length ? (
-                            <span className='flex flex-wrap gap-1'>
-                              {c.blocks.map((b) => (
-                                <button
-                                  key={b}
-                                  type='button'
-                                  className='underline decoration-borderColor hover:decoration-textColor'
-                                  onClick={() => setPicked(b.toLowerCase())}
-                                >
-                                  {b}
-                                </button>
-                              ))}
-                            </span>
-                          ) : (
-                            <span className='text-labelColor'>—</span>
-                          )}
-                        </td>
-                      </tr>
+                        {bad ? '! ' : ''}
+                        {s.filename}
+                      </Chip>
                     );
                   })}
-                </tbody>
-              </DataTable>
+                </ChipRow>
+              )}
+              <HeaderWarnings items={warnings} />
+            </>
+          }
+        >
+          {scope && report && (
+            <>
+              {failing.length > 0 ? (
+                <>
+                  <div className='mb-1 flex items-baseline gap-2'>
+                    <Text size='micro' component='p' className='text-error'>
+                      ! {plural(failing.length, 'check')}{' '}
+                      {failing.length === 1 ? 'blocks' : 'block'} the export
+                    </Text>
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      className='ml-auto whitespace-nowrap text-labelColor hover:text-textColor'
+                      title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
+                      onClick={api.downloadReport}
+                    >
+                      download report
+                    </Button>
+                  </div>
+                  <DataTable>
+                    <tbody>{failing.map((c, i) => checkRow(c, i, false))}</tbody>
+                  </DataTable>
+                </>
+              ) : (
+                <Pill tone='ok'>passes</Pill>
+              )}
+              {passing.length > 0 && (
+                <Fold label={`${plural(passing.length, 'check')} pass`}>
+                  <DataTable>
+                    <tbody>{passing.map((c, i) => checkRow(c, i, false))}</tbody>
+                  </DataTable>
+                </Fold>
+              )}
+              <DebugFold>
+                <Text size='micro' variant='label' component='p'>
+                  {report.durationMs} ms
+                </Text>
+                <DataTable>
+                  <thead>
+                    <tr>
+                      <th>check</th>
+                      <th data-align='left'>what</th>
+                      <th data-align='left'>result</th>
+                      <th>value</th>
+                      <th>limit</th>
+                    </tr>
+                  </thead>
+                  {/* the gate may report one id twice (G9: the block check + the card-split warning) */}
+                  <tbody>{report.checks.map((c, i) => checkRow(c, i, true))}</tbody>
+                </DataTable>
+              </DebugFold>
             </>
           )}
         </Panel>
@@ -283,27 +357,26 @@ export function CheckStep({
   );
 }
 
+/** One line per file; the manifest's make-up is diagnostics. */
 function ScopeSummary({ scope }: { scope: DraftScope }) {
   const m = scope.manifest;
   const bytes = new Blob([scope.dxfText]).size;
   const pairs = m.pieces.filter((p) => p.pairHand === 'L').length;
   return (
     <div>
-      <Row label='file' value={`${scope.filename} · ${fmtBytes(bytes)}`} />
-      <Row label='fabric scope' value={scope.target.label} />
-      <Row label='blocks' value={blockSum(m.blocks)} />
-      <Row label='pairs as _L + _R' value={pairs || '—'} />
-      {/* the value wraps under its own edge instead of running over the label (1024 px) */}
-      <Row
-        label='layers'
-        value='1 cut (final) · 14 seam · 7 grain · 4 notch · 8 internal'
-        className='[&>span:first-child]:shrink-0 [&>span:last-child]:shrink [&>span:last-child]:text-right'
-      />
-      <GroupLabel>manifest</GroupLabel>
-      <Text size='micro' variant='label' component='p'>
-        embedded as 999 comments: block → piece → card size → scope. the card reads it instead of
-        guessing from block names, and does not add the allowance again.
+      <Text size='micro' variant='label' component='p' title={scope.target.label}>
+        {scope.filename} · {plural(m.blocks.length, 'block')} · {fmtBytes(bytes)}
       </Text>
+      <DebugFold className='mt-1'>
+        <Row label='fabric scope' value={scope.target.label} />
+        <Row label='blocks' value={blockSum(m.blocks)} />
+        <Row label='pairs as _L + _R' value={pairs || '—'} />
+        <Row
+          label='layers'
+          value='1 cut (final) · 14 seam · 7 grain · 4 notch · 8 internal'
+          className='[&>span:first-child]:shrink-0 [&>span:last-child]:shrink [&>span:last-child]:text-right'
+        />
+      </DebugFold>
     </div>
   );
 }
