@@ -672,7 +672,6 @@ function chainBeads(beads: Item[], runOf?: Map<Item, RunPos>): WChain[] {
     const near: { j: number; d: number }[] = [];
     grid.near(b.c!, LINK.beadGapMm, (j) => {
       if (j === i) return;
-      if (runOf && !runLinkOk(b, beads[j], runOf)) return;
       const d = dist(b.c!, beads[j].c!);
       if (d <= LINK.beadGapMm && d > 0.05) near.push({ j, d });
     });
@@ -689,7 +688,10 @@ function chainBeads(beads: Item[], runOf?: Map<Item, RunPos>): WChain[] {
         break;
       }
     }
-    nb[i] = [n1, n2];
+    // the guard only REMOVES links of the plain nearest-neighbour graph — never promotes a
+    // farther mark to neighbour in place of a forbidden one (Codex: that would be a new edge)
+    const okLink = (j: number) => j < 0 || !runOf || runLinkOk(b, beads[j], runOf);
+    nb[i] = [okLink(n1) ? n1 : -1, okLink(n2) ? n2 : -1];
   });
   const mutual = (i: number, j: number) => j >= 0 && (nb[j][0] === i || nb[j][1] === i);
   const adj: number[][] = beads.map((_, i) => nb[i].filter((j) => mutual(i, j)));
