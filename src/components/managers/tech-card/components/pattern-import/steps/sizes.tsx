@@ -295,6 +295,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         ]
       : []),
     ...(repeats ? ['two size rows carry one label — read as one size'] : []),
+    // The reader's own notes (a refused split, «split … name it») answer an operator action, so
+    // they stay visible; only the run/encoding statistics live in the debug fold.
+    ...chains.warnings,
   ];
 
   /** The one marker of a mapping row: the open question on it, else nothing. */
@@ -627,11 +630,6 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 run read from {sizes.run.encoding.replace('-', ' ')}
                 {sizes.run.evidence.length ? ` · ${sizes.run.evidence.join(' · ')}` : ''}
               </Text>
-              {chains.warnings.map((w) => (
-                <Text key={w} size='micro' variant='label' component='p'>
-                  {w}
-                </Text>
-              ))}
               <Text size='micro' variant='label' component='p'>
                 two size rows with the same label are one size: type the label of the other row to
                 merge them.
