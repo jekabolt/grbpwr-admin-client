@@ -1672,7 +1672,11 @@ export function NestingModal({
   // не задана — вердикта нет (не ошибка), пиктограмма рисует только длину. Только режим стола.
   const clothRollCm = Math.round((widthCm + 2 * slotSelvedge(lockedSlot ?? slot)) * 10) / 10;
   const clothWiderThanTable =
-    !viewData && tableMode && !widthUnset && tableWidthCm != null && clothRollCm > tableWidthCm + 0.05;
+    !viewData &&
+    tableMode &&
+    !widthUnset &&
+    tableWidthCm != null &&
+    clothRollCm > tableWidthCm + 0.05;
 
   // ЗАДАНИЕ ПРОГОНА — собирается ОДИН РАЗ и уезжает в две стороны: в воркер, который его считает,
   // и в оценку, которая говорит его цену ДО запуска (Ф2.3). Раньше конфиг строился внутри
@@ -2069,7 +2073,9 @@ export function NestingModal({
     const line =
       fabricLines.find((b) => b.lineKey === key) ??
       (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
-    const pin = line ? cwOptions.find((c) => c.colorwayId === cw)?.widthByLine.get(line.lineKey) : undefined;
+    const pin = line
+      ? cwOptions.find((c) => c.colorwayId === cw)?.widthByLine.get(line.lineKey)
+      : undefined;
     const w = line ? (pin ? pin.cutCm : slotCutWidthOf(line).cutCm) : null;
     guardManual(() => {
       setColorwayId(cw);
@@ -3438,7 +3444,7 @@ export function NestingModal({
                   component='span'
                   className={noSlotChosen ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
-                  cloth
+                  {widthFrom ? `cloth · ${widthFrom}` : 'cloth'}
                 </Text>
                 <div className='flex gap-1'>
                   {!lockedSlot && fabricLines.length > 0 && (
@@ -3506,11 +3512,6 @@ export function NestingModal({
                       disabled={busy}
                     />
                     <span className='text-labelColor'>cm</span>
-                    {widthFrom && (
-                      <span className='whitespace-nowrap text-micro leading-none text-labelColor'>
-                        {widthFrom}
-                      </span>
-                    )}
                   </label>
                   <button
                     type='button'
@@ -4061,9 +4062,7 @@ export function NestingModal({
             {viewData ? (
               <>
                 {/* Норма из смешанного маркера — с подписью настила, под который он снят. */}
-                {storedNormLabel && (
-                  <span className='text-labelColor'>{storedNormLabel} · </span>
-                )}
+                {storedNormLabel && <span className='text-labelColor'>{storedNormLabel} · </span>}
                 <span className='text-labelColor'>on table </span>
                 {figure(tableEndCm, 1)}
                 <span className='text-labelColor'> cm · plies </span>
