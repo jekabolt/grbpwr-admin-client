@@ -71,6 +71,43 @@ const VIEW_TOGGLES: [keyof SheetViewPrefs, string][] = [
 const ICON_BTN =
   'flex size-7 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor';
 
+// A segmented row in a canvas corner, on the corner button's metrics (28px box, edge outline,
+// white fill); the chosen segment is ink-filled. Adjacent segments share one border.
+export function CanvasSegments({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: readonly { key: string; label: string }[];
+  value: string;
+  onChange: (key: string) => void;
+  label: string;
+}) {
+  return (
+    <div role='group' aria-label={label} className='flex'>
+      {options.map((o, i) => {
+        const on = o.key === value;
+        return (
+          <button
+            key={o.key || '(none)'}
+            type='button'
+            aria-pressed={on}
+            onClick={() => onChange(o.key)}
+            className={`flex h-7 min-w-7 items-center justify-center border px-2 text-micro uppercase tracking-pill ${i > 0 ? 'border-l-0' : ''} ${
+              on
+                ? 'border-textColor bg-textColor text-bgColor'
+                : 'border-borderColor bg-white text-labelColor hover:text-textColor'
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 type Box = { x: number; y: number; w: number; h: number };
 
 // Чертёжные координаты → экранные. DXF считает Y вверх, SVG — вниз, поэтому Y инвертируется
@@ -104,8 +141,11 @@ export function PieceSheet({
   innerLayers,
   tall,
   bare,
+  topLeft,
 }: {
   pieces: readonly PieceDTO[];
+  // Overlaid in the canvas's top-left corner (the dialog's size switch).
+  topLeft?: React.ReactNode;
   // Taller canvas (60vh) for a screen where the sheet IS the screen (pieces viewer).
   tall?: boolean;
   // No gesture hint line under the sheet: only real problems stay.
@@ -667,6 +707,7 @@ export function PieceSheet({
               </g>
             ))}
         </svg>
+        {topLeft && <div className='absolute top-1.5 left-1.5'>{topLeft}</div>}
         {/* Угол холста: «весь лист» (только когда кадр ушёл от вписанного) и настройки вида. */}
         <div className='absolute right-1.5 bottom-1.5 flex items-center gap-1'>
           {view && (

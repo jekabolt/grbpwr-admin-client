@@ -71,7 +71,7 @@ import {
 import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { PieceSheet, type PieceMark } from './piece-sheet';
+import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import {
   aliasIdentity,
   foreignManifestSizes,
@@ -208,6 +208,36 @@ const FIELD_KEYS = ['fused', 'fusingMode', 'fusingWidthMm', 'ungraded', 'grainli
 
 const selectCls =
   'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+
+// The piece panel beside the sheet: one type size (micro) and one box height (22px) for every
+// field, toggle and select in it.
+const BOX =
+  'block h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] text-micro transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+const INPUT_BOX = 'h-[22px] py-0 text-micro';
+const TOGGLE_BOX = 'h-[22px] w-full justify-center';
+
+// Label row (micro uppercase label, an optional door on the right) over one box.
+function PanelField({
+  label,
+  door,
+  children,
+}: {
+  label: string;
+  door?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className='space-y-0.5'>
+      <div className='flex items-baseline justify-between gap-2'>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          {label}
+        </Text>
+        {door}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 type PieceValue = NonNullable<TechCardFormData['pieces']>[number];
 // Что известно про идентичность из разбора: сколько раз она в чертеже (максимум по файлам и
@@ -1833,7 +1863,12 @@ export function PieceMatchModal({
   const editor = (() => {
     if (!focus) {
       return (
-        <Text size='micro' variant='label' component='p'>
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          className='border-b border-borderColor pb-0.5 uppercase'
+        >
           select a piece
         </Text>
       );
@@ -1928,17 +1963,24 @@ export function PieceMatchModal({
 
     return (
       <div className='space-y-2'>
-        <GroupLabel flush>{title}</GroupLabel>
-        <Text size='micro' variant='label' component='p'>
-          ×{focus.instances} per garment{focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
-        </Text>
+        <div>
+          <Text
+            size='micro'
+            component='p'
+            className='truncate border-b border-borderColor pb-0.5 uppercase'
+            title={title}
+          >
+            {title}
+          </Text>
+          <Text size='micro' variant='label' component='p' className='pt-0.5'>
+            ×{focus.instances} per garment
+            {focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
+          </Text>
+        </div>
         {linked && relinkOf !== ci ? null : (
-          <label className='block'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              this is
-            </Text>
+          <PanelField label='this is'>
             <select
-              className={selectCls}
+              className={BOX}
               aria-label={`what block ${focus.block} is`}
               value={value}
               disabled={readOnly || !focus.known}
@@ -1952,16 +1994,17 @@ export function PieceMatchModal({
                 </option>
               ))}
             </select>
-          </label>
+          </PanelField>
         )}
         {isPiece && (
           <>
-            <div className='block'>
-              <div className='flex items-baseline justify-between gap-2'>
-                <Text size='micro' variant='label' component='span' className='uppercase'>
-                  name
-                </Text>
-                {linked && relinkOf !== ci && !readOnly && focus.known && (
+            <PanelField
+              label='name'
+              door={
+                linked &&
+                relinkOf !== ci &&
+                !readOnly &&
+                focus.known && (
                   <button
                     type='button'
                     className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
@@ -1969,10 +2012,12 @@ export function PieceMatchModal({
                   >
                     relink
                   </button>
-                )}
-              </div>
+                )
+              }
+            >
               <Input
                 {...anchor('name')}
+                className={INPUT_BOX}
                 aria-label='piece name'
                 placeholder='piece name'
                 disabled={readOnly}
@@ -1981,49 +2026,41 @@ export function PieceMatchModal({
                   patch({ name: e.target.value })
                 }
               />
-            </div>
-            <div className='flex items-center gap-4'>
-              <label className='flex cursor-pointer items-center gap-1.5'>
-                <input
-                  type='checkbox'
-                  aria-label='fused'
-                  disabled={readOnly}
-                  checked={!!vals.fused}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    // Unchecking clears the fusing markup at once (pieces-tab, 0304).
-                    patch(
-                      on
-                        ? { fused: true }
-                        : { fused: false, fusingMode: UNSET_FUSING_MODE, fusingWidthMm: '' },
-                    );
-                  }}
-                />
-                <Text size='micro' variant='label' component='span' className='uppercase'>
-                  fused
-                </Text>
-              </label>
-              <label className='flex cursor-pointer items-center gap-1.5'>
-                <input
-                  type='checkbox'
-                  aria-label='ungraded'
-                  disabled={readOnly}
-                  checked={!!vals.ungraded}
-                  onChange={(e) => patch({ ungraded: e.target.checked })}
-                />
-                <Text size='micro' variant='label' component='span' className='uppercase'>
-                  ungraded
-                </Text>
-              </label>
+            </PanelField>
+            <div className='grid grid-cols-2 gap-1'>
+              <Chip
+                className={TOGGLE_BOX}
+                selected={!!vals.fused}
+                pressed={!!vals.fused}
+                disabled={readOnly}
+                aria-label='fused'
+                onClick={() =>
+                  // Unchecking clears the fusing markup at once (pieces-tab, 0304).
+                  patch(
+                    vals.fused
+                      ? { fused: false, fusingMode: UNSET_FUSING_MODE, fusingWidthMm: '' }
+                      : { fused: true },
+                  )
+                }
+              >
+                fused
+              </Chip>
+              <Chip
+                className={TOGGLE_BOX}
+                selected={!!vals.ungraded}
+                pressed={!!vals.ungraded}
+                disabled={readOnly}
+                aria-label='ungraded'
+                onClick={() => patch({ ungraded: !vals.ungraded })}
+              >
+                ungraded
+              </Chip>
             </div>
             {!!vals.fused && (
-              <div className='flex items-end gap-2'>
-                <label className='block min-w-0 flex-1'>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    how it's fused
-                  </Text>
+              <PanelField label="how it's fused">
+                <div className='flex gap-1'>
                   <select
-                    className={selectCls}
+                    className={`${BOX} min-w-0 flex-1`}
                     aria-label="how it's fused"
                     {...anchor('fusingMode')}
                     disabled={readOnly}
@@ -2043,9 +2080,7 @@ export function PieceMatchModal({
                       </option>
                     ))}
                   </select>
-                </label>
-                {fusingTakesWidth(vals.fusingMode) && (
-                  <div className='w-20'>
+                  {fusingTakesWidth(vals.fusingMode) && (
                     <Input
                       type='number'
                       min='0.5'
@@ -2053,6 +2088,7 @@ export function PieceMatchModal({
                       step='0.5'
                       placeholder='mm'
                       aria-label='fusing strip width, mm'
+                      className={`${INPUT_BOX} w-16 shrink-0`}
                       {...anchor('fusingWidthMm')}
                       disabled={readOnly}
                       value={vals.fusingWidthMm ?? ''}
@@ -2060,17 +2096,15 @@ export function PieceMatchModal({
                         patch({ fusingWidthMm: e.target.value })
                       }
                     />
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </PanelField>
             )}
-            <label className='block'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                grain
-              </Text>
-              <div className='flex items-center gap-1'>
+            <PanelField label='grain'>
+              {/* The arrow is the select's own glyph: it sits inside the box, where a chevron would. */}
+              <div className='relative'>
                 <select
-                  className={selectCls}
+                  className={`${BOX} pr-6`}
                   aria-label='grainline'
                   {...anchor('grainline')}
                   disabled={readOnly}
@@ -2083,17 +2117,18 @@ export function PieceMatchModal({
                     </option>
                   ))}
                 </select>
-                <span aria-hidden className='w-3 shrink-0'>
+                <span
+                  aria-hidden
+                  className='pointer-events-none absolute inset-y-0 right-[7px] flex items-center text-micro'
+                >
                   {grainlineArrow(vals.grainline)}
                 </span>
               </div>
-            </label>
-            <label className='block'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                note
-              </Text>
+            </PanelField>
+            <PanelField label='note'>
               <Input
                 {...anchor('note')}
+                className={INPUT_BOX}
                 aria-label='note'
                 disabled={readOnly}
                 value={vals.note ?? ''}
@@ -2101,7 +2136,7 @@ export function PieceMatchModal({
                   patch({ note: e.target.value })
                 }
               />
-            </label>
+            </PanelField>
           </>
         )}
       </div>
@@ -2123,40 +2158,27 @@ export function PieceMatchModal({
       closeOnConfirm={false}
     >
       <div className='space-y-2'>
-        <div className='flex min-h-[22px] flex-wrap items-center gap-2'>
-          {sheets.length > 1 && (
-            <ChipRow>
-              {sheets.map((s, i) => (
-                <Chip key={s.index} selected={i === activeFile} onClick={() => setActiveFile(i)}>
-                  {s.name}
-                </Chip>
-              ))}
-            </ChipRow>
-          )}
-          {/* One size on screen at a time: a piece is ONE piece across the grade, so switching
-              changes what you look at, never what gets created. */}
-          {sizeOptions.length > 1 && (
-            <ChipRow>
-              {sizeOptions.map((o) => (
-                <Chip
-                  key={o.size || '(none)'}
-                  selected={o.size === shownSize}
-                  onClick={() => setActiveSize(o.size)}
-                >
-                  {o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'no size')}
-                </Chip>
-              ))}
-            </ChipRow>
-          )}
-          {parse.phase === 'loading' && (
-            <Text size='micro' variant='label' component='span'>
-              reading…
-            </Text>
-          )}
-          <div className='ml-auto'>
-            <HeaderWarnings items={warnings} />
+        {(sheets.length > 1 || parse.phase === 'loading' || warnings.length > 0) && (
+          <div className='flex min-h-[22px] flex-wrap items-center gap-2'>
+            {sheets.length > 1 && (
+              <ChipRow>
+                {sheets.map((s, i) => (
+                  <Chip key={s.index} selected={i === activeFile} onClick={() => setActiveFile(i)}>
+                    {s.name}
+                  </Chip>
+                ))}
+              </ChipRow>
+            )}
+            {parse.phase === 'loading' && (
+              <Text size='micro' variant='label' component='span'>
+                reading…
+              </Text>
+            )}
+            <div className='ml-auto'>
+              <HeaderWarnings items={warnings} />
+            </div>
           </div>
-        </div>
+        )}
 
         {parse.phase === 'ready' && sheet && (
           <div className='flex flex-col gap-3 lg:flex-row'>
@@ -2175,6 +2197,22 @@ export function PieceMatchModal({
                 onPick={setSelected}
                 tall
                 bare
+                topLeft={
+                  // One size on screen at a time: a piece is ONE piece across the grade, so
+                  // switching changes what you look at, never what gets created.
+                  sizeOptions.length > 1 && (
+                    <CanvasSegments
+                      label='size on screen'
+                      value={shownSize}
+                      onChange={setActiveSize}
+                      options={sizeOptions.map((o) => ({
+                        key: o.size,
+                        label:
+                          o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'no size'),
+                      }))}
+                    />
+                  )
+                }
               />
             </div>
             <div className='w-full shrink-0 lg:w-[280px]'>{editor}</div>
