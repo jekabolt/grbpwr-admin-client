@@ -239,11 +239,14 @@ export function MarkersSection({
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  // НОРМА НАЗНАЧАЕТСЯ САМА (auto-norm.ts): свежайшая годная раскладка ткани. Попытки помнятся по
-  // ключу id@updated_at — одна и та же версия раскладки не назначается дважды, и отказ сервера не
-  // превращается в ретрай на каждом рендере. `normRunning` не пускает второй проход, пока идёт первый.
+  // НОРМА НАЗНАЧАЕТСЯ САМА (auto-norm.ts): последняя созданная годная раскладка ткани. Попытки
+  // помнятся по ключу id@updated_at — одна и та же версия раскладки не назначается дважды, и отказ
+  // сервера не превращается в ретрай на каждом рендере. `normRunning` не пускает второй проход,
+  // пока идёт первый: записи идут строго по одной, значит и на строку BOM — одна в полёте.
+  // `normPass` перезапускает эффект после прохода — шаги, пришедшие, пока он шёл, не теряются.
   const normTried = useRef(new Set<string>());
   const normRunning = useRef(false);
+  const [normPass, setNormPass] = useState(0);
   // Почему это НЕ тост. Переназначение нормы рецепты не пересчитывает, и починка (применить новую
   // норму) делается на ДРУГОЙ вкладке — тост до неё не доживёт, а несделанное применение значит,
   // что костинг продолжает считать по прежнему числу. Плашка висит, пока её не закроют.
@@ -350,10 +353,27 @@ export function MarkersSection({
       for (const s of steps) {
         const id = Number(s.marker.id ?? 0);
         try {
+          // ПЕРЕЧИТАТЬ ПЕРЕД ЗАПИСЬЮ. План посчитан по кэшу карточки (staleTime 5 мин), а рядом
+          // может идти параллельное сохранение/назначение. Пишем, только если план по СВЕЖЕМУ
+          // списку для этой ткани тот же самый (та же раскладка, она ещё не норма); иначе —
+          // пропуск: инвалидация ниже принесёт свежий список, и следующий проход решит по нему.
+          const fresh = await adminService.GetTechCard({
+            id: techCardId,
+            vatCountryCode: undefined,
+          });
+          const freshStep = planAutoNorm(cardMarkers(fresh.techCard?.markers)).find(
+            (x) => x.scope === s.scope,
+          );
+          if (!freshStep || Number(freshStep.marker.id ?? 0) !== id) {
+            changed = true; // кэш устарел — перечитать
+            continue;
+          }
           const r = await adminService.SetTechCardMarkerNorm({ id, isNorm: true });
           changed = true;
           const prevId = Number(r.previousNormMarkerId ?? 0);
-          const prev = prevId ? markers.find((x) => Number(x.id ?? 0) === prevId) : undefined;
+          const prev = prevId
+            ? cardMarkers(fresh.techCard?.markers).find((x) => Number(x.id ?? 0) === prevId)
+            : undefined;
           // Поле читается, а не подразумевается: отсутствие = «не пересчитаны».
           if (prevId && r.recipesNotRecalculated !== false) {
             notes.push(
@@ -372,14 +392,15 @@ export function MarkersSection({
           );
         }
       }
-      normRunning.current = false;
       if (notes.length > 0) setNormNote(notes.join('\n'));
       if (changed) {
-        qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        await qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
         qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       }
+      normRunning.current = false;
+      setNormPass((n) => n + 1);
     })();
-  }, [autoSteps, markers, qc, showMessage, techCardId]);
+  }, [autoSteps, normPass, qc, showMessage, techCardId]);
 
   const deleteMarker = async () => {
     if (!deleting) return;

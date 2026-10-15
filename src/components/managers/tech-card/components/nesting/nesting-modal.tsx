@@ -126,6 +126,11 @@ const isHiddenNote = (w: string): boolean =>
 // выносит сама, по полям раскладки (см. storedNoAllowance), а не по тексту, который раньше писался
 // «SEAM LINE was nested» на ЛЮБОМ нуле, в том числе на линии кроя.
 const SEAM_NOTE_PREFIX = 'seam allowance:';
+// ЗАПИСЬ О СТОЛЕ В БЛОБЕ — она же признак «params.targetLengthCm = конец стола». До ae74b7da поле
+// писалось из ручной «целевой длины» (нейтральная пунктирная цель, не граница), и такие блобы живы.
+// layout.params типизирован (сервер чужие поля отклоняет), поэтому признак едет протоколом в
+// warnings, как припуск: есть запись — targetLengthCm читается концом стола; нет — старой целью.
+const TABLE_NOTE_PREFIX = 'cutting table:';
 const NO_ALLOWANCE_TEXT = 'nested without seam allowance · consumption too low';
 
 const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&material=${materialId}`;
@@ -196,6 +201,11 @@ type RunSnap = {
   gapCm: number;
   marginCm: number;
   crossGrain: boolean;
+  // Стол прогона: полезная U (null = стол не задан), сам стол и запас — на момент СТАРТА. Сохраняется
+  // именно это, а не сегодняшнее значение поля: правка стола после прогона результат не меняет.
+  usableCm: number | null;
+  tableCm: number | null;
+  endLossCm: number;
 };
 
 // Заголовок без авто-хвоста: сохранённое имя вида «XS×9 · main fabric main fabric · 140 cm» — это
@@ -1601,7 +1611,12 @@ export function NestingModal({
     if (manual) setRunConfirm(true);
     else startRun();
   };
-  const launch = (config: NestConfig, comp: MarkerCompositionEntry[]) => {
+  const launch = (
+    config: NestConfig,
+    comp: MarkerCompositionEntry[],
+    // Полезная длина, под которую прогон стартует; «fit to the table» передаёт свою U явно.
+    runUsableCm: number | null = usableCm,
+  ) => {
     if (parse.phase !== 'ready') return;
     setManual(null);
     setRunConfirm(false);
@@ -1615,6 +1630,9 @@ export function NestingModal({
       gapCm,
       marginCm,
       crossGrain,
+      usableCm: runUsableCm,
+      tableCm,
+      endLossCm,
     });
     start(parse.parseId, config);
   };
@@ -1733,7 +1751,7 @@ export function NestingModal({
     if (config.pieces.length === 0) return;
     setQtyByToken(final);
     setKeepOnTable(true);
-    launch({ ...config, maxLengthCm: U }, comp);
+    launch({ ...config, maxLengthCm: U }, comp, U);
   }
   const stopFit = () => {
     fitAbort.current = true;
@@ -2022,13 +2040,24 @@ export function NestingModal({
                 ? `seam allowance: 0 — the contour is the CUT line (layer ${contourLayer || '—'}), its allowance is already in it`
                 : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
             ...(manualNote ? [manualNote] : []),
+            ...(snap.usableCm != null
+              ? [
+                  `${TABLE_NOTE_PREFIX} usable ${snap.usableCm} cm${
+                    snap.tableCm != null
+                      ? ` (table ${snap.tableCm} cm − 2 × ${snap.endLossCm} cm end loss)`
+                      : ''
+                  }`,
+                ]
+              : []),
           ],
         },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: {
           // Длина стола (полезная U) — единственный параметр настила, который блоб умеет нести:
           // layout.params типизирован, сервер незнакомые поля отклоняет. Слои/режим/запас не пишутся.
-          targetLengthCm: usableCm ?? snap.config.maxLengthCm ?? target,
+          // Из СНИМКА прогона, а не из поля: стол могли поправить после прогона. Читается концом
+          // стола только вместе с записью TABLE_NOTE_PREFIX в warnings (см. константу).
+          targetLengthCm: snap.usableCm ?? undefined,
           // The eps the run ACTUALLY used, not the one it asked for. The engine raises it when
           // the job is too big to precompute at the requested fidelity (Ф0), and storing the
           // request would make params.rdpEpsCm a lie — read by exactly the person trying to
@@ -2324,7 +2353,18 @@ export function NestingModal({
     ? thicknessPin?.materialId
     : thicknessSlot?.materialId;
   // Конец стола на холсте: в прогоне — U из ряда table; у сохранённого — U из блоба.
-  const tableEndCm = viewData ? viewData.targetCm ?? null : usableCm;
+  // У сохранённого — только если блоб несёт запись о столе: без неё targetLengthCm — старая ручная
+  // цель (до ae74b7da), она рисуется нейтральной пунктирной целью и вердиктом «за столом» не служит.
+  // У готового прогона — стол из его снимка (как ширина): результат считался под него.
+  const storedTableEnd =
+    !!viewData && (view?.layout?.warnings ?? []).some((w) => w.startsWith(TABLE_NOTE_PREFIX));
+  const tableEndCm = viewData
+    ? storedTableEnd
+      ? viewData.targetCm ?? null
+      : null
+    : runView
+      ? runView.usableCm
+      : usableCm;
   const spread = spreadFigures({
     // У сохранённого маркера слои не хранятся — всё, что от них зависит, прочерк.
     plies: viewData ? NaN : plies,
@@ -2414,7 +2454,9 @@ export function NestingModal({
       snap.widthCm !== widthCm ||
       snap.gapCm !== gapCm ||
       snap.marginCm !== marginCm ||
-      snap.crossGrain !== crossGrain);
+      snap.crossGrain !== crossGrain ||
+      // Стол и запас (через полезную U): вердикт «за столом» и сохраняемый стол — от прогона.
+      snap.usableCm !== usableCm);
   const figure = (v: number | null, digits = 0) =>
     v == null ? '—' : digits > 0 ? String(Math.round(v * 10 ** digits) / 10 ** digits) : String(v);
   const railS1: RailSectionStatus = {
@@ -2647,7 +2689,12 @@ export function NestingModal({
     .filter((w): w is HeaderWarning => w !== '')
     .filter((w) => {
       const t = typeof w === 'string' ? w : w.text;
-      return !isHiddenNote(t) && !t.startsWith(SEAM_NOTE_PREFIX) && !isManualNote(t);
+      return (
+        !isHiddenNote(t) &&
+        !t.startsWith(SEAM_NOTE_PREFIX) &&
+        !t.startsWith(TABLE_NOTE_PREFIX) &&
+        !isManualNote(t)
+      );
     });
   const titleFabric = (lockedSlot ?? slot)?.name?.trim();
   // Выгрузка: та же кнопка 28×28, что «по ширине» и «весь маркер», в той же группе угла холста.
@@ -3262,7 +3309,7 @@ export function NestingModal({
               placements={effective.placements}
               widthCm={displayWidth}
               usedLengthCm={effective.usedLengthCm}
-              targetCm={viewData ? undefined : displayTarget}
+              targetCm={viewData && storedTableEnd ? undefined : displayTarget}
               tableEndCm={tableEndCm ?? undefined}
               marginCm={displayMargin}
               allowCrossGrain={displayCross}
