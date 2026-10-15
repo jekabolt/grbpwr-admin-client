@@ -250,27 +250,51 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const offerInRows =
     sizes.map.entries.some((e) => e.notDrawn) || drawnUnmapped(sizes.map).length > 0;
 
-  // NEW (P3): every drawn size unmapped and the card has room — one click maps rank i → card i.
+  // In-order mapping: card sizes in grade order onto consecutive drawn sizes (8 drawn, 5 card:
+  // a window of 5 drawn, the rest left out), or the drawn sizes onto a window of the card.
   const drawn = sizes.map.entries
     .filter((e) => !e.notDrawn)
     .sort((a, b) => a.source.rank - b.source.rank);
-  const inOrder =
-    drawn.length > 0 &&
-    drawn.every((e) => !e.card) &&
-    drawn.length <= card.sizes.length &&
-    card.sizes.length > 0;
-  const mapInOrder = () => {
-    const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
+  const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
+  const span = drawn.length - cards.length; // ≥ 0: the window runs over the drawn sizes
+  const slots = Math.abs(span) + 1;
+  const windowOf = (start: number) =>
+    drawn.map((e, i) => cards[span >= 0 ? i - start : i + start] ?? null);
+  const sameWindow = (start: number) =>
+    windowOf(start).every((c, i) => (drawn[i].card?.sizeId ?? null) === (c?.sizeId ?? null));
+  const currentStart = Array.from({ length: slots }, (_, s) => s).find(sameWindow) ?? null;
+  const centred = Math.floor(Math.abs(span) / 2);
+  // the quiz: asked while the drawn sizes do not all map by name (a size off the card, a guess, a dupe)
+  const showOrderBar =
+    drawn.length > 0 && cards.length > 0 && (anyDupe || drawn.some((e) => !e.card || isGuess(e)));
+  const mapInOrder = (start: number) => {
+    const win = windowOf(start);
     const ranks = new Set(drawn.map((e) => e.source.rank));
-    // one `size-map` answer of the shape `setSize` sends, for every drawn size at once
+    // one `size-map` answer: the entries per-row `setSize` calls would leave, all at once
     void api.dispatch({
       type: 'size-map',
       entries: [
         ...(inputs.sizeMap ?? []).filter((e) => !ranks.has(e.source.rank)),
-        ...drawn.map((e, i) => ({ ...e, card: cards[i], origin: 'operator' as const })),
+        ...drawn.map((e, i) => ({ ...e, card: win[i], origin: 'operator' as const })),
       ],
     });
   };
+  const drawnName = (e: SizeMapEntry) => e.source.label || `rank ${e.source.rank + 1}`;
+  const windowTitle = (start: number) =>
+    windowOf(start)
+      .map((c, i) => `${drawnName(drawn[i])} → ${c?.name ?? 'leave out'}`)
+      .join(' · ');
+  const quiz =
+    drawn.length > 0 && cards.length > 0
+      ? `the file has sizes ${drawnName(drawn[0])}…${drawnName(drawn[drawn.length - 1])}, the card ${cards[0].name}…${cards[cards.length - 1].name} — ${
+          span >= 0
+            ? `which file size is ${cards[0].name}?`
+            : `which card size is ${drawnName(drawn[0])}?`
+        }`
+      : '';
+  // the legend row the step asks about first: a size row before the other lines
+  const confirmAsk =
+    asking === 'confirm' ? sizeRows.find(pending) ?? otherRows.find(pending) ?? null : null;
   const focusFirstUnmapped = () => {
     const el = listRef.current?.querySelector<HTMLSelectElement>('select[data-unmapped]');
     el?.scrollIntoView({ block: 'nearest' });
@@ -294,6 +318,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           },
         ]
       : []),
+    ...cards.filter((c) => dupe(c.sizeId)).map((c) => `card size ${c.name} twice`),
     ...(repeats ? ['two size rows carry one label — read as one size'] : []),
     // The reader's own notes (a refused split, «split … name it») answer an operator action, so
     // they stay visible; only the run/encoding statistics live in the debug fold.
@@ -308,6 +333,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           quiet
           tone='attention'
           {...ask('sizes-confirm', asking === 'confirm')}
+          data-ask-hint='confirm this line'
           onClick={() => confirmRow(c)}
           title={confirmTitle(c)}
         >
@@ -324,6 +350,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           <Chip
             quiet
             {...ask('sizes-not-drawn', asking === 'offer')}
+            data-ask-hint='say it is drawn on common lines'
             title='this size is drawn on the shared (common) lines — fill it on them; a piece they do not close stays open'
             onClick={() => void api.drawnAnyway(e.source.rank)}
           >
@@ -342,6 +369,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           'sizes-check',
           leftOut ? mapAsk === 'partial' || asking === 'offer' : mapAsk === 'guess',
         )}
+        data-ask-hint={leftOut ? 'leave it out or pick a size' : 'keep it or pick another'}
         onClick={() => void api.confirmSize(e.source.rank)}
         title={
           leftOut
@@ -358,12 +386,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     e ? (
       <CardSizeSelect
         e={e}
-        card={card}
         invalid={dupe(e.card?.sizeId)}
+        cards={cards}
         askOn={
           mapAsk === 'dupe'
             ? dupe(e.card?.sizeId)
-            : mapAsk === 'none' && e.source.rank === firstUnmapped
+            : mapAsk === 'none' && !showOrderBar && e.source.rank === firstUnmapped
         }
         onChange={(v) => setCard(e, v)}
       />
@@ -484,7 +512,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             />
           )}
           {legendQ && sizes.sheetLegend && (
-            <div className='mb-2 flex flex-wrap items-center gap-1.5'>
+            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
               <Text size='micro' component='span' className='text-warning'>
                 ! {legendQ}
               </Text>
@@ -492,6 +520,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 tone='attention'
                 className='h-[22px]'
                 {...ask('sizes-legend', asking === 'legend')}
+                data-ask-hint='same size lines on every sheet'
                 disabled={!!session.busy}
                 title='the sheets share the legend as read'
                 onClick={() => patchInputs({ sheetLegendOk: sizes.sheetLegend!.sig })}
@@ -501,7 +530,73 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             </div>
           )}
 
-          <div ref={listRef}>
+          {confirmAsk && (
+            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
+              <Text size='micro' component='span'>
+                {confirmAsk.role === 'size' && confirmAsk.sizeLabel
+                  ? `is this line size ${confirmAsk.sizeLabel}?`
+                  : `is this line ${ROLE_WORD[confirmAsk.role] ?? confirmAsk.role}?`}
+              </Text>
+              <LineSwatchView
+                swatch={chains.swatches?.[confirmAsk.id]}
+                widthMm={SWATCH_MM}
+                fallbackDash={motifOf(confirmAsk.id)}
+                title={confirmTitle(confirmAsk)}
+              />
+              <Chip
+                tone='attention'
+                className='h-[22px]'
+                {...ask('sizes-confirm')}
+                data-ask-hint={
+                  confirmAsk.role === 'size'
+                    ? 'confirm this line is a size'
+                    : 'confirm what this line is'
+                }
+                title={confirmTitle(confirmAsk)}
+                onClick={() => confirmRow(confirmAsk)}
+              >
+                yes
+              </Chip>
+              <Chip
+                className='h-[22px]'
+                title='open the line: change its meaning, split it or merge it'
+                onClick={() => {
+                  if (confirmAsk.role !== 'size') setOtherOpen(true);
+                  setPicked(confirmAsk.id);
+                  setToKey(false);
+                }}
+              >
+                no — other line
+              </Chip>
+            </div>
+          )}
+          {showOrderBar && (
+            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
+              <Text size='micro' component='span'>
+                {quiz}
+              </Text>
+              {Array.from({ length: slots }, (_, i) => (
+                <Chip
+                  key={i}
+                  className='h-[22px]'
+                  selected={currentStart === i}
+                  pressed={currentStart === i}
+                  disabled={!!session.busy}
+                  {...ask(
+                    'sizes-map',
+                    i === (currentStart ?? centred) &&
+                      (mapAsk === 'none' || mapAsk === 'partial' || mapAsk === 'guess'),
+                  )}
+                  data-ask-hint='map file sizes in order'
+                  title={windowTitle(i)}
+                  onClick={() => mapInOrder(i)}
+                >
+                  {span >= 0 ? drawnName(drawn[i]) : cards[i].name}
+                </Chip>
+              ))}
+            </div>
+          )}
+          <div ref={listRef} data-ask-zone=''>
             <DataTable>
               <thead>
                 <tr>
@@ -563,15 +658,6 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               </tbody>
             </DataTable>
           </div>
-          {inOrder && (
-            <Chip
-              className='mt-2 h-[22px]'
-              title='first drawn size → first card size, and so on'
-              onClick={mapInOrder}
-            >
-              map in order
-            </Chip>
-          )}
           {pickedRow && (
             <RowDetail
               row={pickedRow}
@@ -749,7 +835,7 @@ function DrawnSizes({
 
   const unanswered = asking && set == null;
   return (
-    <div className='mb-3 flex flex-col gap-1'>
+    <div data-ask-zone='' className='mb-3 flex flex-col gap-1'>
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         sizes drawn
       </Text>
@@ -771,6 +857,7 @@ function DrawnSizes({
             pressed={answer === autoQuick}
             className='h-[22px]'
             {...ask('sizes-count', unanswered)}
+            data-ask-hint='pick how many sizes are drawn'
             title={`the sheet says so: ${why}`}
             onClick={() => (answer !== autoQuick ? commit(autoQuick) : setOpen(false))}
           >
@@ -784,6 +871,7 @@ function DrawnSizes({
             pressed={answer === inferred.n}
             className='h-[22px]'
             {...ask('sizes-count', unanswered)}
+            data-ask-hint='pick how many sizes are drawn'
             title={`suggested: ${inferred.why}`}
             onClick={() => (answer !== inferred.n ? commit(inferred.n) : setOpen(false))}
           >
@@ -813,6 +901,7 @@ function DrawnSizes({
           aria-label='sizes drawn on this sheet'
           aria-invalid={(answer == null && autoOn == null) || undefined}
           {...ask('sizes-count', unanswered)}
+          data-ask-hint='count the outlines of one piece'
           title={
             answer == null && autoOn == null
               ? `the file does not say how many sizes it draws — count the outlines of one piece${auto?.evidence.length && auto.n == null ? ` (read off the sheet, not enough to set it: ${why})` : ''}`
@@ -842,13 +931,13 @@ const isGuess = (e: SizeMapEntry) => guessedSizes([e]).length > 0;
 /** The card size of one source size; `leave out` is a value of the list, not an error. */
 function CardSizeSelect({
   e,
-  card,
+  cards,
   invalid,
   askOn,
   onChange,
 }: {
   e: SizeMapEntry;
-  card: CardContext;
+  cards: CardContext['sizes'];
   invalid: boolean;
   askOn: boolean;
   onChange: (sizeId: string) => void;
@@ -859,13 +948,14 @@ function CardSizeSelect({
       onChange={onChange}
       invalid={invalid}
       aria-label={`card size for source size ${e.source.label}`}
-      className='w-24'
+      className={cn('w-24', !e.card && 'text-labelColor')}
       title={e.evidence?.join(' · ')}
       {...(!e.card && !e.notDrawn ? { 'data-unmapped': '' } : {})}
       {...ask('sizes-map', askOn)}
+      data-ask-hint='pick a card size or leave out'
       options={[
         { value: '', label: 'leave out' },
-        ...card.sizes.map((c) => ({ value: String(c.sizeId), label: c.name })),
+        ...cards.map((c) => ({ value: String(c.sizeId), label: c.name })),
       ]}
     />
   );
