@@ -832,6 +832,8 @@ export function PieceMatchModal({
   // block, FP_R's edits were dropped whenever FP_L (same default name) was processed first.
   const [pieceEdits, setPieceEdits] = useState<Record<string, PieceFields>>({});
   const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
+  // Block whose «this is» select was opened by the `relink` door (a linked block shows only its name).
+  const [relinkOf, setRelinkOf] = useState<string | null>(null);
   // Which sheet is on screen. Several files reach one fabric slot when the same size was
   // re-uploaded (revisions) — they are separate drawings and must not be drawn on top of
   // each other.
@@ -1663,7 +1665,8 @@ export function PieceMatchModal({
   const warnings: HeaderWarning[] = [];
   if (parse.phase === 'error') warnings.push({ text: parse.message, error: true });
   if (parse.phase === 'ready') {
-    warnings.push(...parse.warnings);
+    // Units are asked at upload — the parse's «units are not set» note is not repeated here.
+    warnings.push(...parse.warnings.filter((w) => !/units are not set in the file/.test(w)));
     if (!parse.complete) {
       warnings.push(
         `files read: ${parse.filesParsed} of ${parse.filesTotal}${
@@ -1808,6 +1811,7 @@ export function PieceMatchModal({
     // Form anchors only for a piece that exists in the form (error deep links land here).
     const anchor = (f: string) => (index >= 0 ? { 'data-field': `pieces.${index}.${f}` } : {});
     const isPiece = st.kind !== 'none';
+    const linked = st.kind === 'existing';
 
     return (
       <div className='space-y-2'>
@@ -1815,32 +1819,45 @@ export function PieceMatchModal({
         <Text size='micro' variant='label' component='p'>
           ×{focus.instances} per garment{focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
         </Text>
-        <label className='block'>
-          <Text size='micro' variant='label' component='span' className='uppercase'>
-            this is
-          </Text>
-          <select
-            className={selectCls}
-            aria-label={`what block ${focus.block} is`}
-            value={value}
-            disabled={readOnly || !focus.known}
-            onChange={(e) => choose(ci, e.target.value)}
-          >
-            <option value={CREATE}>+ new piece</option>
-            <option value=''>not a piece</option>
-            {pieceOptions.map((p) => (
-              <option key={p.lineKey} value={p.lineKey}>
-                {pieceName(p.lineKey) || p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {linked && relinkOf !== ci ? null : (
+          <label className='block'>
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              this is
+            </Text>
+            <select
+              className={selectCls}
+              aria-label={`what block ${focus.block} is`}
+              value={value}
+              disabled={readOnly || !focus.known}
+              onChange={(e) => choose(ci, e.target.value)}
+            >
+              <option value={CREATE}>+ new piece</option>
+              <option value=''>not a piece</option>
+              {pieceOptions.map((p) => (
+                <option key={p.lineKey} value={p.lineKey}>
+                  {pieceName(p.lineKey) || p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {isPiece && (
           <>
-            <label className='block'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                name
-              </Text>
+            <div className='block'>
+              <div className='flex items-baseline justify-between gap-2'>
+                <Text size='micro' variant='label' component='span' className='uppercase'>
+                  name
+                </Text>
+                {linked && relinkOf !== ci && !readOnly && focus.known && (
+                  <button
+                    type='button'
+                    className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
+                    onClick={() => setRelinkOf(ci)}
+                  >
+                    relink
+                  </button>
+                )}
+              </div>
               <Input
                 {...anchor('name')}
                 aria-label='piece name'
@@ -1851,7 +1868,7 @@ export function PieceMatchModal({
                   patch({ name: e.target.value })
                 }
               />
-            </label>
+            </div>
             <div className='flex items-center gap-4'>
               <label className='flex cursor-pointer items-center gap-1.5'>
                 <input

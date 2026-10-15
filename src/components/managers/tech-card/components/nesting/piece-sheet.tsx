@@ -11,7 +11,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
-import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 
 // Состояние блока на листе. Серо-чернильная палитра — та же, что у редактора раскладки;
@@ -68,7 +67,7 @@ export function PieceSheet({
   pieces: readonly PieceDTO[];
   // Taller canvas (60vh) for a screen where the sheet IS the screen (pieces viewer).
   tall?: boolean;
-  // No gesture hint line under the sheet: only the «whole sheet» door and real problems stay.
+  // No gesture hint line under the sheet: only real problems stay.
   bare?: boolean;
   // Слой долевой. '' — не показывать. Рисуется поверх контуров: раскладка поворачивает деталь
   // именно по этой линии, и человек должен увидеть прочитанное ДО того, как ткань разрезана.
@@ -473,22 +472,44 @@ export function PieceSheet({
             </g>
           ))}
         </svg>
-      </div>
-      <div className='flex flex-wrap items-center gap-2'>
-        {!bare && (
-          <Text size='nano' variant='label' component='span'>
-            click a piece — select · wheel — zoom · drag — pan
-          </Text>
+        {/* «Весь лист» — пиктограмма в углу самого холста, и только когда кадр ушёл от вписанного
+            (зум или протяжка): на обзоре возвращать некуда. */}
+        {view && (
+          <button
+            type='button'
+            aria-label='show the whole sheet'
+            title='show the whole sheet'
+            onClick={() => setView(null)}
+            className='absolute bottom-1.5 right-1.5 flex size-7 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor'
+          >
+            <svg
+              width='14'
+              height='14'
+              viewBox='0 0 14 14'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1'
+              aria-hidden='true'
+            >
+              <path d='M0.5 4.5V0.5H4.5M9.5 0.5H13.5V4.5M13.5 9.5V13.5H9.5M4.5 13.5H0.5V9.5' />
+            </svg>
+          </button>
         )}
-        <Button type='button' variant='secondary' size='xs' onClick={() => setView(null)}>
-          whole sheet
-        </Button>
-        {hidden > 0 && (
-          <Text size='nano' component='span' className='text-error'>
-            pieces not shown: {hidden} (no coordinates in the parse)
-          </Text>
-        )}
       </div>
+      {(!bare || hidden > 0) && (
+        <div className='flex flex-wrap items-center gap-2'>
+          {!bare && (
+            <Text size='nano' variant='label' component='span'>
+              click a piece — select · wheel — zoom · drag — pan
+            </Text>
+          )}
+          {hidden > 0 && (
+            <Text size='nano' component='span' className='text-error'>
+              pieces not shown: {hidden} (no coordinates in the parse)
+            </Text>
+          )}
+        </div>
+      )}
     </div>
   );
 }

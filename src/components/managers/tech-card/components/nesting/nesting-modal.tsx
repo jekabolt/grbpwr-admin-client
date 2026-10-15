@@ -92,6 +92,9 @@ import {
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
+// Units are asked by a dialog at upload: the parse's note about them is not repeated here.
+const UNITS_NOT_SET = /units are not set in the file/;
+
 // Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.
 //
 // ПОМЕТКА — СОХРАНЁННОЕ ЗНАЧЕНИЕ, а не только текст: она уезжает в warnings блоба (:1828) и
@@ -1915,7 +1918,9 @@ export function NestingModal({
   const topWarningsRaw: Array<HeaderWarning | HeaderWarning[] | ''> = [
     ...(parse.phase === 'error' ? [{ text: parse.message, error: true }] : []),
     ...(parse.phase === 'ready'
-      ? parse.warnings.map((w) => ({ text: w, error: isFetchFailure(w) }))
+      ? parse.warnings
+          .filter((w) => !UNITS_NOT_SET.test(w))
+          .map((w) => ({ text: w, error: isFetchFailure(w) }))
       : []),
     ...(!viewData
       ? [
@@ -2597,7 +2602,9 @@ export function NestingModal({
               lockedUnsaved ? 'fabric not saved on the card yet' : '',
               widthMismatch ? `width ${widthCm} cm differs from the article (${slotWidth} cm)` : '',
               slot && slotSelvedge(slot) === 0 ? 'selvedge not set on the article' : '',
-              ...(parse.phase === 'ready' ? parse.warnings : []),
+              ...(parse.phase === 'ready'
+                ? parse.warnings.filter((w) => !UNITS_NOT_SET.test(w))
+                : []),
               manual && violations.length ? manualNote ?? '' : '',
               mixed ? 'mixed composition: no per-unit consumption' : '',
             ]}
