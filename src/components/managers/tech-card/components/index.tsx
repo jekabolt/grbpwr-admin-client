@@ -100,6 +100,7 @@ import {
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
+import { BaseModelFields } from './header-meta-fields';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
 import { CompositionLabelBlock } from './composition-label/composition-label-block';
@@ -3612,6 +3613,12 @@ export function TechCardForm({
                     которого своя сетка колорвей × размер. Выдуманный микс размеров не влиял ни
                     на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
+              </Section>
+              {/* A second view of the STUDIO header's base fields (owner, 15.10: «duplicate and keep
+                  in both places»). Same form fields through Controller, so both read and write one
+                  value; ERROR_TAB keeps pointing at studio, where the fields were first. */}
+              <Section title='base model & sample size'>
+                <BaseModelFields />
               </Section>
               <Section title='size chart measurements'>
                 <SizeChartField
