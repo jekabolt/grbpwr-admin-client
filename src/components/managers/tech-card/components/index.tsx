@@ -207,11 +207,15 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // DEFINES those lines belongs next to the tab that reads them — two entries apart it read as an
   // unrelated stop. Samples follow both, which is also the order the work happens in: you cannot
   // cut a sample before there is a pattern and a fabric to cut it from.
-  { band: 'develop', tabs: ['patterns', 'bom', 'samples', 'colorways', 'construction'] },
-  // SIZES opens spec: the size range and the measurement chart are what the card PROMISES — the
-  // grade every sheet, marker, norm and run is filed against. They used to head PATTERNS; the
-  // pattern panels still read the range from the same form, they just no longer host its editor.
-  { band: 'spec', tabs: ['sizes', 'labels', 'costing', 'issues', 'signoff'] },
+  // SIZES opens develop, ahead of patterns (owner, 15.10): the size range and the measurement chart
+  // are worked out together with the pattern — every sheet, marker, norm and run is filed against
+  // that range, so it is set first. They used to head PATTERNS; the pattern panels still read the
+  // range from the same form, they just no longer host its editor.
+  {
+    band: 'develop',
+    tabs: ['sizes', 'patterns', 'bom', 'samples', 'colorways', 'construction'],
+  },
+  { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
   // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
   { band: 'produce', tabs: ['production'] },
