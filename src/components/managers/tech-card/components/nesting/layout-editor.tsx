@@ -5,7 +5,13 @@
 // раскладки вместе с остальной геометрией.
 import { useMemo, useRef, useState } from 'react';
 import Text from 'ui/components/text';
-import type { FabricDirection, NestResult, Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import type {
+  FabricDirection,
+  NestResult,
+  Placement,
+  PieceDTO,
+  RotationDeg,
+} from 'lib/nesting/types';
 import { allowedRotations } from 'lib/nesting/types';
 import { type LayoutLabel, planLayoutLabels } from 'lib/nesting/render/label-fit';
 import { rotatedBounds } from 'lib/nesting/geom/clearance';
@@ -217,25 +223,23 @@ export function LayoutEditor({
   };
 
   return (
-    <div className='space-y-1'>
-      {editable && (
-        <div className='flex flex-wrap items-center gap-2'>
+    <div className='relative'>
+      {/* Выбранная деталь — мелко в левом верхнем углу холста, только пока она выбрана. */}
+      {editable && selected != null && selPiece && (
+        <div className='pointer-events-none absolute left-1.5 top-1.5 z-[1] flex items-center gap-2 bg-bgColor px-1'>
           <Text size='nano' variant='label' component='span'>
-            {selected != null && selPiece
-              ? `selected: ${selPiece.name}${marksOf(placements[selected])}`
-              : 'drag a piece · click — select · R — rotate'}
+            {selPiece.name}
+            {marksOf(placements[selected])}
           </Text>
-          {selected != null &&
-            selPiece &&
-            rotsFor(selPiece, placements[selected].rot, placements[selected].flipped).length > 1 && (
-              <button
-                type='button'
-                className='text-nano uppercase underline hover:opacity-70'
-                onClick={rotateSelected}
-              >
-                rotate (R)
-              </button>
-            )}
+          {rotsFor(selPiece, placements[selected].rot, placements[selected].flipped).length > 1 && (
+            <button
+              type='button'
+              className='pointer-events-auto text-nano uppercase underline hover:opacity-70'
+              onClick={rotateSelected}
+            >
+              rotate (R)
+            </button>
+          )}
         </div>
       )}
       <div

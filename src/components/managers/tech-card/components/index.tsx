@@ -3620,7 +3620,7 @@ export function TechCardForm({
                   savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
                 />
               </Section>
-              <Section title='markers — fabric consumption by size'>
+              <Section title='markers'>
                 <MarkersSection
                   techCard={techCard}
                   techCardId={numId || 0}
