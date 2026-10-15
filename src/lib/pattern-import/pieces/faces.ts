@@ -22,6 +22,8 @@
 // graded sheet only as a nest of its own sizes (a lone shape of size lines is where sizes cross).
 // Side by side, touching along < CONTACT_MM (a corner) = two pieces; along more = one seeded, the
 // other set aside (a seam strip, a half split by an inner line, a piece drawn joined to it).
+// SEEDNAME: a face set aside so (or by the fragments rule) that prints its own piece name AND is
+// closed by one size's lines alone is seeded as a piece of its own (judgeBlobs namedOneSize).
 //
 // D3: a face seed is not a decision (the piece still goes through the fill, the H1 guard and the
 // gate) but it must never make a piece out of junk silently. Not seeded, with the reason:
@@ -141,6 +143,11 @@ export type FaceOpts = {
   sizeLine?: ReadonlySet<ChainId>;
   /** The sheet draws several sizes (nested copies are sizes, not seam lines). */
   graded?: boolean;
+  /**
+   * SEEDNAME: the rank a wall item is a wall of in the fill — a size rank, 'all' (common lines,
+   * lone stretches: walls of every rank), null (a wall of no one rank's fill, e.g. a band cut).
+   */
+  rankOfItem?: (it: WallItem) => number | 'all' | null;
 };
 
 /** A filter, or a step of the face pass ('units': the split of a blob into outlines). */
@@ -151,7 +158,8 @@ export type FaceSwitch =
   | 'units'
   | 'held'
   | 'free-ends'
-  | 'fragments';
+  | 'fragments'
+  | 'own-name';
 
 /** The labelled raster (faces, depth, blobs, clearance). */
 export type FaceRaster = {
@@ -207,13 +215,32 @@ const FRAME_TOL_MM = 2;
 /** The face pass keeps its raster under this many pixels (a coarser cell on a huge sheet). */
 const MAX_PX = 4e6;
 const EXT = -2;
+/**
+ * SEEDNAME: a piece name printed in a face — a garment-part word or a cutting instruction
+ * ("CUT 2", "CUT 1 ON FOLD"); a word split by a tile edge ("ONT") is no name.
+ */
+const PIECE_NAME =
+  /\b(?:front|back|sleeves?|slv|collar|cuffs?|facing|yoke|pockets?|waistband|band|bodice|skirt|pants?|shorts|panel|placket|lining|flap|belt|straps?|hood|gusset|cups?|tie|loop|ruffle|flounce|extension|underlay|overlay|casing|binding|peplum|lapel|stand|welt|fly|leg|godet|tier|insert|sash|bib)\b|\bcut\s*\d+\b/i;
+/** …and what says the outline is no piece to cut (a template, a view's cut line). */
+const NOT_A_PIECE =
+  /do\s*not\s*cut|don'?t\s*cut|template|cut\s*(?:here|line)|trim\s+(?:here|line)/i;
+/** A text naming a mark or a fold on a piece, never the piece's own name. */
+const MARK_TEXT = /placement|fold\s+(?:here|line|under|back|down|in)|gather|stitch|notch/i;
+/** …and a piece face at least this large (a label box, a notch stack is smaller). */
+const PIECE_NAMED_MIN_MM2 = 2000;
 
 /** The walls the face pass draws: every rank's (fillPieces rank r draws a subset of these). */
 export function faceWalls(
   sheet: Sheet,
   set: ChainSet,
   run: SizeRun,
-): { items: WallItem[]; weak: WallItem[]; model: ReturnType<typeof wallModel> } {
+): {
+  items: WallItem[];
+  weak: WallItem[];
+  model: ReturnType<typeof wallModel>;
+  /** The lone stretches among `items` (walls of every rank). */
+  lone: ReadonlySet<WallItem>;
+} {
   const model = wallModel(set, run, sheet.texts, new Map(sheet.styles.map((s) => [s.id, s])));
   const rescued = rescuedIgnored(
     set,
@@ -224,12 +251,13 @@ export function faceWalls(
     new Set([...pageMarginIds(set.chains, sheet.poses), ...cornerSources(model)]),
   );
   const ids = new Set<ChainId>([...model.common, ...model.byRank.flat()]);
+  const lone = lonePortions(set, model);
   const items: WallItem[] = [
     ...itemsOf(set, ids),
-    ...lonePortions(set, model),
+    ...lone,
     ...(model.bandCuts ?? []).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
   ];
-  return { items, weak: itemsOf(set, rescued), model };
+  return { items, weak: itemsOf(set, rescued), model, lone: new Set(lone) };
 }
 
 function pageRect(p: PagePose): BoxMm {
@@ -990,9 +1018,20 @@ export function judgeBlobs(
         };
         units.push(u);
         queue.push({ f: head, u });
+        /** SEEDNAME: the faces of this group promoted to pieces of their own, and its asides. */
+        const own: Unit[] = [];
+        const mineAside: { a: number; q: number }[] = [];
         for (const f of grp.slice(1)) {
           const why = joinedWhy(f, grp);
-          if (off.has(why)) {
+          // SEEDNAME: a piece drawn against this one (Olea's back beside the front, across the
+          // front's size lines) — its own name and one size's lines closing it alone (D3: both)
+          const named =
+            !off.has(why) &&
+            !off.has('own-name') &&
+            !!o.graded &&
+            (why === 'size-copy' || why === 'joined') &&
+            namedOneSize(f) != null;
+          if (off.has(why) || named) {
             const v: Unit = {
               root: f,
               members: [f],
@@ -1000,14 +1039,16 @@ export function judgeBlobs(
               junk: u.junk,
               host,
               id: -1,
-              rim: u.rim,
-              near: u.near,
+              rim: named ? rimOf([f], p) : u.rim,
+              near: named ? (p == null ? new Set([f]) : facesAround([f], p)) : u.near,
             };
             units.push(v);
             queue.push({ f, u: v });
+            if (named) own.push(v);
           } else {
             const how = why === 'size-copy' || why === 'seam-line' ? howBeside(f) : 'lines';
             howOf.set(f, how);
+            mineAside.push({ a: asides.length, q: queue.length });
             asides.push({
               f,
               junk: why,
@@ -1015,6 +1056,18 @@ export function judgeBlobs(
               ...(why === 'size-copy' || why === 'seam-line' ? { how } : {}),
             });
             queue.push({ f, u });
+          }
+        }
+        // the group's other faces go to the piece they lie beside (its grading strips): the nearest
+        // root across shared lines, the head on a tie — an account only (provenCopy still proves
+        // a strip against its piece's closed sizes, or it stays a question)
+        if (own.length && mineAside.length) {
+          const owner = nearestRoot(grp, [u, ...own]);
+          for (const { a, q } of mineAside) {
+            const w = owner.get(asides[a].f);
+            if (!w || w === u) continue;
+            asides[a].host = w;
+            queue[q].u = w;
           }
         }
       }
@@ -1033,6 +1086,9 @@ export function judgeBlobs(
       for (const u of units) {
         if (u === units[0] || !u.seeded || hasSizeCopy(u)) continue;
         if (!u.rim.length || u.rim.some((id) => o.sizeLine?.has(id))) {
+          // SEEDNAME: a piece of its own after all — it prints its own piece name AND one size's
+          // lines close it alone (D3: two independent evidences; the fill and the gates follow)
+          if (!off.has('own-name') && namedOneSize(u.root) != null) continue;
           u.seeded = false;
           u.junk = 'size-copy';
           u.how = clearMmOf(u.root) <= SLIVER_MM ? 'sliver' : 'fragment';
@@ -1251,6 +1307,115 @@ export function judgeBlobs(
         return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
       }
       return g.centre(x, y);
+    }
+
+    /** Each face of a group → the unit whose root it reaches first across shared lines (BFS). */
+    function nearestRoot(grp: readonly number[], roots: readonly Unit[]): Map<number, Unit> {
+      const inG = new Set(grp);
+      const adj = new Map<number, Set<number>>(grp.map((f) => [f, new Set<number>()]));
+      T.forEach((t) => {
+        const fs2 = [...t.touch].filter(([l, c]) => inG.has(l) && c >= 3).map(([l]) => l);
+        for (const a of fs2) for (const b of fs2) if (a !== b) adj.get(a)!.add(b);
+      });
+      const out = new Map<number, Unit>();
+      const tie = new Set<number>();
+      let front: number[] = [];
+      for (const r of roots) {
+        out.set(r.root, r);
+        front.push(r.root);
+      }
+      while (front.length) {
+        const reach = new Map<number, Unit>();
+        for (const a of front)
+          for (const b of adj.get(a) ?? []) {
+            if (out.has(b)) continue;
+            const w = out.get(a)!;
+            const was = reach.get(b);
+            if (was && was !== w) tie.add(b);
+            else reach.set(b, w);
+          }
+        for (const [b, w] of reach) out.set(b, tie.has(b) ? roots[0] : w);
+        front = [...reach.keys()];
+      }
+      return out;
+    }
+
+    /**
+     * SEEDNAME · a face that is a piece of its own though the face pass would set it aside: Mood's
+     * old sheets draw a piece's sizes side by side from a common edge (the smallest size whole,
+     * the larger ones as strips beside it, joined across size lines) and pieces touching each
+     * other, so (1) a piece that is not its blob's largest reads to the fragments rule as "no copy
+     * of itself" (Rue's sleeve, Vanda's bodice front), and (2) a piece drawn against another
+     * across that one's size lines reads as a size copy of it (Olea's back beside the front).
+     * Two independent evidences, both required (D3):
+     *   name      its own face prints a piece name (PIECE_NAME: a garment-part word, or a cutting
+     *             instruction "CUT 2") — and nothing there says it is no piece to cut (a template,
+     *             a placement mark, a cut line of a view);
+     *   one size  the lines of ONE size (with the lines every size shares) close its face on their
+     *             own: flooded from its seed point on just those walls, the region stays in the
+     *             face's box and covers the face (≥ 90 %), no more than 15 % larger — the outline
+     *             of one drawn size, not a shape cut out where several sizes cross.
+     * The piece still goes through the fill, the H1 guard and the gate (G21 / G22 / G24 / G8): a
+     * face cut where sizes cross does not close in one size, and two pieces closing one region
+     * still merge there and are refused. Returns the name, or null.
+     */
+    function namedOneSize(f: number): string | null {
+      if (!o.rankOfItem) return null;
+      const texts = textAt.filter(({ t, k }) => !t.background && inFace(k, f)).map(({ t }) => t);
+      if (texts.some((t) => NOT_A_PIECE.test(t.text))) return null;
+      const name = texts.find(
+        (t) => pieceLabelText(t.text) && PIECE_NAME.test(t.text) && !MARK_TEXT.test(t.text),
+      );
+      if (!name) return null;
+      const F = fillOfF(f);
+      const pole = poleOf(f).k;
+      if (pole < 0 || F.area * pxArea < PIECE_NAMED_MIN_MM2) return null;
+      // the ranks whose lines bound the face, most touching first
+      const byRank = new Map<number, number>();
+      items.forEach((it, i) => {
+        const t = T[i];
+        const c = t.touch.get(f) ?? 0;
+        if (!t.n || c < 0.3 * t.n) return;
+        const r = o.rankOfItem!(it);
+        if (typeof r === 'number') byRank.set(r, (byRank.get(r) ?? 0) + c);
+      });
+      const ranks = [...byRank].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const pad = Math.max(8, Math.ceil(0.1 * Math.max(F.w, F.h)));
+      const bx0 = Math.max(0, F.x0 - pad);
+      const by0 = Math.max(0, F.y0 - pad);
+      const bx1 = Math.min(W - 1, F.x0 + F.w - 1 + pad);
+      const by1 = Math.min(g.H - 1, F.y0 + F.h - 1 + pad);
+      for (const [r] of ranks) {
+        const mask = new Uint8Array(N);
+        items.forEach((it) => {
+          const ir = o.rankOfItem!(it);
+          if (ir === 'all' || ir === r) drawPolyline(g, mask, it.pts, it.closed);
+        });
+        for (let y = by0; y <= by1; y++)
+          for (let x = bx0; x <= bx1; x++) if (weak[y * W + x]) mask[y * W + x] = 1;
+        if (mask[pole]) continue;
+        const seen = new Uint8Array(N);
+        const st = [pole];
+        seen[pole] = 1;
+        let n = 0;
+        let inF = 0;
+        let leak = false;
+        while (st.length && !leak) {
+          const k = st.pop()!;
+          n++;
+          if (inFill(F, k, W)) inF++;
+          const x = k % W;
+          const y = (k / W) | 0;
+          if (x <= bx0 || y <= by0 || x >= bx1 || y >= by1) leak = true;
+          for (const q of [k - 1, k + 1, k - W, k + W])
+            if (q >= 0 && q < N && !seen[q] && !mask[q]) {
+              seen[q] = 1;
+              st.push(q);
+            }
+        }
+        if (!leak && inF >= 0.9 * F.area && n <= 1.15 * F.area) return name.text.trim();
+      }
+      return null;
     }
 
     /**
@@ -1592,7 +1757,7 @@ export function faceMap(
     }
     return { g: subs[0].g, blobAt: subs[0].blobAt, blobs, subs };
   }
-  const { items, weak, model } = faceWalls(sheet, set, run);
+  const { items, weak, model, lone } = faceWalls(sheet, set, run);
   const fr = faceRaster(
     sheet.bbox,
     items,
@@ -1607,12 +1772,17 @@ export function faceMap(
       classOf.set(id, c.id);
       roleOf.set(id, c.role);
     }
+  const common = new Set(model.common);
+  const rankOfChain = new Map<ChainId, number>();
+  model.byRank.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
   const blobs = judgeBlobs(fr, sheet, set.chains, items, textSeeds, {
     ...o,
     classOf,
     roleOf,
     graded: model.mode !== 'single',
     sizeLine: new Set(model.byRank.flat()),
+    rankOfItem: (it) =>
+      lone.has(it) || common.has(it.chain) ? 'all' : rankOfChain.get(it.chain) ?? null,
   });
   const off = o.off ?? new Set();
   // a sheet that labels its pieces in text (≥ 2 text seeds) labels every piece: an outline it
