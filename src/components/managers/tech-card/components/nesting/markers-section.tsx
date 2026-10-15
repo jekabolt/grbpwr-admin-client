@@ -454,7 +454,7 @@ export function MarkersSection({
         title={rowTooltip(m, colorway)}
         onClick={() => openingId == null && openMarker(id)}
         className={cn(
-          'grid cursor-pointer grid-cols-[minmax(0,1fr)_120px_80px_110px_80px_auto] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-bgZebra',
+          'grid cursor-pointer grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-bgZebra',
           !last && 'border-b border-hairline',
         )}
       >
@@ -489,9 +489,11 @@ export function MarkersSection({
           {cons != null ? (
             `${cons} cm / unit`
           ) : refusal ? (
-            <Pill tone='warn' title={refusal}>
+            // Смешанный состав — не поломка: у такого маркера просто нет одной цифры на изделие.
+            // Красный здесь врал бы (красный = убыток/поломка), поэтому серый текст, причина в title.
+            <span className='text-labelColor' title={refusal}>
               {refusalWord(m)}
-            </Pill>
+            </span>
           ) : (
             '—'
           )}
@@ -575,7 +577,7 @@ export function MarkersSection({
       {groups.map((g) => (
         <div key={g.key}>
           {groups.length > 1 && <GroupLabel>{g.label}</GroupLabel>}
-          <div className='grid grid-cols-[minmax(0,1fr)_120px_80px_110px_80px_auto] gap-x-4 border-b border-borderColor pb-1 text-micro uppercase tracking-label text-labelColor'>
+          <div className='grid grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] gap-x-4 border-b border-borderColor pb-1 text-micro uppercase tracking-label text-labelColor'>
             <span>marker</span>
             <span className='text-right'>per unit</span>
             <span className='text-right'>width</span>

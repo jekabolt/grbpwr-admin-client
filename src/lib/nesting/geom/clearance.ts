@@ -157,6 +157,15 @@ export type Violation = {
   required: number; // cm
 };
 
+// ДОПУСКИ СОХРАНЁННОЙ раскладки. Блоб пишет и контур, и размещение с шагом 0.01 см
+// (marker-io.ts, r2), то есть каждая координата детали на полосе может уйти на 0.005 см от
+// контура и ещё на 0.005 см от размещения: у кромки это ≤ 0.01 см по оси, у пары — до
+// 2·(0.005+0.005)·√2 ≈ 0.0283 см. Проверка сохранённого маркера со строгим допуском живого
+// прогона (1 мкм) красит красным детали, которые движок положил ровно на кромку (замер
+// 15.10: 1–7 «piece outside the cloth» глубиной 0.0014–0.0045 см на маркерах без единой
+// правки). Живой прогон и ручные правки в памяти идут с допуском по умолчанию.
+export const STORED_LAYOUT_TOLERANCE = { edgeTolCm: 0.0101, pairTolCm: 0.0284 } as const;
+
 // Full validation of a layout: pairwise clearances (bbox-prefiltered by gap) and the
 // strip constraints (edge margins across, left margin along).
 export function checkLayout(args: {
@@ -165,6 +174,10 @@ export function checkLayout(args: {
   widthCm: number;
   gapCm: number;
   marginCm: number;
+  // Допуски проверки, см. По умолчанию — квант размещателя (1 мкм); для раскладки, прочитанной
+  // из блоба, — STORED_LAYOUT_TOLERANCE.
+  edgeTolCm?: number;
+  pairTolCm?: number;
 }): Violation[] {
   const { pieces, placements, widthCm, gapCm, marginCm } = args;
   const byId = new Map(pieces.map((p) => [p.id, p]));
@@ -189,10 +202,12 @@ export function checkLayout(args: {
   // Число вписано, а не импортировано из clipper: шапка этого файла обещает зависимость только
   // от типов, чтобы редактор раскладки не тащил за собой clipper и dxf-parser.
   const eps = 1e-4; // = 1 / SCALE (geom/clipper.ts), один микрон
+  const edgeTol = Math.max(eps, args.edgeTolCm ?? eps);
+  const pairTol = Math.max(eps, args.pairTolCm ?? eps);
   for (const s of shapes) {
     // Strip constraints: selvedge margins across (y), left margin along (x). Right is open.
     const edge = Math.min(s.b.minY - marginCm, widthCm - marginCm - s.b.maxY, s.b.minX - marginCm);
-    if (edge < -eps) {
+    if (edge < -edgeTol) {
       out.push({ index: s.index, clearance: Math.max(0, marginCm + edge), required: marginCm });
     }
   }
@@ -202,16 +217,16 @@ export function checkLayout(args: {
       const b = shapes[j];
       // Inflate by the gap: bboxes further apart than the gap cannot violate it.
       if (
-        a.b.minX > b.b.maxX + gapCm + eps ||
-        b.b.minX > a.b.maxX + gapCm + eps ||
-        a.b.minY > b.b.maxY + gapCm + eps ||
-        b.b.minY > a.b.maxY + gapCm + eps
+        a.b.minX > b.b.maxX + gapCm + pairTol ||
+        b.b.minX > a.b.maxX + gapCm + pairTol ||
+        a.b.minY > b.b.maxY + gapCm + pairTol ||
+        b.b.minY > a.b.maxY + gapCm + pairTol
       )
         continue;
       const c = contourClearance(a.poly, b.poly);
       // c < 0 is the genuine-overlap sentinel — a violation at ANY gap, including 0
       // (where touching, exactly 0, stays legal: cut-on-line semantics).
-      if (c < 0 || c < gapCm - eps) {
+      if (c < 0 || c < gapCm - pairTol) {
         out.push({ index: a.index, otherIndex: b.index, clearance: Math.max(0, c), required: gapCm });
       }
     }
