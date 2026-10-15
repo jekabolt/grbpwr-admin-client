@@ -1034,8 +1034,8 @@ export function judgeBlobs(
             !off.has('own-name') &&
             !!o.graded &&
             why === 'size-copy' &&
-            acrossSizeLines(f, grp) &&
-            namedOneSize(f) != null;
+            namedOneSize(f) != null &&
+            acrossSizeLines(f, grp);
           if (off.has(why) || named) {
             const v: Unit = {
               root: f,
@@ -1314,19 +1314,72 @@ export function judgeBlobs(
       return g.centre(x, y);
     }
 
-    /** Face f is parted from the rest of its group by size lines only (joinedWhy's first test). */
+    /**
+     * Face f is parted from the rest of its group by size lines only: read straight across every
+     * wall pixel between f and another face of the group (acrossWall), the wall is a ranked size
+     * line there — not a line every rank shares (a common line, a lone stretch where the sizes
+     * coincide), a rescued line or a wall of no rank (Codex r2: those may split one piece in two).
+     * A few such pixels where lines meet at a corner are tolerated (≤ 10 %); ≥ 20 ranked ones.
+     */
     function acrossSizeLines(f: number, grp: readonly number[]): boolean {
-      const ids = sep(
-        f,
-        grp.filter((x) => x !== f),
-      );
-      return ids.length > 0 && ids.every((id) => !!o.sizeLine?.has(id));
+      if (!o.rankOfItem) return false;
+      const og = new Set(grp.filter((x) => x !== f));
+      const q = fs[f];
+      const x0 = Math.max(0, q.x0 - 4);
+      const y0 = Math.max(0, q.y0 - 4);
+      const x1 = Math.min(W - 1, q.x1 + 4);
+      const y1 = Math.min(g.H - 1, q.y1 + 4);
+      const shared = new Uint8Array(N);
+      items.forEach((it) => {
+        if (typeof o.rankOfItem!(it) !== 'number') drawPolyline(g, shared, it.pts, it.closed);
+      });
+      let ranked = 0;
+      let other = 0;
+      for (let y = y0; y <= y1; y++)
+        for (let x = x0; x <= x1; x++) {
+          const k = y * W + x;
+          if (!wall[k]) continue;
+          const side = acrossWall(x, y);
+          if (!side || !((side[0] === f && og.has(side[1])) || (side[1] === f && og.has(side[0]))))
+            continue;
+          if (shared[k] || weak[k]) other++;
+          else ranked++;
+        }
+      return ranked >= 20 && other <= 0.1 * (ranked + other);
     }
 
     /**
-     * Each face of a group → the unit whose root it reaches first across a line they share at one
-     * place (wall pixels with both faces within 2 px, ≥ 3 of them — never two faces one polyline
-     * touches at distant places: Codex r1); a tie or no path keeps the head (roots[0]).
+     * The two faces on either side of the wall at (x, y), read straight across it (horizontally,
+     * then vertically, ≤ 4 px each way) — never two faces that only meet at a junction's corner.
+     */
+    function acrossWall(x: number, y: number): [number, number] | null {
+      for (const [dx, dy] of [
+        [1, 0],
+        [0, 1],
+      ]) {
+        const end = (sx: number, sy: number) => {
+          for (let n = 1; n <= 4; n++) {
+            const xx = x + sx * n;
+            const yy = y + sy * n;
+            if (!g.inside(xx, yy)) return -1;
+            const k = yy * W + xx;
+            if (wall[k]) continue;
+            return face[k];
+          }
+          return -1;
+        };
+        const a = end(-dx, -dy);
+        const b = end(dx, dy);
+        if (a >= 0 && b >= 0 && a !== b) return [a, b];
+      }
+      return null;
+    }
+
+    /**
+     * Each face of a group → the unit whose root it reaches first across a line they share: faces
+     * read on the two sides of one wall (acrossWall) at ≥ 8 of its pixels — never two faces one
+     * polyline touches at distant places, nor two meeting at a junction (Codex r1, r2); a tie or
+     * no path keeps the head (roots[0]).
      */
     function nearestRoot(grp: readonly number[], roots: readonly Unit[]): Map<number, Unit> {
       const inG = new Set(grp);
@@ -1347,27 +1400,16 @@ export function judgeBlobs(
       x1 = Math.min(W - 1, x1);
       y1 = Math.min(g.H - 1, y1);
       const shared = new Map<number, number>();
-      const near = new Set<number>();
       for (let y = y0; y <= y1; y++)
         for (let x = x0; x <= x1; x++) {
           if (!wall[y * W + x]) continue;
-          near.clear();
-          for (let dy = -2; dy <= 2; dy++)
-            for (let dx = -2; dx <= 2; dx++) {
-              if (!g.inside(x + dx, y + dy)) continue;
-              const l = face[(y + dy) * W + x + dx];
-              if (l >= 0 && inG.has(l)) near.add(l);
-            }
-          if (near.size < 2) continue;
-          for (const a of near)
-            for (const b of near)
-              if (a < b) {
-                const key = a * nFaces + b;
-                shared.set(key, (shared.get(key) ?? 0) + 1);
-              }
+          const side = acrossWall(x, y);
+          if (!side || !inG.has(side[0]) || !inG.has(side[1])) continue;
+          const key = Math.min(...side) * nFaces + Math.max(...side);
+          shared.set(key, (shared.get(key) ?? 0) + 1);
         }
       for (const [key, c] of shared) {
-        if (c < 3) continue;
+        if (c < 8) continue;
         const a = Math.floor(key / nFaces);
         const b = key % nFaces;
         adj.get(a)!.add(b);
