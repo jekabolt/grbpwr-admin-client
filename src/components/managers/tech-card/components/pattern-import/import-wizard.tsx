@@ -57,7 +57,7 @@ import {
   type PrimaryOverride,
   type StageState,
 } from './stages';
-import { focusAsk } from './ui-bits';
+import { AskCoach, firstAsk, focusAsk, type CoachTarget } from './ui-bits';
 import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
 import { isReplayed } from './autopilot/replay-record';
 
@@ -363,12 +363,31 @@ function WizardBody({
   const subSteps = STAGE_OF_STEP[session.step].steps;
 
   const mainRef = useRef<HTMLElement | null>(null);
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
+  // ── COACH MODE: a click that cannot advance shows WHERE and HOW instead (ui-bits ASK COACH) ──
+  const [coach, setCoach] = useState<CoachTarget | null>(null);
+  // the question changed (answered, another step): the old picture goes
+  useEffect(() => setCoach(null), [askText, session.step, session.busy]);
   const onAsk = () => {
     if (askText && offWizard(askText)) return requestClose();
-    // a blocked piece: its row selected, its actions focused in the side panel (details' own door)
-    if (askKind === 'blocker' && jumpSeed != null)
-      return setDetailsJump((j) => ({ seed: jumpSeed, n: (j?.n ?? 0) + 1 }));
-    focusAsk(mainRef.current);
+    const text = askText ?? '';
+    const show = (el: HTMLElement, bare = false) =>
+      setCoach((c) => ({ el, text, n: (c?.n ?? 0) + 1, bare }));
+    const bare = () => primaryRef.current && show(primaryRef.current, true);
+    // a blocked piece: its row selected, its actions focused in the side panel (details' own
+    // door) — the coach lights what details focused, else its first answer
+    if (askKind === 'blocker' && jumpSeed != null) {
+      setDetailsJump((j) => ({ seed: jumpSeed, n: (j?.n ?? 0) + 1 }));
+      void nextFrames().then(() => {
+        const main = mainRef.current;
+        const a = document.activeElement;
+        const el = a instanceof HTMLElement && main?.contains(a) && a !== main ? a : firstAsk(main);
+        if (el) show(el);
+        else bare();
+      });
+      return;
+    }
+    if (!focusAsk(mainRef.current, (el) => show(el))) bare();
   };
 
   // ── the one primary: action + count, derived from the session ──────────────────────────────
@@ -393,6 +412,8 @@ function WizardBody({
         loading: true,
       };
     if (override) return override;
+    // a blocker never greys the primary out: the click coaches (shows where and how) instead
+    const blocked = !!blocker && !session.error;
     if (session.step === 'apply') {
       if (card.downloadOnly)
         return {
@@ -403,8 +424,8 @@ function WizardBody({
       if (applied) return { label: 'back to the card', onClick: onClose };
       return {
         label: `apply ${plural(created, 'piece')} to the card`,
-        onClick: () => void api.dispatch({ type: 'apply' }),
-        disabled: !draft || applyRunning || !!blocker,
+        onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),
+        disabled: !draft || applyRunning,
         loading: applyRunning,
         title: draft
           ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
@@ -418,14 +439,23 @@ function WizardBody({
         label: card.downloadOnly
           ? `download .dxf (${draft?.downloads.length ?? 0})…`
           : `apply ${plural(created, 'piece')} to the card…`,
-        onClick: () => void api.next(),
-        disabled: !!blocker || !nextStep,
-        title: 'review what goes to the card, then apply',
+        onClick: blocked ? onAsk : () => void api.next(),
+        disabled: !nextStep,
+        title: blocked
+          ? `${blocker} — click to see where`
+          : 'review what goes to the card, then apply',
+      };
+    if (blocked)
+      return {
+        label: 'next',
+        onClick: onAsk,
+        disabled: !nextStep,
+        title: `${blocker} — click to see where and how`,
       };
     return {
       label: actionLabel() ?? `continue: ${nextStage}`,
       onClick: continueAnyway,
-      disabled: !!blocker || !nextStep,
+      disabled: !nextStep,
       title: autopilot ? `${nextTitle ?? ''} · resumes the autopilot after your answer` : nextTitle,
     };
   })();
@@ -789,10 +819,12 @@ function WizardBody({
                 )}
               {(nextStep || session.step === 'apply') && (
                 <Button
+                  ref={primaryRef}
                   variant='main'
                   size='sm'
                   className='shrink-0'
                   data-testid='pattern-import-primary'
+                  data-coach={blocker && !session.error && !session.busy ? '' : undefined}
                   disabled={!!primary.disabled}
                   loading={!!primary.loading}
                   title={primary.title}
@@ -803,6 +835,10 @@ function WizardBody({
               )}
             </footer>
           </div>
+
+          {coach && !session.busy && (
+            <AskCoach target={coach} area={mainRef.current} onClose={() => setCoach(null)} />
+          )}
 
           <ConfirmationModal
             open={askClose}

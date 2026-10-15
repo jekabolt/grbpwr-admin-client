@@ -1,7 +1,7 @@
 // Small shared pieces of the wizard, all built on the admin's own primitives (Text, Input, the
 // Input field metric for native selects). Nothing here is new design: these are the metrics of
 // ui/components/input.tsx and the panel grammar of assembly-fullscreen.tsx, named once.
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
 import { FoldCaret } from 'ui/components/fold-caret';
 import Input from 'ui/components/input';
@@ -242,35 +242,76 @@ export function DashSample({
 // * An answer that lives inside a closed `Fold`: give the Fold `ask` — its toggle carries
 //   `data-ask` while folded; the link opens it and then focuses the first `[data-ask]` inside.
 // * Nothing marked → the link falls back to the first `[aria-invalid="true"]` control; nothing
-//   at all → it does nothing (the sentence still reads as the instruction).
+//   at all → the coach bubble sits over the primary with the sentence alone.
 // * The key is free text for probes and debugging; the shell does not match on it.
+//
+// COACH MODE (owner: "click next, next, next — and where a human is needed, show the zone and how").
+// The footer primary is never disabled by a blocker: clicking it while something blocks (or the
+// ask line, at any time) focuses the answering control as above, then HIGHLIGHTS ITS ZONE and puts
+// a small bubble next to it: what is asked (the footer sentence) + how to answer it. Two more
+// attributes, both optional, both read off the DOM at click time:
+//
+//   <section data-ask-zone>                       // the card / region the decision lives in:
+//     …                                           // the nearest ancestor of the [data-ask]
+//     <Chip {...ask('pieces-gap', 'click both ends of the gap on the sheet')}>close the gap</Chip>
+//   </section>                                    // control is outlined + tinted blue
+//
+// * `data-ask-zone` (no value): put it on the panel / card / table region that holds the
+//   decision — wide enough that the operator sees WHERE (the row + its controls, the sheet + its
+//   tool strip), not the whole stage. Missing → the control itself is the zone.
+// * `data-ask-hint="<how, imperative, lower case, no full stop>"`: HOW to answer, on the
+//   `[data-ask]` control (the second argument of `ask()` sets it), or on the zone for a hint shared
+//   by every control in it. Missing → the bubble shows the footer sentence alone.
+// * The highlight stays until the operator acts inside the zone (pointer, key, input), presses ✕,
+//   or the blocker changes; nothing else on screen is dimmed.
 
-/** Spread onto a control that answers the footer's ask line: `<Chip {...ask('sizes-confirm')}>`. */
-export const ask = (key: string, on = true) => (on ? { 'data-ask': key } : {});
+/**
+ * Spread onto a control that answers the footer's ask line: `<Chip {...ask('sizes-confirm')}>`.
+ * `hint`: how to answer (the coach bubble's second line) — `data-ask-hint`.
+ */
+export const ask = (key: string, on: boolean | string = true, hint?: string) => {
+  const h = typeof on === 'string' ? on : hint;
+  if (on === false) return {};
+  return h ? { 'data-ask': key, 'data-ask-hint': h } : { 'data-ask': key };
+};
 
 const usable = (el: HTMLElement) =>
   !el.matches(':disabled, [aria-disabled="true"]') && el.getClientRects().length > 0;
 
+/** The first live answer control under `root` (no focus, no fold opened). */
+export function firstAsk(root: ParentNode | null): HTMLElement | null {
+  if (!root) return null;
+  const pick = (sel: string) =>
+    Array.from(root.querySelectorAll<HTMLElement>(sel)).find(usable) ?? null;
+  return pick('[data-ask]') ?? pick('[aria-invalid="true"]');
+}
+
 /**
  * The ask line's door: scroll to and focus the first live `[data-ask]` under `root`, open a folded
  * one first. Returns whether a control was found. A short ring marks it (a programmatic focus
- * after a mouse click shows no focus-visible ring).
+ * after a mouse click shows no focus-visible ring). `onFound` gets the control finally focused
+ * (inside the opened fold, or the fold's toggle when the fold holds none) — the coach's anchor.
  */
-export function focusAsk(root: ParentNode | null, depth = 0): boolean {
-  if (!root) return false;
-  const pick = (sel: string) =>
-    Array.from(root.querySelectorAll<HTMLElement>(sel)).find(usable) ?? null;
-  const el = pick('[data-ask]') ?? pick('[aria-invalid="true"]');
+export function focusAsk(
+  root: ParentNode | null,
+  onFound?: (el: HTMLElement) => void,
+  depth = 0,
+): boolean {
+  const el = firstAsk(root);
   if (!el) return false;
   // a folded answer: open the fold, let React render it, then look again inside
   if (el.dataset.askFold === 'folded' && depth < 2) {
     el.click();
     requestAnimationFrame(() => {
-      if (!focusAsk(root, depth + 1)) mark(el);
+      if (!focusAsk(root, onFound, depth + 1)) {
+        mark(el);
+        onFound?.(el);
+      }
     });
     return true;
   }
   mark(el);
+  onFound?.(el);
   return true;
 }
 
@@ -285,6 +326,176 @@ function mark(el: HTMLElement) {
     el.style.outline = before;
     el.style.outlineOffset = offset;
   }, 1200);
+}
+
+// ═══ ASK COACH ════════════════════════════════════════════════════════════════════════════════════
+
+/** The zone a control's decision lives in (`data-ask-zone`), else the control itself. */
+export const askZoneOf = (el: HTMLElement): HTMLElement =>
+  el.closest<HTMLElement>('[data-ask-zone]') ?? el;
+
+/** How to answer: the control's `data-ask-hint`, else its zone's (only up to the zone). */
+export function askHintOf(el: HTMLElement): string | null {
+  const zone = askZoneOf(el);
+  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+    const h = n.getAttribute('data-ask-hint');
+    if (h) return h;
+    if (n === zone) break;
+  }
+  return null;
+}
+
+export type CoachTarget = {
+  /** The control that answers (anchor of the bubble when the zone is too big to sit beside). */
+  el: HTMLElement;
+  /** What is asked: the footer sentence. */
+  text: string;
+  /** Bumped on every coach click: the zone pulses again. */
+  n: number;
+  /** No control was found: the bubble sits over this element (the primary), nothing is lit. */
+  bare?: boolean;
+};
+
+// one pulse of the tint, then the calm state; the outline sits inside the zone so a scroller's
+// overflow does not clip it
+const COACH_CSS = `
+[data-ask-coached]{outline:2px solid #2323ff!important;outline-offset:-2px!important;box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)!important;animation:ask-coach-pulse 900ms ease-out 1}
+@keyframes ask-coach-pulse{0%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .2)}100%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)}}
+@media (prefers-reduced-motion: reduce){[data-ask-coached]{animation:none}}
+`;
+
+const BUBBLE_W = 260;
+const GAP = 8;
+
+type Box = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Beside the zone (below, above, left, right — the first that fits inside `area`), else under /
+ * over the control. `area` = the stage: the bubble never covers the footer's primary.
+ */
+function place(zone: Box, ctl: Box, h: number, area: Box) {
+  const clampX = (x: number) => Math.min(Math.max(area.left, x), area.right - BUBBLE_W);
+  const clampY = (y: number) => Math.min(Math.max(area.top, y), area.bottom - h);
+  if (zone.bottom + GAP + h <= area.bottom)
+    return { left: clampX(zone.left), top: zone.bottom + GAP };
+  if (zone.top - GAP - h >= area.top) return { left: clampX(zone.left), top: zone.top - GAP - h };
+  if (zone.left - GAP - BUBBLE_W >= area.left)
+    return { left: zone.left - GAP - BUBBLE_W, top: clampY(ctl.top) };
+  if (zone.right + GAP + BUBBLE_W <= area.right)
+    return { left: zone.right + GAP, top: clampY(ctl.top) };
+  return ctl.bottom + GAP + h <= area.bottom
+    ? { left: clampX(ctl.left), top: ctl.bottom + GAP }
+    : { left: clampX(ctl.left), top: clampY(ctl.top - GAP - h) };
+}
+
+/**
+ * Coach mode's picture: the zone outlined + tinted (one pulse), a fixed bubble beside it with
+ * what is asked and how. Fixed-position inside the dialog: no overflow container clips it. It
+ * goes away on ✕, on any act inside the zone, or when the zone leaves the page; the shell drops
+ * it when the blocker changes.
+ */
+export function AskCoach({
+  target,
+  onClose,
+  area,
+}: {
+  target: CoachTarget;
+  onClose: () => void;
+  /** Where the bubble may sit (the stage); the viewport when absent or for a bare bubble. */
+  area?: HTMLElement | null;
+}) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const zone = target.bare ? null : askZoneOf(target.el);
+  const hint = target.bare ? null : askHintOf(target.el);
+  // the zone: lit, pulsing once per coach click, unlit on any act inside it
+  useEffect(() => {
+    if (!zone) return;
+    zone.removeAttribute('data-ask-coached');
+    void zone.offsetWidth; // restart the pulse
+    zone.setAttribute('data-ask-coached', '');
+    const acted = () => close.current();
+    const evs = ['pointerdown', 'keydown', 'input', 'change'] as const;
+    // a tick later: the click that opened a fold for us must not count as the operator's act
+    const t = window.setTimeout(() => evs.forEach((e) => zone.addEventListener(e, acted, true)), 0);
+    return () => {
+      window.clearTimeout(t);
+      evs.forEach((e) => zone.removeEventListener(e, acted, true));
+      zone.removeAttribute('data-ask-coached');
+    };
+  }, [zone, target.n]);
+  // the bubble follows the zone through scrolls and resizes
+  useLayoutEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const b = box.current;
+      const anchor = zone ?? target.el;
+      if (!anchor.isConnected) return close.current();
+      if (b) {
+        const view = {
+          left: GAP,
+          top: GAP,
+          right: window.innerWidth - GAP,
+          bottom: window.innerHeight - GAP,
+        };
+        const a = !target.bare && area ? area.getBoundingClientRect() : null;
+        const p = place(
+          anchor.getBoundingClientRect(),
+          target.el.getBoundingClientRect(),
+          b.offsetHeight,
+          a
+            ? {
+                left: Math.max(view.left, a.left),
+                top: Math.max(view.top, a.top),
+                right: Math.min(view.right, a.right),
+                bottom: Math.min(view.bottom, a.bottom),
+              }
+            : view,
+        );
+        b.style.left = `${Math.round(p.left)}px`;
+        b.style.top = `${Math.round(p.top)}px`;
+        b.style.visibility = 'visible';
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [zone, target.el, target.bare, area]);
+  return (
+    <>
+      <style>{COACH_CSS}</style>
+      <div
+        ref={box}
+        role='status'
+        aria-live='polite'
+        data-testid='pattern-import-coach'
+        className='fixed z-[var(--z-popover)] flex flex-col gap-1 border border-textColor bg-bgColor px-2 py-1.5 shadow-[var(--shadow-popover)]'
+        style={{ width: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
+      >
+        <span className='flex items-start gap-2'>
+          <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+            ! {target.text}
+          </Text>
+          <button
+            type='button'
+            aria-label='close the hint'
+            className='-mr-0.5 shrink-0 leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            onClick={onClose}
+          >
+            <Text size='micro' component='span'>
+              ✕
+            </Text>
+          </button>
+        </span>
+        {hint && hint !== target.text && (
+          <Text size='micro' component='p' data-testid='pattern-import-coach-hint'>
+            {hint}
+          </Text>
+        )}
+      </div>
+    </>
+  );
 }
 
 // ═══ FOLD ═════════════════════════════════════════════════════════════════════════════════════════
