@@ -108,6 +108,13 @@ import {
 } from './piece-selection';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
+import {
+  MarkerSchematic,
+  type SchematicBlock,
+  type SchematicPiece,
+  type SchematicView,
+} from './marker-schematic';
+import { useLayMode } from './use-lay-mode';
 import { useGoToBomLineField } from './go-to-card-field';
 
 // Units are asked by a dialog at upload: the parse's note about them is not repeated here.
@@ -143,6 +150,8 @@ const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&mate
 const BOX =
   'flex h-6 w-full min-w-0 items-center rounded-none border border-borderColor bg-bgColor px-[7px] text-textBaseSize tabular-nums transition-colors hover:border-textColor focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
 const BOX_LABEL = 'block h-[14px] truncate uppercase leading-[14px]';
+// Та же коробка без w-full — для коробок своей ширины в шапке.
+const BOX_AUTO = BOX.replace('w-full ', '');
 
 // Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.
 //
@@ -174,6 +183,21 @@ type RailSectionStatus = {
 
 /** Одна ширина на все поля тулбара (правило владельца: поля в ряд одного размера). */
 const FIELD = 'w-[84px] shrink-0';
+// Поля, которые живут в свёрнутой панели раскладки и в строке стола: дверь «show» их раскрывает.
+const LAY_FIELDS = new Set(['nest-gap', 'nest-margin', 'nest-allowance', 'nest-crossgrain']);
+const TABLE_FIELDS = new Set([
+  'nest-table',
+  'nest-end-loss',
+  'nest-plies',
+  'nest-spread-mode',
+  'nest-stack-limit',
+  'nest-keep-on-table',
+]);
+// Ячейка состава настила (число без рамки внутри общей коробки) и сегмент режима настила.
+const CELL_INPUT =
+  'w-[3ch] min-w-0 bg-transparent p-0 text-right text-textBaseSize tabular-nums focus:outline-none disabled:text-labelColor';
+const SEG =
+  'flex h-6 items-center border px-2 text-micro uppercase tracking-label transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:text-labelColor';
 
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
@@ -263,6 +287,8 @@ function NumBox({
   commitOnBlur = false,
   disabled,
   onClear,
+  className = BOX,
+  arrowStep = false,
 }: {
   name: string;
   // null = не задано: пустая коробка, а не ноль.
@@ -274,6 +300,9 @@ function NumBox({
   disabled?: boolean;
   // Пустое поле без emptyAs — «очистить» (стол, предел стопки).
   onClear?: () => void;
+  className?: string;
+  // ↑/↓ меняют целое на 1 (ячейки состава настила).
+  arrowStep?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const parse = (raw: string): number | null => {
@@ -289,8 +318,20 @@ function NumBox({
       type='text'
       inputMode={decimal ? 'decimal' : 'numeric'}
       autoComplete='off'
-      className={BOX}
+      className={className}
       value={draft ?? (value == null ? '' : String(value))}
+      onKeyDown={
+        arrowStep
+          ? (e) => {
+              if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              const cur = parse(draft ?? '') ?? value ?? 0;
+              const next = Math.max(0, cur + (e.key === 'ArrowUp' ? 1 : -1));
+              setDraft(String(next));
+              onCommit(next);
+            }
+          : undefined
+      }
       disabled={disabled}
       onFocus={(e) => {
         setDraft(value == null ? '' : String(value));
@@ -790,7 +831,11 @@ export function NestingModal({
     tableCm != null && tableCm - 2 * endLossCm > 0
       ? Math.round((tableCm - 2 * endLossCm) * 100) / 100
       : null;
-  const keepOnTable = usableCm != null && (keepOnTableEdit ?? true);
+  // РЕЖИМ НАСТИЛА (раунд 6): «single lay» — один настил без стола, граница стола в движок не
+  // уходит; «table» — прежний режим стола. Режим помнит браузер.
+  const [layMode, setLayMode] = useLayMode();
+  const tableMode = layMode === 'table';
+  const keepOnTable = tableMode && usableCm != null && (keepOnTableEdit ?? true);
   const workshopDirty =
     (tableEdit !== undefined && tableEdit !== wsTableCm) ||
     (stackEdit !== undefined && stackEdit !== wsStackCm);
@@ -1650,7 +1695,8 @@ export function NestingModal({
     });
     start(parse.parseId, config);
   };
-  const startRun = () => launch(runConfig, composition);
+  // Один настил (single lay) стола не знает: ни капа, ни отметки стола в сохранённом маркере.
+  const startRun = () => launch(runConfig, composition, layMode === 'table' ? usableCm : null);
 
   // ── «fit to the table» ─────────────────────────────────────────────────────────────────
   // Целые изделия, пропорции размеров сохраняются: k изделий раскладываются по долям текущего
@@ -2388,8 +2434,13 @@ export function NestingModal({
       ? viewData.targetCm ?? null
       : null
     : runView
-      ? runView.usableCm
-      : usableCm;
+      ? // Стол на холсте — у прогона со столом или в режиме стола; одиночный настил стола не знает.
+        runView.config.maxLengthCm != null || tableMode
+        ? runView.usableCm
+        : null
+      : tableMode
+        ? usableCm
+        : null;
   const spread = spreadFigures({
     // У сохранённого маркера слои не хранятся — всё, что от них зависит, прочерк.
     plies: viewData ? NaN : plies,
@@ -2445,7 +2496,7 @@ export function NestingModal({
       action: fitAction,
     });
   }
-  if (!viewData && spread.overStack && spread.maxPlies != null) {
+  if (!viewData && tableMode && spread.overStack && spread.maxPlies != null) {
     const max = spread.maxPlies;
     spreadWarnings.push({
       text: `${plies} plies over the stack limit, max ${max}`,
@@ -2453,7 +2504,7 @@ export function NestingModal({
       action: { label: 'set plies to max', onClick: () => setPlies(Math.max(1, max)) },
     });
   }
-  if (!viewData && spread.oddFaceToFace) {
+  if (!viewData && tableMode && spread.oddFaceToFace) {
     spreadWarnings.push({
       text: 'face to face needs an even number of plies',
       error: true,
@@ -2466,13 +2517,13 @@ export function NestingModal({
       },
     });
   }
-  if (!viewData && parse.phase === 'ready' && tableCm == null) {
+  if (!viewData && tableMode && parse.phase === 'ready' && tableCm == null) {
     spreadWarnings.push({
       text: 'table length not set',
       action: { label: 'set', onClick: () => focusField('nest-table') },
     });
   }
-  if (!viewData && thicknessSlot && thicknessMm == null && plies > 1) {
+  if (!viewData && tableMode && thicknessSlot && thicknessMm == null && plies > 1) {
     spreadWarnings.push({
       text: 'fabric thickness not set: no stack height',
       action: openArticle(thicknessArticleId),
@@ -2538,12 +2589,39 @@ export function NestingModal({
   };
   // Двери «show» у блокеров: поле, которое чинит отказ, получает фокус; детали открывают поповер.
   const [piecesOpen, setPiecesOpen] = useState(false);
+  // Панель раскладки (gap, margin, allowance, rotate) под шапкой, по умолчанию свёрнута.
+  const [layOpen, setLayOpen] = useState(false);
+  // СХЕМА ДО ЗАПУСКА: какое поле шапки сейчас под мышью / в фокусе (data-schematic).
+  const [hoverView, setHoverView] = useState<SchematicView | null>(null);
+  const [focusView, setFocusView] = useState<SchematicView | null>(null);
+  const schematicOf = (t: EventTarget | null): SchematicView | null => {
+    const el = t instanceof Element ? t.closest('[data-schematic]') : null;
+    return (el?.getAttribute('data-schematic') as SchematicView | null) ?? null;
+  };
+  const schematicView: SchematicView = hoverView ?? focusView ?? 'compose';
+  const headerHandlers = {
+    onPointerOver: (e: React.PointerEvent) => setHoverView(schematicOf(e.target)),
+    onPointerLeave: () => setHoverView(null),
+    onFocusCapture: (e: React.FocusEvent) => setFocusView(schematicOf(e.target)),
+    onBlurCapture: (e: React.FocusEvent) => setFocusView(schematicOf(e.relatedTarget)),
+  };
   const focusField = (id: string) => {
-    const el = document.getElementById(id);
-    const target = el?.matches('input, button')
-      ? el
-      : el?.querySelector<HTMLElement>('button, input');
-    target?.focus();
+    const go = () => {
+      const el = document.getElementById(id);
+      const target = el?.matches('input, button, select')
+        ? el
+        : el?.querySelector<HTMLElement>('button, input, select');
+      target?.focus();
+    };
+    // Поле может жить в свёрнутой панели раскладки или в строке стола: сначала раскрыть её,
+    // фокус — после рендера.
+    if (LAY_FIELDS.has(id) && !layOpen) {
+      setLayOpen(true);
+      requestAnimationFrame(go);
+    } else if (TABLE_FIELDS.has(id) && !tableMode) {
+      setLayMode('table');
+      requestAnimationFrame(go);
+    } else go();
   };
   const firstCompField = graded
     ? `nest-comp-${(compRows.find((r) => (!r.resolvable || r.sizeId <= 0) && r.qty >= 1) ?? compRows[0])?.key ?? ''}`
@@ -2640,8 +2718,9 @@ export function NestingModal({
             }
             return text;
           }),
-          ...railS3.warnings.map((text): HeaderWarning =>
-            text === DIRECTION_UNSET_TEXT ? { text, action: directionFix() } : text,
+          ...railS3.warnings.map(
+            (text): HeaderWarning =>
+              text === DIRECTION_UNSET_TEXT ? { text, action: directionFix() } : text,
           ),
         ]),
     !viewData && !running && saveRefusals.length > 0 && !onlyTerminal
@@ -2781,6 +2860,43 @@ export function NestingModal({
       </GenericPopover>
     ) : null;
 
+  // ── данные схемы до запуска ──────────────────────────────────────────────────────────────
+  // Оценка длины по площади: Σ площадь·тираж / (ширина · 0.8). Блоки размеров — доли площади.
+  const areaOfPiece = new Map(pieces.map((p) => [p.id, p.areaCm2]));
+  const areaByGroup = new Map<string, number>();
+  let areaTotal = 0;
+  for (const c of runConfig.pieces) {
+    const a = (areaOfPiece.get(c.pieceId) ?? 0) * c.quantity;
+    const g = (c.groupKey ?? '').toLowerCase();
+    areaByGroup.set(g, (areaByGroup.get(g) ?? 0) + a);
+    areaTotal += a;
+  }
+  const estLengthCm = areaTotal > 0 && widthCm > 0 ? areaTotal / (widthCm * 0.8) : null;
+  const schematicBlocks: SchematicBlock[] = (() => {
+    if (!graded) return [{ label: sizeLabel || 'garments', qty: ungradedUnits, share: 1 }];
+    const qtyTotal = activeRows.reduce((s, r) => s + r.qty, 0) || 1;
+    // Размеронезависимые детали кроятся на каждое изделие: их площадь делится по тиражу.
+    const uni = areaByGroup.get('') ?? 0;
+    const raw = activeRows.map((r) => {
+      const own = r.tokens.reduce((s, t) => s + (areaByGroup.get(t.toLowerCase()) ?? 0), 0);
+      return { label: r.label, qty: r.qty, area: own + (uni * r.qty) / qtyTotal };
+    });
+    const sum = raw.reduce((s, r) => s + r.area, 0);
+    return raw.map((r) => ({
+      label: r.label,
+      qty: r.qty,
+      share: sum > 0 ? r.area / sum : r.qty / qtyTotal,
+    }));
+  })();
+  const compBad = graded && compRows.some((r) => (!r.resolvable || r.sizeId <= 0) && r.qty >= 1);
+  const schematicPieces: SchematicPiece[] = pieces.map((p) => ({
+    id: p.id,
+    poly: p.poly,
+    bboxW: p.bboxW,
+    bboxH: p.bboxH,
+    checked: !!sel[p.id]?.checked && !!fitsWidth.get(p.id),
+  }));
+
   return (
     <ConfirmationModal
       open={files != null || view != null}
@@ -2806,149 +2922,385 @@ export function NestingModal({
       width='lg'
       hideActions
     >
-      {/* Тулбар настроек: один ряд полей одного размера над холстом, отказы справа. У
-          сохранённого маркера настраивать нечего, остаются только отказы. */}
-      <div className='mb-2.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-        {!viewData && (
-          <>
-            {cwOptions.length > 0 && (
-              <label className={`${FIELD} space-y-0.5`} title={chosenColorway?.label ?? 'shared'}>
-                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                  colourway
-                </Text>
-                <select
-                  name='nest-colourway'
-                  className={`${BOX} cursor-pointer truncate`}
-                  disabled={busy}
-                  value={String(colorwayId)}
-                  onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
+      {/* ШАПКА МАРКЕРА (раунд 6): одна строка из четырёх групп — colourway · garments per size ·
+          cloth · pieces + режим настила; предупреждения справа в той же строке. Панель раскладки и
+          строка стола раскрываются под ней. Наведение/фокус на поле переключает схему холста. */}
+      <div {...headerHandlers}>
+        <div className='mb-2.5 flex flex-wrap items-end gap-x-4 gap-y-1.5'>
+          {!viewData && (
+            <>
+              {cwOptions.length > 0 && (
+                <label
+                  data-schematic='compose'
+                  className={`${FIELD} space-y-0.5`}
+                  title={chosenColorway?.label ?? 'shared'}
                 >
-                  <option value='0'>shared</option>
-                  {cwOptions.map((c) => (
-                    <option key={c.colorwayId} value={String(c.colorwayId)}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {!lockedSlot && fabricLines.length > 0 && (
-              <div
-                id='nest-fabric'
-                className={`${FIELD} space-y-0.5`}
-                title={[
-                  slot ? slotLabel(slot) : 'not picked',
-                  pinArticle ? `article: ${pinArticle}` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              >
+                  <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                    colourway
+                  </Text>
+                  <span className='relative block'>
+                    <select
+                      name='nest-colourway'
+                      className={`${BOX} cursor-pointer appearance-none truncate pr-5`}
+                      disabled={busy}
+                      value={String(colorwayId)}
+                      onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
+                    >
+                      <option value='0'>shared</option>
+                      {cwOptions.map((c) => (
+                        <option key={c.colorwayId} value={String(c.colorwayId)}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span
+                      aria-hidden
+                      className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
+                    >
+                      ▾
+                    </span>
+                  </span>
+                </label>
+              )}
+
+              {/* СОСТАВ НАСТИЛА — одна коробка из ячеек «размер · число»: размер с 0 не кроится. */}
+              <div data-schematic='garments' className='shrink-0 space-y-0.5'>
+                <Text
+                  size='micro'
+                  variant={compBad || sizeUnknown ? undefined : 'label'}
+                  component='span'
+                  className={compBad || sizeUnknown ? `${BOX_LABEL} text-error` : BOX_LABEL}
+                >
+                  garments per size
+                </Text>
+                <div className='flex h-6 items-stretch divide-x divide-hairline border border-borderColor bg-bgColor hover:border-textColor'>
+                  {graded ? (
+                    compRows.map((r) => {
+                      const bad = (!r.resolvable || r.sizeId <= 0) && r.qty >= 1;
+                      return (
+                        <label
+                          key={r.key}
+                          title={r.label}
+                          className='flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'
+                        >
+                          <span
+                            className={`max-w-[6ch] truncate text-micro uppercase tracking-label ${
+                              bad ? 'text-error' : 'text-labelColor'
+                            }`}
+                          >
+                            {r.label}
+                          </span>
+                          <NumBox
+                            name={`nest-comp-${r.key}`}
+                            className={`${CELL_INPUT} ${r.qty > 0 ? '' : 'text-labelColor'}`}
+                            value={r.qty}
+                            emptyAs={0}
+                            arrowStep
+                            disabled={busy}
+                            onCommit={(n) => {
+                              const next = Math.max(0, Math.round(n));
+                              if (next !== r.qty) {
+                                guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
+                              }
+                            }}
+                          />
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <label className='flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'>
+                      <span
+                        className={`max-w-[10ch] truncate text-micro uppercase tracking-label ${
+                          sizeUnknown ? 'text-error' : 'text-labelColor'
+                        }`}
+                      >
+                        {sizeLabel || 'garments'}
+                      </span>
+                      <NumBox
+                        name='nest-units'
+                        className={CELL_INPUT}
+                        value={ungradedUnits}
+                        emptyAs={1}
+                        arrowStep
+                        disabled={busy}
+                        onCommit={(n) => {
+                          const next = Math.max(1, Math.round(n));
+                          if (next !== ungradedUnits) {
+                            guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* ТКАНЬ: слот BOM (если выбор есть), ширина и свёрнутая сводка раскладки. */}
+              <div className='shrink-0 space-y-0.5'>
                 <Text
                   size='micro'
                   variant={noSlotChosen ? undefined : 'label'}
                   component='span'
                   className={noSlotChosen ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
-                  fabric
+                  cloth
                 </Text>
-                <select
-                  name='nest-fabric-select'
-                  className={`${BOX} cursor-pointer truncate`}
-                  disabled={busy}
-                  value={slotKey}
-                  onChange={(e) => setSlotKey(e.target.value)}
-                >
-                  <option value=''>not picked</option>
-                  {fabricLines.map((b) => (
-                    <option key={b.lineKey} value={b.lineKey}>
-                      {slotLabel(b)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* СОСТАВ НАСТИЛА: размер с количеством 0 не кроится. */}
-            {graded ? (
-              compRows.map((r) => {
-                const bad = (!r.resolvable || r.sizeId <= 0) && r.qty >= 1;
-                return (
-                  <label key={r.key} className={`${FIELD} space-y-0.5`} title={r.label}>
-                    <Text
-                      size='micro'
-                      variant={bad ? undefined : 'label'}
-                      component='span'
-                      className={bad ? `${BOX_LABEL} text-error` : BOX_LABEL}
+                <div className='flex gap-1'>
+                  {!lockedSlot && fabricLines.length > 0 && (
+                    <div
+                      id='nest-fabric'
+                      data-schematic='width'
+                      className={`${FIELD} relative`}
+                      title={[
+                        slot ? slotLabel(slot) : 'not picked',
+                        pinArticle ? `article: ${pinArticle}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     >
-                      {r.label}
-                    </Text>
+                      <select
+                        name='nest-fabric-select'
+                        className={`${BOX} cursor-pointer appearance-none truncate pr-5 ${
+                          noSlotChosen ? 'text-error' : ''
+                        }`}
+                        disabled={busy}
+                        value={slotKey}
+                        onChange={(e) => setSlotKey(e.target.value)}
+                      >
+                        <option value=''>not picked</option>
+                        {fabricLines.map((b) => (
+                          <option key={b.lineKey} value={b.lineKey}>
+                            {slotLabel(b)}
+                          </option>
+                        ))}
+                      </select>
+                      <span
+                        aria-hidden
+                        className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
+                      >
+                        ▾
+                      </span>
+                    </div>
+                  )}
+                  <label
+                    data-schematic='width'
+                    className={`${BOX_AUTO} ${FIELD} gap-1 focus-within:border-textColor`}
+                    title={widthSource || 'cloth width'}
+                  >
                     <NumBox
-                      name={`nest-comp-${r.key}`}
-                      value={r.qty}
-                      emptyAs={0}
-                      disabled={busy}
+                      name='nest-width'
+                      className={`${CELL_INPUT} w-full text-left`}
+                      decimal
+                      value={widthCm}
+                      // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
+                      // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
+                      commitOnBlur
                       onCommit={(n) => {
-                        const next = Math.max(0, Math.round(n));
-                        if (next !== r.qty) {
-                          guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
+                        const next = Math.max(10, n);
+                        // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
+                        // не должен молча выключать автоподстановку ширины по колорвею.
+                        if (next !== widthCm) {
+                          guardManual(() => {
+                            setWidthTouched(true);
+                            setWidthRaw(null);
+                            setWidthCm(next);
+                          });
                         }
                       }}
+                      disabled={busy}
                     />
+                    <span className='text-labelColor'>cm</span>
                   </label>
-                );
-              })
-            ) : (
-              <label className={`${FIELD} space-y-0.5`}>
+                  <button
+                    type='button'
+                    name='nest-lay'
+                    data-schematic='lay'
+                    aria-expanded={layOpen}
+                    aria-controls='nest-lay-panel'
+                    onClick={() => setLayOpen((o) => !o)}
+                    className={`${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+                      layOpen ? 'border-textColor' : ''
+                    }`}
+                  >
+                    <span className='text-labelColor'>gap</span> {gapCm}
+                    <span className='text-labelColor'>·</span>
+                    <span className='text-labelColor'>margin</span> {marginCm}
+                    <span className='text-labelColor'>·</span>
+                    <span className={doubleAllowanceRefusal ? 'text-error' : 'text-labelColor'}>
+                      allowance
+                    </span>{' '}
+                    {allowanceMm}
+                    <span className='text-labelColor'>·</span>
+                    <span className='text-labelColor'>↻</span> {crossGrain ? 'on' : 'off'}
+                    <span aria-hidden className='text-labelColor'>
+                      {layOpen ? '▴' : '▾'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Детали: дверь в поповер с чек-листом и тиражом; рядом — режим настила. */}
+              <div data-schematic='pieces' className={`${FIELD} space-y-0.5`}>
                 <Text
                   size='micro'
-                  variant={sizeUnknown ? undefined : 'label'}
+                  variant={railS3.blockers.length > 0 ? undefined : 'label'}
                   component='span'
-                  className={sizeUnknown ? `${BOX_LABEL} text-error` : BOX_LABEL}
+                  className={railS3.blockers.length > 0 ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
-                  {sizeLabel || 'garments'}
+                  pieces
                 </Text>
-                <NumBox
-                  name='nest-units'
-                  value={ungradedUnits}
-                  emptyAs={1}
-                  disabled={busy}
-                  onCommit={(n) => {
-                    const next = Math.max(1, Math.round(n));
-                    if (next !== ungradedUnits) {
-                      guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
-                    }
+                <GenericPopover
+                  open={piecesOpen}
+                  onOpenChange={setPiecesOpen}
+                  className='w-[320px]'
+                  contentProps={{ align: 'start' }}
+                  triggerProps={{
+                    className: `${BOX_AUTO} w-[84px] justify-between focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
+                    disabled: parse.phase !== 'ready' || pieces.length === 0,
                   }}
-                />
-              </label>
-            )}
+                  openElement={(isOpen) => (
+                    <>
+                      <span>
+                        {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}
+                      </span>
+                      <span aria-hidden className='text-labelColor'>
+                        {isOpen ? '▴' : '▾'}
+                      </span>
+                    </>
+                  )}
+                >
+                  <div className='max-h-[46vh] space-y-1 overflow-y-auto'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <Text size='micro' variant='label' component='span'>
+                        {checkedCount}/{pieces.length}
+                        {instanceCount !== checkedCount ? ` · placements ${instanceCount}` : ''}
+                        {graded && ungradedCount > 0
+                          ? ` · ${ungradedAllUni ? 'UNI' : 'no size'} ${ungradedCount}`
+                          : ''}
+                      </Text>
+                      <button
+                        type='button'
+                        className='text-micro uppercase underline hover:opacity-70'
+                        disabled={busy}
+                        onClick={() =>
+                          guardManual(() => {
+                            // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
+                            const next: PieceSel = { ...sel };
+                            for (const p of pieces) {
+                              next[p.id] = {
+                                checked: !!fitsWidth.get(p.id),
+                                qty: sel[p.id]?.qty ?? 1,
+                              };
+                            }
+                            setSel(next);
+                          })
+                        }
+                      >
+                        select all
+                      </button>
+                    </div>
+                    {pieces.map((p) => {
+                      const fits = fitsWidth.get(p.id) ?? false;
+                      const s = sel[p.id] ?? { checked: false, qty: 1 };
+                      return (
+                        <div key={p.id} className='flex items-center gap-1.5'>
+                          <CheckboxCommon
+                            name={`nest-piece-${p.id}`}
+                            checked={s.checked && fits}
+                            disabled={!fits || busy}
+                            onChange={(c: boolean) =>
+                              guardManual(() =>
+                                setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })),
+                              )
+                            }
+                          />
+                          <PieceThumb piece={p} />
+                          <div className='min-w-0 flex-1'>
+                            <Text size='micro' component='p' className='truncate'>
+                              {p.name}
+                            </Text>
+                            {/* Размер детали и её тираж в этом настиле: в списке лежат детали
+                            нескольких размеров, у которых имена различаются одним хвостом. */}
+                            <Text size='nano' variant='label' component='p'>
+                              {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
+                              {graded
+                                ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
+                                  // размера» читалось бы про неё как недостача.
+                                  ` · ${
+                                    split.codeById.get(p.id)?.size ||
+                                    (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
+                                  } · ×${
+                                    Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
+                                  }`
+                                : ''}
+                            </Text>
+                          </div>
+                          {!fits && <Pill tone='warn'>too wide</Pill>}
+                          <Input
+                            name={`nest-qty-${p.id}`}
+                            type='number'
+                            value={s.qty}
+                            min={1}
+                            disabled={!fits || busy}
+                            className='w-12 shrink-0'
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setSel((m) => ({
+                                ...m,
+                                [p.id]: {
+                                  ...s,
+                                  qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
+                                },
+                              }))
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </GenericPopover>
+              </div>
+              <div data-schematic='compose' className='shrink-0 space-y-0.5'>
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                  spread
+                </Text>
+                <div role='group' aria-label='spread mode' className='flex'>
+                  {(
+                    [
+                      ['single', 'single lay'],
+                      ['table', 'table'],
+                    ] as const
+                  ).map(([m, label], i) => (
+                    <button
+                      key={m}
+                      type='button'
+                      name={`nest-lay-mode-${m}`}
+                      aria-pressed={layMode === m}
+                      disabled={busy}
+                      onClick={() => setLayMode(m)}
+                      className={`${SEG} ${i > 0 ? '-ml-px' : ''} ${
+                        layMode === m
+                          ? 'relative border-textColor bg-textColor text-bgColor'
+                          : 'border-borderColor bg-bgColor text-textColor hover:border-textColor'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {topWarnings.length > 0 && (
+            <div className='ml-auto self-end'>
+              <HeaderWarnings items={topWarnings} />
+            </div>
+          )}
+        </div>
 
-            <label className={`${FIELD} space-y-0.5`} title={widthSource || undefined}>
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                width cm
-              </Text>
-              <NumBox
-                name='nest-width'
-                decimal
-                value={widthCm}
-                // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
-                // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
-                commitOnBlur
-                onCommit={(n) => {
-                  const next = Math.max(10, n);
-                  // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
-                  // не должен молча выключать автоподстановку ширины по колорвею.
-                  if (next !== widthCm) {
-                    guardManual(() => {
-                      setWidthTouched(true);
-                      setWidthRaw(null);
-                      setWidthCm(next);
-                    });
-                  }
-                }}
-                disabled={busy}
-              />
-            </label>
-            <label className={`${FIELD} space-y-0.5`}>
+        {/* ПАНЕЛЬ РАСКЛАДКИ: gap, margin, allowance, rotate — раскрывается сводкой в группе cloth. */}
+        {!viewData && layOpen && (
+          <div id='nest-lay-panel' className='mb-2.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
+            <label data-schematic='gap' className={`${FIELD} space-y-0.5`}>
               <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 gap cm
               </Text>
@@ -2964,7 +3316,7 @@ export function NestingModal({
                 disabled={busy}
               />
             </label>
-            <label className={`${FIELD} space-y-0.5`}>
+            <label data-schematic='margin' className={`${FIELD} space-y-0.5`}>
               <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 margin cm
               </Text>
@@ -2982,6 +3334,7 @@ export function NestingModal({
             </label>
             {/* Припуск на шов — ВХОД алгоритма: раздувает контур до линии кроя до укладки. */}
             <label
+              data-schematic='allowance'
               className={`${FIELD} space-y-0.5`}
               title={
                 [
@@ -3019,13 +3372,14 @@ export function NestingModal({
                 disabled={busy}
               />
             </label>
-            <div className={`${FIELD} space-y-0.5`}>
+            <div data-schematic='rotate' className={`${FIELD} space-y-0.5`}>
               <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 rotate 90°
               </Text>
               {/* Переключатель той же коробкой, что и поля: нажатое состояние — заливка чернилом. */}
               <button
                 type='button'
+                id='nest-crossgrain'
                 name='nest-crossgrain'
                 aria-pressed={crossGrain}
                 disabled={busy}
@@ -3037,289 +3391,181 @@ export function NestingModal({
                 {crossGrain ? 'on' : 'off'}
               </button>
             </div>
+          </div>
+        )}
 
-            {/* Детали: дверь в поповер с чек-листом и тиражом. */}
-            <div className={`${FIELD} space-y-0.5`}>
+        {/* РЯД СТОЛА: только в режиме «table» — настил слоями на раскроечном столе. */}
+        {!viewData && tableMode && (
+          <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
+            <label
+              data-schematic='table'
+              className={`${FIELD} space-y-0.5`}
+              title='cutting table length · empty = not set'
+            >
               <Text
                 size='micro'
-                variant={railS3.blockers.length > 0 ? undefined : 'label'}
+                variant={tableCm == null ? undefined : 'label'}
                 component='span'
-                className={railS3.blockers.length > 0 ? `${BOX_LABEL} text-error` : BOX_LABEL}
+                className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
               >
-                pieces
+                table cm
               </Text>
-              <GenericPopover
-                open={piecesOpen}
-                onOpenChange={setPiecesOpen}
-                className='w-[320px]'
-                contentProps={{ align: 'start' }}
-                triggerProps={{
-                  className: `${BOX} justify-between focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
-                  disabled: parse.phase !== 'ready' || pieces.length === 0,
-                }}
-                openElement={(isOpen) => (
-                  <>
-                    <span>
-                      {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}
-                    </span>
-                    <span aria-hidden className='text-labelColor'>
-                      {isOpen ? '▴' : '▾'}
-                    </span>
-                  </>
-                )}
+              <NumBox
+                name='nest-table'
+                decimal
+                value={tableCm}
+                commitOnBlur
+                disabled={busy}
+                onClear={() => setTableEdit(null)}
+                onCommit={(n) => setTableEdit(n > 0 ? n : null)}
+              />
+            </label>
+            <label
+              data-schematic='endLoss'
+              className={`${FIELD} space-y-0.5`}
+              title='spread end loss on each end of the table'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                end loss cm
+              </Text>
+              <NumBox
+                name='nest-end-loss'
+                decimal
+                value={endLossCm}
+                emptyAs={0}
+                commitOnBlur
+                disabled={busy}
+                onCommit={(n) => setEndLossCm(Math.max(0, n))}
+              />
+            </label>
+            <label data-schematic='plies' className={`${FIELD} space-y-0.5`}>
+              <Text
+                size='micro'
+                variant={spread.overStack || spread.oddFaceToFace ? undefined : 'label'}
+                component='span'
+                className={
+                  spread.overStack || spread.oddFaceToFace ? `${BOX_LABEL} text-error` : BOX_LABEL
+                }
               >
-                <div className='max-h-[46vh] space-y-1 overflow-y-auto'>
-                  <div className='flex items-center justify-between gap-2'>
-                    <Text size='micro' variant='label' component='span'>
-                      {checkedCount}/{pieces.length}
-                      {instanceCount !== checkedCount ? ` · placements ${instanceCount}` : ''}
-                      {graded && ungradedCount > 0
-                        ? ` · ${ungradedAllUni ? 'UNI' : 'no size'} ${ungradedCount}`
-                        : ''}
-                    </Text>
-                    <button
-                      type='button'
-                      className='text-micro uppercase underline hover:opacity-70'
-                      disabled={busy}
-                      onClick={() =>
-                        guardManual(() => {
-                          // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
-                          const next: PieceSel = { ...sel };
-                          for (const p of pieces) {
-                            next[p.id] = {
-                              checked: !!fitsWidth.get(p.id),
-                              qty: sel[p.id]?.qty ?? 1,
-                            };
-                          }
-                          setSel(next);
-                        })
-                      }
-                    >
-                      select all
-                    </button>
-                  </div>
-                  {pieces.map((p) => {
-                    const fits = fitsWidth.get(p.id) ?? false;
-                    const s = sel[p.id] ?? { checked: false, qty: 1 };
-                    return (
-                      <div key={p.id} className='flex items-center gap-1.5'>
-                        <CheckboxCommon
-                          name={`nest-piece-${p.id}`}
-                          checked={s.checked && fits}
-                          disabled={!fits || busy}
-                          onChange={(c: boolean) =>
-                            guardManual(() =>
-                              setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })),
-                            )
-                          }
-                        />
-                        <PieceThumb piece={p} />
-                        <div className='min-w-0 flex-1'>
-                          <Text size='micro' component='p' className='truncate'>
-                            {p.name}
-                          </Text>
-                          {/* Размер детали и её тираж в этом настиле: в списке лежат детали
-                            нескольких размеров, у которых имена различаются одним хвостом. */}
-                          <Text size='nano' variant='label' component='p'>
-                            {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
-                            {graded
-                              ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
-                                // размера» читалось бы про неё как недостача.
-                                ` · ${
-                                  split.codeById.get(p.id)?.size ||
-                                  (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
-                                } · ×${
-                                  Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
-                                }`
-                              : ''}
-                          </Text>
-                        </div>
-                        {!fits && <Pill tone='warn'>too wide</Pill>}
-                        <Input
-                          name={`nest-qty-${p.id}`}
-                          type='number'
-                          value={s.qty}
-                          min={1}
-                          disabled={!fits || busy}
-                          className='w-12 shrink-0'
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setSel((m) => ({
-                              ...m,
-                              [p.id]: {
-                                ...s,
-                                qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </GenericPopover>
+                plies
+              </Text>
+              <NumBox
+                name='nest-plies'
+                value={plies}
+                emptyAs={1}
+                onCommit={(n) => setPlies(Math.max(1, Math.round(n)))}
+              />
+            </label>
+            <div
+              data-schematic='face'
+              className={`${FIELD} space-y-0.5`}
+              title='spread mode: face up or face to face'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                face
+              </Text>
+              <button
+                type='button'
+                name='nest-spread-mode'
+                aria-pressed={spreadMode === 'face_to_face'}
+                onClick={() => setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up'))}
+                className={`${BOX} justify-center uppercase ${
+                  spreadMode === 'face_to_face'
+                    ? 'border-textColor bg-textColor text-bgColor hover:opacity-80'
+                    : ''
+                }`}
+              >
+                {spreadMode === 'face_up' ? 'up' : 'to face'}
+              </button>
             </div>
-          </>
-        )}
-        {topWarnings.length > 0 && (
-          <div className='ml-auto self-start'>
-            <HeaderWarnings items={topWarnings} />
+            <label
+              data-schematic='stack'
+              className={`${FIELD} space-y-0.5`}
+              title='stack height limit · empty = not set'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                max stack cm
+              </Text>
+              <NumBox
+                name='nest-stack-limit'
+                decimal
+                value={stackLimitCm}
+                commitOnBlur
+                onClear={() => setStackEdit(null)}
+                onCommit={(n) => setStackEdit(n > 0 ? n : null)}
+              />
+            </label>
+            <div
+              data-schematic='thickness'
+              className={`${FIELD} space-y-0.5`}
+              title='fabric thickness, from the article'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                thickness mm
+              </Text>
+              <div className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor`}>
+                {thicknessMm == null ? '—' : thicknessMm}
+              </div>
+            </div>
+            <div
+              data-schematic='within'
+              className={`${FIELD} space-y-0.5`}
+              title='keep within the table: the engine stops at the table end'
+            >
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                within table
+              </Text>
+              <button
+                type='button'
+                name='nest-keep-on-table'
+                aria-pressed={keepOnTable}
+                disabled={busy || usableCm == null}
+                onClick={() => guardManual(() => setKeepOnTable(!keepOnTable))}
+                className={`${BOX} justify-center uppercase ${
+                  keepOnTable ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
+                }`}
+              >
+                {keepOnTable ? 'on' : 'off'}
+              </button>
+            </div>
+            {workshopDirty && canWriteWorkshop && (
+              <Button
+                type='button'
+                variant='underline'
+                className='h-6'
+                disabled={savingWorkshop}
+                onClick={() => void saveForWorkshop()}
+              >
+                {savingWorkshop ? 'saving…' : 'save for the workshop'}
+              </Button>
+            )}
           </div>
+        )}
+
+        {/* Цифры настила: одна строка, единицы серым, цифры моноширинные. */}
+        {(viewData ? tableEndCm != null : tableMode) && (
+          <p className='mb-2.5 text-textBaseSize tabular-nums'>
+            {fitting && (
+              <span className='text-labelColor'>
+                fitting to the table… attempt {fitting.attempt} ·{' '}
+              </span>
+            )}
+            <span className='text-labelColor'>on table </span>
+            {figure(tableEndCm, 1)}
+            <span className='text-labelColor'> cm · plies </span>
+            {viewData ? '—' : plies}
+            <span className='text-labelColor'> · stack </span>
+            {figure(spread.stackCm, 1)}
+            <span className='text-labelColor'> cm / max </span>
+            {figure(spread.maxPlies)}
+            <span className='text-labelColor'> plies · garments </span>
+            {figure(spread.garments)}
+            <span className='text-labelColor'> · fabric </span>
+            {figure(spread.fabricCm == null ? null : spread.fabricCm / 100, 2)}
+            <span className='text-labelColor'> m</span>
+          </p>
         )}
       </div>
-
-      {/* РЯД СТОЛА: настил слоями на раскроечном столе. Те же коробки 72×24, что и ряд выше. */}
-      {!viewData && (
-        <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-          <label className={`${FIELD} space-y-0.5`} title='cutting table length · empty = not set'>
-            <Text
-              size='micro'
-              variant={tableCm == null ? undefined : 'label'}
-              component='span'
-              className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
-            >
-              table cm
-            </Text>
-            <NumBox
-              name='nest-table'
-              decimal
-              value={tableCm}
-              commitOnBlur
-              disabled={busy}
-              onClear={() => setTableEdit(null)}
-              onCommit={(n) => setTableEdit(n > 0 ? n : null)}
-            />
-          </label>
-          <label
-            className={`${FIELD} space-y-0.5`}
-            title='spread end loss on each end of the table'
-          >
-            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              end loss cm
-            </Text>
-            <NumBox
-              name='nest-end-loss'
-              decimal
-              value={endLossCm}
-              emptyAs={0}
-              commitOnBlur
-              disabled={busy}
-              onCommit={(n) => setEndLossCm(Math.max(0, n))}
-            />
-          </label>
-          <label className={`${FIELD} space-y-0.5`}>
-            <Text
-              size='micro'
-              variant={spread.overStack || spread.oddFaceToFace ? undefined : 'label'}
-              component='span'
-              className={
-                spread.overStack || spread.oddFaceToFace ? `${BOX_LABEL} text-error` : BOX_LABEL
-              }
-            >
-              plies
-            </Text>
-            <NumBox
-              name='nest-plies'
-              value={plies}
-              emptyAs={1}
-              onCommit={(n) => setPlies(Math.max(1, Math.round(n)))}
-            />
-          </label>
-          <div className={`${FIELD} space-y-0.5`} title='spread mode: face up or face to face'>
-            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              face
-            </Text>
-            <button
-              type='button'
-              name='nest-spread-mode'
-              aria-pressed={spreadMode === 'face_to_face'}
-              onClick={() => setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up'))}
-              className={`${BOX} justify-center uppercase ${
-                spreadMode === 'face_to_face'
-                  ? 'border-textColor bg-textColor text-bgColor hover:opacity-80'
-                  : ''
-              }`}
-            >
-              {spreadMode === 'face_up' ? 'up' : 'to face'}
-            </button>
-          </div>
-          <label className={`${FIELD} space-y-0.5`} title='stack height limit · empty = not set'>
-            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              max stack cm
-            </Text>
-            <NumBox
-              name='nest-stack-limit'
-              decimal
-              value={stackLimitCm}
-              commitOnBlur
-              onClear={() => setStackEdit(null)}
-              onCommit={(n) => setStackEdit(n > 0 ? n : null)}
-            />
-          </label>
-          <div className={`${FIELD} space-y-0.5`} title='fabric thickness, from the article'>
-            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              thickness mm
-            </Text>
-            <div className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor`}>
-              {thicknessMm == null ? '—' : thicknessMm}
-            </div>
-          </div>
-          <div
-            className={`${FIELD} space-y-0.5`}
-            title='keep within the table: the engine stops at the table end'
-          >
-            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              within table
-            </Text>
-            <button
-              type='button'
-              name='nest-keep-on-table'
-              aria-pressed={keepOnTable}
-              disabled={busy || usableCm == null}
-              onClick={() => guardManual(() => setKeepOnTable(!keepOnTable))}
-              className={`${BOX} justify-center uppercase ${
-                keepOnTable ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
-              }`}
-            >
-              {keepOnTable ? 'on' : 'off'}
-            </button>
-          </div>
-          {workshopDirty && canWriteWorkshop && (
-            <Button
-              type='button'
-              variant='underline'
-              className='h-6'
-              disabled={savingWorkshop}
-              onClick={() => void saveForWorkshop()}
-            >
-              {savingWorkshop ? 'saving…' : 'save for the workshop'}
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Цифры настила: одна строка, единицы серым, цифры моноширинные. */}
-      {(!viewData || tableEndCm != null) && (
-        <p className='mb-2.5 text-textBaseSize tabular-nums'>
-          {fitting && (
-            <span className='text-labelColor'>
-              fitting to the table… attempt {fitting.attempt} ·{' '}
-            </span>
-          )}
-          <span className='text-labelColor'>on table </span>
-          {figure(tableEndCm, 1)}
-          <span className='text-labelColor'> cm · plies </span>
-          {viewData ? '—' : plies}
-          <span className='text-labelColor'> · stack </span>
-          {figure(spread.stackCm, 1)}
-          <span className='text-labelColor'> cm / max </span>
-          {figure(spread.maxPlies)}
-          <span className='text-labelColor'> plies · garments </span>
-          {figure(spread.garments)}
-          <span className='text-labelColor'> · fabric </span>
-          {figure(spread.fabricCm == null ? null : spread.fabricCm / 100, 2)}
-          <span className='text-labelColor'> m</span>
-        </p>
-      )}
 
       {/* Холст на всю ширину модалки. Готовая/сохранённая раскладка идёт через интерактивный
           редактор; потоковое превью GA остаётся дешёвым строковым SVG. */}
@@ -3357,6 +3603,32 @@ export function NestingModal({
               focus={focusReq}
               onChange={(next) => setManual(next)}
               corner={downloadButton}
+            />
+          ) : !viewData && !running && !fitting ? (
+            // ДО ЗАПУСКА — живая схема: как сложится настил, а при наведении на поле — что оно меняет.
+            <MarkerSchematic
+              className='h-[40vh] min-h-[320px]'
+              view={schematicView}
+              mode={layMode}
+              widthCm={widthCm}
+              gapCm={gapCm}
+              marginCm={marginCm}
+              allowanceMm={allowanceMm}
+              crossGrain={crossGrain}
+              flipAllowed={allowsFlip(effectiveDirection)}
+              estLengthCm={estLengthCm}
+              blocks={schematicBlocks}
+              pieces={schematicPieces}
+              tableCm={tableCm}
+              endLossCm={endLossCm}
+              usableCm={usableCm}
+              keepOnTable={keepOnTable}
+              plies={plies}
+              spreadMode={spreadMode}
+              stackLimitCm={stackLimitCm}
+              thicknessMm={thicknessMm}
+              stackCm={spread.stackCm}
+              maxPlies={spread.maxPlies}
             />
           ) : (
             <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
