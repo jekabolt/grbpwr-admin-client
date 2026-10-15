@@ -36,9 +36,12 @@ export function outlineAsked(api: ImportSessionApi, current: AllowanceDecision):
 export function OutlineQuestion({
   api,
   current,
+  answersOnly = false,
 }: {
   api: ImportSessionApi;
   current: AllowanceDecision;
+  /** GUIDED: the step's question card says the question — render the answers (and why) only. */
+  answersOnly?: boolean;
 }) {
   const open = useOpenQuestions(api).allowance;
   const [mm, setMm] = useState(
@@ -65,6 +68,54 @@ export function OutlineQuestion({
   ]
     .filter(Boolean)
     .join(' · ');
+  const answers = (
+    <span className='flex flex-wrap items-center gap-1.5'>
+      <Button
+        {...ask('details-outline')}
+        data-ask-hint='pick cut or seam line'
+        variant='secondary'
+        size='xs'
+        disabled={busy}
+        className={prefill === 'cut' ? 'border-warning' : undefined}
+        title='the allowance is already in the drawing: the outline is cut as drawn'
+        onClick={() => void api.answerOutline('cut', mm)}
+      >
+        cut line — as drawn{prefill === 'cut' ? ' (file says so)' : ''}
+      </Button>
+      <Button
+        {...ask('details-outline')}
+        data-ask-hint='pick cut or seam line'
+        variant='secondary'
+        size='xs'
+        disabled={busy}
+        title='the outline is the sewing line: the cut line is built this far outside it'
+        onClick={() => void api.answerOutline('seam', mm)}
+      >
+        seam line — add {mm} mm
+      </Button>
+      <NumberField
+        value={mm}
+        min={0}
+        aria-label='allowance to add to a seam line, mm'
+        className='w-12'
+        onCommit={(v) => v != null && v >= 0 && setMm(v)}
+      />
+      <Text size='micro' variant='label' component='span'>
+        mm
+      </Text>
+    </span>
+  );
+  if (answersOnly)
+    return (
+      <span className='flex flex-col items-start gap-1' title={why}>
+        {(clash || word?.kind === 'stop') && (
+          <Text size='micro' variant='label' component='p'>
+            {clash ?? (word?.kind === 'stop' ? word.reason : '')}
+          </Text>
+        )}
+        {answers}
+      </span>
+    );
   return (
     <CalloutBox
       tone='warning'
@@ -77,38 +128,7 @@ export function OutlineQuestion({
         {clash && ` ${clash}`}
         {word?.kind === 'stop' && ` ${word.reason}`}
       </Text>
-      <span className='flex flex-wrap items-center gap-1.5'>
-        <Button
-          {...ask('details-outline')}
-          variant={prefill === 'cut' ? 'main' : 'secondary'}
-          size='xs'
-          disabled={busy}
-          title='the allowance is already in the drawing: the outline is cut as drawn'
-          onClick={() => void api.answerOutline('cut', mm)}
-        >
-          cut line · as drawn
-        </Button>
-        <Button
-          {...ask('details-outline')}
-          variant='secondary'
-          size='xs'
-          disabled={busy}
-          title='the outline is the sewing line: the cut line is built this far outside it'
-          onClick={() => void api.answerOutline('seam', mm)}
-        >
-          seam line · add {mm} mm
-        </Button>
-        <NumberField
-          value={mm}
-          min={0}
-          aria-label='allowance to add to a seam line, mm'
-          className='w-12'
-          onCommit={(v) => v != null && v >= 0 && setMm(v)}
-        />
-        <Text size='micro' variant='label' component='span'>
-          mm
-        </Text>
-      </span>
+      {answers}
     </CalloutBox>
   );
 }
