@@ -704,48 +704,33 @@ export function rescuedIgnored(
     const c = set.chains[id];
     if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
   }
-  const onOneSizeLine = (c: { pts: PtMm[]; lengthMm: number }) => {
-    const hits = new Map<ChainId, number>();
-    let n = 0;
-    const L = c.lengthMm;
-    const step = Math.max(1, L / 200);
-    const cum: number[] = [0];
-    for (let i = 1; i < c.pts.length; i++) cum.push(cum[i - 1] + dist(c.pts[i - 1], c.pts[i]));
-    let seg = 0;
-    for (let sAt = step / 2; sAt < L; sAt += step) {
-      while (seg + 2 < c.pts.length && cum[seg + 1] < sAt) seg++;
-      const a = c.pts[seg];
-      const b = c.pts[seg + 1];
-      const l = cum[seg + 1] - cum[seg] || 1;
-      const u = (sAt - cum[seg]) / l;
-      const p = { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
-      n++;
-      const seen = new Set<ChainId>();
+  // ALL of it — every vertex and every 0.5 mm between, ends included — within 0.3 mm of ONE ranked
+  // line (Codex: a line that leaves the size's line anywhere, even for a short excursion, draws
+  // something of its own there and stays rescuable)
+  const onOneSizeLine = (c: { pts: PtMm[] }) => {
+    let live: Set<ChainId> | null = null;
+    const probe = (p: PtMm) => {
+      const here = new Set<ChainId>();
       ranked.near(p, 0.3, (rid, i) => {
-        if (seen.has(rid)) return;
+        if (here.has(rid) || (live && !live.has(rid))) return;
         const q = set.chains[rid].pts;
         const q1 = i + 1 < q.length ? q[i + 1] : q[0];
-        if (segNearest(p, q[i], q1).d > 0.3) return;
-        seen.add(rid);
-        hits.set(rid, (hits.get(rid) ?? 0) + 1);
+        if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
       });
-    }
-    // ALL of it, ends included, on that one line (Codex: a line that leaves the size's line for
-    // its last stretch closes something of its own there — it stays rescuable)
-    const onLine = (rid: ChainId, p: PtMm) => {
-      const q = set.chains[rid].pts;
-      for (let i = 0; i + 1 < q.length; i++)
-        if (segNearest(p, q[i], q[i + 1]).d <= 0.3) return true;
-      return (
-        set.chains[rid].closed && q.length > 2 && segNearest(p, q[q.length - 1], q[0]).d <= 0.3
-      );
+      live = here;
+      return here.size > 0;
     };
-    return (
-      n > 0 &&
-      [...hits].some(
-        ([rid, v]) => v === n && onLine(rid, c.pts[0]) && onLine(rid, c.pts[c.pts.length - 1]),
-      )
-    );
+    for (let i = 0; i < c.pts.length; i++) {
+      if (!probe(c.pts[i])) return false;
+      if (i + 1 >= c.pts.length) break;
+      const a = c.pts[i];
+      const b = c.pts[i + 1];
+      const k = Math.ceil(dist(a, b) / 0.5);
+      for (let j = 1; j < k; j++)
+        if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k }))
+          return false;
+    }
+    return true;
   };
   const cand: ChainId[] = [];
   for (const id of ignore) {
