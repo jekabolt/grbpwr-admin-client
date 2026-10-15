@@ -1429,6 +1429,7 @@ export function PatternsField({
       <Suspense fallback={null}>
         <ImportWizard
           initialFiles={importing.files}
+          initialScopeKey={importing.scopeKey}
           card={buildCardContext({
             techCardId,
             orderedSizeIds: orderSizes(sizeIds),

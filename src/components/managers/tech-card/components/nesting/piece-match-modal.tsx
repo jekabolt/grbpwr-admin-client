@@ -827,7 +827,9 @@ export function PieceMatchModal({
   // garment calls it, and the second one is the one that has to reach the factory.
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
   // Buffered editor fields. Existing pieces by lineKey (lower-cased) — a piece is one thing however
-  // many blocks point at it; new pieces by the ci of the block that creates them (no lineKey yet).
+  // many blocks point at it; new pieces by their RESOLVED name (lower-cased, see newTargetOf), so
+  // every block that will coalesce into one new piece shares one buffer — keyed by the creating
+  // block, FP_R's edits were dropped whenever FP_L (same default name) was processed first.
   const [pieceEdits, setPieceEdits] = useState<Record<string, PieceFields>>({});
   const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
   // Which sheet is on screen. Several files reach one fabric slot when the same size was
@@ -1284,6 +1286,28 @@ export function PieceMatchModal({
   };
   const newNameOf = (row: BlockRow): string =>
     (draftNames[row.block.toLowerCase()] ?? '').trim() || defaultPieceName(row);
+  // The piece a NEW block will actually land on — resolved exactly as apply() resolves it: a name
+  // that a live piece (buffered renames applied, leaving pieces excluded) already carries binds to
+  // that piece; otherwise every block under this name coalesces into ONE new piece. The editor
+  // buffers by this target, so blocks resolving to the same piece read and write the same values.
+  const liveKeyByName = (() => {
+    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+    const m = new Map<string, string>();
+    const live = ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
+      (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
+    );
+    for (const p of withEditedNames(live)) {
+      const n = p.name?.trim().toLowerCase();
+      if (n && p.lineKey?.trim()) m.set(n, p.lineKey.trim().toLowerCase());
+    }
+    return m;
+  })();
+  const newEditKey = (name: string) => name.toLowerCase();
+  const newTargetOf = (row: BlockRow): { kind: 'piece' | 'new'; key: string } => {
+    const n = newEditKey(newNameOf(row));
+    const k = liveKeyByName.get(n);
+    return k ? { kind: 'piece', key: k } : { kind: 'new', key: n };
+  };
 
   const markOf = (p: PieceDTO): PieceMark => {
     const ci = ciOf(p);
@@ -1507,8 +1531,10 @@ export function PieceMatchModal({
           } else {
             pieceLineKey = ulid();
             keyByName.set(name.toLowerCase(), pieceLineKey);
-            // Fields typed in the editor for this new piece (by the block that creates it).
-            const ed = newEdits[r.block.toLowerCase()] ?? {};
+            // Fields typed in the editor for this new piece — one buffer per resolved name, shared
+            // by every block that coalesces into it (newTargetOf). A name that binds to an existing
+            // piece takes the branch above; its edits sit in pieceEdits and land in the loop below.
+            const ed = newEdits[newEditKey(name)] ?? {};
             created.push({
               lineKey: pieceLineKey,
               name,
@@ -1732,14 +1758,52 @@ export function PieceMatchModal({
         });
       title = vals.name || focus.block;
     } else if (st.kind === 'new') {
-      vals = { ...newEdits[ci], name: draftNames[ci] ?? defaultPieceName(st.row) };
+      const row = st.row;
+      const shownName = draftNames[ci] ?? defaultPieceName(row);
+      const tgt = newTargetOf(row);
+      if (tgt.kind === 'piece') {
+        // The typed name is an existing piece's: the block binds to it on save, so its fields are
+        // that piece's — read the form, overlay the shared piece buffer, write the shared buffer.
+        const p = (pieces ?? []).find((x) => (x.lineKey ?? '').trim().toLowerCase() === tgt.key);
+        vals = {
+          fused: p?.fused,
+          fusingMode: p?.fusingMode,
+          fusingWidthMm: p?.fusingWidthMm,
+          ungraded: p?.ungraded,
+          grainline: p?.grainline,
+          note: p?.note,
+          ...pieceEdits[tgt.key],
+          name: shownName,
+        };
+      } else {
+        vals = { ...newEdits[tgt.key], name: shownName };
+      }
       patch = (d) => {
         const { name, ...rest } = d;
-        if (name !== undefined) setDraftNames((prev) => ({ ...prev, [ci]: name }));
-        if (Object.keys(rest).length > 0)
-          setNewEdits((prev) => ({ ...prev, [ci]: { ...(prev[ci] ?? {}), ...rest } }));
+        let target = tgt;
+        if (name !== undefined) {
+          setDraftNames((prev) => ({ ...prev, [ci]: name }));
+          const nk = newEditKey(name.trim() || defaultPieceName(row));
+          const pk = liveKeyByName.get(nk);
+          target = pk ? { kind: 'piece', key: pk } : { kind: 'new', key: nk };
+          // Renaming carries this piece's buffered fields to the new name unless that name already
+          // has its own (another block's piece). The old buffer stays: other blocks may still
+          // resolve to it.
+          if (tgt.kind === 'new' && target.kind === 'new' && target.key !== tgt.key) {
+            const from = tgt.key;
+            const to = target.key;
+            setNewEdits((prev) =>
+              prev[from] && !prev[to] ? { ...prev, [to]: { ...prev[from] } } : prev,
+            );
+          }
+        }
+        if (Object.keys(rest).length === 0) return;
+        const t = target;
+        if (t.kind === 'piece')
+          setPieceEdits((prev) => ({ ...prev, [t.key]: { ...(prev[t.key] ?? {}), ...rest } }));
+        else setNewEdits((prev) => ({ ...prev, [t.key]: { ...(prev[t.key] ?? {}), ...rest } }));
       };
-      title = newNameOf(st.row);
+      title = newNameOf(row);
     }
     // Form anchors only for a piece that exists in the form (error deep links land here).
     const anchor = (f: string) => (index >= 0 ? { 'data-field': `pieces.${index}.${f}` } : {});

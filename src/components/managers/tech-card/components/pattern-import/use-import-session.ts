@@ -79,7 +79,7 @@ import type {
 } from './client';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
-import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
+import { fusedSeeds, pinToScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
   answerCtxOf,
   maskRevOf,
@@ -324,6 +324,11 @@ export function useImportSession(deps: {
    * probes). Absent = no call: the pages are judged by their geometry alone, as before.
    */
   pageRoles?: PageRoleDeps;
+  /**
+   * Files dropped on one card slot: every piece's fabric defaults to this scope (pinToScope), not
+   * to the sheet's inferred main fabric. The operator can still change it on the fabrics step.
+   */
+  pinScopeKey?: string;
 }) {
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
@@ -1369,7 +1374,12 @@ export function useImportSession(deps: {
           // The AI's fabric calls ride along; the worker uses them only where the sheet is silent,
           // only for names auto-accepted at T and never for a name the operator typed (C7).
           const aiHints = aiFabricHintsOf(s.names, iRef.current.editedNames);
-          const out = await run('fabrics', { bom: rc().scopes, aiHints });
+          const proposed = await run('fabrics', { bom: rc().scopes, aiHints });
+          const pinSeeds = (s.semantics?.pieces ?? []).map((p) => p.seed);
+          const out =
+            deps.pinScopeKey && pinSeeds.length
+              ? pinToScope(proposed, deps.pinScopeKey, pinSeeds, rc().scopes)
+              : proposed;
           // An assignment the operator already edited survives a round trip through `back`.
           const a = iRef.current.assignment ?? out;
           patch({ fabrics: a, step: 'fabrics' });

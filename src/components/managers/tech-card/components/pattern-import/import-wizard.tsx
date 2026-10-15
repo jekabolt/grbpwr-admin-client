@@ -80,6 +80,8 @@ type WizardProps = {
   onReviewPieces?: (scopeKey: string) => void;
   /** Files dropped on a pattern slot: the run starts reading them at once. */
   initialFiles?: File[];
+  /** The slot the files were dropped on: every piece defaults to this fabric scope. */
+  initialScopeKey?: string;
 };
 
 /**
@@ -143,6 +145,7 @@ function WizardBody({
   onRetryFollowUp,
   onReviewPieces,
   initialFiles,
+  initialScopeKey,
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
@@ -188,7 +191,15 @@ function WizardBody({
         : undefined,
     [client],
   );
-  const api = useImportSession({ client, card, namer, buildDraft, applyDraft, pageRoles });
+  const api = useImportSession({
+    client,
+    card,
+    namer,
+    buildDraft,
+    applyDraft,
+    pageRoles,
+    pinScopeKey: initialScopeKey,
+  });
   latest.current = api.session;
   const { session, blocker } = api;
   // files dropped on a pattern slot: read them once, as if picked on the files step

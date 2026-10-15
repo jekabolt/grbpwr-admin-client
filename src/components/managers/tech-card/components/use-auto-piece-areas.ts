@@ -27,7 +27,7 @@ import {
   useTechCard,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
 import { aliasInScope } from './bom-purpose';
@@ -69,8 +69,17 @@ type PieceRow = {
 type Job = {
   scopeKey: string;
   sig: string;
-  run: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * `stillCurrent` is asked right before the write: a run frozen at plan time must not publish
+   * once the card moved on (dirty form, save in flight, RELEASED, disabled, unmounted, or a new
+   * signature for this scope). `dropped` = nothing written, nothing to report.
+   */
+  run: (
+    stillCurrent: () => boolean,
+  ) => Promise<{ ok: true } | { ok: false; reason: string } | { ok: 'dropped' }>;
 };
+
+const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 const PREFIX = 'piece areas: ';
 
@@ -130,6 +139,8 @@ export function useAutoPieceAreas(args: {
   // ALL sheets of a scope (PDF too): the server fingerprints the scope by its whole set.
   const sheetsByScope = useMemo(() => dxfByScope(patterns, scopes, (r) => r), [patterns, scopes]);
 
+  // A RELEASED card is frozen server-side: nothing is measured or written for it.
+  const released = cardRead?.techCard?.approvalState === RELEASED;
   const savedSizeIds = cardRead?.techCard?.sizeIds ?? undefined;
   const savedPieceKeys = useMemo(() => {
     const s = new Set<string>();
@@ -146,7 +157,8 @@ export function useAutoPieceAreas(args: {
     const jobs: Job[] = [];
     const id = techCardId ?? 0;
     // Global waits: nothing the server could accept right now.
-    if (!enabled || id <= 0 || !cardRead || isSubmitting || sourceDirty) return { refusals, jobs };
+    if (!enabled || id <= 0 || !cardRead || released || isSubmitting || sourceDirty)
+      return { refusals, jobs };
     const saved = new Set(savedSizeIds ?? []);
     const sameRange =
       savedSizeIds != null &&
@@ -234,7 +246,8 @@ export function useAutoPieceAreas(args: {
       jobs.push({
         scopeKey: scope.key,
         sig,
-        run: async () => {
+        run: async (stillCurrent) => {
+          if (!stillCurrent()) return { ok: 'dropped' };
           const outcome = dxfNormAreas({
             index: idx,
             pieces,
@@ -249,6 +262,8 @@ export function useAutoPieceAreas(args: {
             return { ok: false, reason: 'set incomplete in some sizes' };
           if (pieceAreaSizeRangeRefusal(sizeIds, savedSizeIds, sizeName, outcome.areas.pieceRows))
             return { ok: false, reason: 'size range not saved' };
+          // Last gate before the write: the plan this run was frozen from must still be the live one.
+          if (!stillCurrent()) return { ok: 'dropped' };
           const res = await publishPieceAreas({
             techCardId: id,
             scopeKey: serverKey,
@@ -272,6 +287,7 @@ export function useAutoPieceAreas(args: {
     enabled,
     techCardId,
     cardRead,
+    released,
     isSubmitting,
     sourceDirty,
     savedSizeIds,
@@ -306,6 +322,19 @@ export function useAutoPieceAreas(args: {
     };
   }, []);
 
+  // The LIVE gates and per-scope signatures, refreshed at every commit. A running job compares
+  // its frozen signature against these before it writes (see Job.run).
+  const live = useRef<{ gatesOk: boolean; sigByScope: Map<string, string> }>({
+    gatesOk: false,
+    sigByScope: new Map(),
+  });
+  useLayoutEffect(() => {
+    live.current = {
+      gatesOk: enabled && !isSubmitting && !sourceDirty && !released && !!cardRead,
+      sigByScope: new Map(plan.jobs.map((j) => [j.scopeKey, j.sig])),
+    };
+  }, [enabled, isSubmitting, sourceDirty, released, cardRead, plan]);
+
   useEffect(() => {
     if (busy.current) return;
     const job = plan.jobs.find((j) => !attemptedSigs.current.has(j.sig));
@@ -313,10 +342,22 @@ export function useAutoPieceAreas(args: {
     attemptedSigs.current.add(job.sig);
     busy.current = true;
     const id = techCardId ?? 0;
+    const stillCurrent = () =>
+      alive.current &&
+      live.current.gatesOk &&
+      live.current.sigByScope.get(job.scopeKey) === job.sig;
     void (async () => {
       let reason = '';
       try {
-        const r = await job.run();
+        const r = await job.run(stillCurrent);
+        if (r.ok === 'dropped') {
+          // Stale before the write: nothing published, nothing recorded. Forget the signature so it
+          // may run again if it becomes current once more, and let the next plan take over.
+          busy.current = false;
+          attemptedSigs.current.delete(job.sig);
+          if (alive.current) setTick((t) => t + 1);
+          return;
+        }
         if (!r.ok) reason = `${PREFIX}${r.reason}`;
       } catch {
         reason = `${PREFIX}measurement failed`;
