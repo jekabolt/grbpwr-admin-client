@@ -105,7 +105,9 @@ export function FilesStep({
           </Text>
         }
       >
-        <div className='flex h-full flex-col gap-2'>
+        {/* the files' zone (THE ASK CONTRACT, ui-bits): the drop target is its own, the kinds
+            block (files-clean KindTable) too */}
+        <div data-ask-zone='' className='flex h-full flex-col gap-2'>
           <input
             ref={pick}
             type='file'
@@ -122,7 +124,8 @@ export function FilesStep({
           <div
             role='button'
             tabIndex={0}
-            {...ask('files-drop', staged.length === 0)}
+            data-ask-zone=''
+            {...ask('files-drop', staged.length === 0, 'drop the files here, or click to pick')}
             onClick={() => pick.current?.click()}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -197,6 +200,11 @@ export function FilesStep({
                           className='text-labelColor hover:text-textColor'
                           onClick={() => setStaged((p) => p.filter((x) => x !== f))}
                           aria-label={`remove ${f.name}`}
+                          {...ask(
+                            'files-eps',
+                            ext === 'eps',
+                            'remove it, export the pattern as pdf',
+                          )}
                         >
                           ✕
                         </Button>

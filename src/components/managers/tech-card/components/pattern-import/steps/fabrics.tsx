@@ -127,6 +127,23 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   const ORDER = { ai: 0, blocked: 1, defaulted: 2 } as const;
   const asking = seeds.filter((sd) => why(sd)).sort((x, y) => ORDER[why(x)!] - ORDER[why(y)!]);
   const settled = seeds.filter((sd) => !why(sd));
+  // the coach's how (THE ASK CONTRACT, ui-bits) for a row that asks, and the box that answers it
+  // (a duplicate is answered in its own fabric's column, everything else in the first)
+  const problemOf = (seed: SeedId) => problems.find((p) => p.seeds.includes(seed));
+  const askScopeOf = (seed: SeedId) => {
+    const p = problemOf(seed);
+    return p?.kind === 'duplicate' ? p.scopeKey : card.scopes[0]?.scopeKey;
+  };
+  const hintOf = (seed: SeedId, w: 'ai' | 'blocked' | 'defaulted' | null): string | undefined => {
+    if (w === 'ai') return 'confirm the AI fabric, or change ticks';
+    if (w === 'defaulted') return 'tick another fabric, or go on';
+    if (w !== 'blocked') return undefined;
+    const p = problemOf(seed);
+    if (p?.kind === 'duplicate') return 'untick one of the two, or rename';
+    if (p?.kind === 'refused') return 'tick a fabric that is in the BOM';
+    if (p && fusedSet.has(seed)) return 'tick the fabric it is also cut from';
+    return 'tick the fabric for each piece';
+  };
 
   // the sheet named a fabric the BOM does not have: true, but not the question — the header list
   const warnings = (a.refused ?? []).map(
@@ -179,7 +196,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 {nameOf(seed)}
                 {aiPending.has(seed) && (
                   <Chip
-                    {...ask('fabrics-ai-confirm')}
+                    {...ask('fabrics-ai-confirm', hintOf(seed, w) ?? true)}
                     tone='attention'
                     className='ml-1'
                     onClick={() => set(answered(seed))}
@@ -192,12 +209,13 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                   </Chip>
                 )}
               </td>
-              {card.scopes.map((s, k) => (
+              {card.scopes.map((s) => (
                 <td key={s.scopeKey} data-align='left'>
                   <CheckboxCommon
                     {...ask(
                       w === 'blocked' ? 'fabrics-assign' : 'fabrics-defaulted',
-                      firstBox && k === 0,
+                      firstBox && s.scopeKey === askScopeOf(seed),
+                      hintOf(seed, w),
                     )}
                     name={`fab-${s.scopeKey}-${seed}`}
                     aria-label={`${nameOf(seed)} cut from ${s.label}`}
@@ -233,7 +251,8 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
           aside={<HeaderWarnings items={warnings} />}
         >
           {card.scopes.length > 0 && asking.length > 0 && (
-            <div>
+            // the rows that ask and the planner's reasons: the coach's zone
+            <div data-ask-zone=''>
               {/* every planner refusal stays readable (the footer says only the first) */}
               {problems.map((p, i) => (
                 <Text key={i} size='micro' component='p' className='text-error'>

@@ -28,6 +28,9 @@ import {
 } from '../ui-bits';
 import { SheetCleanRows } from './files-clean';
 
+/** The coach's how (THE ASK CONTRACT, ui-bits) when the grid by hand is the answer. */
+const GRID_HINT = 'set rows, columns and step, then apply';
+
 const keyOf = (p: { file: string; page: number }) => `${p.file}:${p.page}`;
 
 /** "p3–17" (pages are 0-based; several files: "2/p3–17 …"). */
@@ -268,7 +271,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               </Text>
             )}
             {overLimit && (
-              <div className='flex flex-wrap items-center gap-2'>
+              <div data-ask-zone='' className='flex flex-wrap items-center gap-2'>
                 <Text
                   size='micro'
                   component='span'
@@ -286,7 +289,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   pressed={inputs.residualsAccepted}
                   onClick={() => patchInputs({ residualsAccepted: !inputs.residualsAccepted })}
                   title='I looked at the blue seams — the drawing runs on across them'
-                  {...ask('sheet-accept', acceptAsks)}
+                  {...ask('sheet-accept', acceptAsks, 'check the blue seams, then accept')}
                 >
                   accept {fmtMm(worst)}
                 </Chip>
@@ -296,105 +299,109 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
             {out.clean && <SheetCleanRows api={api} clean={out.clean} />}
           </div>
 
-          <Fold label='grid by hand' ask={gridAsks ? 'sheet-grid' : undefined} {...gridFold}>
-            <div className='grid grid-cols-2 gap-2'>
-              {sheets.length > 1 && (
-                <Field label='grid of sheet' className='col-span-2'>
-                  <NativeSelect
-                    value={String(gridSheet)}
-                    onChange={(v) => setGridSheet(Number(v))}
-                    options={sheets.map((n) => ({
-                      value: String(n),
-                      label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
-                    }))}
+          {/* the hand grid: the coach's zone when pages are missing or the placement is refused */}
+          <div data-ask-zone='' data-ask-hint={GRID_HINT}>
+            <Fold label='grid by hand' ask={gridAsks ? 'sheet-grid' : undefined} {...gridFold}>
+              <div className='grid grid-cols-2 gap-2'>
+                {sheets.length > 1 && (
+                  <Field label='grid of sheet' className='col-span-2'>
+                    <NativeSelect
+                      value={String(gridSheet)}
+                      onChange={(v) => setGridSheet(Number(v))}
+                      options={sheets.map((n) => ({
+                        value: String(n),
+                        label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
+                      }))}
+                    />
+                  </Field>
+                )}
+                <Field label='rows'>
+                  <NumberField
+                    {...ask('sheet-grid', gridAsks, GRID_HINT)}
+                    value={grid.rows}
+                    min={1}
+                    step='1'
+                    onCommit={(v) =>
+                      setGrid((g) => ({ ...g, rows: Math.max(1, Math.round(v ?? 1)) }))
+                    }
                   />
                 </Field>
-              )}
-              <Field label='rows'>
-                <NumberField
-                  value={grid.rows}
-                  min={1}
-                  step='1'
-                  onCommit={(v) =>
-                    setGrid((g) => ({ ...g, rows: Math.max(1, Math.round(v ?? 1)) }))
-                  }
-                />
-              </Field>
-              <Field label='columns'>
-                <NumberField
-                  value={grid.cols}
-                  min={1}
-                  step='1'
-                  onCommit={(v) =>
-                    setGrid((g) => ({ ...g, cols: Math.max(1, Math.round(v ?? 1)) }))
-                  }
-                />
-              </Field>
-              <Field label='step across, mm'>
-                <NumberField
-                  value={grid.stepXMm}
-                  min={1}
-                  onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
-                />
-              </Field>
-              <Field label='step down, mm'>
-                <NumberField
-                  value={grid.stepYMm}
-                  min={1}
-                  onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
-                />
-              </Field>
-              <Field label='page order' className='col-span-2'>
-                <NativeSelect
-                  value={grid.order}
-                  onChange={(v) => setGrid((g) => ({ ...g, order: v as GridOverride['order'] }))}
-                  options={[
-                    { value: 'row-major', label: 'by rows (A1 A2 A3 … B1)' },
-                    { value: 'col-major', label: 'by columns (A1 B1 C1 … A2)' },
-                  ]}
-                />
-              </Field>
-            </div>
-            <div className='mt-2 flex flex-wrap gap-2'>
-              <Button
-                variant='secondary'
-                size='sm'
-                disabled={!!session.busy}
-                {...ask('sheet-grid', gridAsks)}
-                onClick={() =>
-                  void api.dispatch({
-                    type: 'sheet',
-                    sheet: gridSheet,
-                    override: {
-                      ...grid,
-                      // The hand grid starts at the first tile page of THAT sheet, in file order.
-                      originPage: (() => {
-                        const t = session.pages.find(
-                          (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
-                        );
-                        return {
-                          file: t?.file ?? first?.file ?? '0',
-                          page: t?.page ?? first?.page ?? 0,
-                        };
-                      })(),
-                    },
-                  })
-                }
-              >
-                apply {grid.rows}×{grid.cols} grid
-              </Button>
-              {inputs.gridOverride && (
+                <Field label='columns'>
+                  <NumberField
+                    value={grid.cols}
+                    min={1}
+                    step='1'
+                    onCommit={(v) =>
+                      setGrid((g) => ({ ...g, cols: Math.max(1, Math.round(v ?? 1)) }))
+                    }
+                  />
+                </Field>
+                <Field label='step across, mm'>
+                  <NumberField
+                    value={grid.stepXMm}
+                    min={1}
+                    onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
+                  />
+                </Field>
+                <Field label='step down, mm'>
+                  <NumberField
+                    value={grid.stepYMm}
+                    min={1}
+                    onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
+                  />
+                </Field>
+                <Field label='page order' className='col-span-2'>
+                  <NativeSelect
+                    value={grid.order}
+                    onChange={(v) => setGrid((g) => ({ ...g, order: v as GridOverride['order'] }))}
+                    options={[
+                      { value: 'row-major', label: 'by rows (A1 A2 A3 … B1)' },
+                      { value: 'col-major', label: 'by columns (A1 B1 C1 … A2)' },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <div className='mt-2 flex flex-wrap gap-2'>
                 <Button
-                  variant='underline'
-                  size='xs'
-                  className='text-labelColor hover:text-textColor'
-                  onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
+                  variant='secondary'
+                  size='sm'
+                  disabled={!!session.busy}
+                  {...ask('sheet-grid', gridAsks, 'apply the grid to place the pages')}
+                  onClick={() =>
+                    void api.dispatch({
+                      type: 'sheet',
+                      sheet: gridSheet,
+                      override: {
+                        ...grid,
+                        // The hand grid starts at the first tile page of THAT sheet, in file order.
+                        originPage: (() => {
+                          const t = session.pages.find(
+                            (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
+                          );
+                          return {
+                            file: t?.file ?? first?.file ?? '0',
+                            page: t?.page ?? first?.page ?? 0,
+                          };
+                        })(),
+                      },
+                    })
+                  }
                 >
-                  back to detected
+                  apply {grid.rows}×{grid.cols} grid
                 </Button>
-              )}
-            </div>
-          </Fold>
+                {inputs.gridOverride && (
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor hover:text-textColor'
+                    onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
+                  >
+                    back to detected
+                  </Button>
+                )}
+              </div>
+            </Fold>
+          </div>
 
           <DebugFold>
             {sheets.length > 1 && (

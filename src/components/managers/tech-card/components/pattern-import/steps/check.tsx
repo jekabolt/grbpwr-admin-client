@@ -215,7 +215,7 @@ export function CheckStep({
             <td data-align='left'>
               {failed && meta.fix && (
                 <Button
-                  {...ask('check-fix')}
+                  {...ask('check-fix', 'open the step that fixes it')}
                   variant='underline'
                   size='xs'
                   className='whitespace-nowrap text-labelColor hover:text-textColor'
@@ -245,25 +245,33 @@ export function CheckStep({
           aside={
             <>
               {scopes.length > 1 && (
-                <ChipRow>
-                  {scopes.map((s) => {
-                    const bad = blocking(session.gate[s.target.scopeKey]).length;
-                    const here = s.target.scopeKey === scope?.target.scopeKey;
-                    return (
-                      <Chip
-                        {...ask('check-scope', !!bad && !here)}
-                        key={s.target.scopeKey}
-                        quiet
-                        selected={here}
-                        tone={bad ? 'error' : 'default'}
-                        onClick={() => setKey(s.target.scopeKey)}
-                      >
-                        {bad ? '! ' : ''}
-                        {s.filename}
-                      </Chip>
-                    );
-                  })}
-                </ChipRow>
+                <span data-ask-zone=''>
+                  <ChipRow>
+                    {scopes.map((s) => {
+                      const bad = blocking(session.gate[s.target.scopeKey]).length;
+                      const here = s.target.scopeKey === scope?.target.scopeKey;
+                      return (
+                        <Chip
+                          // this file's own failing rows answer first; another file's chip only
+                          // when this one is clean
+                          {...ask(
+                            'check-scope',
+                            !!bad && !here && !failing.length,
+                            'open the file whose checks block',
+                          )}
+                          key={s.target.scopeKey}
+                          quiet
+                          selected={here}
+                          tone={bad ? 'error' : 'default'}
+                          onClick={() => setKey(s.target.scopeKey)}
+                        >
+                          {bad ? '! ' : ''}
+                          {s.filename}
+                        </Chip>
+                      );
+                    })}
+                  </ChipRow>
+                </span>
               )}
               <HeaderWarnings items={warnings} />
             </>
@@ -272,7 +280,8 @@ export function CheckStep({
           {scope && report && (
             <>
               {failing.length > 0 ? (
-                <>
+                // the blocking checks and their doors: the coach's zone
+                <div data-ask-zone=''>
                   <div className='mb-1 flex items-baseline gap-2'>
                     <Text size='micro' component='p' className='text-error'>
                       ! {plural(failing.length, 'check')}{' '}
@@ -284,6 +293,13 @@ export function CheckStep({
                       className='ml-auto whitespace-nowrap text-labelColor hover:text-textColor'
                       title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
                       onClick={api.downloadReport}
+                      // no step fixes any of them (round trip, probe square, …): the report is
+                      // the only door left
+                      {...ask(
+                        'check-report',
+                        failing.every((c) => !CHECK[c.id].fix),
+                        'no step fixes it — download the report',
+                      )}
                     >
                       download report
                     </Button>
@@ -291,7 +307,7 @@ export function CheckStep({
                   <DataTable>
                     <tbody>{failing.map((c, i) => checkRow(c, i, false))}</tbody>
                   </DataTable>
-                </>
+                </div>
               ) : (
                 <Pill tone='ok'>passes</Pill>
               )}

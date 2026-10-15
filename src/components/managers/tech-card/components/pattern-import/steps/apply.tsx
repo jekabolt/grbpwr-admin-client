@@ -25,7 +25,7 @@ import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
-import { DebugFold, Fold, Panel, fmtBytes } from '../ui-bits';
+import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';
 import { plural, useWizardPrimary } from '../stages';
 import { DroppedLabels, leftOut } from './not-in-file';
 import { AssumptionList, autopilotSummary } from '../autopilot/view';
@@ -38,6 +38,9 @@ const CUT_SYMMETRY_WORD: Record<string, string> = {
 
 /** The card save answered something other than "saved" / "nothing to save". */
 const saveFailed = (save?: string) => !!save && save !== 'ok' && save !== 'nothing';
+
+/** The coach's how (THE ASK CONTRACT, ui-bits) on a re-import. */
+const SHEET_MODE_HINT = 'replace the old sheet, or add another';
 
 const MATCHED_BY: Record<NonNullable<DraftScope['replaces']>['matchedBy'], string> = {
   sha256: 'same source file',
@@ -192,8 +195,10 @@ export function ApplyStep({
             const mode = modeOf(sc);
             const at = formatTechCardDate(r.convertedAt);
             return (
+              // replace / add for this fabric: the coach's zone (asked only on a re-import)
               <div
                 key={sc.target.scopeKey}
+                data-ask-zone=''
                 className='border-b border-hairline py-1.5 last:border-b-0'
               >
                 <Text
@@ -210,6 +215,7 @@ export function ApplyStep({
                     disabled={running || !!done?.ok}
                     title='the new file goes into that row: its name, fabric binding and storage slot stay, the server numbers the new file. the old file leaves the card.'
                     onClick={() => setSheetMode(sc.target.scopeKey, 'replace')}
+                    {...ask('apply-sheet-mode', !done, SHEET_MODE_HINT)}
                   >
                     replace
                   </Chip>
@@ -219,6 +225,7 @@ export function ApplyStep({
                     disabled={running || !!done?.ok}
                     title='the old sheet stays. the card reads two sheets of one fabric as revisions: it counts the larger of them, not the sum.'
                     onClick={() => setSheetMode(sc.target.scopeKey, 'add')}
+                    {...ask('apply-sheet-mode', !done, SHEET_MODE_HINT)}
                   >
                     add as another
                   </Chip>
@@ -460,30 +467,34 @@ export function ApplyStep({
           </div>
         )}
         {done && !done.ok && (
-          <CalloutBox tone='error' className='mb-2'>
-            <Text size='micro' component='p'>
-              <b>! {done.failedScope}:</b> {done.message}. the card was not saved.
-            </Text>
-            {done.uploaded.length > 0 && (
-              <Text
-                size='micro'
-                component='p'
-                className='mt-1'
-                title='there is no delete for uploaded pattern files yet, so they stay in storage; applying again uploads them anew'
-              >
-                left unused in storage: {done.uploaded.map((u) => u.filename).join(', ')}
+          // the failed apply and its one door: the coach's zone
+          <div data-ask-zone=''>
+            <CalloutBox tone='error' className='mb-2'>
+              <Text size='micro' component='p'>
+                <b>! {done.failedScope}:</b> {done.message}. the card was not saved.
               </Text>
-            )}
-            <Button
-              variant='underline'
-              size='xs'
-              className='mt-1 whitespace-nowrap'
-              title='saves a JSON file: versions, file names, sizes and checksums, the failed step, the gate and your answers; never the files themselves'
-              onClick={api.downloadReport}
-            >
-              download report
-            </Button>
-          </CalloutBox>
+              {done.uploaded.length > 0 && (
+                <Text
+                  size='micro'
+                  component='p'
+                  className='mt-1'
+                  title='there is no delete for uploaded pattern files yet, so they stay in storage; applying again uploads them anew'
+                >
+                  left unused in storage: {done.uploaded.map((u) => u.filename).join(', ')}
+                </Text>
+              )}
+              <Button
+                variant='underline'
+                size='xs'
+                className='mt-1 whitespace-nowrap'
+                title='saves a JSON file: versions, file names, sizes and checksums, the failed step, the gate and your answers; never the files themselves'
+                onClick={api.downloadReport}
+                {...ask('apply-failed', 'download the report, then apply again')}
+              >
+                download report
+              </Button>
+            </CalloutBox>
+          </div>
         )}
       </Panel>
     </div>

@@ -75,6 +75,12 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
           ? `${METHOD[chosen!.method] ?? chosen!.method} is off 1:1 by ${((chosen!.factor - 1) * 100).toFixed(2)} %`
           : 'a page has no scale of its own';
 
+  // the coach's how (THE ASK CONTRACT, ui-bits), per kind of doubt
+  const confirmHint = nonSquare
+    ? 'measure it on paper, or confirm it'
+    : chosen && !scaleUncertain(chosen, chosen.factor)
+      ? 'check the listed pages, then confirm'
+      : 'check the square on paper, then confirm';
   const confirmChip = needsHuman && !inputs.manualMeasuredMm && (
     <Chip
       tone={inputs.scaleConfirmed ? undefined : 'attention'}
@@ -82,7 +88,7 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
       pressed={inputs.scaleConfirmed}
       onClick={() => patchInputs({ scaleConfirmed: !inputs.scaleConfirmed })}
       title='I checked the square on paper — the detection stands'
-      {...ask('scale-confirm', asks)}
+      {...ask('scale-confirm', asks, confirmHint)}
     >
       {nominal ? `it is ${nominal} mm` : 'the scale is right'}
     </Chip>
@@ -107,7 +113,7 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
           onCommit={(v) => patchInputs({ manualMeasuredMm: v && v > 0 ? v : null })}
           title={`print page ${chosen?.evidence ? chosen.evidence.page + 1 : '—'} at 100 %, measure the square with a ruler — it overrides the detection`}
           aria-label='square on paper, mm'
-          {...ask('scale-measured', asks)}
+          {...ask('scale-measured', asks, 'measure the test square and type mm')}
         />
         <Text size='micro' variant='label' component='span'>
           mm · nominal {nominal} mm
@@ -156,120 +162,130 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
               )}
             </Text>
 
-            {question && (
-              <Text
-                size='micro'
-                component='p'
-                className={answered ? 'text-labelColor' : 'text-warning'}
-              >
-                {answered ? '' : '! '}
-                {question}
-              </Text>
-            )}
-            {/* a page whose own calibration is weak: the rows the question is about */}
-            {needsHuman && weakCalibs.length > 0 && (
-              <Text size='micro' variant='label' component='p'>
-                {weakCalibs
-                  .map(
-                    (c) =>
-                      `${session.files.length > 1 ? `${fileName(c.file)} · ` : ''}p${c.page + 1} ${
-                        c.calibration.method === 'inherited' ? 'inherited' : 'none'
-                      }`,
-                  )
-                  .join(' · ')}
-              </Text>
-            )}
+            {/* the one question and its answers: the coach's zone */}
+            <div data-ask-zone='' className='flex flex-col gap-2'>
+              {question && (
+                <Text
+                  size='micro'
+                  component='p'
+                  className={answered ? 'text-labelColor' : 'text-warning'}
+                >
+                  {answered ? '' : '! '}
+                  {question}
+                </Text>
+              )}
+              {/* a page whose own calibration is weak: the rows the question is about */}
+              {needsHuman && weakCalibs.length > 0 && (
+                <Text size='micro' variant='label' component='p'>
+                  {weakCalibs
+                    .map(
+                      (c) =>
+                        `${session.files.length > 1 ? `${fileName(c.file)} · ` : ''}p${c.page + 1} ${
+                          c.calibration.method === 'inherited' ? 'inherited' : 'none'
+                        }`,
+                    )
+                    .join(' · ')}
+                </Text>
+              )}
 
-            {nonSquare ? (
-              <>
-                {measure}
-                {confirmChip && <div>{confirmChip}</div>}
-              </>
-            ) : (
-              <>
-                {confirmChip && <div>{confirmChip}</div>}
-                {measure}
-              </>
-            )}
-            {inputs.manualMeasuredMm != null && (
-              <Chip
-                quiet
-                onClick={() => patchInputs({ manualMeasuredMm: null })}
-                title='drop the hand measure — the detection is used again'
-              >
-                use the detection
-              </Chip>
-            )}
+              {nonSquare ? (
+                <>
+                  {measure}
+                  {confirmChip && <div>{confirmChip}</div>}
+                </>
+              ) : (
+                <>
+                  {confirmChip && <div>{confirmChip}</div>}
+                  {measure}
+                </>
+              )}
+              {inputs.manualMeasuredMm != null && (
+                <Chip
+                  quiet
+                  onClick={() => patchInputs({ manualMeasuredMm: null })}
+                  title='drop the hand measure — the detection is used again'
+                >
+                  use the detection
+                </Chip>
+              )}
+            </div>
 
             {unique.length > 1 && (
-              <Fold label={`sources (${unique.length})`} className='mt-0'>
-                <div
-                  role='radiogroup'
-                  aria-label='scale source'
-                  className='divide-y divide-hairline'
+              <div data-ask-zone=''>
+                <Fold
+                  label={`sources (${unique.length})`}
+                  className='mt-0'
+                  ask={chosen ? undefined : 'scale-source'}
                 >
-                  {unique.map(({ c, index, all }) => {
-                    const on = all.includes(inputs.scaleIndex);
-                    return (
-                      <button
-                        key={index}
-                        type='button'
-                        role='radio'
-                        aria-checked={on}
-                        onClick={() =>
-                          patchInputs({
-                            scaleIndex: index,
-                            manualMeasuredMm: null,
-                            scaleConfirmed: false,
-                          })
-                        }
-                        title={c.evidence?.text ? `“${c.evidence.text}”` : undefined}
-                        className={cn(
-                          'flex w-full items-start gap-2 px-1 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                          on ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                        )}
-                      >
-                        <span
-                          aria-hidden
+                  <div
+                    role='radiogroup'
+                    aria-label='scale source'
+                    className='divide-y divide-hairline'
+                  >
+                    {unique.map(({ c, index, all }) => {
+                      const on = all.includes(inputs.scaleIndex);
+                      return (
+                        <button
+                          key={index}
+                          type='button'
+                          role='radio'
+                          aria-checked={on}
+                          {...ask('scale-source', !chosen, 'pick the source of the scale')}
+                          onClick={() =>
+                            patchInputs({
+                              scaleIndex: index,
+                              manualMeasuredMm: null,
+                              scaleConfirmed: false,
+                            })
+                          }
+                          title={c.evidence?.text ? `“${c.evidence.text}”` : undefined}
                           className={cn(
-                            'mt-0.5 size-3 shrink-0 border',
-                            on ? 'border-textColor bg-textColor' : 'border-borderColor',
+                            'flex w-full items-start gap-2 px-1 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                            on ? 'bg-bgZebra' : 'hover:bg-bgZebra',
                           )}
-                        />
-                        <span className='min-w-0 flex-1'>
-                          <Text
-                            size='control'
-                            variant='uppercase'
-                            tracking='label'
-                            component='span'
-                            className={cn('block', on && 'font-bold')}
-                          >
-                            {METHOD[c.method] ?? c.method}
-                          </Text>
-                          {c.measuredMm != null && c.declaredMm != null && (
+                        >
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'mt-0.5 size-3 shrink-0 border',
+                              on ? 'border-textColor bg-textColor' : 'border-borderColor',
+                            )}
+                          />
+                          <span className='min-w-0 flex-1'>
                             <Text
-                              size='micro'
-                              variant='label'
+                              size='control'
+                              variant='uppercase'
+                              tracking='label'
                               component='span'
-                              className='block tabular-nums'
+                              className={cn('block', on && 'font-bold')}
                             >
-                              {fmtMm(c.measuredMm)} · nominal {fmtMm(c.declaredMm, 0)}
+                              {METHOD[c.method] ?? c.method}
                             </Text>
+                            {c.measuredMm != null && c.declaredMm != null && (
+                              <Text
+                                size='micro'
+                                variant='label'
+                                component='span'
+                                className='block tabular-nums'
+                              >
+                                {fmtMm(c.measuredMm)} · nominal {fmtMm(c.declaredMm, 0)}
+                              </Text>
+                            )}
+                          </span>
+                          {c.confidence < 0.9 && (
+                            <Pill
+                              tone={c.confidence > 0 ? 'attention' : 'mut'}
+                              title={c.confidence > 0 ? fmtPct(c.confidence, 0) : undefined}
+                            >
+                              {c.confidence > 0 ? 'check' : '—'}
+                            </Pill>
                           )}
-                        </span>
-                        {c.confidence < 0.9 && (
-                          <Pill
-                            tone={c.confidence > 0 ? 'attention' : 'mut'}
-                            title={c.confidence > 0 ? fmtPct(c.confidence, 0) : undefined}
-                          >
-                            {c.confidence > 0 ? 'check' : '—'}
-                          </Pill>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </Fold>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Fold>
+              </div>
             )}
           </div>
 

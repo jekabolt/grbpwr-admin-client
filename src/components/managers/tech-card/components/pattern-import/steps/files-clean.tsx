@@ -184,7 +184,7 @@ export function KindTable({
   const asks = waiting.length > 0;
   const open = (openProp !== undefined ? openProp : own) ?? asks;
   return (
-    <div className='min-w-0'>
+    <div data-ask-zone='' data-ask-hint={KIND_HINT} className='min-w-0'>
       <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
         <Text size='micro' component='span' className='min-w-0'>
           {lead ? `${lead} · ` : ''}
@@ -197,7 +197,7 @@ export function KindTable({
             disabled={busy}
             onClick={onAcceptAll}
             title={`set aside: ${waiting.map((r) => KIND_LABEL[r.kind]).join(', ')} — each row keeps its "keep" to undo`}
-            {...ask(askKey)}
+            {...ask(askKey, KIND_HINT)}
           >
             {waiting.length > 1 ? `accept all ${waiting.length}` : 'accept'}
           </Chip>
@@ -216,6 +216,13 @@ export function KindTable({
     </div>
   );
 }
+
+/** The coach's how (THE ASK CONTRACT, ui-bits) for a kind suggested to set aside. */
+const KIND_HINT = 'accept it, or press next to keep lines';
+const ROW_HINT = 'accept or keep each kind of line';
+/** … and for a page to check. */
+const PAGE_HINT = 'keep it or read it as a tile';
+const TILE_HINT = 'keep it as a tile, or set aside';
 
 function KindRowsTable({
   rows,
@@ -275,7 +282,7 @@ function KindRowsTable({
                       ? 'keep these lines as line work (the run reads again from here)'
                       : 'set these lines aside'
                   }
-                  {...ask(askKey, !r.applied && r.suggested > 0)}
+                  {...ask(askKey, !r.applied && r.suggested > 0, ROW_HINT)}
                 >
                   {state.act}
                 </Button>
@@ -286,7 +293,7 @@ function KindRowsTable({
                     className='ml-2'
                     disabled={busy}
                     onClick={() => onEdit(r.kind, false)}
-                    {...ask(askKey)}
+                    {...ask(askKey, ROW_HINT)}
                   >
                     accept
                   </Button>
@@ -504,7 +511,7 @@ function AsideThumb({
           size='xs'
           disabled={busy}
           onClick={onKeep}
-          {...ask('files-page', !aiPattern)}
+          {...ask('files-page', !aiPattern, PAGE_HINT)}
         >
           keep aside
         </Button>
@@ -514,7 +521,7 @@ function AsideThumb({
         size='xs'
         disabled={busy}
         onClick={onRead}
-        {...ask('files-page', check && aiPattern)}
+        {...ask('files-page', check && aiPattern, PAGE_HINT)}
       >
         {d.aiAside ? 'undo · read as tile' : 'read as tile'}
       </Button>
@@ -715,7 +722,7 @@ export function PageRoles({
       )}
 
       {toCheck.length + tilesToCheck.length > 0 && (
-        <div className='flex flex-wrap gap-2'>
+        <div data-ask-zone='' className='flex flex-wrap gap-2'>
           {toCheck.map(aside)}
           {tilesToCheck.map((p) => (
             <PageThumb
@@ -734,7 +741,7 @@ export function PageRoles({
                 size='xs'
                 disabled={busy}
                 onClick={() => setRole(p.file, p.page, 'tile')}
-                {...ask('files-page')}
+                {...ask('files-page', TILE_HINT)}
               >
                 keep as tile
               </Button>
@@ -743,6 +750,7 @@ export function PageRoles({
                 size='xs'
                 disabled={busy}
                 onClick={() => setRole(p.file, p.page, 'blank')}
+                {...ask('files-page', TILE_HINT)}
               >
                 set aside
               </Button>
