@@ -72,7 +72,7 @@ import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
-import { markerColorways } from './nesting/colorway-widths';
+import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
@@ -381,14 +381,18 @@ export function PatternsField({
   // один раз, без кнопки «ещё раз» и без цикла на каждый рендер формы.
   const { data: cardRead, dataUpdatedAt: cardReadAt } = useTechCard(techCardId);
   const { data: materialsData } = useMaterials('', true, !!techCardId);
-  const colorwayOptions = useMemo(() => {
+  const materialById = useMemo(() => {
     const byId = new Map<number, common_Material>();
     for (const m of materialsData?.materials ?? []) {
       const id = Number(m.id ?? 0);
       if (id) byId.set(id, m);
     }
-    return markerColorways(cardRead, byId);
-  }, [cardRead?.techCard, materialsData?.materials]);
+    return byId;
+  }, [materialsData?.materials]);
+  const colorwayOptions = useMemo(
+    () => markerColorways(cardRead, materialById),
+    [cardRead?.techCard, materialById],
+  );
 
   // Материал, над которым сейчас висит перетаскиваемый файл ('' = ничей).
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -487,6 +491,7 @@ export function PatternsField({
     // разбивает скоуп направления надвое: см. markerScopeLines в bom-purpose.ts.
     isSample?: boolean;
     id?: number;
+    materialId?: number;
   }>;
   const fabricBomLines = useMemo(
     () =>
@@ -514,6 +519,8 @@ export function PatternsField({
           // этого непроставленное направление на СЕМПЛОВОМ рулоне снимало бы 180° у
           // производственного маркера, который сервер бы принял.
           isSample: !!b.isSample,
+          // Толщина слоя артикула строки — для настила под раскроечный стол.
+          fabricThicknessMm: materialThicknessMm(materialById.get(Number(b.materialId ?? 0))),
           order: i,
         }))
         // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
@@ -523,7 +530,7 @@ export function PatternsField({
             SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section) ||
             a.order - b.order,
         ),
-    [bomItems],
+    [bomItems, materialById],
   );
   // Скоупы — то, к чему выкройка привязывается с 0267: одна группа на НАЗНАЧЕНИЕ и одна на каждую
   // ещё не разложенную строку. У неразобранной карточки назначений нет вовсе, поэтому каждая

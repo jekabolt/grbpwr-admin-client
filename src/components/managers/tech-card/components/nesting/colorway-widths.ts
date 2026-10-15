@@ -19,6 +19,9 @@ export type ColorwaySlotWidth = {
   // проверяемым после правок материала.
   selvedgeCm: number;
   articleName: string;
+  // Толщина ОДНОГО слоя приколотого артикула, мм (Material.fabricThicknessMm) — для настила под
+  // раскроечный стол. Отсутствует = не задана (не ноль).
+  fabricThicknessMm?: number;
 };
 
 export type MarkerColorway = {
@@ -38,6 +41,12 @@ export function colorwayLabelOf(c: {
   baseSku?: string;
 }): string {
   return c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? 0}`;
+}
+
+// Толщина слоя артикула, мм. undefined — не задана: ноль толщины значил бы «стопка любой высоты».
+export function materialThicknessMm(m: common_Material | undefined): number | undefined {
+  const t = parseDecimalNumber(m?.fabricThicknessMm?.value || '');
+  return Number.isFinite(t) && t > 0 ? t : undefined;
 }
 
 // Раскройная ширина артикула. Рулон и кромка берутся ОБА у пина: взять ширину пина с кромкой
@@ -93,7 +102,12 @@ export function markerColorways(
       if (!key || !materialId) continue;
       const mat = materialById.get(materialId);
       const { cutCm, selvedgeCm } = cutWidthOf(mat);
-      widthByLine.set(key, { cutCm, selvedgeCm, articleName: mat?.name?.trim() || '' });
+      widthByLine.set(key, {
+        cutCm,
+        selvedgeCm,
+        articleName: mat?.name?.trim() || '',
+        fabricThicknessMm: materialThicknessMm(mat),
+      });
     }
     out.push({ colorwayId: id, label: colorwayLabelOf(cw), widthByLine });
   }

@@ -190,6 +190,11 @@ export type NestConfig = {
   fabricWidthCm: number;
   // Optional target the verdict is judged against; nesting itself is unbounded along X.
   targetLengthCm?: number;
+  // ДЛИНА РАСКРОЕЧНОГО СТОЛА (полезная, за вычетом запасов на концы настила), см. В отличие от
+  // targetLengthCm это НЕ вердикт, а граница укладки: полоса режется по min(естественная граница,
+  // maxLengthCm), и всё, что не влезло, уходит в unplaced с причиной 'table-full'. Отсутствует —
+  // полоса не ограничена, поведение прежнее. Не-конечное или ≤ 0 трактуется как «не задано».
+  maxLengthCm?: number;
   gapCm: number;
   edgeMarginCm: number;
   allowCrossGrain: boolean; // adds 90/270 to the rotation set
@@ -338,7 +343,10 @@ export type PlacedTransform = Pick<Placement, 'rot' | 'x' | 'y' | 'flipped'>;
 //                Альтернатива — молча положить незеркальную копию — это и есть тот самый брак,
 //                ради которого зеркало заводили: сорок четыре левые полочки и ни одной правой,
 //                и на маркере это неотличимо от нормы.
-export type UnplacedReason = 'width' | 'no-space' | 'missing' | 'mirror';
+//   'table-full' — задан NestConfig.maxLengthCm, и экземпляр не влез в длину стола. Это НЕ
+//                патология (в отличие от 'no-space'), а ожидаемый ответ «стол кончился»: лечится
+//                меньшим числом изделий на слой или более длинным столом, а не поиском.
+export type UnplacedReason = 'width' | 'no-space' | 'missing' | 'mirror' | 'table-full';
 
 export type UnplacedPiece = {
   pieceId: number;

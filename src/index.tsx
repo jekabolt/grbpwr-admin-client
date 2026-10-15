@@ -175,9 +175,6 @@ const OrderInvoicePrint = lazyRoute(() =>
 const Materials = lazyRoute(() =>
   import('components/managers/materials').then((m) => ({ default: m.Materials })),
 );
-const WorkshopSettingsPage = lazyRoute(() =>
-  import('components/managers/workshop/page').then((m) => ({ default: m.WorkshopSettingsPage })),
-);
 const ProductionRuns = lazyRoute(() =>
   import('components/managers/production-runs').then((m) => ({ default: m.ProductionRuns })),
 );
@@ -436,7 +433,6 @@ root.render(
                   <Route path={ROUTES.techCardImport} element={<TechCardImport />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
                   <Route path={ROUTES.materials} element={<Materials />} />
-                  <Route path={ROUTES.workshop} element={<WorkshopSettingsPage />} />
                   <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />

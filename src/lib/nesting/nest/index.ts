@@ -297,7 +297,7 @@ export async function nest(
   // a 2 cm margin and 45 instances the under-budget was ~157 cm against ~14 cm of slack, and
   // overflowing it no longer merely wasted a slot: since Ф0 an overflowing piece is DROPPED and
   // charged the unplaced penalty. The bound is free — it only sizes an unbounded strip.
-  const lMax =
+  const naturalLMax =
     genesBase.reduce((s, g) => {
       const b = g.piece.boundsAt[g.flip][0];
       return (
@@ -308,6 +308,12 @@ export async function nest(
     }, 0) +
     2 * config.edgeMarginCm +
     10;
+  // КАП СТОЛА (NestConfig.maxLengthCm). Только сужает естественную границу, никогда не расширяет:
+  // стол длиннее всех деталей встык ничего не меняет. Когда кап сработал, правый край полосы —
+  // это конец стола, и «не влезло» читается как 'table-full', а не как патология.
+  const cap = config.maxLengthCm;
+  const lengthCapped = cap !== undefined && Number.isFinite(cap) && cap > 0 && cap < naturalLMax;
+  const lMax = lengthCapped ? (cap as number) : naturalLMax;
 
   // Gap compensation: NFP inputs are RDP-simplified, whose chords cut ≤ rdpEps inside
   // convex runs PER PIECE — widen the octagon so true contours still end up ≥ gap apart.
@@ -433,6 +439,7 @@ export async function nest(
     fabricWidthCm: config.fabricWidthCm,
     edgeMarginCm: config.edgeMarginCm,
     lMaxCm: lMax,
+    lengthCapped,
     nfps,
     deadlineMs: Math.max(Date.now() + GA_MIN_MS, deadline),
     maxGenerations: MAX_GENERATIONS,
