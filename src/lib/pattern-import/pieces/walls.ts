@@ -696,7 +696,7 @@ export function rescuedIgnored(
     });
     return hit;
   };
-  // LEAKS: an ignored line lying ON one size's line (a piece recovery joined into that line —
+  // LEAKS: an ignored line lying wholly ON one size's line (a piece recovery joined into that line —
   // sizes/land bridgeSameRank — or a copy of it) is that size's stretch, never a wall of every
   // size: rescued, it handed one size's line to all the others
   const ranked = new SegGrid(4);
@@ -730,7 +730,22 @@ export function rescuedIgnored(
         hits.set(rid, (hits.get(rid) ?? 0) + 1);
       });
     }
-    return n > 0 && [...hits.values()].some((v) => v >= 0.8 * n);
+    // ALL of it, ends included, on that one line (Codex: a line that leaves the size's line for
+    // its last stretch closes something of its own there — it stays rescuable)
+    const onLine = (rid: ChainId, p: PtMm) => {
+      const q = set.chains[rid].pts;
+      for (let i = 0; i + 1 < q.length; i++)
+        if (segNearest(p, q[i], q[i + 1]).d <= 0.3) return true;
+      return (
+        set.chains[rid].closed && q.length > 2 && segNearest(p, q[q.length - 1], q[0]).d <= 0.3
+      );
+    };
+    return (
+      n > 0 &&
+      [...hits].some(
+        ([rid, v]) => v === n && onLine(rid, c.pts[0]) && onLine(rid, c.pts[c.pts.length - 1]),
+      )
+    );
   };
   const cand: ChainId[] = [];
   for (const id of ignore) {

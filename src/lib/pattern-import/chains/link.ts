@@ -535,6 +535,8 @@ export const OPROW = {
   minLenMm: 15,
   /** …its marks on average at least this far apart, mm. */
   minStepMm: 1,
+  /** Two opposite turns of at least this in a row are a lane change (another path), not a corner. */
+  laneTurnDeg: 35,
 };
 
 /** The paint operation number of an item (`file|page|op`). */
@@ -546,9 +548,12 @@ const opNo = (it: Item) => {
 /**
  * Rows of marks in DRAWING ORDER (two evidences: the marks are painted one after another — op
  * numbers a few apart, the same ink — AND each lies next to the previous one, ≤ 5 mm, the row
- * turning ≤ 100° per step). A row of ≥ minDots marks, at least half of them beads, is one line;
- * what no such row takes is linked by proximity as before (`chainBeads`). A mark that ends a
- * sequence (the next op is far away, or another ink) ends the row: nothing is bridged.
+ * turning ≤ 100° per step, never off and back parallel — a lane change is two paths). A row of ≥
+ * minDots marks, at least half of them beads, ≥ 15 mm with a line's spacing, is one line; what no
+ * such row takes is linked by proximity as before (`chainBeads`). A mark that ends a sequence (the
+ * next op is far away, another ink, another tile page) ends the row: nothing is bridged — a row cut
+ * at a tile seam is two chains, and the fill closes or leaks there as with any gap (stitching the
+ * seam by proximity measured worse on Marostica: 44 → 35 closed sizes).
  */
 function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; rest: Item[] } {
   if (typeof process !== 'undefined' && process.env?.LEAKS_OPROWS_OFF)
@@ -564,9 +569,9 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
       a.o.page < b.o.page ? -1 : a.o.page > b.o.page ? 1 : a.o.n - b.o.n || a.it.sub - b.it.sub,
     );
   const cosTurn = Math.cos((OPROW.maxTurnDeg * Math.PI) / 180);
-  const rows: WChain[] = [];
-  const taken = new Set<Item>();
-  let cur: typeof sorted = [];
+  type M = (typeof sorted)[number];
+  const rows: M[][] = [];
+  let cur: M[] = [];
   const flush = () => {
     const beads = cur.filter((x) => x.it.kind === 'bead' && !x.it.extra?.length).length;
     let L = 0;
@@ -578,12 +583,21 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
       2 * beads >= cur.length &&
       L >= OPROW.minLenMm &&
       L >= OPROW.minStepMm * (cur.length - 1)
-    ) {
-      rows.push({ items: cur.map((x) => ({ it: x.it, rev: false })), decor: [], dead: false });
-      for (const x of cur) taken.add(x.it);
-    }
+    )
+      rows.push(cur);
     cur = [];
   };
+  /** signed turn at b on the way a → b → c, degrees (0 when a step is degenerate) */
+  const turnAt = (a: PtMm, b: PtMm, c: PtMm) => {
+    const u = { x: b.x - a.x, y: b.y - a.y };
+    const v = { x: c.x - b.x, y: c.y - b.y };
+    const lu = Math.hypot(u.x, u.y);
+    const lv = Math.hypot(v.x, v.y);
+    if (lu < 1e-6 || lv < 1e-6) return 0;
+    const cos = Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / (lu * lv)));
+    return (Math.sign(u.x * v.y - u.y * v.x) * Math.acos(cos) * 180) / Math.PI;
+  };
+  let prevTurn = 0;
   for (const x of sorted) {
     const last = cur[cur.length - 1];
     if (last) {
@@ -594,23 +608,38 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
         ink(last.it) === ink(x.it) &&
         dist(last.it.c!, x.it.c!) <= OPROW.maxGapMm &&
         dist(last.it.c!, x.it.c!) > 0.05;
-      let turnOk = true;
-      if (ok && cur.length >= 2) {
-        const a = cur[cur.length - 2].it.c!;
-        const b = last.it.c!;
-        const c = x.it.c!;
-        const u = { x: b.x - a.x, y: b.y - a.y };
-        const v = { x: c.x - b.x, y: c.y - b.y };
-        const lu = Math.hypot(u.x, u.y);
-        const lv = Math.hypot(v.x, v.y);
-        if (lu > 1e-6 && lv > 1e-6) turnOk = (u.x * v.x + u.y * v.y) / (lu * lv) >= cosTurn;
-      }
-      if (!ok || !turnOk) flush();
+      let turn = 0;
+      if (ok && cur.length >= 2) turn = turnAt(cur[cur.length - 2].it.c!, last.it.c!, x.it.c!);
+      if (!ok || Math.cos((turn * Math.PI) / 180) < cosTurn) {
+        flush();
+        prevTurn = 0;
+      } else if (
+        cur.length >= 3 &&
+        Math.abs(prevTurn) >= OPROW.laneTurnDeg &&
+        Math.abs(turn) >= OPROW.laneTurnDeg &&
+        Math.sign(prevTurn) !== Math.sign(turn)
+      ) {
+        // a lane change (Codex): turn off the line, then back parallel to it — the end of one
+        // path and the start of another (the next size's), not a corner: split before `last`
+        cur.pop();
+        flush();
+        cur = [last];
+        prevTurn = 0;
+      } else prevTurn = turn;
     }
     cur.push(x);
   }
   flush();
-  return { rows, rest: pool.filter((it) => !taken.has(it)) };
+  const taken = new Set<Item>();
+  for (const r of rows) for (const x of r) taken.add(x.it);
+  return {
+    rows: rows.map((r) => ({
+      items: r.map((x) => ({ it: x.it, rev: false })),
+      decor: [],
+      dead: false,
+    })),
+    rest: pool.filter((it) => !taken.has(it)),
+  };
 }
 
 function chainBeads(beads: Item[]): WChain[] {
