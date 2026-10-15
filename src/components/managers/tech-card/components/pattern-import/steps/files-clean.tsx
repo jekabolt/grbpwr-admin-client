@@ -1,7 +1,8 @@
 // A8 · what the clean stage set aside before reading (files step, and the sheet pass on the sheet
-// step): one line "removed: …", a row per kind with its undo / accept, the page drawn with its
-// mask. Monochrome (DESIGN.md): masked lines are the sheet's light source grey, a suggestion
-// nobody accepted yet is the blue of "needs a human", the kind under the pointer is ink.
+// step): one line "removed: …" with a fold for the per-kind keep / accept and the page drawn with
+// its mask; the pages that ask about their role as thumbnails. Monochrome (DESIGN.md): masked
+// lines are the sheet's light source grey, a suggestion nobody accepted yet is the blue of "needs
+// a human", the kind under the pointer is ink.
 import { useMemo, useState } from 'react';
 import type {
   BackgroundKind,
@@ -15,7 +16,7 @@ import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
+import type { HeaderWarning } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
@@ -25,8 +26,10 @@ import {
   PATTERN_ROLES,
   aiWords,
 } from 'lib/pattern-import/clean/page-roles';
+import { PAGE_SURE } from '../auto-advance';
 import { SHEET_INK, SheetViewport } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
+import { Fold, ask } from '../ui-bits';
 
 export const KIND_LABEL: Record<BackgroundKind, string> = {
   grid: 'grid lines',
@@ -143,42 +146,74 @@ export function withAllAccepted(edits: PageMaskEdit[], rows: KindRow[]) {
   return rows.filter((r) => r.suggested > 0).reduce((e, r) => withKind(e, r.kind, false), edits);
 }
 
-/** The kind table: a row per kind, its state as a worded pill and the one action it allows. */
+/**
+ * The kinds the clean stage set aside, as ONE line ("removed: … · 2 suggested") with the answer
+ * beside it (`accept`) and the per-kind table behind a fold — opened by itself while a kind waits
+ * for an answer (the only time it asks). `children` (the page with its mask) sit in the fold too.
+ * `open`: controlled by the caller (null = the automatic rule); omitted = the fold's own.
+ */
 export function KindTable({
   rows,
   busy,
   onEdit,
   onAcceptAll,
   onHover,
+  lead,
+  askKey = 'files-keep',
+  open: openProp,
+  onOpenChange,
+  children,
 }: {
   rows: KindRow[];
   busy: boolean;
   onEdit: (kind: BackgroundKind, keep: boolean) => void;
-  /** N1: accept every waiting suggestion in one click (offered from two kinds up). */
+  /** N1: accept every waiting suggestion in one click. */
   onAcceptAll?: () => void;
   onHover?: (kind: BackgroundKind | null) => void;
+  /** A word before the line ("sheet"). */
+  lead?: string;
+  /** The `data-ask` key of this block's answers (THE ASK CONTRACT, ui-bits). */
+  askKey?: string;
+  open?: boolean | null;
+  onOpenChange?: (open: boolean) => void;
+  children?: React.ReactNode;
 }) {
+  const [own, setOwn] = useState<boolean | null>(null);
   if (!rows.length) return null;
   const waiting = rows.filter((r) => r.suggested > 0);
+  const asks = waiting.length > 0;
+  const open = (openProp !== undefined ? openProp : own) ?? asks;
   return (
-    <>
-      {onAcceptAll && waiting.length > 1 && (
-        <div className='mb-1 flex flex-wrap items-center gap-2'>
-          <Text size='micro' variant='label' component='span'>
-            {waiting.length} suggested: {waiting.map((r) => KIND_LABEL[r.kind]).join(', ')}
-          </Text>
+    <div className='min-w-0'>
+      <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
+        <Text size='micro' component='span' className='min-w-0'>
+          {lead ? `${lead} · ` : ''}
+          {removedLine(rows)}
+          {asks && <span className='text-warning'> · {waiting.length} suggested</span>}
+        </Text>
+        {onAcceptAll && asks && (
           <Chip
             tone='attention'
             disabled={busy}
             onClick={onAcceptAll}
-            title='set every suggested kind aside — the page below shows them dashed blue; each row keeps its "keep" to undo'
+            title={`set aside: ${waiting.map((r) => KIND_LABEL[r.kind]).join(', ')} — each row keeps its "keep" to undo`}
+            {...ask(askKey)}
           >
-            accept all {waiting.length}
+            {waiting.length > 1 ? `accept all ${waiting.length}` : 'accept'}
           </Chip>
-        </div>
-      )}
-      <KindRowsTable rows={rows} busy={busy} onEdit={onEdit} onHover={onHover} />
-    </>
+        )}
+      </div>
+      <Fold
+        label={asks ? 'suggested' : 'keep some'}
+        open={open}
+        onOpenChange={onOpenChange ?? setOwn}
+        ask={asks ? askKey : undefined}
+        className='mt-1'
+      >
+        <KindRowsTable rows={rows} busy={busy} onEdit={onEdit} onHover={onHover} askKey={askKey} />
+        {children}
+      </Fold>
+    </div>
   );
 }
 
@@ -187,11 +222,13 @@ function KindRowsTable({
   busy,
   onEdit,
   onHover,
+  askKey,
 }: {
   rows: KindRow[];
   busy: boolean;
   onEdit: (kind: BackgroundKind, keep: boolean) => void;
   onHover?: (kind: BackgroundKind | null) => void;
+  askKey: string;
 }) {
   return (
     <DataTable>
@@ -238,6 +275,7 @@ function KindRowsTable({
                       ? 'keep these lines as line work (the run reads again from here)'
                       : 'set these lines aside'
                   }
+                  {...ask(askKey, !r.applied && r.suggested > 0)}
                 >
                   {state.act}
                 </Button>
@@ -248,6 +286,7 @@ function KindRowsTable({
                     className='ml-2'
                     disabled={busy}
                     onClick={() => onEdit(r.kind, false)}
+                    {...ask(askKey)}
                   >
                     accept
                   </Button>
@@ -322,47 +361,49 @@ export function asideEvidence(d: StageIO['clean']['out']['dropped'][number]): st
   return [ai, ex, geo].filter(Boolean).join(' · ');
 }
 
-/** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */
-function AsideThumb({
+/** A page drawn small: its live lines, its number and role, the doors under it. */
+function PageThumb({
   p,
-  d,
-  busy,
+  page,
+  file,
   files,
-  onRead,
-  onKeep,
+  role,
+  check,
+  title,
+  ariaLabel,
   selected,
+  pick,
   onToggle,
+  children,
 }: {
   p: CleanPreview | undefined;
-  d: StageIO['clean']['out']['dropped'][number];
-  busy: boolean;
+  page: number;
+  file: string;
   files: number;
-  onRead: () => void;
-  /** A9: "keep it aside" — the operator's answer to a page to check (the AI's, pre-filled). */
-  onKeep: () => void;
-  /** Owner 12.10: picked for a bulk answer (absent = no checkbox: a single page). */
+  role: string;
+  /** Needs the operator's look: framed in ink, the role pill reads "check". */
+  check: boolean;
+  title: string;
+  ariaLabel: string;
   selected?: boolean;
+  /** The bulk pick's checkbox id (absent = no checkbox). */
+  pick?: string;
   onToggle?: () => void;
+  children: React.ReactNode;
 }) {
   const live = useMemo(() => (p ? pathData(p.live) : ''), [p]);
   const W = p?.widthMm ?? 210;
   const H = p?.heightMm ?? 297;
-  // A9: the AI's reading pre-fills the answer the operator gives with one click
-  const aiPattern = !!d.ai && PATTERN_ROLES.has(d.ai.role);
-  const aiAside = !!d.ai && !aiPattern && d.ai.role !== 'other';
-  const ev = asideEvidence(d);
-  const box = cn(
-    'h-32 w-24 border',
-    d.status === 'suggest' ? 'border-textColor' : 'border-borderColor',
-    selected && 'outline outline-2 outline-offset-1 outline-textColor',
-  );
-  const pick = onToggle ? pickId(d) : undefined;
   const thumb = (
     <svg
       viewBox={`0 ${-H} ${W} ${H}`}
-      className={box}
+      className={cn(
+        'h-32 w-24 border',
+        check ? 'border-textColor' : 'border-borderColor',
+        selected && 'outline outline-2 outline-offset-1 outline-textColor',
+      )}
       preserveAspectRatio='xMidYMid meet'
-      aria-label={`page ${d.page + 1}, set aside as ${d.cls}`}
+      aria-label={ariaLabel}
     >
       <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
       <path
@@ -375,10 +416,7 @@ function AsideThumb({
     </svg>
   );
   return (
-    <figure
-      className='flex w-24 flex-col gap-0.5'
-      title={`${d.why}${d.drawing ? ` — holds ${d.drawing}: check it is not a pattern page` : ''}${ev ? ` — ${ev}` : ''}`}
-    >
+    <figure className='flex w-24 flex-col gap-0.5' title={title}>
       {/* the whole thumbnail is the checkbox's label: a click on the page picks it */}
       {pick ? (
         <label htmlFor={pick} className='cursor-pointer'>
@@ -393,61 +431,175 @@ function AsideThumb({
             name={pick}
             checked={!!selected}
             onChange={() => onToggle?.()}
-            aria-label={`pick page ${d.page + 1}${files > 1 ? ` of file ${Number(d.file) + 1}` : ''}`}
+            aria-label={`pick page ${page + 1}${files > 1 ? ` of file ${Number(file) + 1}` : ''}`}
           />
         )}
         <Text size='micro' component='span' className='tabular-nums'>
-          p{d.page + 1}
-          {files > 1 ? `·f${Number(d.file) + 1}` : ''}
+          p{page + 1}
+          {files > 1 ? `·f${Number(file) + 1}` : ''}
         </Text>
-        <Pill tone={d.status === 'suggest' ? 'attention' : 'mut'}>
-          {d.status === 'suggest' ? 'check' : d.cls}
-        </Pill>
-        {d.aiAside && (
-          <Text size='micro' component='span' className='w-full' title={ev}>
-            set aside · AI + geometry
-          </Text>
-        )}
-        {d.status === 'suggest' && d.ai && (
-          <Text size='micro' component='span' className='w-full' title={ev}>
-            AI{d.ai.stale ? ' (before your edits)' : ''}: {aiWords(d.ai)}
-          </Text>
-        )}
-        {d.status === 'suggest' && (
-          <Button
-            variant={aiAside ? 'main' : 'underline'}
-            size='xs'
-            disabled={busy}
-            onClick={onKeep}
-          >
-            keep aside
-          </Button>
-        )}
-        <Button
-          variant={aiPattern && d.status === 'suggest' ? 'main' : 'underline'}
-          size='xs'
-          disabled={busy}
-          onClick={onRead}
-        >
-          {d.aiAside ? 'undo · read as tile' : 'read as tile'}
-        </Button>
+        <Pill tone={check ? 'attention' : 'mut'}>{check ? 'check' : role}</Pill>
+        {children}
       </figcaption>
     </figure>
   );
 }
 
-/** The files step's clean block: the line, the kinds, the selected page with its mask. */
+/** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */
+function AsideThumb({
+  p,
+  d,
+  busy,
+  files,
+  uncertain,
+  onRead,
+  onKeep,
+  selected,
+  onToggle,
+}: {
+  p: CleanPreview | undefined;
+  d: StageIO['clean']['out']['dropped'][number];
+  busy: boolean;
+  files: number;
+  /** The classifier placed the page below "sure": a question even when set aside by itself. */
+  uncertain?: boolean;
+  onRead: () => void;
+  /** A9: "keep it aside" — the operator's answer to a page to check (the AI's, pre-filled). */
+  onKeep: () => void;
+  /** Owner 12.10: picked for a bulk answer (absent = no checkbox: a single page). */
+  selected?: boolean;
+  onToggle?: () => void;
+}) {
+  // A9: the AI's reading pre-fills the answer the operator gives with one click
+  const aiPattern = !!d.ai && PATTERN_ROLES.has(d.ai.role);
+  const aiAside = !!d.ai && !aiPattern && d.ai.role !== 'other';
+  const check = d.status === 'suggest' || !!uncertain;
+  const ev = asideEvidence(d);
+  const ai = d.ai ? `AI${d.ai.stale ? ' (before your edits)' : ''}: ${aiWords(d.ai)}` : '';
+  return (
+    <PageThumb
+      p={p}
+      page={d.page}
+      file={d.file}
+      files={files}
+      role={d.cls}
+      check={check}
+      pick={onToggle ? pickId(d) : undefined}
+      selected={selected}
+      onToggle={onToggle}
+      ariaLabel={`page ${d.page + 1}, set aside as ${d.cls}`}
+      title={[
+        d.why,
+        d.drawing ? `holds ${d.drawing}: check it is not a pattern page` : '',
+        d.aiAside ? 'set aside · AI + geometry' : '',
+        ai,
+        ev,
+      ]
+        .filter(Boolean)
+        .join(' — ')}
+    >
+      {check && (
+        <Button
+          variant={aiAside ? 'main' : 'underline'}
+          size='xs'
+          disabled={busy}
+          onClick={onKeep}
+          {...ask('files-page', !aiPattern)}
+        >
+          keep aside
+        </Button>
+      )}
+      <Button
+        variant={aiPattern && check ? 'main' : 'underline'}
+        size='xs'
+        disabled={busy}
+        onClick={onRead}
+        {...ask('files-page', check && aiPattern)}
+      >
+        {d.aiAside ? 'undo · read as tile' : 'read as tile'}
+      </Button>
+    </PageThumb>
+  );
+}
+
+/** The files step's clean block: the removed line, the kinds behind a fold, the page with its mask. */
 export function CleanBlock({
   api,
   page,
+  open,
+  onOpenChange,
 }: {
   api: ImportSessionApi;
-  /** The page picked in the pages table (`file:page`). */
+  /** The page picked in the pages panel (`file:page`). */
   page: string | null;
+  /** The fold, held by the files step (a tile picked on the pages panel opens it); null = auto. */
+  open?: boolean | null;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { session, inputs } = api;
   const clean = session.clean;
   const [hover, setHover] = useState<BackgroundKind | null>(null);
+  const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
+  if (!clean) return null;
+  const tilePreviews = clean.previews.filter((p) =>
+    clean.pages.some((m) => m.file === p.file && m.page === p.page && m.role === 'tile'),
+  );
+  const shown =
+    tilePreviews.find((p) => `${p.file}:${p.page}` === page) ??
+    clean.previews.find((p) =>
+      clean.pages.some((m) => m.file === p.file && m.page === p.page && m.items.length),
+    ) ??
+    tilePreviews[0];
+  const edit = (kind: BackgroundKind, keep: boolean) =>
+    void api.dispatch({ type: 'clean', edits: withKind(inputs.cleanEdits, kind, keep) });
+  const view = shown && (
+    <div className='mt-2'>
+      <Text size='micro' variant='label' component='p' className='mb-0.5'>
+        page {shown.page + 1}
+        {session.files.length > 1 ? ` of file ${Number(shown.file) + 1}` : ''}
+      </Text>
+      <PageView p={shown} hover={hover} />
+    </div>
+  );
+  if (!rows.length) return null;
+  return (
+    <KindTable
+      rows={rows}
+      busy={!!session.busy}
+      onEdit={edit}
+      onAcceptAll={() =>
+        void api.dispatch({ type: 'clean', edits: withAllAccepted(inputs.cleanEdits, rows) })
+      }
+      onHover={setHover}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      {view}
+    </KindTable>
+  );
+}
+
+/** The page roles the operator set on the files step (`roleEdit`): their answer, not a guess. */
+const roleSet = (edits: readonly PageMaskEdit[]) =>
+  new Set(edits.flatMap((e) => ('role' in e ? [`${e.file}:${e.page}`] : [])));
+
+/**
+ * The pages panel: only the pages that ask (set aside on a doubt, read below "sure") as
+ * thumbnails with their two doors; the pages set aside for sure and the tiles are a count each,
+ * behind a fold. The bulk pick stays for several pages to check (owner 12.10).
+ */
+export function PageRoles({
+  api,
+  shown,
+  onShow,
+}: {
+  api: ImportSessionApi;
+  /** The tile drawn with its mask on the files panel (`file:page`). */
+  shown: string | null;
+  onShow: (key: string) => void;
+}) {
+  const { session, inputs } = api;
+  const clean = session.clean;
   // owner 12.10: the set-aside pages picked for one bulk answer — nothing picked by default (D3)
   // — bound to the clean output it was made on: `file:page` keys are positional and get reused
   // (a rerun with fresh AI answers, a replaced file), so a pick never outlives its snapshot
@@ -455,9 +607,21 @@ export function CleanBlock({
     of: null,
     keys: new Set(),
   }));
-  const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
   if (!clean) return null;
+  const busy = !!session.busy;
+  const files = session.files.length;
+  const answered = roleSet(inputs.cleanEdits);
+  const uncertain = (p: { file: string; page: number; cls: PageClass; confidence: number }) =>
+    !answered.has(`${p.file}:${p.page}`) && (p.cls === 'unknown' || p.confidence < PAGE_SURE);
+  const unsure = new Set(session.pages.filter(uncertain).map(pageKey));
   const dropped = clean.dropped;
+  const droppedKeys = new Set(dropped.map(pageKey));
+  const toCheck = dropped.filter((d) => d.status === 'suggest' || unsure.has(pageKey(d)));
+  const asideRest = dropped.filter((d) => !toCheck.includes(d));
+  const tiles = session.pages.filter((p) => p.cls === 'tile' && !droppedKeys.has(pageKey(p)));
+  const tilesToCheck = tiles.filter((p) => unsure.has(pageKey(p)));
+  const tilesSure = tiles.filter((p) => !unsure.has(pageKey(p)));
+
   const keys = dropped.map(pageKey);
   const picked = pickedOn.of === clean ? pickedOn.keys : new Set<string>();
   const setPicked = (next: (prev: ReadonlySet<string>) => ReadonlySet<string>) =>
@@ -466,7 +630,8 @@ export function CleanBlock({
       keys: next(cur.of === clean ? cur.keys : new Set()),
     }));
   const sel = new Set(keys.filter((k) => picked.has(k)));
-  const selectable = dropped.length > 1;
+  // the bulk answer is offered when several set-aside pages ask
+  const selectable = dropped.length > 1 && toCheck.length > 1;
   const toggle = (k: string) =>
     setPicked((prev) => {
       const n = new Set(prev);
@@ -481,142 +646,183 @@ export function CleanBlock({
     setPicked(() => new Set());
     void api.dispatch({ type: 'clean', edits: rolesEdit(inputs.cleanEdits, pages) });
   };
-  const tilePreviews = clean.previews.filter((p) =>
-    clean.pages.some((m) => m.file === p.file && m.page === p.page && m.role === 'tile'),
+  const preview = (file: string, page: number) =>
+    clean.previews.find((x) => x.file === file && x.page === page);
+  const setRole = (file: string, page: number, role: PageClass) =>
+    void api.dispatch({ type: 'clean', edits: roleEdit(inputs.cleanEdits, file, page, role) });
+  const aside = (d: Dropped) => (
+    <AsideThumb
+      key={pageKey(d)}
+      d={d}
+      p={preview(d.file, d.page)}
+      busy={busy}
+      files={files}
+      uncertain={unsure.has(pageKey(d))}
+      selected={selectable ? sel.has(pageKey(d)) : undefined}
+      onToggle={selectable ? () => toggle(pageKey(d)) : undefined}
+      onRead={() => setRole(d.file, d.page, 'tile')}
+      onKeep={() => setRole(d.file, d.page, d.cls)}
+    />
   );
-  const shown =
-    tilePreviews.find((p) => `${p.file}:${p.page}` === page) ??
-    clean.previews.find((p) =>
-      clean.pages.some((m) => m.file === p.file && m.page === p.page && m.items.length),
-    ) ??
-    tilePreviews[0];
-  const edit = (kind: BackgroundKind, keep: boolean) =>
-    void api.dispatch({ type: 'clean', edits: withKind(inputs.cleanEdits, kind, keep) });
+
   return (
-    <div className='mb-3'>
-      <GroupLabel flush>before reading</GroupLabel>
-      <Text size='micro' component='p' className='mb-1'>
-        {cleanLine(clean)}
-      </Text>
-      <KindTable
-        rows={rows}
-        busy={!!session.busy}
-        onEdit={edit}
-        onAcceptAll={() =>
-          void api.dispatch({ type: 'clean', edits: withAllAccepted(inputs.cleanEdits, rows) })
-        }
-        onHover={setHover}
-      />
-      {clean.dropped.length > 0 && (
-        <div className='mt-2'>
-          <Text size='micro' variant='label' component='p' className='mb-0.5'>
-            pages set aside — framed: it holds line work that could be pattern, check it
-          </Text>
-          {api.pageRoleNote && (
-            <Text size='micro' component='p' className='mb-0.5'>
-              {api.pageRoleNote}
-              {api.pageRolesStale && (
-                <>
-                  {' '}
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    disabled={!!session.busy}
-                    onClick={() => void api.dispatch({ type: 'page-roles' })}
-                  >
-                    ask the AI again
-                  </Button>
-                </>
-              )}
-            </Text>
-          )}
-          {selectable && (
-            <ChipRow className='mb-1 gap-2'>
-              <span className='inline-flex items-center gap-1'>
-                <CheckboxCommon
-                  name='pi-aside-all'
-                  checked={sel.size === dropped.length}
-                  onChange={(on) => setPicked(() => (on ? new Set(keys) : new Set()))}
-                />
-                <label htmlFor='pi-aside-all' className='cursor-pointer'>
-                  <Text size='micro' variant='label' component='span'>
-                    select all
-                  </Text>
-                </label>
-              </span>
-              <Text size='micro' component='span' className='tabular-nums'>
-                · {sel.size} selected
+    <div className='flex flex-col gap-2'>
+      {selectable && (
+        <ChipRow className='gap-2'>
+          <span className='inline-flex items-center gap-1'>
+            <CheckboxCommon
+              name='pi-aside-all'
+              checked={sel.size === dropped.length}
+              onChange={(on) => setPicked(() => (on ? new Set(keys) : new Set()))}
+            />
+            <label htmlFor='pi-aside-all' className='cursor-pointer'>
+              <Text size='micro' variant='label' component='span'>
+                select all
               </Text>
-              {aiPicks.length > 0 && (
-                <Chip
-                  tone='attention'
-                  onClick={() => setPicked(() => new Set(aiPicks))}
-                  title={`pick the pages to check that the AI reads as not pattern at ${AI_PAGES.autoMin} or more — nothing is set aside until you press "keep aside"`}
-                >
-                  select AI suggestions ({aiPicks.length})
-                </Chip>
-              )}
-              <Chip
-                disabled={!!session.busy || !keepPicked.length}
-                onClick={() => applyBulk(keepPicked)}
-                title={
-                  readPicked.length > keepPicked.length
-                    ? 'only the pages to check take this answer — a page already set aside stays as it is'
-                    : 'keep the picked pages aside (the run reads again once)'
-                }
-              >
-                keep {keepPicked.length} aside
-              </Chip>
-              <Chip
-                disabled={!!session.busy || !readPicked.length}
-                onClick={() => applyBulk(readPicked)}
-                title='read the picked pages as tiles (the run reads again once)'
-              >
-                read {readPicked.length} as {readPicked.length === 1 ? 'tile' : 'tiles'}
-              </Chip>
-            </ChipRow>
+            </label>
+          </span>
+          <Text size='micro' component='span' className='tabular-nums'>
+            · {sel.size} selected
+          </Text>
+          {aiPicks.length > 0 && (
+            <Chip
+              tone='attention'
+              onClick={() => setPicked(() => new Set(aiPicks))}
+              title={`pick the pages to check that the AI reads as not pattern at ${AI_PAGES.autoMin} or more — nothing is set aside until you press "keep aside"`}
+            >
+              select AI suggestions ({aiPicks.length})
+            </Chip>
           )}
-          <div className='flex flex-wrap gap-2'>
-            {[...clean.dropped]
-              .sort((a, b) => (a.status === b.status ? 0 : a.status === 'suggest' ? -1 : 1))
-              .map((d) => (
-                <AsideThumb
-                  key={`${d.file}:${d.page}`}
-                  d={d}
-                  p={clean.previews.find((x) => x.file === d.file && x.page === d.page)}
-                  busy={!!session.busy}
-                  files={session.files.length}
-                  selected={selectable ? sel.has(pageKey(d)) : undefined}
-                  onToggle={selectable ? () => toggle(pageKey(d)) : undefined}
-                  onRead={() =>
-                    void api.dispatch({
-                      type: 'clean',
-                      edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
-                    })
-                  }
-                  onKeep={() =>
-                    void api.dispatch({
-                      type: 'clean',
-                      edits: roleEdit(inputs.cleanEdits, d.file, d.page, d.cls),
-                    })
-                  }
-                />
-              ))}
-          </div>
+          <Chip
+            disabled={busy || !keepPicked.length}
+            onClick={() => applyBulk(keepPicked)}
+            title={
+              readPicked.length > keepPicked.length
+                ? 'only the pages to check take this answer — a page already set aside stays as it is'
+                : 'keep the picked pages aside (the run reads again once)'
+            }
+          >
+            keep {keepPicked.length} aside
+          </Chip>
+          <Chip
+            disabled={busy || !readPicked.length}
+            onClick={() => applyBulk(readPicked)}
+            title='read the picked pages as tiles (the run reads again once)'
+          >
+            read {readPicked.length} as {readPicked.length === 1 ? 'tile' : 'tiles'}
+          </Chip>
+        </ChipRow>
+      )}
+
+      {toCheck.length + tilesToCheck.length > 0 && (
+        <div className='flex flex-wrap gap-2'>
+          {toCheck.map(aside)}
+          {tilesToCheck.map((p) => (
+            <PageThumb
+              key={pageKey(p)}
+              p={preview(p.file, p.page)}
+              page={p.page}
+              file={p.file}
+              files={files}
+              role='tile'
+              check
+              ariaLabel={`page ${p.page + 1}, read as tile`}
+              title={`read as tile — ${p.why}`}
+            >
+              <Button
+                variant='underline'
+                size='xs'
+                disabled={busy}
+                onClick={() => setRole(p.file, p.page, 'tile')}
+                {...ask('files-page')}
+              >
+                keep as tile
+              </Button>
+              <Button
+                variant='underline'
+                size='xs'
+                disabled={busy}
+                onClick={() => setRole(p.file, p.page, 'blank')}
+              >
+                set aside
+              </Button>
+            </PageThumb>
+          ))}
         </div>
       )}
-      {shown && (
-        <div className='mt-2'>
-          <Text size='micro' variant='label' component='p' className='mb-0.5'>
-            page {shown.page + 1}
-            {session.files.length > 1 ? ` of file ${Number(shown.file) + 1}` : ''} — grey: set aside
-            · blue dashed: suggested · hover a row to find its lines
-          </Text>
-          <PageView p={shown} hover={hover} />
-        </div>
+
+      {asideRest.length > 0 && (
+        <Fold label={`${asideRest.length} set aside`} className='mt-0'>
+          <div className='flex flex-wrap gap-2'>{asideRest.map(aside)}</div>
+        </Fold>
+      )}
+
+      {tilesSure.length > 0 && (
+        <Fold
+          label={`${tilesSure.length} ${tilesSure.length === 1 ? 'tile' : 'tiles'}`}
+          className='mt-0'
+        >
+          <DataTable>
+            <thead>
+              <tr>
+                <th data-align='left'>page</th>
+                <th aria-label='page role' />
+              </tr>
+            </thead>
+            <tbody>
+              {tilesSure.map((p) => (
+                <tr
+                  key={pageKey(p)}
+                  className={shown === pageKey(p) ? 'bg-hairline' : 'cursor-pointer'}
+                  onClick={() => onShow(pageKey(p))}
+                  title={p.why}
+                >
+                  <td data-align='left' className='tabular-nums'>
+                    p{p.page + 1}
+                    {files > 1
+                      ? ` · ${session.files.find((f) => f.id === p.file)?.name ?? p.file}`
+                      : ''}
+                  </td>
+                  <td>
+                    {/* the door: a tile set aside */}
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      className='text-labelColor hover:text-textColor'
+                      disabled={busy}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        setRole(p.file, p.page, 'blank');
+                      }}
+                    >
+                      set aside
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        </Fold>
       )}
     </div>
   );
+}
+
+/** What the pages panel's `! N warnings` carries: the AI page-role note and its retry. */
+export function pageRoleWarnings(api: ImportSessionApi): HeaderWarning[] {
+  if (!api.pageRoleNote) return [];
+  return [
+    api.pageRolesStale
+      ? {
+          text: `${api.pageRoleNote} — ask the AI again`,
+          action: {
+            label: 'ask the AI again',
+            disabled: !!api.session.busy,
+            onClick: () => void api.dispatch({ type: 'page-roles' }),
+          },
+        }
+      : api.pageRoleNote,
+  ];
 }
 
 /** A page's role door: set a tile aside, or read a page the classifier set aside as a tile. */
@@ -699,15 +905,13 @@ export function SheetCleanRows({
       edits: withItems(api.inputs.cleanEdits, idsOf(kind), keep),
     });
   return (
-    <>
-      <GroupLabel>set aside on the sheet</GroupLabel>
-      <Text size='micro' component='p' className='mb-1'>
-        {removedLine(rows)}
-      </Text>
+    <div className='mt-2'>
       <KindTable
         rows={rows}
         busy={!!api.session.busy}
         onEdit={edit}
+        lead='sheet'
+        askKey='sheet-keep'
         onAcceptAll={() =>
           void api.dispatch({
             type: 'clean',
@@ -719,6 +923,6 @@ export function SheetCleanRows({
           })
         }
       />
-    </>
+    </div>
   );
 }
