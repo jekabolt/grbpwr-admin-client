@@ -62,8 +62,14 @@ export function PieceSheet({
   onPick,
   grainLayer,
   innerLayers,
+  tall,
+  bare,
 }: {
   pieces: readonly PieceDTO[];
+  // Taller canvas (60vh) for a screen where the sheet IS the screen (pieces viewer).
+  tall?: boolean;
+  // No gesture hint line under the sheet: only the «whole sheet» door and real problems stay.
+  bare?: boolean;
   // Слой долевой. '' — не показывать. Рисуется поверх контуров: раскладка поворачивает деталь
   // именно по этой линии, и человек должен увидеть прочитанное ДО того, как ткань разрезана.
   grainLayer?: string;
@@ -251,7 +257,9 @@ export function PieceSheet({
 
   if (!fit || !box) {
     return (
-      <div className='flex h-[46vh] w-full items-center justify-center border border-borderColor bg-bgColor'>
+      <div
+        className={`flex ${tall ? 'h-[60vh]' : 'h-[46vh]'} w-full items-center justify-center border border-borderColor bg-bgColor`}
+      >
         <Text size='micro' variant='label'>
           no contours that can be shown were found in the file
         </Text>
@@ -276,7 +284,7 @@ export function PieceSheet({
           xmlns='http://www.w3.org/2000/svg'
           viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
           fontFamily='monospace'
-          className={`h-[46vh] w-full touch-none ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`${tall ? 'h-[60vh]' : 'h-[46vh]'} w-full touch-none ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
           onPointerDown={(e) => {
             // Только основная кнопка: правый клик открывает контекстное меню и никогда не
             // отдаёт pointerup, оставляя жест взведённым навсегда.
@@ -467,9 +475,11 @@ export function PieceSheet({
         </svg>
       </div>
       <div className='flex flex-wrap items-center gap-2'>
-        <Text size='nano' variant='label' component='span'>
-          click a piece — select · wheel — zoom · drag — pan
-        </Text>
+        {!bare && (
+          <Text size='nano' variant='label' component='span'>
+            click a piece — select · wheel — zoom · drag — pan
+          </Text>
+        )}
         <Button type='button' variant='secondary' size='xs' onClick={() => setView(null)}>
           whole sheet
         </Button>

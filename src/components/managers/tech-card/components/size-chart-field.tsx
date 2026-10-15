@@ -14,7 +14,6 @@ import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
@@ -233,23 +232,8 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     );
   }
 
-  const totalCells = ordered.length * measurements.length;
-  let filled = 0;
-  for (const sizeId of ordered)
-    for (const m of measurements) if (stored(sizeId, m.id).trim()) filled += 1;
-
   return (
     <div className='space-y-2'>
-      <Toolbar>
-        <Text size='micro' variant='label' component='span'>
-          measurements per size — fill in each cell by hand
-        </Text>
-        <ToolbarSpacer />
-        <Pill tone={totalCells > 0 && filled === totalCells ? 'ok' : 'mut'}>
-          {filled}/{totalCells} cells
-        </Pill>
-      </Toolbar>
-
       <DataTable
         variant='grid'
         className={cn(

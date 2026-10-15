@@ -79,7 +79,6 @@ import {
 } from './output-variants-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
-import { PiecesTab } from './pieces-tab';
 import { DevExpensesField } from './dev-expenses-field';
 import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
@@ -613,6 +612,8 @@ export function TechCardForm({
   // cut-piece table moved to PATTERNS the alias is unconditional.
   const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'studio';
+  // The PATTERNS block header: PatternsField portals its counts and warnings into it.
+  const [patternsHeaderEl, setPatternsHeaderEl] = useState<HTMLSpanElement | null>(null);
   // Whether this page is still on screen — for the side effects of a write that outlives it (R-13).
   // m6: true from the first render — a child's mount effect runs BEFORE this one, and a tab it asks
   // for on mount must not be dropped as «the page is gone».
@@ -3597,12 +3598,16 @@ export function TechCardForm({
                     на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
               </Section>
-              <Section title='size chart (measurements) — shared by every colourway of the style'>
+              <Section title='size chart measurements'>
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
-              <Section title='patterns (DXF) — by material'>
+              <Section
+                title='patterns'
+                action={<span ref={setPatternsHeaderEl} className='flex items-center gap-1.5' />}
+              >
                 <PatternsField
                   techCardId={numId || undefined}
+                  headerEl={patternsHeaderEl}
                   // Разбор DXF стартует сам, но только на ОТКРЫТОЙ вкладке: этот SectionStack
                   // смонтирован всегда и прячется через `hidden`, так что без явного ответа
                   // карточка качала бы все выкройки всякому, кто зашёл править BOM.
@@ -3615,12 +3620,6 @@ export function TechCardForm({
                   savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
                 />
               </Section>
-              {/* Cut pieces sit directly under the sheets they come out of: «↔ детали кроя» on the
-                  panel above creates them, and until now it wrote into a table on another tab. Its
-                  own block, not a nested one — a block never contains a block (DESIGN.md). Mounted
-                  ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
-                  set of [data-field] anchors for revealField to walk to. */}
-              <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
               <Section title='markers — fabric consumption by size'>
                 <MarkersSection
                   techCard={techCard}
