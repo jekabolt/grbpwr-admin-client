@@ -10,7 +10,15 @@
 // с shift или горизонтальным свайпом; колесо — зум под курсором. Сверху мини-карта всего маркера
 // с рамкой текущего окна. Зум/панорама живут только в viewBox: детали не перерисовываются на
 // кадр, подписи пересобираются на ОКОНЧАНИЕ зума.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import Text from 'ui/components/text';
 import type { FabricDirection, Placement, PieceDTO, Pt, RotationDeg } from 'lib/nesting/types';
 import { allowedRotations, placedPoly } from 'lib/nesting/types';
@@ -25,6 +33,7 @@ const RULE = '#cccccc';
 const TARGET = '#c22222';
 const BAD = '#c22222';
 const MINI_FILL = '#d4d4d4';
+const OFF_TABLE = '#bdbdbd';
 
 // Экранные константы, px.
 const PAD_PX = 10;
@@ -36,8 +45,11 @@ const LABEL_MIN_PX = 9;
 const LABEL_HIDE_PX = 24;
 const DRAG_SLOP = 4;
 const MINIMAP_PX = 28;
-const ICON_BTN =
-  'flex size-7 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor';
+// Одна квадратная кнопка угла холста: 28×28, рамка, глиф 14px. Модалка рисует свою кнопку выгрузки
+// ЭТИМ ЖЕ классом и в ЭТОЙ ЖЕ группе (проп `corner`), чтобы три кнопки не расходились по размеру.
+export const CANVAS_ICON_BTN =
+  'flex size-7 shrink-0 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+const ICON_BTN = CANVAS_ICON_BTN;
 
 type View = { x: number; y: number; s: number }; // s — px на см
 type Size = { w: number; h: number };
@@ -125,6 +137,8 @@ export function LayoutEditor({
   violating,
   onChange,
   focus,
+  tableEndCm,
+  corner,
 }: {
   pieces: readonly PieceDTO[];
   placements: readonly Placement[];
@@ -148,6 +162,11 @@ export function LayoutEditor({
   // «Показать» снаружи (шапка модалки): выбрать размещение и подвести к нему окно. `nonce`
   // меняется на каждый щелчок, чтобы повторный щелчок по той же детали снова её показывал.
   focus?: { index: number; nonce: number } | null;
+  // КОНЕЦ РАСКРОЕЧНОГО СТОЛА: полезная длина U = стол − 2·запас на концы, см. Вертикальная линия
+  // чернилом с подписью и штриховка «не на столе» за ней. Отсутствует — стол не задан, линии нет.
+  tableEndCm?: number;
+  // Дополнительные кнопки угла холста (выгрузка из модалки) — в ту же группу, тем же размером.
+  corner?: ReactNode;
 }) {
   const byId = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -183,7 +202,12 @@ export function LayoutEditor({
   };
 
   const W = widthCm;
-  const L = Math.max(usedLengthCm, targetCm ?? 0, 10);
+  const tableEnd =
+    tableEndCm != null && Number.isFinite(tableEndCm) && tableEndCm > 0 ? tableEndCm : null;
+  // Стол входит в длину полотна (плюс узкая полоса «за столом»), чтобы его конец был виден и тогда,
+  // когда маркер короче стола: «весь маркер» показывает, сколько стола ещё свободно.
+  const L = Math.max(usedLengthCm, targetCm ?? 0, tableEnd != null ? tableEnd * 1.04 : 0, 10);
+  const hatchId = `table-off-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   // ——— окно просмотра ————————————————————————————————————————————————————————————————————
   // Размер холста в px. До первого замера — правдоподобная заглушка; useLayoutEffect меряет до
@@ -655,7 +679,28 @@ export function LayoutEditor({
           className='absolute inset-0 h-full w-full'
           aria-hidden='true'
         >
+          {tableEnd != null && (
+            <rect
+              x={tableEnd}
+              y={0}
+              width={Math.max(0, L - tableEnd)}
+              height={W}
+              fill={OFF_TABLE}
+              opacity={0.35}
+            />
+          )}
           {minimapPieces}
+          {tableEnd != null && (
+            <line
+              x1={tableEnd}
+              y1={0}
+              x2={tableEnd}
+              y2={W}
+              stroke={INK}
+              strokeWidth={1.5}
+              vectorEffect='non-scaling-stroke'
+            />
+          )}
           <line
             x1={usedLengthCm}
             y1={0}
@@ -743,6 +788,29 @@ export function LayoutEditor({
             strokeWidth={1}
             vectorEffect='non-scaling-stroke'
           />
+          {tableEnd != null && (
+            <>
+              <defs>
+                <pattern
+                  id={hatchId}
+                  patternUnits='userSpaceOnUse'
+                  width={8 * px}
+                  height={8 * px}
+                  patternTransform='rotate(45)'
+                >
+                  <line x1={0} y1={0} x2={0} y2={8 * px} stroke={OFF_TABLE} strokeWidth={px} />
+                </pattern>
+              </defs>
+              <rect
+                x={tableEnd}
+                y={0}
+                width={Math.max(0, L - tableEnd)}
+                height={W}
+                fill={`url(#${hatchId})`}
+                pointerEvents='none'
+              />
+            </>
+          )}
           {marginCm > 0 && (
             <rect
               x={marginCm}
@@ -798,6 +866,31 @@ export function LayoutEditor({
             vectorEffect='non-scaling-stroke'
             pointerEvents='none'
           />
+          {tableEnd != null && (
+            <g pointerEvents='none'>
+              <line
+                x1={tableEnd}
+                y1={0}
+                x2={tableEnd}
+                y2={W}
+                stroke={INK}
+                strokeWidth={1.5}
+                vectorEffect='non-scaling-stroke'
+              />
+              <text
+                x={tableEnd - 4 * px}
+                y={12 * px}
+                fontSize={10 * px}
+                fill={INK}
+                textAnchor='end'
+                stroke='#ffffff'
+                strokeWidth={3 * px}
+                paintOrder='stroke'
+              >
+                table end
+              </text>
+            </g>
+          )}
           {targetCm != null && targetCm > 0 && (
             <line
               x1={targetCm}
@@ -832,9 +925,9 @@ export function LayoutEditor({
           </div>
         )}
 
-        {/* Угол холста: «по ширине» и «весь маркер». Правее (right-1.5) модалка кладёт свою
-            кнопку выгрузки 22px — наши стоят левее неё. */}
-        <div className='absolute bottom-1.5 right-8 flex items-center gap-1'>
+        {/* Угол холста: «по ширине», «весь маркер» и кнопки модалки (выгрузка) — одна группа,
+            один размер 28×28, одна линия. */}
+        <div className='absolute bottom-1.5 right-1.5 z-[1] flex items-center gap-1'>
           <button
             type='button'
             aria-label='fit fabric width'
@@ -876,6 +969,7 @@ export function LayoutEditor({
               <path d='M0.5 4.5V0.5H4.5M9.5 0.5H13.5V4.5M13.5 9.5V13.5H9.5M4.5 13.5H0.5V9.5' />
             </svg>
           </button>
+          {corner}
         </div>
       </div>
     </div>

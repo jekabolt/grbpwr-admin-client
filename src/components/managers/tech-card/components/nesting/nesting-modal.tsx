@@ -6,7 +6,8 @@
 // dxf-parser/clipper2-js/воркер живут только в чанке раскладки.
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_TechCardMarker } from 'api/proto-http/admin';
+import type { common_TechCardMarker, googletype_Decimal } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { extractFieldViolations } from 'utils/field-errors';
@@ -20,8 +21,13 @@ import Selector from 'ui/components/selector';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
-import { ROUTES } from 'constants/routes';
-import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+import { ROUTES, SECTION } from 'constants/routes';
+import {
+  CLEAR_SETTING,
+  useUpdateWorkshopSettings,
+  useWorkshopSettings,
+} from 'components/managers/workshop/useWorkshopSettings';
+import { estimateGarmentsPerPly, spreadFigures, type SpreadMode } from 'lib/nesting/spread';
 import type {
   FabricDirection,
   NestConfig,
@@ -31,13 +37,18 @@ import type {
   Unit,
 } from 'lib/nesting/types';
 import { NEST_DEFAULTS, allowsFlip } from 'lib/nesting/types';
-import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
+import {
+  STORED_LAYOUT_TOLERANCE,
+  checkLayout,
+  measureLayout,
+  type Violation,
+} from 'lib/nesting/geom/clearance';
 // БЮДЖЕТ ДО ЗАПУСКА (Ф2.3). Та же модель, что решает внутри движка, какой точности контуры он
 // потянет: экран зовёт ровно её, а не свою копию.
 import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
-import { LayoutEditor } from './layout-editor';
+import { CANVAS_ICON_BTN, LayoutEditor } from './layout-editor';
 import { isFetchFailure } from './dxf-warnings';
 import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
 import {
@@ -101,10 +112,16 @@ import { useNesting, type NestingFile } from './use-nesting';
 // Units are asked by a dialog at upload: the parse's note about them is not repeated here.
 const UNITS_NOT_SET = /units are not set in the file/;
 // Перенос надсечек с базового размера — служебная заметка разбора, не дело оператора раскладки.
-const NOTCH_CARRY = /notches .*(carried|carry)/i;
+// ТОЛЬКО легаси-заметка об УСПЕШНОМ переносе («— N carried …»). Отказ переноса («could not be
+// carried … those sizes have no notches») — настоящая потеря надсечек и остаётся видимым.
+const NOTCH_CARRY = /^notches are drawn only in the sample size — \d+ carried/;
+// Упрощение контуров под бюджет — не дело оператора: движок компенсирует его зазором (gap + 2·eps)
+// и проверяет зазоры по НЕупрощённым контурам, рез безопасен. Скрыто и в прогоне, и в блобах.
+const SIMPLIFIED_NOTE = /contours are simplified to .* so the search can finish in time/;
 // ЗАМЕТКИ, КОТОРЫЕ ЭТА МОДАЛКА НЕ ПОКАЗЫВАЕТ НИГДЕ — ни из свежего разбора, ни из блоба сохранённой
 // раскладки (туда разбор пишет их вместе с остальными). Фильтр стоит в одном месте — на сборке шапки.
-const isHiddenNote = (w: string): boolean => UNITS_NOT_SET.test(w) || NOTCH_CARRY.test(w);
+const isHiddenNote = (w: string): boolean =>
+  UNITS_NOT_SET.test(w) || NOTCH_CARRY.test(w) || SIMPLIFIED_NOTE.test(w);
 // Записи о припуске в блобе — протокол съёмки, а не предупреждение: вердикт о недоборе модалка
 // выносит сама, по полям раскладки (см. storedNoAllowance), а не по тексту, который раньше писался
 // «SEAM LINE was nested» на ЛЮБОМ нуле, в том числе на линии кроя.
@@ -161,6 +178,47 @@ function violationText(v: Violation): string {
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
 
+// Запас на конец настила с каждой стороны, см (как LAY_END_LOSS_DEFAULT_CM формы настила).
+const END_LOSS_DEFAULT_CM = 2;
+// «fit to the table»: пробные прогоны коротким бюджетом, не больше стольких попыток.
+const FIT_PROBE_BUDGET_MS = 4000;
+const FIT_MAX_ATTEMPTS = 6;
+
+// СНИМОК ТОГО, С ЧЕМ ЗАПУЩЕН ПРОГОН. Сохранение и холст читают его, а не текущие поля: настройки
+// цеха и артикул догружаются асинхронно и могли сменить припуск или ширину посреди прогона, и
+// маркер записал бы не те числа, по которым движок укладывал.
+type RunSnap = {
+  config: NestConfig;
+  pieces: PieceDTO[];
+  composition: MarkerCompositionEntry[];
+  allowanceMm: number;
+  widthCm: number;
+  gapCm: number;
+  marginCm: number;
+  crossGrain: boolean;
+};
+
+// Заголовок без авто-хвоста: сохранённое имя вида «XS×9 · main fabric main fabric · 140 cm» — это
+// подпись по умолчанию, не имя от человека; показывается «xs ×9 · main fabric». Своё имя — как есть.
+const AUTO_NAME_TAIL = /\s·\s\d+(?:[.,]\d+)?\s?cm$/;
+function cleanMarkerTitle(name: string): string {
+  if (!AUTO_NAME_TAIL.test(name)) return name;
+  return name
+    .replace(AUTO_NAME_TAIL, '')
+    .split(' · ')
+    .map((part) => {
+      const w = part.trim().split(/\s+/);
+      if (w.length % 2 === 0) {
+        const h = w.length / 2;
+        const a = w.slice(0, h).join(' ');
+        if (a.toLowerCase() === w.slice(h).join(' ').toLowerCase()) part = a;
+      }
+      return part.replace(/(\S+)×(\d+)/g, (_m, s: string, q: string) => `${s.toLowerCase()} ×${q}`);
+    })
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function PieceThumb({ piece }: { piece: PieceDTO }) {
   const path = useMemo(() => {
     const s = 30 / Math.max(piece.bboxW, piece.bboxH, 1e-6);
@@ -191,14 +249,18 @@ function NumBox({
   emptyAs,
   commitOnBlur = false,
   disabled,
+  onClear,
 }: {
   name: string;
-  value: number;
+  // null = не задано: пустая коробка, а не ноль.
+  value: number | null;
   onCommit: (n: number) => void;
   decimal?: boolean;
   emptyAs?: number;
   commitOnBlur?: boolean;
   disabled?: boolean;
+  // Пустое поле без emptyAs — «очистить» (стол, предел стопки).
+  onClear?: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const parse = (raw: string): number | null => {
@@ -215,10 +277,10 @@ function NumBox({
       inputMode={decimal ? 'decimal' : 'numeric'}
       autoComplete='off'
       className={BOX}
-      value={draft ?? String(value)}
+      value={draft ?? (value == null ? '' : String(value))}
       disabled={disabled}
       onFocus={(e) => {
-        setDraft(String(value));
+        setDraft(value == null ? '' : String(value));
         const el = e.currentTarget;
         requestAnimationFrame(() => el.select());
       }}
@@ -237,6 +299,8 @@ function NumBox({
           if (commitOnBlur) onCommit(n);
         } else if (raw.trim() === '' && emptyAs != null) {
           onCommit(emptyAs);
+        } else if (raw.trim() === '' && onClear) {
+          onClear();
         }
       }}
     />
@@ -344,9 +408,8 @@ export function NestingModal({
   // сегодняшними умолчаниями. Отдать те же файлы ещё и сюда значило бы скачать их дважды и
   // дважды разобрать в двух воркерах — ради `allPieces`, которых в этом режиме не читает никто:
   // геометрию даёт блоб, левая колонка скрыта, прогон недоступен.
-  const { parse, run, start, stop, resetRun, reparse, unitOverride } = useNesting(
-    view ? null : files,
-  );
+  const { parse, run, start, stop, resetRun, reparse, unitOverride, probe, cancelProbe } =
+    useNesting(view ? null : files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
   // Отказ выдать скалярную норму у ОТКРЫТОГО маркера — слово сервера, если он его сказал.
   // Показывается вместо числа: «средняя по составу» и настоящая норма выглядят одинаково.
@@ -688,7 +751,59 @@ export function NestingModal({
   // ПРИПУСК ЦЕХА — прямо из настроек, если вызывающий его не передал. Раньше ни одна точка входа
   // его не передавала, и предзаполнение модалки шло мимо цеха, тогда как планировщик
   // (batch-marker-plan) брал его всегда: две раскладки одной ткани мерили разные контуры.
-  const workshopQuery = useWorkshopSettings(workshopDefaultSeamAllowanceMm == null);
+  // Читается всегда: кроме припуска отсюда же длина стола и предел стопки (ряд «table»).
+  const workshopQuery = useWorkshopSettings();
+  const updateWorkshop = useUpdateWorkshopSettings();
+  const { canWrite } = usePermissions();
+  const canWriteWorkshop = canWrite(SECTION.production);
+  const settingCm = (d?: googletype_Decimal): number | null => {
+    const n = parseDecimalNumber(decimalToInput(d));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const wsTableCm = settingCm(workshopQuery.data?.settings?.cuttingTableLengthCm);
+  const wsStackCm = settingCm(workshopQuery.data?.settings?.maxStackHeightCm);
+  // undefined = следовать цеху; null = очищено здесь; число = своё значение до «save for the workshop».
+  const [tableEdit, setTableEdit] = useState<number | null | undefined>(undefined);
+  const [stackEdit, setStackEdit] = useState<number | null | undefined>(undefined);
+  const tableCm = tableEdit === undefined ? wsTableCm : tableEdit;
+  const stackLimitCm = stackEdit === undefined ? wsStackCm : stackEdit;
+  const [endLossCm, setEndLossCm] = useState<number>(END_LOSS_DEFAULT_CM);
+  const [plies, setPlies] = useState<number>(1);
+  const [spreadMode, setSpreadMode] = useState<SpreadMode>('face_up');
+  // null = по умолчанию: укладывать в стол, когда длина стола задана.
+  const [keepOnTableEdit, setKeepOnTable] = useState<boolean | null>(null);
+  // Полезная длина стола U = стол − 2·запас.
+  const usableCm =
+    tableCm != null && tableCm - 2 * endLossCm > 0
+      ? Math.round((tableCm - 2 * endLossCm) * 100) / 100
+      : null;
+  const keepOnTable = usableCm != null && (keepOnTableEdit ?? true);
+  const workshopDirty =
+    (tableEdit !== undefined && tableEdit !== wsTableCm) ||
+    (stackEdit !== undefined && stackEdit !== wsStackCm);
+  const [savingWorkshop, setSavingWorkshop] = useState(false);
+  const saveForWorkshop = async () => {
+    if (!workshopDirty || !canWriteWorkshop || savingWorkshop) return;
+    const asSetting = (v: number | null): googletype_Decimal =>
+      v == null ? CLEAR_SETTING : { value: String(Math.round(v * 100) / 100) };
+    setSavingWorkshop(true);
+    try {
+      await updateWorkshop.mutateAsync({
+        cuttingTableLengthCm:
+          tableEdit !== undefined && tableEdit !== wsTableCm ? asSetting(tableEdit) : undefined,
+        maxStackHeightCm:
+          stackEdit !== undefined && stackEdit !== wsStackCm ? asSetting(stackEdit) : undefined,
+        defaultSeamAllowanceMm: undefined,
+      });
+      setTableEdit(undefined);
+      setStackEdit(undefined);
+      showMessage('saved for the workshop', 'success');
+    } catch (e) {
+      showMessage(failMessage(e, "couldn't save for the workshop"), 'error');
+    } finally {
+      setSavingWorkshop(false);
+    }
+  };
   const workshopSeamMm = (() => {
     if (workshopDefaultSeamAllowanceMm != null) return workshopDefaultSeamAllowanceMm;
     const n = parseDecimalNumber(
@@ -766,6 +881,13 @@ export function NestingModal({
   const stopping = running && run.stopping;
   const result: NestResult | null =
     run.phase === 'done' ? run.result : run.phase === 'running' ? run.best : null;
+  const [snap, setSnap] = useState<RunSnap | null>(null);
+  // Подбор под стол идёт пробными прогонами мимо run-состояния — отдельный признак занятости.
+  const [fitting, setFitting] = useState<{ attempt: number } | null>(null);
+  const fitAbort = useRef(false);
+  const busy = running || fitting != null;
+  // Результат прогона рисуется и сохраняется по СНИМКУ его входов.
+  const runView = !viewData && result && snap ? snap : null;
 
   // ── ручная доводка (Ф5) ────────────────────────────────────────────────────────────────
   // manual = hand-edited placements overriding the engine/blob result; null = untouched.
@@ -914,14 +1036,24 @@ export function NestingModal({
       ? drawing.pieces
       : viewData
         ? viewData.pieces
-        : pieces;
+        : runView
+          ? runView.pieces
+          : pieces;
   const displayResult = viewData ? viewData.result : result;
-  const displayWidth = viewData ? viewData.widthCm : widthCm;
+  const displayWidth = viewData ? viewData.widthCm : runView ? runView.widthCm : widthCm;
   const displayTarget = viewData ? viewData.targetCm : target;
   // Validation parameters follow the layout's own params in view mode.
-  const displayGap = viewData ? decNum(view?.summary?.gapCm) : gapCm;
-  const displayMargin = viewData ? decNum(view?.summary?.edgeMarginCm) : marginCm;
-  const displayCross = viewData ? !!view?.summary?.allowCrossGrain : crossGrain;
+  const displayGap = viewData ? decNum(view?.summary?.gapCm) : runView ? runView.gapCm : gapCm;
+  const displayMargin = viewData
+    ? decNum(view?.summary?.edgeMarginCm)
+    : runView
+      ? runView.marginCm
+      : marginCm;
+  const displayCross = viewData
+    ? !!view?.summary?.allowCrossGrain
+    : runView
+      ? runView.crossGrain
+      : crossGrain;
 
   // The effective layout: manual placements override, length/efficiency re-measured from
   // true contours; untouched layouts keep the engine's own accounting verbatim.
@@ -952,8 +1084,9 @@ export function NestingModal({
       widthCm: displayWidth,
       gapCm: displayGap,
       marginCm: displayMargin,
+      ...(viewData ? STORED_LAYOUT_TOLERANCE : {}),
     });
-  }, [effective, running, displayPieces, displayWidth, displayGap, displayMargin]);
+  }, [effective, running, displayPieces, displayWidth, displayGap, displayMargin, viewData]);
   const violatingIdx = useMemo(() => new Set(violations.map((v) => v.index)), [violations]);
   const worstViolation = violations.length
     ? violations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
@@ -1045,7 +1178,10 @@ export function NestingModal({
   // a glance instead of after a 20-second search — which is the better place to say it. What
   // survives here is the engine's own guarantee: whatever reaches the placer and does not land is
   // named. The two are not redundant, they are the pre-flight and the black box.
-  const unplaced = !running ? displayResult?.unplaced ?? [] : [];
+  // 'table-full' — отдельный вердикт стола (с действием), не «did not fit».
+  const unplaced = (!running ? displayResult?.unplaced ?? [] : []).filter(
+    (u) => u.reason !== 'table-full',
+  );
   const unplacedText = useMemo(() => {
     if (unplaced.length === 0) return '';
     const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `piece ${id}`;
@@ -1400,6 +1536,8 @@ export function NestingModal({
         })),
       fabricWidthCm: widthCm,
       targetLengthCm: target,
+      // Длина стола — граница укладки ТОЛЬКО при «within table» (или из «fit to the table»).
+      maxLengthCm: keepOnTable && usableCm != null ? usableCm : undefined,
       gapCm,
       edgeMarginCm: marginCm,
       allowCrossGrain: crossGrain,
@@ -1435,6 +1573,8 @@ export function NestingModal({
       grainLayer,
       allowanceMm,
       budgetS,
+      keepOnTable,
+      usableCm,
     ],
   );
 
@@ -1461,12 +1601,143 @@ export function NestingModal({
     if (manual) setRunConfirm(true);
     else startRun();
   };
-  const startRun = () => {
+  const launch = (config: NestConfig, comp: MarkerCompositionEntry[]) => {
     if (parse.phase !== 'ready') return;
     setManual(null);
     setRunConfirm(false);
     setSaveError(null);
-    start(parse.parseId, runConfig);
+    setSnap({
+      config,
+      pieces,
+      composition: comp,
+      allowanceMm,
+      widthCm,
+      gapCm,
+      marginCm,
+      crossGrain,
+    });
+    start(parse.parseId, config);
+  };
+  const startRun = () => launch(runConfig, composition);
+
+  // ── «fit to the table» ─────────────────────────────────────────────────────────────────
+  // Целые изделия, пропорции размеров сохраняются: k изделий раскладываются по долям текущего
+  // состава (наибольший остаток), минимум одно изделие.
+  const qtyMapForK = (k: number): Record<string, number> | null => {
+    const want = Math.max(1, Math.round(k));
+    if (!graded) return { ...qtyByToken, '': want };
+    const total = activeRows.reduce((s, r) => s + r.qty, 0);
+    if (total <= 0) return null;
+    const parts = activeRows.map((r) => {
+      const exact = (r.qty * want) / total;
+      return { key: r.key, qty: r.qty, n: Math.floor(exact), frac: exact - Math.floor(exact) };
+    });
+    let left = want - parts.reduce((s, p) => s + p.n, 0);
+    for (const p of [...parts].sort((a, b) => b.frac - a.frac || b.qty - a.qty)) {
+      if (left <= 0) break;
+      p.n += 1;
+      left -= 1;
+    }
+    const next = { ...qtyByToken };
+    for (const p of parts) next[p.key] = p.n;
+    return next;
+  };
+  // Минус одно изделие — у самого многочисленного размера.
+  const minusOneGarment = (m: Record<string, number>): Record<string, number> | null => {
+    const keys = graded ? activeRows.map((r) => r.key) : [''];
+    let best: string | null = null;
+    for (const k of keys) {
+      if ((m[k] ?? 0) >= 1 && (best == null || (m[k] ?? 0) > (m[best] ?? 0))) best = k;
+    }
+    if (best == null) return null;
+    const next = { ...m, [best]: (m[best] ?? 0) - 1 };
+    return keys.reduce((s, k) => s + (next[k] ?? 0), 0) >= 1 ? next : null;
+  };
+  // Конфиг и состав для гипотетических количеств — та же формула, что у runConfig/composition.
+  const derivedFor = (m: Record<string, number>) => {
+    const rows = compRows
+      .map((r) => ({ ...r, qty: Math.max(0, Math.round(m[r.key] ?? 0)) }))
+      .filter((r) => r.qty >= 1);
+    const ung = Math.max(1, Math.round(m[''] ?? 1));
+    const u = markerUnits({ graded, rows, ungradedUnits: ung });
+    const uop = unitsOfPieces(allPieces, (id) => split.codeById.get(id)?.size ?? '', u);
+    const comp: MarkerCompositionEntry[] = graded
+      ? rows
+          .filter((r) => r.sizeId > 0)
+          .map((r) => ({ sizeId: r.sizeId, quantity: r.qty }))
+          .sort((a, b) => a.sizeId - b.sizeId)
+      : sizeId
+        ? [{ sizeId, quantity: ung }]
+        : [];
+    const config: NestConfig = {
+      ...runConfig,
+      pieces: runConfig.pieces
+        .map((c) => ({
+          ...c,
+          quantity: Math.max(1, Math.round(sel[c.pieceId]?.qty ?? 1)) * (uop.get(c.pieceId) ?? 0),
+        }))
+        .filter((c) => c.quantity > 0),
+    };
+    return { config, comp };
+  };
+  async function fitToTable() {
+    if (parse.phase !== 'ready' || usableCm == null || busy) return;
+    const parseId = parse.parseId;
+    const U = usableCm;
+    const areaById = new Map(pieces.map((p) => [p.id, p.areaCm2]));
+    const totalArea = runConfig.pieces.reduce(
+      (s, c) => s + (areaById.get(c.pieceId) ?? 0) * c.quantity,
+      0,
+    );
+    const garments = Math.max(1, unitsTotal);
+    let k = estimateGarmentsPerPly({
+      garmentAreaCm2: totalArea / garments,
+      fabricWidthCm: widthCm - 2 * marginCm,
+      usableLengthCm: U,
+    });
+    const perGarment = instanceCount / garments;
+    if (perGarment > 0)
+      k = Math.max(1, Math.min(k, Math.floor(MAX_MARKER_PLACEMENTS / perGarment)));
+    let m = qtyMapForK(k);
+    if (!m) return;
+    fitAbort.current = false;
+    let fitted: Record<string, number> | null = null;
+    let lastTried: Record<string, number> = m;
+    try {
+      for (let attempt = 1; attempt <= FIT_MAX_ATTEMPTS && m; attempt++) {
+        setFitting({ attempt });
+        lastTried = m;
+        const { config } = derivedFor(m);
+        if (config.pieces.length === 0) break;
+        const res = await probe(parseId, {
+          ...config,
+          maxLengthCm: U,
+          timeBudgetMs: Math.min(FIT_PROBE_BUDGET_MS, config.timeBudgetMs),
+        });
+        if (fitAbort.current) return;
+        if (!res.unplaced.some((u) => u.reason === 'table-full')) {
+          fitted = m;
+          break;
+        }
+        m = minusOneGarment(m);
+      }
+    } catch {
+      return;
+    } finally {
+      setFitting(null);
+    }
+    // Не влезло за все попытки — финальный прогон берёт следующее меньшее (или последнее
+    // испробованное): полный бюджет укладывает плотнее пробы, а остаток покажет вердикт.
+    const final = fitted ?? m ?? lastTried;
+    const { config, comp } = derivedFor(final);
+    if (config.pieces.length === 0) return;
+    setQtyByToken(final);
+    setKeepOnTable(true);
+    launch({ ...config, maxLengthCm: U }, comp);
+  }
+  const stopFit = () => {
+    fitAbort.current = true;
+    cancelProbe();
   };
 
   // Какой именно артикул подставил колорвей — иначе «ширина взялась откуда-то» и проверить нечем.
@@ -1713,7 +1984,7 @@ export function NestingModal({
       composition.length === 0
     )
       return;
-    if (!effective) return;
+    if (!effective || !snap) return;
     const name = nameValue.trim();
     if (!name) return;
     // Отказ прошлой попытки снимается ЗДЕСЬ, на входе в новую. Он держится на панели намеренно
@@ -1724,7 +1995,7 @@ export function NestingModal({
     setSaving(true);
     try {
       const perSetQty = new Map<number, number>();
-      for (const p of pieces) {
+      for (const p of snap.pieces) {
         const s = sel[p.id];
         if (s?.checked) perSetQty.set(p.id, Math.max(1, Math.round(s.qty)));
       }
@@ -1733,7 +2004,7 @@ export function NestingModal({
       // explicit warning when the operator accepted clearance violations (cutter's call —
       // never blocked, always on the record).
       const layout = buildMarkerLayout({
-        pieces,
+        pieces: snap.pieces,
         perSetQty,
         pieceLineKeyById,
         urlBySource,
@@ -1745,8 +2016,8 @@ export function NestingModal({
           // каждый сантиметр записанного расхода.
           warnings: [
             ...effective.warnings,
-            allowanceMm > 0
-              ? `seam allowance: ${allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
+            snap.allowanceMm > 0
+              ? `seam allowance: ${snap.allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
               : contourIsCutLine
                 ? `seam allowance: 0 — the contour is the CUT line (layer ${contourLayer || '—'}), its allowance is already in it`
                 : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
@@ -1755,13 +2026,15 @@ export function NestingModal({
         },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: {
-          targetLengthCm: target,
+          // Длина стола (полезная U) — единственный параметр настила, который блоб умеет нести:
+          // layout.params типизирован, сервер незнакомые поля отклоняет. Слои/режим/запас не пишутся.
+          targetLengthCm: usableCm ?? snap.config.maxLengthCm ?? target,
           // The eps the run ACTUALLY used, not the one it asked for. The engine raises it when
           // the job is too big to precompute at the requested fidelity (Ф0), and storing the
           // request would make params.rdpEpsCm a lie — read by exactly the person trying to
           // reproduce this marker, who would reproduce a different one.
           rdpEpsCm: effective?.telemetry?.rdpEpsCm ?? NEST_DEFAULTS.rdpEpsCm,
-          timeBudgetMs: budgetS * 1000,
+          timeBudgetMs: snap.config.timeBudgetMs,
         },
         tol: NEST_DEFAULTS.tol,
         tolChain: NEST_DEFAULTS.tolChain,
@@ -1769,7 +2042,7 @@ export function NestingModal({
         // Состав и размеры деталей. buildMarkerLayout сам решает, писать ли их в блоб: на
         // однородной раскладке состав выражается легаси-парой ниже, и блоб остаётся байт в байт
         // прежним — иначе каждый пересохранённый старый маркер «дрожал» бы без единого отличия.
-        composition,
+        composition: snap.composition,
         sizeIdByPieceId,
       });
       await adminService.SaveTechCardMarker({
@@ -1789,7 +2062,7 @@ export function NestingModal({
           // Смешанная раскладка шлёт нули: сервер увидит состав в блобе и запишет size_id/sets
           // как NULL. Однородная шлёт пару — и сохраняется ровно так же, как до Ф2. Решение
           // живёт в legacyPairOf (marker-io), а не выражением здесь, — чтобы его проверял зонд.
-          sizeId: legacyPairOf(composition).sizeId,
+          sizeId: legacyPairOf(snap.composition).sizeId,
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
@@ -1797,17 +2070,17 @@ export function NestingModal({
           // раскладки одного слота на разных ширинах неразличимы, и «применить маркер» в рецепте
           // предложит длину, снятую на чужом полотне.
           colorwayId,
-          fabricWidthCm: dec(widthCm),
-          gapCm: dec(gapCm),
-          edgeMarginCm: dec(marginCm),
+          fabricWidthCm: dec(snap.widthCm),
+          gapCm: dec(snap.gapCm),
+          edgeMarginCm: dec(snap.marginCm),
           // Снимок кромки эффективного артикула на момент сохранения: разложение отходов
           // (кромка / межлекальные выпады) должно оставаться проверяемым и после того, как
           // материал слота отредактируют.
           selvedgeCm: dec(slotSelvedge(slot)),
-          allowCrossGrain: crossGrain,
+          allowCrossGrain: snap.crossGrain,
           // ПРИПУСК, КОТОРЫМ РАЗДУВАЛИ КОНТУРЫ ЭТОГО ПРОГОНА. Это вход алгоритма, а не подпись:
           // длина снята по линии кроя, и без числа её не воспроизвести.
-          seamAllowanceMm: dec(allowanceMm),
+          seamAllowanceMm: dec(snap.allowanceMm),
           // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ (Ф3.3), и оно уезжает ровно
           // тогда, когда состоялось. `undefined` едет как NULL, то есть «не мерялось»; ноль
           // значит «померили, и его нет» — контур был линией шва. Спутать их нельзя ни в одну
@@ -1838,8 +2111,8 @@ export function NestingModal({
           // Направление у полотна меняется, а маркер судят по условиям, при которых он снят.
           // Вывести это из геометрии нельзя: «ни одна деталь не перевёрнута» не значит «переворот
           // был запрещён», и такой вывод завысил бы строгость.
-          allowFlip: allowsFlip(effectiveDirection),
-          sets: legacyPairOf(composition).sets,
+          allowFlip: allowsFlip(snap.config.fabricDirection ?? effectiveDirection),
+          sets: legacyPairOf(snap.composition).sets,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
           placedCount: effective.placedCount,
@@ -2033,6 +2306,117 @@ export function NestingModal({
         }
       : undefined;
   const directionUnset = effectiveDirection === 'unknown';
+
+  // ── настил под раскроечный стол: толщина, цифры, вердикты ───────────────────────────────
+  const thicknessSlot = viewData
+    ? fabricLines.find((b) => b.lineKey === view?.summary?.bomLineKey)
+    : activeSlot;
+  const thicknessPin = thicknessSlot
+    ? (viewData
+        ? cwOptions.find((c) => c.colorwayId === (view?.summary?.colorwayId ?? 0))
+        : chosenColorway
+      )?.widthByLine.get(thicknessSlot.lineKey)
+    : undefined;
+  const thicknessFromPin = !!thicknessPin && Number.isFinite(thicknessPin.cutCm);
+  const thicknessMm =
+    (thicknessFromPin ? thicknessPin?.fabricThicknessMm : thicknessSlot?.fabricThicknessMm) ?? null;
+  const thicknessArticleId = thicknessFromPin
+    ? thicknessPin?.materialId
+    : thicknessSlot?.materialId;
+  // Конец стола на холсте: в прогоне — U из ряда table; у сохранённого — U из блоба.
+  const tableEndCm = viewData ? viewData.targetCm ?? null : usableCm;
+  const spread = spreadFigures({
+    // У сохранённого маркера слои не хранятся — всё, что от них зависит, прочерк.
+    plies: viewData ? NaN : plies,
+    thicknessMm,
+    stackLimitCm,
+    compositionTotal: viewData ? viewData.totalUnits || 1 : unitsTotal,
+    markerLengthCm: effective?.usedLengthCm ?? null,
+    endLossCm,
+    mode: spreadMode,
+  });
+  const overTableCm =
+    effective && tableEndCm != null && !running ? effective.usedLengthCm - tableEndCm : 0;
+  const tableFullCount =
+    !viewData && !running
+      ? (displayResult?.unplaced ?? []).filter((u) => u.reason === 'table-full').length
+      : 0;
+  const fitAvailable =
+    !viewData &&
+    canEdit &&
+    parse.phase === 'ready' &&
+    usableCm != null &&
+    checkedCount > 0 &&
+    !overCap &&
+    !doubleAllowanceRefusal &&
+    !uniRefusal;
+  const fitAction: HeaderWarningAction | undefined = fitAvailable
+    ? {
+        label: 'fit to the table',
+        onClick: () => guardManual(() => void fitToTable()),
+        disabled: busy,
+      }
+    : undefined;
+  const spreadWarnings: HeaderWarning[] = [];
+  if (overTableCm > 0.05) {
+    spreadWarnings.push({
+      text: `longer than the table by ${overTableCm.toFixed(1)} cm`,
+      error: true,
+      action: fitAction,
+    });
+  }
+  if (tableFullCount > 0) {
+    spreadWarnings.push({
+      text: `${tableFullCount} ${tableFullCount === 1 ? "piece doesn't" : "pieces don't"} fit on the table`,
+      error: true,
+      action: fitAction,
+    });
+  }
+  if (!viewData && spread.overStack && spread.maxPlies != null) {
+    const max = spread.maxPlies;
+    spreadWarnings.push({
+      text: `${plies} plies over the stack limit, max ${max}`,
+      error: true,
+      action: { label: 'set plies to max', onClick: () => setPlies(Math.max(1, max)) },
+    });
+  }
+  if (!viewData && spread.oddFaceToFace) {
+    spreadWarnings.push({
+      text: 'face to face needs an even number of plies',
+      error: true,
+      action: {
+        label: 'make even',
+        onClick: () =>
+          setPlies((p) =>
+            spread.maxPlies != null && p + 1 > spread.maxPlies ? Math.max(2, p - 1) : p + 1,
+          ),
+      },
+    });
+  }
+  if (!viewData && parse.phase === 'ready' && tableCm == null) {
+    spreadWarnings.push({
+      text: 'table length not set',
+      action: { label: 'set', onClick: () => focusField('nest-table') },
+    });
+  }
+  if (!viewData && thicknessSlot && thicknessMm == null && plies > 1) {
+    spreadWarnings.push({
+      text: 'fabric thickness not set: no stack height',
+      action: openArticle(thicknessArticleId),
+    });
+  }
+  // Припуск/ширина сменились (догрузка цеха или артикула) уже после старта прогона.
+  const snapStale =
+    !viewData &&
+    run.phase === 'done' &&
+    snap != null &&
+    (snap.allowanceMm !== allowanceMm ||
+      snap.widthCm !== widthCm ||
+      snap.gapCm !== gapCm ||
+      snap.marginCm !== marginCm ||
+      snap.crossGrain !== crossGrain);
+  const figure = (v: number | null, digits = 0) =>
+    v == null ? '—' : digits > 0 ? String(Math.round(v * 10 ** digits) / 10 ** digits) : String(v);
   const railS1: RailSectionStatus = {
     blockers: [
       noSlotChosen ? 'pick a fabric' : '',
@@ -2198,6 +2582,13 @@ export function NestingModal({
                 : undefined,
           }))
       : [],
+    ...spreadWarnings,
+    snapStale
+      ? {
+          text: 'settings changed after the run',
+          action: { label: 'run again', onClick: requestRun },
+        }
+      : '',
     forecast?.outlook === 'starved' && !running ? 'geometry too heavy for the time budget' : '',
     unplaced.length > 0
       ? { text: `did not fit: ${unplaced.length} · ${unplacedText}`, error: true }
@@ -2246,7 +2637,8 @@ export function NestingModal({
     checkedCount === 0 ||
     overCap ||
     !!doubleAllowanceRefusal ||
-    !!uniRefusal;
+    !!uniRefusal ||
+    fitting != null;
   // ЕДИНСТВЕННОЕ МЕСТО, где собирается шапка: служебные заметки разбора, протокол припуска и
   // прежняя заметка о ручной правке (её заменяет живая проверка выше) отсюда не выходят — ни из
   // свежего разбора, ни из блоба сохранённой раскладки.
@@ -2258,6 +2650,61 @@ export function NestingModal({
       return !isHiddenNote(t) && !t.startsWith(SEAM_NOTE_PREFIX) && !isManualNote(t);
     });
   const titleFabric = (lockedSlot ?? slot)?.name?.trim();
+  // Выгрузка: та же кнопка 28×28, что «по ширине» и «весь маркер», в той же группе угла холста.
+  const downloadButton =
+    effective && !running ? (
+      <GenericPopover
+        noTail
+        className='w-[120px]'
+        contentProps={{ align: 'end', side: 'top', sideOffset: 4 }}
+        triggerProps={{
+          'aria-label': 'download',
+          className: CANVAS_ICON_BTN,
+        }}
+        openElement={
+          <svg width='14' height='14' viewBox='0 0 14 14' aria-hidden fill='none'>
+            <path
+              d='M7 1.5v8M3.5 6 7 9.5 10.5 6M2 12.5h10'
+              stroke='currentColor'
+              strokeWidth='1.2'
+            />
+          </svg>
+        }
+      >
+        <div className='flex flex-col items-start gap-1'>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={viewDegraded || drawingBlocked || partialGeometry}
+            title={exportBlockReason || undefined}
+            onClick={downloadSvg}
+          >
+            SVG
+          </Button>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={!dxfReady}
+            title={exportBlockReason || undefined}
+            onClick={downloadDxf}
+          >
+            DXF
+          </Button>
+          {/* Плоттерный выход без чертежа — только когда чертёж не восстановлен (решение Р4). */}
+          {drawing.phase === 'error' && !viewDegraded && (
+            <Button
+              type='button'
+              variant='underline'
+              disabled={partialGeometry}
+              title={partialExportRefusal || undefined}
+              onClick={downloadContoursOnly}
+            >
+              DXF contours
+            </Button>
+          )}
+        </div>
+      </GenericPopover>
+    ) : null;
 
   return (
     <ConfirmationModal
@@ -2268,8 +2715,18 @@ export function NestingModal({
       onConfirm={requestClose}
       title={
         viewData
-          ? `marker · ${view?.summary?.name ?? ''}`
-          : `marker${titleFabric ? ` · ${titleFabric}` : sizeLabel ? ` · ${sizeLabel}` : ''}`
+          ? `marker · ${cleanMarkerTitle(view?.summary?.name ?? '')}`
+          : [
+              'marker',
+              graded
+                ? composition
+                    .map((c) => `${sizeNameOfId(c.sizeId).toLowerCase()} ×${c.quantity}`)
+                    .join(' ')
+                : sizeLabel || (ungradedUnits > 1 ? `×${ungradedUnits}` : ''),
+              titleFabric,
+            ]
+              .filter(Boolean)
+              .join(' · ')
       }
       width='lg'
       hideActions
@@ -2287,6 +2744,7 @@ export function NestingModal({
                 <select
                   name='nest-colourway'
                   className={`${BOX} cursor-pointer truncate`}
+                  disabled={busy}
                   value={String(colorwayId)}
                   onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
                 >
@@ -2321,6 +2779,7 @@ export function NestingModal({
                 <select
                   name='nest-fabric-select'
                   className={`${BOX} cursor-pointer truncate`}
+                  disabled={busy}
                   value={slotKey}
                   onChange={(e) => setSlotKey(e.target.value)}
                 >
@@ -2352,7 +2811,7 @@ export function NestingModal({
                       name={`nest-comp-${r.key}`}
                       value={r.qty}
                       emptyAs={0}
-                      disabled={running}
+                      disabled={busy}
                       onCommit={(n) => {
                         const next = Math.max(0, Math.round(n));
                         if (next !== r.qty) {
@@ -2377,7 +2836,7 @@ export function NestingModal({
                   name='nest-units'
                   value={ungradedUnits}
                   emptyAs={1}
-                  disabled={running}
+                  disabled={busy}
                   onCommit={(n) => {
                     const next = Math.max(1, Math.round(n));
                     if (next !== ungradedUnits) {
@@ -2411,7 +2870,7 @@ export function NestingModal({
                     });
                   }
                 }}
-                disabled={running}
+                disabled={busy}
               />
             </label>
             <label className={`${FIELD} space-y-0.5`}>
@@ -2427,7 +2886,7 @@ export function NestingModal({
                   const next = Math.max(0, n);
                   if (next !== gapCm) guardManual(() => setGapCm(next));
                 }}
-                disabled={running}
+                disabled={busy}
               />
             </label>
             <label className={`${FIELD} space-y-0.5`}>
@@ -2443,7 +2902,7 @@ export function NestingModal({
                   const next = Math.max(0, n);
                   if (next !== marginCm) guardManual(() => setMarginCm(next));
                 }}
-                disabled={running}
+                disabled={busy}
               />
             </label>
             {/* Припуск на шов — ВХОД алгоритма: раздувает контур до линии кроя до укладки. */}
@@ -2482,7 +2941,7 @@ export function NestingModal({
                     });
                   }
                 }}
-                disabled={running}
+                disabled={busy}
               />
             </label>
             <div className={`${FIELD} space-y-0.5`}>
@@ -2494,7 +2953,7 @@ export function NestingModal({
                 type='button'
                 name='nest-crossgrain'
                 aria-pressed={crossGrain}
-                disabled={running}
+                disabled={busy}
                 onClick={() => guardManual(() => setCrossGrain(!crossGrain))}
                 className={`${BOX} justify-center uppercase ${
                   crossGrain ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
@@ -2546,7 +3005,7 @@ export function NestingModal({
                     <button
                       type='button'
                       className='text-micro uppercase underline hover:opacity-70'
-                      disabled={running}
+                      disabled={busy}
                       onClick={() =>
                         guardManual(() => {
                           // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
@@ -2572,7 +3031,7 @@ export function NestingModal({
                         <CheckboxCommon
                           name={`nest-piece-${p.id}`}
                           checked={s.checked && fits}
-                          disabled={!fits || running}
+                          disabled={!fits || busy}
                           onChange={(c: boolean) =>
                             guardManual(() =>
                               setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })),
@@ -2606,7 +3065,7 @@ export function NestingModal({
                           type='number'
                           value={s.qty}
                           min={1}
-                          disabled={!fits || running}
+                          disabled={!fits || busy}
                           className='w-12 shrink-0'
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setSel((m) => ({
@@ -2633,6 +3092,160 @@ export function NestingModal({
         )}
       </div>
 
+      {/* РЯД СТОЛА: настил слоями на раскроечном столе. Те же коробки 72×24, что и ряд выше. */}
+      {!viewData && (
+        <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
+          <label className={`${FIELD} space-y-0.5`} title='cutting table length · empty = not set'>
+            <Text
+              size='micro'
+              variant={tableCm == null ? undefined : 'label'}
+              component='span'
+              className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
+            >
+              table cm
+            </Text>
+            <NumBox
+              name='nest-table'
+              decimal
+              value={tableCm}
+              commitOnBlur
+              disabled={busy}
+              onClear={() => setTableEdit(null)}
+              onCommit={(n) => setTableEdit(n > 0 ? n : null)}
+            />
+          </label>
+          <label
+            className={`${FIELD} space-y-0.5`}
+            title='spread end loss on each end of the table'
+          >
+            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+              end loss cm
+            </Text>
+            <NumBox
+              name='nest-end-loss'
+              decimal
+              value={endLossCm}
+              emptyAs={0}
+              commitOnBlur
+              disabled={busy}
+              onCommit={(n) => setEndLossCm(Math.max(0, n))}
+            />
+          </label>
+          <label className={`${FIELD} space-y-0.5`}>
+            <Text
+              size='micro'
+              variant={spread.overStack || spread.oddFaceToFace ? undefined : 'label'}
+              component='span'
+              className={
+                spread.overStack || spread.oddFaceToFace ? `${BOX_LABEL} text-error` : BOX_LABEL
+              }
+            >
+              plies
+            </Text>
+            <NumBox
+              name='nest-plies'
+              value={plies}
+              emptyAs={1}
+              onCommit={(n) => setPlies(Math.max(1, Math.round(n)))}
+            />
+          </label>
+          <div className={`${FIELD} space-y-0.5`} title='spread mode: face up or face to face'>
+            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+              face
+            </Text>
+            <button
+              type='button'
+              name='nest-spread-mode'
+              aria-pressed={spreadMode === 'face_to_face'}
+              onClick={() => setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up'))}
+              className={`${BOX} justify-center uppercase ${
+                spreadMode === 'face_to_face'
+                  ? 'border-textColor bg-textColor text-bgColor hover:opacity-80'
+                  : ''
+              }`}
+            >
+              {spreadMode === 'face_up' ? 'up' : 'to face'}
+            </button>
+          </div>
+          <label className={`${FIELD} space-y-0.5`} title='stack height limit · empty = not set'>
+            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+              stack limit cm
+            </Text>
+            <NumBox
+              name='nest-stack-limit'
+              decimal
+              value={stackLimitCm}
+              commitOnBlur
+              onClear={() => setStackEdit(null)}
+              onCommit={(n) => setStackEdit(n > 0 ? n : null)}
+            />
+          </label>
+          <div className={`${FIELD} space-y-0.5`} title='fabric thickness, from the article'>
+            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+              thickness mm
+            </Text>
+            <div className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor`}>
+              {thicknessMm == null ? '—' : thicknessMm}
+            </div>
+          </div>
+          <div
+            className={`${FIELD} space-y-0.5`}
+            title='keep within the table: the engine stops at the table end'
+          >
+            <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+              within table
+            </Text>
+            <button
+              type='button'
+              name='nest-keep-on-table'
+              aria-pressed={keepOnTable}
+              disabled={busy || usableCm == null}
+              onClick={() => guardManual(() => setKeepOnTable(!keepOnTable))}
+              className={`${BOX} justify-center uppercase ${
+                keepOnTable ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
+              }`}
+            >
+              {keepOnTable ? 'on' : 'off'}
+            </button>
+          </div>
+          {workshopDirty && canWriteWorkshop && (
+            <Button
+              type='button'
+              variant='underline'
+              className='h-6'
+              disabled={savingWorkshop}
+              onClick={() => void saveForWorkshop()}
+            >
+              {savingWorkshop ? 'saving…' : 'save for the workshop'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Цифры настила: одна строка, единицы серым, цифры моноширинные. */}
+      {(!viewData || tableEndCm != null) && (
+        <p className='mb-2.5 text-textBaseSize tabular-nums'>
+          {fitting && (
+            <span className='text-labelColor'>
+              fitting to the table… attempt {fitting.attempt} ·{' '}
+            </span>
+          )}
+          <span className='text-labelColor'>on table </span>
+          {figure(tableEndCm, 1)}
+          <span className='text-labelColor'> cm · plies </span>
+          {viewData ? '—' : plies}
+          <span className='text-labelColor'> · stack </span>
+          {figure(spread.stackCm, 1)}
+          <span className='text-labelColor'> cm / max </span>
+          {figure(spread.maxPlies)}
+          <span className='text-labelColor'> plies · garments </span>
+          {figure(spread.garments)}
+          <span className='text-labelColor'> · fabric </span>
+          {figure(spread.fabricCm == null ? null : spread.fabricCm / 100, 2)}
+          <span className='text-labelColor'> m</span>
+        </p>
+      )}
+
       {/* Холст на всю ширину модалки. Готовая/сохранённая раскладка идёт через интерактивный
           редактор; потоковое превью GA остаётся дешёвым строковым SVG. */}
       <div className='space-y-2'>
@@ -2649,7 +3262,8 @@ export function NestingModal({
               placements={effective.placements}
               widthCm={displayWidth}
               usedLengthCm={effective.usedLengthCm}
-              targetCm={displayTarget}
+              targetCm={viewData ? undefined : displayTarget}
+              tableEndCm={tableEndCm ?? undefined}
               marginCm={displayMargin}
               allowCrossGrain={displayCross}
               // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
@@ -2667,69 +3281,17 @@ export function NestingModal({
               violating={violatingIdx}
               focus={focusReq}
               onChange={(next) => setManual(next)}
+              corner={downloadButton}
             />
           ) : (
             <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
               <Text size='micro' variant='label'>
-                {running ? 'computing…' : '—'}
+                {running
+                  ? 'computing…'
+                  : fitting
+                    ? `fitting to the table… attempt ${fitting.attempt}`
+                    : '—'}
               </Text>
-            </div>
-          )}
-          {/* Выгрузка: одна квадратная кнопка в углу холста, форматы в поповере. */}
-          {effective && !running && (
-            <div className='absolute bottom-1.5 right-1.5'>
-              <GenericPopover
-                noTail
-                className='w-[120px]'
-                contentProps={{ align: 'end', side: 'top', sideOffset: 4 }}
-                triggerProps={{
-                  'aria-label': 'download',
-                  className:
-                    'flex h-[22px] w-[22px] items-center justify-center border border-borderColor bg-bgColor text-textColor hover:border-textColor hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                }}
-                openElement={
-                  <svg width='14' height='14' viewBox='0 0 14 14' aria-hidden fill='none'>
-                    <path
-                      d='M7 1.5v8M3.5 6 7 9.5 10.5 6M2 12.5h10'
-                      stroke='currentColor'
-                      strokeWidth='1.2'
-                    />
-                  </svg>
-                }
-              >
-                <div className='flex flex-col items-start gap-1'>
-                  <Button
-                    type='button'
-                    variant='underline'
-                    disabled={viewDegraded || drawingBlocked || partialGeometry}
-                    title={exportBlockReason || undefined}
-                    onClick={downloadSvg}
-                  >
-                    SVG
-                  </Button>
-                  <Button
-                    type='button'
-                    variant='underline'
-                    disabled={!dxfReady}
-                    title={exportBlockReason || undefined}
-                    onClick={downloadDxf}
-                  >
-                    DXF
-                  </Button>
-                  {/* Плоттерный выход без чертежа — только когда чертёж не восстановлен (решение Р4). */}
-                  {drawing.phase === 'error' && !viewDegraded && (
-                    <Button
-                      type='button'
-                      variant='underline'
-                      disabled={partialGeometry}
-                      title={partialExportRefusal || undefined}
-                      onClick={downloadContoursOnly}
-                    >
-                      DXF contours
-                    </Button>
-                  )}
-                </div>
-              </GenericPopover>
             </div>
           )}
         </div>
@@ -2834,6 +3396,10 @@ export function NestingModal({
             (running ? (
               <Button type='button' variant='main' size='sm' disabled={stopping} onClick={stop}>
                 {stopping ? 'stopping…' : 'stop'}
+              </Button>
+            ) : fitting ? (
+              <Button type='button' variant='main' size='sm' onClick={stopFit}>
+                stop
               </Button>
             ) : effective ? (
               <>

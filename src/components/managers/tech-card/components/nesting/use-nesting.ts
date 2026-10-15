@@ -225,5 +225,35 @@ export function useNesting(files: NestingFile[] | null) {
   // Read the files again (a warning's «retry» after a failed download).
   const reparse = useCallback(() => setParseNonce((n) => n + 1), []);
 
-  return { parse, run, start, stop, resetRun, reparse, unitOverride, setUnitOverride };
+  // ПРОБНЫЙ ПРОГОН («fit to the table»): тот же воркер, но без run-состояния — ни холст, ни
+  // кнопки не видят пробу. Один пробный за раз; cancelProbe просит воркер вернуть лучшее.
+  const probeRef = useRef<number | null>(null);
+  const probe = useCallback(
+    async (parseId: number, config: NestConfig): Promise<NestResult> => {
+      const { id, done } = client().nest(parseId, config, () => {});
+      probeRef.current = id;
+      try {
+        return await done;
+      } finally {
+        if (probeRef.current === id) probeRef.current = null;
+      }
+    },
+    [client],
+  );
+  const cancelProbe = useCallback(() => {
+    if (probeRef.current != null) client().cancel(probeRef.current);
+  }, [client]);
+
+  return {
+    parse,
+    run,
+    start,
+    stop,
+    resetRun,
+    reparse,
+    unitOverride,
+    setUnitOverride,
+    probe,
+    cancelProbe,
+  };
 }
