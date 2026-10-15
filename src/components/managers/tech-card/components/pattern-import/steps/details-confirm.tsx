@@ -16,7 +16,7 @@ import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
-import { NumberField } from '../ui-bits';
+import { NumberField, ask } from '../ui-bits';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
@@ -45,25 +45,32 @@ export function OutlineQuestion({
     current.origin === 'text' || current.origin === 'measured' ? current : null,
   );
   const prefill = word?.kind === 'cut' && !clash ? 'cut' : null;
+  const why = [
+    current.evidence.some((e) => /only for some pieces/.test(e))
+      ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
+      : 'the sheet has no allowance note and no second line',
+    `${open.length} ${open.length === 1 ? 'piece' : 'pieces'} · answer once for the file`,
+    !clash && word?.kind === 'cut'
+      ? `the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <CalloutBox
       tone='warning'
       className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
     >
-      <Text size='micro' component='p' className='min-w-0 flex-1'>
-        <b>! what is the drawn outline?</b>{' '}
-        {current.evidence.some((e) => /only for some pieces/.test(e))
-          ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
-          : 'the sheet has no allowance note and no second line'}{' '}
-        ({open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
+      <Text size='micro' component='p' className='min-w-0 flex-1' title={why}>
+        <b>! what is the drawn outline?</b>
+        {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
+            the reason the question is asked at all — stays on screen */}
         {clash && ` ${clash}`}
-        {!clash &&
-          word?.kind === 'cut' &&
-          ` the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled.`}
         {word?.kind === 'stop' && ` ${word.reason}`}
       </Text>
       <span className='flex flex-wrap items-center gap-1.5'>
         <Button
+          {...ask('details-outline')}
           variant={prefill === 'cut' ? 'main' : 'secondary'}
           size='xs'
           disabled={busy}
@@ -73,6 +80,7 @@ export function OutlineQuestion({
           cut line · as drawn
         </Button>
         <Button
+          {...ask('details-outline')}
           variant='secondary'
           size='xs'
           disabled={busy}
@@ -99,15 +107,19 @@ export function OutlineQuestion({
 export function ConfirmStrip({ api }: { api: ImportSessionApi }) {
   const open = useOpenQuestions(api);
   if (!open.total) return null;
+  const foldAlt = open.quantity.filter((u) => u.foldAlt).length;
   return (
     <div className='mt-2 flex flex-wrap items-center gap-2'>
-      <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
-        ! {countWords(open)} not proven by the sheet: check the marked rows, fix any that are wrong,
-        then confirm the rest.
-        {open.quantity.some((u) => u.foldAlt) &&
-          ` ${open.quantity.filter((u) => u.foldAlt).length} may be cut on fold instead of a pair.`}
+      <Text
+        size='micro'
+        component='p'
+        className='min-w-0 flex-1 text-warning'
+        title={`check the marked rows, fix any that are wrong, then confirm the rest${foldAlt ? ` · ${foldAlt} may be cut on fold instead of a pair` : ''}`}
+      >
+        ! {countWords(open)} not proven by the sheet
       </Text>
       <Button
+        {...ask('details-confirm')}
         variant='main'
         size='xs'
         disabled={!!api.session.busy}
@@ -200,33 +212,26 @@ export function nameNote(open: ReturnType<typeof openQuestions>, seed: SeedId) {
 /**
  * PASSPORT (d), Ф1: the document's own cutting list against the pieces found — a NOTE, never a
  * stop (the list may name other models, other sheets, pieces cut by dimensions or traced from
- * another). Shown only when the list was read from the text layer (our grammar, a cutting section).
+ * another). Read from the text layer only. A `HeaderWarnings` item, and only when the list names
+ * a piece this sheet does not carry (all found = nothing to say).
  */
-export function PassportNote({ api }: { api: ImportSessionApi }) {
+export function passportWarning(api: ImportSessionApi): string | null {
   const p = api.session.semantics?.passport;
   if (!p || !p.pieces.length) return null;
-  const bound = p.pieces.filter((e) => e.binding);
   const missing = p.pieces.filter((e) => !e.binding);
+  const extra = p.extra ?? [];
+  if (!missing.length && !extra.length) return null;
   const tag = (e: (typeof p.pieces)[number]) =>
     `${e.label?.value ?? '?'} «${e.name.value}»${e.qty ? ` ×${e.qty.value.n}${e.qty.value.mode === 'fold' ? ' on fold' : ''}` : ''}`;
-  return (
-    <Text
-      size='micro'
-      component='p'
-      className={`mt-2 ${missing.length ? 'text-warning' : 'text-textInactiveColor'}`}
-    >
-      the document&apos;s cutting list names {p.pieces.length}{' '}
-      {p.pieces.length === 1 ? 'piece' : 'pieces'}; {bound.length} found on this sheet by the
-      printed number
-      {missing.length > 0 &&
-        ` — not found here: ${missing
+  return [
+    missing.length
+      ? `cutting list: not found on this sheet — ${missing
           .slice(0, 6)
           .map(tag)
-          .join(
-            ', ',
-          )}${missing.length > 6 ? ` +${missing.length - 6}` : ''} (another model or sheet, cut by dimensions, or lost — check)`}
-      {(p.extra?.length ?? 0) > 0 &&
-        ` · on the sheet but not in the list: ${(p.extra ?? []).slice(0, 6).join(', ')}`}
-    </Text>
-  );
+          .join(', ')}${missing.length > 6 ? ` +${missing.length - 6}` : ''}`
+      : '',
+    extra.length ? `on the sheet, not in the list: ${extra.slice(0, 6).join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }

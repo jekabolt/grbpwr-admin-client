@@ -20,7 +20,8 @@ import { Button } from 'ui/components/button';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
+import { FoldCaret } from 'ui/components/fold-caret';
+import { HeaderWarnings } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
@@ -28,10 +29,11 @@ import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
-import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtMm, fmtPct } from '../ui-bits';
+import { plural } from '../stages';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
-import { provenCopy } from '../auto-advance';
+import { provenCopy, weakAsides } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
 
@@ -46,6 +48,16 @@ const HINT: Record<Tool, string> = {
   lasso: 'draw around several seeds to merge · inside a two-seed region to split',
   reseed: 'click the new place for the selected seed',
 };
+
+/** The toolbar: tool, word, what it does. */
+const TOOLS = [
+  ['pan', 'pan', 'pan and select'],
+  ['seed', '+ seed', 'click inside a piece the text did not label'],
+  ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
+  ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
+  ['ignore', 'ignore line', 'a line that is not an outline'],
+  ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
+] as const satisfies readonly (readonly [Tool, string, string])[];
 
 type Bridge = Extract<PieceEdit, { kind: 'bridge' }>;
 
@@ -144,6 +156,13 @@ const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
     'two size layouts fit these lines equally well, so no outline is given. reseed: click another spot inside the piece. or mark it not a piece.',
 };
 
+/** A refusal in a row's few words; the whole of REFUSED is the row's title. */
+const REFUSED_SHORT: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
+  'sizes-not-distinguished': 'sizes drawn alike',
+  'size-count': 'size count open',
+  'grade-ambiguous': 'two size layouts fit',
+};
+
 /**
  * The reader's own detail on a refusal, minus the sentence REFUSED already says (FLY-final copy 6:
  * the panel printed it twice). Its generic sentences end in the specific reason in brackets.
@@ -224,6 +243,10 @@ export function PiecesStep({
     lastFocus.current = focus;
   }, [focus]);
   const [hint, setHint] = useState<string | null>(null);
+  /** Every tool on the toolbar, not only the ones the selected region's problem needs. */
+  const [allTools, setAllTools] = useState(false);
+  /** The closed regions' list, opened by hand (a closed region picked on the sheet opens it too). */
+  const [closedOpen, setClosedOpen] = useState(false);
   /** A2: the set-aside group opened in the list, and the outline the sheet zooms to. */
   const [asideOpen, setAsideOpen] = useState<string | null>(null);
   const [asideAt, setAsideAt] = useState<SetAside | null>(null);
@@ -318,6 +341,82 @@ export function PiecesStep({
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
   );
 
+  // ── what needs a fix: only the sizes that are exported must close (the footer's own rule) ──
+  const isExp = (r: number) => !mapped || mapped.has(r);
+  const needsFix = (f: PieceFamily) =>
+    f.candidates.some((c) => isExp(c.rank) && c.outcome !== 'closed');
+  const openFams = families.filter(needsFix);
+  const closedFams = families.filter((f) => !needsFix(f));
+  /** The size that shows the region's problem: the one on screen, else the first open one. */
+  const problemOf = (f: PieceFamily): PieceCandidate => {
+    const c = cand(f);
+    return c.outcome !== 'closed' && isExp(c.rank)
+      ? c
+      : f.candidates.find((x) => isExp(x.rank) && x.outcome !== 'closed') ?? c;
+  };
+  const selClosed = !!selected && !needsFix(selected);
+  const weak = new Set(weakAsides(asides, families, out.seeds));
+  /** What is wrong with a region: a short word on the row, the whole instruction as its title. */
+  const whyOf = (f: PieceFamily, c: PieceCandidate): { short: string; full: string } => {
+    switch (c.outcome) {
+      case 'refused': {
+        const r = c.gradeRefusal ?? 'sizes-not-distinguished';
+        const extra = refusalExtra(c.gradeDetail);
+        return { short: REFUSED_SHORT[r], full: `${REFUSED[r]}${extra ? ` (${extra})` : ''}` };
+      }
+      case 'leak':
+        return seedAt(f.seed)?.origin === 'face' &&
+          f.candidates.every((x) => x.outcome === 'leak' || x.outcome === 'tiny')
+          ? {
+              short: 'open outline',
+              full: 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.',
+            }
+          : {
+              short: 'gap at the red ring',
+              full: 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.',
+            };
+      case 'merged':
+        return {
+          short: 'two pieces touch',
+          full: 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.',
+        };
+      case 'tiny':
+        return {
+          short: 'too small',
+          full: `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`,
+        };
+      default:
+        return { short: 'closed', full: 'closed and snapped to the drawn lines.' };
+    }
+  };
+  const notAPiece = (f: PieceFamily) => {
+    // keep how the region read, for "not in this file" on check
+    const big = Math.max(...f.candidates.map((c) => c.areaMm2));
+    remember(
+      f.seed,
+      `region ${markOf.get(f.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
+    );
+    void api.editPieces({ kind: 'not-a-piece', seed: f.seed });
+    setSel(null);
+  };
+  // the toolbar holds the tools the selected problem needs (and the one in hand), not all six
+  const ctxTools = new Set<Tool>(['pan', 'seed', tool]);
+  const selProblem = selected && needsFix(selected) ? problemOf(selected).outcome : null;
+  if (selProblem === 'leak') ['bridge', 'wall', 'ignore'].forEach((t) => ctxTools.add(t as Tool));
+  if (selProblem === 'merged') ctxTools.add('lasso');
+  if (focus?.kind === 'walls') ['wall', 'bridge'].forEach((t) => ctxTools.add(t as Tool));
+  if (focus?.kind === 'growth') ctxTools.add('wall');
+  if (focus?.kind === 'region') ctxTools.add('bridge');
+  const editsLine = [
+    plural(inputs.edits.length, 'edit'),
+    bridges.length && `${plural(bridges.length, 'gap')} closed`,
+    used.size && `${plural(used.size, 'line')} used`,
+    ignored.size && `${plural(ignored.size, 'line')} ignored`,
+    `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   const onLasso = (poly: PtMm[]) => {
     const ins = families.filter((f) => {
       const s = seedAt(f.seed);
@@ -345,17 +444,9 @@ export function PiecesStep({
           title='pieces on the sheet'
           aside={
             <span className='flex flex-wrap items-center gap-1'>
-              {(
-                [
-                  ['pan', 'pan', 'pan and select'],
-                  ['seed', '+ seed', 'click inside a piece the text did not label'],
-                  ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
-                  ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
-                  ['ignore', 'ignore line', 'a line that is not an outline'],
-                  ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
-                ] as const
-              ).map(([t, word, title]) => (
+              {TOOLS.filter(([t]) => allTools || ctxTools.has(t)).map(([t, word, title]) => (
                 <Chip
+                  {...ask('pieces-seed', t === 'seed' && !families.length)}
                   quiet
                   key={t}
                   selected={tool === t}
@@ -372,6 +463,13 @@ export function PiecesStep({
                   {word}
                 </Chip>
               ))}
+              <Chip
+                quiet
+                onClick={() => setAllTools((a) => !a)}
+                title={allTools ? 'only the tools for the selected region' : 'every tool'}
+              >
+                {allTools ? 'fewer tools' : 'more tools'}
+              </Chip>
             </span>
           }
           bodyClassName='p-0 flex flex-col'
@@ -419,6 +517,7 @@ export function PiecesStep({
                   </Chip>
                   {variants.map((v) => (
                     <Chip
+                      {...ask('pieces-model', !session.variant)}
                       key={v}
                       selected={session.variant === v}
                       pressed={session.variant === v}
@@ -722,24 +821,33 @@ export function PiecesStep({
         <Panel
           title='regions'
           aside={
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              {counts.closed} closed
-              {counts.leak ? ` · ${counts.leak} leak` : ''}
-              {counts.merged ? ` · ${counts.merged} two seeds` : ''}
-              {counts.tiny ? ` · ${counts.tiny} tiny` : ''}
-              {counts.refused ? ` · ${counts.refused} sizes unclear` : ''}
-            </Text>
+            <>
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='uppercase tracking-label'
+              >
+                {counts.closed} closed
+                {counts.leak ? ` · ${counts.leak} leak` : ''}
+                {counts.merged ? ` · ${counts.merged} two seeds` : ''}
+                {counts.tiny ? ` · ${counts.tiny} tiny` : ''}
+                {counts.refused ? ` · ${counts.refused} sizes unclear` : ''}
+              </Text>
+              {/* the grade's open questions: notes behind the header door, not lines in the list */}
+              <HeaderWarnings items={(out.grade?.ambiguities ?? []).map((a) => a.message)} />
+            </>
           }
         >
           {focus && (
             <CalloutBox tone='error' className='mb-2 flex flex-col gap-1.5 py-1.5'>
               <div className='flex items-start gap-2'>
-                <Text size='micro' component='p' className='min-w-0 flex-1'>
+                <Text
+                  size='micro'
+                  component='p'
+                  className='min-w-0 flex-1'
+                  title={FOCUS_HELP[focus.kind]}
+                >
                   <b>! from {focus.from}</b>
                 </Text>
                 {onDismissFocus && (
@@ -778,9 +886,6 @@ export function PiecesStep({
                   </li>
                 ))}
               </ul>
-              <Text size='micro' component='p'>
-                {FOCUS_HELP[focus.kind]}
-              </Text>
               <ChipRow>
                 {focus.kind !== 'region' && (
                   <Chip
@@ -815,39 +920,45 @@ export function PiecesStep({
             </CalloutBox>
           )}
           {variants.length > 1 && !session.variant && (
-            <Text size='micro' component='p' className='mb-2 text-warning'>
-              ! the sheet carries {variants.length} models ({variants.join(', ')}). one run imports
-              one model — pick it above.
-              {named?.pick == null && named?.why ? ` ${named.why}.` : ''}
+            <Text
+              size='micro'
+              component='p'
+              className='mb-2 text-warning'
+              title={named?.pick == null && named?.why ? named.why : undefined}
+            >
+              ! {variants.length} models ({variants.join(', ')}) — pick one
             </Text>
           )}
           {named?.pick != null && (
             <div className='mb-2'>
               <Button
+                {...ask('pieces-model')}
                 variant='secondary'
                 size='sm'
                 disabled={!!session.busy}
+                title={[
+                  named.strong ? 'the card names it' : 'suggested by the card',
+                  ...named.evidence,
+                ].join(' · ')}
                 onClick={() => void api.dispatch({ type: 'variant', variant: named.pick })}
               >
-                use {named.pick} · {named.strong ? 'the card names it' : 'suggested by the card'}
+                use {named.pick}
               </Button>
-              <Text size='micro' variant='label' component='p' className='mt-1'>
-                {named.evidence.join(' · ')}
-              </Text>
             </div>
           )}
           {sheetQ && (
             <CalloutBox tone='warning' className='mb-2 flex flex-col gap-1.5 py-1.5'>
-              <Text size='micro' component='p'>
-                ! {sheetQ.text}
-              </Text>
-              <Text size='micro' variant='label' component='p'>
-                {(
+              <Text
+                size='micro'
+                component='p'
+                title={(
                   out.sheets?.alternatives.find((x) => x.key === sheetQ.key)?.evidence ??
                   out.sheets?.copies.find((x) => x.key === sheetQ.key)?.evidence ??
                   out.sheets?.splits.find((x) => x.key === sheetQ.key)?.evidence ??
                   []
                 ).join(' · ')}
+              >
+                ! {sheetQ.text}
               </Text>
               <div className='flex flex-wrap gap-2'>
                 {(sheetQ.kind === 'alternative'
@@ -868,6 +979,7 @@ export function PiecesStep({
                         ] as const)
                 ).map(([answer, label]) => (
                   <Button
+                    {...ask('pieces-sheet', !openFams.length)}
                     key={answer}
                     variant='secondary'
                     size='sm'
@@ -887,145 +999,291 @@ export function PiecesStep({
               </div>
             </CalloutBox>
           )}
-          {(out.grade?.ambiguities ?? []).map((a, i) => (
-            <Text key={i} size='micro' component='p' className='mb-2 text-warning'>
-              ! {a.message}
-            </Text>
-          ))}
-          <ul className='divide-y divide-hairline'>
-            {families.map((f) => {
-              const c = cand(f);
-              const o = outcomeOf(f);
-              const s = seedAt(f.seed);
-              const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
-              const out_ = ranks.filter((x) => !mapped || mapped.has(x.rank));
-              const shut = out_.filter((x) => x.outcome === 'closed').length;
-              return (
-                <li key={f.seed} className='pb-1'>
-                  <button
-                    type='button'
-                    onClick={() => setSel(f.seed === sel ? null : f.seed)}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                      f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                    )}
-                  >
-                    <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano text-bgColor tabular-nums'>
-                      {markOf.get(f.seed)}
-                    </span>
-                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                      {SEED_WORD[s?.origin ?? 'text']}
-                      {s?.variant ? ` · ${s.variant}` : ''}
-                    </Text>
-                    <Text size='micro' variant='label' component='span' className='tabular-nums'>
-                      {o === 'closed' ? fmtPct(c.sourceCoverage) : ''}
-                    </Text>
-                    {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
-                    <Pill tone={OUTCOME[o].tone}>{OUTCOME[o].word}</Pill>
-                  </button>
-                  <div className='flex flex-wrap items-center gap-0.5 pl-6'>
-                    {ranks.map((x) => (
-                      <RankCell
-                        key={x.rank}
-                        label={labelOf(x.rank)}
-                        outcome={x.outcome}
-                        exported={!mapped || mapped.has(x.rank)}
-                        current={x.rank === rank}
-                        onClick={() => {
-                          setRank(x.rank);
-                          setSel(f.seed);
-                        }}
-                      />
-                    ))}
-                    <Text size='nano' variant='label' component='span' className='ml-1'>
-                      {shut}/{out_.length} closed
-                    </Text>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
 
-          {asideGroups.length > 0 && (
-            <>
-              <GroupLabel>set aside</GroupLabel>
-              <ul className='divide-y divide-hairline'>
-                {asideGroups.map(({ key: k, list }) => (
-                  <li key={k} className='pb-1'>
+          {/* the regions that need a fix, first, each with its answers inline */}
+          {openFams.length > 0 && (
+            <ul className='divide-y divide-hairline'>
+              {openFams.map((f) => {
+                const c = problemOf(f);
+                const o = c.outcome;
+                const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
+                const out_ = ranks.filter((x) => !mapped || mapped.has(x.rank));
+                const shut = out_.filter((x) => x.outcome === 'closed').length;
+                const why = whyOf(f, c);
+                const pickHere = (t: Tool, r = c.rank) => {
+                  setSel(f.seed);
+                  setRank(r);
+                  pickTool(t);
+                };
+                return (
+                  <li key={f.seed} className='pb-1.5'>
                     <button
                       type='button'
-                      aria-expanded={asideOpen === k}
-                      onClick={() => {
-                        setAsideOpen(asideOpen === k ? null : k);
-                        setAsideAt(null);
-                      }}
+                      onClick={() => setSel(f.seed === sel ? null : f.seed)}
+                      title={why.full}
                       className={cn(
                         'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                        asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                        f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
                       )}
                     >
-                      <Text size='micro' component='span' className='min-w-0 flex-1'>
-                        {list.length} {list.length === 1 ? 'outline' : 'outlines'} ·{' '}
-                        {asideWords(list[0])}
+                      <MarkSquare n={markOf.get(f.seed)} />
+                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                        {why.short}
                       </Text>
-                      <Text size='micro' variant='label' component='span'>
-                        {asideOpen === k ? 'hide' : 'show'}
-                      </Text>
+                      {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
+                      <Pill tone={OUTCOME[o].tone}>{OUTCOME[o].word}</Pill>
                     </button>
-                    {asideOpen === k && (
-                      <ul className='flex flex-col pl-3'>
-                        {list.map((a) => (
-                          <li key={a.id} className='flex items-center gap-2 py-0.5'>
-                            <button
-                              type='button'
-                              onClick={() => setAsideAt(a === asideAt ? null : a)}
-                              className={cn(
-                                'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                                a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                              )}
-                            >
-                              <Text size='micro' component='span' className='tabular-nums'>
-                                {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
-                                {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
-                                {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
-                              </Text>
-                              {a.why && (
-                                <Text
-                                  size='nano'
-                                  variant='label'
-                                  component='span'
-                                  className='block'
-                                >
-                                  {a.why}
-                                </Text>
-                              )}
-                            </button>
-                            <Button
-                              variant='underline'
-                              size='xs'
-                              disabled={!!session.busy}
-                              onClick={() => {
-                                setAsideAt(null);
-                                void api.promoteAside(a).then((id) => id != null && setSel(id));
-                                setHint('made a piece — the fill runs from it');
-                              }}
-                            >
-                              this is a piece
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    <div className='flex flex-wrap items-center gap-0.5 pl-6'>
+                      {ranks.map((x) => (
+                        <RankCell
+                          key={x.rank}
+                          label={labelOf(x.rank)}
+                          outcome={x.outcome}
+                          exported={!mapped || mapped.has(x.rank)}
+                          current={x.rank === rank}
+                          onClick={() => {
+                            setRank(x.rank);
+                            setSel(f.seed);
+                          }}
+                        />
+                      ))}
+                      <Text size='nano' variant='label' component='span' className='ml-1'>
+                        {shut}/{out_.length} closed
+                      </Text>
+                    </div>
+                    <ChipRow className='mt-1 pl-6'>
+                      {o === 'leak' && (
+                        <Chip
+                          {...ask('pieces-region')}
+                          selected={sel === f.seed && tool === 'bridge'}
+                          pressed={sel === f.seed && tool === 'bridge'}
+                          onClick={() => pickHere('bridge')}
+                          title='two clicks: the two line ends at the red ring'
+                        >
+                          close gap
+                        </Chip>
+                      )}
+                      {o === 'merged' && (
+                        <Chip
+                          {...ask('pieces-region')}
+                          selected={sel === f.seed && tool === 'lasso'}
+                          pressed={sel === f.seed && tool === 'lasso'}
+                          onClick={() => pickHere('lasso')}
+                          title='draw a lasso around one of the two pieces'
+                        >
+                          split
+                        </Chip>
+                      )}
+                      {o === 'refused' && c.gradeRefusal === 'size-count' && (
+                        <Chip
+                          {...ask('pieces-region')}
+                          disabled={!!session.busy}
+                          onClick={() => void api.dispatch({ type: 'back', to: 'sizes' })}
+                        >
+                          ← sizes
+                        </Chip>
+                      )}
+                      {o !== 'tiny' && (
+                        <Chip
+                          {...ask('pieces-region')}
+                          selected={sel === f.seed && tool === 'reseed'}
+                          pressed={sel === f.seed && tool === 'reseed'}
+                          disabled={!!session.busy}
+                          onClick={() => pickHere('reseed')}
+                          title='click another spot inside the piece'
+                        >
+                          reseed
+                        </Chip>
+                      )}
+                      <Chip
+                        {...ask('pieces-region')}
+                        disabled={!!session.busy}
+                        onClick={() => notAPiece(f)}
+                      >
+                        not a piece
+                      </Chip>
+                    </ChipRow>
                   </li>
-                ))}
+                );
+              })}
+            </ul>
+          )}
+
+          {/* the regions that closed: one count line, the list behind it */}
+          {closedFams.length > 0 && (
+            <Fold
+              label={plural(closedFams.length, 'piece')}
+              open={closedOpen || selClosed}
+              onOpenChange={(o) => {
+                setClosedOpen(o);
+                if (!o && selClosed) setSel(null);
+              }}
+            >
+              <ul className='flex flex-col'>
+                {closedFams.map((f) => {
+                  const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
+                  return (
+                    <li
+                      key={f.seed}
+                      className={cn(
+                        'flex items-center gap-2 px-1 py-0.5',
+                        f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                      )}
+                    >
+                      <button
+                        type='button'
+                        aria-label={`region ${markOf.get(f.seed)}`}
+                        onClick={() => setSel(f.seed === sel ? null : f.seed)}
+                        className='focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+                      >
+                        <MarkSquare n={markOf.get(f.seed)} />
+                      </button>
+                      <span className='flex flex-wrap items-center gap-0.5'>
+                        {ranks.map((x) => (
+                          <RankCell
+                            key={x.rank}
+                            label={labelOf(x.rank)}
+                            outcome={x.outcome}
+                            exported={!mapped || mapped.has(x.rank)}
+                            current={x.rank === rank && f.seed === sel}
+                            onClick={() => {
+                              setRank(x.rank);
+                              setSel(f.seed);
+                            }}
+                          />
+                        ))}
+                      </span>
+                      {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
+                    </li>
+                  );
+                })}
               </ul>
-            </>
+              {selected && selClosed && (
+                <div className='mt-1 flex flex-wrap gap-2 pl-6'>
+                  <Chip disabled={!!session.busy} onClick={() => notAPiece(selected)}>
+                    not a piece
+                  </Chip>
+                  <Chip
+                    selected={tool === 'reseed'}
+                    pressed={tool === 'reseed'}
+                    disabled={!!session.busy}
+                    onClick={() => setTool('reseed')}
+                  >
+                    reseed
+                  </Chip>
+                </div>
+              )}
+            </Fold>
+          )}
+
+          {asideGroups.length > 0 && (
+            <Fold
+              label={`${asides.length} set aside`}
+              defaultOpen={weak.size > 0}
+              ask={weak.size ? 'pieces-aside' : undefined}
+            >
+              <ul className='divide-y divide-hairline'>
+                {asideGroups.map(({ key: k, list }) => {
+                  const weakHere = list.some((a) => weak.has(a));
+                  return (
+                    <li key={k} className='pb-1'>
+                      <button
+                        type='button'
+                        aria-expanded={asideOpen === k}
+                        {...(weakHere && asideOpen !== k
+                          ? { 'data-ask': 'pieces-aside', 'data-ask-fold': 'folded' }
+                          : {})}
+                        onClick={() => {
+                          setAsideOpen(asideOpen === k ? null : k);
+                          setAsideAt(null);
+                        }}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                          asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                        )}
+                      >
+                        <Text
+                          size='micro'
+                          component='span'
+                          className={cn('min-w-0 flex-1', weakHere && 'text-warning')}
+                        >
+                          {weakHere ? '! ' : ''}
+                          {list.length} · {asideWords(list[0])}
+                        </Text>
+                        <FoldCaret open={asideOpen === k} />
+                      </button>
+                      {asideOpen === k && (
+                        <ul className='flex flex-col pl-3'>
+                          {list.map((a) => (
+                            <li key={a.id} className='flex items-center gap-2 py-0.5'>
+                              <button
+                                type='button'
+                                title={a.why || undefined}
+                                onClick={() => setAsideAt(a === asideAt ? null : a)}
+                                className={cn(
+                                  'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                                  a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                                )}
+                              >
+                                <Text size='micro' component='span' className='tabular-nums'>
+                                  {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
+                                  {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
+                                  {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
+                                </Text>
+                              </button>
+                              <Button
+                                {...ask('pieces-aside', weak.has(a))}
+                                variant='underline'
+                                size='xs'
+                                disabled={!!session.busy}
+                                onClick={() => {
+                                  setAsideAt(null);
+                                  void api.promoteAside(a).then((id) => id != null && setSel(id));
+                                  setHint('made a piece — the fill runs from it');
+                                }}
+                              >
+                                this is a piece
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Fold>
+          )}
+
+          {(inputs.edits.length > 0 || hint) && (
+            <div className='mt-2 flex flex-wrap items-center gap-2'>
+              {inputs.edits.length > 0 && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
+                  disabled={!!session.busy}
+                  title={editsLine}
+                  onClick={() => void api.editPieces('undo')}
+                >
+                  undo
+                </Button>
+              )}
+              {hint && (
+                <Text size='micro' variant='label' component='span'>
+                  {hint}
+                </Text>
+              )}
+            </div>
           )}
 
           {selected && (
-            <>
-              <GroupLabel>region {markOf.get(selected.seed)}</GroupLabel>
-              {/* a refused size has no outline: no area, no coverage, no growth to show (copy 6) */}
+            <DebugFold label={`region ${markOf.get(selected.seed)} · diagnostics`}>
+              {/* a refused size has no outline: no area, no coverage, no growth (copy 6) */}
+              <Row
+                label='seed'
+                value={`${SEED_WORD[seedAt(selected.seed)?.origin ?? 'text']}${seedAt(selected.seed)?.variant ? ` · ${seedAt(selected.seed)!.variant}` : ''}`}
+              />
               <Row
                 label='area, this size'
                 value={refusedSel ? '—' : `${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`}
@@ -1050,85 +1308,19 @@ export function PiecesStep({
                   )
                 }
               />
-              <Text size='micro' variant='label' component='p' className='mt-1'>
-                {cand(selected).outcome === 'refused'
-                  ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${refusalExtra(cand(selected).gradeDetail) ? ` (${refusalExtra(cand(selected).gradeDetail)})` : ''}`
-                  : outcomeOf(selected) === 'leak' &&
-                      seedAt(selected.seed)?.origin === 'face' &&
-                      selected.candidates.every((c) => c.outcome === 'leak' || c.outcome === 'tiny')
-                    ? 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.'
-                    : outcomeOf(selected) === 'leak'
-                      ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
-                      : outcomeOf(selected) === 'merged'
-                        ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
-                        : outcomeOf(selected) === 'tiny'
-                          ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
-                          : 'closed and snapped to the drawn lines.'}
-              </Text>
-              <div className='mt-2 flex flex-wrap gap-2'>
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  disabled={!!session.busy}
-                  onClick={() => {
-                    // keep how the region read, for "not in this file" on check
-                    const big = Math.max(...selected.candidates.map((c) => c.areaMm2));
-                    remember(
-                      selected.seed,
-                      `region ${markOf.get(selected.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
-                    );
-                    void api.editPieces({ kind: 'not-a-piece', seed: selected.seed });
-                    setSel(null);
-                  }}
-                >
-                  not a piece
-                </Button>
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  disabled={!!session.busy}
-                  onClick={() => setTool('reseed')}
-                >
-                  reseed
-                </Button>
-              </div>
-            </>
-          )}
-
-          <GroupLabel>edits</GroupLabel>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Text size='micro' variant='label' component='span'>
-              {[
-                `${inputs.edits.length} ${inputs.edits.length === 1 ? 'edit' : 'edits'}`,
-                bridges.length &&
-                  `${bridges.length} ${bridges.length === 1 ? 'gap' : 'gaps'} closed`,
-                used.size && `${used.size} ${used.size === 1 ? 'line' : 'lines'} used`,
-                ignored.size && `${ignored.size} ${ignored.size === 1 ? 'line' : 'lines'} ignored`,
-                `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-            {inputs.edits.length > 0 && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                disabled={!!session.busy}
-                onClick={() => void api.editPieces('undo')}
-              >
-                undo last
-              </Button>
-            )}
-          </div>
-          {hint && (
-            <Text size='micro' variant='label' component='p' className='mt-1'>
-              {hint}
-            </Text>
+            </DebugFold>
           )}
         </Panel>
       }
     />
+  );
+}
+
+function MarkSquare({ n }: { n: number | undefined }) {
+  return (
+    <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano text-bgColor tabular-nums'>
+      {n}
+    </span>
   );
 }
 
