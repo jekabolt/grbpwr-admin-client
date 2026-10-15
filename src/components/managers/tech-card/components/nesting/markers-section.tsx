@@ -15,7 +15,7 @@ import { colorwayLabelOf } from './colorway-widths';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -42,6 +42,7 @@ import {
 // пересборкой — второй его копии здесь быть не должно. Модуль зависит только от типов и от чистой
 // geom/, так что импорт в НЕленивый чанк не тащит ни clipper, ни dxf-parser.
 import { patternSourcesForMarker, type MarkerPatternRow } from './marker-rebuild';
+import { planAutoNorm } from './auto-norm';
 import {
   fabricScopes,
   isRollGoodsSection,
@@ -238,15 +239,11 @@ export function MarkersSection({
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  // Назначение нормы: подтверждение, занятость и ПЕРЕЖИВАЮЩАЯ строка о последствиях.
-  const [norming, setNorming] = useState<{
-    id: number;
-    name: string;
-    slot: string;
-    on: boolean;
-    refusal: string;
-  } | null>(null);
-  const [normBusy, setNormBusy] = useState(false);
+  // НОРМА НАЗНАЧАЕТСЯ САМА (auto-norm.ts): свежайшая годная раскладка ткани. Попытки помнятся по
+  // ключу id@updated_at — одна и та же версия раскладки не назначается дважды, и отказ сервера не
+  // превращается в ретрай на каждом рендере. `normRunning` не пускает второй проход, пока идёт первый.
+  const normTried = useRef(new Set<string>());
+  const normRunning = useRef(false);
   // Почему это НЕ тост. Переназначение нормы рецепты не пересчитывает, и починка (применить новую
   // норму) делается на ДРУГОЙ вкладке — тост до неё не доживёт, а несделанное применение значит,
   // что костинг продолжает считать по прежнему числу. Плашка висит, пока её не закроют.
@@ -336,45 +333,53 @@ export function MarkersSection({
   // говорит, из какой раскладки число когда-то взяли, и ничего не пересчитывает. Ровно поэтому
   // предупреждение ниже остаётся верным и после Ф6.8, а расхождение «раскладку с тех пор
   // перемеряли» показывается на строке рецепта, а не здесь.
-  const setNorm = async () => {
-    if (!norming) return;
-    setNormBusy(true);
-    try {
-      const r = await adminService.SetTechCardMarkerNorm({ id: norming.id, isNorm: norming.on });
-      const prevId = Number(r.previousNormMarkerId ?? 0);
-      const prev = prevId ? markers.find((x) => Number(x.id ?? 0) === prevId) : undefined;
-      // Читается ПОЛЕ, а не подразумевается: сервер отвечает recipes_not_recalculated = true
-      // именно затем, чтобы это не было домыслом экрана. Отсутствие поля читаем как «не
-      // пересчитаны» — пересчитывать некому ни на одной версии сервера.
-      const notRecalculated = r.recipesNotRecalculated !== false;
-      setNormNote(
-        norming.on
-          ? `the norm of ${scopeWord(norming.slot)} is now “${norming.name}”${
-              prev ? `, the previous one was “${prev.name ?? ''}”` : ''
-            }.${
-              notRecalculated
-                ? ' recipes were NOT recalculated: the consumption applied into the recipe from the previous norm stayed the same number. if it has to change — apply the new marker in the colourway consumption by hand.'
-                : ''
-            }`
-          : `“${norming.name}” is no longer the norm of ${scopeWord(norming.slot)}. no other norm appeared in its place — assign one, otherwise costing and the readiness gate have nothing to ask.${
-              notRecalculated
-                ? ' recipes were not recalculated: the applied consumption stayed the same.'
-                : ''
+  //
+  // Поэтому назначение — автоматическое, а последствие — нет: если норма ткани СМЕНИЛАСЬ (была
+  // прежняя), плашка говорит, что рецепты держат старое число и применить новое надо руками.
+  // Первое назначение (прежней нормы не было) плашки не даёт: устаревать в рецептах нечему.
+  const autoSteps = useMemo(() => (canEdit ? planAutoNorm(markers) : []), [canEdit, markers]);
+  useEffect(() => {
+    if (normRunning.current) return;
+    const steps = autoSteps.filter((s) => !normTried.current.has(s.key));
+    if (steps.length === 0) return;
+    normRunning.current = true;
+    for (const s of steps) normTried.current.add(s.key);
+    (async () => {
+      const notes: string[] = [];
+      let changed = false;
+      for (const s of steps) {
+        const id = Number(s.marker.id ?? 0);
+        try {
+          const r = await adminService.SetTechCardMarkerNorm({ id, isNorm: true });
+          changed = true;
+          const prevId = Number(r.previousNormMarkerId ?? 0);
+          const prev = prevId ? markers.find((x) => Number(x.id ?? 0) === prevId) : undefined;
+          // Поле читается, а не подразумевается: отсутствие = «не пересчитаны».
+          if (prevId && r.recipesNotRecalculated !== false) {
+            notes.push(
+              `the norm of ${scopeWord(s.marker.bomItemName ?? '')} is now the newest complete marker “${
+                s.marker.name ?? ''
+              }”${prev ? ` (was “${prev.name ?? ''}”)` : ''}. recipes were NOT recalculated: the consumption already applied from the previous norm stays the same number — if it has to change, apply the new marker in the colourway consumption.`,
+            );
+          }
+        } catch (e) {
+          // Тихо не глотаем: оператор должен знать, что у ткани осталась прежняя норма (или никакой).
+          showMessage(
+            `couldn't make “${s.marker.name ?? ''}” the norm: ${
+              e instanceof Error && e.message ? e.message : 'unknown error'
             }`,
-      );
-      showMessage(norming.on ? 'norm assigned' : 'norm cleared', 'success');
-      qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-      qc.invalidateQueries({ queryKey: techCardKeys.lists() });
-      setNorming(null);
-    } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : "couldn't change the norm",
-        'error',
-      );
-    } finally {
-      setNormBusy(false);
-    }
-  };
+            'error',
+          );
+        }
+      }
+      normRunning.current = false;
+      if (notes.length > 0) setNormNote(notes.join('\n'));
+      if (changed) {
+        qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        qc.invalidateQueries({ queryKey: techCardKeys.lists() });
+      }
+    })();
+  }, [autoSteps, markers, qc, showMessage, techCardId]);
 
   const deleteMarker = async () => {
     if (!deleting) return;
@@ -495,7 +500,14 @@ export function MarkersSection({
         <span className='text-right text-labelColor'>{length ? `${length} cm` : '—'}</span>
         <span className='text-right text-labelColor'>{eff ? `${eff} %` : '—'}</span>
         <span className='inline-flex items-baseline justify-end gap-2'>
-          {m.isNorm && <Pill tone='ok'>norm</Pill>}
+          {m.isNorm && (
+            <Pill
+              tone='ok'
+              title='the norm: the marker costing and the readiness gate measure this fabric by. chosen automatically — the newest complete single-size marker of the fabric.'
+            >
+              norm
+            </Pill>
+          )}
           {draft && (
             <Pill tone='warn' title={refusal}>
               draft
@@ -516,28 +528,6 @@ export function MarkersSection({
             <Pill tone='warn' title={conflict}>
               norm conflict
             </Pill>
-          )}
-          {canEdit && !draft && (
-            // Отдельное действие, а не поле сохранения: пересохранение геометрии не должно уметь
-            // перехватить норму. Черновику дверь не показываем — сервер откажет ему в любом случае
-            // (CHECK chk_tcm_draft_not_norm), причина висит на пилюле «draft».
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                setNorming({
-                  id,
-                  name: m.name ?? '',
-                  slot: m.bomItemName ?? '',
-                  on: !m.isNorm,
-                  refusal,
-                });
-              }}
-            >
-              {m.isNorm ? 'clear norm' : 'set as norm'}
-            </Button>
           )}
           {canEdit && (
             <Button
@@ -563,7 +553,8 @@ export function MarkersSection({
       {conflicts.map((t) => (
         <CalloutBox key={t} tone='error'>
           <Text size='micro' component='p'>
-            <b>two norms on one fabric.</b> {t} set as norm on the one to keep.
+            <b>two norms on one fabric.</b> {t} the next complete marker saved for this fabric
+            becomes its only norm; or delete the marker you don't want.
           </Text>
         </CalloutBox>
       ))}
@@ -572,7 +563,7 @@ export function MarkersSection({
         // дожить до туда.
         <CalloutBox tone='warning'>
           <div className='flex items-start justify-between gap-2'>
-            <Text size='micro' component='p'>
+            <Text size='micro' component='p' className='whitespace-pre-line'>
               {normNote}
             </Text>
             <Button type='button' variant='underline' size='xs' onClick={() => setNormNote(null)}>
@@ -642,66 +633,9 @@ export function MarkersSection({
       >
         <Text size='micro' component='p'>
           “{deleting?.name}” will be deleted for good. the consumption already written into the
-          recipes will not change — only the marker itself and its hint in costing will go.
+          recipes will not change — only the marker itself and its hint in costing will go. if it
+          was the norm, the newest complete marker of the same fabric becomes the norm.
         </Text>
-      </ConfirmationModal>
-
-      <ConfirmationModal
-        open={norming != null}
-        onOpenChange={(o) => {
-          if (!o && !normBusy) setNorming(null);
-        }}
-        onConfirm={setNorm}
-        onCancel={() => {
-          if (!normBusy) setNorming(null);
-        }}
-        title={norming?.on === false ? 'clear the norm?' : 'set as the norm?'}
-        confirmLabel={
-          norming?.on === false
-            ? normBusy
-              ? 'clearing…'
-              : 'clear the norm'
-            : normBusy
-              ? 'assigning…'
-              : 'set as the norm'
-        }
-        confirmDisabled={normBusy}
-        closeOnConfirm={false}
-      >
-        <div className='space-y-2'>
-          {norming?.on === false ? (
-            <Text size='micro' component='p'>
-              “{norming?.name}” will stop being the norm of {scopeWord(norming?.slot ?? '')}. no
-              other norm will appear in its place: clearing assigns nothing, and until the next
-              assignment the fabric stays without a norm — the readiness gate will see that.
-            </Text>
-          ) : norming?.slot ? (
-            <Text size='micro' component='p'>
-              “{norming?.name}” will become the norming marker of {scopeWord(norming?.slot ?? '')}:
-              costing computes by it and the readiness gate asks for it. the previous norm of THE
-              SAME fabric will lose the flag — there is one norm per fabric, not one per card, and
-              the norms of other fabrics are not affected.
-            </Text>
-          ) : (
-            <Text size='micro' component='p'>
-              “{norming?.name}” is not linked to a fabric, so it lands in its own “no fabric” scope
-              — one such norm per card. the readiness gate will not accept it anyway: it asks about
-              a fabric. link the marker to a BOM slot if it is meant to norm.
-            </Text>
-          )}
-          <Text size='micro' component='p'>
-            recipes are not recalculated. the number already applied into a recipe from the previous
-            norm stays as it was: applying is a separate deliberate action (colourway consumption →
-            apply marker). the flag only says WHICH marker to measure by, and computes nothing
-            itself.
-          </Text>
-          {norming?.on !== false && !!norming?.refusal && (
-            <Text size='micro' variant='label' component='p'>
-              {norming.refusal} such a marker can be set as the norm — it is still a measurement of
-              a lay — but it cannot be applied into a recipe as a single number.
-            </Text>
-          )}
-        </div>
       </ConfirmationModal>
     </div>
   );
