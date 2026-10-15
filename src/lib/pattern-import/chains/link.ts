@@ -539,10 +539,6 @@ export const OPROW = {
   laneTurnDeg: 35,
   /** …and two same-way turns adding up to this are a U-turn (the next path painted back). */
   uTurnDeg: 150,
-  /** A loose mark of another tile page ahead of a row's end (within this of its tangent, …) */
-  seamDeg: 35,
-  /** …and this far beside its line, mm) is its continuation: the row is not taken alone. */
-  seamLatMm: 1.5,
 };
 
 /** The paint operation number of an item (`file|page|op`). */
@@ -637,38 +633,6 @@ function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; res
     cur.push(x);
   }
   flush();
-  // a row cut at a tile page whose continuation on the other page is too short to be a row of
-  // its own (Codex): taken alone, that continuation would be left loose and the line open there
-  // — such a row is not taken at all; its marks go to proximity linking as before (fail to the
-  // old behaviour, never to a new gap)
-  const inRow = new Set<Item>();
-  for (const r of rows) for (const x of r) inRow.add(x.it);
-  const grid = new PtGrid(LINK.beadGapMm);
-  sorted.forEach((x, i) => grid.add(i, x.it.c!));
-  const cosA = Math.cos((OPROW.seamDeg * Math.PI) / 180);
-  const cutAtSeam = (r: M[]) =>
-    ([0, 1] as const).some((end) => {
-      const n = r.length;
-      const tip = end ? r[n - 1] : r[0];
-      const back = end ? r[Math.max(0, n - 4)] : r[Math.min(n - 1, 3)];
-      const L = dist(tip.it.c!, back.it.c!);
-      if (L < 0.5) return false;
-      const t = { x: (tip.it.c!.x - back.it.c!.x) / L, y: (tip.it.c!.y - back.it.c!.y) / L };
-      let hit = false;
-      grid.near(tip.it.c!, LINK.beadGapMm, (i) => {
-        const y = sorted[i];
-        if (hit || inRow.has(y.it) || y.o.page === tip.o.page || ink(y.it) !== ink(tip.it)) return;
-        const d = dist(tip.it.c!, y.it.c!);
-        if (d < 0.05 || d > LINK.beadGapMm) return;
-        const along = ((y.it.c!.x - tip.it.c!.x) * t.x + (y.it.c!.y - tip.it.c!.y) * t.y) / d;
-        const lat = Math.abs((y.it.c!.x - tip.it.c!.x) * t.y - (y.it.c!.y - tip.it.c!.y) * t.x);
-        if (along >= cosA && lat <= OPROW.seamLatMm) hit = true;
-      });
-      return hit;
-    });
-  const kept = rows.filter((r) => !cutAtSeam(r));
-  rows.length = 0;
-  rows.push(...kept);
   const taken = new Set<Item>();
   for (const r of rows) for (const x of r) taken.add(x.it);
   return {
