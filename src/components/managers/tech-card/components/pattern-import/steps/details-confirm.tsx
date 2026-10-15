@@ -24,6 +24,15 @@ export function useOpenQuestions(api: ImportSessionApi) {
   return openQuestions(api.session.semantics, api.session.names, api.inputs, api.answersNow);
 }
 
+/**
+ * Is the file's outline still a question? While it is, the question box is the only place the
+ * outline is set (the compact line/allowance fields stay hidden — one decision, one place).
+ */
+export function outlineAsked(api: ImportSessionApi, current: AllowanceDecision): boolean {
+  const open = openQuestions(api.session.semantics, api.session.names, api.inputs, api.answersNow);
+  return open.allowance.length > 0 && current.origin !== 'operator';
+}
+
 export function OutlineQuestion({
   api,
   current,
@@ -35,7 +44,7 @@ export function OutlineQuestion({
   const [mm, setMm] = useState(
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
-  if (!open.length || current.origin === 'operator') return null;
+  if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
   const word = outlineByLayerWord(api.session);
@@ -108,26 +117,19 @@ export function ConfirmStrip({ api }: { api: ImportSessionApi }) {
   const open = useOpenQuestions(api);
   if (!open.total) return null;
   const foldAlt = open.quantity.filter((u) => u.foldAlt).length;
+  // no summary line: each open row carries its own "? … · confirm" and the footer's ask line
+  // counts them; this is the secondary shortcut — the footer keeps the one filled button
   return (
-    <div className='mt-2 flex flex-wrap items-center gap-2'>
-      <Text
-        size='micro'
-        component='p'
-        className='min-w-0 flex-1 text-warning'
-        title={`check the marked rows, fix any that are wrong, then confirm the rest${foldAlt ? ` · ${foldAlt} may be cut on fold instead of a pair` : ''}`}
-      >
-        ! {countWords(open)} not proven by the sheet
-      </Text>
-      <Button
+    <div className='mt-2 flex justify-end'>
+      <Chip
         {...ask('details-confirm')}
-        variant='main'
-        size='xs'
+        quiet
         disabled={!!api.session.busy}
         onClick={() => api.confirmShown()}
-        title='accept every marked quantity and name as the table shows it now'
+        title={`accept every marked quantity and name as the table shows it now (${countWords(open)})${foldAlt ? ` · ${foldAlt} may be cut on fold instead of a pair` : ''}`}
       >
         confirm all as shown
-      </Button>
+      </Chip>
     </div>
   );
 }

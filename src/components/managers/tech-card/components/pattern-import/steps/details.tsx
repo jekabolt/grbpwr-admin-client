@@ -43,6 +43,7 @@ import { PendingDetails } from './details-pending';
 import {
   ConfirmStrip,
   OutlineQuestion,
+  outlineAsked,
   RowQuestions,
   passportWarning,
   qtyOpen,
@@ -563,15 +564,19 @@ export function DetailsStep({
     }
     return (
       <div className='mt-1 flex flex-col items-start gap-1'>
-        <Text size='micro' component='p' className='text-error'>
-          ! {REASON[b.reason] ?? b.reason}
-          {b.reason === 'fold-unresolved' && foldMissOf(seed) ? '' : ` — ${b.detail}`}
-        </Text>
+        {/* no grainline: the button says it, the footer's ask line says why — no third sentence */}
+        {b.reason !== 'no-grain' && (
+          <Text size='micro' component='p' className='text-error'>
+            ! {REASON[b.reason] ?? b.reason}
+            {b.reason === 'fold-unresolved' && foldMissOf(seed) ? '' : ` — ${b.detail}`}
+          </Text>
+        )}
         {body}
       </div>
     );
   };
 
+  const outlineOpen = outlineAsked(api, fileAllowance);
   // what the file's outline answer rests on, and what it does to the cut: the fields' tooltip
   const fileNote = `${
     fileAllowance.origin === 'operator'
@@ -917,36 +922,6 @@ export function DetailsStep({
               </>
             }
           >
-            <div className='flex flex-wrap items-end gap-2'>
-              <Field label='drawn outline' className='w-40'>
-                <NativeSelect
-                  value={fileAllowance.meaning}
-                  title={fileNote}
-                  onChange={(v) =>
-                    rerun({
-                      fileAllowance: {
-                        ...fileAllowance,
-                        meaning: v as LineMeaning,
-                        origin: 'operator',
-                      },
-                    })
-                  }
-                  options={MEANING}
-                />
-              </Field>
-              <Field label='allowance, mm' className='w-40'>
-                <NumberField
-                  value={fileAllowance.allowanceMm}
-                  min={0}
-                  title={fileNote}
-                  onCommit={(v) =>
-                    rerun({
-                      fileAllowance: { ...fileAllowance, allowanceMm: v ?? 0, origin: 'operator' },
-                    })
-                  }
-                />
-              </Field>
-            </div>
             <OutlineQuestion api={api} current={fileAllowance} />
             <ConfirmStrip api={api} />
 
@@ -1027,7 +1002,49 @@ export function DetailsStep({
                 {pieceTable(ready, false)}
               </Fold>
             )}
-            <Fold label='line & allowance'>
+            <Fold
+              label={`line & allowance · ${
+                MEANING.find((m) => m.value === fileAllowance.meaning)?.label ??
+                fileAllowance.meaning
+              } · ${fileAllowance.allowanceMm} mm`}
+            >
+              {/* the file's answer: set by the question box above while it is open (one place) */}
+              {!outlineOpen && (
+                <div className='mb-1 flex flex-wrap items-end gap-2'>
+                  <Field label='drawn outline' className='w-40'>
+                    <NativeSelect
+                      value={fileAllowance.meaning}
+                      title={fileNote}
+                      onChange={(v) =>
+                        rerun({
+                          fileAllowance: {
+                            ...fileAllowance,
+                            meaning: v as LineMeaning,
+                            origin: 'operator',
+                          },
+                        })
+                      }
+                      options={MEANING}
+                    />
+                  </Field>
+                  <Field label='allowance, mm' className='w-40'>
+                    <NumberField
+                      value={fileAllowance.allowanceMm}
+                      min={0}
+                      title={fileNote}
+                      onCommit={(v) =>
+                        rerun({
+                          fileAllowance: {
+                            ...fileAllowance,
+                            allowanceMm: v ?? 0,
+                            origin: 'operator',
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+              )}
               <DataTable>
                 <thead>
                   <tr>
@@ -1143,7 +1160,9 @@ export function DetailsStep({
             )
           }
           aside={
-            sel != null && (
+            // a piece without a grainline draws it from the one button under the drawing
+            sel != null &&
+            blockedOf(sel)?.reason !== 'no-grain' && (
               <Chip
                 quiet
                 selected={drawing}
@@ -1282,11 +1301,22 @@ export function DetailsStep({
               </div>
               <div ref={actionsRef} className='shrink-0 border-t border-hairline p-2'>
                 {drawing ? (
-                  <Text size='micro' component='p' className='text-warning'>
-                    {grainA
-                      ? '! click the second end of the grainline'
-                      : '! click the first end of the grainline'}
-                  </Text>
+                  <div className='flex items-center gap-2'>
+                    <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                      {grainA
+                        ? '! click the second end of the grainline'
+                        : '! click the first end of the grainline'}
+                    </Text>
+                    <Chip
+                      quiet
+                      onClick={() => {
+                        setGrainA(null);
+                        setDrawing(false);
+                      }}
+                    >
+                      cancel
+                    </Chip>
+                  </div>
                 ) : pickingFold && selPick ? (
                   <div className='flex items-center gap-2'>
                     <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
@@ -1406,19 +1436,8 @@ function BlockedState({
         proposed — accept or draw
       </Button>
     );
-  if (reason === 'no-grain')
-    return (
-      <Button
-        {...ask('details-blocked')}
-        variant='secondary'
-        size='xs'
-        className='whitespace-nowrap border-error text-error'
-        title={detail}
-        onClick={stop(onGrain)}
-      >
-        ! draw grainline
-      </Button>
-    );
+  // the row's grain cell carries "! draw" — the state cell does not repeat it
+  if (reason === 'no-grain') return null;
   if (reason === 'fold-question')
     return (
       <Button
