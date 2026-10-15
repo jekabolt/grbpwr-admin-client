@@ -8,14 +8,21 @@
 // wrongPassing = a block that passes the gate and is wrong.
 //   node scripts/pattern-import/archive.mjs   (yarn patimport:archive) — this is its child
 // The archive is READ ONLY: bytes are read once, nothing is ever written next to them.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { toWireError } from 'lib/pattern-import/worker/errors';
 import { parseSizeToken } from 'lib/pattern-import/sizes/tokens';
-import type { ChainSet, PieceFamily, Sheet, StageIO, StageName } from 'lib/pattern-import/types';
+import type {
+  ChainSet,
+  PieceFamily,
+  Sheet,
+  SizeRun,
+  StageIO,
+  StageName,
+} from 'lib/pattern-import/types';
 import type {
   CardContext,
   ImportClient,
@@ -50,6 +57,8 @@ import {
 } from 'components/managers/tech-card/components/pattern-import/auto-advance';
 import { pointInPoly } from 'lib/pattern-import/pieces/geom';
 import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
+import { seedLabel } from 'lib/pattern-import/pieces/seeds';
+import { leakDiag } from './leak-diag';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 export const ARCHIVE_DIR =
@@ -423,6 +432,12 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     expectedPassport: S?.passport?.pieces?.length ?? null,
     expectedLetters: text.letters.length || null,
     seeds: s.pieces?.seeds.length ?? null,
+    /** seed → label: outcome counts (the families as filled) */
+    seedNames: (s.pieces?.seeds ?? []).map((x) => {
+      const f = fams.find((y) => y.seed === x.id);
+      const o = f ? countBy(f.candidates.map((c) => c.outcome)) : null;
+      return `${x.id}:${x.origin}:${(seedLabel(x) ?? '').slice(0, 24)}${o ? ` ${JSON.stringify(o)}` : ' -'}`;
+    }),
     families: fams.length,
     /** Families whose every size closes / with a leak / with a refused (held back) size. */
     familiesClosed: fams.filter(
@@ -432,6 +447,10 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     familiesRefused: fams.filter((f) => f.candidates.some((c) => c.outcome === 'refused')).length,
     candidates: outcomes,
     setAside: (s.pieces?.setAside ?? []).length,
+    /** held text seeds: label → the junk its outline was read as */
+    heldText: (s.pieces?.setAside ?? [])
+      .filter((a) => a.seed)
+      .map((a) => `${(a.seed && seedLabel(a.seed)) ?? '?'}:${a.reason}:${a.areaMm2}`),
     named: s.semantics?.pieces.length ?? null,
   };
   // the written files
@@ -575,6 +594,32 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
           /* a crop is a diagnostic only */
         }
       });
+    }
+  }
+  // ARCHIVE_LEAKS=<dir>: every leaking size × piece classified at its mouth (+ close-ups there)
+  if (process.env.ARCHIVE_LEAKS && S) {
+    try {
+      const names = new Map((s.pieces?.seeds ?? []).map((x) => [x.id, seedLabel(x) ?? '']));
+      rec.leaks = leakDiag(
+        rel,
+        {
+          ...S,
+          run: (box.s as unknown as { run: SizeRun | null }).run,
+          contRefused: (
+            box.s as unknown as {
+              pieceSession: {
+                diag?: { continuity?: { refused: { seed: number; rank: number; why: string }[] } };
+              } | null;
+            }
+          ).pieceSession?.diag?.continuity?.refused,
+        },
+        names,
+        process.env.ARCHIVE_LEAKS === '1' ? null : process.env.ARCHIVE_LEAKS,
+        Number(process.env.ARCHIVE_LEAKS_PNG ?? 6),
+      );
+      rec.leaksAside = (rec.leaks as { aside?: unknown }).aside;
+    } catch (e) {
+      rec.leaksError = String((e as Error)?.stack ?? e).slice(0, 400);
     }
   }
   if (process.env.ARCHIVE_PNG && S) {
@@ -793,7 +838,8 @@ export async function main(args: string[]): Promise<number> {
     } catch (e) {
       r = { id: rel, verdict: 'crashed', error: toWireError(e).message.slice(0, 600) };
     }
-    console.log(`@@RESULT ${JSON.stringify(r)}`);
+    // writeSync: the runner exits right after main — an async pipe write would be cut at 64 KB
+    writeSync(1, `@@RESULT ${JSON.stringify(r)}\n`);
   }
   return 0;
 }
