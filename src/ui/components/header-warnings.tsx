@@ -1,7 +1,6 @@
 import { useState } from 'react';
 
 import { HEADER_TEXT } from 'ui/components/section-header';
-import { Button } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
@@ -12,13 +11,20 @@ import { cn } from 'lib/utility';
  * item 11) — the body is for the work, the header says what is wrong with it.
  *
  * A warning that can be fixed carries its fix (owner, patterns-lite round 2: «give us a
- * possibility to resolve these warnings»): `action` renders a door under the text; pressing it
- * closes the list and runs the fix. A warning without an action is a fact that cannot be changed
- * here — keep those rare.
+ * possibility to resolve these warnings»). The warning TEXT is the door (owner, round 5: «btn set
+ * not needed, underline the warning on hover»): clicking it closes the list and runs the fix, or
+ * opens `href` in a new tab. A warning without an action is plain text — keep those rare.
  *
  * `error` items are red and counted first; plain warnings are grey-ink. Empty → renders nothing.
  */
-export type HeaderWarningAction = { label: string; onClick: () => void; disabled?: boolean };
+export type HeaderWarningAction = {
+  /** Kept for screen readers; the warning TEXT itself is the clickable thing. */
+  label: string;
+  onClick?: () => void;
+  /** A link out (e.g. the article card) — rendered as a real <a target=_blank>, not window.open. */
+  href?: string;
+  disabled?: boolean;
+};
 export type HeaderWarning =
   | string
   | { text: string; error?: boolean; action?: HeaderWarningAction };
@@ -68,22 +74,52 @@ export function HeaderWarnings({
     >
       <ul className='flex max-w-[320px] flex-col gap-2'>
         {[...unique.filter((w) => w.error), ...unique.filter((w) => !w.error)].map((w) => (
-          <li key={w.text} className='flex flex-col items-start gap-1'>
-            <Text className={w.error ? 'text-error' : undefined}>{w.text}</Text>
-            {w.action && (
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                disabled={w.action.disabled}
-                onClick={() => {
-                  const run = w.action!.onClick;
-                  setOpen(false);
-                  run();
-                }}
-              >
-                {w.action.label}
-              </Button>
+          <li key={w.text}>
+            {w.action && !w.action.disabled ? (
+              w.action.href ? (
+                <a
+                  href={w.action.href}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  aria-label={`${w.text}: ${w.action.label}`}
+                  className={cn(
+                    'text-left underline-offset-2 hover:underline focus-visible:underline',
+                    w.error && 'text-error',
+                  )}
+                  onClick={() => {
+                    w.action!.onClick?.();
+                    setOpen(false);
+                  }}
+                >
+                  {w.text} ↗
+                </a>
+              ) : (
+                <button
+                  type='button'
+                  aria-label={`${w.text}: ${w.action.label}`}
+                  className={cn(
+                    'text-left underline-offset-2 hover:underline focus-visible:underline',
+                    w.error && 'text-error',
+                  )}
+                  onClick={() => {
+                    const run = w.action!.onClick;
+                    setOpen(false);
+                    run?.();
+                  }}
+                >
+                  {w.text}
+                </button>
+              )
+            ) : (
+              <>
+                <Text className={w.error ? 'text-error' : undefined}>{w.text}</Text>
+                {/* A fix that is blocked says why (e.g. «remove one-size PDFs first»). */}
+                {w.action?.disabled && (
+                  <Text size='micro' variant='label' component='span' className='block'>
+                    {w.action.label}
+                  </Text>
+                )}
+              </>
             )}
           </li>
         ))}

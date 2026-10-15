@@ -644,95 +644,102 @@ export function LayoutEditor({
     for (let k = from; k <= to; k++) ticks.push(k * tickStep);
   }
 
+  const allVisible =
+    view.x <= 1e-6 && view.x + vw >= L - 1e-6 && view.y <= 1e-6 && view.y + vh >= W - 1e-6;
   const atFitWidth =
     Math.abs(view.s - fitWidth.s) < 1e-6 && Math.abs(view.x - clampView(fitWidth).x) < 1e-6;
   const atFitAll = Math.abs(view.s - clampView(fitAll).s) < 1e-6;
 
   return (
     <div className='space-y-1'>
-      {/* Мини-карта: весь маркер, рамка — текущее окно; щелчок/протяжка переводит окно. */}
-      <div
-        ref={miniRef}
-        className='relative w-full cursor-pointer touch-none border border-borderColor bg-white'
-        style={{ height: MINIMAP_PX }}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          miniDragging.current = true;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          centerFromMinimap(e);
-        }}
-        onPointerMove={(e) => {
-          if (miniDragging.current) centerFromMinimap(e);
-        }}
-        onPointerUp={() => {
-          miniDragging.current = false;
-        }}
-        onPointerCancel={() => {
-          miniDragging.current = false;
-        }}
-        aria-label='marker overview'
-      >
-        <svg
-          xmlns='http://www.w3.org/2000/svg'
-          viewBox={`0 0 ${L} ${W}`}
-          preserveAspectRatio='none'
-          className='absolute inset-0 h-full w-full'
-          aria-hidden='true'
-        >
-          {tableEnd != null && (
-            <rect
-              x={tableEnd}
-              y={0}
-              width={Math.max(0, L - tableEnd)}
-              height={W}
-              fill={OFF_TABLE}
-              opacity={0.35}
+      {/* Мини-карта нужна только когда маркер не влезает в окно целиком (владелец). */}
+      {!allVisible && (
+        <>
+          {/* Мини-карта: весь маркер, рамка — текущее окно; щелчок/протяжка переводит окно. */}
+          <div
+            ref={miniRef}
+            className='relative w-full cursor-pointer touch-none border border-borderColor bg-white'
+            style={{ height: MINIMAP_PX }}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              miniDragging.current = true;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              centerFromMinimap(e);
+            }}
+            onPointerMove={(e) => {
+              if (miniDragging.current) centerFromMinimap(e);
+            }}
+            onPointerUp={() => {
+              miniDragging.current = false;
+            }}
+            onPointerCancel={() => {
+              miniDragging.current = false;
+            }}
+            aria-label='marker overview'
+          >
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              viewBox={`0 0 ${L} ${W}`}
+              preserveAspectRatio='none'
+              className='absolute inset-0 h-full w-full'
+              aria-hidden='true'
+            >
+              {tableEnd != null && (
+                <rect
+                  x={tableEnd}
+                  y={0}
+                  width={Math.max(0, L - tableEnd)}
+                  height={W}
+                  fill={OFF_TABLE}
+                  opacity={0.35}
+                />
+              )}
+              {minimapPieces}
+              {tableEnd != null && (
+                <line
+                  x1={tableEnd}
+                  y1={0}
+                  x2={tableEnd}
+                  y2={W}
+                  stroke={INK}
+                  strokeWidth={1.5}
+                  vectorEffect='non-scaling-stroke'
+                />
+              )}
+              <line
+                x1={usedLengthCm}
+                y1={0}
+                x2={usedLengthCm}
+                y2={W}
+                stroke={INK}
+                strokeWidth={1}
+                vectorEffect='non-scaling-stroke'
+              />
+              {targetCm != null && targetCm > 0 && (
+                <line
+                  x1={targetCm}
+                  y1={0}
+                  x2={targetCm}
+                  y2={W}
+                  stroke={TARGET}
+                  strokeWidth={1}
+                  vectorEffect='non-scaling-stroke'
+                />
+              )}
+            </svg>
+            <div
+              className='pointer-events-none absolute border border-textColor'
+              style={{
+                left: pct(miniLeft),
+                width: pct(Math.max(0, miniRight - miniLeft)),
+                top: pct(miniTop),
+                height: pct(Math.max(0, miniBottom - miniTop)),
+                minWidth: 3,
+              }}
             />
-          )}
-          {minimapPieces}
-          {tableEnd != null && (
-            <line
-              x1={tableEnd}
-              y1={0}
-              x2={tableEnd}
-              y2={W}
-              stroke={INK}
-              strokeWidth={1.5}
-              vectorEffect='non-scaling-stroke'
-            />
-          )}
-          <line
-            x1={usedLengthCm}
-            y1={0}
-            x2={usedLengthCm}
-            y2={W}
-            stroke={INK}
-            strokeWidth={1}
-            vectorEffect='non-scaling-stroke'
-          />
-          {targetCm != null && targetCm > 0 && (
-            <line
-              x1={targetCm}
-              y1={0}
-              x2={targetCm}
-              y2={W}
-              stroke={TARGET}
-              strokeWidth={1}
-              vectorEffect='non-scaling-stroke'
-            />
-          )}
-        </svg>
-        <div
-          className='pointer-events-none absolute border border-textColor'
-          style={{
-            left: pct(miniLeft),
-            width: pct(Math.max(0, miniRight - miniLeft)),
-            top: pct(miniTop),
-            height: pct(Math.max(0, miniBottom - miniTop)),
-            minWidth: 3,
-          }}
-        />
-      </div>
+          </div>
+        </>
+      )}
 
       <div
         ref={canvasRef}
