@@ -134,7 +134,7 @@ function isAutoName(m: common_TechCardMarkerSummary, sizeLabels: readonly string
   // раскладка (даже автоматическая по происхождению) остаётся видна по имени (Codex r5).
   const name = (m.name ?? '').trim();
   if (!name.includes(' · ')) return false;
-  const head = name.split(' · ')[0].trim().toLowerCase();
+  const head = name.split(' · ')[0].trim().toLowerCase().replace(/\s*[×x]\s*\d+$/, '');
   return sizeLabels.some((l) => l.trim().toLowerCase() === head);
 }
 
@@ -443,25 +443,19 @@ export function MarkersSection({
     const width = decNum(m.fabricWidthCm);
     const length = decNum(m.usedLengthCm);
     const eff = decNum(m.efficiencyPct);
-    const facts = [
-      colorway,
-      width ? `width ${width}` : '',
-      length ? `length ${length} cm` : '',
-      eff ? `eff. ${eff} %` : '',
-    ].filter(Boolean);
     return (
       <li
         key={id}
         title={rowTooltip(m, colorway)}
         onClick={() => openingId == null && openMarker(id)}
         className={cn(
-          'flex cursor-pointer flex-wrap items-baseline gap-x-4 gap-y-0.5 py-1.5 hover:bg-bgZebra',
+          'grid cursor-pointer grid-cols-[minmax(0,1fr)_120px_80px_110px_80px_auto] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-bgZebra',
           !last && 'border-b border-hairline',
         )}
       >
         <button
           type='button'
-          className='min-w-32 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          className='min-w-0 truncate text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
           disabled={openingId === id}
           onClick={(e) => {
             e.stopPropagation();
@@ -470,10 +464,7 @@ export function MarkersSection({
         >
           {custom ? (
             <>
-              {name}{' '}
-              <Text size='micro' variant='label' component='span'>
-                {compositionText(comp, sizeName)}
-              </Text>
+              {name} · {compositionText(comp, sizeName)}
             </>
           ) : (
             compositionText(comp, sizeName) || (
@@ -489,25 +480,21 @@ export function MarkersSection({
             </Text>
           )}
         </button>
-        {cons != null ? (
-          <Text size='stat' component='span'>
-            {cons} cm / unit
-          </Text>
-        ) : refusal ? (
-          <Pill tone='warn' title={refusal}>
-            {refusalWord(m)}
-          </Pill>
-        ) : (
-          <Text size='micro' variant='label' component='span'>
-            —
-          </Text>
-        )}
-        {facts.length > 0 && (
-          <Text size='micro' variant='label' component='span'>
-            {facts.join(' · ')}
-          </Text>
-        )}
-        <span className='ml-auto inline-flex items-baseline gap-2'>
+        <span className='text-right'>
+          {cons != null ? (
+            `${cons} cm / unit`
+          ) : refusal ? (
+            <Pill tone='warn' title={refusal}>
+              {refusalWord(m)}
+            </Pill>
+          ) : (
+            '—'
+          )}
+        </span>
+        <span className='text-right text-labelColor'>{width ? `${width} cm` : '—'}</span>
+        <span className='text-right text-labelColor'>{length ? `${length} cm` : '—'}</span>
+        <span className='text-right text-labelColor'>{eff ? `${eff} %` : '—'}</span>
+        <span className='inline-flex items-baseline justify-end gap-2'>
           {m.isNorm && <Pill tone='ok'>norm</Pill>}
           {draft && (
             <Pill tone='warn' title={refusal}>
@@ -597,6 +584,14 @@ export function MarkersSection({
       {groups.map((g) => (
         <div key={g.key}>
           {groups.length > 1 && <GroupLabel>{g.label}</GroupLabel>}
+          <div className='grid grid-cols-[minmax(0,1fr)_120px_80px_110px_80px_auto] gap-x-4 border-b border-borderColor pb-1 text-micro uppercase tracking-label text-labelColor'>
+            <span>marker</span>
+            <span className='text-right'>per unit</span>
+            <span className='text-right'>width</span>
+            <span className='text-right'>length</span>
+            <span className='text-right'>eff.</span>
+            <span />
+          </div>
           <ul>{g.markers.map((m, i) => renderRow(m, i === g.markers.length - 1))}</ul>
         </div>
       ))}

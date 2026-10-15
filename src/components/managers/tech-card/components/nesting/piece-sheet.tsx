@@ -45,7 +45,8 @@ const STYLE: Record<PieceMark, PieceStyle> = {
 };
 
 const GRID_STROKE = '#e6e6f0';
-const GRID_MINOR_STROKE = '#f1f1f7';
+// Один шаг сетки, в см листа: сетка масштабируется вместе с деталями, шаг от зума не зависит.
+const GRID_STEP = 10;
 const SIZE_INK = '#311eee';
 
 // Линии сетки на видимый кадр: шаг в см, только видимые, одним путём.
@@ -326,6 +327,23 @@ export function PieceSheet({
   // Чертёжных единиц (см) на экранный пиксель.
   const px = svgSize ? 1 / Math.min(svgSize.w / box.w, svgSize.h / box.h) : box.w / 800;
 
+  // Видимая область целиком: 'meet' добавляет поля по краям, если пропорции холста и viewBox
+  // расходятся, — сетка обязана закрывать и их. Края привязаны к шагу, чтобы линии не плыли.
+  const gridBox = (() => {
+    const vw = svgSize ? svgSize.w * px : box.w * 3;
+    const vh = svgSize ? svgSize.h * px : box.h * 3;
+    const x = box.x - (vw - box.w) / 2;
+    const y = box.y - (vh - box.h) / 2;
+    const x0 = Math.floor(x / GRID_STEP) * GRID_STEP - GRID_STEP;
+    const y0 = Math.floor(y / GRID_STEP) * GRID_STEP - GRID_STEP;
+    return {
+      x: x0,
+      y: y0,
+      w: Math.ceil((x + vw - x0) / GRID_STEP) * GRID_STEP + GRID_STEP,
+      h: Math.ceil((y + vh - y0) / GRID_STEP) * GRID_STEP + GRID_STEP,
+    };
+  })();
+
   // Длины сторон: подпись внутрь от середины дуги, вдоль касательной, строкой вверх. Короче 3 см
   // и короче самой подписи на экране — пропускаем; соседние подписи не налезают (сетка ячеек).
   const sizeLabels: { k: string; x: number; y: number; a: number; t: string }[] = [];
@@ -438,18 +456,16 @@ export function PieceSheet({
           onLostPointerCapture={endGesture}
           onDoubleClick={() => setView(null)}
         >
-          {/* Сетка в сантиметрах листа: 10 см всегда, 1 см — когда сантиметр крупнее 6px. */}
+          {/* Сетка в сантиметрах листа: одна, 10 см, зумится вместе с деталями. */}
           {prefs.grid ? (
-            <g pointerEvents='none' fill='none' strokeWidth={1}>
-              {px < 1 / 6 ? (
-                <path
-                  d={gridPath(box, 1)}
-                  stroke={GRID_MINOR_STROKE}
-                  vectorEffect='non-scaling-stroke'
-                />
-              ) : null}
-              <path d={gridPath(box, 10)} stroke={GRID_STROKE} vectorEffect='non-scaling-stroke' />
-            </g>
+            <path
+              pointerEvents='none'
+              fill='none'
+              strokeWidth={1}
+              d={gridPath(gridBox, GRID_STEP)}
+              stroke={GRID_STROKE}
+              vectorEffect='non-scaling-stroke'
+            />
           ) : null}
 
           {/* Силуэт — ориентир масштаба за деталями, по центру габарита листа. */}
@@ -465,41 +481,56 @@ export function PieceSheet({
             const ox = p.originX!;
             const oy = p.originY!;
             const points = p.poly.map((pt) => `${ox + pt.x},${vy(oy + pt.y)}`).join(' ');
-            // Толщина — в экранных пикселях (1px, выбранная 2px), на любом зуме.
-            const sw = (on ? 2 : 1) * px;
+            // Толщина — в экранных пикселях (1px, наведение 1.5px, выбранная 2.5px), на любом
+            // зуме. Выбор не трогает заливку (владелец: яркость не должна падать) — только
+            // синяя обводка и мягкий ореол под ней.
+            const sw = (on ? 2.5 : 1) * px;
             const plan = labelPlans.get(p.id);
             return (
-              <polygon
-                key={p.id}
-                points={points}
-                fill={on ? BLUE : st.fill}
-                fillOpacity={on ? 0.3 : st.fillOpacity}
-                stroke={on ? '#111111' : st.stroke}
-                strokeOpacity={on ? 1 : st.strokeOpacity}
-                strokeWidth={sw}
-                strokeDasharray={st.dash ? `${6 * px} ${4 * px}` : undefined}
-                className={
-                  key
-                    ? on
-                      ? 'cursor-pointer'
-                      : 'cursor-pointer hover:[fill-opacity:0.22]'
-                    : undefined
-                }
-                onPointerDown={(e) => {
-                  if (e.button !== 0 || !key) return;
-                  // Кладём кандидата и ОТПУСКАЕМ событие дальше: панорама взводится на самом
-                  // svg, а что это было — выбор или протяжка — решится по пройденному пути.
-                  candidate.current = { key, pointerId: e.pointerId };
-                }}
-                // Двойной клик по листу возвращает обзор; по детали — не должен, иначе
-                // привычный двойной щелчок по выбору выбрасывает весь зум.
-                onDoubleClick={(e) => e.stopPropagation()}
-              >
-                {/* Усечённое имя обязано остаться восстановимым: подсказка висит на самой
+              <g key={p.id}>
+                {on ? (
+                  <polygon
+                    points={points}
+                    pointerEvents='none'
+                    fill='none'
+                    stroke={BLUE}
+                    strokeOpacity={0.15}
+                    strokeWidth={6 * px}
+                    strokeLinejoin='round'
+                  />
+                ) : null}
+                <polygon
+                  points={points}
+                  fill={st.fill}
+                  fillOpacity={st.fillOpacity}
+                  stroke={on ? BLUE : st.stroke}
+                  strokeOpacity={on ? 1 : st.strokeOpacity}
+                  strokeWidth={sw}
+                  strokeDasharray={st.dash && !on ? `${6 * px} ${4 * px}` : undefined}
+                  style={{ '--hw': `${1.5 * px}` } as React.CSSProperties}
+                  className={
+                    key
+                      ? on
+                        ? 'cursor-pointer'
+                        : 'cursor-pointer hover:[stroke-width:var(--hw)]'
+                      : undefined
+                  }
+                  onPointerDown={(e) => {
+                    if (e.button !== 0 || !key) return;
+                    // Кладём кандидата и ОТПУСКАЕМ событие дальше: панорама взводится на самом
+                    // svg, а что это было — выбор или протяжка — решится по пройденному пути.
+                    candidate.current = { key, pointerId: e.pointerId };
+                  }}
+                  // Двойной клик по листу возвращает обзор; по детали — не должен, иначе
+                  // привычный двойной щелчок по выбору выбрасывает весь зум.
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  {/* Усечённое имя обязано остаться восстановимым: подсказка висит на самой
                     детали, а не на подписи — та не принимает указатель, иначе перехватывала
                     бы клик у своего же контура. */}
-                {plan?.truncated ? <title>{plan.full}</title> : null}
-              </polygon>
+                  {plan?.truncated ? <title>{plan.full}</title> : null}
+                </polygon>
+              </g>
             );
           })}
 

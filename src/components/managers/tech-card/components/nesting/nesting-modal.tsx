@@ -2413,7 +2413,8 @@ export function NestingModal({
         <div className='relative'>
           {running && liveSvg ? (
             <div
-              className='max-h-[56vh] w-full overflow-auto border border-borderColor bg-bgColor [&_svg]:h-auto [&_svg]:w-full'
+              // Потоковое превью: ширина ткани = высота холста, длина — горизонтальный скролл.
+              className='h-[60vh] min-h-[320px] w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-bgColor [&_svg]:h-full [&_svg]:w-auto [&_svg]:max-w-none'
               dangerouslySetInnerHTML={{ __html: liveSvg }}
             />
           ) : effective && !running ? (
