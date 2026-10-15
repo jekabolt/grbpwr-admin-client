@@ -27,7 +27,11 @@ import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
+import {
+  HeaderWarnings,
+  type HeaderWarning,
+  type HeaderWarningAction,
+} from 'ui/components/header-warnings';
 import Input from 'ui/components/input';
 import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
@@ -40,6 +44,7 @@ import {
   MAX_PATTERN_BYTES,
   MAX_PATTERN_NAME,
   clampPatternName,
+  clampUtf8Bytes,
   formatBytes,
   isDxfFile,
   isDxfUrl,
@@ -60,6 +65,7 @@ import {
   strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf, uniOf } from './nesting/block-code';
+import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
@@ -393,9 +399,7 @@ export function PatternsField({
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
-  const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(
-    null,
-  );
+  const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
@@ -870,8 +874,14 @@ export function PatternsField({
         .filter((r) => scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey)
         .map((r) => (r.name ?? '').trim()),
     );
+    // The suffix gets its bytes BEFORE the base is clamped: a base already at the 255-byte cap
+    // would otherwise clamp `${base} 2` back to `base` and the loop would never end.
+    const withSuffix = (suffix: string) =>
+      `${clampUtf8Bytes(base, MAX_PATTERN_NAME - new TextEncoder().encode(suffix).length).trimEnd()}${suffix}`;
     let name = base;
-    for (let n = 2; taken.has(name); n++) name = clampPatternName(`${base} ${n}`);
+    for (let n = 2; taken.has(name) && n <= 999; n++) name = withSuffix(` ${n}`);
+    // Finite fallback: a ulid tail is unique enough without another scan.
+    if (taken.has(name)) name = withSuffix(` ${ulid().slice(-8).toLowerCase()}`);
     return name;
   }
 
@@ -1196,7 +1206,8 @@ export function PatternsField({
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
     // A DXF name opens the pieces viewer of its slot; a sheet without a material has none.
-    const rowGroup = dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
+    const rowGroup =
+      dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
     const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
     const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
     const meta = [rev != null ? `v${rev}` : '', row.sizeBytes ? formatBytes(row.sizeBytes) : '']
@@ -1681,52 +1692,202 @@ export function PatternsField({
     ) : null;
 
   // ── ШАПКА БЛОКА: счёт и предупреждения (portal в action секции) ─────────────────────────
+  // Each warning carries its fix where this screen has one (owner, patterns-lite round 2).
+  const withFiles = (k: string) =>
+    scopeGroups.find((g) => g.scope.key === k && g.entries.length > 0);
+  // The pieces viewer of a slot; without a known slot, the selected one, else the first with files.
+  const piecesDoor = (scopeKey?: string): HeaderWarningAction | undefined => {
+    const g =
+      (scopeKey ? withFiles(scopeKey) : undefined) ??
+      (selectedKey ? withFiles(selectedKey) : undefined) ??
+      scopeGroups.find((x) => x.entries.length > 0);
+    return g
+      ? {
+          label: 'open pieces',
+          onClick: () => {
+            setSelectedKey(g.scope.key);
+            openPieces(g);
+          },
+        }
+      : undefined;
+  };
+  // The size range is a sibling block of this one (index.tsx, PATTERNS tab), with no anchor id:
+  // found by its title among the blocks of the same stack.
+  const sizeRangeDoor: HeaderWarningAction | undefined = headerEl
+    ? {
+        label: 'open size range',
+        onClick: () => {
+          const stack = headerEl.closest('section')?.parentElement;
+          if (!stack) return;
+          const target =
+            Array.from(stack.children).find((el) =>
+              (el.textContent ?? '').trim().toLowerCase().startsWith('size range'),
+            ) ?? stack.firstElementChild;
+          if (!(target instanceof HTMLElement)) return;
+          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          target
+            .querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+            ?.focus({ preventScroll: true });
+        },
+      }
+    : undefined;
+  const reparse: HeaderWarningAction = { label: 'retry', onClick: () => void geometry.refetch() };
+
   const pieceErrors: HeaderWarning[] = [];
   for (const [k, v] of Object.entries((errors.pieces ?? {}) as Record<string, unknown>)) {
     const i = Number(k);
-    const who = Number.isInteger(i) ? cardPieces[i]?.name?.trim() || `#${i + 1}` : '';
+    const piece = Number.isInteger(i) ? cardPieces[i] : undefined;
+    const who = Number.isInteger(i) ? piece?.name?.trim() || `#${i + 1}` : '';
+    // A piece has no fabric of its own: its slot is the one its DXF block is linked in.
+    const linked = piece?.lineKey
+      ? pieceDxfAliases.find((a) => a.pieceLineKey === piece.lineKey)
+      : undefined;
+    const slot = linked
+      ? scopeKeyOfBinding(linked.fabricPurpose, linked.bomLineKey, scopes)
+      : undefined;
     for (const m of messagesOf(v))
-      pieceErrors.push({ text: who ? `piece ${who}: ${m}` : `pieces: ${m}`, error: true });
+      pieceErrors.push({
+        text: who ? `piece ${who}: ${m}` : `pieces: ${m}`,
+        error: true,
+        action: piecesDoor(slot),
+      });
   }
   for (const [k, v] of Object.entries((errors.pieceDxfAliases ?? {}) as Record<string, unknown>)) {
     const i = Number(k);
-    const who = Number.isInteger(i) ? pieceDxfAliases[i]?.blockName?.trim() || `#${i + 1}` : '';
+    const alias = Number.isInteger(i) ? pieceDxfAliases[i] : undefined;
+    const who = Number.isInteger(i) ? alias?.blockName?.trim() || `#${i + 1}` : '';
+    const slot = alias
+      ? scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, scopes)
+      : undefined;
     for (const m of messagesOf(v))
-      pieceErrors.push({ text: who ? `piece ${who}: ${m}` : `pieces: ${m}`, error: true });
+      pieceErrors.push({
+        text: who ? `piece ${who}: ${m}` : `pieces: ${m}`,
+        error: true,
+        action: piecesDoor(slot),
+      });
   }
-  const followUpFailures = !importing
+  const followUpFailures: HeaderWarning[] = !importing
     ? (followUp?.rows ?? []).flatMap((r) =>
         (['areas', 'sizeIndex'] as const)
           .filter((step) => r[step].state === 'failed')
           .map((step) => ({
             text: `${r.label}: ${step === 'areas' ? 'piece areas' : 'size index'} not saved, ${r[step].detail}`,
             error: true,
+            action: {
+              label: 'retry',
+              onClick: () => retryFollowUp({ scopeKey: r.scopeKey, step }),
+            },
           })),
       )
     : [];
+  const unitsWarning: HeaderWarning | null =
+    unitless.length > 0
+      ? {
+          text: `units guessed: ${unitless.length} ${plural(unitless.length, 'sheet')}`,
+          action: canEdit
+            ? {
+                label: unitsFetching ? 'set units…' : 'set units',
+                onClick: () => void setUnitsOfExisting(),
+                disabled: unitsFetching || isSubmitting,
+              }
+            : undefined,
+        }
+      : null;
+  const outOfRangeAction: HeaderWarningAction | undefined =
+    canEdit && storageSizeId > 0
+      ? {
+          label: 're-file',
+          disabled: isSubmitting,
+          onClick: () => {
+            for (const e of outOfRange)
+              setValue(`patterns.${e.index}.sizeId`, storageSizeId, { shouldDirty: true });
+          },
+        }
+      : sizeRangeDoor;
+  const parserWarnings: HeaderWarning[] = (geometry.data?.warnings ?? [])
+    .filter((w) => !w.includes(UNITS_GUESS))
+    .map((w) => (isFetchFailure(w) ? { text: w, action: reparse } : w));
+  const missingSizeWarnings: HeaderWarning[] = missingSizeNotes.map((text) => ({
+    text,
+    action: sizeRangeDoor,
+  }));
+  const noPatternWarnings: HeaderWarning[] = materialsWithoutDxf.map((g) => ({
+    text: `${scopeLabel(g.scope)}: no pattern`,
+    action: canDrop
+      ? { label: 'add files', onClick: () => openPicker(g.scope.key) }
+      : canUpload
+        ? sizeRangeDoor
+        : undefined,
+  }));
+  const looseWarning: HeaderWarning | null =
+    looseDxf.length > 0
+      ? {
+          text: `without a material: ${looseDxf.length}`,
+          action:
+            canEdit && uploadScopes.length > 0
+              ? {
+                  label: 'choose material',
+                  onClick: () => {
+                    // The loose panel shows a material select on every unbound row.
+                    setSelectedKey(LOOSE_KEY);
+                    requestAnimationFrame(() =>
+                      headerEl
+                        ?.closest('section')
+                        ?.querySelector<HTMLSelectElement>('select[aria-label^="material for"]')
+                        ?.focus(),
+                    );
+                  },
+                }
+              : undefined,
+        }
+      : null;
+  const indexWarnings: HeaderWarning[] = Object.entries(indexFailures).flatMap(([sig, reason]) => {
+    const g = scopeGroups.find((x) => x.entries.length > 0 && sigOf(x.entries) === sig);
+    if (!g) return [];
+    return [
+      {
+        text: `size index not saved: ${reason}`,
+        action: {
+          label: 'retry',
+          onClick: () => void publishIndexForRef.current(g.scope.key, true),
+        },
+      },
+    ];
+  });
+  // Auto piece-area refusals: a fix only where the reason has one on this screen.
+  const areaFix = (k: string, reason: string): HeaderWarningAction | undefined => {
+    if (reason.includes('no piece linked') || reason.includes('linked pieces missing'))
+      return piecesDoor(k);
+    if (reason.includes('download failed') || reason.includes('could not be parsed'))
+      return reparse;
+    if (reason.includes('no size range')) return sizeRangeDoor;
+    return undefined;
+  };
+  const areaWarnings: HeaderWarning[] = Object.entries(areaRefusals).map(([k, reason]) => ({
+    text: `${scopeLabelByKey.get(k) ?? 'pattern'}: ${reason}`,
+    action: areaFix(k, reason),
+  }));
   const warnings: HeaderWarning[] = [
     ...pieceErrors,
     geometry.isError && {
       text: `parsing failed: ${geometry.error?.message ?? 'reason unknown'}`,
       error: true,
+      action: reparse,
     },
     outOfRange.length > 0 && {
-      text: `size out of range: ${outOfRange.length} ${plural(outOfRange.length, 'sheet')}, re-file before saving`,
+      text: `size out of range: ${outOfRange.length} ${plural(outOfRange.length, 'sheet')}`,
       error: true,
+      action: outOfRangeAction,
     },
     ...followUpFailures,
-    ...(geometry.data?.warnings ?? []).filter((w) => !w.includes(UNITS_GUESS)),
-    ...missingSizeNotes,
-    ...materialsWithoutDxf.map((g) => `${scopeLabel(g.scope)}: no pattern`),
-    looseDxf.length > 0 && `without a material: ${looseDxf.length}`,
-    ...Object.entries(indexFailures)
-      .filter(([sig]) => scopeGroups.some((g) => g.entries.length > 0 && sigOf(g.entries) === sig))
-      .map(([, reason]) => `size index not saved: ${reason}`),
-    ...Object.entries(areaRefusals).map(
-      ([k, reason]) => `${scopeLabelByKey.get(k) ?? 'pattern'}: ${reason}`,
-    ),
+    unitsWarning,
+    ...parserWarnings,
+    ...missingSizeWarnings,
+    ...noPatternWarnings,
+    looseWarning,
+    ...indexWarnings,
+    ...areaWarnings,
   ].filter((w): w is HeaderWarning => !!w);
-  const canRetry = geometry.isError || followUpFailures.length > 0;
   const withoutPattern = scopeGroups.filter((g) => g.entries.length === 0).length;
   const header = (
     <>
@@ -1737,32 +1898,6 @@ export function PatternsField({
         </HeaderNote>
       )}
       <HeaderWarnings items={warnings} />
-      {canEdit && unitless.length > 0 && (
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className={door}
-          disabled={unitsFetching || isSubmitting}
-          onClick={() => void setUnitsOfExisting()}
-        >
-          {unitsFetching ? 'set units…' : 'set units'}
-        </Button>
-      )}
-      {canRetry && (
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className={door}
-          onClick={() => {
-            if (geometry.isError) void geometry.refetch();
-            if (followUpFailures.length > 0) retryFollowUp();
-          }}
-        >
-          retry
-        </Button>
-      )}
     </>
   );
   const headerPortal = headerEl ? createPortal(header, headerEl) : null;
