@@ -2478,12 +2478,14 @@ export function NestingModal({
               </Text>
             )}
             {manual && !running && (
-              <Button type='button' variant='secondary' onClick={() => setManual(null)}>
+              <Button type='button' variant='secondary'
+                    size='sm' onClick={() => setManual(null)}>
                 reset edits
               </Button>
             )}
             {viewData && !viewDegraded && canEdit && !editView && (
-              <Button type='button' variant='secondary' onClick={() => setEditView(true)}>
+              <Button type='button' variant='secondary'
+                    size='sm' onClick={() => setEditView(true)}>
                 edit
               </Button>
             )}
@@ -2491,6 +2493,7 @@ export function NestingModal({
               <Button
                 type='button'
                 variant='main'
+                    size='sm'
                 disabled={!canSaveView || saving}
                 onClick={updateViewMarker}
               >
@@ -2500,13 +2503,15 @@ export function NestingModal({
             {!viewData && (
               <>
                 {running ? (
-                  <Button type='button' variant='main' disabled={stopping} onClick={stop}>
+                  <Button type='button' variant='main'
+                    size='sm' disabled={stopping} onClick={stop}>
                     {stopping ? 'stopping…' : 'stop'}
                   </Button>
                 ) : (
                   <Button
                     type='button'
                     variant='main'
+                    size='sm'
                     disabled={
                       parse.phase !== 'ready' ||
                       checkedCount === 0 ||
@@ -2522,6 +2527,7 @@ export function NestingModal({
                 <Button
                   type='button'
                   variant='secondary'
+                    size='sm'
                   disabled={!canSave}
                   title={!canSave && onlyTerminal ? TERMINAL_SAVE_REASON : undefined}
                   onClick={() => setSaveOpen(true)}
@@ -2560,7 +2566,8 @@ export function NestingModal({
                 DXF contours
               </Button>
             )}
-            <Button type='button' variant='secondary' onClick={requestClose}>
+            <Button type='button' variant='secondary'
+                    size='sm' onClick={requestClose}>
               close
             </Button>
           </div>

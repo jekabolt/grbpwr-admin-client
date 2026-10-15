@@ -23,6 +23,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { uploadPatternFile } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
+import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 import {
   MAX_PATTERN_BYTES,
@@ -1251,27 +1252,34 @@ export function PatternsField({
     const a = audits[sigOf(g.entries)];
     const missing = a?.phase === 'ready' ? missingIn(a) : [];
     const empty = (
-      <Placeholder dashed className='h-[84px] w-full'>
-        <span className='flex flex-col items-center gap-0.5 text-center'>
-          {busy ? (
-            <span>uploading…</span>
-          ) : !canDrop ? (
-            <span>{canUpload ? 'set the size range first' : 'no pattern'}</span>
-          ) : (
-            <>
-              <span>drop pattern files</span>
-              <span className='text-nano text-labelColor'>
-                {importOk ? 'DXF or PDF' : 'DXF'} · one file or one per size
-              </span>
-            </>
-          )}
-        </span>
-      </Placeholder>
+      <div
+        className={cn(
+          'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
+          canDrop && !busy
+            ? 'border-labelColor text-textColor group-hover/slot:border-textColor'
+            : 'border-borderColor text-labelColor',
+        )}
+      >
+        {busy ? (
+          <span className='text-micro'>uploading…</span>
+        ) : !canDrop ? (
+          <span className='text-micro'>
+            {canUpload ? 'set the size range first' : 'no pattern'}
+          </span>
+        ) : (
+          <>
+            <span className='text-micro'>+ drop pattern files</span>
+            <span className='text-nano text-labelColor'>
+              {importOk ? 'DXF or PDF' : 'DXF'} · one file or one per size
+            </span>
+          </>
+        )}
+      </div>
     );
     return (
       <div
         key={key}
-        className={dragKey === key ? 'outline outline-2 outline-textColor' : undefined}
+        className={cn('group/slot', dragKey === key && 'outline outline-2 outline-textColor')}
         {...dropProps(key)}
       >
         <Tile

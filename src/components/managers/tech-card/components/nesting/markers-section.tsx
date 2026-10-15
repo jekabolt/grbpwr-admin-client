@@ -339,7 +339,7 @@ export function MarkersSection({
   if (markers.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        there are no saved markers — run “⌗ marker” on the size tile and press “save marker”
+        no saved markers
       </Text>
     );
   }
