@@ -677,6 +677,8 @@ export function rescuedIgnored(
   minLenMm = 15,
   module: number[] = [],
   never: ReadonlySet<ChainId> = new Set(),
+  /** hold back an ignored line lying wholly on one size's line (the faces' weak walls, below) */
+  holdSizeLine = false,
 ): ChainId[] {
   const ignore = set.classes.filter((c) => c.role === 'ignore').flatMap((c) => c.chains);
   if (!ignore.length) return [];
@@ -697,8 +699,10 @@ export function rescuedIgnored(
     return hit;
   };
   // LEAKS: an ignored line lying wholly ON one size's line (a piece recovery joined into that line —
-  // sizes/land bridgeSameRank — or a copy of it) is that size's stretch, never a wall of every
-  // size: rescued, it handed one size's line to all the others
+  // sizes/land bridgeSameRank — or a copy of it) is that size's stretch, not a weak wall of the
+  // faces: there it walled Mood's bead rows into blobs read as background (whole pieces' labels
+  // held). Only for the faces (`holdSizeLine`): the fill's continuity closures keep it as before
+  // (palto 25·80 closes through such a line; the merged-strip seam fixture is refused through it)
   const ranked = new SegGrid(4);
   for (const id of m.byRank.flat()) {
     const c = set.chains[id];
@@ -736,7 +740,7 @@ export function rescuedIgnored(
   for (const id of ignore) {
     const c = set.chains[id];
     if (!c || c.closed || c.pts.length < 2 || c.lengthMm < minLenMm || never.has(id)) continue;
-    if (!probeOff('LEAKS_RESCUE_ON_LINE') && onOneSizeLine(c)) continue;
+    if (holdSizeLine && !probeOff('LEAKS_RESCUE_ON_LINE') && onOneSizeLine(c)) continue;
     // a page-module rule (Redcafe's 1116 mm = 6 × 186 tile pitch grid line) is furniture even
     // when both its ends happen to touch a garment edge
     if (module.length && frameLike(c.pts, 60, module)) continue;

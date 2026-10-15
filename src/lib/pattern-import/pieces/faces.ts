@@ -251,6 +251,7 @@ export function faceWalls(
     15,
     sheetModule(sheet),
     new Set([...pageMarginIds(set.chains, sheet.poses), ...cornerSources(model)]),
+    true,
   );
   const ids = new Set<ChainId>([...model.common, ...model.byRank.flat()]);
   const lone = lonePortions(set, model);
