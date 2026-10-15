@@ -224,6 +224,8 @@ const PIECE_NAME =
 /** …and what says the outline is no piece to cut (a template, a view's cut line). */
 const NOT_A_PIECE =
   /do\s*not\s*cut|don'?t\s*cut|template|cut\s*(?:here|line)|trim\s+(?:here|line)/i;
+/** …or a mark whose own outline / a fold this face may be (Codex r1: a veto wherever it stands). */
+const MARK_VETO = /placement|fold\s+(?:here|line)/i;
 /** A text naming a mark or a fold on a piece, never the piece's own name. */
 const MARK_TEXT = /placement|fold\s+(?:here|line|under|back|down|in)|gather|stitch|notch/i;
 /** …and a piece face at least this large (a label box, a notch stack is smaller). */
@@ -1024,12 +1026,15 @@ export function judgeBlobs(
         for (const f of grp.slice(1)) {
           const why = joinedWhy(f, grp);
           // SEEDNAME: a piece drawn against this one (Olea's back beside the front, across the
-          // front's size lines) — its own name and one size's lines closing it alone (D3: both)
+          // front's size lines) — its own name and one size's lines closing it alone (D3: both).
+          // Only across size lines: a face split off by a common / inner line ('joined', or a strip
+          // told by its width) may be half of the piece — that stays a question (Codex r1)
           const named =
             !off.has(why) &&
             !off.has('own-name') &&
             !!o.graded &&
-            (why === 'size-copy' || why === 'joined') &&
+            why === 'size-copy' &&
+            acrossSizeLines(f, grp) &&
             namedOneSize(f) != null;
           if (off.has(why) || named) {
             const v: Unit = {
@@ -1309,14 +1314,65 @@ export function judgeBlobs(
       return g.centre(x, y);
     }
 
-    /** Each face of a group → the unit whose root it reaches first across shared lines (BFS). */
+    /** Face f is parted from the rest of its group by size lines only (joinedWhy's first test). */
+    function acrossSizeLines(f: number, grp: readonly number[]): boolean {
+      const ids = sep(
+        f,
+        grp.filter((x) => x !== f),
+      );
+      return ids.length > 0 && ids.every((id) => !!o.sizeLine?.has(id));
+    }
+
+    /**
+     * Each face of a group → the unit whose root it reaches first across a line they share at one
+     * place (wall pixels with both faces within 2 px, ≥ 3 of them — never two faces one polyline
+     * touches at distant places: Codex r1); a tie or no path keeps the head (roots[0]).
+     */
     function nearestRoot(grp: readonly number[], roots: readonly Unit[]): Map<number, Unit> {
       const inG = new Set(grp);
       const adj = new Map<number, Set<number>>(grp.map((f) => [f, new Set<number>()]));
-      T.forEach((t) => {
-        const fs2 = [...t.touch].filter(([l, c]) => inG.has(l) && c >= 3).map(([l]) => l);
-        for (const a of fs2) for (const b of fs2) if (a !== b) adj.get(a)!.add(b);
-      });
+      let x0 = W;
+      let y0 = g.H;
+      let x1 = -1;
+      let y1 = -1;
+      for (const f of grp) {
+        const q = fs[f];
+        x0 = Math.min(x0, q.x0 - 3);
+        y0 = Math.min(y0, q.y0 - 3);
+        x1 = Math.max(x1, q.x1 + 3);
+        y1 = Math.max(y1, q.y1 + 3);
+      }
+      x0 = Math.max(0, x0);
+      y0 = Math.max(0, y0);
+      x1 = Math.min(W - 1, x1);
+      y1 = Math.min(g.H - 1, y1);
+      const shared = new Map<number, number>();
+      const near = new Set<number>();
+      for (let y = y0; y <= y1; y++)
+        for (let x = x0; x <= x1; x++) {
+          if (!wall[y * W + x]) continue;
+          near.clear();
+          for (let dy = -2; dy <= 2; dy++)
+            for (let dx = -2; dx <= 2; dx++) {
+              if (!g.inside(x + dx, y + dy)) continue;
+              const l = face[(y + dy) * W + x + dx];
+              if (l >= 0 && inG.has(l)) near.add(l);
+            }
+          if (near.size < 2) continue;
+          for (const a of near)
+            for (const b of near)
+              if (a < b) {
+                const key = a * nFaces + b;
+                shared.set(key, (shared.get(key) ?? 0) + 1);
+              }
+        }
+      for (const [key, c] of shared) {
+        if (c < 3) continue;
+        const a = Math.floor(key / nFaces);
+        const b = key % nFaces;
+        adj.get(a)!.add(b);
+        adj.get(b)!.add(a);
+      }
       const out = new Map<number, Unit>();
       const tie = new Set<number>();
       let front: number[] = [];
@@ -1362,7 +1418,7 @@ export function judgeBlobs(
     function namedOneSize(f: number): string | null {
       if (!o.rankOfItem) return null;
       const texts = textAt.filter(({ t, k }) => !t.background && inFace(k, f)).map(({ t }) => t);
-      if (texts.some((t) => NOT_A_PIECE.test(t.text))) return null;
+      if (texts.some((t) => NOT_A_PIECE.test(t.text) || MARK_VETO.test(t.text))) return null;
       const name = texts.find(
         (t) => pieceLabelText(t.text) && PIECE_NAME.test(t.text) && !MARK_TEXT.test(t.text),
       );
@@ -1385,35 +1441,52 @@ export function judgeBlobs(
       const by0 = Math.max(0, F.y0 - pad);
       const bx1 = Math.min(W - 1, F.x0 + F.w - 1 + pad);
       const by1 = Math.min(g.H - 1, F.y0 + F.h - 1 + pad);
-      for (const [r] of ranks) {
-        const mask = new Uint8Array(N);
-        items.forEach((it) => {
-          const ir = o.rankOfItem!(it);
-          if (ir === 'all' || ir === r) drawPolyline(g, mask, it.pts, it.closed);
-        });
-        for (let y = by0; y <= by1; y++)
-          for (let x = bx0; x <= bx1; x++) if (weak[y * W + x]) mask[y * W + x] = 1;
-        if (mask[pole]) continue;
+      // the walls of every rank (common lines, lone stretches, rescued lines) alone
+      const all = new Uint8Array(N);
+      items.forEach((it) => {
+        if (o.rankOfItem!(it) === 'all') drawPolyline(g, all, it.pts, it.closed);
+      });
+      for (let y = by0; y <= by1; y++)
+        for (let x = bx0; x <= bx1; x++) if (weak[y * W + x]) all[y * W + x] = 1;
+      /** Flood from the pole on `mask` in the box: null on a leak, else the region's account. */
+      const flood = (mask: Uint8Array) => {
+        if (mask[pole]) return null;
         const seen = new Uint8Array(N);
         const st = [pole];
         seen[pole] = 1;
         let n = 0;
         let inF = 0;
-        let leak = false;
-        while (st.length && !leak) {
+        let rimAll = 0;
+        let rimOwn = 0;
+        while (st.length) {
           const k = st.pop()!;
           n++;
           if (inFill(F, k, W)) inF++;
           const x = k % W;
           const y = (k / W) | 0;
-          if (x <= bx0 || y <= by0 || x >= bx1 || y >= by1) leak = true;
-          for (const q of [k - 1, k + 1, k - W, k + W])
-            if (q >= 0 && q < N && !seen[q] && !mask[q]) {
-              seen[q] = 1;
-              st.push(q);
-            }
+          if (x <= bx0 || y <= by0 || x >= bx1 || y >= by1) return null;
+          for (const q of [k - 1, k + 1, k - W, k + W]) {
+            if (q < 0 || q >= N || seen[q]) continue;
+            seen[q] = 1;
+            if (!mask[q]) st.push(q);
+            else if (all[q]) rimAll++;
+            else rimOwn++;
+          }
         }
-        if (!leak && inF >= 0.9 * F.area && n <= 1.15 * F.area) return name.text.trim();
+        return { n, inF, own: rimOwn / Math.max(1, rimAll + rimOwn) };
+      };
+      // closed by the shared walls alone: an outline drawn once (a box, a cartouche) — not a size's
+      // outline (Codex r1)
+      if (flood(all)) return null;
+      for (const [r] of ranks) {
+        const mask = all.slice();
+        items.forEach((it) => {
+          if (o.rankOfItem!(it) === r) drawPolyline(g, mask, it.pts, it.closed);
+        });
+        const v = flood(mask);
+        // …and that size's own lines bound a good part of it (≥ 30 % of its edge)
+        if (v && v.inF >= 0.9 * F.area && v.n <= 1.15 * F.area && v.own >= 0.3)
+          return name.text.trim();
       }
       return null;
     }
