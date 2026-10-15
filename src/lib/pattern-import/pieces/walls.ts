@@ -696,10 +696,47 @@ export function rescuedIgnored(
     });
     return hit;
   };
+  // LEAKS: an ignored line lying ON one size's line (a piece recovery joined into that line —
+  // sizes/land bridgeSameRank — or a copy of it) is that size's stretch, never a wall of every
+  // size: rescued, it handed one size's line to all the others
+  const ranked = new SegGrid(4);
+  for (const id of m.byRank.flat()) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  const onOneSizeLine = (c: { pts: PtMm[]; lengthMm: number }) => {
+    const hits = new Map<ChainId, number>();
+    let n = 0;
+    const L = c.lengthMm;
+    const step = Math.max(1, L / 200);
+    const cum: number[] = [0];
+    for (let i = 1; i < c.pts.length; i++) cum.push(cum[i - 1] + dist(c.pts[i - 1], c.pts[i]));
+    let seg = 0;
+    for (let sAt = step / 2; sAt < L; sAt += step) {
+      while (seg + 2 < c.pts.length && cum[seg + 1] < sAt) seg++;
+      const a = c.pts[seg];
+      const b = c.pts[seg + 1];
+      const l = cum[seg + 1] - cum[seg] || 1;
+      const u = (sAt - cum[seg]) / l;
+      const p = { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+      n++;
+      const seen = new Set<ChainId>();
+      ranked.near(p, 0.3, (rid, i) => {
+        if (seen.has(rid)) return;
+        const q = set.chains[rid].pts;
+        const q1 = i + 1 < q.length ? q[i + 1] : q[0];
+        if (segNearest(p, q[i], q1).d > 0.3) return;
+        seen.add(rid);
+        hits.set(rid, (hits.get(rid) ?? 0) + 1);
+      });
+    }
+    return n > 0 && [...hits.values()].some((v) => v >= 0.8 * n);
+  };
   const cand: ChainId[] = [];
   for (const id of ignore) {
     const c = set.chains[id];
     if (!c || c.closed || c.pts.length < 2 || c.lengthMm < minLenMm || never.has(id)) continue;
+    if (!probeOff('LEAKS_RESCUE_ON_LINE') && onOneSizeLine(c)) continue;
     // a page-module rule (Redcafe's 1116 mm = 6 × 186 tile pitch grid line) is furniture even
     // when both its ends happen to touch a garment edge
     if (module.length && frameLike(c.pts, 60, module)) continue;

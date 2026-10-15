@@ -443,7 +443,11 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     chainOfMark.set(m, ch);
     markOfChain.set(ch, m);
   }
-  const rows = chainBeads(pool).filter((row) => {
+  // LEAKS: marks drawn one after another (a pattern brush emits its tiles in order along the
+  // line) are one row before any proximity linking: in a dense bundle of sizes the nearest mark is
+  // often the next size's (Mood 0 / 2 / 6, 1 mm apart), and proximity alone zigzags across them
+  const seq = opRows(pool, styles);
+  const rows = [...seq.rows, ...chainBeads(seq.rest)].filter((row) => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
     let near = 0;
     for (const l of row.items) {
@@ -517,6 +521,96 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   for (const [rep, ch] of tinyLeft) if (!used.has(rep)) alive.push(ch);
   const free = loose.filter((b) => !used.has(b) && !tinyLeft.has(b)).length;
   return { chains: alive, items: nItems, freeBeads: free, ignoredPaths: ignored };
+}
+
+/** Drawing-order rows: see `opRows`. */
+export const OPROW = {
+  /** Consecutive marks of one row are at most this many paint operations apart. */
+  maxOpStep: 12,
+  /** …and at most this far apart (centre to centre; a capsule by its nearer end), mm. */
+  maxGapMm: 5,
+  /** The row turns at most this much from one step to the next (a corner of the line). */
+  maxTurnDeg: 100,
+  /** A row is a line: at least this long (centre to centre), mm… */
+  minLenMm: 15,
+  /** …its marks on average at least this far apart, mm. */
+  minStepMm: 1,
+};
+
+/** The paint operation number of an item (`file|page|op`). */
+const opNo = (it: Item) => {
+  const k = it.op.lastIndexOf('|');
+  return { page: it.op.slice(0, k), n: Number(it.op.slice(k + 1)) };
+};
+
+/**
+ * Rows of marks in DRAWING ORDER (two evidences: the marks are painted one after another — op
+ * numbers a few apart, the same ink — AND each lies next to the previous one, ≤ 5 mm, the row
+ * turning ≤ 100° per step). A row of ≥ minDots marks, at least half of them beads, is one line;
+ * what no such row takes is linked by proximity as before (`chainBeads`). A mark that ends a
+ * sequence (the next op is far away, or another ink) ends the row: nothing is bridged.
+ */
+function opRows(pool: Item[], styles: Map<number, Style>): { rows: WChain[]; rest: Item[] } {
+  if (typeof process !== 'undefined' && process.env?.LEAKS_OPROWS_OFF)
+    return { rows: [], rest: pool };
+  const ink = (it: Item) => {
+    const st = styles.get(it.style);
+    return st?.strokeRgb ? st.strokeRgb.map((v) => Math.round(v / 24)).join(',') : '-';
+  };
+  const sorted = pool
+    .map((it) => ({ it, o: opNo(it) }))
+    .filter((x) => Number.isFinite(x.o.n) && x.it.c)
+    .sort((a, b) =>
+      a.o.page < b.o.page ? -1 : a.o.page > b.o.page ? 1 : a.o.n - b.o.n || a.it.sub - b.it.sub,
+    );
+  const cosTurn = Math.cos((OPROW.maxTurnDeg * Math.PI) / 180);
+  const rows: WChain[] = [];
+  const taken = new Set<Item>();
+  let cur: typeof sorted = [];
+  const flush = () => {
+    const beads = cur.filter((x) => x.it.kind === 'bead' && !x.it.extra?.length).length;
+    let L = 0;
+    for (let i = 1; i < cur.length; i++) L += dist(cur[i - 1].it.c!, cur[i].it.c!);
+    // a line of marks, not a glyph or a symbol drawn in short strokes (Camden's lettering: 32
+    // strokes in 12 mm): long enough, its marks spaced like a line's rhythm
+    if (
+      cur.length >= LINK.minDots &&
+      2 * beads >= cur.length &&
+      L >= OPROW.minLenMm &&
+      L >= OPROW.minStepMm * (cur.length - 1)
+    ) {
+      rows.push({ items: cur.map((x) => ({ it: x.it, rev: false })), decor: [], dead: false });
+      for (const x of cur) taken.add(x.it);
+    }
+    cur = [];
+  };
+  for (const x of sorted) {
+    const last = cur[cur.length - 1];
+    if (last) {
+      const ok =
+        last.o.page === x.o.page &&
+        x.o.n - last.o.n >= 1 &&
+        x.o.n - last.o.n <= OPROW.maxOpStep &&
+        ink(last.it) === ink(x.it) &&
+        dist(last.it.c!, x.it.c!) <= OPROW.maxGapMm &&
+        dist(last.it.c!, x.it.c!) > 0.05;
+      let turnOk = true;
+      if (ok && cur.length >= 2) {
+        const a = cur[cur.length - 2].it.c!;
+        const b = last.it.c!;
+        const c = x.it.c!;
+        const u = { x: b.x - a.x, y: b.y - a.y };
+        const v = { x: c.x - b.x, y: c.y - b.y };
+        const lu = Math.hypot(u.x, u.y);
+        const lv = Math.hypot(v.x, v.y);
+        if (lu > 1e-6 && lv > 1e-6) turnOk = (u.x * v.x + u.y * v.y) / (lu * lv) >= cosTurn;
+      }
+      if (!ok || !turnOk) flush();
+    }
+    cur.push(x);
+  }
+  flush();
+  return { rows, rest: pool.filter((it) => !taken.has(it)) };
 }
 
 function chainBeads(beads: Item[]): WChain[] {
