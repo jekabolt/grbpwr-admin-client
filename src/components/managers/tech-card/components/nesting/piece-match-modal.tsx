@@ -39,7 +39,6 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
@@ -48,7 +47,8 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
-import { clampUtf8Bytes } from 'utils/pattern';
+import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
+import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
 import {
   IDENTICAL_CUT_SYMMETRY,
@@ -86,6 +86,7 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
+import { isFetchFailure } from './dxf-warnings';
 
 // Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
 // «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.
@@ -693,7 +694,7 @@ export function PieceMatchModal({
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as TechCardFormData['pieces'];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
-  const { parse } = useNesting(files);
+  const { parse, reparse } = useNesting(files);
   // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
   // внутри них не пропущен) решает судьбу ДВУХ исходов сразу: предложений об удалении (находка 1
   // первого ревью) и пересчёта «× на изделие» с разметкой кроя (находка 2 второго). Собирать это
@@ -766,14 +767,62 @@ export function PieceMatchModal({
   }, [operations]);
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
-  const missingSizes = useMemo(
+  const fileSizes = useMemo(
     () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById, techCardId),
     [allPieces, dictTokens, cardSizeIds, sizeById, techCardId],
   );
+  // OS (one size) and graded sizes exclude each other (size-ids-field). A graded file on a one-size
+  // card appends NOTHING: it surfaces as a warning whose action swaps OS for the file's sizes. An
+  // OS file on a graded card adds nothing either.
+  const isOsId = (id: number) => {
+    const raw = sizeById.get(id);
+    return raw != null && isOsSizeName(raw);
+  };
+  const cardIsOs = cardSizeIds.some(isOsId);
+  const cardIsGraded = cardSizeIds.some((id) => sizeById.has(id) && !isOsId(id));
+  // Graded sizes of the file that the OS line keeps out of the card.
+  const gradedOnOs = useMemo(
+    () => (cardIsOs ? fileSizes.filter((m) => !isOsId(m.sizeId)) : []),
+    // isOsId reads sizeById.
+    [cardIsOs, fileSizes, sizeById],
+  );
+  const missingSizes = useMemo(() => {
+    if (cardIsOs) return [];
+    const fileGraded = fileSizes.some((m) => !isOsId(m.sizeId));
+    return cardIsGraded || fileGraded ? fileSizes.filter((m) => !isOsId(m.sizeId)) : fileSizes;
+    // isOsId reads sizeById.
+  }, [cardIsOs, cardIsGraded, fileSizes, sizeById]);
   // F14f: что пишется само, а что только предлагается (манифест другой карточки, карточка без
-  // размеров) — второе добавляет человек кнопкой ниже.
+  // размеров) — второе добавляет человек из предупреждения.
   const autoSizes = useMemo(() => missingSizes.filter((m) => !m.confirm), [missingSizes]);
   const proposedSizes = useMemo(() => missingSizes.filter((m) => m.confirm), [missingSizes]);
+  // Swap OS for the file's graded sizes, pruning like removing OS in size-ids-field: DXF rows on OS
+  // are re-filed onto the smallest new size. A PDF on OS would be lost, so the swap waits for it.
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{
+    sizeId?: number;
+    url?: string;
+  }>;
+  const osPdfs = patterns.filter((p) => p.sizeId != null && isOsId(p.sizeId) && !isDxfUrl(p.url));
+  const switchToFileSizes = () => {
+    if (gradedOnOs.length === 0 || osPdfs.length > 0) return;
+    const next = orderSizes([
+      ...cardSizeIds.filter((id) => !isOsId(id)),
+      ...gradedOnOs.map((m) => m.sizeId),
+    ]);
+    setValue('sizeIds', next, { shouldDirty: true });
+    const target = next[0] ?? 0;
+    const current = (getValues('patterns') ?? []) as typeof patterns;
+    if (current.some((p) => p.sizeId != null && isOsId(p.sizeId))) {
+      setValue(
+        'patterns',
+        current.map((p) =>
+          p.sizeId != null && isOsId(p.sizeId) ? { ...p, sizeId: target } : p,
+        ) as TechCardFormData['patterns'],
+        { shouldDirty: true },
+      );
+    }
+    setAddedSizes((prev) => [...prev, ...gradedOnOs.map((m) => formatSizeName(m.name))]);
+  };
   // F14: размеры манифеста другой карточки или вне системы карточки не берутся из него — сказать.
   const foreignSizes = useMemo(
     () => foreignManifestSizes(allPieces, cardSizeIds, sizeById, techCardId),
@@ -1654,6 +1703,24 @@ export function PieceMatchModal({
   }
 
   // ── header warnings ───────────────────────────────────────────────────────────────────
+  // A warning's «show»: bring the contour's file and size on screen and select it.
+  const showContour = (p: PieceDTO | undefined) => {
+    if (!p) return;
+    const fi = sheets.findIndex((sh) => sh.pieces.includes(p));
+    if (fi >= 0) setActiveFile(fi);
+    setActiveSize(split.codeById.get(p.id)?.size ?? '');
+    const ci = ciOf(p);
+    if (ci) setSelected(ci);
+  };
+  const showBlock = (ci: string) => showContour(contourPieces.find((p) => ciOf(p) === ci));
+  // First contour of the active sheet whose size was not recognised (UNI is declared, not missed).
+  const showUnsized = () =>
+    showContour(
+      sheet?.pieces.find((p) => {
+        const code = split.codeById.get(p.id);
+        return !code?.size && !code?.uni;
+      }),
+    );
   // Everything the parse or the plan wants to say, as one `! N warnings` door in the top bar
   // (patterns-lite #11). Nothing of it sits in the body.
   const unrecognisedSizes = (() => {
@@ -1666,7 +1733,13 @@ export function PieceMatchModal({
   if (parse.phase === 'error') warnings.push({ text: parse.message, error: true });
   if (parse.phase === 'ready') {
     // Units are asked at upload — the parse's «units are not set» note is not repeated here.
-    warnings.push(...parse.warnings.filter((w) => !/units are not set in the file/.test(w)));
+    warnings.push(
+      ...parse.warnings
+        .filter((w) => !/units are not set in the file/.test(w))
+        .map((w): HeaderWarning =>
+          isFetchFailure(w) ? { text: w, error: true, action: { label: 'retry', onClick: reparse } } : w,
+        ),
+    );
     if (!parse.complete) {
       warnings.push(
         `files read: ${parse.filesParsed} of ${parse.filesTotal}${
@@ -1681,8 +1754,33 @@ export function PieceMatchModal({
       `sizes not taken from the file: ${foreignSizes.map((n) => formatSizeName(n)).join(', ')}`,
     );
   }
+  if (gradedOnOs.length > 0) {
+    const names = orderSizes(gradedOnOs.map((m) => m.sizeId)).map((id) =>
+      formatSizeName(sizeById.get(id) ?? `#${id}`),
+    );
+    const range = names.length > 1 ? `${names[0]}–${names[names.length - 1]}` : names[0];
+    warnings.push({
+      text: `the file is graded (${range}), the card is one size`,
+      action: readOnly
+        ? undefined
+        : osPdfs.length > 0
+          ? { label: 'remove one-size PDFs first', onClick: () => {}, disabled: true }
+          : { label: 'switch to these sizes', onClick: switchToFileSizes },
+    });
+  }
+  if (proposedSizes.length > 0) {
+    warnings.push({
+      text: `new sizes in the file: ${proposedSizes.map((m) => formatSizeName(m.name)).join(', ')}`,
+      action: readOnly ? undefined : { label: 'add sizes', onClick: addProposedSizes },
+    });
+  }
   if (addedSizes.length > 0) warnings.push(`sizes added: ${addedSizes.join(', ')}`);
-  if (unrecognisedSizes > 0) warnings.push(`size not recognised on ${unrecognisedSizes} contours`);
+  if (unrecognisedSizes > 0) {
+    warnings.push({
+      text: `size not recognised on ${unrecognisedSizes} contours`,
+      action: { label: 'show', onClick: showUnsized },
+    });
+  }
   if (missingOnLayer.length > 0) {
     warnings.push(
       `no contour for ${missingOnLayer.length} pieces: ${missingOnLayer.slice(0, 6).join(', ')}${
@@ -1695,6 +1793,21 @@ export function PieceMatchModal({
     warnings.push({
       text: `${deleteCandidates.length} of ${scopeBoundPieces} pieces gone from the file`,
       error: true,
+      action:
+        readOnly || toDelete.length === 0
+          ? undefined
+          : {
+              label: 'keep all',
+              onClick: () =>
+                setDeleteChoice(new Map(deleteCandidates.map((c) => [c.lineKey, 'keep' as const]))),
+            },
+    });
+  }
+  if (unresolvedCollapses.length > 0) {
+    warnings.push({
+      text: `one block, two pieces: ${unresolvedCollapses.length} to pick`,
+      error: true,
+      action: { label: 'show', onClick: () => showBlock(unresolvedCollapses[0]) },
     });
   }
 
@@ -2044,24 +2157,6 @@ export function PieceMatchModal({
             <HeaderWarnings items={warnings} />
           </div>
         </div>
-
-        {/* F14f: sizes the machine may not add on its own. An action, so it stays in the body. */}
-        {proposedSizes.length > 0 && (
-          <div className='flex flex-wrap items-center gap-2'>
-            <Text size='micro' component='span'>
-              new sizes: {proposedSizes.map((m) => formatSizeName(m.name)).join(', ')}
-            </Text>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={readOnly}
-              onClick={addProposedSizes}
-            >
-              add sizes
-            </Button>
-          </div>
-        )}
 
         {parse.phase === 'ready' && sheet && (
           <div className='flex flex-col gap-3 lg:flex-row'>

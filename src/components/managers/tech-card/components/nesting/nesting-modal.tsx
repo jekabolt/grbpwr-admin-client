@@ -246,7 +246,7 @@ export function NestingModal({
   // сегодняшними умолчаниями. Отдать те же файлы ещё и сюда значило бы скачать их дважды и
   // дважды разобрать в двух воркерах — ради `allPieces`, которых в этом режиме не читает никто:
   // геометрию даёт блоб, левая колонка скрыта, прогон недоступен.
-  const { parse, run, start, stop, resetRun, unitOverride } = useNesting(view ? null : files);
+  const { parse, run, start, stop, resetRun, reparse, unitOverride } = useNesting(view ? null : files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
   // Отказ выдать скалярную норму у ОТКРЫТОГО маркера — слово сервера, если он его сказал.
   // Показывается вместо числа: «средняя по составу» и настоящая норма выглядят одинаково.
@@ -1915,12 +1915,31 @@ export function NestingModal({
 
   // ПРЕДУПРЕЖДЕНИЯ И ОТКАЗЫ — В ШАПКЕ МОДАЛКИ (patterns-lite, п. 11). Чтение файла (единицы,
   // контур, долевая, файлы) идёт по умолчаниям; всё, что из него пошло не так, — здесь.
+  const setAllowanceZero = () =>
+    guardManual(() => {
+      setAllowanceTouched(true);
+      setAllowanceMm(0);
+    });
+  // The article's cutting width, back in the field; the width follows the article again.
+  const applyArticleWidth = () => {
+    if (!Number.isFinite(slotWidth) || slotWidth < 10) return;
+    setSaveOpen(false);
+    guardManual(() => {
+      setWidthTouched(false);
+      setWidthRaw(null);
+      setWidthCm(Math.round(slotWidth * 10) / 10);
+    });
+  };
   const topWarningsRaw: Array<HeaderWarning | HeaderWarning[] | ''> = [
     ...(parse.phase === 'error' ? [{ text: parse.message, error: true }] : []),
     ...(parse.phase === 'ready'
       ? parse.warnings
           .filter((w) => !UNITS_NOT_SET.test(w))
-          .map((w) => ({ text: w, error: isFetchFailure(w) }))
+          .map((w) =>
+            isFetchFailure(w)
+              ? { text: w, error: true, action: { label: 'retry', onClick: () => guardManual(reparse) } }
+              : w,
+          )
       : []),
     ...(!viewData
       ? [
@@ -1937,10 +1956,20 @@ export function NestingModal({
     ...(viewData
       ? []
       : [
-          ...[...railS1.blockers, ...railS2.blockers, ...railS3.blockers].map((text) => ({
-            text,
-            error: true,
-          })),
+          // A blocker's fix lives in its rail section: «show» opens it. Double allowance has a
+          // direct fix.
+          ...[railS1, railS2, railS3].flatMap((sec, i) =>
+            sec.blockers.map(
+              (text): HeaderWarning => ({
+                text,
+                error: true,
+                action:
+                  text === doubleAllowanceRefusal
+                    ? { label: 'set allowance to 0', onClick: setAllowanceZero }
+                    : { label: 'show', onClick: () => setRailPick(i + 1) },
+              }),
+            ),
+          ),
           ...railS1.warnings,
           ...railS2.warnings,
           ...railS3.warnings,
@@ -2600,10 +2629,34 @@ export function NestingModal({
             items={[
               lockDangling ? 'bound fabric is no longer on the BOM' : '',
               lockedUnsaved ? 'fabric not saved on the card yet' : '',
-              widthMismatch ? `width ${widthCm} cm differs from the article (${slotWidth} cm)` : '',
+              widthMismatch
+                ? {
+                    text: `width ${widthCm} cm differs from the article (${slotWidth} cm)`,
+                    action:
+                      viewData || slotWidth < 10
+                        ? undefined
+                        : { label: 'use article width', onClick: applyArticleWidth },
+                  }
+                : '',
               slot && slotSelvedge(slot) === 0 ? 'selvedge not set on the article' : '',
               ...(parse.phase === 'ready'
-                ? parse.warnings.filter((w) => !UNITS_NOT_SET.test(w))
+                ? parse.warnings
+                    .filter((w) => !UNITS_NOT_SET.test(w))
+                    .map((w) =>
+                      isFetchFailure(w)
+                        ? {
+                            text: w,
+                            error: true,
+                            action: {
+                              label: 'retry',
+                              onClick: () => {
+                                setSaveOpen(false);
+                                guardManual(reparse);
+                              },
+                            },
+                          }
+                        : w,
+                    )
                 : []),
               manual && violations.length ? manualNote ?? '' : '',
               mixed ? 'mixed composition: no per-unit consumption' : '',

@@ -222,5 +222,8 @@ export function useNesting(files: NestingFile[] | null) {
     setRun((prev) => (prev.phase === 'done' ? { phase: 'idle' } : prev));
   }, []);
 
-  return { parse, run, start, stop, resetRun, unitOverride, setUnitOverride };
+  // Read the files again (a warning's «retry» after a failed download).
+  const reparse = useCallback(() => setParseNonce((n) => n + 1), []);
+
+  return { parse, run, start, stop, resetRun, reparse, unitOverride, setUnitOverride };
 }

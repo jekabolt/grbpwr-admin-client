@@ -19,6 +19,16 @@ import Text from 'ui/components/text';
 import { permittedSizeSystems } from 'utils/size-systems';
 import { TechCardFormData } from './schema';
 
+// OS (one size) by its dictionary name. Shared with the pieces dialog, which must not append a
+// graded file's sizes onto a one-size card.
+export function isOsSizeName(raw: string): boolean {
+  const n = formatSizeName(raw)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ' ')
+    .trim();
+  return n === 'os' || n === 'one size' || n === 'onesize';
+}
+
 // Size range / grade for the tech card (FK size ids). The primary system (the one holding the run,
 // else the first permitted) is inline; every other system with a selected size is inline too, and
 // the empty ones fold behind "more systems (N)". Inside the fold, the out-of-category picker
@@ -65,12 +75,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   // an id the dictionary does not know is neither, so it blocks nothing.
   const isOs = (id: number) => {
     const raw = sizeById.get(id);
-    if (raw == null) return false;
-    const n = formatSizeName(raw)
-      .toLowerCase()
-      .replace(/[\s_-]+/g, ' ')
-      .trim();
-    return n === 'os' || n === 'one size' || n === 'onesize';
+    return raw != null && isOsSizeName(raw);
   };
   const osSelected = sizeIds.some(isOs);
   const gradedSelected = sizeIds.some((id) => sizeById.has(id) && !isOs(id));
