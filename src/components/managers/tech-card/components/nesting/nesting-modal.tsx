@@ -27,7 +27,15 @@ import {
   useUpdateWorkshopSettings,
   useWorkshopSettings,
 } from 'components/managers/workshop/useWorkshopSettings';
-import { estimateGarmentsPerPly, spreadFigures, type SpreadMode } from 'lib/nesting/spread';
+import {
+  autoPlies,
+  estimateGarmentsPerPly,
+  extraWithinTolerance,
+  overCutOf,
+  perPlyQuantities,
+  spreadFigures,
+  type SpreadMode,
+} from 'lib/nesting/spread';
 import type {
   FabricDirection,
   NestConfig,
@@ -271,6 +279,15 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
     <svg viewBox='-1 -1 32 32' className='h-8 w-8 shrink-0 border border-borderColor bg-bgColor'>
       <polygon points={path} fill='none' stroke='currentColor' strokeWidth='1' />
     </svg>
+  );
+}
+
+// «per ply N» под ячейкой итога в режиме стола: в ячейке 10, на холсте 1 — и это не ошибка.
+function PerPlyNote({ q }: { q: number }) {
+  return (
+    <span className='pointer-events-none absolute top-full left-[7px] mt-px text-[9px] leading-none whitespace-nowrap text-labelColor'>
+      per ply {q}
+    </span>
   );
 }
 
@@ -667,7 +684,13 @@ export function NestingModal({
 
   // Строки состава с количеством. sizeId 0 = токен не резолвится: считать такую раскладку
   // можно, сохранить — нет (тот же отказ, что был у одиночного размера, только построчно).
-  const compRows = useMemo(
+  //
+  // ЯЧЕЙКИ ≠ СОСТАВ МАРКЕРА В РЕЖИМЕ СТОЛА. В «single lay» ячейка — сколько изделий лежит в маркере.
+  // В «table» ячейка — сколько изделий КРОИТЬ всего, а маркер — ОДИН слой настила: его состав
+  // q_s = ⌈total_s / plies⌉ (слои режут стопкой). XS 10 при 10 слоях — один XS на столе, а не
+  // десять. compRows/activeRows/ungradedUnits ниже — всегда состав МАРКЕРА (то, что нестит движок
+  // и что сохраняется); cellRows/cellUngraded — то, что в ячейках.
+  const cellRows = useMemo(
     () =>
       foldedRows.map((r) => ({
         ...r,
@@ -676,10 +699,45 @@ export function NestingModal({
       })),
     [foldedRows, qtyByToken],
   );
-  const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
   // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
-  const ungradedUnits = Math.max(1, Math.round(qtyByToken[''] ?? 1));
-  const graded = compRows.length > 0;
+  const cellUngraded = Math.max(1, Math.round(qtyByToken[''] ?? 1));
+  const graded = cellRows.length > 0;
+  // Слои: null = авто (НОД итогов под пределом стопки, см. autoPlies); число — своё значение
+  // оператора, пока он не вернёт «auto».
+  const [pliesEdit, setPlies] = useState<number | null>(null);
+  const [spreadMode, setSpreadMode] = useState<SpreadMode>('face_up');
+  // РЕЖИМ НАСТИЛА (раунд 6): «single lay» — один настил без стола, граница стола в движок не
+  // уходит; «table» — настил слоями под стол. Режим помнит браузер.
+  const [layMode, setLayMode] = useLayMode();
+  const tableMode = layMode === 'table';
+  // Предел стопки в СЛОЯХ считается ниже (толщина живёт у слота ткани) и зеркалится сюда эффектом.
+  const [stackCapPlies, setStackCapPlies] = useState<number | null>(null);
+  const cutTotals = useMemo(
+    () => (graded ? cellRows.map((r) => r.qty) : [cellUngraded]),
+    [graded, cellRows, cellUngraded],
+  );
+  const autoPliesN = useMemo(
+    () => autoPlies(cutTotals, stackCapPlies, spreadMode === 'face_to_face'),
+    [cutTotals, stackCapPlies, spreadMode],
+  );
+  const plies = pliesEdit ?? autoPliesN;
+  const pliesAuto = pliesEdit == null;
+  const perPly = useMemo(
+    () => (tableMode ? perPlyQuantities(cutTotals, plies) : cutTotals),
+    [tableMode, cutTotals, plies],
+  );
+  // Перекрой по размерам: plies·q − total (только в режиме стола).
+  const overCut = useMemo(
+    () => (tableMode ? overCutOf(cutTotals, plies) : cutTotals.map(() => 0)),
+    [tableMode, cutTotals, plies],
+  );
+  const compRows = useMemo(
+    () => (graded ? cellRows.map((r, i) => ({ ...r, qty: perPly[i] ?? 0 })) : cellRows),
+    [graded, cellRows, perPly],
+  );
+  const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
+  const ungradedUnits = graded ? cellUngraded : Math.max(1, perPly[0] ?? 1);
+  const perPlyKey = perPly.join(',');
   // ТИРАЖ НАСТИЛА И ФОРМУЛА БЛОБА — из общего модуля (piece-selection.ts), а не выражением здесь.
   // Ту же формулу собирает очередь раскроя партии на вкладке костинга, БЕЗ этой модалки, и вторая
   // её копия была бы вторым ответом на вопрос «сколько экземпляров этой детали кроят».
@@ -828,8 +886,6 @@ export function NestingModal({
   const tableCm = tableEdit === undefined ? wsTableCm : tableEdit;
   const stackLimitCm = stackEdit === undefined ? wsStackCm : stackEdit;
   const [endLossCm, setEndLossCm] = useState<number>(END_LOSS_DEFAULT_CM);
-  const [plies, setPlies] = useState<number>(1);
-  const [spreadMode, setSpreadMode] = useState<SpreadMode>('face_up');
   // null = по умолчанию: укладывать в стол, когда длина стола задана.
   const [keepOnTableEdit, setKeepOnTable] = useState<boolean | null>(null);
   // Полезная длина стола U = стол − 2·запас.
@@ -837,10 +893,6 @@ export function NestingModal({
     tableCm != null && tableCm - 2 * endLossCm > 0
       ? Math.round((tableCm - 2 * endLossCm) * 100) / 100
       : null;
-  // РЕЖИМ НАСТИЛА (раунд 6): «single lay» — один настил без стола, граница стола в движок не
-  // уходит; «table» — прежний режим стола. Режим помнит браузер.
-  const [layMode, setLayMode] = useLayMode();
-  const tableMode = layMode === 'table';
   const keepOnTable = tableMode && usableCm != null && (keepOnTableEdit ?? true);
   const workshopDirty =
     (tableEdit !== undefined && tableEdit !== wsTableCm) ||
@@ -949,6 +1001,9 @@ export function NestingModal({
   // Подбор под стол идёт пробными прогонами мимо run-состояния — отдельный признак занятости.
   const [fitting, setFitting] = useState<{ attempt: number } | null>(null);
   const fitAbort = useRef(false);
+  // Слои, которые выставил «fit to the table» в режиме стола: если их больше предела стопки,
+  // итоги одним настилом не закрыть — шапка говорит «needs N lays», а не «set plies to max».
+  const [fitPlies, setFitPlies] = useState<number | null>(null);
   const busy = running || fitting != null;
   // Результат прогона рисуется и сохраняется по СНИМКУ его входов.
   const runView = !viewData && result && snap ? snap : null;
@@ -994,6 +1049,8 @@ export function NestingModal({
     // Состав — параметр прогона наравне с шириной: он решает, какие детали и в скольких
     // экземплярах ложатся на полосу. Готовый результат после его правки описывал бы другой настил.
     qtyByToken,
+    // В режиме стола состав маркера зависит ещё и от слоёв (⌈total/plies⌉).
+    perPlyKey,
     contourLayer,
     grainLayer,
     allowanceMm,
@@ -1783,6 +1840,10 @@ export function NestingModal({
     const perGarment = instanceCount / garments;
     if (perGarment > 0)
       k = Math.max(1, Math.min(k, Math.floor(MAX_MARKER_PLACEMENTS / perGarment)));
+    if (tableMode) {
+      await fitPliesToTable(parseId, U, k);
+      return;
+    }
     let m = qtyMapForK(k);
     if (!m) return;
     fitAbort.current = false;
@@ -1817,6 +1878,63 @@ export function NestingModal({
     const { config, comp } = derivedFor(final);
     if (config.pieces.length === 0) return;
     setQtyByToken(final);
+    setKeepOnTable(true);
+    launch({ ...config, maxLengthCm: U }, comp, U);
+  }
+  // РЕЖИМ СТОЛА: итоги неприкосновенны, ужимается СЛОЙ. Состав слоя — функция слоёв
+  // (⌈total/plies⌉), поэтому перебираются слои: от текущих вверх, каждый раз до наименьшего N,
+  // при котором слой становится меньше. Наименьшее такое N — наименьший перекрой при том же слое.
+  // Укрупнять слой «fit» не берётся: он подгоняет под стол, а не заполняет стол.
+  async function fitPliesToTable(parseId: number, U: number, estimate: number) {
+    const sumAt = (n: number) => perPlyQuantities(cutTotals, n).reduce((s, q) => s + q, 0);
+    const mapAt = (n: number): Record<string, number> => {
+      const q = perPlyQuantities(cutTotals, n);
+      return graded
+        ? Object.fromEntries(cellRows.map((r, i) => [r.key, q[i] ?? 0]))
+        : { '': Math.max(1, q[0] ?? 1) };
+    };
+    const pMax = Math.max(1, ...cutTotals);
+    // Следующее N, при котором слой строго меньше; null — меньше некуда (по одному изделию).
+    const nextSmaller = (n: number): number | null => {
+      const cur = sumAt(n);
+      let x = n;
+      while (x < pMax && sumAt(x) >= cur) x++;
+      return sumAt(x) < cur ? x : null;
+    };
+    let p: number | null = plies;
+    while (p != null && sumAt(p) > estimate) p = nextSmaller(p);
+    if (p == null) p = pMax;
+    fitAbort.current = false;
+    let fitted: number | null = null;
+    let lastTried = p;
+    try {
+      for (let attempt = 1; attempt <= FIT_MAX_ATTEMPTS && p != null; attempt++) {
+        setFitting({ attempt });
+        lastTried = p;
+        const { config } = derivedFor(mapAt(p));
+        if (config.pieces.length === 0) break;
+        const res = await probe(parseId, {
+          ...config,
+          maxLengthCm: U,
+          timeBudgetMs: Math.min(FIT_PROBE_BUDGET_MS, config.timeBudgetMs),
+        });
+        if (fitAbort.current) return;
+        if (!res.unplaced.some((u) => u.reason === 'table-full')) {
+          fitted = p;
+          break;
+        }
+        p = nextSmaller(p);
+      }
+    } catch {
+      return;
+    } finally {
+      setFitting(null);
+    }
+    const finalP = fitted ?? p ?? lastTried;
+    const { config, comp } = derivedFor(mapAt(finalP));
+    if (config.pieces.length === 0) return;
+    setPlies(finalP);
+    setFitPlies(finalP);
     setKeepOnTable(true);
     launch({ ...config, maxLengthCm: U }, comp, U);
   }
@@ -1888,15 +2006,44 @@ export function NestingModal({
   // перебивается — свой номер оператор ставит осознанно, и подставлять поверх него было бы хуже,
   // чем не подставлять вовсе.
   const [widthTouched, setWidthTouched] = useState(false);
+  // Ширины нет НИГДЕ (ни у пина колорвея, ни у строки BOM): коробка пустая, прогон закрыт, в шапке
+  // дверь туда, где её задают. 140 по умолчанию здесь была бы правдоподобной и неверной длиной.
+  const [widthUnset, setWidthUnset] = useState(false);
   const resolvedSlot = fabricLines.find((b) => b.lineKey === slotKey);
+  const widthSrcLine =
+    resolvedSlot ??
+    (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
+  const widthPin = widthSrcLine ? chosenColorway?.widthByLine.get(widthSrcLine.lineKey) : undefined;
+  const widthFromPin = !!widthPin && Number.isFinite(widthPin.cutCm);
+  // Откуда число в коробке — подпись под ней.
+  const widthFrom = widthUnset
+    ? ''
+    : widthTouched
+      ? 'manual'
+      : widthSrcLine
+        ? widthFromPin
+          ? 'from article'
+          : 'from BOM'
+        : '';
+  // Владелец: выбор колорвея (и слота) ВСЕГДА заново берёт ширину из BOM — ручное число живёт
+  // только до следующего выбора. Эффект стоит ДО подстановки: та перезапустится по смене флага.
+  useEffect(() => {
+    if (viewData) return;
+    setWidthTouched(false);
+  }, [viewData, colorwayId, slotKey]);
   useEffect(() => {
     if (viewData || widthTouched) return;
-    const src =
-      resolvedSlot ??
-      (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
-    if (!src) return;
+    const src = widthSrcLine;
+    if (!src) {
+      setWidthUnset(false);
+      return;
+    }
     const w = slotCutWidth(src);
-    if (!Number.isFinite(w) || w < 10) return;
+    if (!Number.isFinite(w) || w < 10) {
+      setWidthUnset(true);
+      return;
+    }
+    setWidthUnset(false);
     const next = Math.round(w * 10) / 10;
     // Ширина — параметр прогона: её смена сбрасывает результат и стирает ручные правки
     // размещений. Поэтому, во-первых, ставим только если число реально другое (иначе любая
@@ -2432,6 +2579,13 @@ export function NestingModal({
   const thicknessArticleId = thicknessFromPin
     ? thicknessPin?.materialId
     : thicknessSlot?.materialId;
+  // Предел стопки в слоях — вход авто-слоёв, которые считаются выше (до слота ткани): зеркало.
+  const stackCapNow = viewData
+    ? null
+    : spreadFigures({ plies: 1, thicknessMm, stackLimitCm, mode: spreadMode }).maxPlies;
+  useEffect(() => {
+    setStackCapPlies(stackCapNow);
+  }, [stackCapNow]);
   // Конец стола на холсте: в прогоне — U из ряда table; у сохранённого — U из блоба.
   // У сохранённого — только если блоб несёт запись о столе: без неё targetLengthCm — старая ручная
   // цель (до ae74b7da), она рисуется нейтральной пунктирной целью и вердиктом «за столом» не служит.
@@ -2494,6 +2648,17 @@ export function NestingModal({
         disabled: busy,
       }
     : undefined;
+  // Строка цифр режима стола: состав слоя и что им накроется (plies × слой).
+  const compText = (qs: readonly number[]) =>
+    graded
+      ? cellRows
+          .map((r, i) => ({ l: r.label.toLowerCase(), q: qs[i] ?? 0 }))
+          .filter((x) => x.q > 0)
+          .map((x) => `${x.l} ×${x.q}`)
+          .join(' ')
+      : `${(sizeLabel || 'garments').toLowerCase()} ×${qs[0] ?? 0}`;
+  const markerCompText = compText(perPly);
+  const cutCompText = compText(perPly.map((q) => q * plies)).replace(/×/g, '');
   const spreadWarnings: HeaderWarning[] = [];
   if (overTableCm > 0.05) {
     spreadWarnings.push({
@@ -2517,7 +2682,16 @@ export function NestingModal({
       action: fitAction,
     });
   }
-  if (!viewData && tableMode && spread.overStack && spread.maxPlies != null) {
+  // «fit to the table» поднял слои выше стопки: маркер тот же, просто настилов несколько.
+  const needsLays =
+    !viewData && tableMode && spread.overStack && spread.maxPlies != null && spread.maxPlies >= 1
+      ? fitPlies === plies
+        ? Math.ceil(plies / spread.maxPlies)
+        : 0
+      : 0;
+  if (needsLays > 1) {
+    spreadWarnings.push({ text: `needs ${needsLays} lays: stack limit`, error: true });
+  } else if (!viewData && tableMode && spread.overStack && spread.maxPlies != null) {
     const max = spread.maxPlies;
     spreadWarnings.push({
       text: `${plies} plies over the stack limit, max ${max}`,
@@ -2532,8 +2706,10 @@ export function NestingModal({
       action: {
         label: 'make even',
         onClick: () =>
-          setPlies((p) =>
-            spread.maxPlies != null && p + 1 > spread.maxPlies ? Math.max(2, p - 1) : p + 1,
+          setPlies(
+            spread.maxPlies != null && plies + 1 > spread.maxPlies
+              ? Math.max(2, plies - 1)
+              : plies + 1,
           ),
       },
     });
@@ -2544,9 +2720,37 @@ export function NestingModal({
       action: { label: 'set', onClick: () => focusField('nest-table') },
     });
   }
-  if (!viewData && tableMode && thicknessSlot && thicknessMm == null && plies > 1) {
+  // Перекрой: в допуске (≤ +1 на размер или ≤ 10 % итога) молчит; сверх — строка с дверью
+  // «fit plies» (вернуть авто-слои), если слои свои; у авто дверь ничего бы не поменяла.
+  const extraTotal = overCut.reduce((a, v) => a + v, 0);
+  const cutTotal = cutTotals.reduce((a, v) => a + v, 0);
+  const extraDetail = cutTotals
+    .map((t, i) => ({
+      t,
+      o: overCut[i] ?? 0,
+      label: graded ? cellRows[i]?.label ?? '' : sizeLabel || 'garments',
+    }))
+    .filter((x) => x.o > 0)
+    .map((x) => `${x.label.toLowerCase()}: cuts ${x.t + x.o} for ${x.t} (+${x.o})`)
+    .join(' · ');
+  if (
+    !viewData &&
+    tableMode &&
+    extraTotal > 0 &&
+    cutTotal > 0 &&
+    !extraWithinTolerance(cutTotals, plies)
+  ) {
     spreadWarnings.push({
-      text: 'fabric thickness not set: no stack height',
+      text: `+${extraTotal} extra (${Math.round((extraTotal / cutTotal) * 100)} %) · ${extraDetail}`,
+      action:
+        !pliesAuto && plies !== autoPliesN
+          ? { label: 'fit plies', onClick: () => setPlies(null) }
+          : undefined,
+    });
+  }
+  if (!viewData && tableMode && thicknessSlot && thicknessMm == null) {
+    spreadWarnings.push({
+      text: 'max plies unknown: thickness not set',
       action: openArticle(thicknessArticleId),
     });
   }
@@ -2672,6 +2876,7 @@ export function NestingModal({
     setSaveOpen(false);
     guardManual(() => {
       setWidthTouched(false);
+      setWidthUnset(false);
       setWidthRaw(null);
       setWidthCm(Math.round(slotWidth * 10) / 10);
     });
@@ -2801,8 +3006,26 @@ export function NestingModal({
     greedyOnly ? 'no search ran: greedy placement' : '',
     ...(displayResult ? displayResult.warnings : []),
     saveError ? { text: `saving failed: ${saveError}`, error: true } : '',
+    !viewData && widthUnset
+      ? {
+          text: chosenColorway
+            ? `cloth width not set for ${chosenColorway.label}`
+            : 'cloth width not set',
+          error: true,
+          // Пин колорвея есть — ширину чинят в его артикуле; нет — на строке BOM (её артикул).
+          action: widthPin?.materialId
+            ? openArticle(widthPin.materialId)
+            : (() => {
+                const run = goToBomLineField(widthSrcLine?.lineKey, 'materialId', onClose);
+                return run
+                  ? { label: 'set on the BOM line', onClick: run }
+                  : openArticle(widthSrcLine?.materialId);
+              })(),
+        }
+      : '',
   ];
   const runBlocked =
+    (!viewData && widthUnset) ||
     parse.phase !== 'ready' ||
     checkedCount === 0 ||
     overCap ||
@@ -2985,24 +3208,27 @@ export function NestingModal({
               )}
 
               {/* СОСТАВ НАСТИЛА — одна коробка из ячеек «размер · число»: размер с 0 не кроится. */}
-              <div data-schematic='garments' className='shrink-0 space-y-0.5'>
+              <div
+                data-schematic='garments'
+                className={`shrink-0 space-y-0.5 ${tableMode ? 'pb-3.5' : ''}`}
+              >
                 <Text
                   size='micro'
                   variant={compBad || sizeUnknown ? undefined : 'label'}
                   component='span'
                   className={compBad || sizeUnknown ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
-                  garments per size
+                  {tableMode ? 'to cut' : 'garments per size'}
                 </Text>
                 <div className='flex h-6 items-stretch divide-x divide-hairline border border-borderColor bg-bgColor hover:border-textColor'>
                   {graded ? (
-                    compRows.map((r) => {
+                    cellRows.map((r, i) => {
                       const bad = (!r.resolvable || r.sizeId <= 0) && r.qty >= 1;
                       return (
                         <label
                           key={r.key}
                           title={r.label}
-                          className='flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'
+                          className='relative flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'
                         >
                           <span
                             className={`max-w-[6ch] truncate text-micro uppercase tracking-label ${
@@ -3025,11 +3251,12 @@ export function NestingModal({
                               }
                             }}
                           />
+                          {tableMode && r.qty > 0 && <PerPlyNote q={perPly[i] ?? 0} />}
                         </label>
                       );
                     })
                   ) : (
-                    <label className='flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'>
+                    <label className='relative flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'>
                       <span
                         className={`max-w-[10ch] truncate text-micro uppercase tracking-label ${
                           sizeUnknown ? 'text-error' : 'text-labelColor'
@@ -3040,17 +3267,18 @@ export function NestingModal({
                       <NumBox
                         name='nest-units'
                         className={CELL_INPUT}
-                        value={ungradedUnits}
+                        value={cellUngraded}
                         emptyAs={1}
                         arrowStep
                         disabled={busy}
                         onCommit={(n) => {
                           const next = Math.max(1, Math.round(n));
-                          if (next !== ungradedUnits) {
+                          if (next !== cellUngraded) {
                             guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
                           }
                         }}
                       />
+                      {tableMode && <PerPlyNote q={perPly[0] ?? 0} />}
                     </label>
                   )}
                 </div>
@@ -3112,7 +3340,7 @@ export function NestingModal({
                       name='nest-width'
                       className={`${CELL_INPUT} w-full text-left`}
                       decimal
-                      value={widthCm}
+                      value={widthUnset ? null : widthCm}
                       // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
                       // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
                       commitOnBlur
@@ -3120,9 +3348,10 @@ export function NestingModal({
                         const next = Math.max(10, n);
                         // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
                         // не должен молча выключать автоподстановку ширины по колорвею.
-                        if (next !== widthCm) {
+                        if (next !== widthCm || widthUnset) {
                           guardManual(() => {
                             setWidthTouched(true);
+                            setWidthUnset(false);
                             setWidthRaw(null);
                             setWidthCm(next);
                           });
@@ -3131,6 +3360,11 @@ export function NestingModal({
                       disabled={busy}
                     />
                     <span className='text-labelColor'>cm</span>
+                    {widthFrom && (
+                      <span className='whitespace-nowrap text-[9px] leading-none text-labelColor'>
+                        {widthFrom}
+                      </span>
+                    )}
                   </label>
                   <button
                     type='button'
@@ -3509,14 +3743,29 @@ export function NestingModal({
                   spread.overStack || spread.oddFaceToFace ? `${BOX_LABEL} text-error` : BOX_LABEL
                 }
               >
-                plies
+                plies{pliesAuto ? ' · auto' : ''}
               </Text>
-              <NumBox
-                name='nest-plies'
-                value={plies}
-                emptyAs={1}
-                onCommit={(n) => setPlies(Math.max(1, Math.round(n)))}
-              />
+              <span className='flex items-center gap-1.5'>
+                <NumBox
+                  name='nest-plies'
+                  value={plies}
+                  emptyAs={1}
+                  onCommit={(n) => {
+                    const next = Math.max(1, Math.round(n));
+                    if (next !== plies) setPlies(next);
+                  }}
+                />
+                {!pliesAuto && (
+                  <Button
+                    type='button'
+                    variant='underline'
+                    title={`back to auto: ${autoPliesN} plies`}
+                    onClick={() => setPlies(null)}
+                  >
+                    auto
+                  </Button>
+                )}
+              </span>
             </label>
             <div
               data-schematic='face'
@@ -3612,16 +3861,38 @@ export function NestingModal({
                 fitting to the table… attempt {fitting.attempt} ·{' '}
               </span>
             )}
-            <span className='text-labelColor'>on table </span>
-            {figure(tableEndCm, 1)}
-            <span className='text-labelColor'> cm · plies </span>
-            {viewData ? storedSpread?.plies ?? '—' : plies}
-            <span className='text-labelColor'> · stack </span>
-            {figure(spread.stackCm, 1)}
-            <span className='text-labelColor'> cm / max </span>
-            {figure(spread.maxPlies)}
-            <span className='text-labelColor'> plies · garments </span>
-            {figure(spread.garments)}
+            {viewData ? (
+              <>
+                <span className='text-labelColor'>on table </span>
+                {figure(tableEndCm, 1)}
+                <span className='text-labelColor'> cm · plies </span>
+                {storedSpread?.plies ?? '—'}
+                <span className='text-labelColor'> · stack </span>
+                {figure(spread.stackCm, 1)}
+                <span className='text-labelColor'> cm / max </span>
+                {figure(spread.maxPlies)}
+                <span className='text-labelColor'> plies · garments </span>
+                {figure(spread.garments)}
+              </>
+            ) : (
+              <>
+                {/* marker xs ×1 · plies 10 = xs 10 [· +n extra] · on table … */}
+                <span className='text-labelColor'>marker </span>
+                {markerCompText || '—'}
+                <span className='text-labelColor'> · plies </span>
+                {plies}
+                <span className='text-labelColor'> = </span>
+                {cutCompText || '—'}
+                {extraTotal > 0 && <span className='text-labelColor'> · +{extraTotal} extra</span>}
+                <span className='text-labelColor'> · on table </span>
+                {figure(tableEndCm, 1)}
+                <span className='text-labelColor'> cm · stack </span>
+                {figure(spread.stackCm, 1)}
+                <span className='text-labelColor'> cm / max </span>
+                {figure(spread.maxPlies)}
+                <span className='text-labelColor'> plies</span>
+              </>
+            )}
             <span className='text-labelColor'> · fabric </span>
             {figure(spread.fabricCm == null ? null : spread.fabricCm / 100, 2)}
             <span className='text-labelColor'> m</span>

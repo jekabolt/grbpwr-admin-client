@@ -39,7 +39,8 @@ export type SpreadFigures = {
   oddFaceToFace: boolean;
 };
 
-const known = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
+const known = (v: number | null | undefined): v is number =>
+  typeof v === 'number' && Number.isFinite(v);
 const positive = (v: number | null | undefined): v is number => known(v) && v > 0;
 
 export function spreadFigures(input: SpreadInput): SpreadFigures {
@@ -57,7 +58,9 @@ export function spreadFigures(input: SpreadInput): SpreadFigures {
 
   const stackCm = plies !== null && positive(thicknessMm) ? (plies * thicknessMm) / 10 : null;
   const garments =
-    plies !== null && known(compositionTotal) && compositionTotal >= 0 ? plies * compositionTotal : null;
+    plies !== null && known(compositionTotal) && compositionTotal >= 0
+      ? plies * compositionTotal
+      : null;
   const fabricCm =
     plies !== null && positive(markerLengthCm) && known(endLossCm) && endLossCm >= 0
       ? plies * (markerLengthCm + 2 * endLossCm)
@@ -91,8 +94,91 @@ export type GarmentsPerPlyInput = {
 // влезает ни одно, поиск начинает с одного изделия, и ответ «не влезло» даёт уже настоящий прогон.
 export function estimateGarmentsPerPly(input: GarmentsPerPlyInput): number {
   const { garmentAreaCm2, fabricWidthCm, usableLengthCm } = input;
-  const eff = positive(input.efficiency) ? Math.min(1, input.efficiency) : ASSUMED_MARKER_EFFICIENCY;
+  const eff = positive(input.efficiency)
+    ? Math.min(1, input.efficiency)
+    : ASSUMED_MARKER_EFFICIENCY;
   if (!positive(garmentAreaCm2) || !positive(fabricWidthCm) || !positive(usableLengthCm)) return 1;
   const k = Math.floor((fabricWidthCm * usableLengthCm * eff) / garmentAreaCm2 + 1e-9);
   return Math.max(1, k);
+}
+
+// ── НАСТИЛ ПО ИТОГАМ (режим стола) ─────────────────────────────────────────────────────────
+// В режиме стола оператор задаёт, сколько изделий КРОИТЬ всего (по размерам), а маркер — один
+// слой: его состав q_s = ⌈total_s / plies⌉, и всё, что лишнее (plies·q_s − total_s), — перекрой.
+// Та же идея, что у планировщика партии (batch-marker-plan): пропорция, сокращённая на НОД.
+
+const gcd2 = (a: number, b: number): number => {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) [x, y] = [y, x % y];
+  return x;
+};
+
+// НОД ненулевых итогов; 0 — если кроить нечего.
+export function gcdOfTotals(totals: readonly number[]): number {
+  return totals.filter((t) => t > 0).reduce((g, t) => gcd2(g, Math.round(t)), 0);
+}
+
+// Состав одного слоя при N слоях: ⌈total/N⌉, ноль остаётся нулём.
+export function perPlyQuantities(totals: readonly number[], plies: number): number[] {
+  const n = Math.max(1, Math.round(plies));
+  return totals.map((t) => (t > 0 ? Math.ceil(t / n) : 0));
+}
+
+// Перекрой по размерам: N·q − total.
+export function overCutOf(totals: readonly number[], plies: number): number[] {
+  const n = Math.max(1, Math.round(plies));
+  return perPlyQuantities(totals, n).map((q, i) => n * q - Math.max(0, totals[i]));
+}
+
+// Сколько слоёв нужно, чтобы слоем состава perPly покрыть итоги: max ⌈total/q⌉. Infinity — если
+// у размера с итогом нет места в слое.
+export function pliesToCover(totals: readonly number[], perPly: readonly number[]): number {
+  let p = 1;
+  totals.forEach((t, i) => {
+    if (t <= 0) return;
+    const q = perPly[i] ?? 0;
+    p = q > 0 ? Math.max(p, Math.ceil(t / q)) : Infinity;
+  });
+  return p;
+}
+
+// Слои по умолчанию (а не своё число оператора):
+//   1. НОД итогов — ноль перекроя;
+//   2. НОД выше предела стопки → наибольший его делитель под пределом (итоги всё ещё ровные);
+//      лицом к лицу — наибольший ЧЁТНЫЙ делитель под пределом;
+//   3. ни один делитель > 1 не влезает → сам предел (перекрой ⌈total/N⌉·N − total);
+//   4. лицом к лицу и всё ещё нечётно → +1 слой (предел лицом к лицу уже чётный, так что влезает).
+export function autoPlies(
+  totals: readonly number[],
+  maxPlies: number | null | undefined,
+  faceToFace: boolean,
+): number {
+  const g = gcdOfTotals(totals);
+  if (g <= 0) return 1;
+  const cap = typeof maxPlies === 'number' && maxPlies >= 1 ? Math.floor(maxPlies) : Infinity;
+  const largestDivisor = (even: boolean): number => {
+    for (let d = Math.min(g, cap); d >= 1; d--) {
+      if (g % d === 0 && (!even || d % 2 === 0)) return d;
+    }
+    return 0;
+  };
+  if (faceToFace) {
+    const even = largestDivisor(true);
+    if (even >= 2) return even;
+  }
+  let p = largestDivisor(false);
+  if (p <= 1 && g > 1 && Number.isFinite(cap)) p = cap;
+  p = Math.max(1, p);
+  if (faceToFace && p % 2 === 1 && p + 1 <= cap) p += 1;
+  return p;
+}
+
+// Перекрой молчит, пока он в допуске: не больше +1 на размер ИЛИ не больше 10 % итога.
+export const EXTRA_TOLERANCE_SHARE = 0.1;
+export function extraWithinTolerance(totals: readonly number[], plies: number): boolean {
+  const over = overCutOf(totals, plies);
+  const extra = over.reduce((s, v) => s + v, 0);
+  const total = totals.reduce((s, t) => s + Math.max(0, t), 0);
+  return over.every((v) => v <= 1) || extra <= EXTRA_TOLERANCE_SHARE * total;
 }

@@ -46,6 +46,7 @@
 import type { common_TechCardMarkerSummary, googletype_Decimal } from 'api/proto-http/admin';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { gcdOfTotals } from 'lib/nesting/spread';
 import {
   crossSpanCm,
   estimateJob,
@@ -375,8 +376,7 @@ function uniqueMarkerName(runId: number, sizeId: number, base: string, taken: Se
 
 /** НОД списка количеств — то, на что и только на что ужимается соотношение партии (см. шапку). */
 function gcdOf(values: readonly number[]): number {
-  const gcd2 = (a: number, b: number): number => (b === 0 ? a : gcd2(b, a % b));
-  return values.reduce((g, v) => gcd2(g, Math.max(0, Math.round(v))), 0) || 1;
+  return gcdOfTotals(values) || 1;
 }
 
 export function planBatchMarkers(args: {

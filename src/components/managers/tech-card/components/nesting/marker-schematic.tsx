@@ -1079,6 +1079,8 @@ function useBoxSize<T extends HTMLElement>(): [React.RefObject<T | null>, Box] {
 export function MarkerSchematic(props: MarkerSchematicProps) {
   const { view, mode, className } = props;
   const [ref, box] = useBoxSize<HTMLDivElement>();
+  // В режиме стола ячейки — итоги, а схема рисует ОДИН слой (состав маркера).
+  const title = view === 'garments' && mode === 'table' ? 'marker · one ply' : TITLE[view];
   let scene: ReactNode;
   switch (view) {
     case 'compose':
@@ -1113,7 +1115,7 @@ export function MarkerSchematic(props: MarkerSchematicProps) {
   return (
     <div
       className={`flex flex-col border border-borderColor bg-bgColor ${className ?? ''}`}
-      aria-label={`schematic: ${TITLE[view]}`}
+      aria-label={`schematic: ${title}`}
       role='img'
     >
       <div ref={ref} className='relative min-h-0 flex-1'>
@@ -1123,7 +1125,7 @@ export function MarkerSchematic(props: MarkerSchematicProps) {
           preserveAspectRatio='xMidYMid meet'
         >
           <T x={16} y={18} anchor='start' color={view === 'compose' ? LABEL : BLUE} small>
-            {TITLE[view]}
+            {title}
           </T>
           {scene}
         </svg>
