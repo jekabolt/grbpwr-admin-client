@@ -42,7 +42,7 @@ export function isBinaryDxf(bytes: Uint8Array): boolean {
   return true;
 }
 
-type Pair = {
+export type DxfPair = {
   code: number;
   value: string;
   /** Offset of the code line. */
@@ -62,7 +62,8 @@ function lineAt(s: string, pos: number): { end: number; next: number } | null {
   return { end, next: nl < 0 ? s.length : nl + 1 };
 }
 
-function* pairs(s: string, from = 0): Generator<Pair> {
+/** The code/value pairs of an ASCII DXF (latin1 view), with the offsets of each. */
+export function* dxfPairs(s: string, from = 0): Generator<DxfPair> {
   let pos = from;
   // Skip a UTF-8 BOM if present.
   if (pos === 0 && s.startsWith('\xef\xbb\xbf')) pos = 3;
@@ -90,16 +91,16 @@ type HeaderInfo = {
   endsec: number;
   /** Text of the first `9` code line in HEADER (its padding is reused). */
   varCodeLine: string | null;
-  vars: Map<string, Pair[]>;
+  vars: Map<string, DxfPair[]>;
 };
 
 function readHeader(s: string): HeaderInfo {
-  const vars = new Map<string, Pair[]>();
+  const vars = new Map<string, DxfPair[]>();
   let inHeader = false;
   let pendingSection = false;
   let current: string | null = null;
   let varCodeLine: string | null = null;
-  for (const p of pairs(s)) {
+  for (const p of dxfPairs(s)) {
     const value = p.value.trim();
     if (!inHeader) {
       if (p.code === 0 && value === 'SECTION') pendingSection = true;
@@ -145,7 +146,7 @@ export function unitsMissing(s: string): boolean {
   return n == null || !KNOWN.has(n);
 }
 
-function point(list: Pair[] | undefined): { x: number; y: number } | null {
+function point(list: DxfPair[] | undefined): { x: number; y: number } | null {
   const x = Number(list?.find((p) => p.code === 10)?.value.trim());
   const y = Number(list?.find((p) => p.code === 20)?.value.trim());
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
@@ -172,7 +173,7 @@ export function drawingExtents(s: string): Extents | null {
   let section = '';
   let pendingSection = false;
   let x: number | null = null;
-  for (const p of pairs(s)) {
+  for (const p of dxfPairs(s)) {
     if (p.code === 0) {
       const v = p.value.trim();
       if (v === 'SECTION') pendingSection = true;
@@ -226,7 +227,7 @@ export function writeInsunits(s: string, code: number): string {
   }
   // No HEADER: a new one goes before the first section (comments before it stay first).
   const header = `0${eol}SECTION${eol}2${eol}HEADER${eol}9${eol}$INSUNITS${eol}70${eol}${code}${eol}0${eol}ENDSEC${eol}`;
-  for (const p of pairs(s)) {
+  for (const p of dxfPairs(s)) {
     if (p.code === 0) return s.slice(0, p.start) + header + s.slice(p.start);
   }
   return header + s;

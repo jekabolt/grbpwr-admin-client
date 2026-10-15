@@ -69,6 +69,14 @@ import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
+import {
+  applySizeMap,
+  guessSizeMap,
+  needsSizeDialog,
+  scanDxfSizes,
+  type SizePick,
+} from './nesting/dxf-size-plan';
+import { DxfSizesDialog, UNSIZED, type SizesAsk } from './nesting/dxf-sizes-dialog';
 import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
@@ -423,6 +431,12 @@ export function PatternsField({
     cancel: () => void;
   } | null>(null);
   const [unitsBusy, setUnitsBusy] = useState(false);
+  // Sizes dialog: a DXF whose sizes the card cannot read, and what confirm does with the mapping.
+  const [sizesAsk, setSizesAsk] = useState<{
+    ask: SizesAsk;
+    confirm: (picks: Record<string, SizePick>) => void;
+    cancel: () => void;
+  } | null>(null);
   // Downloading the unitless sheets before the dialog can show their size.
   const [unitsFetching, setUnitsFetching] = useState(false);
   // Inline rename in progress: which row and the draft value.
@@ -874,6 +888,55 @@ export function PatternsField({
     );
   }
 
+  // Map the sizes of a DXF the card cannot read (unsized on a multi-size card, or graded in names
+  // the card does not have) onto the card's sizes: block names are rewritten and left-out sizes
+  // removed before upload; an unsized file instead takes the picked size as its row's size.
+  // Resolves null on cancel.
+  async function withSizes(file: File): Promise<{ file: File; sizeId?: number } | null> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (isBinaryDxf(bytes)) return { file };
+    const text = bytesToLatin1(bytes);
+    const scan = scanDxfSizes(text, (t) => dictTokens.has(t));
+    const cards = orderSizes(sizeIds).map((id) => ({
+      id,
+      label: nameOf(id),
+      tokens: sizeTokensOf(sizeById.get(id)),
+    }));
+    if (!needsSizeDialog(scan, cards)) return { file };
+    const picks = await new Promise<Record<string, SizePick> | null>((resolve) =>
+      setSizesAsk({
+        ask: {
+          name: file.name,
+          sizes: scan.sizes,
+          cards,
+          initial:
+            scan.sizes.length > 0
+              ? guessSizeMap(scan.sizes, cards)
+              : { [UNSIZED]: { on: true, to: cards[0].id } },
+        },
+        confirm: (p) => {
+          setSizesAsk(null);
+          resolve(p);
+        },
+        cancel: () => {
+          setSizesAsk(null);
+          resolve(null);
+        },
+      }),
+    );
+    if (!picks) return null;
+    if (scan.sizes.length === 0) return { file, sizeId: picks[UNSIZED]?.to || undefined };
+    try {
+      const out = applySizeMap(text, scan, picks, cards);
+      return {
+        file: new File([latin1ToBytes(out) as BlobPart], file.name, { type: file.type }),
+      };
+    } catch (e) {
+      showMessage(`${file.name}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      return null;
+    }
+  }
+
   // New sheets are named by the card, not by the file: `{style number or card name} {material}`,
   // + ' 2', ' 3'… while the slot already holds that name. Existing rows are never renamed — the
   // name is the marker's provenance key (nesting/sheet-name.ts).
@@ -905,7 +968,9 @@ export function PatternsField({
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked]);
     if (!fixed) return;
-    const file = fixed[0];
+    const sized = await withSizes(fixed[0]);
+    if (!sized) return;
+    const file = sized.file;
     const bump = (d: number) =>
       setUploading((u) => {
         const n = (u[scopeKey] ?? 0) + d;
@@ -916,7 +981,7 @@ export function PatternsField({
     try {
       const up = await uploadPatternFile(file);
       append({
-        sizeId: storageSizeId,
+        sizeId: sized.sizeId ?? storageSizeId,
         lineKey: ulid(),
         ...up,
         name: autoName(scopeKey, file),
@@ -2039,6 +2104,12 @@ export function PatternsField({
             setUnitsBusy(false);
           }
         }}
+      />
+
+      <DxfSizesDialog
+        ask={sizesAsk?.ask ?? null}
+        onCancel={() => sizesAsk?.cancel()}
+        onConfirm={(picks) => sizesAsk?.confirm(picks)}
       />
 
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
