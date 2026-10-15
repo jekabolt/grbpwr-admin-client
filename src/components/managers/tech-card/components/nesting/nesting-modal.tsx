@@ -170,7 +170,7 @@ type RailSectionStatus = {
 };
 
 /** Одна ширина на все поля тулбара (правило владельца: поля в ряд одного размера). */
-const FIELD = 'w-[72px] shrink-0';
+const FIELD = 'w-[92px] shrink-0';
 
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
@@ -3216,7 +3216,7 @@ export function NestingModal({
           </div>
           <label className={`${FIELD} space-y-0.5`} title='stack height limit · empty = not set'>
             <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-              stack limit cm
+              max stack cm
             </Text>
             <NumBox
               name='nest-stack-limit'
