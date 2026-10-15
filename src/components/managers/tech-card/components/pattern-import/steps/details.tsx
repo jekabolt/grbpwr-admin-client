@@ -63,6 +63,7 @@ import {
   SplitStage,
   ask,
   fmtPct,
+  useQuizSlot,
 } from '../ui-bits';
 import { plural } from '../stages';
 import { PIECES_REASONS, focusFromBlocked, type PieceFocus } from '../piece-focus';
@@ -108,12 +109,6 @@ type Problem = {
   reason?: string;
   label: string;
 };
-
-/**
- * Every question seen on this run, in first-seen order: the answered ones stay listed, ticked.
- * Module-level: the step unmounts while a semantics re-run shows the busy screen.
- */
-let seenStore: { sid: unknown; m: Map<string, Problem> } = { sid: null, m: new Map() };
 
 /**
  * The blocked row the footer's "N pieces …" points at — in table order, the same priority as the
@@ -194,6 +189,9 @@ export function DetailsStep({
   // GUIDED: the problem the operator chose in the checklist (a key) or the footer jumped to (a
   // seed); null = the first open one, in the footer's order — answered, it advances by itself
   const [pick, setPick] = useState<{ key?: string; seed?: SeedId } | null>(null);
+  // every question seen on this run, in first-seen order: the answered ones stay listed, ticked
+  // (the wizard owns it — the step unmounts while a semantics re-run shows the busy screen)
+  const seen = useQuizSlot('details', () => new Map<string, Problem>());
   const [synced, setSynced] = useState<string | null>(null);
   // the active question's free answer (a count not offered, a new name) is open
   const [other, setOther] = useState(false);
@@ -806,9 +804,8 @@ export function DetailsStep({
     if (!problems.length && api.blocker)
       problems.push({ key: `gate:${api.blocker}`, seed: null, kind: 'gate', label: api.blocker });
   }
-  if (seenStore.sid !== session.sessionId) seenStore = { sid: session.sessionId, m: new Map() };
-  for (const p of problems) seenStore.m.set(p.key, p);
-  const listed = [...seenStore.m.values()];
+  for (const p of problems) seen.set(p.key, p);
+  const listed = [...seen.values()];
   const active =
     (pick &&
       problems.find((p) =>

@@ -296,7 +296,8 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               </div>
             )}
 
-            {out.clean && <SheetCleanRows api={api} clean={out.clean} />}
+            {/* the sheet offer asks only when no blocker does: the blocker's answer wins the coach */}
+            {out.clean && <SheetCleanRows api={api} clean={out.clean} askOn={!api.blocker} />}
           </div>
 
           {/* the hand grid: the coach's zone when pages are missing or the placement is refused */}

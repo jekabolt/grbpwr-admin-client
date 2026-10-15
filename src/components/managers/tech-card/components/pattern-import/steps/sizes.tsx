@@ -88,6 +88,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   // the `other lines` fold: null = follow the step (open while one of them waits for a confirm)
   const [otherOpen, setOtherOpen] = useState<boolean | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // the in-order quiz reopened over row answers (it then replaces them, and says so)
+  const [reorder, setReorder] = useState(false);
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -265,8 +267,17 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const currentStart = Array.from({ length: slots }, (_, s) => s).find(sameWindow) ?? null;
   const centred = Math.floor(Math.abs(span) / 2);
   // the quiz: asked while the drawn sizes do not all map by name (a size off the card, a guess, a dupe)
-  const showOrderBar =
+  const orderAsked =
     drawn.length > 0 && cards.length > 0 && (anyDupe || drawn.some((e) => !e.card || isGuess(e)));
+  // An operator row answer (a manual card size, a leave-out, a kept guess) that no quiz window
+  // matches: the bulk quiz would overwrite it, so it folds to a quiet «map in order again» that
+  // says so. A map that IS one quiz window keeps the quiz open (picking another window is the quiz).
+  const drawnRanks = new Set(drawn.map((e) => e.source.rank));
+  const rowAnswered =
+    currentStart == null &&
+    (inputs.sizeMap ?? []).some((e) => e.origin === 'operator' && drawnRanks.has(e.source.rank));
+  const showOrderBar = orderAsked && (!rowAnswered || reorder);
+  const orderFolded = orderAsked && rowAnswered && !reorder;
   const mapInOrder = (start: number) => {
     const win = windowOf(start);
     const ranks = new Set(drawn.map((e) => e.source.rank));
@@ -278,6 +289,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         ...drawn.map((e, i) => ({ ...e, card: win[i], origin: 'operator' as const })),
       ],
     });
+    setReorder(false);
   };
   const drawnName = (e: SizeMapEntry) => e.source.label || `rank ${e.source.rank + 1}`;
   const windowTitle = (start: number) =>
@@ -570,11 +582,28 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               </Chip>
             </div>
           )}
+          {orderFolded && (
+            <div className='mb-2'>
+              <Chip
+                quiet
+                className='h-[22px]'
+                title='map every drawn size in grade order — replaces the answers you gave on the rows'
+                onClick={() => setReorder(true)}
+              >
+                map in order again
+              </Chip>
+            </div>
+          )}
           {showOrderBar && (
             <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
               <Text size='micro' component='span'>
                 {quiz}
               </Text>
+              {rowAnswered && (
+                <Text size='micro' component='span' className='text-error'>
+                  replaces your row answers
+                </Text>
+              )}
               {Array.from({ length: slots }, (_, i) => (
                 <Chip
                   key={i}

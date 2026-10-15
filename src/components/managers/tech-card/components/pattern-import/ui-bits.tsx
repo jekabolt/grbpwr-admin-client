@@ -1,11 +1,28 @@
 // Small shared pieces of the wizard, all built on the admin's own primitives (Text, Input, the
 // Input field metric for native selects). Nothing here is new design: these are the metrics of
 // ui/components/input.tsx and the panel grammar of assembly-fullscreen.tsx, named once.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
 import { FoldCaret } from 'ui/components/fold-caret';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+
+/**
+ * The steps' quiz histories (every question seen open on this run, so a fixed one stays listed,
+ * ticked): owned by the wizard — one per wizard mount, emptied on every new file read — because a
+ * step unmounts while its stage runs again after an answer. Each step keeps its own named slot.
+ */
+export type QuizHistory = Map<string, unknown>;
+export const QuizHistoryContext = createContext<QuizHistory | null>(null);
+
+/** A step's slot in the wizard's quiz history; outside a wizard, a slot that lives with the step. */
+export function useQuizSlot<T>(name: string, init: () => T): T {
+  const store = useContext(QuizHistoryContext);
+  const local = useRef<T | null>(null);
+  if (!store) return (local.current ??= init());
+  if (!store.has(name)) store.set(name, init());
+  return store.get(name) as T;
+}
 
 // A caret drawn in the field's own label grey, so the select reads as a select without OS chrome.
 const CARET: React.CSSProperties = {
@@ -425,6 +442,16 @@ export function AskCoach({
       zone.removeAttribute('data-ask-coached');
     };
   }, [zone, target.n]);
+  // any press on the stage (the canvas under the bubble too) is the operator's act: the hint goes
+  useEffect(() => {
+    if (!area) return;
+    const acted = () => close.current();
+    const t = window.setTimeout(() => area.addEventListener('pointerdown', acted, true), 0);
+    return () => {
+      window.clearTimeout(t);
+      area.removeEventListener('pointerdown', acted, true);
+    };
+  }, [area, target.n]);
   // the bubble follows the zone through scrolls and resizes
   useLayoutEffect(() => {
     let raf = 0;
@@ -465,12 +492,13 @@ export function AskCoach({
   return (
     <>
       <style>{COACH_CSS}</style>
+      {/* the bubble never takes the canvas's input (a drag, a click under it); only ✕ is live */}
       <div
         ref={box}
         role='status'
         aria-live='polite'
         data-testid='pattern-import-coach'
-        className='fixed z-[var(--z-popover)] flex flex-col gap-1 border border-textColor bg-bgColor px-2 py-1.5 shadow-[var(--shadow-popover)]'
+        className='pointer-events-none fixed z-[var(--z-popover)] flex flex-col gap-1 border border-textColor bg-bgColor px-2 py-1.5 shadow-[var(--shadow-popover)]'
         style={{ width: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
       >
         <span className='flex items-start gap-2'>
@@ -480,7 +508,7 @@ export function AskCoach({
           <button
             type='button'
             aria-label='close the hint'
-            className='-mr-0.5 shrink-0 leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className='pointer-events-auto -mr-0.5 shrink-0 leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             onClick={onClose}
           >
             <Text size='micro' component='span'>

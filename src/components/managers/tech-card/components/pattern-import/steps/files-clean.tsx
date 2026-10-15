@@ -160,6 +160,7 @@ export function KindTable({
   onHover,
   lead,
   askKey = 'files-keep',
+  askOn = true,
   open: openProp,
   onOpenChange,
   children,
@@ -174,6 +175,8 @@ export function KindTable({
   lead?: string;
   /** The `data-ask` key of this block's answers (THE ASK CONTRACT, ui-bits). */
   askKey?: string;
+  /** false: the block carries no `data-ask` (another, stronger question owns the coach). */
+  askOn?: boolean;
   open?: boolean | null;
   onOpenChange?: (open: boolean) => void;
   children?: React.ReactNode;
@@ -197,7 +200,7 @@ export function KindTable({
             disabled={busy}
             onClick={onAcceptAll}
             title={`set aside: ${waiting.map((r) => KIND_LABEL[r.kind]).join(', ')} — each row keeps its "keep" to undo`}
-            {...ask(askKey, KIND_HINT)}
+            {...ask(askKey, askOn && KIND_HINT)}
           >
             {waiting.length > 1 ? `accept all ${waiting.length}` : 'accept'}
           </Chip>
@@ -207,10 +210,17 @@ export function KindTable({
         label={asks ? 'suggested' : 'keep some'}
         open={open}
         onOpenChange={onOpenChange ?? setOwn}
-        ask={asks ? askKey : undefined}
+        ask={asks && askOn ? askKey : undefined}
         className='mt-1'
       >
-        <KindRowsTable rows={rows} busy={busy} onEdit={onEdit} onHover={onHover} askKey={askKey} />
+        <KindRowsTable
+          rows={rows}
+          busy={busy}
+          onEdit={onEdit}
+          onHover={onHover}
+          askKey={askKey}
+          askOn={askOn}
+        />
         {children}
       </Fold>
     </div>
@@ -230,12 +240,14 @@ function KindRowsTable({
   onEdit,
   onHover,
   askKey,
+  askOn,
 }: {
   rows: KindRow[];
   busy: boolean;
   onEdit: (kind: BackgroundKind, keep: boolean) => void;
   onHover?: (kind: BackgroundKind | null) => void;
   askKey: string;
+  askOn: boolean;
 }) {
   return (
     <DataTable>
@@ -282,7 +294,7 @@ function KindRowsTable({
                       ? 'keep these lines as line work (the run reads again from here)'
                       : 'set these lines aside'
                   }
-                  {...ask(askKey, !r.applied && r.suggested > 0, ROW_HINT)}
+                  {...ask(askKey, askOn && !r.applied && r.suggested > 0, ROW_HINT)}
                 >
                   {state.act}
                 </Button>
@@ -293,7 +305,7 @@ function KindRowsTable({
                     className='ml-2'
                     disabled={busy}
                     onClick={() => onEdit(r.kind, false)}
-                    {...ask(askKey, ROW_HINT)}
+                    {...ask(askKey, askOn && ROW_HINT)}
                   >
                     accept
                   </Button>
@@ -897,9 +909,12 @@ export function aiKeepSuggested(d: Dropped): boolean {
 export function SheetCleanRows({
   api,
   clean,
+  askOn = true,
 }: {
   api: ImportSessionApi;
   clean: NonNullable<StageIO['assemble']['out']['clean']>;
+  /** false while the sheet step has a blocker: the blocker's answer owns the coach. */
+  askOn?: boolean;
 }) {
   const rows = kindRows(clean.items);
   if (!rows.length) return null;
@@ -920,6 +935,7 @@ export function SheetCleanRows({
         onEdit={edit}
         lead='sheet'
         askKey='sheet-keep'
+        askOn={askOn}
         onAcceptAll={() =>
           void api.dispatch({
             type: 'clean',

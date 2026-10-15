@@ -29,7 +29,7 @@ import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
-import { DebugFold, Fold, Panel, SplitStage, ask, fmtMm, fmtPct } from '../ui-bits';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtMm, fmtPct, useQuizSlot } from '../ui-bits';
 import { plural } from '../stages';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
@@ -217,11 +217,6 @@ type Problem =
 
 /** A checklist row as it was last seen open: a fixed one keeps its words, greyed, with a ✓. */
 type SeenRow = { order: number; label: string; seed?: number };
-/**
- * The checklist's memory, per import (its file names): the step unmounts while the pieces run
- * again after an answer, and a fixed question must come back as fixed, not vanish.
- */
-const GUIDE_SEEN = new Map<string, { variant: string | null; rows: Map<string, SeenRow> }>();
 
 export function PiecesStep({
   api,
@@ -238,6 +233,12 @@ export function PiecesStep({
 }) {
   const { session, inputs } = api;
   const { remember } = useContext(DroppedLabels);
+  // the checklist's memory for this import (owned by the wizard: the step unmounts while the
+  // pieces run again after an answer, and a fixed question must come back as fixed, not vanish)
+  const seen = useQuizSlot('pieces', () => ({
+    variant: session.variant ?? null,
+    rows: new Map<string, SeenRow>(),
+  }));
   const out = session.pieces;
   const runSizes = session.sizes?.run.sizes ?? [];
   const [rank, setRank] = useState(
@@ -261,6 +262,8 @@ export function PiecesStep({
     lastFocus.current = focus;
   }, [focus]);
   const [hint, setHint] = useState<string | null>(null);
+  // the lasso armed by «one piece»: it joins the parts drawn around, it does not split
+  const [lassoJoin, setLassoJoin] = useState(false);
   /** Every tool on the toolbar, not only the ones the selected region's problem needs. */
   const [allTools, setAllTools] = useState(false);
   /** The closed regions' list, opened by hand (a closed region picked on the sheet opens it too). */
@@ -315,10 +318,6 @@ export function PiecesStep({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const active = openProblems.find((p) => p.key === activeKey) ?? openProblems[0] ?? null;
   /** Every question seen open since the step opened (or the model last changed): fixed ones stay. */
-  const seenKey = session.files.map((f) => f.name).join('|');
-  if (!GUIDE_SEEN.has(seenKey))
-    GUIDE_SEEN.set(seenKey, { variant: session.variant ?? null, rows: new Map() });
-  const seen = GUIDE_SEEN.get(seenKey)!;
   if (seen.variant !== (session.variant ?? null)) {
     // another model is another set of regions: what the last one asked is not "fixed"
     seen.variant = session.variant ?? null;
@@ -362,6 +361,7 @@ export function PiecesStep({
   const pickTool = (t: Tool) => {
     setGapA(null);
     setTool(t);
+    setLassoJoin(false);
   };
 
   const seedAt = (id: number) => out.seeds.find((s) => s.id === id);
@@ -471,6 +471,12 @@ export function PiecesStep({
     if (ins.length >= 2) {
       void api.editPieces({ kind: 'merge', seeds: ins.map((f) => f.seed) });
       setHint(`merged ${ins.length} seeds into one piece`);
+    } else if (lassoJoin) {
+      // «one piece» never splits: a lasso around fewer than two labels joins nothing
+      setHint('draw around both parts (both labels inside the lasso) to join them');
+      setTool('pan');
+      setLassoJoin(false);
+      return;
     } else {
       const c = centre(poly);
       const target =
@@ -481,6 +487,7 @@ export function PiecesStep({
       } else setHint('the lasso holds no seed and crosses no merged region — nothing to do');
     }
     setTool('pan');
+    setLassoJoin(false);
   };
 
   // ── the guide's checklist: every question seen open, fixed ones greyed with a ✓ ──
@@ -513,7 +520,9 @@ export function PiecesStep({
   const badRanks = expRanks.filter((c) => c.outcome !== 'closed');
   /** The problem is in some sizes only: the card says which ('in 44 46'). */
   const partly = badRanks.length > 0 && badRanks.length < expRanks.length;
-  // two seeds in one region: the other seeds inside this outline are the piece it touches
+  // two seeds in one region: another label inside this outline means «one piece» is a possible
+  // answer — only offered, never inferred: a separately closed nested piece (a pocket, a facing)
+  // sits inside too, so the operator lassoes exactly the parts to join
   const partners =
     activeFam && activeCand && activeCand.outer.length > 2
       ? families.filter((g) => {
@@ -612,21 +621,19 @@ export function PiecesStep({
             label: 'two — split',
             how: 'draw around one of the two pieces',
             title: 'draw a lasso around one of the two pieces',
-            pressed: tool === 'lasso' && sel === activeFam.seed,
+            pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
             onClick: () => arm('lasso'),
           },
           ...(partners.length
             ? [
                 {
                   label: 'one piece',
-                  how: 'join the two labels into one piece',
-                  title: 'both labels name one piece: join them',
+                  how: 'draw around both parts to join them',
+                  title: 'both labels name one piece: draw a lasso around both parts to join them',
+                  pressed: tool === 'lasso' && lassoJoin && sel === activeFam.seed,
                   onClick: () => {
-                    void api.editPieces({
-                      kind: 'merge',
-                      seeds: [activeFam.seed, ...partners.map((g) => g.seed)],
-                    });
-                    setHint('joined into one piece');
+                    arm('lasso');
+                    setLassoJoin(true);
                   },
                 },
               ]
@@ -673,7 +680,9 @@ export function PiecesStep({
           ? '! now click the other end of the gap'
           : 'click both ends of the gap'
         : tool === 'lasso'
-          ? 'draw around one of the two pieces'
+          ? lassoJoin
+            ? 'draw around both parts to join them'
+            : 'draw around one of the two pieces'
           : tool === 'reseed'
             ? 'click inside the piece'
             : null

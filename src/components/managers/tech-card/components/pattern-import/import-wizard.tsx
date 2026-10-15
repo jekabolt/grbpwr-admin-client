@@ -57,7 +57,14 @@ import {
   type PrimaryOverride,
   type StageState,
 } from './stages';
-import { AskCoach, firstAsk, focusAsk, type CoachTarget } from './ui-bits';
+import {
+  AskCoach,
+  QuizHistoryContext,
+  firstAsk,
+  focusAsk,
+  type CoachTarget,
+  type QuizHistory,
+} from './ui-bits';
 import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
 import { isReplayed } from './autopilot/replay-record';
 
@@ -317,6 +324,14 @@ function WizardBody({
     }),
     [dropped],
   );
+  // The steps' quiz histories: one per wizard mount, emptied whenever the run's session changes
+  // (a new file read, a reset) — never shared between imports, cards or re-imports of one name.
+  const [quizHistory] = useState<QuizHistory>(() => new Map());
+  const quizSid = useRef<number | null>(session.sessionId);
+  if (quizSid.current !== session.sessionId) {
+    quizSid.current = session.sessionId;
+    quizHistory.clear();
+  }
   const fixInPieces = (f: PieceFocus) => {
     setFocus(f);
     void api.dispatch({ type: 'back', to: 'pieces' });
@@ -369,7 +384,9 @@ function WizardBody({
   // the question changed (answered, another step): the old picture goes
   useEffect(() => setCoach(null), [askText, session.step, session.busy]);
   const onAsk = () => {
-    if (askText && offWizard(askText)) return requestClose();
+    // an ask fixed on the card closes the wizard only when nothing in the wizard answers it
+    // (fabrics' interlining-only blocker names the BOM tab and is answered by a tick here)
+    if (askText && offWizard(askText) && !firstAsk(mainRef.current)) return requestClose();
     const text = askText ?? '';
     const show = (el: HTMLElement, bare = false) =>
       setCoach((c) => ({ el, text, n: (c?.n ?? 0) + 1, bare }));
@@ -747,14 +764,16 @@ function WizardBody({
             <main ref={mainRef} className='relative min-h-0 min-w-0'>
               <WizardPrimaryContext.Provider value={setOverride}>
                 <DroppedLabels.Provider value={droppedCtx}>
-                  {session.busy ? (
-                    // the last picture the run has, dimmed and out of reach while it works
-                    <div className='h-full opacity-40' inert aria-hidden>
-                      {body}
-                    </div>
-                  ) : (
-                    body
-                  )}
+                  <QuizHistoryContext.Provider value={quizHistory}>
+                    {session.busy ? (
+                      // the last picture the run has, dimmed and out of reach while it works
+                      <div className='h-full opacity-40' inert aria-hidden>
+                        {body}
+                      </div>
+                    ) : (
+                      body
+                    )}
+                  </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>
               {session.busy && <Working busy={session.busy} onStop={api.cancel} />}
@@ -793,7 +812,7 @@ function WizardBody({
                       type='button'
                       className='cursor-pointer text-left underline decoration-current/40 underline-offset-2 hover:decoration-current'
                       title={
-                        offWizard(askText)
+                        offWizard(askText) && !firstAsk(mainRef.current)
                           ? 'close the import and fix it on the card'
                           : 'show the control that answers this'
                       }
