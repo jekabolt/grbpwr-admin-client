@@ -108,6 +108,7 @@ import {
 } from './piece-selection';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
+import { useGoToBomLineField } from './go-to-card-field';
 
 // Units are asked by a dialog at upload: the parse's note about them is not repeated here.
 const UNITS_NOT_SET = /units are not set in the file/;
@@ -133,6 +134,8 @@ const SEAM_NOTE_PREFIX = 'seam allowance:';
 const TABLE_NOTE_PREFIX = 'cutting table:';
 const NO_ALLOWANCE_TEXT = 'nested without seam allowance · consumption too low';
 
+// Направление ворса не задано на строке BOM (вкладка BOM карточки), см. directionUnset.
+const DIRECTION_UNSET_TEXT = 'fabric direction not set on the BOM line';
 const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&material=${materialId}`;
 
 // ОДНА КОРОБКА НА ВЕСЬ РЯД ТУЛБАРА: поле ввода, селект, переключатель и дверь деталей — одной
@@ -1174,6 +1177,17 @@ export function NestingModal({
   const partialExportRefusal = partialGeometry
     ? `${viewIsDraft ? 'draft: ' : ''}${effective?.placedCount ?? 0} of ${effective?.totalCount ?? 0} placed, export off`
     : '';
+  // РЕЖИМ СТОЛА: прогон шёл с maxLengthCm (обычный прогон с «within table» или финал «fit to the
+  // table»), и легли НЕ ВСЕ детали — по любой причине, не только 'table-full'. Это ОДНА ошибка в
+  // шапке (дверь — «fit to the table»), она же причина выключенного «save marker»; строки «did not
+  // fit» и «… placed, export off» в этом режиме не дублируют её.
+  const tableRun = !viewData && runView?.config.maxLengthCm != null;
+  const tableShortText =
+    tableRun && !running && !!effective && effective.placedCount < effective.totalCount
+      ? `${effective.totalCount - effective.placedCount} of ${effective.totalCount} ${
+          effective.totalCount === 1 ? "piece doesn't" : "pieces don't"
+        } fit on the table`
+      : '';
 
   // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
   //
@@ -1903,7 +1917,7 @@ export function NestingModal({
   const directionRefusal =
     !viewData && layoutFlipsPiece && !allowsFlip(effectiveDirection)
       ? effectiveDirection === 'unknown'
-        ? 'a piece is flipped, fabric direction not set'
+        ? 'a piece is flipped, fabric direction not set on the BOM line'
         : 'a piece is flipped on a one-way fabric'
       : null;
   const canSave =
@@ -1961,6 +1975,7 @@ export function NestingModal({
       out.push(`no pieces picked for: ${sizesWithoutPieces.join(', ')}`);
     if (composition.length > MAX_MARKER_COMPOSITION_SIZES)
       out.push(`${composition.length} sizes, cap ${MAX_MARKER_COMPOSITION_SIZES}`);
+    if (tableShortText) out.push(tableShortText);
     // Терминальная ветка прежней цепочки — она же покрывает незавершённый прогон, пустой
     // состав и отсутствие серверного контекста (compute-only).
     if (
@@ -2324,16 +2339,26 @@ export function NestingModal({
     if (pin && Number.isFinite(pin.cutCm)) return pin.materialId;
     return activeSlot?.materialId;
   })();
+  const goToBomLineField = useGoToBomLineField();
+  // Направление — поле СТРОКИ BOM (ворс: any / one way / two way), не артикула: туда и ведём.
+  const directionFix = (): HeaderWarningAction | undefined => {
+    const run = goToBomLineField(activeSlot?.lineKey, 'fabricDirection', onClose);
+    return run ? { label: 'set on the BOM line', onClick: run } : undefined;
+  };
   const openArticle = (materialId: number | undefined): HeaderWarningAction | undefined =>
     materialId && materialId > 0
       ? {
           label: 'set on the article',
+          href: articleUrl(materialId),
           onClick: () => {
             articleOpenedRef.current = true;
-            window.open(articleUrl(materialId), '_blank', 'noopener');
           },
         }
       : undefined;
+  // НАПРАВЛЕНИЕ — поле СТРОКИ BOM (tech_card_bom_item.fabric_direction: any/one_way/two_way), а не
+  // артикула: у артикула своё fabricAttrs.fabricDirection — это ДОЛЕВАЯ (lengthwise/crosswise/any),
+  // про ворс оно ничего не говорит, и сервер судит маркер только по строке
+  // (ValidateMarkerFabricDirection). Поэтому дверь в артикул здесь не ставится: там это не чинится.
   const directionUnset = effectiveDirection === 'unknown';
 
   // ── настил под раскроечный стол: толщина, цифры, вердикты ───────────────────────────────
@@ -2405,7 +2430,15 @@ export function NestingModal({
       action: fitAction,
     });
   }
-  if (tableFullCount > 0) {
+  if (tableShortText) {
+    spreadWarnings.push({
+      // Прочие причины (шире полотна, зеркало…) дописываются в ту же строку: дверь стола их не
+      // чинит, и молча проглотить их нельзя.
+      text: unplaced.length > 0 ? `${tableShortText} · ${unplacedText}` : tableShortText,
+      error: true,
+      action: fitAction,
+    });
+  } else if (tableFullCount > 0) {
     spreadWarnings.push({
       text: `${tableFullCount} ${tableFullCount === 1 ? "piece doesn't" : "pieces don't"} fit on the table`,
       error: true,
@@ -2486,7 +2519,7 @@ export function NestingModal({
       allowanceMm === 0 && !contourIsCutLine ? NO_ALLOWANCE_TEXT : '',
       allowanceUnconfirmed ? 'allowance not confirmed by the file' : '',
       seam.hulled.length > 0 ? `defective contour on ${seam.hulled.length} pieces` : '',
-      !viewData && effectiveDirection === 'unknown' ? 'fabric direction not set' : '',
+      !viewData && effectiveDirection === 'unknown' ? DIRECTION_UNSET_TEXT : '',
     ].filter(Boolean),
   };
   const railS3: RailSectionStatus = {
@@ -2585,7 +2618,7 @@ export function NestingModal({
                   text === doubleAllowanceRefusal
                     ? { label: 'set allowance to 0', onClick: setAllowanceZero }
                     : text === directionRefusal && directionUnset
-                      ? openArticle(activeSlot?.materialId)
+                      ? directionFix()
                       : showFix(i + 1, text),
               }),
             ),
@@ -2605,23 +2638,18 @@ export function NestingModal({
                 },
               };
             }
-            if (text === 'fabric direction not set') {
-              return { text, action: openArticle(activeSlot?.materialId) };
-            }
             return text;
           }),
-          ...railS3.warnings,
+          ...railS3.warnings.map((text): HeaderWarning =>
+            text === DIRECTION_UNSET_TEXT ? { text, action: directionFix() } : text,
+          ),
         ]),
     !viewData && !running && saveRefusals.length > 0 && !onlyTerminal
       ? saveRefusals
-          .filter((r) => r !== TERMINAL_SAVE_REASON)
+          .filter((r) => r !== TERMINAL_SAVE_REASON && r !== tableShortText)
           .map((text) => ({
             text,
             error: true,
-            action:
-              text === directionRefusal && directionUnset
-                ? openArticle(activeSlot?.materialId)
-                : undefined,
           }))
       : [],
     ...spreadWarnings,
@@ -2632,10 +2660,10 @@ export function NestingModal({
         }
       : '',
     forecast?.outlook === 'starved' && !running ? 'geometry too heavy for the time budget' : '',
-    unplaced.length > 0
+    unplaced.length > 0 && !tableShortText
       ? { text: `did not fit: ${unplaced.length} · ${unplacedText}`, error: true }
       : '',
-    partialGeometry ? { text: partialExportRefusal, error: true } : '',
+    partialGeometry && !tableShortText ? { text: partialExportRefusal, error: true } : '',
     drawing.phase === 'error' ? { text: `drawing not restored: ${rebuildText}`, error: true } : '',
     ...(drawing.phase === 'ok' ? drawing.warnings : []),
     !running && displayResult?.cancelled && displayResult.placements.length === 0
@@ -3463,7 +3491,11 @@ export function NestingModal({
                   variant='main'
                   size='sm'
                   disabled={!canSave}
-                  title={!canSave && onlyTerminal ? TERMINAL_SAVE_REASON : undefined}
+                  title={
+                    !canSave
+                      ? tableShortText || (onlyTerminal ? TERMINAL_SAVE_REASON : undefined)
+                      : undefined
+                  }
                   onClick={() => setSaveOpen(true)}
                 >
                   save marker
