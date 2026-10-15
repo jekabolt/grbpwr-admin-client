@@ -11,24 +11,64 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
+import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
+import { BodySilhouette } from './body-silhouette';
+import { outlineGeo } from './sheet-outline-geo';
+import { useSheetViewPrefs, type SheetViewPrefs } from './sheet-view-prefs';
 
 // Состояние блока на листе. Серо-чернильная палитра — та же, что у редактора раскладки;
 // красный оставлен ровно за одним смыслом: связь снимается.
 export type PieceMark = 'open' | 'staged' | 'mapped' | 'dropped' | 'unnamed';
 
-const STYLE: Record<PieceMark, { fill: string; stroke: string; dash: boolean }> = {
-  // не сопоставлена — пустая, пунктиром: это то, что ещё просит ответа
-  open: { fill: '#ffffff', stroke: '#8a8a8a', dash: true },
-  // выбор сделан в этой сессии, но карточка не сохранена
-  staged: { fill: '#ececec', stroke: '#111111', dash: true },
-  // связь уже лежит на сервере
-  mapped: { fill: '#f2f2f2', stroke: '#111111', dash: false },
-  // помечена «снять» — связь уйдёт при сохранении
-  dropped: { fill: '#ffffff', stroke: '#c22222', dash: true },
-  // в файле у контура нет имени блока, привязать не к чему
-  unnamed: { fill: '#fafafa', stroke: '#d5d5d5', dash: false },
+// Вид листа (владелец, patterns-lite r3): синяя заливка 12 % и синяя обводка 1px — деталь
+// «есть и связана»; остальные состояния отличаются от неё обводкой/пунктиром, как раньше.
+const BLUE = '#2323ff';
+type PieceStyle = {
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeOpacity: number;
+  dash: boolean;
 };
+const STYLE: Record<PieceMark, PieceStyle> = {
+  // не сопоставлена — пустая, пунктиром: это то, что ещё просит ответа
+  open: { fill: '#ffffff', fillOpacity: 1, stroke: '#8a8a8a', strokeOpacity: 1, dash: true },
+  // выбор сделан в этой сессии, но карточка не сохранена
+  staged: { fill: BLUE, fillOpacity: 0.12, stroke: BLUE, strokeOpacity: 0.8, dash: true },
+  // связь уже лежит на сервере
+  mapped: { fill: BLUE, fillOpacity: 0.12, stroke: BLUE, strokeOpacity: 0.8, dash: false },
+  // помечена «снять» — связь уйдёт при сохранении
+  dropped: { fill: '#ffffff', fillOpacity: 1, stroke: '#c22222', strokeOpacity: 1, dash: true },
+  // в файле у контура нет имени блока, привязать не к чему (приглушена)
+  unnamed: { fill: '#f2f2f2', fillOpacity: 1, stroke: '#d5d5d5', strokeOpacity: 1, dash: false },
+};
+
+const GRID_STROKE = '#e6e6f0';
+const GRID_MINOR_STROKE = '#f1f1f7';
+const SIZE_INK = '#311eee';
+
+// Линии сетки на видимый кадр: шаг в см, только видимые, одним путём.
+function gridPath(b: Box, step: number): string {
+  const x0 = Math.floor(b.x / step) * step;
+  const y0 = Math.floor(b.y / step) * step;
+  let d = '';
+  for (let x = x0; x <= b.x + b.w; x += step) d += `M${x},${b.y}V${b.y + b.h}`;
+  for (let y = y0; y <= b.y + b.h; y += step) d += `M${b.x},${y}H${b.x + b.w}`;
+  return d;
+}
+
+const VIEW_TOGGLES: [keyof SheetViewPrefs, string][] = [
+  ['grid', 'grid'],
+  ['silhouette', 'body silhouette'],
+  ['sizes', 'sizes'],
+  ['names', 'names'],
+  ['grain', 'grainline'],
+  ['vertices', 'vertices'],
+];
+
+const ICON_BTN =
+  'flex size-7 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor';
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -127,6 +167,23 @@ export function PieceSheet({
   // бы деталь при клике по пустому месту.
   const candidate = useRef<{ key: string; pointerId: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  const [prefs, setPref] = useSheetViewPrefs();
+  // svg появляется вместе с fit — наблюдатель размера переподписывается на это.
+  const hasFit = fit != null;
+
+  // Размер холста в пикселях — чтобы точки, подписи длин и обводки держали экранный размер
+  // на любом зуме.
+  const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const r = svg.getBoundingClientRect();
+      if (r.width && r.height) setSvgSize({ w: r.width, h: r.height });
+    });
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, [hasFit]);
 
   // Крупные детали рисуются первыми: мелкая, лежащая в вырезе крупной, иначе оказалась бы под
   // ней и стала бы некликабельной.
@@ -266,6 +323,57 @@ export function PieceSheet({
     );
   }
 
+  // Чертёжных единиц (см) на экранный пиксель.
+  const px = svgSize ? 1 / Math.min(svgSize.w / box.w, svgSize.h / box.h) : box.w / 800;
+
+  // Длины сторон: подпись внутрь от середины дуги, вдоль касательной, строкой вверх. Короче 3 см
+  // и короче самой подписи на экране — пропускаем; соседние подписи не налезают (сетка ячеек).
+  const sizeLabels: { k: string; x: number; y: number; a: number; t: string }[] = [];
+  if (prefs.sizes) {
+    const cell = 26 * px;
+    const taken = new Map<string, { x: number; y: number }[]>();
+    const off = 8 * px;
+    for (const p of ordered) {
+      const ox = p.originX!;
+      const oy = p.originY!;
+      outlineGeo(p.poly).edges.forEach((e, i) => {
+        if (e.lenCm < 3 || e.lenCm / px < 40) return;
+        const x = ox + e.mid.x + e.nx * off;
+        const y = vy(oy + e.mid.y + e.ny * off);
+        if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) return;
+        const cx = Math.floor(x / cell);
+        const cy = Math.floor(y / cell);
+        for (let dx = -1; dx <= 1; dx++)
+          for (let dy = -1; dy <= 1; dy++)
+            for (const q of taken.get(`${cx + dx}:${cy + dy}`) ?? [])
+              if (Math.hypot(q.x - x, q.y - y) < cell) return;
+        const key = `${cx}:${cy}`;
+        taken.set(key, [...(taken.get(key) ?? []), { x, y }]);
+        let a = (Math.atan2(-e.ty, e.tx) * 180) / Math.PI;
+        if (a > 90) a -= 180;
+        else if (a <= -90) a += 180;
+        sizeLabels.push({ k: `${p.id}:${i}`, x, y, a, t: e.lenCm.toFixed(1) });
+      });
+    }
+  }
+
+  // Вершины одним путём на цвет: 50 деталей × 20 углов — это тысяча кружков, а путь один.
+  const dots = { blue: '', grey: '' };
+  if (prefs.vertices) {
+    const r = 1.8 * px;
+    for (const p of ordered) {
+      const ox = p.originX!;
+      const oy = p.originY!;
+      const m = markOf(p);
+      const tone = m === 'mapped' || m === 'staged' ? 'blue' : 'grey';
+      for (const c of outlineGeo(p.poly).corners) {
+        const x = ox + c.x - r;
+        const y = vy(oy + c.y);
+        dots[tone] += `M${x},${y}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0`;
+      }
+    }
+  }
+
   const endGesture = () => {
     gesture.current = null;
     // Defensive: the svg's pointerdown always consumes the candidate (it bubbles there and
@@ -330,6 +438,25 @@ export function PieceSheet({
           onLostPointerCapture={endGesture}
           onDoubleClick={() => setView(null)}
         >
+          {/* Сетка в сантиметрах листа: 10 см всегда, 1 см — когда сантиметр крупнее 6px. */}
+          {prefs.grid ? (
+            <g pointerEvents='none' fill='none' strokeWidth={1}>
+              {px < 1 / 6 ? (
+                <path
+                  d={gridPath(box, 1)}
+                  stroke={GRID_MINOR_STROKE}
+                  vectorEffect='non-scaling-stroke'
+                />
+              ) : null}
+              <path d={gridPath(box, 10)} stroke={GRID_STROKE} vectorEffect='non-scaling-stroke' />
+            </g>
+          ) : null}
+
+          {/* Силуэт — ориентир масштаба за деталями, по центру габарита листа. */}
+          {prefs.silhouette ? (
+            <BodySilhouette cx={fit.x + fit.w / 2} cy={fit.y + fit.h / 2} />
+          ) : null}
+
           {ordered.map((p) => {
             const key = keyOf(p);
             const mark = markOf(p);
@@ -338,19 +465,26 @@ export function PieceSheet({
             const ox = p.originX!;
             const oy = p.originY!;
             const points = p.poly.map((pt) => `${ox + pt.x},${vy(oy + pt.y)}`).join(' ');
-            // Толщина — от текущего окна, а не от листа: иначе на зуме обводка разъезжается
-            // в кляксу.
-            const sw = (on ? box.w / 280 : box.w / 520) || 0.01;
+            // Толщина — в экранных пикселях (1px, выбранная 2px), на любом зуме.
+            const sw = (on ? 2 : 1) * px;
             const plan = labelPlans.get(p.id);
             return (
               <polygon
                 key={p.id}
                 points={points}
-                fill={on ? '#e0e0e0' : st.fill}
+                fill={on ? BLUE : st.fill}
+                fillOpacity={on ? 0.3 : st.fillOpacity}
                 stroke={on ? '#111111' : st.stroke}
+                strokeOpacity={on ? 1 : st.strokeOpacity}
                 strokeWidth={sw}
-                strokeDasharray={st.dash ? `${box.w / 90} ${box.w / 150}` : undefined}
-                className={key ? 'cursor-pointer' : undefined}
+                strokeDasharray={st.dash ? `${6 * px} ${4 * px}` : undefined}
+                className={
+                  key
+                    ? on
+                      ? 'cursor-pointer'
+                      : 'cursor-pointer hover:[fill-opacity:0.22]'
+                    : undefined
+                }
                 onPointerDown={(e) => {
                   if (e.button !== 0 || !key) return;
                   // Кладём кандидата и ОТПУСКАЕМ событие дальше: панорама взводится на самом
@@ -381,14 +515,19 @@ export function PieceSheet({
                 const ox = p.originX!;
                 const oy = p.originY!;
                 return (
-                  <g key={`i${p.id}`} pointerEvents='none' fill='none' stroke='#8a8a8a'>
+                  <g
+                    key={`i${p.id}`}
+                    pointerEvents='none'
+                    fill='none'
+                    stroke='#9a9a9a'
+                    strokeWidth={0.75 * px}
+                  >
                     {paths.map((c, i) => {
                       const pts = c.pts.map((pt) => `${ox + pt.x},${vy(oy + pt.y)}`).join(' ');
-                      const sw = box.w / 700 || 0.01;
                       return c.closed ? (
-                        <polygon key={i} points={pts} strokeWidth={sw} />
+                        <polygon key={i} points={pts} />
                       ) : (
-                        <polyline key={i} points={pts} strokeWidth={sw} />
+                        <polyline key={i} points={pts} />
                       );
                     })}
                   </g>
@@ -399,7 +538,7 @@ export function PieceSheet({
           {/* Долевая: тот самый отрезок из файла, по которому раскладка разворачивает деталь.
               Отдельным проходом поверх контуров и без реакции на указатель — линия не должна
               перехватывать клик у своей же детали. */}
-          {grainLayer
+          {grainLayer && prefs.grain
             ? ordered.map((p) => {
                 const g = (p.grain ?? []).filter((c) => c.layer === grainLayer);
                 // Ровно один отрезок = то, что ориентация считает долевой. Показываем ровно то,
@@ -438,63 +577,130 @@ export function PieceSheet({
               Угол берётся со знаком минус: план считается в чертёжной системе (Y вверх), а
               лист рисуется через vy() — картинка зеркальна, и строка обязана лечь вдоль
               детали такой, какой её ВИДНО. */}
-          {Array.from(labelPlans, ([id, plan]) => (
-            <g key={`t${id}`} pointerEvents='none'>
-              {plan.leader ? (
-                <>
-                  <circle
-                    cx={plan.leader.dotX}
-                    cy={vy(plan.leader.dotY)}
-                    r={plan.fontCm * 0.22}
-                    fill='#111111'
-                  />
-                  <line
-                    x1={plan.leader.dotX}
-                    y1={vy(plan.leader.dotY)}
-                    x2={plan.leader.toX}
-                    y2={vy(plan.leader.toY)}
-                    stroke='#111111'
-                    strokeWidth={box.w / 900 || 0.005}
-                  />
-                </>
-              ) : null}
-              <text
-                transform={`translate(${plan.x} ${vy(plan.y)})${
-                  plan.angleDeg ? ` rotate(${-plan.angleDeg})` : ''
-                }`}
-                fontSize={plan.fontCm}
-                fill='#111111'
-                textAnchor='middle'
-                dominantBaseline='middle'
-              >
-                {plan.text}
-              </text>
+          {/* Вершины контура — точки на изломах. */}
+          {dots.blue || dots.grey ? (
+            <g pointerEvents='none'>
+              {dots.blue ? <path d={dots.blue} fill={BLUE} /> : null}
+              {dots.grey ? <path d={dots.grey} fill='#9a9a9a' /> : null}
             </g>
-          ))}
+          ) : null}
+
+          {/* Длины сторон, см. */}
+          {sizeLabels.length > 0 ? (
+            <g pointerEvents='none' fill={SIZE_INK} fontSize={9 * px}>
+              {sizeLabels.map((l) => (
+                <text
+                  key={l.k}
+                  transform={`translate(${l.x} ${l.y})${l.a ? ` rotate(${l.a})` : ''}`}
+                  textAnchor='middle'
+                  dominantBaseline='middle'
+                >
+                  {l.t}
+                </text>
+              ))}
+            </g>
+          ) : null}
+
+          {prefs.names &&
+            Array.from(labelPlans, ([id, plan]) => (
+              <g key={`t${id}`} pointerEvents='none'>
+                {plan.leader ? (
+                  <>
+                    <circle
+                      cx={plan.leader.dotX}
+                      cy={vy(plan.leader.dotY)}
+                      r={plan.fontCm * 0.22}
+                      fill='#111111'
+                    />
+                    <line
+                      x1={plan.leader.dotX}
+                      y1={vy(plan.leader.dotY)}
+                      x2={plan.leader.toX}
+                      y2={vy(plan.leader.toY)}
+                      stroke='#111111'
+                      strokeWidth={box.w / 900 || 0.005}
+                    />
+                  </>
+                ) : null}
+                <text
+                  transform={`translate(${plan.x} ${vy(plan.y)})${
+                    plan.angleDeg ? ` rotate(${-plan.angleDeg})` : ''
+                  }`}
+                  fontSize={plan.fontCm}
+                  fill='#111111'
+                  textAnchor='middle'
+                  dominantBaseline='middle'
+                >
+                  {plan.text}
+                </text>
+              </g>
+            ))}
         </svg>
-        {/* «Весь лист» — пиктограмма в углу самого холста, и только когда кадр ушёл от вписанного
-            (зум или протяжка): на обзоре возвращать некуда. */}
-        {view && (
-          <button
-            type='button'
-            aria-label='show the whole sheet'
-            title='show the whole sheet'
-            onClick={() => setView(null)}
-            className='absolute bottom-1.5 right-1.5 flex size-7 items-center justify-center border border-borderColor bg-white text-labelColor hover:border-textColor hover:text-textColor'
-          >
-            <svg
-              width='14'
-              height='14'
-              viewBox='0 0 14 14'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='1'
-              aria-hidden='true'
+        {/* Угол холста: «весь лист» (только когда кадр ушёл от вписанного) и настройки вида. */}
+        <div className='absolute right-1.5 bottom-1.5 flex items-center gap-1'>
+          {view && (
+            <button
+              type='button'
+              aria-label='show the whole sheet'
+              title='show the whole sheet'
+              onClick={() => setView(null)}
+              className={ICON_BTN}
             >
-              <path d='M0.5 4.5V0.5H4.5M9.5 0.5H13.5V4.5M13.5 9.5V13.5H9.5M4.5 13.5H0.5V9.5' />
-            </svg>
-          </button>
-        )}
+              <svg
+                width='14'
+                height='14'
+                viewBox='0 0 14 14'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='1'
+                aria-hidden='true'
+              >
+                <path d='M0.5 4.5V0.5H4.5M9.5 0.5H13.5V4.5M13.5 9.5V13.5H9.5M4.5 13.5H0.5V9.5' />
+              </svg>
+            </button>
+          )}
+          <GenericPopover
+            noTail
+            className='w-[168px]'
+            contentProps={{ side: 'top', align: 'end', sideOffset: 4 }}
+            triggerProps={{
+              'aria-label': 'view settings',
+              title: 'view settings',
+              className: ICON_BTN,
+            }}
+            openElement={
+              <svg
+                width='14'
+                height='14'
+                viewBox='0 0 14 14'
+                fill='white'
+                stroke='currentColor'
+                strokeWidth='1'
+                aria-hidden='true'
+              >
+                <path d='M0.5 3.5H13.5M0.5 7.5H13.5M0.5 11.5H13.5' />
+                <rect x='3.5' y='1.5' width='2' height='4' />
+                <rect x='8.5' y='5.5' width='2' height='4' />
+                <rect x='5.5' y='9.5' width='2' height='4' />
+              </svg>
+            }
+          >
+            <div className='flex flex-col gap-1.5 py-0.5'>
+              {VIEW_TOGGLES.map(([k, label]) => (
+                <label key={k} className='flex cursor-pointer items-center gap-1.5'>
+                  <input
+                    type='checkbox'
+                    checked={prefs[k]}
+                    onChange={(e) => setPref(k, e.target.checked)}
+                  />
+                  <Text size='micro' variant='label' component='span'>
+                    {label}
+                  </Text>
+                </label>
+              ))}
+            </div>
+          </GenericPopover>
+        </div>
       </div>
       {(!bare || hidden > 0) && (
         <div className='flex flex-wrap items-center gap-2'>
