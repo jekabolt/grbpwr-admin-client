@@ -170,7 +170,7 @@ type RailSectionStatus = {
 };
 
 /** Одна ширина на все поля тулбара (правило владельца: поля в ряд одного размера). */
-const FIELD = 'w-[92px] shrink-0';
+const FIELD = 'w-[84px] shrink-0';
 
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
