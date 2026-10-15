@@ -6934,6 +6934,9 @@ export type WorkshopSettings = {
   // the check is common.Material.fabric_thickness_mm; either one absent ⇒ UNKNOWN, and the screen
   // says which of the two is missing rather than printing a height nobody can trust.
   maxStackHeightCm: googletype_Decimal | undefined;
+  // Usable WIDTH of the cutting/spreading table, in CENTIMETRES (0413) — the length's partner, so the
+  // marker modal can draw the table to scale. ABSENT = not configured ⇒ no width verdict, never 0.
+  cuttingTableWidthCm: googletype_Decimal | undefined;
 };
 
 export type GetWorkshopSettingsRequest = {
@@ -6981,6 +6984,9 @@ export type UpdateWorkshopSettingsRequest = {
   // clearing the setting (send the empty message), which withholds the verdict instead of failing
   // it. Same floor argument as the table length, opposite to the seam allowance's legal zero.
   maxStackHeightCm: googletype_Decimal | undefined;
+  // 0413 — table width, CENTIMETRES, band [50, 1000] (entity.Min/MaxCuttingTableWidthCm). Tri-state
+  // like the length: absent = leave alone, empty message = clear, number = set.
+  cuttingTableWidthCm: googletype_Decimal | undefined;
 };
 
 export type UpdateWorkshopSettingsResponse = {

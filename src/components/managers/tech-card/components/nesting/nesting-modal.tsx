@@ -887,10 +887,14 @@ export function NestingModal({
   };
   const wsTableCm = settingCm(workshopQuery.data?.settings?.cuttingTableLengthCm);
   const wsStackCm = settingCm(workshopQuery.data?.settings?.maxStackHeightCm);
+  // Ширина стола (0413): рисуется на пиктограмме в масштабе; не задана — вердикта по ширине нет.
+  const wsTableWidthCm = settingCm(workshopQuery.data?.settings?.cuttingTableWidthCm);
   // undefined = следовать цеху; null = очищено здесь; число = своё значение до «save for the workshop».
   const [tableEdit, setTableEdit] = useState<number | null | undefined>(undefined);
   const [stackEdit, setStackEdit] = useState<number | null | undefined>(undefined);
+  const [tableWidthEdit, setTableWidthEdit] = useState<number | null | undefined>(undefined);
   const tableCm = tableEdit === undefined ? wsTableCm : tableEdit;
+  const tableWidthCm = tableWidthEdit === undefined ? wsTableWidthCm : tableWidthEdit;
   const stackLimitCm = stackEdit === undefined ? wsStackCm : stackEdit;
   const [endLossCm, setEndLossCm] = useState<number>(END_LOSS_DEFAULT_CM);
   // null = по умолчанию: укладывать в стол, когда длина стола задана.
@@ -903,6 +907,7 @@ export function NestingModal({
   const keepOnTable = tableMode && usableCm != null && (keepOnTableEdit ?? true);
   const workshopDirty =
     (tableEdit !== undefined && tableEdit !== wsTableCm) ||
+    (tableWidthEdit !== undefined && tableWidthEdit !== wsTableWidthCm) ||
     (stackEdit !== undefined && stackEdit !== wsStackCm);
   const [savingWorkshop, setSavingWorkshop] = useState(false);
   const saveForWorkshop = async () => {
@@ -916,9 +921,14 @@ export function NestingModal({
           tableEdit !== undefined && tableEdit !== wsTableCm ? asSetting(tableEdit) : undefined,
         maxStackHeightCm:
           stackEdit !== undefined && stackEdit !== wsStackCm ? asSetting(stackEdit) : undefined,
+        cuttingTableWidthCm:
+          tableWidthEdit !== undefined && tableWidthEdit !== wsTableWidthCm
+            ? asSetting(tableWidthEdit)
+            : undefined,
         defaultSeamAllowanceMm: undefined,
       });
       setTableEdit(undefined);
+      setTableWidthEdit(undefined);
       setStackEdit(undefined);
       showMessage('saved for the workshop', 'success');
     } catch (e) {
