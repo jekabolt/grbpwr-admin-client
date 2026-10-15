@@ -51,7 +51,7 @@ export function HeaderWarnings({
       <ul className='flex max-w-[320px] flex-col gap-1.5'>
         {[...unique.filter((w) => w.error), ...unique.filter((w) => !w.error)].map((w) => (
           <li key={w.text}>
-            <Text size='small' className={w.error ? 'text-error' : undefined}>
+            <Text className={w.error ? 'text-error' : undefined}>
               {w.text}
             </Text>
           </li>
