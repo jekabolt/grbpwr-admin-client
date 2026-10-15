@@ -539,6 +539,8 @@ export const OPROW = {
   laneTurnDeg: 35,
   /** …and two same-way turns adding up to this are a U-turn (the next path painted back). */
   uTurnDeg: 150,
+  /** A step back within this of the line the last step drew (mm) is along that line, not a turn. */
+  backStepLatMm: 0.3,
 };
 
 /** A mark's place in the run of marks drawn one after another that it belongs to. */
@@ -599,15 +601,20 @@ function opRows(
       rows.push(cur);
     cur = [];
   };
-  /** signed turn at b on the way a → b → c, degrees, ±180 for a reversal (0 when a step is
-   *  degenerate) — atan2 keeps the sign-less straight-back step a 180° turn (Codex) */
+  /** signed turn at b on the way a → b → c, degrees: ±180 for a reversal onto another lane (atan2
+   *  keeps it — Codex), 0 for a step back ALONG the same line (a compound motif's sub-mark painted
+   *  behind the last one — the old acos-sign form read an exactly collinear one 0 by accident;
+   *  splitting there cut such rows apart: Lanai 10 → 5 families) and when a step is degenerate */
   const turnAt = (a: PtMm, b: PtMm, c: PtMm) => {
     const u = { x: b.x - a.x, y: b.y - a.y };
     const v = { x: c.x - b.x, y: c.y - b.y };
     const lu = Math.hypot(u.x, u.y);
     const lv = Math.hypot(v.x, v.y);
     if (lu < 1e-6 || lv < 1e-6) return 0;
-    return (Math.atan2(u.x * v.y - u.y * v.x, u.x * v.x + u.y * v.y) * 180) / Math.PI;
+    const cross = u.x * v.y - u.y * v.x;
+    const dot = u.x * v.x + u.y * v.y;
+    if (dot < 0 && Math.abs(cross) / lu <= OPROW.backStepLatMm) return 0;
+    return (Math.atan2(cross, dot) * 180) / Math.PI;
   };
   let prevTurn = 0;
   for (const x of sorted) {
