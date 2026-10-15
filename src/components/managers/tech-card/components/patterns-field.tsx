@@ -1,4 +1,5 @@
 import { parseDecimalNumber } from 'utils/decimal';
+import { revealField } from 'utils/field-errors';
 import type { common_Material } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
@@ -23,6 +24,7 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
@@ -351,6 +353,7 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  const [, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
   const { showMessage } = useSnackBarStore();
@@ -1812,23 +1815,23 @@ export function PatternsField({
         }
       : undefined;
   };
-  // The size range is a sibling block of this one (index.tsx, PATTERNS tab), with no anchor id:
-  // found by its title among the blocks of the same stack.
+  // The size range lives on its own SIZES tab now (index.tsx). The door switches the card there —
+  // a sibling `hidden` panel, already mounted — and revealField pulses its `data-field` anchor.
   const sizeRangeDoor: HeaderWarningAction | undefined = headerEl
     ? {
         label: 'open size range',
         onClick: () => {
-          const stack = headerEl.closest('section')?.parentElement;
-          if (!stack) return;
-          const target =
-            Array.from(stack.children).find((el) =>
-              (el.textContent ?? '').trim().toLowerCase().startsWith('size range'),
-            ) ?? stack.firstElementChild;
-          if (!(target instanceof HTMLElement)) return;
-          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          target
-            .querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
-            ?.focus({ preventScroll: true });
+          setParams(
+            (prev) => {
+              const p = new URLSearchParams(prev);
+              p.set('tab', 'sizes');
+              p.delete('sample');
+              p.delete('fits');
+              return p;
+            },
+            { replace: true },
+          );
+          window.setTimeout(() => revealField('sizeIds'), 0);
         },
       }
     : undefined;

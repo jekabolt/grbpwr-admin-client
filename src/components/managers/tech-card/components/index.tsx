@@ -171,6 +171,7 @@ const TABS = [
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
   { id: 'construction', label: 'construction' },
+  { id: 'sizes', label: 'sizes' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
   { id: 'production', label: 'production' },
@@ -190,7 +191,7 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // остался порядком работы: сначала смотрят, потом морозят.
   { band: 'design', tabs: ['studio', 'artifacts'] },
   // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
-  // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
+  // The DXF sheets and the раскладки (the size range and chart moved to SIZES) are the first artefacts
   // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
   // leads the band because everything under it is downstream of a pattern: a sample is cut from
   // these sheets, and the marker on this tab is what the BOM's fabric consumption is measured from.
@@ -207,7 +208,10 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // unrelated stop. Samples follow both, which is also the order the work happens in: you cannot
   // cut a sample before there is a pattern and a fabric to cut it from.
   { band: 'develop', tabs: ['patterns', 'bom', 'samples', 'colorways', 'construction'] },
-  { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
+  // SIZES opens spec: the size range and the measurement chart are what the card PROMISES — the
+  // grade every sheet, marker, norm and run is filed against. They used to head PATTERNS; the
+  // pattern panels still read the range from the same form, they just no longer host its editor.
+  { band: 'spec', tabs: ['sizes', 'labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
   // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
   { band: 'produce', tabs: ['production'] },
@@ -270,7 +274,8 @@ const ERROR_TAB: Record<string, TabId> = {
   technicalMedia: 'artifacts',
   callouts: 'studio',
   patterns: 'patterns',
-  sizeIds: 'patterns',
+  // The size range moved to its own SIZES tab (spec band), with the measurement chart.
+  sizeIds: 'sizes',
   bomItems: 'bom',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
@@ -330,7 +335,7 @@ const ERROR_TAB: Record<string, TabId> = {
 // где его чинят.
 const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   style_number: 'studio',
-  size_range: 'patterns',
+  size_range: 'sizes',
   bom_fabric: 'bom',
   bom_linked: 'bom',
   costing: 'costing',
@@ -934,6 +939,9 @@ export function TechCardForm({
   const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
   const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
   const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
+  // The measurement chart lives outside react-hook-form (its own Get/UpdateStyleSizeChart), so the
+  // SIZES glyph hears about it from the grid itself: true once any cell of the range holds a value.
+  const [sizeChartFilled, setSizeChartFilled] = useState(false);
   // Watched for the patterns glyph only. Cheap in practice: a rename commits on blur/Enter and a
   // rebind on select, so this re-renders the form on an upload or a deliberate edit — not per
   // keystroke (the inline rename holds its draft in the panel's own state).
@@ -961,6 +969,8 @@ export function TechCardForm({
     // second implementation to keep in step (and would peg a card whose sheets are still on paper
     // below done for good). This is the cheap, strictly-less-wrong half: the range AND a sheet.
     patterns: len(sizeIdsW) > 0 && len(patternsW) > 0,
+    // A range alone is a list of names; the tab is done when the chart also measures at least one.
+    sizes: len(sizeIdsW) > 0 && sizeChartFilled,
     bom: len(bomItemsW) > 0,
     // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
     // Cut pieces are deliberately NOT part of any tab's test (they answer for `patterns` now): no
@@ -3586,8 +3596,9 @@ export function TechCardForm({
               />
             )}
 
-            {/* PATTERNS (size range + DXF выкройки по материалам) */}
-            <SectionStack hidden={activeTab !== 'patterns'}>
+            {/* SIZES (size range + size chart measurements). Moved off PATTERNS; a hidden panel like
+                every other SectionStack, so both fields stay mounted and registered on any tab. */}
+            <SectionStack hidden={activeTab !== 'sizes'}>
               <Section title='size range'>
                 {/* The colourways AS READ: their recipes grade per-size consumption, and that is
                     what makes removing a size destructive beyond this form. */}
@@ -3599,8 +3610,16 @@ export function TechCardForm({
                 <SizeIdsField colorways={techCard?.colorways} />
               </Section>
               <Section title='size chart measurements'>
-                <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+                <SizeChartField
+                  styleId={numId}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  onFilledChange={setSizeChartFilled}
+                />
               </Section>
+            </SectionStack>
+
+            {/* PATTERNS (DXF выкройки по материалам + markers); the size range is on SIZES */}
+            <SectionStack hidden={activeTab !== 'patterns'}>
               <Section
                 title='patterns'
                 action={<span ref={setPatternsHeaderEl} className='flex items-center gap-1.5' />}

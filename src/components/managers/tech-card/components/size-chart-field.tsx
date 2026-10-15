@@ -42,7 +42,16 @@ const cellKey = (sizeId: number, nameId: number) => `${sizeId}:${nameId}`;
 // A plain hand-filled grid: measurements (rows) × sizes (columns), every cell typed by hand. There
 // is no grade rule — the chart is saved with no base size and no grade steps (gradeBaseSizeId 0,
 // gradeSteps []); the per-size cells are the sole source of truth.
-export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
+export function SizeChartField({
+  styleId,
+  canEdit,
+  onFilledChange,
+}: {
+  styleId?: number;
+  canEdit: boolean;
+  /** Whether any cell of the current range holds a measurement — the SIZES tab's ✓ reads it. */
+  onFilledChange?: (filled: boolean) => void;
+}) {
   const { dictionary } = useDictionary();
   const { control } = useFormContext<TechCardFormData>();
 
@@ -121,6 +130,15 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   }, [loadChart]);
 
   const stored = (sizeId: number, nameId: number) => cells.get(sizeId)?.get(nameId) ?? '';
+
+  // Same rule as the save (`put`): an empty or zero cell is not a measurement. Only sizes still in
+  // the range count — a value parked under a removed size is not one the tab shows.
+  const filled = ordered.some((sizeId) =>
+    [...(cells.get(sizeId)?.values() ?? [])].some((v) => !!v && v !== '0'),
+  );
+  useEffect(() => {
+    onFilledChange?.(filled);
+  }, [filled, onFilledChange]);
 
   const setCell = (sizeId: number, nameId: number, value: string) => {
     setDirty(true);

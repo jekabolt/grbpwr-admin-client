@@ -250,7 +250,9 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     ) : undefined;
 
   return (
-    <div className='space-y-2'>
+    // `data-field='sizeIds'`: the anchor revealField walks to — a failed save on the range and the
+    // PATTERNS «open size range» door both land here on the SIZES tab.
+    <div className='space-y-2' data-field='sizeIds'>
       {!primary ? (
         <Text size='micro' variant='label'>
           no sizes available for this category and target gender

@@ -65,7 +65,7 @@ export const REQ_TAB: Record<string, string> = {
   bom_linked: 'bom',
   colorway_linked: 'colorways',
   patterns: 'patterns',
-  size_range: 'patterns',
+  size_range: 'sizes',
   costing: 'costing',
 };
 
