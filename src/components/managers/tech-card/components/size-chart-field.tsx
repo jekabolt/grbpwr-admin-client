@@ -251,7 +251,12 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
         </thead>
         <tbody>
           {measurements.map((m) => (
-            <tr key={m.id}>
+            // Подсветка строки — на ЯЧЕЙКАХ, не на <tr>: первая ячейка липкая и красит себя сама,
+            // фон строки ушёл бы под неё. focus-within держит строку, пока в ней печатают.
+            <tr
+              key={m.id}
+              className='[&>td]:transition-colors hover:[&>td]:bg-trackBg focus-within:[&>td]:bg-trackBg'
+            >
               <td className='uppercase'>{m.name}</td>
               {ordered.map((sizeId) => (
                 <td key={sizeId} className='w-20'>
