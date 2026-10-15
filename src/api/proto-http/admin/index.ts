@@ -14299,6 +14299,13 @@ export type common_TechCardMarkerLayout = {
   // outlive the used_length it was derived from — and would be indistinguishable from a измеренное
   // one to every future reader.
   composition: common_TechCardMarkerCompositionEntry[] | undefined;
+  // НАСТИЛ the раскладка was planned for on the cutting table: plies, end loss, spread mode and the
+  // PHYSICAL table length. ABSENT = not recorded (every blob saved before this field, and every
+  // stale bundle). Replaces the old client hack that stuffed the usable table length into
+  // params.target_length_cm and wrote a «cutting table:» line into warnings — readers keep decoding
+  // that hack for blobs that predate this field. No schema_version bump: the field is additive and
+  // readers branch on its PRESENCE.
+  spread: common_TechCardMarkerSpread | undefined;
 };
 
 // TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
@@ -14383,6 +14390,24 @@ export type common_TechCardMarkerPlacement = {
   flipped: boolean | undefined;
 };
 
+// TechCardMarkerSpread is the cutting-table half of the conditions a раскладка was taken under.
+// Validated on save (SaveTechCardMarker refuses out-of-range values with InvalidArgument):
+// plies 1..1000, end_loss_cm 0..100, table_length_cm 0 (= not recorded) or 50..5000, mode a known
+// value.
+export type common_TechCardMarkerSpread = {
+  plies: number | undefined;
+  endLossCm: number | undefined;
+  mode: common_TechCardMarkerSpreadMode | undefined;
+  // The PHYSICAL length of the cutting table, cm; 0 = not recorded. Its own field — NOT
+  // params.target_length_cm, which is the engine's target and stays what the search was asked for.
+  tableLengthCm: number | undefined;
+};
+
+// TechCardMarkerSpreadMode is how the plies of the настил face each other.
+export type common_TechCardMarkerSpreadMode =
+  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
 export type SaveTechCardMarkerResponse = {
   id: number | undefined;
 };
@@ -19971,7 +19996,10 @@ export interface AdminService {
   // steps in the order it proposes. Text only: no picture is sent. The model returns: a suggested
   // order of the steps (each with a reason), a pick per decision (each with a reason) and
   // plausibility warnings (a sleeve set before the shoulders are joined, a lining bagged
-  // before its facings, a piece in no step…). The server validates the answer against the request:
+  // before its facings, a piece in no step…) and, in the same call, the structure it reads off the
+  // pieces: a garment category out of the offered category_options and the subassemblies (units)
+  // as nested or disjoint sets of piece keys, in the house style of the examples (the request's, or
+  // up to 3 assembly trees of other cards the server picks). The server validates the answer against the request:
   // unknown step, decision and piece ids are dropped, a pick outside a decision's readings is
   // dropped, and an order that is not a complete permutation of the ordered steps or that sews a
   // unit before the step that makes it is returned EMPTY with a note. Nothing is stored and nothing
@@ -19982,7 +20010,9 @@ export interface AdminService {
   // call carries the same figures as an ErrorInfo detail (reason AI_SPEND, metadata calls,
   // unknown_calls, cost_usd).
   // InvalidArgument: 0 or more than 80 pieces, 0 or more than 240 steps, more than 400 seams or 60
-  // decisions, a duplicate or unknown id, a field above its bound.
+  // decisions, more than 24 category_options or an empty or repeated one, more than 4 examples, 60
+  // units per example or 16 parts per unit, an empty label, name or part, a duplicate or unknown
+  // id, a field above its bound.
   SuggestAssemblySkeleton(request: SuggestAssemblySkeletonRequest): Promise<SuggestAssemblySkeletonResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody

@@ -1814,6 +1814,11 @@ export type TechCardMarkerPieceSetStatus =
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
+// TechCardMarkerSpreadMode is how the plies of the настил face each other.
+export type TechCardMarkerSpreadMode =
+  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type TechCardMediaItem = {
   mediaId: number | undefined;
@@ -4515,6 +4520,13 @@ export type TechCardMarkerLayout = {
   // outlive the used_length it was derived from — and would be indistinguishable from a измеренное
   // one to every future reader.
   composition: TechCardMarkerCompositionEntry[] | undefined;
+  // НАСТИЛ the раскладка was planned for on the cutting table: plies, end loss, spread mode and the
+  // PHYSICAL table length. ABSENT = not recorded (every blob saved before this field, and every
+  // stale bundle). Replaces the old client hack that stuffed the usable table length into
+  // params.target_length_cm and wrote a «cutting table:» line into warnings — readers keep decoding
+  // that hack for blobs that predate this field. No schema_version bump: the field is additive and
+  // readers branch on its PRESENCE.
+  spread: TechCardMarkerSpread | undefined;
 };
 
 // TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
@@ -4597,6 +4609,19 @@ export type TechCardMarkerPlacement = {
   // editor must compose this exact expression, and the order matters as much as the axis:
   // M · R(θ) = R(−θ) · M, so mirroring after rotating differs by 2θ, not by a sign.
   flipped: boolean | undefined;
+};
+
+// TechCardMarkerSpread is the cutting-table half of the conditions a раскладка was taken under.
+// Validated on save (SaveTechCardMarker refuses out-of-range values with InvalidArgument):
+// plies 1..1000, end_loss_cm 0..100, table_length_cm 0 (= not recorded) or 50..5000, mode a known
+// value.
+export type TechCardMarkerSpread = {
+  plies: number | undefined;
+  endLossCm: number | undefined;
+  mode: TechCardMarkerSpreadMode | undefined;
+  // The PHYSICAL length of the cutting table, cm; 0 = not recorded. Its own field — NOT
+  // params.target_length_cm, which is the engine's target and stays what the search was asked for.
+  tableLengthCm: number | undefined;
 };
 
 // TechCardMarkerInsert is the writable payload of SaveTechCardMarker. Geometry is SELF-CONTAINED

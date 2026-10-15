@@ -64,6 +64,7 @@ export function marker(args: {
       schemaVersion: 4,
       params: undefined,
       composition: undefined,
+      spread: undefined,
       pieces: args.pieces.map((p, i) => ({
         pieceId: i + 1,
         name: p.blockName,

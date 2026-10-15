@@ -63,6 +63,8 @@ import {
   isDraftMarker,
   refusalWord,
   scalarNormRefusal,
+  spreadToWire,
+  storedSpreadOf,
   type MarkerBomLine,
   type MarkerCompositionEntry,
 } from './marker-io';
@@ -134,10 +136,11 @@ const isHiddenNote = (w: string): boolean =>
 // выносит сама, по полям раскладки (см. storedNoAllowance), а не по тексту, который раньше писался
 // «SEAM LINE was nested» на ЛЮБОМ нуле, в том числе на линии кроя.
 const SEAM_NOTE_PREFIX = 'seam allowance:';
-// ЗАПИСЬ О СТОЛЕ В БЛОБЕ — она же признак «params.targetLengthCm = конец стола». До ae74b7da поле
-// писалось из ручной «целевой длины» (нейтральная пунктирная цель, не граница), и такие блобы живы.
-// layout.params типизирован (сервер чужие поля отклоняет), поэтому признак едет протоколом в
-// warnings, как припуск: есть запись — targetLengthCm читается концом стола; нет — старой целью.
+// ЗАПИСЬ О СТОЛЕ В БЛОБЕ — ЛЕГАСИ, только на ЧТЕНИЕ. Новые маркеры несут настил своим полем
+// layout.spread (слои, запас, режим, физическая длина стола), а targetLengthCm — снова честная цель
+// прогона. Маркеры, снятые до этого поля, хранили полезную U в params.targetLengthCm и признак этого
+// протоколом в warnings: есть запись — targetLengthCm читается концом стола; нет — старой целью (до
+// ae74b7da поле писалось из ручной «целевой длины»). Оба чтения живы, пока живы такие блобы.
 const TABLE_NOTE_PREFIX = 'cutting table:';
 const NO_ALLOWANCE_TEXT = 'nested without seam allowance · consumption too low';
 
@@ -233,6 +236,9 @@ type RunSnap = {
   usableCm: number | null;
   tableCm: number | null;
   endLossCm: number;
+  // Прогон шёл в режиме стола (настил слоями): только такой маркер записывает layout.spread.
+  // Одиночный настил стола не знает — настил не пишется вовсе.
+  layTable: boolean;
 };
 
 // Заголовок без авто-хвоста: сохранённое имя вида «XS×9 · main fabric main fabric · 140 cm» — это
@@ -1692,6 +1698,7 @@ export function NestingModal({
       usableCm: runUsableCm,
       tableCm,
       endLossCm,
+      layTable: runUsableCm != null || layMode === 'table',
     });
     start(parse.parseId, config);
   };
@@ -2101,24 +2108,13 @@ export function NestingModal({
                 ? `seam allowance: 0 — the contour is the CUT line (layer ${contourLayer || '—'}), its allowance is already in it`
                 : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
             ...(manualNote ? [manualNote] : []),
-            ...(snap.usableCm != null
-              ? [
-                  `${TABLE_NOTE_PREFIX} usable ${snap.usableCm} cm${
-                    snap.tableCm != null
-                      ? ` (table ${snap.tableCm} cm − 2 × ${snap.endLossCm} cm end loss)`
-                      : ''
-                  }`,
-                ]
-              : []),
           ],
         },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: {
-          // Длина стола (полезная U) — единственный параметр настила, который блоб умеет нести:
-          // layout.params типизирован, сервер незнакомые поля отклоняет. Слои/режим/запас не пишутся.
-          // Из СНИМКА прогона, а не из поля: стол могли поправить после прогона. Читается концом
-          // стола только вместе с записью TABLE_NOTE_PREFIX в warnings (см. константу).
-          targetLengthCm: snap.usableCm ?? undefined,
+          // ЦЕЛЬ ПРОГОНА как она была — не стол. Стол едет своим полем layout.spread (ниже); до
+          // него сюда писалась полезная U с записью TABLE_NOTE_PREFIX, и такие блобы читаются.
+          targetLengthCm: snap.config.targetLengthCm,
           // The eps the run ACTUALLY used, not the one it asked for. The engine raises it when
           // the job is too big to precompute at the requested fidelity (Ф0), and storing the
           // request would make params.rdpEpsCm a lie — read by exactly the person trying to
@@ -2134,6 +2130,17 @@ export function NestingModal({
         // прежним — иначе каждый пересохранённый старый маркер «дрожал» бы без единого отличия.
         composition: snap.composition,
         sizeIdByPieceId,
+        // НАСТИЛ. Стол и запас — из СНИМКА прогона: результат и вердикт «за столом» считались под
+        // них (правка после прогона помечает его устаревшим). Слои и режим — из полей на момент
+        // сохранения: на укладку они не влияют, и сохраняется то, что оператор видит в строке цифр.
+        spread: snap.layTable
+          ? spreadToWire({
+              plies,
+              endLossCm: snap.endLossCm,
+              mode: spreadMode,
+              tableCm: snap.tableCm,
+            })
+          : undefined,
       });
       await adminService.SaveTechCardMarker({
         id: 0,
@@ -2346,6 +2353,8 @@ export function NestingModal({
               flipped: pl.flipped === true,
             })),
             warnings: [...keptWarnings, ...(manualNote ? [manualNote] : [])],
+            // Настил эхом, как params: правка размещения не должна стирать, под какой стол снято.
+            spread: view.layout?.spread,
           },
         },
       });
@@ -2427,12 +2436,23 @@ export function NestingModal({
   // У сохранённого — только если блоб несёт запись о столе: без неё targetLengthCm — старая ручная
   // цель (до ae74b7da), она рисуется нейтральной пунктирной целью и вердиктом «за столом» не служит.
   // У готового прогона — стол из его снимка (как ширина): результат считался под него.
+  // Новый маркер: настил своим полем (layout.spread), конец стола = стол − 2·запас.
+  const storedSpread = viewData ? storedSpreadOf(view?.layout) : null;
+  const storedUsableCm =
+    storedSpread?.tableCm != null && storedSpread.tableCm - 2 * storedSpread.endLossCm > 0
+      ? Math.round((storedSpread.tableCm - 2 * storedSpread.endLossCm) * 100) / 100
+      : null;
+  // Старый маркер (до layout.spread): U в targetLengthCm + запись TABLE_NOTE_PREFIX.
   const storedTableEnd =
-    !!viewData && (view?.layout?.warnings ?? []).some((w) => w.startsWith(TABLE_NOTE_PREFIX));
+    !!viewData &&
+    !storedSpread &&
+    (view?.layout?.warnings ?? []).some((w) => w.startsWith(TABLE_NOTE_PREFIX));
   const tableEndCm = viewData
-    ? storedTableEnd
-      ? viewData.targetCm ?? null
-      : null
+    ? storedSpread
+      ? storedUsableCm
+      : storedTableEnd
+        ? viewData.targetCm ?? null
+        : null
     : runView
       ? // Стол на холсте — у прогона со столом или в режиме стола; одиночный настил стола не знает.
         runView.config.maxLengthCm != null || tableMode
@@ -2442,14 +2462,15 @@ export function NestingModal({
         ? usableCm
         : null;
   const spread = spreadFigures({
-    // У сохранённого маркера слои не хранятся — всё, что от них зависит, прочерк.
-    plies: viewData ? NaN : plies,
+    // У сохранённого — слои из layout.spread; у старого маркера их нет — всё, что от них
+    // зависит, прочерк.
+    plies: viewData ? storedSpread?.plies ?? NaN : plies,
     thicknessMm,
     stackLimitCm,
     compositionTotal: viewData ? viewData.totalUnits || 1 : unitsTotal,
     markerLengthCm: effective?.usedLengthCm ?? null,
-    endLossCm,
-    mode: spreadMode,
+    endLossCm: viewData && storedSpread ? storedSpread.endLossCm : endLossCm,
+    mode: viewData && storedSpread ? storedSpread.mode : spreadMode,
   });
   const overTableCm =
     effective && tableEndCm != null && !running ? effective.usedLengthCm - tableEndCm : 0;
@@ -3394,6 +3415,47 @@ export function NestingModal({
           </div>
         )}
 
+        {/* РЯД СТОЛА СОХРАНЁННОГО МАРКЕРА: настил, под который он снят (layout.spread), — только
+            чтение, той же коробкой, что и в прогоне. */}
+        {viewData && storedSpread && (
+          <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
+            {(
+              [
+                [
+                  'table cm',
+                  storedSpread.tableCm == null ? '—' : storedSpread.tableCm,
+                  'cutting table length',
+                ],
+                ['end loss cm', storedSpread.endLossCm, 'spread end loss on each end of the table'],
+                ['plies', storedSpread.plies, 'plies in the spread'],
+                ['face', storedSpread.mode === 'face_up' ? 'up' : 'to face', 'spread mode'],
+                [
+                  'thickness mm',
+                  thicknessMm == null ? '—' : thicknessMm,
+                  'fabric thickness, from the article',
+                ],
+              ] as const
+            ).map(([label, value, title]) => (
+              <div
+                key={label}
+                className={`${FIELD} space-y-0.5`}
+                title={`${title} · saved with the marker`}
+              >
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                  {label}
+                </Text>
+                <div
+                  className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor ${
+                    label === 'face' ? 'justify-center uppercase' : ''
+                  }`}
+                >
+                  {value}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* РЯД СТОЛА: только в режиме «table» — настил слоями на раскроечном столе. */}
         {!viewData && tableMode && (
           <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
@@ -3543,7 +3605,7 @@ export function NestingModal({
         )}
 
         {/* Цифры настила: одна строка, единицы серым, цифры моноширинные. */}
-        {(viewData ? tableEndCm != null : tableMode) && (
+        {(viewData ? tableEndCm != null || storedSpread != null : tableMode) && (
           <p className='mb-2.5 text-textBaseSize tabular-nums'>
             {fitting && (
               <span className='text-labelColor'>
@@ -3553,7 +3615,7 @@ export function NestingModal({
             <span className='text-labelColor'>on table </span>
             {figure(tableEndCm, 1)}
             <span className='text-labelColor'> cm · plies </span>
-            {viewData ? '—' : plies}
+            {viewData ? storedSpread?.plies ?? '—' : plies}
             <span className='text-labelColor'> · stack </span>
             {figure(spread.stackCm, 1)}
             <span className='text-labelColor'> cm / max </span>
