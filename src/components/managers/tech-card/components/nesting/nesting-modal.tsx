@@ -19,7 +19,9 @@ import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
-import { parseDecimalNumber } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { ROUTES } from 'constants/routes';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import type {
   FabricDirection,
   NestConfig,
@@ -55,7 +57,6 @@ import {
 } from './marker-io';
 import { markerScopeLines, strictestDirection } from '../bom-purpose';
 import {
-  MAX_SEAM_ALLOWANCE_MM,
   blocksMissingOnLayer,
   clampSeamAllowanceMm,
   defaultContourLayer,
@@ -99,6 +100,24 @@ import { useNesting, type NestingFile } from './use-nesting';
 
 // Units are asked by a dialog at upload: the parse's note about them is not repeated here.
 const UNITS_NOT_SET = /units are not set in the file/;
+// Перенос надсечек с базового размера — служебная заметка разбора, не дело оператора раскладки.
+const NOTCH_CARRY = /notches .*(carried|carry)/i;
+// ЗАМЕТКИ, КОТОРЫЕ ЭТА МОДАЛКА НЕ ПОКАЗЫВАЕТ НИГДЕ — ни из свежего разбора, ни из блоба сохранённой
+// раскладки (туда разбор пишет их вместе с остальными). Фильтр стоит в одном месте — на сборке шапки.
+const isHiddenNote = (w: string): boolean => UNITS_NOT_SET.test(w) || NOTCH_CARRY.test(w);
+// Записи о припуске в блобе — протокол съёмки, а не предупреждение: вердикт о недоборе модалка
+// выносит сама, по полям раскладки (см. storedNoAllowance), а не по тексту, который раньше писался
+// «SEAM LINE was nested» на ЛЮБОМ нуле, в том числе на линии кроя.
+const SEAM_NOTE_PREFIX = 'seam allowance:';
+const NO_ALLOWANCE_TEXT = 'nested without seam allowance · consumption too low';
+
+const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&material=${materialId}`;
+
+// ОДНА КОРОБКА НА ВЕСЬ РЯД ТУЛБАРА: поле ввода, селект, переключатель и дверь деталей — одной
+// ширины (FIELD), одной высоты и одной рамки (владелец: ряд полей ввода = один размер плиток).
+const BOX =
+  'flex h-6 w-full min-w-0 items-center rounded-none border border-borderColor bg-bgColor px-[7px] text-textBaseSize tabular-nums transition-colors hover:border-textColor focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+const BOX_LABEL = 'block h-[14px] truncate uppercase leading-[14px]';
 
 // Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.
 //
@@ -157,6 +176,71 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
 function numOr(v: string, fallback: number): number {
   const n = Number(v.replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
+}
+
+// ЧИСЛОВОЕ ПОЛЕ ТУЛБАРА. Пока поле в фокусе, в нём живёт СТРОКА: стёртый ноль остаётся пустым, а
+// не прыгает обратно в «0» (иначе ввод «1» давал «01»). Число уходит наружу на каждом валидном
+// вводе (или только на blur — `commitOnBlur`), пустое поле становится `emptyAs` на blur (без него
+// — откат к прежнему значению). Фокус выделяет всё: набор заменяет число, а не дописывается к нему.
+// type=text + inputMode — без нативных стрелок, которые ломали ряд одинаковых коробок.
+function NumBox({
+  name,
+  value,
+  onCommit,
+  decimal = false,
+  emptyAs,
+  commitOnBlur = false,
+  disabled,
+}: {
+  name: string;
+  value: number;
+  onCommit: (n: number) => void;
+  decimal?: boolean;
+  emptyAs?: number;
+  commitOnBlur?: boolean;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const parse = (raw: string): number | null => {
+    const t = raw.trim().replace(',', '.');
+    if (t === '' || t === '.' || !(decimal ? /^\d*\.?\d*$/ : /^\d+$/).test(t)) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+  return (
+    <input
+      id={name}
+      name={name}
+      type='text'
+      inputMode={decimal ? 'decimal' : 'numeric'}
+      autoComplete='off'
+      className={BOX}
+      value={draft ?? String(value)}
+      disabled={disabled}
+      onFocus={(e) => {
+        setDraft(String(value));
+        const el = e.currentTarget;
+        requestAnimationFrame(() => el.select());
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        if (commitOnBlur) return;
+        const n = parse(raw);
+        if (n != null) onCommit(n);
+      }}
+      onBlur={() => {
+        const raw = draft ?? '';
+        setDraft(null);
+        const n = parse(raw);
+        if (n != null) {
+          if (commitOnBlur) onCommit(n);
+        } else if (raw.trim() === '' && emptyAs != null) {
+          onCommit(emptyAs);
+        }
+      }}
+    />
+  );
 }
 
 // ПЕРЕСОБРАННЫЙ ЧЕРТЁЖ ДЕТАЛИ (Ф3.5) — состояние, а не булево. Четыре ответа, и каждый решает
@@ -596,6 +680,33 @@ export function NestingModal({
   // не эталон, а признание: `NEST_DEFAULTS.seamAllowanceCm` перестал быть источником истины и
   // остался последним фолбэком, у которого в подписи так и сказано, что его никто не задавал.
   const [allowanceTouched, setAllowanceTouched] = useState(false);
+  // Дверь в артикул открыта в другой вкладке → на возврате перечитать материалы (см. ниже).
+  const articleOpenedRef = useRef(false);
+  const qcEarly = useQueryClient();
+  const qcRef = useRef(qcEarly);
+  qcRef.current = qcEarly;
+  // ПРИПУСК ЦЕХА — прямо из настроек, если вызывающий его не передал. Раньше ни одна точка входа
+  // его не передавала, и предзаполнение модалки шло мимо цеха, тогда как планировщик
+  // (batch-marker-plan) брал его всегда: две раскладки одной ткани мерили разные контуры.
+  const workshopQuery = useWorkshopSettings(workshopDefaultSeamAllowanceMm == null);
+  const workshopSeamMm = (() => {
+    if (workshopDefaultSeamAllowanceMm != null) return workshopDefaultSeamAllowanceMm;
+    const n = parseDecimalNumber(
+      decimalToInput(workshopQuery.data?.settings?.defaultSeamAllowanceMm),
+    );
+    return Number.isFinite(n) ? n : null;
+  })();
+  // Чем чинить «без припуска»: эталон карточки → цех → умолчание движка; первое НЕНУЛЕВОЕ.
+  const fixAllowanceMm = (() => {
+    for (const v of [
+      requiredSeamAllowanceMm,
+      workshopSeamMm,
+      engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
+    ]) {
+      if (v != null && Number.isFinite(v) && v > 0) return clampSeamAllowanceMm(v);
+    }
+    return 0;
+  })();
   const allowancePrefill = useMemo(() => {
     // Пока файл не разобран, подставлять нечего: замера ещё нет, а без него порядок §5.5 отвечал
     // бы эталоном на вопрос, на который сперва обязан ответить файл.
@@ -603,16 +714,10 @@ export function NestingModal({
     return seamAllowancePrefill({
       measured: contourMeasure,
       cardRequiredMm: requiredSeamAllowanceMm,
-      workshopDefaultMm: workshopDefaultSeamAllowanceMm,
+      workshopDefaultMm: workshopSeamMm,
       fallbackMm: engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
     });
-  }, [
-    viewData,
-    parse.phase,
-    contourMeasure,
-    requiredSeamAllowanceMm,
-    workshopDefaultSeamAllowanceMm,
-  ]);
+  }, [viewData, parse.phase, contourMeasure, requiredSeamAllowanceMm, workshopSeamMm]);
   useEffect(() => {
     // Введённое руками не перебивается НИКОГДА — ровно как ширина полотна рядом. Свой номер
     // оператор ставит осознанно, и подставить поверх него «правильный» значит спорить с
@@ -853,6 +958,52 @@ export function NestingModal({
   const worstViolation = violations.length
     ? violations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
     : null;
+  // «show» в шапке: худшая деталь ЗА КРАЕМ полотна (её и видно красной), иначе худший зазор.
+  const outsideViolations = violations.filter((v) => v.otherIndex == null);
+  const showViolation = outsideViolations.length
+    ? outsideViolations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
+    : worstViolation;
+  const outsideCount = new Set(outsideViolations.map((v) => v.index)).size;
+  const tooCloseCount = new Set(
+    violations.filter((v) => v.otherIndex != null).flatMap((v) => [v.index, v.otherIndex!]),
+  ).size;
+  const [focusReq, setFocusReq] = useState<{ index: number; nonce: number } | null>(null);
+
+  // НЕДОБОР ПРИПУСКА У СОХРАНЁННОЙ РАСКЛАДКИ — по полям раскладки, а не по тексту блоба: тот на
+  // любом нуле писал «SEAM LINE was nested», в том числе когда уложен был контур КРОЯ. Тревога
+  // только когда припуск записан нулём И ни одно из свидетельств не говорит «контур — линия кроя»:
+  // замер в записи (contour_allowance_mm > 0), новая заметка блоба или сегодняшний замер того же
+  // слоя по выкройкам этой ткани. Незаписанный припуск (легаси) — не ноль, тревоги нет.
+  const storedNoAllowance = useMemo(() => {
+    const sm = view?.summary;
+    if (!viewData || !sm) return false;
+    const seamMm = parseDecimalNumber(decimalToInput(sm.seamAllowanceMm));
+    if (!Number.isFinite(seamMm) || seamMm > 0) return false;
+    const contourMm = parseDecimalNumber(decimalToInput(sm.contourAllowanceMm));
+    if (Number.isFinite(contourMm) && contourMm > 0) return false;
+    const note = (view?.layout?.warnings ?? []).find((w) => w.startsWith(SEAM_NOTE_PREFIX)) ?? '';
+    if (/the contour is the CUT line/.test(note)) return false;
+    const layer = sm.contourLayer ?? '';
+    if (layer && allPieces.length > 0) {
+      const opt = layerOptions(allPieces, split.codeById, buildAllowanceIndex(allPieces)).find(
+        (o) => o.layer === layer,
+      );
+      if (contourCarriesCutLine(opt?.allowance)) return false;
+    }
+    return true;
+  }, [view, viewData, allPieces, split]);
+
+  // Вернулись из карточки артикула — перечитать материалы: ширина и толщина пина колорвея идут
+  // из каталога. Только если дверь в артикул открывали: фокус окна случается постоянно.
+  useEffect(() => {
+    const onFocus = () => {
+      if (!articleOpenedRef.current) return;
+      articleOpenedRef.current = false;
+      void qcRef.current.invalidateQueries({ queryKey: ['materials'] });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   const manualNote =
     manual && violations.length && worstViolation
       ? `${MANUAL_NOTE_PREFIX} ${violations.length} ${violations.length === 1 ? 'violation' : 'violations'} (worst — ${violationText(worstViolation)})`
@@ -1596,7 +1747,9 @@ export function NestingModal({
             ...effective.warnings,
             allowanceMm > 0
               ? `seam allowance: ${allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
-              : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
+              : contourIsCutLine
+                ? `seam allowance: 0 — the contour is the CUT line (layer ${contourLayer || '—'}), its allowance is already in it`
+                : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
             ...(manualNote ? [manualNote] : []),
           ],
         },
@@ -1860,6 +2013,26 @@ export function NestingModal({
   const selSeeded = parse.phase === 'ready' && pieces.some((p) => sel[p.id] != null);
   const unfitCount = pieces.filter((p) => !fitsWidth.get(p.id)).length;
   const sizeUnknown = selSeeded && !graded && !sizeId;
+  // ДВЕРЬ В АРТИКУЛ. Направление, кромка и ширина — поля АРТИКУЛА (карточка материала), и чинятся
+  // они там; ссылка открывает его карточку в НОВОЙ вкладке, чтобы раскладка с ручными правками
+  // осталась жить. Артикул ширины — пин колорвея, если он дал ширину, иначе артикул слота.
+  const activeSlot = lockedSlot ?? slot;
+  const widthArticleId = (() => {
+    const pin = activeSlot ? chosenColorway?.widthByLine.get(activeSlot.lineKey) : undefined;
+    if (pin && Number.isFinite(pin.cutCm)) return pin.materialId;
+    return activeSlot?.materialId;
+  })();
+  const openArticle = (materialId: number | undefined): HeaderWarningAction | undefined =>
+    materialId && materialId > 0
+      ? {
+          label: 'set on the article',
+          onClick: () => {
+            articleOpenedRef.current = true;
+            window.open(articleUrl(materialId), '_blank', 'noopener');
+          },
+        }
+      : undefined;
+  const directionUnset = effectiveDirection === 'unknown';
   const railS1: RailSectionStatus = {
     blockers: [
       noSlotChosen ? 'pick a fabric' : '',
@@ -1884,7 +2057,7 @@ export function NestingModal({
   const railS2: RailSectionStatus = {
     blockers: [directionRefusal ?? '', doubleAllowanceRefusal ?? ''].filter(Boolean),
     warnings: [
-      allowanceMm === 0 && !contourIsCutLine ? 'allowance 0: consumption understated' : '',
+      allowanceMm === 0 && !contourIsCutLine ? NO_ALLOWANCE_TEXT : '',
       allowanceUnconfirmed ? 'allowance not confirmed by the file' : '',
       seam.hulled.length > 0 ? `defective contour on ${seam.hulled.length} pieces` : '',
       !viewData && effectiveDirection === 'unknown' ? 'fabric direction not set' : '',
@@ -1949,7 +2122,7 @@ export function NestingModal({
     ...(parse.phase === 'error' ? [{ text: parse.message, error: true }] : []),
     ...(parse.phase === 'ready'
       ? parse.warnings
-          .filter((w) => !UNITS_NOT_SET.test(w))
+          .filter((w) => !isHiddenNote(w))
           .map((w) =>
             isFetchFailure(w)
               ? {
@@ -1985,18 +2158,45 @@ export function NestingModal({
                 action:
                   text === doubleAllowanceRefusal
                     ? { label: 'set allowance to 0', onClick: setAllowanceZero }
-                    : showFix(i + 1, text),
+                    : text === directionRefusal && directionUnset
+                      ? openArticle(activeSlot?.materialId)
+                      : showFix(i + 1, text),
               }),
             ),
           ),
           ...railS1.warnings,
-          ...railS2.warnings,
+          ...railS2.warnings.map((text): HeaderWarning => {
+            if (text === NO_ALLOWANCE_TEXT && fixAllowanceMm > 0) {
+              return {
+                text,
+                action: {
+                  label: `set allowance to ${fixAllowanceMm} mm`,
+                  onClick: () =>
+                    guardManual(() => {
+                      setAllowanceTouched(true);
+                      setAllowanceMm(fixAllowanceMm);
+                    }),
+                },
+              };
+            }
+            if (text === 'fabric direction not set') {
+              return { text, action: openArticle(activeSlot?.materialId) };
+            }
+            return text;
+          }),
           ...railS3.warnings,
         ]),
     !viewData && !running && saveRefusals.length > 0 && !onlyTerminal
       ? saveRefusals
           .filter((r) => r !== TERMINAL_SAVE_REASON)
-          .map((text) => ({ text, error: true }))
+          .map((text) => ({
+            text,
+            error: true,
+            action:
+              text === directionRefusal && directionUnset
+                ? openArticle(activeSlot?.materialId)
+                : undefined,
+          }))
       : [],
     forecast?.outlook === 'starved' && !running ? 'geometry too heavy for the time budget' : '',
     unplaced.length > 0
@@ -2009,7 +2209,33 @@ export function NestingModal({
       ? 'stopped before the first result'
       : '',
     violations.length > 0 && !running
-      ? `violations: ${violations.length}${worstViolation ? ` · worst: ${violationText(worstViolation)}` : ''}`
+      ? {
+          text: [
+            outsideCount > 0
+              ? `${outsideCount} ${outsideCount === 1 ? 'piece' : 'pieces'} outside the cloth`
+              : '',
+            tooCloseCount > 0 ? `${tooCloseCount} pieces closer than the gap` : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          error: true,
+          action: showViolation
+            ? {
+                label: 'show',
+                onClick: () => setFocusReq({ index: showViolation.index, nonce: Date.now() }),
+              }
+            : undefined,
+        }
+      : '',
+    // Ручные правки откатываются из шапки: красные детали почти всегда — результат перетаскивания.
+    violations.length > 0 && !running && manual
+      ? {
+          text: 'pieces moved by hand',
+          action: { label: 'reset edits', onClick: () => setManual(null) },
+        }
+      : '',
+    viewData && storedNoAllowance
+      ? `${NO_ALLOWANCE_TEXT} — re-run the marker from the patterns with an allowance`
       : '',
     greedyOnly ? 'no search ran: greedy placement' : '',
     ...(displayResult ? displayResult.warnings : []),
@@ -2021,7 +2247,16 @@ export function NestingModal({
     overCap ||
     !!doubleAllowanceRefusal ||
     !!uniRefusal;
-  const topWarnings = topWarningsRaw.flat().filter((w): w is HeaderWarning => w !== '');
+  // ЕДИНСТВЕННОЕ МЕСТО, где собирается шапка: служебные заметки разбора, протокол припуска и
+  // прежняя заметка о ручной правке (её заменяет живая проверка выше) отсюда не выходят — ни из
+  // свежего разбора, ни из блоба сохранённой раскладки.
+  const topWarnings = topWarningsRaw
+    .flat()
+    .filter((w): w is HeaderWarning => w !== '')
+    .filter((w) => {
+      const t = typeof w === 'string' ? w : w.text;
+      return !isHiddenNote(t) && !t.startsWith(SEAM_NOTE_PREFIX) && !isManualNote(t);
+    });
   const titleFabric = (lockedSlot ?? slot)?.name?.trim();
 
   return (
@@ -2045,24 +2280,24 @@ export function NestingModal({
         {!viewData && (
           <>
             {cwOptions.length > 0 && (
-              <div className={`${FIELD} space-y-0.5`} title={chosenColorway?.label ?? 'shared'}>
-                <Text size='micro' variant='label' component='span' className='block uppercase'>
+              <label className={`${FIELD} space-y-0.5`} title={chosenColorway?.label ?? 'shared'}>
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                   colourway
                 </Text>
-                <div className='overflow-hidden'>
-                  <Selector
-                    label='colourway'
-                    compact
-                    fullWidth
-                    value={String(colorwayId)}
-                    options={[
-                      { value: '0', label: 'shared' },
-                      ...cwOptions.map((c) => ({ value: String(c.colorwayId), label: c.label })),
-                    ]}
-                    onChange={(v: string | number) => setColorwayId(Number(v) || 0)}
-                  />
-                </div>
-              </div>
+                <select
+                  name='nest-colourway'
+                  className={`${BOX} cursor-pointer truncate`}
+                  value={String(colorwayId)}
+                  onChange={(e) => setColorwayId(Number(e.target.value) || 0)}
+                >
+                  <option value='0'>shared</option>
+                  {cwOptions.map((c) => (
+                    <option key={c.colorwayId} value={String(c.colorwayId)}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
             {!lockedSlot && fabricLines.length > 0 && (
               <div
@@ -2079,23 +2314,23 @@ export function NestingModal({
                   size='micro'
                   variant={noSlotChosen ? undefined : 'label'}
                   component='span'
-                  className={noSlotChosen ? 'block uppercase text-error' : 'block uppercase'}
+                  className={noSlotChosen ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
                   fabric
                 </Text>
-                <div className='overflow-hidden'>
-                  <Selector
-                    label='fabric'
-                    compact
-                    fullWidth
-                    value={slotKey}
-                    options={[
-                      { value: '', label: 'not picked' },
-                      ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
-                    ]}
-                    onChange={(v: string | number) => setSlotKey(String(v))}
-                  />
-                </div>
+                <select
+                  name='nest-fabric-select'
+                  className={`${BOX} cursor-pointer truncate`}
+                  value={slotKey}
+                  onChange={(e) => setSlotKey(e.target.value)}
+                >
+                  <option value=''>not picked</option>
+                  {fabricLines.map((b) => (
+                    <option key={b.lineKey} value={b.lineKey}>
+                      {slotLabel(b)}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
@@ -2109,20 +2344,17 @@ export function NestingModal({
                       size='micro'
                       variant={bad ? undefined : 'label'}
                       component='span'
-                      className={
-                        bad ? 'block truncate uppercase text-error' : 'block truncate uppercase'
-                      }
+                      className={bad ? `${BOX_LABEL} text-error` : BOX_LABEL}
                     >
                       {r.label}
                     </Text>
-                    <Input
+                    <NumBox
                       name={`nest-comp-${r.key}`}
-                      type='number'
                       value={r.qty}
-                      min={0}
+                      emptyAs={0}
                       disabled={running}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
+                      onCommit={(n) => {
+                        const next = Math.max(0, Math.round(n));
                         if (next !== r.qty) {
                           guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
                         }
@@ -2137,20 +2369,17 @@ export function NestingModal({
                   size='micro'
                   variant={sizeUnknown ? undefined : 'label'}
                   component='span'
-                  className={
-                    sizeUnknown ? 'block truncate uppercase text-error' : 'block truncate uppercase'
-                  }
+                  className={sizeUnknown ? `${BOX_LABEL} text-error` : BOX_LABEL}
                 >
                   {sizeLabel || 'garments'}
                 </Text>
-                <Input
+                <NumBox
                   name='nest-units'
-                  type='number'
                   value={ungradedUnits}
-                  min={1}
+                  emptyAs={1}
                   disabled={running}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const next = Math.max(1, Math.round(numOr(e.target.value, ungradedUnits)));
+                  onCommit={(n) => {
+                    const next = Math.max(1, Math.round(n));
                     if (next !== ungradedUnits) {
                       guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
                     }
@@ -2160,23 +2389,24 @@ export function NestingModal({
             )}
 
             <label className={`${FIELD} space-y-0.5`} title={widthSource || undefined}>
-              <Text size='micro' variant='label' component='span' className='block uppercase'>
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 width cm
               </Text>
-              <Input
+              <NumBox
                 name='nest-width'
-                type='number'
-                value={widthRaw ?? String(widthCm)}
-                min={10}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
-                onBlur={() => {
-                  const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
-                  setWidthRaw(null);
+                decimal
+                value={widthCm}
+                // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
+                // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
+                commitOnBlur
+                onCommit={(n) => {
+                  const next = Math.max(10, n);
                   // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
                   // не должен молча выключать автоподстановку ширины по колорвею.
                   if (next !== widthCm) {
                     guardManual(() => {
                       setWidthTouched(true);
+                      setWidthRaw(null);
                       setWidthCm(next);
                     });
                   }
@@ -2185,34 +2415,32 @@ export function NestingModal({
               />
             </label>
             <label className={`${FIELD} space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className='block uppercase'>
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 gap cm
               </Text>
-              <Input
+              <NumBox
                 name='nest-gap'
-                type='number'
+                decimal
                 value={gapCm}
-                min={0}
-                step={0.1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const next = Math.max(0, numOr(e.target.value, gapCm));
+                emptyAs={0}
+                onCommit={(n) => {
+                  const next = Math.max(0, n);
                   if (next !== gapCm) guardManual(() => setGapCm(next));
                 }}
                 disabled={running}
               />
             </label>
             <label className={`${FIELD} space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className='block uppercase'>
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 margin cm
               </Text>
-              <Input
+              <NumBox
                 name='nest-margin'
-                type='number'
+                decimal
                 value={marginCm}
-                min={0}
-                step={0.5}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const next = Math.max(0, numOr(e.target.value, marginCm));
+                emptyAs={0}
+                onCommit={(n) => {
+                  const next = Math.max(0, n);
                   if (next !== marginCm) guardManual(() => setMarginCm(next));
                 }}
                 disabled={running}
@@ -2234,22 +2462,18 @@ export function NestingModal({
                 size='micro'
                 variant={doubleAllowanceRefusal ? undefined : 'label'}
                 component='span'
-                className={
-                  doubleAllowanceRefusal ? 'block uppercase text-error' : 'block uppercase'
-                }
+                className={doubleAllowanceRefusal ? `${BOX_LABEL} text-error` : BOX_LABEL}
               >
                 allowance mm
               </Text>
-              <Input
+              <NumBox
                 name='nest-allowance'
-                type='number'
+                decimal
                 value={allowanceMm}
-                min={0}
-                max={MAX_SEAM_ALLOWANCE_MM}
-                step={0.1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  // Потолок живёт в contour-layer.ts рядом с предзаполнением.
-                  const next = clampSeamAllowanceMm(numOr(e.target.value, allowanceMm));
+                emptyAs={0}
+                onCommit={(n) => {
+                  // Потолок (MAX_SEAM_ALLOWANCE_MM) живёт в contour-layer.ts рядом с предзаполнением.
+                  const next = clampSeamAllowanceMm(n);
                   if (next !== allowanceMm) {
                     // Флаг «ввели руками» — ВНУТРИ apply, как у ширины.
                     guardManual(() => {
@@ -2261,19 +2485,24 @@ export function NestingModal({
                 disabled={running}
               />
             </label>
-            <label className={`${FIELD} cursor-pointer space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className='block uppercase'>
+            <div className={`${FIELD} space-y-0.5`}>
+              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
                 rotate 90°
               </Text>
-              <span className='flex min-h-[22px] items-center'>
-                <CheckboxCommon
-                  name='nest-crossgrain'
-                  checked={crossGrain}
-                  onChange={(c: boolean) => guardManual(() => setCrossGrain(c))}
-                  disabled={running}
-                />
-              </span>
-            </label>
+              {/* Переключатель той же коробкой, что и поля: нажатое состояние — заливка чернилом. */}
+              <button
+                type='button'
+                name='nest-crossgrain'
+                aria-pressed={crossGrain}
+                disabled={running}
+                onClick={() => guardManual(() => setCrossGrain(!crossGrain))}
+                className={`${BOX} justify-center uppercase ${
+                  crossGrain ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
+                }`}
+              >
+                {crossGrain ? 'on' : 'off'}
+              </button>
+            </div>
 
             {/* Детали: дверь в поповер с чек-листом и тиражом. */}
             <div className={`${FIELD} space-y-0.5`}>
@@ -2281,9 +2510,7 @@ export function NestingModal({
                 size='micro'
                 variant={railS3.blockers.length > 0 ? undefined : 'label'}
                 component='span'
-                className={
-                  railS3.blockers.length > 0 ? 'block uppercase text-error' : 'block uppercase'
-                }
+                className={railS3.blockers.length > 0 ? `${BOX_LABEL} text-error` : BOX_LABEL}
               >
                 pieces
               </Text>
@@ -2293,14 +2520,13 @@ export function NestingModal({
                 className='w-[320px]'
                 contentProps={{ align: 'start' }}
                 triggerProps={{
-                  className:
-                    'flex min-h-[22px] w-full items-center justify-between border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize tabular-nums hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  className: `${BOX} justify-between focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
                   disabled: parse.phase !== 'ready' || pieces.length === 0,
                 }}
                 openElement={(isOpen) => (
                   <>
                     <span>
-                      {parse.phase === 'ready' ? `${checkedCount}/${pieces.length}` : '—'}
+                      {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}
                     </span>
                     <span aria-hidden className='text-labelColor'>
                       {isOpen ? '▴' : '▾'}
@@ -2439,6 +2665,7 @@ export function NestingModal({
               fabricDirection={effectiveDirection}
               editable={editingActive}
               violating={violatingIdx}
+              focus={focusReq}
               onChange={(next) => setManual(next)}
             />
           ) : (
@@ -2673,10 +2900,16 @@ export function NestingModal({
                         : { label: 'use article width', onClick: applyArticleWidth },
                   }
                 : '',
-              slot && slotSelvedge(slot) === 0 ? 'selvedge not set on the article' : '',
+              // Вторая дверь того же расхождения: неверна может быть и сама ширина артикула.
+              widthMismatch && !viewData && widthArticleId
+                ? { text: 'or the article width is wrong', action: openArticle(widthArticleId) }
+                : '',
+              slot && slotSelvedge(slot) === 0
+                ? { text: 'selvedge not set on the article', action: openArticle(widthArticleId) }
+                : '',
               ...(parse.phase === 'ready'
                 ? parse.warnings
-                    .filter((w) => !UNITS_NOT_SET.test(w))
+                    .filter((w) => !isHiddenNote(w))
                     .map((w) =>
                       isFetchFailure(w)
                         ? {

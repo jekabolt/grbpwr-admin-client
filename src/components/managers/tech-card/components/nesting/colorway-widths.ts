@@ -22,6 +22,8 @@ export type ColorwaySlotWidth = {
   // Толщина ОДНОГО слоя приколотого артикула, мм (Material.fabricThicknessMm) — для настила под
   // раскроечный стол. Отсутствует = не задана (не ноль).
   fabricThicknessMm?: number;
+  // Приколотый артикул — дверь «set on the article» (ширину и кромку чинят в его карточке).
+  materialId?: number;
 };
 
 export type MarkerColorway = {
@@ -107,6 +109,7 @@ export function markerColorways(
         selvedgeCm,
         articleName: mat?.name?.trim() || '',
         fabricThicknessMm: materialThicknessMm(mat),
+        materialId,
       });
     }
     out.push({ colorwayId: id, label: colorwayLabelOf(cw), widthByLine });

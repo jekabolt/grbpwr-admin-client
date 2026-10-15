@@ -44,6 +44,8 @@ export type MarkerBomLine = {
   // Толщина слоя артикула этой строки, мм (Material.fabricThicknessMm) — для настила под
   // раскроечный стол. Отсутствует = не задана (не ноль).
   fabricThicknessMm?: number;
+  // Артикул строки (каталог материалов) — дверь «set on the article» в шапке раскладки.
+  materialId?: number;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;

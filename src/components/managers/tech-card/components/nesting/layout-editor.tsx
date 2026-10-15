@@ -124,6 +124,7 @@ export function LayoutEditor({
   editable,
   violating,
   onChange,
+  focus,
 }: {
   pieces: readonly PieceDTO[];
   placements: readonly Placement[];
@@ -144,6 +145,9 @@ export function LayoutEditor({
   violating: ReadonlySet<number>;
   // Fired on drop / rotate with the full new placement array.
   onChange: (next: Placement[]) => void;
+  // «Показать» снаружи (шапка модалки): выбрать размещение и подвести к нему окно. `nonce`
+  // меняется на каждый щелчок, чтобы повторный щелчок по той же детали снова её показывал.
+  focus?: { index: number; nonce: number } | null;
 }) {
   const byId = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -295,6 +299,28 @@ export function LayoutEditor({
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
+
+  // Показ детали по запросу снаружи: выбор + окно по центру её габарита, масштаб — чтобы деталь
+  // занимала около трети холста (не крупнее предела зума).
+  useEffect(() => {
+    if (!focus) return;
+    const pl = placements[focus.index];
+    const piece = pl ? byId.get(pl.pieceId) : undefined;
+    if (!pl || !piece) return;
+    setSelected(focus.index);
+    const b = rotatedBounds(piece, pl.rot, pl.flipped);
+    const cx = pl.x + (b.minX + b.maxX) / 2;
+    const cy = pl.y + (b.minY + b.maxY) / 2;
+    const { size: sz, clampView: cv } = live.current;
+    const want = Math.min(
+      sz.w / (3 * Math.max(b.maxX - b.minX, 1)),
+      sz.h / (3 * Math.max(b.maxY - b.minY, 1)),
+    );
+    const s = cv({ s: want, x: 0, y: 0 }).s;
+    setUserView(cv({ s, x: cx - sz.w / (2 * s), y: cy - sz.h / (2 * s) }));
+    // Только на новый запрос: правка размещений не должна снова дёргать окно.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.nonce]);
 
   // Протяжка за пустое место полотна.
   const pan = useRef<{ px: number; py: number; v: View; moved: boolean } | null>(null);

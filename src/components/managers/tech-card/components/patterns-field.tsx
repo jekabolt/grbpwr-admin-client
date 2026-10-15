@@ -1,3 +1,4 @@
+import { parseDecimalNumber } from 'utils/decimal';
 import type { common_Material } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
@@ -364,6 +365,12 @@ export function PatternsField({
     fusingMode?: string;
   }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
+  // Эталон припуска карточки — в предзаполнение раскладки, тем же порядком, что у планировщика.
+  const cardSeamRaw = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
+  const cardSeamAllowanceMm = (() => {
+    const n = parseDecimalNumber(cardSeamRaw);
+    return Number.isFinite(n) ? n : null;
+  })();
   const cardName = (useWatch({ control, name: 'name' }) ?? '') as string;
 
   const sizeById = useSizeNames();
@@ -521,6 +528,7 @@ export function PatternsField({
           isSample: !!b.isSample,
           // Толщина слоя артикула строки — для настила под раскроечный стол.
           fabricThicknessMm: materialThicknessMm(materialById.get(Number(b.materialId ?? 0))),
+          materialId: Number(b.materialId ?? 0) || undefined,
           order: i,
         }))
         // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
@@ -2051,6 +2059,7 @@ export function PatternsField({
             season={season}
             styleNumber={styleNumber}
             pieceAliases={nesting.aliases}
+            requiredSeamAllowanceMm={cardSeamAllowanceMm}
             onClose={() => setNesting(null)}
           />
         </Suspense>
