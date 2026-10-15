@@ -7,7 +7,14 @@
 // upload makes the file speak the card's language everywhere downstream (viewer, nesting, areas).
 //
 // Pure (no React), so it can be checked under node.
-import { readDxfBlocks, rewriteDxfBlocks, type DxfBlockInfo } from 'lib/nesting/dxf/size-rename';
+import {
+  blockKey,
+  looseEntityCount,
+  readDxfBlocks,
+  rewriteDxfBlocks,
+  type DxfBlockInfo,
+} from 'lib/nesting/dxf/size-rename';
+import type { ConversionManifest } from 'lib/pattern-import/types';
 import { bareToken, deriveBlockSizes, uniOf } from './block-code';
 
 /** A card size as the dialog offers it: dictionary id, display label, block-name tokens. */
@@ -19,6 +26,8 @@ export type DxfSizeScan = {
   sizes: string[];
   /** Block name → its size tail as written. Blocks without one are absent. */
   sizeOfBlock: Map<string, string>;
+  /** Drawn entities outside blocks (a blockless sheet draws only here). */
+  loose: number;
 };
 
 const LETTER = /^(\d?x{0,4}[sl]|m)$/;
@@ -46,32 +55,35 @@ function gradeOrder(sizes: string[]): string[] {
 
 /**
  * Sizes the file grades. A tail counts when it looks like a size (a dictionary size, a letter
- * size, a number, or the `SIZE:` text of a block) AND varies across many stems (deriveBlockSizes),
- * so FP_L / FP_R stays two pieces.
+ * size, a number) AND varies across many stems (deriveBlockSizes), so FP_L / FP_R stays two
+ * pieces. A block whose `SIZE:` text names another size than its tail is not graded by that tail.
  */
 export function scanDxfSizes(text: string, dictHas: (token: string) => boolean): DxfSizeScan {
   const blocks = readDxfBlocks(text);
-  const texts = new Set(blocks.flatMap((b) => (b.sizeText ? [bareToken(b.sizeText)] : [])));
+  const loose = looseEntityCount(text);
+  const tailOf = (name: string) => bareToken(name.split('_').pop() ?? '');
+  const agrees = (b: DxfBlockInfo) => !b.sizeText || bareToken(b.sizeText) === tailOf(b.name);
+  const sized = blocks.filter(agrees);
+  const texts = new Set(sized.flatMap((b) => (b.sizeText ? [bareToken(b.sizeText)] : [])));
   const sizeLike = (t: string) => dictHas(t) || texts.has(t) || LETTER.test(t) || NUMBER.test(t);
   const sizeOfBlock = deriveBlockSizes(
-    blocks.map((b) => b.name),
+    sized.map((b) => b.name),
     sizeLike,
   );
   const byBare = new Map<string, string>();
   for (const raw of sizeOfBlock.values())
     if (!byBare.has(bareToken(raw))) byBare.set(bareToken(raw), raw);
-  // Part numbers (BP_1, BP_2, FP_1, FP_2) look graded by structure alone; without a SIZE text
-  // telling otherwise, a run 1…n is numbering, not grading.
+  // Part numbers (BP_1, BP_2, FP_1, FP_2) look graded by structure alone: a run 1…n is
+  // numbering, not grading — whatever text sits in the blocks.
   const bares = [...byBare.keys()];
   const numbering =
-    texts.size === 0 &&
     bares.every((b) => NUMBER.test(b)) &&
     bares
       .map(Number)
       .sort((a, b) => a - b)
       .every((n, i) => n === i + 1);
-  if (numbering) return { blocks, sizes: [], sizeOfBlock: new Map() };
-  return { blocks, sizes: gradeOrder([...byBare.values()]), sizeOfBlock };
+  if (numbering) return { blocks, sizes: [], sizeOfBlock: new Map(), loose };
+  return { blocks, sizes: gradeOrder([...byBare.values()]), sizeOfBlock, loose };
 }
 
 /** Every named block carries the UNI mark: the author declared one contour for all sizes. */
@@ -80,7 +92,9 @@ const allUni = (scan: DxfSizeScan) =>
 
 /** Should the size dialog open for this file on this card? */
 export function needsSizeDialog(scan: DxfSizeScan, cards: CardSize[]): boolean {
-  if (cards.length === 0 || scan.blocks.length === 0 || allUni(scan)) return false;
+  if (cards.length === 0 || allUni(scan)) return false;
+  // Nothing drawn at all is a broken file, not an unsized one: the parser names that.
+  if (scan.blocks.length === 0 && scan.loose === 0) return false;
   if (scan.sizes.length === 0) return cards.length > 1;
   const known = new Set(cards.flatMap((c) => c.tokens));
   return scan.sizes.some((s) => !known.has(bareToken(s)));
@@ -124,38 +138,111 @@ export function sizeConflicts(picks: Record<string, SizePick>): Set<string> {
   return new Set([...by.values()].filter((l) => l.length > 1).flat());
 }
 
+/** A mapping turned into block edits. Keys of `rename` / `drop` are blockKey()s. */
+export type SizeMapPlan = {
+  rename: Map<string, string>;
+  drop: Set<string>;
+  /** Lower-cased old size → new size, for `SIZE:` texts. */
+  sizeText: Map<string, string>;
+  /** Bare old size → the card size it becomes (null = left out). */
+  to: Map<string, { id: number; token: string; label: string } | null>;
+  /** blockKey()s of blocks graded by a tail. */
+  sized: Set<string>;
+};
+
 /**
- * The file with its sizes renamed to the card's and left-out sizes removed. Throws when a renamed
- * block would take the name of a block that stays.
+ * Block edits for a mapping. Throws when two surviving blocks would end up with one name (DXF
+ * names compare case-insensitively).
  */
-export function applySizeMap(
-  text: string,
+export function planSizeMap(
   scan: DxfSizeScan,
   picks: Record<string, SizePick>,
   cards: CardSize[],
-): string {
+): SizeMapPlan {
   const pickOf = new Map(Object.entries(picks).map(([s, p]) => [bareToken(s), p]));
-  const tokenOf = new Map(cards.map((c) => [c.id, (c.tokens[0] ?? c.label).toUpperCase()]));
+  const cardOf = new Map(cards.map((c) => [c.id, c]));
+  const to: SizeMapPlan['to'] = new Map();
+  for (const [bare, p] of pickOf) {
+    const c = p.on ? cardOf.get(p.to) : undefined;
+    to.set(
+      bare,
+      c ? { id: c.id, token: (c.tokens[0] ?? c.label).toUpperCase(), label: c.label } : null,
+    );
+  }
   const rename = new Map<string, string>();
   const drop = new Set<string>();
   const sizeText = new Map<string, string>();
+  const sized = new Set<string>();
   for (const [block, tail] of scan.sizeOfBlock) {
-    const p = pickOf.get(bareToken(tail));
-    if (!p) continue;
-    const to = p.on ? tokenOf.get(p.to) : undefined;
-    if (!to) {
-      drop.add(block);
+    const k = blockKey(block);
+    sized.add(k);
+    const t = to.get(bareToken(tail));
+    if (t === undefined) continue;
+    if (t === null) {
+      drop.add(k);
       continue;
     }
-    sizeText.set(tail.toLowerCase(), to);
-    if (bareToken(to) === bareToken(tail)) continue;
-    rename.set(block, `${block.slice(0, block.length - tail.length)}${to}`);
+    sizeText.set(tail.toLowerCase(), t.token);
+    if (bareToken(t.token) === bareToken(tail)) continue;
+    rename.set(k, `${block.slice(0, block.length - tail.length)}${t.token}`);
   }
-  const staying = new Set(
-    scan.blocks.map((b) => b.name).filter((n) => !drop.has(n) && !rename.has(n)),
-  );
-  for (const to of rename.values()) {
-    if (staying.has(to)) throw new Error(`block ${to} already exists`);
+  const final = new Set<string>();
+  for (const b of scan.blocks) {
+    const k = blockKey(b.name);
+    if (drop.has(k)) continue;
+    const name = blockKey(rename.get(k) ?? b.name);
+    if (final.has(name)) throw new Error(`two blocks would be named ${name.toUpperCase()}`);
+    final.add(name);
   }
-  return rewriteDxfBlocks(text, { rename, drop, sizeText });
+  return { rename, drop, sizeText, to, sized };
+}
+
+/** The file with its sizes renamed to the card's and left-out sizes removed. */
+export function applySizeMap(text: string, plan: SizeMapPlan): string {
+  return rewriteDxfBlocks(text, plan);
+}
+
+/**
+ * The converter's manifest after the same edits, so the sheet's next parse still finds every
+ * block it declares: blocks renamed or dropped, their size token and id moved to the card's, the
+ * size list and the gate's block lists following.
+ */
+export function remapManifest(m: ConversionManifest, plan: SizeMapPlan): ConversionManifest {
+  const nameOf = (block: string) => plan.rename.get(blockKey(block)) ?? block;
+  const kept = (block: string) => !plan.drop.has(blockKey(block));
+  return {
+    ...m,
+    sizes: m.sizes.flatMap((s) => {
+      const t = plan.to.get(bareToken(s.token));
+      if (t === undefined) return [s];
+      return t ? [{ ...s, token: t.token, sizeId: t.id, name: t.label }] : [];
+    }),
+    blocks: m.blocks
+      .filter((b) => kept(b.block))
+      .map((b) => {
+        if (!plan.sized.has(blockKey(b.block))) return b;
+        const t = plan.to.get(bareToken(b.sizeToken));
+        return {
+          ...b,
+          block: nameOf(b.block),
+          ...(t ? { sizeToken: t.token, sizeId: t.id } : {}),
+        };
+      }),
+    gate: m.gate
+      ? {
+          ...m.gate,
+          checks: m.gate.checks.map((c) => ({
+            ...c,
+            blocks: c.blocks.filter(kept).map(nameOf),
+          })),
+          ...(m.gate.derived
+            ? {
+                derived: m.gate.derived
+                  .filter((d) => kept(d.block))
+                  .map((d) => ({ ...d, block: nameOf(d.block) })),
+              }
+            : {}),
+        }
+      : m.gate,
+  };
 }

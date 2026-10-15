@@ -12,9 +12,9 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import {
   INSUNITS_CODE,
+  asciiDxfProblem,
   bytesToLatin1,
   drawingExtents,
-  isBinaryDxf,
   latin1ToBytes,
   unitsMissing,
   writeInsunits,
@@ -73,6 +73,8 @@ import {
   applySizeMap,
   guessSizeMap,
   needsSizeDialog,
+  planSizeMap,
+  remapManifest,
   scanDxfSizes,
   type SizePick,
 } from './nesting/dxf-size-plan';
@@ -183,7 +185,7 @@ function fileWithUnits(text: string, unit: DxfLinearUnit, name: string, type = '
 /** ASCII DXF text when the file declares no usable units; null otherwise (binary, set, not DXF). */
 async function unitlessText(blob: Blob): Promise<string | null> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  if (isBinaryDxf(bytes)) return null;
+  if (asciiDxfProblem(bytes)) return null;
   const text = bytesToLatin1(bytes);
   return unitsMissing(text) ? text : null;
 }
@@ -858,8 +860,19 @@ export function PatternsField({
   };
 
   // Ask the units of the DXFs that declare none; resolves the files to upload (rewritten where
-  // asked) or null on cancel. Binary DXFs and files with units pass through untouched.
-  async function withUnits(files: File[]): Promise<File[] | null> {
+  // asked) or null on cancel. Files with units pass through untouched; binary and UTF-16 DXFs
+  // are refused here, before any rewrite reads them as latin1.
+  async function withUnits(picked: File[]): Promise<File[] | null> {
+    const problems = await Promise.all(
+      picked.map(async (f) =>
+        isDxfFile(f) ? asciiDxfProblem(new Uint8Array(await f.arrayBuffer())) : null,
+      ),
+    );
+    picked.forEach((f, i) => {
+      if (problems[i]) showMessage(`${f.name}: ${problems[i]}`, 'error');
+    });
+    const files = picked.filter((_, i) => !problems[i]);
+    if (files.length === 0) return null;
     const texts = await Promise.all(
       files.map((f) => (isDxfFile(f) ? unitlessText(f) : Promise.resolve(null))),
     );
@@ -894,7 +907,7 @@ export function PatternsField({
   // Resolves null on cancel.
   async function withSizes(file: File): Promise<{ file: File; sizeId?: number } | null> {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (isBinaryDxf(bytes)) return { file };
+    if (asciiDxfProblem(bytes)) return null; // withUnits already said why
     const text = bytesToLatin1(bytes);
     const scan = scanDxfSizes(text, (t) => dictTokens.has(t));
     const cards = orderSizes(sizeIds).map((id) => ({
@@ -927,7 +940,15 @@ export function PatternsField({
     if (!picks) return null;
     if (scan.sizes.length === 0) return { file, sizeId: picks[UNSIZED]?.to || undefined };
     try {
-      const out = applySizeMap(text, scan, picks, cards);
+      const plan = planSizeMap(scan, picks, cards);
+      let out = applySizeMap(text, plan);
+      // A converter sheet declares its blocks in an embedded manifest; it moves with the blocks,
+      // or the next parse refuses the sheet.
+      if (text.includes('GRBPWR-MANIFEST')) {
+        const mf = await import('lib/pattern-import/manifest');
+        const m = mf.readManifest(text);
+        if (m) out = mf.embedManifest(out, remapManifest(m, plan));
+      }
       return {
         file: new File([latin1ToBytes(out) as BlobPart], file.name, { type: file.type }),
       };

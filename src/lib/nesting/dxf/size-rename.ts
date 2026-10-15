@@ -49,6 +49,23 @@ function* groups(s: string): Generator<Group & { section: string }> {
 
 const nameOf = (g: Group) => g.pairs.find((p) => p.code === 2)?.value.trim() ?? '';
 
+/** DXF symbol names are case-insensitive: every lookup goes through this key. */
+export const blockKey = (name: string) => name.trim().toLowerCase();
+
+/** Drawn entities in ENTITIES other than INSERTs (a blockless R12 sheet draws here). */
+export function looseEntityCount(s: string): number {
+  let n = 0;
+  for (const g of groups(s)) {
+    if (
+      g.section === 'ENTITIES' &&
+      g.type &&
+      !['INSERT', 'SECTION', 'ENDSEC', 'ATTRIB', 'SEQEND'].includes(g.type)
+    )
+      n++;
+  }
+  return n;
+}
+
 /** Named blocks (not *Model_Space / *Paper_Space) in file order, with their `SIZE:` text. */
 export function readDxfBlocks(s: string): DxfBlockInfo[] {
   const out: DxfBlockInfo[] = [];
@@ -76,7 +93,7 @@ export function readDxfBlocks(s: string): DxfBlockInfo[] {
 }
 
 export type SizeRewrite = {
-  /** Block name → new block name. */
+  /** Block name → new block name. Keys compare case-insensitively. */
   rename: ReadonlyMap<string, string>;
   /** Blocks to remove, with their record and every INSERT of them. */
   drop: ReadonlySet<string>;
@@ -88,6 +105,8 @@ type Edit = { from: number; to: number; text: string };
 
 /** The file with blocks renamed and dropped as `plan` says. Nothing else changes. */
 export function rewriteDxfBlocks(s: string, plan: SizeRewrite): string {
+  const rename = new Map([...plan.rename].map(([k, v]) => [blockKey(k), v]));
+  const drop = new Set([...plan.drop].map(blockKey));
   const parts: string[] = [];
   let cursor = 0;
   let droppingBlock = false;
@@ -124,20 +143,20 @@ export function rewriteDxfBlocks(s: string, plan: SizeRewrite): string {
       (g.type === 'BLOCK_RECORD' && g.section === 'TABLES') ||
       g.type === 'INSERT';
     if (named) {
-      const name = nameOf(g);
-      if (plan.drop.has(name)) {
+      const name = blockKey(nameOf(g));
+      if (drop.has(name)) {
         skip(g);
         if (g.type === 'BLOCK') droppingBlock = true;
         if (g.type === 'INSERT' && g.pairs.some((p) => p.code === 66 && p.value.trim() === '1'))
           droppingAttribs = true;
         continue;
       }
-      const to = plan.rename.get(name);
+      const to = rename.get(name);
       const edits: Edit[] = [];
       if (to != null) {
         for (const p of g.pairs) {
           const nameCode = p.code === 2 || (g.type === 'BLOCK' && p.code === 3);
-          if (nameCode && p.value.trim() === name)
+          if (nameCode && blockKey(p.value) === name)
             edits.push({ from: p.valueStart, to: p.valueEnd, text: to });
         }
       }

@@ -251,3 +251,16 @@ export function sheetHint(e: Extents, unit: DxfLinearUnit): string {
   };
   return `sheet ${cm(e.maxX - e.minX)} × ${cm(e.maxY - e.minY)} cm`;
 }
+
+/**
+ * Why these bytes are not an ASCII DXF the rewrites (and the parser) can take, null when they are.
+ * Binary DXF and UTF-16 text both read as garbage through the latin1 view.
+ */
+export function asciiDxfProblem(bytes: Uint8Array): string | null {
+  if (isBinaryDxf(bytes)) return 'binary DXF — re-export as ASCII DXF';
+  const bom16 =
+    (bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff);
+  const head = bytes.subarray(0, Math.min(bytes.length, 512));
+  if (bom16 || head.includes(0)) return 'UTF-16 DXF — re-export as ASCII DXF';
+  return null;
+}
