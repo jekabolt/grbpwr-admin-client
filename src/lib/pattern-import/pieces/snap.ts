@@ -27,7 +27,13 @@ export type SnapResult = {
   gaps: { at: PtMm; lengthMm: number }[];
 };
 
-export type SnapOpts = { stepMm: number; reachMm: number; snapMm: number };
+export type SnapOpts = {
+  stepMm: number;
+  reachMm: number;
+  snapMm: number;
+  /** KINKS: walls never read back onto the wall around them (knives, end ticks). */
+  keep?: ReadonlySet<ChainId>;
+};
 
 type Hit = { item: number; seg: number; u: number; q: PtMm; s: number; d: number };
 
@@ -161,6 +167,8 @@ type Run = { kind: 'wall'; item: number; hits: Hit[] } | { kind: 'raw'; item: -1
 
 /** KINKS: the longest excursion onto another wall that is read back onto the wall around it. */
 export const EXCURSION_MM = 6;
+/** …whose samples all lie this close to the wall around it (a neighbouring size ~1 mm out). */
+export const EXCURSION_REACH_MM = 1.6;
 
 /** Probe switch (node only): the A/B column of a measurement. */
 function snapProbeOff(k: string): boolean {
@@ -214,9 +222,13 @@ export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): Sna
       const before = lab[(i + n - 1) % n];
       const after = lab[(j + 1) % n];
       if (len * o.stepMm > EXCURSION_MM || before !== after || before === -1) continue;
+      // only a drawn chain is read back (never a derived edge: a bridge, a band cut, a corner
+      // wall), and only a neighbour hugging the wall (≤ EXCURSION_REACH_MM): a branch or knife
+      // standing off it is its own edge (Codex)
+      if (idx.items[lab[i]].chain < 0 || o.keep?.has(idx.items[lab[i]].chain)) continue;
       const re: Hit[] = [];
       for (let k = i; k <= j; k++) {
-        const h = idx.nearest(samples[k % n], o.reachMm, before, Infinity);
+        const h = idx.nearest(samples[k % n], EXCURSION_REACH_MM, before, Infinity);
         if (!h || h.item !== before) break;
         re.push(h);
       }

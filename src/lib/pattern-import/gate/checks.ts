@@ -2053,7 +2053,7 @@ export function kinkRuns(
   excused: readonly PtMm[][],
   k = KINK,
 ): KinkRun[] {
-  if (line.length < 3 || !own.length) return [];
+  if (line.length < 3) return [];
   const idx = (ls: readonly PtMm[][]) =>
     new SegmentIndex(
       ls.map((pts) => ({ pts, closed: false })),
@@ -2066,7 +2066,17 @@ export function kinkRuns(
   if (!n) return [];
   const off = s.map((p) => onIdx.nearest(p, k.reachMm) > k.reachMm);
   const first = off.indexOf(false);
-  if (first < 0) return [];
+  // nowhere on a line it may lie on (Codex: no own line at all, or a line wholly another size's):
+  // the whole outline is one run off its own line
+  if (first < 0)
+    return [
+      {
+        at: s[n >> 1],
+        lengthMm: n * k.stepMm,
+        offMm: own.length ? Math.min(k.farMm, ownIdx.nearest(s[n >> 1], k.farMm)) : k.farMm,
+        turnDeg: 0,
+      },
+    ];
   // heading change over ±1.5 mm around sample i (degrees, 0…180)
   const w = Math.max(1, Math.round(1.5 / k.stepMm));
   const turnAt = (i: number) => {
@@ -2115,8 +2125,10 @@ export const isKink = (r: KinkRun, k = KINK) => r.lengthMm > k.runMm && r.offMm 
  * be so". A kinked outline that passed every other check is the silent wrong export D3 forbids.
  */
 function kinksOfBlock(ctx: GateCtx, b: BlockInfo, g: IdentityGeometry, line: PtMm[]): KinkRun[] {
+  // an empty strict set where `own` is not (every own-pen line is another size's class line): no
+  // line of its own to lie on — measured as such (one run off it), never skipped (Codex)
   const own = g.ownStrict ?? g.own;
-  if (!own.length) return [];
+  if (!g.own.length) return [];
   const derived = (ctx.expect.derivedByBlock?.[b.block] ?? []).map((d) => d.pts);
   const runs = kinkRuns(line, own, [...g.excused, ...derived]);
   if (typeof process !== 'undefined' && process.env?.PATIMPORT_KINK_DEBUG)

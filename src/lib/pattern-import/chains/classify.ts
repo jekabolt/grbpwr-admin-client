@@ -54,7 +54,7 @@ export function furniture(
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
-  for (const i of tileMarks(chains)) out[i] = out[i] ?? 'tile mark';
+  for (const i of tileMarks(chains, poses)) out[i] = out[i] ?? 'tile mark';
   const grid = backgroundGrid(chains);
   for (const i of grid) out[i] = out[i] ?? 'background grid';
   for (const i of testSquares(chains, poses, texts, out)) out[i] = out[i] ?? 'test square';
@@ -575,12 +575,15 @@ export const TILE_MARK = {
  * old patterns a 1" registration cross (two 25.4 mm arms, read as a common edge), Mood 2024 the
  * diagonals of the tiles' overlap square (17.9 / 28.6 mm, rescued as walls where both ends touch a
  * size line). Inside a piece such a mark cuts a corner off the outline or walks it onto the next
- * size's line. Two evidences: ≥ 12 straight chains of ONE length (0.2 mm) and direction (1°) on
- * the sheet, AND ≥ 9 of them on a lattice — each middle sharing its x with ≥ 2 other members' and
- * its y with ≥ 2 others' (the tile grid). Only the lattice members are marks. A garment's repeated
- * notch or buttonhole is shorter than 10 mm or stands in one column, never on a sheet-wide grid.
+ * size's line. Three evidences: ≥ 12 straight chains of ONE length (0.2 mm) and direction (1°) on
+ * the sheet; ≥ 9 of them on a lattice — each middle sharing its x with ≥ 2 other members' and its
+ * y with ≥ 2 others' (the tile grid); and each of those at one PAGE-RELATIVE spot (2 mm) that ≥ 3
+ * tile pages share (Codex: a garment's pleat or quilting lines may stand on a grid, never at one
+ * spot of every page). No tiles (< 3 page poses), no marks.
  */
-export function tileMarks(chains: readonly Chain[]): number[] {
+export function tileMarks(chains: readonly Chain[], poses: readonly PagePose[] = []): number[] {
+  if (poses.length < 3) return [];
+  const rects = poses.map(pageRect);
   const groups = new Map<string, { i: number; m: PtMm }[]>();
   chains.forEach((c, i) => {
     if (c.closed || c.pts.length < 2) return;
@@ -603,7 +606,26 @@ export function tileMarks(chains: readonly Chain[]): number[] {
       return n - 1;
     };
     const lattice = g.filter((_, k) => share((p) => p.x, k) >= 2 && share((p) => p.y, k) >= 2);
-    if (lattice.length >= TILE_MARK.minLattice) for (const o of lattice) out.push(o.i);
+    if (lattice.length < TILE_MARK.minLattice) continue;
+    // the page-relative spots of each member (every page whose rect holds its middle) → pages
+    const spotsOf = (m: PtMm) =>
+      rects.flatMap((r, p) =>
+        m.x >= r.minX && m.x <= r.maxX && m.y >= r.minY && m.y <= r.maxY
+          ? [{ p, k: `${Math.round((m.x - r.minX) / 2)},${Math.round((m.y - r.minY) / 2)}` }]
+          : [],
+      );
+    const pages = new Map<string, Set<number>>();
+    const spots = lattice.map((o) => spotsOf(o.m));
+    for (const ss of spots)
+      for (const { p, k } of ss) {
+        const set = pages.get(k) ?? new Set<number>();
+        set.add(p);
+        pages.set(k, set);
+      }
+    const onPages = lattice.filter((_, k) =>
+      spots[k].some(({ k: key }) => (pages.get(key)?.size ?? 0) >= 3),
+    );
+    if (onPages.length >= TILE_MARK.minLattice) for (const o of onPages) out.push(o.i);
   }
   return out;
 }
@@ -1278,7 +1300,7 @@ export function pageMarginIds(chains: Chain[], poses: PagePose[]): Set<number> {
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
   // KINKS: a tile corner's mark is never a rescued wall either
-  for (const i of tileMarks(chains)) out[i] = out[i] ?? 'tile mark';
+  for (const i of tileMarks(chains, poses)) out[i] = out[i] ?? 'tile mark';
   for (const i of backgroundGrid(chains)) out[i] = out[i] ?? 'background grid';
   const ids = new Set<number>();
   out.forEach((w, i) => w && ids.add(chains[i].id));
