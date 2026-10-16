@@ -22,6 +22,10 @@ export type BigImage = {
   /** The placeholder's height (its width is 1): how its paint operator is recognised. */
   code: number;
   source: RowSource;
+  /** The stream's first raw bytes (what pdf.js reads as the placeholder's samples), its layout. */
+  head: Uint8Array;
+  comps: 1 | 3;
+  bpc: number;
 };
 
 export type BigImagePlan = {
@@ -85,6 +89,8 @@ function sourceOf(
       if (bpc !== 8 && !(bpc === 1 && n === 1)) return `${bpc ?? '?'} bits per sample`;
       const pr = rec.parms ?? {};
       const predictor = pr.Predictor ?? 1;
+      if (!(predictor === 1 || predictor === 2 || (Number.isInteger(predictor) && predictor >= 10 && predictor <= 15)))
+        return `predictor ${predictor}`;
       if (predictor > 1) {
         if ((pr.Colors ?? 1) !== n || (pr.BitsPerComponent ?? 8) !== bpc || (pr.Columns ?? 1) !== w)
           return 'its predictor parameters do not match the image';
@@ -139,6 +145,8 @@ export function planBigImages(
     }
     const [ha, hb] = r.heightSpan!;
     const [wa, wb] = r.widthSpan!;
+    // codes ≥ 16 where the height's digits allow: ≥ 16 samples compared (extract.ts isPlaceholder)
+    if (code < 16 && hb - ha >= 2) code = 15;
     do code++;
     while (genuine.has(`1x${code}`));
     if (String(code).length > hb - ha) {
@@ -151,7 +159,9 @@ export function planBigImages(
     put(wa, pad(1, wb - wa));
     put(ha, pad(code, hb - ha));
     for (const sp of [r.filterSpan, r.parmsSpan]) if (sp) copy.fill(0x20, sp[0], sp[1]);
-    plan.byDims.set(`1x${code}`, { width: r.width!, height: r.height!, code, source: src });
+    const comps = (components(r, iccN) ?? 3) === 1 ? 1 : 3;
+    const head = u.slice(r.data[0], Math.min(r.data[1], r.data[0] + code * comps));
+    plan.byDims.set(`1x${code}`, { width: r.width!, height: r.height!, code, source: src, head, comps, bpc: r.bpc ?? 8 });
   }
   if (!plan.refused.length) plan.bytes = copy.buffer;
   return plan;

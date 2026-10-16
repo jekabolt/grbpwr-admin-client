@@ -234,6 +234,24 @@ async function finish(
  */
 export const MIN_RESAMPLED_PX_PER_MM = 4;
 
+/** Whether pdf.js' pixels of a 1 × code paint are the placeholder's raw samples (big-image.ts). */
+function isPlaceholder(px: Awaited<ReturnType<typeof pixelsOf>>, b: BigImage): boolean {
+  const d = px?.data;
+  if (!px || !d || px.width !== 1 || px.height !== b.code) return false;
+  const n = b.code;
+  if (b.bpc === 1) {
+    if (d.length < n || b.head.length < n) return false;
+    for (let i = 0; i < n; i++) if ((d[i] & 0x80) !== (b.head[i] & 0x80)) return false;
+    return true;
+  }
+  const stride = d.length / n;
+  if ((stride !== 3 && stride !== 4) || b.head.length < n * b.comps) return false;
+  for (let i = 0; i < n; i++)
+    for (let c = 0; c < 3; c++)
+      if (d[i * stride + c] !== b.head[b.comps === 3 ? i * 3 + c : i]) return false;
+  return true;
+}
+
 /** The pixel window of an image the page shows ([0, w] × [0, h] mm), clamped to the image. */
 export function pageWindow(
   pxToPage: Affine,
@@ -314,25 +332,32 @@ export async function extractRasterPdfDetailed(
     let pdfjsPx = 0;
     for (let q = 0; q < paints.length; q++) {
       const p = paints[q];
-      let big = p.w === 1 ? plan.byDims.get(`1x${p.h}`) ?? null : null;
-      let w = big ? big.width : p.w;
-      let h = big ? big.height : p.h;
+      let big: BigImage | null = null;
+      let w = p.w;
+      let h = p.h;
+      let px: Awaited<ReturnType<typeof pixelsOf>> | undefined;
       if (!(w > 0 && h > 0)) {
         // an inline image or a folded repeat: the size comes with the pixels
-        const px = await pixelsOf(page, p);
-        big = px?.width === 1 ? plan.byDims.get(`1x${px.height}`) ?? null : null;
-        if (big) {
-          w = big.width;
-          h = big.height;
-        } else {
-          decoded.set(q, px);
-          w = px?.width ?? 0;
-          h = px?.height ?? 0;
+        px = await pixelsOf(page, p);
+        decoded.set(q, px);
+        w = px?.width ?? 0;
+        h = px?.height ?? 0;
+      }
+      // a placeholder is an image XObject (never inline) of 1 × code px whose raw samples are the
+      // first bytes of the oversized image's stream — a genuine 1 × code image is not taken for it
+      const cand = p.objId !== null && w === 1 ? plan.byDims.get(`1x${h}`) : undefined;
+      if (cand) {
+        px ??= await pixelsOf(page, p);
+        if (isPlaceholder(px, cand)) {
+          big = cand;
+          w = cand.width;
+          h = cand.height;
+          decoded.delete(q);
         }
-        if (!(w > 0 && h > 0)) {
-          warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
-          continue;
-        }
+      }
+      if (!(w > 0 && h > 0)) {
+        warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
+        continue;
       }
       if (big) matched.add(big);
       else pdfjsPx += w * h;
@@ -441,9 +466,11 @@ export async function extractRasterPdfDetailed(
   const numPages = pdf.numPages;
   await pdf.destroy();
   // an oversized image that never showed up as a placeholder paint (an operator form we do not
-  // read) on a file that traced nothing: refused as before, never an empty import
-  if (plan.byDims.size && !matched.size && raw.every((pg) => pg.paths.length === 0))
-    throw inputTooLarge(oversizedPdfImagesMessage([...plan.byDims.values()]));
+  // read, or one we did not recognise) when every page was read: refused as before — a part of
+  // the scan is never silently missing (an unused image resource is refused too)
+  const missing = [...plan.byDims.values()].filter((b) => !matched.has(b));
+  if (missing.length && new Set(wanted).size === numPages)
+    throw inputTooLarge(oversizedPdfImagesMessage(missing));
   return finish(
     {
       id: file.id,

@@ -628,7 +628,15 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
             ? f.items.map((x) => (x as { v: string }).v)
             : null;
     let pv = get('DecodeParms', 'DP');
-    if (pv?.t === 'arr') pv = pv.items.length === 1 ? pv.items[0] : undefined;
+    // one filter, one parameter set: any other array shape is not guessed at
+    let badArr = false;
+    if (pv?.t === 'arr') {
+      if (pv.items.length === 1) pv = pv.items[0];
+      else {
+        badArr = true;
+        pv = undefined;
+      }
+    }
     let parms: PdfImageStream['parms'] = null;
     if (pv?.t === 'dict') {
       // a parameter the decoder uses must be a plain number — an indirect one is not guessed
@@ -639,7 +647,7 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
         else if (['Predictor', 'Colors', 'BitsPerComponent', 'Columns', 'ColorTransform'].includes(k))
           ok = false;
       parms = ok ? o : 'other';
-    } else if (pv && !(pv.t === 'kw' && pv.v === 'null')) parms = 'other';
+    } else if (badArr || (pv && !(pv.t === 'kw' && pv.v === 'null'))) parms = 'other';
     const cs = get('ColorSpace', 'CS');
     const colorSpace =
       cs === undefined
