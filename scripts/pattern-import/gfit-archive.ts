@@ -365,8 +365,7 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
       rec.alt = tols.slice(1).map((tol) => {
         const f2 = fitFamily(sizesIn, { tol, neighbourLines });
         return f2.sizes
-          .filter((v) => v.status === 'disagrees')
-          .map((v) => `${v.rank}/${v.cause}`)
+          .map((v) => `${v.rank}:${v.status[0]}${v.cause ? `/${v.cause}` : ''}:${r2(v.score)}`)
           .join(' ');
       });
     } catch (e) {
@@ -377,6 +376,7 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
       if (fam.why) rec.why = fam.why;
       rec.frame = fam.frame;
       rec.gp = fam.gradePoints;
+      rec.stepMm = r2(fam.stepMm);
       rec.sgp = fam.strongGradePoints;
       rec.topoSkips = fam.topoSkips;
       rec.ratio = Number.isFinite(fam.minRatio) ? r2(fam.minRatio) : null;

@@ -127,6 +127,9 @@ export type GfitFamily = {
   topoSkips: number;
   /** Worst uniqueness ratio over the anchor pairs (second / best). */
   minRatio: number;
+  /** Median grade step per rank over the grade points of neighbouring trusted anchors, mm (≈ 0: the
+   * sizes are drawn alike — an ungraded piece, or sizes that all took one line). */
+  stepMm: number;
   sizes: GfitSizeVerdict[];
   /** Notch candidates (in/out excursions of the outline) per edge across the checked sizes. */
   notches: {
@@ -268,6 +271,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     strongGradePoints: 0,
     topoSkips: 0,
     minRatio: Infinity,
+    stepMm: 0,
     sizes: sizes.map((s) => ({
       rank: s.rank,
       anchor: s.anchor,
@@ -701,6 +705,15 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     strongGradePoints: gps.filter((g) => g.strong).length,
     topoSkips,
     minRatio,
+    stepMm: (() => {
+      const tr = anchors.filter((s) => trusted.has(s.rank));
+      const st: number[] = [];
+      for (let k = 1; k < tr.length; k++)
+        for (let g = 0; g < G; g++)
+          st.push(hyp(gpos(tr[k], g), gpos(tr[k - 1], g)) / (tr[k].rank - tr[k - 1].rank));
+      st.sort((a, b) => a - b);
+      return st.length ? st[st.length >> 1] : 0;
+    })(),
     sizes: verdicts,
     notches,
     predict,
