@@ -61,6 +61,16 @@ export function useDeleteUnfitted(techCardId: number) {
     }
     setDeletingId(sampleId);
     try {
+      // Ask the server first: the fitting count above is this screen's cache. Only stock left out
+      // may be cleared here — anything else (a fitting booked meanwhile, over-return) refuses
+      // BEFORE a single unit goes back to the warehouse.
+      const dry = await adminService.DeleteSample({ id: sampleId, dryRun: true });
+      const other = (dry.blockers ?? []).filter((b) => b.reason !== 'material_outstanding');
+      if (other.length) {
+        showMessage(other.map((b) => b.text?.trim() || b.reason).join(' · '), 'error');
+        qc.invalidateQueries({ queryKey: sampleKeys.all });
+        return false;
+      }
       const lines = [...(await outstandingOf(sampleId)).entries()]
         .map(([materialId, qty]) => ({ materialId, qty: Number(qty.toFixed(3)) }))
         .filter((l) => l.qty > 0);
