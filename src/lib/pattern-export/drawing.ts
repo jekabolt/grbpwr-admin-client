@@ -107,13 +107,24 @@ export function drawingFromDxf(
 ): PatternDrawing & { unitGuessed: boolean } {
   const warnings: string[] = [];
   const parsed = parseDxf(buf, unit);
-  const { groups } = expandGroups(
+  const expandNotes: string[] = [];
+  const { groups, skippedBlocks } = expandGroups(
     parsed.dxf.entities ?? [],
     parsed.dxf.blocks ?? {},
     parsed.cmPerUnit,
     NEST_DEFAULTS.tol,
-    warnings,
+    expandNotes,
   );
+  // A 1:1 print with pieces missing is worse than no print: the cutter trusts paper to be the
+  // whole pattern. Skipped inserts (missing definition, nesting too deep, instance budget) refuse
+  // the export, naming what was skipped, before anything is rendered.
+  if (skippedBlocks > 0)
+    throw new Error(
+      `${skippedBlocks} block insert(s) of the drawing could not be read, so the PDF would be incomplete: ${
+        expandNotes.join('; ') || 'blocks skipped'
+      }`,
+    );
+  warnings.push(...expandNotes);
   const segs: Seg[] = [];
   const labels: { at: Pt; s: string }[] = [];
   for (const g of groups) {

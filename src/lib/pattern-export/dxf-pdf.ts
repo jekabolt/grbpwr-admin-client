@@ -25,6 +25,9 @@ export const TILE_MARGIN_MM = 10;
 /** Tiles overlap by this much: the strip where the next page is laid and aligned. */
 export const TILE_OVERLAP_MM = 10;
 export const TEST_SQUARE_MM = 100;
+/** Past this a tiled PDF is not a sane way to print the pattern: refuse and point at PLT. */
+export const TILED_MAX_PAGES = 500;
+export const TILED_MAX_SIDE_MM = 20_000;
 
 export const TILE_PAPERS = {
   A4: [210, 297],
@@ -279,34 +282,126 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
   const ch = ph - 2 * M;
   const sx = cw - OV;
   const sy = ch - OV;
+  // The size is checked from the extent alone, BEFORE anything per page is allocated: a
+  // mis-scaled DXF (mm read as inches) would otherwise plan tens of thousands of pages.
+  if (d.w > TILED_MAX_SIDE_MM || d.h > TILED_MAX_SIDE_MM)
+    throw new Error(
+      `too large for a tiled PDF (${(d.w / 1000).toFixed(1)} x ${(d.h / 1000).toFixed(1)} m, limit ${TILED_MAX_SIDE_MM / 1000} m a side) — use PLT for a plotter`,
+    );
   const cols = Math.max(1, Math.ceil((d.w - cw) / sx - 1e-9) + 1);
   const rows = Math.max(1, Math.ceil((d.h - ch) / sy - 1e-9) + 1);
+  if (rows * cols > TILED_MAX_PAGES)
+    throw new Error(
+      `too large for a tiled PDF (${rows * cols} pages of ${paper}, limit ${TILED_MAX_PAGES}) — use PLT for a plotter`,
+    );
   // The drawing sits centred in the grid: spare paper splits evenly between the edges.
   const ox = ((cols - 1) * sx + cw - d.w) / 2;
   const oy = ((rows - 1) * sy + ch - d.h) / 2;
   const boxes = d.strokes.map((s) => boxOf(s.pts));
   const LPT = labelPt(pw, ph);
+  // Window of cell (r, c) in drawing coordinates.
+  const winOf = (r: number, c: number): Box => ({
+    x0: c * sx - ox,
+    y0: r * sy - oy,
+    x1: c * sx - ox + cw,
+    y1: r * sy - oy + ch,
+  });
 
+  // Pass 1: which cells have line work. Pages are only built for those (pass 2).
   const cells: TileCell[] = [];
+  const blankAt = new Uint8Array(rows * cols);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      // Blank = no line work on the whole PAGE (window + margin), not just the window: the
+      // importer places a page by its full rectangle, so a line in a skipped page's margin band —
+      // drawn whole on the neighbour that owns it — would read as running into a missing page.
+      const w = winOf(r, c);
+      const page: Box = { x0: w.x0 - M, y0: w.y0 - M, x1: w.x1 + M, y1: w.y1 + M };
+      const blank = !d.strokes.some((s, i) => overlaps(boxes[i], page) && strokeHitsBox(s, page));
+      blankAt[r * cols + c] = blank ? 1 : 0;
+      cells.push({ row: r, col: c, label: tileLabel(r, c, rows), blank });
+    }
+  const printedAt = (r: number, c: number) =>
+    r >= 0 && r < rows && c >= 0 && c < cols && !blankAt[r * cols + c];
+
+  // MARKS NEVER REACH INTO A BLANK CELL. The page margin and the overlap strip of a tile lie
+  // over its neighbours' windows, so a trim line, a lap line, a corner cross or a crop tick drawn
+  // there lands, in sheet terms, inside the neighbour. When that neighbour is a blank page that
+  // was deliberately not printed, the importer sees line ends running into a page it does not have
+  // and reports it missing. Every mark segment (all are axis-aligned) is cut against the page
+  // rectangles (window + margin) of the blank cells around (r, c); only the rest is kept.
+  const clearOfBlankCells = (marks: Mark[], r: number, c: number): Mark[] => {
+    const pad = M; // the blank cell's whole page rectangle, not only its window
+    const blanks: Box[] = [];
+    for (let rr = r - 1; rr <= r + 1; rr++)
+      for (let cc = c - 1; cc <= c + 1; cc++)
+        if (rr >= 0 && rr < rows && cc >= 0 && cc < cols && blankAt[rr * cols + cc])
+          // Page coordinates of that cell's window, as seen from page (r, c).
+          blanks.push({
+            x0: M + (cc - c) * sx - pad,
+            y0: M + (rr - r) * sy - pad,
+            x1: M + (cc - c) * sx + cw + pad,
+            y1: M + (rr - r) * sy + ch + pad,
+          });
+    if (blanks.length === 0) return marks;
+    const out: Mark[] = [];
+    for (const m of marks) {
+      if (m.k !== 'path' || m.pts.length !== 2) {
+        out.push(m);
+        continue;
+      }
+      const [[ax, ay], [bx, by]] = m.pts;
+      const vertical = ax === bx;
+      if (!vertical && ay !== by) {
+        out.push(m);
+        continue;
+      }
+      // 1-D interval along the segment, minus each blank window it runs through.
+      let spans: [number, number][] = [
+        vertical ? [Math.min(ay, by), Math.max(ay, by)] : [Math.min(ax, bx), Math.max(ax, bx)],
+      ];
+      for (const b of blanks) {
+        const across = vertical ? ax : ay;
+        const [lo, hi] = vertical ? [b.x0, b.x1] : [b.y0, b.y1];
+        if (across < lo || across > hi) continue;
+        const [s0, s1] = vertical ? [b.y0, b.y1] : [b.x0, b.x1];
+        spans = spans.flatMap(([u, v]): [number, number][] => {
+          if (v <= s0 || u >= s1) return [[u, v]];
+          const keep: [number, number][] = [];
+          if (u < s0) keep.push([u, s0]);
+          if (v > s1) keep.push([s1, v]);
+          return keep;
+        });
+      }
+      for (const [u, v] of spans)
+        if (v - u > 0.5)
+          out.push({
+            ...m,
+            pts: vertical
+              ? [
+                  [ax, u],
+                  [ax, v],
+                ]
+              : [
+                  [u, ay],
+                  [v, ay],
+                ],
+          });
+    }
+    return out;
+  };
+
   const tiles: PlanPage[] = [];
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++) {
-      // Window in drawing coordinates.
-      const win: Box = {
-        x0: c * sx - ox,
-        y0: r * sy - oy,
-        x1: c * sx - ox + cw,
-        y1: r * sy - oy + ch,
-      };
-      const blank = !d.strokes.some((s, i) => overlaps(boxes[i], win) && strokeHitsBox(s, win));
+      if (!printedAt(r, c)) continue;
+      const win = winOf(r, c);
       const label = tileLabel(r, c, rows);
-      cells.push({ row: r, col: c, label, blank });
-      if (blank) continue;
       const marks: Mark[] = [];
       const grey = MARK;
       const dash: [number, number] = [2, 1.5];
       // Trim lines: left and top edges of the window, where an earlier page meets this one.
-      if (c > 0)
+      if (printedAt(r, c - 1))
         marks.push({
           k: 'path',
           pts: [
@@ -317,7 +412,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
           grey,
           dash,
         });
-      if (r > 0)
+      if (printedAt(r - 1, c))
         marks.push({
           k: 'path',
           pts: [
@@ -329,7 +424,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
           dash,
         });
       // Lap lines: where the NEXT page's trimmed edge is laid (the overlap starts here).
-      if (c < cols - 1)
+      if (printedAt(r, c + 1))
         marks.push({
           k: 'path',
           pts: [
@@ -340,7 +435,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
           grey,
           dash: [0.6, 1.2],
         });
-      if (r < rows - 1)
+      if (printedAt(r + 1, c))
         marks.push({
           k: 'path',
           pts: [
@@ -419,8 +514,8 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
         s: `${label} - page {PAGE} of {PAGES} - ${paper} - ${d.title} - 1:1, print at 100 %`,
         pt: 6.5,
       });
-      const nb = (rr: number, cc: number) =>
-        rr >= 0 && rr < rows && cc >= 0 && cc < cols ? tileLabel(rr, cc, rows) : null;
+      // Hints only toward pages that are printed: a blank neighbour has no paper to lay.
+      const nb = (rr: number, cc: number) => (printedAt(rr, cc) ? tileLabel(rr, cc, rows) : null);
       const up = nb(r - 1, c);
       const down = nb(r + 1, c);
       const left = nb(r, c - 1);
@@ -473,7 +568,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
         role: 'tile',
         label,
         content: { tx: M - win.x0, ty: M - win.y0, clip: [M, M, cw, ch] },
-        marks,
+        marks: clearOfBlankCells(marks, r, c),
       });
     }
 
