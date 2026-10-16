@@ -161,11 +161,6 @@ const STEP_WORD: Record<CreateStep, string> = {
   rnd: 'sewing R&D',
 };
 
-const FABRIC_CHIPS = [
-  { value: 'sample', label: 'stand-in' },
-  { value: 'production', label: 'final' },
-];
-
 // The same row grammar for every fact: tiny label, one row of chips.
 function FactRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -593,7 +588,8 @@ export function SampleScreen({
               <Chip
                 selected={!d.colorwayId}
                 pressed={!d.colorwayId}
-                onClick={canEdit ? () => set({ colorwayId: 0 }) : undefined}
+                // The colourway says the fabric: `sample` = cut from stand-ins, a real one = the final fabric.
+                onClick={canEdit ? () => set({ colorwayId: 0, fabricSource: 'sample' }) : undefined}
               >
                 <ColourwayDot />
                 sample
@@ -603,22 +599,14 @@ export function SampleScreen({
                   key={c.colorwayId}
                   selected={d.colorwayId === c.colorwayId}
                   pressed={d.colorwayId === c.colorwayId}
-                  onClick={canEdit ? () => set({ colorwayId: c.colorwayId ?? 0 }) : undefined}
+                  onClick={
+                    canEdit
+                      ? () => set({ colorwayId: c.colorwayId ?? 0, fabricSource: 'production' })
+                      : undefined
+                  }
                 >
                   <ColourwayDot colorway={c} />
                   {colorwayLabel(c)}
-                </Chip>
-              ))}
-            </FactRow>
-            <FactRow label='fabric'>
-              {FABRIC_CHIPS.map((o) => (
-                <Chip
-                  key={o.value}
-                  selected={d.fabricSource === o.value}
-                  pressed={d.fabricSource === o.value}
-                  onClick={canEdit ? () => set({ fabricSource: o.value }) : undefined}
-                >
-                  {o.label}
                 </Chip>
               ))}
             </FactRow>
@@ -1023,6 +1011,20 @@ function MaterialsBlock({
 
 // ── R&D ───────────────────────────────────────────────────────────────────────────────────────
 
+// What R&D money is usually spent on: picking one fills the description and the kind, so only
+// the amount is typed. `other` leaves the description to the person.
+const EXPENSE_PRESETS = [
+  { label: 'sewing', kind: 'labour' },
+  { label: 'pattern', kind: 'labour' },
+  { label: 'fabric bought', kind: 'materials' },
+  { label: 'outsourcing', kind: 'outsourcing' },
+  { label: 'courier', kind: 'other' },
+  { label: 'other', kind: 'other' },
+] as const;
+
+const fieldCell =
+  'block h-[30px] w-full border border-borderColor bg-bgColor px-2 text-micro placeholder:text-labelColor focus:border-textColor focus:outline-none';
+
 // `courier 12` → description `courier`, amount 12; the kind follows the words.
 function parseExpense(raw: string): { description: string; amount: string; kind: string } | null {
   const m = raw.trim().match(/^(.*?)\s*(\d+(?:[.,]\d+)?)$/);
@@ -1045,7 +1047,10 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
   const { data } = useDevExpenses(techCardId);
   const add = useAddDevExpense(techCardId);
   const del = useDeleteDevExpense(techCardId);
-  const [text, setText] = useState('');
+  // The expense being written: born from the placeholder's pick, saved by Enter on the amount.
+  const [draft, setDraft] = useState<{ description: string; kind: string; amount: string } | null>(
+    null,
+  );
   const [confirmId, setConfirmId] = useState(0);
 
   const rows = (data?.expenses ?? [])
@@ -1057,25 +1062,37 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
   }, 0);
 
   const submit = () => {
-    const parsed = parseExpense(text);
-    if (!parsed || add.isPending) return;
+    if (!draft || add.isPending) return;
+    const amount = draft.amount.replace(',', '.');
+    const description = draft.description.trim();
+    if (!(Number(amount) > 0) || !description) return;
+    // A typed `other` still gets a kind from its words.
+    const kind =
+      draft.kind === 'other' ? parseExpense(`${description} 1`)?.kind ?? 'other' : draft.kind;
     add.mutate(
       {
         techCardId,
-        kind: parsed.kind,
-        description: parsed.description,
-        amount: { value: parsed.amount },
+        kind,
+        description,
+        amount: { value: amount },
         currency: dictionary?.baseCurrency || 'EUR',
         fittingId: 0,
         sampleId,
         incurredAt: new Date().toISOString(),
       },
       {
-        onSuccess: () => setText(''),
+        onSuccess: () => setDraft(null),
         onError: (e) =>
           showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
       },
     );
+  };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submit();
+    }
+    if (e.key === 'Escape') setDraft(null);
   };
 
   return (
@@ -1120,21 +1137,61 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
             )}
           </div>
         ))}
-        {canWriteCosting && (
-          <input
+        {canWriteCosting && draft && (
+          <div className='grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2 py-1.5'>
+            <input
+              aria-label='what it was'
+              placeholder='what'
+              autoFocus={!draft.description}
+              value={draft.description}
+              disabled={add.isPending}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              onKeyDown={onKey}
+              className={fieldCell}
+            />
+            <input
+              aria-label='amount'
+              inputMode='decimal'
+              placeholder={`${dictionary?.baseCurrency || 'EUR'} ↵`}
+              autoFocus={!!draft.description}
+              value={draft.amount}
+              disabled={add.isPending}
+              onChange={(e) => setDraft({ ...draft, amount: sanitizeDecimal(e.target.value) })}
+              onKeyDown={onKey}
+              className={cn(fieldCell, 'text-right tabular-nums')}
+            />
+            <button
+              type='button'
+              aria-label='cancel'
+              onClick={() => setDraft(null)}
+              className='text-micro uppercase text-labelColor hover:text-textColor'
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {canWriteCosting && !draft && (
+          <select
             aria-label='add an expense'
-            placeholder='+ courier 12 ↵'
-            value={text}
-            disabled={add.isPending}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submit();
-              }
+            value=''
+            onChange={(e) => {
+              const p = EXPENSE_PRESETS.find((x) => x.label === e.target.value);
+              if (p)
+                setDraft({
+                  description: p.label === 'other' ? '' : p.label,
+                  kind: p.kind,
+                  amount: '',
+                });
             }}
-            className='border-b border-hairline bg-transparent py-1 text-micro placeholder:text-labelColor focus:outline-none'
-          />
+            className='mt-2 block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
+            <option value=''>+ add an expense ▾</option>
+            {EXPENSE_PRESETS.map((p) => (
+              <option key={p.label} value={p.label}>
+                {p.label}
+              </option>
+            ))}
+          </select>
         )}
       </div>
     </Section>

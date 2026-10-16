@@ -305,7 +305,7 @@ export function useAutoCreateSample({
 
   const sizeName = (id?: number) =>
     id ? String(findInDictionary(dictionary, id, 'size') || id) : '';
-  const preview = [purpose, sizeName(autoSize), standIn ? 'stand-in' : 'final']
+  const preview = [purpose, sizeName(autoSize), standIn ? 'sample' : 'final']
     .filter(Boolean)
     .join(' · ');
 
