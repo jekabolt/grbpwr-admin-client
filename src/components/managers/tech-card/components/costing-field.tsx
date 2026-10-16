@@ -43,6 +43,11 @@ import { unmeasuredDxfScopeKeys } from './piece-areas-state';
 import { useDevExpenses } from './dev-expenses-field';
 import { MarkerConsumptionBand } from './marker-apply';
 import { TechCardFormData } from './schema';
+import {
+  defaultsPatch,
+  describeDefaults,
+  useWorkshopCostingDefaults,
+} from './use-workshop-costing-defaults';
 
 // Весь граф раскладки (dxf-parser + clipper2 + воркер) живёт в ленивом чанке — см. место рендера.
 const BatchMarkerQueue = lazy(() =>
@@ -205,8 +210,14 @@ export function CostingField({
   techCard,
   frozen = false,
   headerEl,
+  active = true,
 }: {
   techCard?: common_TechCard;
+  /**
+   * The costing tab is the one on screen. The block stays MOUNTED behind other tabs, and the
+   * workshop prefill must not dirty (and so autosave) a card nobody opened the costing of.
+   */
+  active?: boolean;
   /** The Section header slot: calculation problems portal there as `! N`. Absent → drawn inline. */
   headerEl?: HTMLElement | null;
   /**
@@ -432,6 +443,37 @@ export function CostingField({
   const totalSam = operations.reduce((sum, o) => sum + operationMinutes(o), 0);
   const impliedPerMinute = cmt > 0 && totalSam > 0 ? cmt / totalSam : undefined;
 
+  // ── WORKSHOP DEFAULTS (0414): prefill an empty costing; write the shown figures back.
+  const canWriteWorkshop = canWrite(SECTION.production);
+  const workshop = useWorkshopCostingDefaults({
+    active: active && canWriteCosting && !frozen,
+    canWrite: canWriteWorkshop,
+    techCardId,
+    saved: rollup,
+    totalSam,
+  });
+  const workshopPatch = defaultsPatch({
+    defaults: workshop.defaults,
+    currency: costing.currency ?? '',
+    cmt,
+    totalSam,
+    overhead,
+    materials,
+    materialsComparable: !currencyDirty && !rollup?.hasUnconvertedCurrencies,
+    defectPercent: costing.defectPercent ?? '',
+    targetMarginPct: costing.targetMarginPct ?? '',
+  });
+  const workshopPatchEmpty = Object.keys(workshopPatch).length === 0;
+  const saveWorkshopDefaults = () => {
+    if (workshopPatchEmpty || !canWriteWorkshop || !workshop.loaded || workshop.update.isPending)
+      return;
+    workshop.update.mutate(workshopPatch, {
+      onSuccess: () => showMessage('saved as workshop default', 'success'),
+      onError: () => showMessage("couldn't save the workshop default", 'error'),
+    });
+  };
+  const wsTag = (on: boolean) => (on ? 'workshop' : '');
+
   // Read-only cutting-wastage context for the reject rate: the per-line wastage% already grosses
   // the material lines, so reject% must not re-price the same losses. Read from the SAVED card
   // (the rollup's own inputs), not the form.
@@ -617,7 +659,13 @@ export function CostingField({
       key: 'cmt',
       name: 'CMT (labour)',
       amount: cmt,
-      aside: impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/min` : undefined,
+      aside:
+        [
+          wsTag(workshop.fromWorkshop('cmtCost')),
+          impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/min` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
       help: `The factory's quote per garment — the only money figure a person brings in from outside. ${
         impliedPerMinute != null
           ? `At the construction's total SAM of ${totalSam.toFixed(1)} min that is ≈ ${impliedPerMinute.toFixed(2)} ${cur}/min — a derived rate, stored nowhere; check it against the factory's usual rate.`
@@ -642,6 +690,7 @@ export function CostingField({
       key: 'overhead',
       name: 'overhead',
       amount: overhead,
+      aside: wsTag(workshop.fromWorkshop('overheadCost')) || undefined,
       help: 'Per 1 garment, in the costing currency. Pricing (markup, wholesale, retail) lives on the published product, not here.',
       lever: (
         <Lever
@@ -658,6 +707,7 @@ export function CostingField({
       // and materials_per_unit to 2dp independently, so it lands within ±0.005). Printing «0.01»
       // beside «defects 0%» states a cost nobody entered.
       amount: defectPct > 0 ? defectAmount : 0,
+      aside: wsTag(workshop.fromWorkshop('defectPercent')) || undefined,
       help:
         avgWastage != null
           ? `Only defects in FINISHED garments. Cutting losses are already in the materials: the average cutting wastage across BOM lines is ${avgWastage.toFixed(1)}% (${bomWastages.length} lines with wastage).`
@@ -1227,11 +1277,7 @@ export function CostingField({
             <Stat
               label={netted ? `− VAT ${vatRate.toFixed(0)}% ${vatCountry}` : '− VAT'}
               value={netted ? (netRetail ?? 0).toFixed(2) : '—'}
-              sub={
-                netted
-                  ? 'net, the margin base'
-                  : `no rate for ${vatCountry || 'the country'}`
-              }
+              sub={netted ? 'net, the margin base' : `no rate for ${vatCountry || 'the country'}`}
             />
             <Stat
               label={
@@ -1364,6 +1410,29 @@ export function CostingField({
             emphasis
           />
         )}
+        {/* The defaults are edited where they are used: one quiet action under the waterfall
+          (after it, so the step rows stay adjacent for their rules), the stored values on hover.
+          Only what the rows above state, and what differs, is written. */}
+        {canWriteWorkshop && canWriteCosting && (
+          <div className='flex justify-end'>
+            <button
+              type='button'
+              data-save-workshop-defaults=''
+              onClick={saveWorkshopDefaults}
+              // aria-disabled, not disabled: the hover line with the stored defaults is the
+              // point of this control, and a disabled button swallows the pointer.
+              aria-disabled={workshopPatchEmpty || workshop.update.isPending || !workshop.loaded}
+              title={
+                workshopPatchEmpty
+                  ? `${describeDefaults(workshop.defaults)} · nothing different to save`
+                  : describeDefaults(workshop.defaults)
+              }
+              className='cursor-pointer whitespace-nowrap text-micro uppercase tracking-label text-textColor underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor aria-disabled:cursor-default aria-disabled:text-labelColor aria-disabled:no-underline'
+            >
+              {workshop.update.isPending ? 'saving…' : 'save as workshop default'}
+            </button>
+          </div>
+        )}
         {/* Not on an understated cost: a confident unit count derived from a margin the verdict has
           just refused to certify is the same contradiction as a green bar. */}
         {breakEven.value && certifiable && (
@@ -1410,13 +1479,16 @@ export function CostingField({
               disabled={!canWriteCosting}
               className='m-0 grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
             >
-              <CurrencySelect name='costing.currency' label='costing currency' />
+              <CurrencySelect
+                name='costing.currency'
+                label={`costing currency${workshop.fromWorkshop('currency') ? ' · workshop' : ''}`}
+              />
               {/* This style's own target. Left empty it falls back to the house default, which the
                 server resolves onto the read — so an empty field is not "no target", it is "the
                 usual one". */}
               <DecimalField
                 name='costing.targetMarginPct'
-                label={`margin target, %${hasTarget && !num(costing.targetMarginPct) ? ` (default ${targetPct.toFixed(0)})` : ''}`}
+                label={`margin target, %${hasTarget && !num(costing.targetMarginPct) ? ` (default ${targetPct.toFixed(0)})` : ''}${workshop.fromWorkshop('targetMarginPct') ? ' · workshop' : ''}`}
               />
             </fieldset>
             {/* WHICH MARKET the margin is for. Catalogue prices are VAT-inclusive, so the net retail —
