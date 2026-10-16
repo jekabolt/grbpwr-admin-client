@@ -16,6 +16,7 @@ import {
   useIssueMaterialStock,
   warehouseKeys,
 } from 'components/managers/materials/components/useWarehouse';
+import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -654,7 +655,9 @@ export function SampleScreen({
         onUnscrap={unscrapNow}
       />
 
-      {canReadCosting && <RndBlock techCardId={techCardId} sampleId={sampleId} />}
+      {canReadCosting && (
+        <RndBlock techCardId={techCardId} sampleId={sampleId} fittings={fittings} />
+      )}
     </SectionStack>
   );
 }
@@ -1071,32 +1074,34 @@ const EXPENSE_PRESETS = [
 const fieldCell =
   'block h-[30px] w-full border border-borderColor bg-bgColor px-2 text-micro placeholder:text-labelColor focus:border-textColor focus:outline-none';
 
-// `courier 12` → description `courier`, amount 12; the kind follows the words.
-function parseExpense(raw: string): { description: string; amount: string; kind: string } | null {
-  const m = raw.trim().match(/^(.*?)\s*(\d+(?:[.,]\d+)?)$/);
-  if (!m) return null;
-  const description = m[1].trim();
-  const amount = m[2].replace(',', '.');
-  if (!(Number(amount) > 0)) return null;
-  const kind = /sew|pattern|cut/i.test(description)
-    ? 'labour'
-    : /fabric|button|zip|thread/i.test(description)
-      ? 'materials'
-      : 'other';
-  return { description, amount, kind };
-}
+const EXPENSE_KINDS = ['labour', 'materials', 'outsourcing', 'sample', 'other'] as const;
 
-function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: number }) {
+type ExpenseDraft = {
+  description: string;
+  kind: string;
+  amount: string;
+  currency: string;
+  date: string;
+  fittingId: number;
+};
+
+function RndBlock({
+  techCardId,
+  sampleId,
+  fittings,
+}: {
+  techCardId: number;
+  sampleId: number;
+  fittings: common_Fitting[];
+}) {
   const { dictionary } = useDictionary();
   const { canWriteCosting } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const { data } = useDevExpenses(techCardId);
   const add = useAddDevExpense(techCardId);
   const del = useDeleteDevExpense(techCardId);
-  // The expense being written: born from the placeholder's pick, saved by Enter on the amount.
-  const [draft, setDraft] = useState<{ description: string; kind: string; amount: string } | null>(
-    null,
-  );
+  // The expense being written: born from the placeholder's pick, saved by Enter.
+  const [draft, setDraft] = useState<ExpenseDraft | null>(null);
   const [confirmId, setConfirmId] = useState(0);
 
   const rows = (data?.expenses ?? [])
@@ -1106,25 +1111,39 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
     const n = parseDecimalNumber(e.amountBase?.value);
     return s + (Number.isFinite(n) ? n : 0);
   }, 0);
+  const baseCurrency = dictionary?.baseCurrency || 'EUR';
+  // Prefilled meta: the currency used last on this sample, today, the newest fitting.
+  const lastCurrency = rows[rows.length - 1]?.currency || baseCurrency;
+  const fittingName = (id?: number) => {
+    const f = fittings.find((x) => x.id === id);
+    return f ? `fitting ${ddmm(f.fitting?.fittingDate) || `#${f.id}`}` : '';
+  };
+
+  const start = (label: string, kind: string) =>
+    setDraft({
+      description: label === 'other' ? '' : label,
+      kind,
+      amount: '',
+      currency: lastCurrency,
+      date: todayISO(),
+      fittingId: fittings[0]?.id ?? 0,
+    });
 
   const submit = () => {
     if (!draft || add.isPending) return;
     const amount = draft.amount.replace(',', '.');
     const description = draft.description.trim();
     if (!(Number(amount) > 0) || !description) return;
-    // A typed `other` still gets a kind from its words.
-    const kind =
-      draft.kind === 'other' ? parseExpense(`${description} 1`)?.kind ?? 'other' : draft.kind;
     add.mutate(
       {
         techCardId,
-        kind,
+        kind: draft.kind,
         description,
         amount: { value: amount },
-        currency: dictionary?.baseCurrency || 'EUR',
-        fittingId: 0,
+        currency: draft.currency || baseCurrency,
+        fittingId: draft.fittingId || 0,
         sampleId,
-        incurredAt: new Date().toISOString(),
+        incurredAt: new Date(`${draft.date || todayISO()}T12:00:00`).toISOString(),
       },
       {
         onSuccess: () => setDraft(null),
@@ -1140,6 +1159,8 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
     }
     if (e.key === 'Escape') setDraft(null);
   };
+  const cell = (extra = '') => cn(fieldCell, extra);
+  const selectCls = cell('cursor-pointer appearance-none uppercase');
 
   return (
     <Section title='r&d' action={total > 0 ? <HeaderNote>{money(total)}</HeaderNote> : undefined}>
@@ -1147,13 +1168,16 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
         {rows.map((e) => (
           <div
             key={e.id}
-            className='grid grid-cols-[48px_minmax(0,1fr)_auto_auto] items-baseline gap-2 border-b border-hairline py-1'
+            className='grid grid-cols-[48px_minmax(0,1fr)_auto_auto_auto] items-baseline gap-3 border-b border-hairline py-1'
           >
             <Text size='micro' variant='label' component='span' className='tabular-nums'>
               {ddmm(e.incurredAt)}
             </Text>
             <Text size='micro' component='span' className='truncate'>
               {e.description || e.kind}
+            </Text>
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              {[e.kind, fittingName(e.fittingId)].filter(Boolean).join(' · ')}
             </Text>
             <Text size='micro' component='span' className='text-right tabular-nums'>
               {decimalToInput(e.amount)} {e.currency}
@@ -1183,8 +1207,18 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
             )}
           </div>
         ))}
+
         {canWriteCosting && draft && (
-          <div className='grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2 py-1.5'>
+          // One row of equal boxes: what · kind · date · amount · currency · fitting. Everything
+          // but the amount is prefilled; Enter in any box saves.
+          <div
+            className={cn(
+              'grid grid-cols-2 items-center gap-2 py-1.5',
+              fittings.length
+                ? 'sm:grid-cols-[minmax(0,2fr)_repeat(5,minmax(0,1fr))_auto]'
+                : 'sm:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))_auto]',
+            )}
+          >
             <input
               aria-label='what it was'
               placeholder='what'
@@ -1193,19 +1227,73 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
               disabled={add.isPending}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
               onKeyDown={onKey}
-              className={fieldCell}
+              className={cell()}
+            />
+            <select
+              aria-label='kind'
+              value={draft.kind}
+              disabled={add.isPending}
+              onChange={(e) => setDraft({ ...draft, kind: e.target.value })}
+              onKeyDown={onKey}
+              className={selectCls}
+            >
+              {EXPENSE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label='date'
+              type='date'
+              value={draft.date}
+              disabled={add.isPending}
+              onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+              onKeyDown={onKey}
+              className={cell('tabular-nums')}
             />
             <input
               aria-label='amount'
               inputMode='decimal'
-              placeholder={`${dictionary?.baseCurrency || 'EUR'} ↵`}
+              placeholder='amount ↵'
               autoFocus={!!draft.description}
               value={draft.amount}
               disabled={add.isPending}
               onChange={(e) => setDraft({ ...draft, amount: sanitizeDecimal(e.target.value) })}
               onKeyDown={onKey}
-              className={cn(fieldCell, 'text-right tabular-nums')}
+              className={cell('text-right tabular-nums')}
             />
+            <select
+              aria-label='currency'
+              value={draft.currency}
+              disabled={add.isPending}
+              onChange={(e) => setDraft({ ...draft, currency: e.target.value })}
+              onKeyDown={onKey}
+              className={selectCls}
+            >
+              {EXPENSE_CURRENCIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.value}
+                </option>
+              ))}
+            </select>
+            {fittings.length > 0 && (
+              <select
+                aria-label='for fitting'
+                value={draft.fittingId}
+                disabled={add.isPending}
+                onChange={(e) => setDraft({ ...draft, fittingId: Number(e.target.value) || 0 })}
+                onKeyDown={onKey}
+                className={selectCls}
+              >
+                <option value={0}>no fitting</option>
+                {fittings.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {fittingName(f.id)}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               type='button'
               aria-label='cancel'
@@ -1222,12 +1310,7 @@ function RndBlock({ techCardId, sampleId }: { techCardId: number; sampleId: numb
             value=''
             onChange={(e) => {
               const p = EXPENSE_PRESETS.find((x) => x.label === e.target.value);
-              if (p)
-                setDraft({
-                  description: p.label === 'other' ? '' : p.label,
-                  kind: p.kind,
-                  amount: '',
-                });
+              if (p) start(p.label, p.kind);
             }}
             className='mt-2 block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
           >
