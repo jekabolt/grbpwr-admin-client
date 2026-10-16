@@ -42,7 +42,7 @@ export function useSamples(techCardId?: number) {
 // this adds no extra fetch), so the card board's "N fittings · last verdict" chip and the open
 // sample's fittings panel always read the exact same grouping.
 export function useSampleFittings(techCardId?: number) {
-  const { data, isLoading } = useTechCardFittings(techCardId);
+  const { data, isLoading, isError, isSuccess, refetch } = useTechCardFittings(techCardId);
   const bySample = useMemo(() => {
     const m = new Map<number, common_Fitting[]>();
     for (const f of data ?? []) {
@@ -54,7 +54,7 @@ export function useSampleFittings(techCardId?: number) {
     }
     return m;
   }, [data]);
-  return { bySample, isLoading };
+  return { bySample, isLoading, isError, isSuccess, refetch };
 }
 
 // One sample with its composed cost (materials issued + manual dev-expenses). costing:read strips

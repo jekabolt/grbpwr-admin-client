@@ -17,6 +17,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decima
 import { useAddDevExpense } from './dev-expenses-field';
 import {
   fittingsNewestFirst,
+  lineMaterialId,
   specQuantity,
   stockOnHand,
   todayISO,
@@ -104,9 +105,12 @@ export function useAutoCreateSample({
   const issuer = useWriteoffBatch();
   const addExpense = useAddDevExpense(techCardId);
   const stock = useStockIndex();
-  const { data: samplesData, isLoading: samplesLoading } = useSamples(techCardId);
-  const { bySample, isLoading: fittingsLoading } = useSampleFittings(techCardId);
-  const { data: releasesData } = useTechCardReleases(techCardId);
+  const samplesQ = useSamples(techCardId);
+  const samplesData = samplesQ.data;
+  const fittingsQ = useSampleFittings(techCardId);
+  const bySample = fittingsQ.bySample;
+  const releasesQ = useTechCardReleases(techCardId);
+  const releasesData = releasesQ.data;
 
   const samples = useMemo(
     () => [...(samplesData?.samples ?? [])].sort(byNumberDesc),
@@ -121,14 +125,41 @@ export function useAutoCreateSample({
       enabled: !!s.id,
     })),
   });
-  const subsLoading = subsQueries.some((q) => q.isLoading);
+
   const subsBySample = samples.map((s, i) => ({
     sample: s,
     subs: subsQueries[i]?.data?.substitutions ?? [],
   }));
 
-  const ready =
-    !!techCard && !samplesLoading && !fittingsLoading && !stock.isLoading && !subsLoading;
+  // Never create from partial data: every source must have ANSWERED, not merely stopped loading.
+  const sources = [
+    { name: 'samples', ok: samplesQ.isSuccess, err: samplesQ.isError, refetch: samplesQ.refetch },
+    {
+      name: 'fittings',
+      ok: fittingsQ.isSuccess,
+      err: fittingsQ.isError,
+      refetch: fittingsQ.refetch,
+    },
+    { name: 'stock', ok: stock.isSuccess, err: stock.isError, refetch: stock.refetch },
+    {
+      name: 'releases',
+      ok: releasesQ.isSuccess,
+      err: releasesQ.isError,
+      refetch: releasesQ.refetch,
+    },
+    ...subsQueries.map((q) => ({
+      name: 'stand-ins',
+      ok: q.isSuccess,
+      err: q.isError,
+      refetch: q.refetch,
+    })),
+  ];
+  const failedSources = sources.filter((x) => x.err);
+  const sourceError = failedSources.length
+    ? `couldn't read ${[...new Set(failedSources.map((x) => x.name))].join(', ')}`
+    : '';
+  const refetchSources = () => failedSources.forEach((x) => void x.refetch());
+  const ready = !!techCard && !sourceError && sources.every((x) => x.ok);
 
   const sizeIds = techCard?.techCard?.sizeIds ?? [];
   const colorways = (techCard?.colorways ?? []).filter(
@@ -203,8 +234,13 @@ export function useAutoCreateSample({
   const [answers, setAnswers] = useState<Answers>({});
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<CreateFailure | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(
+    null,
+  );
 
-  const ownMaterialId = wireInt(mainLines.find((b) => wireInt(b.materialId))?.materialId);
+  // The article the main fabric is cut from in the colourway being sewn (a colourway may pin one).
+  const ownMaterialId =
+    mainLines.map((b) => lineMaterialId(techCard, b, autoColorway ?? 0)).find(Boolean) ?? 0;
   const materialOptions = (): { options: MaterialOption[]; own?: MaterialOption } => {
     const fmt = (id: number) => {
       const row = stock.rowByMaterial.get(id);
@@ -273,6 +309,40 @@ export function useAutoCreateSample({
     .filter(Boolean)
     .join(' · ');
 
+  const rndWillRun = () =>
+    canWriteCosting && parseDecimalNumber(decimalToInput(techCard?.techCard?.costing?.cmtCost)) > 0;
+
+  // Every line with an article and a norm, at min(spec, what is left of the stock).
+  function writeoffLines(p: SamplePlan): WriteoffLine[] {
+    const lines: WriteoffLine[] = [];
+    // Stock left per material across lines: the batch merges lines that share a material (a
+    // stand-in on two main lines), so capping each line by the full balance could overdraw it
+    // and get the whole batch rejected.
+    const left = new Map<number, number>();
+    for (const b of techCard?.techCard?.bomItems ?? []) {
+      const materialId =
+        p.standInId && mainIds.has(wireInt(b.id))
+          ? p.standInId
+          : lineMaterialId(techCard, b, p.colorwayId);
+      if (!materialId) continue;
+      const spec = parseDecimalNumber(
+        specQuantity(techCard, wireInt(b.id), p.colorwayId, p.sizeId),
+      );
+      const onHand = left.get(materialId) ?? stockOnHand(stock.rowByMaterial.get(materialId));
+      if (!(spec > 0) || !(onHand > 0)) continue;
+      const qty = Number(Math.min(spec, onHand).toFixed(3));
+      left.set(materialId, onHand - qty);
+      lines.push({
+        key: `bom-${wireInt(b.id) || b.lineKey}`,
+        materialId,
+        label: b.name ?? '',
+        unit: b.unit ?? '',
+        quantity: String(qty),
+      });
+    }
+    return lines;
+  }
+
   // ── the steps after AddSample, re-runnable one by one ───────────────────────────────────────
   async function finish(id: number, p: SamplePlan, steps: CreateStep[]) {
     const failed: CreateStep[] = [];
@@ -282,22 +352,33 @@ export function useAutoCreateSample({
       errors.push(e instanceof Error ? e.message : String(e));
     };
     const bomItems = techCard?.techCard?.bomItems ?? [];
-    const cutFrom = (b: common_TechCardBomItem) =>
-      p.standInId && mainIds.has(wireInt(b.id)) ? p.standInId : wireInt(b.materialId);
+    const own = (b: common_TechCardBomItem) => lineMaterialId(techCard, b, p.colorwayId);
+    const lines = writeoffLines(p);
+    const willRnd = rndWillRun();
+    // Progress: AddSample is step 1 (already done when we get here, unless this is a retry).
+    let done = 1;
+    const total =
+      1 +
+      (steps.includes('subs') && p.standInId ? 1 : 0) +
+      (steps.includes('writeoff') && lines.length ? 1 : 0) +
+      (steps.includes('rnd') && willRnd ? 1 : 0) +
+      1;
+    const tick = (label: string) => setProgress({ done, total, label });
 
     if (steps.includes('subs') && p.standInId) {
+      tick('stand-in');
       try {
         // A retry must not record a line twice.
         const have = await adminService.ListSampleSubstitutions({ sampleId: id });
-        const done = new Set((have.substitutions ?? []).map((s) => wireInt(s.bomItemId)));
+        const recorded = new Set((have.substitutions ?? []).map((s) => wireInt(s.bomItemId)));
         for (const b of bomItems) {
           const bid = wireInt(b.id);
-          if (!mainIds.has(bid) || done.has(bid) || wireInt(b.materialId) === p.standInId) continue;
+          if (!mainIds.has(bid) || recorded.has(bid) || own(b) === p.standInId) continue;
           await adminService.AddSampleSubstitution({
             substitution: {
               sampleId: id,
               bomItemId: bid,
-              originalMaterialId: wireInt(b.materialId),
+              originalMaterialId: own(b),
               substitutedMaterialId: p.standInId,
               reason: 'stand-in',
               plannedQty: inputToDecimal(specQuantity(techCard, bid, p.colorwayId, p.sizeId)),
@@ -309,37 +390,17 @@ export function useAutoCreateSample({
       } catch (e) {
         fail('subs', e);
       }
+      done += 1;
     }
 
     let issued = false;
     if (steps.includes('writeoff')) {
-      const lines: WriteoffLine[] = [];
-      // Stock left per material across lines: the batch merges lines that share a material (a
-      // stand-in on two main lines), so capping each line by the full balance could overdraw it
-      // and get the whole batch rejected.
-      const left = new Map<number, number>();
-      for (const b of bomItems) {
-        const materialId = cutFrom(b);
-        if (!materialId) continue;
-        const spec = parseDecimalNumber(
-          specQuantity(techCard, wireInt(b.id), p.colorwayId, p.sizeId),
-        );
-        const onHand = left.get(materialId) ?? stockOnHand(stock.rowByMaterial.get(materialId));
-        if (!(spec > 0) || !(onHand > 0)) continue;
-        const qty = Number(Math.min(spec, onHand).toFixed(3));
-        left.set(materialId, onHand - qty);
-        lines.push({
-          key: `bom-${wireInt(b.id) || b.lineKey}`,
-          materialId,
-          label: b.name ?? '',
-          unit: b.unit ?? '',
-          quantity: String(qty),
-        });
-      }
       if (lines.length) {
+        tick(`writing off ${lines.length} ${lines.length === 1 ? 'material' : 'materials'}`);
         const res = await issuer.run(id, lines, 'sample write-off');
         if (res.ok) issued = true;
         else fail('writeoff', res.error);
+        done += 1;
       }
     }
     if (issued || steps.includes('status')) {
@@ -351,7 +412,8 @@ export function useAutoCreateSample({
     }
 
     const cmt = parseDecimalNumber(decimalToInput(techCard?.techCard?.costing?.cmtCost));
-    if (steps.includes('rnd') && canWriteCosting && cmt > 0) {
+    if (steps.includes('rnd') && willRnd) {
+      tick('sewing R&D');
       try {
         await addExpense.mutateAsync({
           techCardId,
@@ -370,7 +432,9 @@ export function useAutoCreateSample({
       } catch (e) {
         fail('rnd', e);
       }
+      done += 1;
     }
+    tick('opening');
 
     setFailure(
       failed.length ? { sampleId: id, steps: failed, error: errors.join(' · '), plan: p } : null,
@@ -382,6 +446,12 @@ export function useAutoCreateSample({
     setAsking(false);
     setAnswers({});
     setBusy(true);
+    const lines = writeoffLines(p);
+    setProgress({
+      done: 0,
+      total: 2 + (p.standInId ? 1 : 0) + (lines.length ? 1 : 0) + (rndWillRun() ? 1 : 0),
+      label: 'creating sample',
+    });
     try {
       let id = 0;
       try {
@@ -418,6 +488,7 @@ export function useAutoCreateSample({
       onOpen(id);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -449,11 +520,15 @@ export function useAutoCreateSample({
       await finish(failure.sampleId, failure.plan, failure.steps);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
   return {
     ready,
+    sourceError,
+    refetchSources,
+    progress,
     busy,
     preview,
     previewNumber: (prev?.number ?? 0) + 1,

@@ -3,10 +3,12 @@ import { adminService } from 'api/api';
 import {
   BatchIssueMaterialStockRequest,
   common_Fitting,
-  common_Material,
   common_MaterialMovement,
   common_MaterialStockRow,
+  common_AdminColorwayRef,
   common_TechCard,
+  common_TechCardBomItem,
+  common_TechCardColorwayUsage,
 } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
@@ -33,21 +35,6 @@ import { sampleKeys } from './useSamples';
 // out at min(spec, on hand) when the sample is created; shortfalls surface as warnings, not errors.
 // ---------------------------------------------------------------------------
 
-export type WriteoffRow = {
-  // Stable across re-renders: BOM lines key by their server id.
-  key: string;
-  bomItemId: number;
-  lineKey: string;
-  materialId: number;
-  label: string;
-  material?: common_Material;
-  unit: string;
-  /** Spec consumption for this line, '' when the colourway recipe has no norm for it. */
-  spec: string;
-  onHand: number;
-  avgUnitCost: number;
-};
-
 /** One line as the batch will see it — after the per-material fold below. */
 export type WriteoffLine = {
   key: string;
@@ -67,9 +54,6 @@ export type WriteoffOutcome =
   | { ok: true; lines: WriteoffPostedLine[] }
   | { ok: false; error: string };
 
-const materialText = (m?: common_Material): string =>
-  `${m?.code ? `${m.code} · ` : ''}${m?.name ?? `#${m?.id ?? '?'}`}`;
-
 export function todayISO(): string {
   // Local wall-clock date (not toISOString) — mirrors the warehouse movement modals so a
   // write-off is dated the operator's "today", not a UTC day-off around midnight.
@@ -79,40 +63,64 @@ export function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
-// The spec quantity of one BOM line: the colourway recipe's consumption norm
-// (TechCardColorwayUsage), preferring the sample's own colourway and its own size before
-// falling back to any colourway that has a norm for the line. '' when the style has no
-// recipe yet.
+// The colourway's GARMENT-LEVEL usage of a BOM line (piece-level usages are per-piece norms, not the
+// line's). A real colourway answers only for itself; the `sample` colourway (0) borrows the first
+// colourway that has a garment-level usage for the line.
+function garmentUsage(
+  techCard: common_TechCard | undefined,
+  bomItemId: number,
+  colorwayId: number,
+): common_TechCardColorwayUsage | undefined {
+  if (!bomItemId) return undefined;
+  const usageOf = (cw: common_AdminColorwayRef) =>
+    (cw.usages ?? []).find(
+      (u) =>
+        wireInt(u.bomItemId) === bomItemId &&
+        !(u.pieceLineKey ?? '').trim() &&
+        u.pieceIndex === undefined &&
+        !wireInt(u.pieceId),
+    );
+  const colorways = techCard?.colorways ?? [];
+  if (colorwayId > 0) {
+    const own = colorways.find((cw) => wireInt(cw.colorwayId) === colorwayId);
+    return own ? usageOf(own) : undefined;
+  }
+  for (const cw of colorways) {
+    const u = usageOf(cw);
+    if (u) return u;
+  }
+  return undefined;
+}
+
+/** The article a line is cut from in this colourway: the usage's pinned material, else the line's. */
+export function lineMaterialId(
+  techCard: common_TechCard | undefined,
+  bomItem: common_TechCardBomItem,
+  colorwayId: number,
+): number {
+  return (
+    wireInt(garmentUsage(techCard, wireInt(bomItem.id), colorwayId)?.materialId) ||
+    wireInt(bomItem.materialId)
+  );
+}
+
+// The spec quantity of one BOM line: the colourway's garment-level consumption norm. A per-size
+// recipe answers only for the size ('' when that size has none); otherwise the scalar norm. ''
+// when there is no recipe.
 export function specQuantity(
   techCard: common_TechCard | undefined,
   bomItemId: number,
   colorwayId: number,
   sizeId: number,
 ): string {
-  if (!bomItemId) return '';
-  const colorways = techCard?.colorways ?? [];
-  const usageOf = (cw: (typeof colorways)[number]) =>
-    (cw.usages ?? []).find((u) => wireInt(u.bomItemId) === bomItemId);
-  const own = colorwayId
-    ? colorways.find((cw) => wireInt(cw.colorwayId) === colorwayId)
-    : undefined;
-  let usage = own ? usageOf(own) : undefined;
-  if (!usage) {
-    for (const cw of colorways) {
-      usage = usageOf(cw);
-      if (usage) break;
-    }
-  }
+  const usage = garmentUsage(techCard, bomItemId, colorwayId);
   if (!usage) return '';
-  const bySize = sizeId
-    ? (usage.sizeConsumptions ?? []).find((s) => wireInt(s.sizeId) === sizeId)
-    : undefined;
-  return (
-    decimalToInput(bySize?.consumption) ||
-    decimalToInput(usage.consumption) ||
-    decimalToInput(usage.quantity) ||
-    ''
-  );
+  const sizes = usage.sizeConsumptions ?? [];
+  if (sizes.length) {
+    const bySize = sizeId ? sizes.find((s) => wireInt(s.sizeId) === sizeId) : undefined;
+    return decimalToInput(bySize?.consumption);
+  }
+  return decimalToInput(usage.consumption) || decimalToInput(usage.quantity) || '';
 }
 
 /**
@@ -121,7 +129,9 @@ export function specQuantity(
  * value builds a Map of "12" that `.get(12)` can never hit.
  */
 export function useStockIndex() {
-  const { data, isLoading, isError } = useMaterialStock({ withStockOnly: false });
+  const { data, isLoading, isError, isSuccess, refetch } = useMaterialStock({
+    withStockOnly: false,
+  });
   const rowByMaterial = useMemo(() => {
     const m = new Map<number, common_MaterialStockRow>();
     for (const r of data?.rows ?? []) {
@@ -131,42 +141,19 @@ export function useStockIndex() {
     return m;
   }, [data]);
   const baseCurrency = (data?.rows ?? []).find((r) => r.baseCurrency)?.baseCurrency ?? '';
-  return { rowByMaterial, rows: data?.rows ?? [], baseCurrency, isLoading, isError };
+  return {
+    rowByMaterial,
+    rows: data?.rows ?? [],
+    baseCurrency,
+    isLoading,
+    isError,
+    isSuccess,
+    refetch,
+  };
 }
 
 export const stockOnHand = (r?: common_MaterialStockRow): number =>
   parseDecimalNumber(decimalToInput(r?.onHand));
-export const stockAvgCost = (r?: common_MaterialStockRow): number =>
-  parseDecimalNumber(decimalToInput(r?.avgUnitCostBase));
-
-/** One row per BOM line that links a catalog material, with its spec for the size/colourway. */
-export function bomWriteoffRows(
-  techCard: common_TechCard | undefined,
-  rowByMaterial: Map<number, common_MaterialStockRow>,
-  colorwayId: number,
-  sizeId: number,
-): WriteoffRow[] {
-  return (techCard?.techCard?.bomItems ?? [])
-    .filter((b) => wireInt(b.materialId) > 0)
-    .map((b, i) => {
-      const materialId = wireInt(b.materialId);
-      const stock = rowByMaterial.get(materialId);
-      const material = stock?.material;
-      return {
-        key: `bom-${wireInt(b.id) || b.lineKey || i}`,
-        bomItemId: wireInt(b.id),
-        lineKey: b.lineKey ?? '',
-        materialId,
-        label: b.name?.trim() || materialText(material),
-        material,
-        unit: b.unit?.trim() || material?.unit || '',
-        spec: specQuantity(techCard, wireInt(b.id), colorwayId, sizeId),
-        onHand: stockOnHand(stock),
-        avgUnitCost: stockAvgCost(stock),
-      };
-    });
-}
-
 // Sum two sheet quantities, rounding back to 3 decimals to undo float noise only.
 function addQuantities(a: string, b: string): string {
   const sum = (parseDecimalNumber(a) || 0) + (parseDecimalNumber(b) || 0);

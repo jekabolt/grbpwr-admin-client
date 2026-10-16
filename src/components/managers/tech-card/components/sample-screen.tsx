@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
   common_Fitting,
@@ -11,7 +12,10 @@ import { verdictLabel } from 'components/managers/fittings/components/utils';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
-import { useIssueMaterialStock } from 'components/managers/materials/components/useWarehouse';
+import {
+  useIssueMaterialStock,
+  warehouseKeys,
+} from 'components/managers/materials/components/useWarehouse';
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -36,6 +40,7 @@ import { SampleDeleteControl } from './sample-delete';
 import { samplePurposeLabel, sampleStatusLabel } from './sample-options';
 import {
   fittingsNewestFirst,
+  lineMaterialId,
   openChangeRequests,
   SampleReturns,
   specQuantity,
@@ -259,26 +264,37 @@ export function SampleScreen({
     if (!sampleId) return;
     try {
       const fresh = await adminService.GetSample({ id: sampleId }).catch(() => undefined);
+      const mine = {
+        techCardId,
+        purpose: d.purpose,
+        sizeId: d.sizeId || 0,
+        colorwayId: d.colorwayId || 0,
+        status: d.status,
+        fabricSource: d.fabricSource,
+        notes: d.notes.trim(),
+        startedAt: d.startedAt,
+        finishedAt: d.finishedAt,
+        mediaIds: d.mediaIds,
+        patternUrl: d.patternUrl.trim(),
+        patternNote: d.patternNote.trim(),
+        roundNumber: d.roundNumber || 0,
+        specReleaseId: d.specReleaseId || 0,
+        previousSampleId: d.previousSampleId || 0,
+      };
+      const server = fresh?.sample?.sample;
+      // Only what THIS draft changed goes over the server's copy: the automatic `done`, a
+      // colleague's edit, anything written since the draft was opened survives the save. Without a
+      // fresh read, the whole draft goes with the ORIGINAL lock version so a conflict surfaces.
+      const keys = (Object.keys(DRAFT_LABELS) as (keyof Draft)[]).filter(
+        (k) => JSON.stringify(base[k]) !== JSON.stringify(d[k]),
+      );
+      const sampleOut = server
+        ? { ...server, ...Object.fromEntries(keys.map((k) => [k, mine[k]])) }
+        : mine;
       await save.mutateAsync({
         id: sampleId,
-        expectedLockVersion: fresh?.sample?.lockVersion ?? sample.lockVersion ?? 0,
-        sample: {
-          techCardId,
-          purpose: d.purpose,
-          sizeId: d.sizeId || 0,
-          colorwayId: d.colorwayId || 0,
-          status: d.status,
-          fabricSource: d.fabricSource,
-          notes: d.notes.trim(),
-          startedAt: d.startedAt,
-          finishedAt: d.finishedAt,
-          mediaIds: d.mediaIds,
-          patternUrl: d.patternUrl.trim(),
-          patternNote: d.patternNote.trim(),
-          roundNumber: d.roundNumber || 0,
-          specReleaseId: d.specReleaseId || 0,
-          previousSampleId: d.previousSampleId || 0,
-        },
+        expectedLockVersion: server ? fresh?.sample?.lockVersion ?? 0 : sample.lockVersion ?? 0,
+        sample: sampleOut,
       });
     } catch (e) {
       throw new Error(saveSampleErrorMessage(e), { cause: e });
@@ -711,6 +727,7 @@ function MaterialsBlock({
   const issued = useSampleIssued(sampleId);
   const { data: subsData } = useSampleSubstitutions(sampleId);
   const issue = useIssueMaterialStock();
+  const qc = useQueryClient();
   const [showMovements, setShowMovements] = useState(false);
   const [picking, setPicking] = useState(false);
   const [adding, setAdding] = useState<common_Material | null>(null);
@@ -741,7 +758,7 @@ function MaterialsBlock({
     const noNormLines: { label: string; lineKey: string }[] = [];
     for (const b of techCard?.techCard?.bomItems ?? []) {
       const bid = wireInt(b.id);
-      const materialId = subByLine.get(bid) || wireInt(b.materialId);
+      const materialId = subByLine.get(bid) || lineMaterialId(techCard, b, colorwayId);
       if (!materialId) {
         unlinkedN += 1;
         continue;
@@ -819,6 +836,9 @@ function MaterialsBlock({
         productId: 0,
         lotId: 0,
       });
+      // Hold the lock until the ledger this block reads has re-read: a second click on the
+      // still-short tile would otherwise issue the same remainder twice.
+      await qc.invalidateQueries({ queryKey: warehouseKeys.movements({ sampleId }, 50) });
     } catch (e) {
       showMessage(e instanceof Error ? e.message : "couldn't write the material off", 'error');
     } finally {
@@ -853,7 +873,7 @@ function MaterialsBlock({
 
   const submitAdd = async () => {
     const qty = parseDecimalNumber(addQty);
-    if (!adding || !(qty > 0)) return;
+    if (!adding || !(qty > 0) || pendingKey) return;
     await issueQty('add', wireInt(adding.id), qty);
     setAdding(null);
     setAddQty('');

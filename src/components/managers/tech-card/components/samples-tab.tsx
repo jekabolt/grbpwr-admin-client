@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
+import { Progress } from 'ui/components/progress';
 import { Section } from 'ui/components/section';
 import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -126,11 +127,37 @@ export function SamplesTab({
             />
           ))}
           {canEdit && (
-            <Tile dashed onClick={auto.ready && !auto.busy ? auto.start : undefined}>
+            <Tile
+              dashed
+              onClick={
+                auto.sourceError
+                  ? auto.refetchSources
+                  : auto.ready && !auto.busy
+                    ? auto.start
+                    : undefined
+              }
+              className='relative'
+            >
               <span className='flex min-h-[170px] flex-col items-center justify-center gap-1 text-center uppercase tracking-label'>
-                <span className='text-micro'>{auto.busy ? 'creating…' : '+ sample'}</span>
-                <span className='text-nano text-labelColor'>{auto.ready ? auto.preview : '…'}</span>
+                {auto.progress ? (
+                  <span className='text-micro'>{auto.progress.label}</span>
+                ) : auto.sourceError ? (
+                  <span className='text-micro text-error'>{auto.sourceError} · retry</span>
+                ) : (
+                  <>
+                    <span className='text-micro'>+ sample</span>
+                    <span className='text-nano text-labelColor'>
+                      {auto.ready ? auto.preview : '…'}
+                    </span>
+                  </>
+                )}
               </span>
+              {auto.progress && (
+                <Progress
+                  value={(auto.progress.done / Math.max(1, auto.progress.total)) * 100}
+                  className='absolute inset-x-0 bottom-0 h-0.5 bg-transparent'
+                />
+              )}
             </Tile>
           )}
         </Tiles>
