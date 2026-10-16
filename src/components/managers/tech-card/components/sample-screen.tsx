@@ -139,7 +139,7 @@ function changedFields(base: Draft, draft: Draft): string[] {
 
 // The draft holds media IDS only; the resolved records ride along so a re-opened screen can show
 // the staged photo.
-type SampleSnapshot = { draft: Draft; media: common_MediaFull[] };
+type SampleSnapshot = { draft: Draft; media: common_MediaFull[]; touched?: (keyof Draft)[] };
 
 const pad = (n: number) => String(n).padStart(2, '0');
 /** `16/10` — every date on this screen. */
@@ -224,13 +224,27 @@ export function SampleScreen({
   // Any list refetch re-delivers `sample` — without the dirty guard that reset silently overwrote
   // in-progress edits with server state.
   const [dirty, setDirty] = useState(false);
+  // The keys the person actually touched. Only these count as edits and only these go over the
+  // server's copy on save — a field the server moved meanwhile (the automatic `done`, a colleague)
+  // must not read as a local change just because the draft still holds the older value.
+  const [touched, setTouched] = useState<Set<keyof Draft>>(new Set());
   const [mediaById, setMediaById] = useState<Map<number, common_MediaFull>>(new Map());
   useEffect(() => {
-    if (dirty) return;
+    if (dirty) {
+      // Keep what was touched, take everything else from the server so the screen never shows a
+      // stale status / date next to the edits.
+      setD((prev) => {
+        const next = draftFrom(sample);
+        for (const k of touched) (next as Record<keyof Draft, unknown>)[k] = prev[k];
+        return next;
+      });
+      return;
+    }
     setD(draftFrom(sample));
     const m = new Map<number, common_MediaFull>();
     (sample.media ?? []).forEach((mf) => mf.id && m.set(mf.id, mf));
     setMediaById(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sample, dirty]);
 
   // Pick up edits this sample already had staged — the screen unmounts while its change is still
@@ -240,6 +254,7 @@ export function SampleScreen({
     const snap = stagedSnapshot(stagingKey) as SampleSnapshot | undefined;
     if (!snap) return;
     setD(snap.draft);
+    setTouched(new Set(snap.touched ?? (Object.keys(DRAFT_LABELS) as (keyof Draft)[])));
     setMediaById(new Map((snap.media ?? []).filter((m) => m.id).map((m) => [m.id!, m])));
     setDirty(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,11 +262,22 @@ export function SampleScreen({
 
   const set = (p: Partial<Draft>) => {
     setDirty(true);
+    setTouched((prev) => new Set([...prev, ...(Object.keys(p) as (keyof Draft)[])]));
     setD((prev) => ({ ...prev, ...p }));
   };
 
   const base = useMemo(() => draftFrom(sample), [sample]);
-  const changed = useMemo(() => changedFields(base, d), [base, d]);
+  // A field set back to the server's value stops being an edit right away, so a later refetch takes
+  // the server's (possibly newer) value for it instead of re-applying the old one.
+  useEffect(() => {
+    const back = [...touched].filter((k) => JSON.stringify(base[k]) === JSON.stringify(d[k]));
+    if (back.length) setTouched((prev) => new Set([...prev].filter((k) => !back.includes(k))));
+  }, [base, d, touched]);
+  const changed = useMemo(
+    () =>
+      changedFields(base, d).filter((label) => [...touched].some((k) => DRAFT_LABELS[k] === label)),
+    [base, d, touched],
+  );
   const staged = canEdit && changed.length > 0;
   const mediaLinks = d.mediaIds
     .map((id) => mediaById.get(id))
@@ -285,9 +311,9 @@ export function SampleScreen({
       // Only what THIS draft changed goes over the server's copy: the automatic `done`, a
       // colleague's edit, anything written since the draft was opened survives the save. Without a
       // fresh read, the whole draft goes with the ORIGINAL lock version so a conflict surfaces.
-      const keys = (Object.keys(DRAFT_LABELS) as (keyof Draft)[]).filter(
-        (k) => JSON.stringify(base[k]) !== JSON.stringify(d[k]),
-      );
+      // Touched AND still different from the server: a field set back to the server's value is
+      // not an edit, and sending it would overwrite whatever the server holds by now.
+      const keys = [...touched].filter((k) => JSON.stringify(base[k]) !== JSON.stringify(d[k]));
       const sampleOut = server
         ? { ...server, ...Object.fromEntries(keys.map((k) => [k, mine[k]])) }
         : mine;
@@ -306,7 +332,12 @@ export function SampleScreen({
   useEffect(() => {
     if (!staging || !sampleId || !canEdit) return;
     if (changed.length === 0) {
-      if (dirty) staging.unstage(stagingKey);
+      // Everything set back: no edit left, so nothing may linger to resurrect it on a refetch.
+      if (dirty) {
+        staging.unstage(stagingKey);
+        setDirty(false);
+        setTouched(new Set());
+      }
       return;
     }
     staging.stage({
@@ -316,14 +347,29 @@ export function SampleScreen({
       }`,
       order: COMMIT_ORDER.samples,
       commit: commitSample,
-      settle: () => setDirty(false),
-      snapshot: { draft: d, media: mediaLinks } satisfies SampleSnapshot,
+      settle: () => {
+        setDirty(false);
+        setTouched(new Set());
+      },
+      snapshot: { draft: d, media: mediaLinks, touched: [...touched] } satisfies SampleSnapshot,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, sampleId, stagingKey, canEdit, dirty, changed, d, mediaById, sample.number]);
+  }, [
+    staging,
+    sampleId,
+    stagingKey,
+    canEdit,
+    dirty,
+    changed,
+    d,
+    mediaById,
+    sample.number,
+    touched,
+  ]);
 
   const discardEdits = () => {
     staging?.unstage(stagingKey);
+    setTouched(new Set());
     setDirty(false);
   };
   const afterDelete = () => {
