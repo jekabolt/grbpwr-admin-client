@@ -183,17 +183,14 @@ function LinkProjectDialog({
       open={open}
       onOpenChange={(o) => !o && close()}
       onConfirm={submit}
-      title='link a project'
-      confirmLabel={linkProject.isPending ? 'linking…' : 'link'}
+      title='link project'
+      confirmLabel={linkProject.isPending ? 'linking…' : 'link project'}
+      hideCancel
       confirmDisabled={!picked || linkProject.isPending}
       closeOnConfirm={false}
       width='md'
     >
       <div className='flex flex-col gap-2'>
-        <Text size='micro' variant='label'>
-          a project is a topic in the file library with dates and an archive — a shoot, a lookbook,
-          a backup of the source files. linking says “this garment is what that project is about”.
-        </Text>
         <Input
           name='projectSearch'
           value={search}
@@ -206,9 +203,7 @@ function LinkProjectDialog({
           </Text>
         ) : projects.length === 0 ? (
           <Text size='micro' variant='label'>
-            {search.trim()
-              ? 'no project answers to this name'
-              : 'not a single project is started yet — a topic becomes one on the topics screen of the file library'}
+            {search.trim() ? 'no project answers to this name' : 'no projects yet'}
           </Text>
         ) : (
           <div className='max-h-72 overflow-y-auto'>
@@ -326,9 +321,6 @@ export function StyleProjects({ techCardId }: { techCardId: number }) {
         <Text size='micro' variant='label' component='span'>
           {links.length}
         </Text>
-        <Text size='micro' variant='label' component='span' className='min-w-0'>
-          — the file library knows this garment under them
-        </Text>
         {writable && (
           <span className='ml-auto shrink-0'>
             <Button type='button' variant='underline' size='xs' onClick={() => setLinking(true)}>
@@ -355,20 +347,20 @@ export function StyleProjects({ techCardId }: { techCardId: number }) {
       />
 
       {/* «ОТВЯЗАТЬ» РЯДОМ С «УДАЛИТЬ» ЧИТАЕТСЯ ОДИНАКОВО ТРЕВОЖНО, а последствия у них разные,
-          поэтому подтверждение называет их прямо: уходит СТРОКА СВЯЗИ и больше ничего. */}
+          поэтому подтверждение называет их одной строкой: уходит только связь. */}
       <ConfirmationModal
         open={!!unlinking}
         onOpenChange={(o) => !o && setUnlinking(undefined)}
         onConfirm={doUnlink}
-        title={`unlink “${unlinking?.name ?? ''}”`}
-        confirmLabel={unlinkProject.isPending ? 'unlinking…' : 'unlink'}
+        title={`unlink project “${unlinking?.name ?? ''}”?`}
+        confirmLabel={unlinkProject.isPending ? 'unlinking…' : 'unlink project'}
+        hideCancel
         confirmDisabled={unlinkProject.isPending}
         closeOnConfirm={false}
         width='sm'
       >
-        <Text>
-          only the link goes. the project stays where it is, and so does every file in it — the
-          .zprj and the .dxf this garment was made with are not touched. link it back at any time.
+        <Text size='micro' variant='label'>
+          files stay in the project
         </Text>
       </ConfirmationModal>
     </div>

@@ -2,6 +2,7 @@ import { techCardIssueSeverityOptions, techCardIssueStatusOptions } from 'consta
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Placeholder } from 'ui/components/placeholder';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { SectionHeader } from 'ui/components/section-header';
@@ -183,11 +184,7 @@ function WhereCell({
   return (
     <span className='inline-flex flex-wrap items-center justify-end gap-1'>
       {opNumber > 0 && (
-        <Text
-          size='micro'
-          component='span'
-          title={opInfo?.label || undefined}
-        >
+        <Text size='micro' component='span' title={opInfo?.label || undefined}>
           op {opNumber}
         </Text>
       )}
@@ -368,8 +365,6 @@ export function IssuesField() {
   const issueErrors = errors.issues as unknown as Array<unknown> | undefined;
   const hasError = (index: number) => !!issueErrors?.[index];
 
-  const openCount = values.filter((v) => v?.status === OPEN).length;
-
   const removeAt = (index: number, key: string) => {
     remove(index);
     if (pinnedId === key) setPinnedId(null);
@@ -385,12 +380,14 @@ export function IssuesField() {
     <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader
         title='maker flags'
-        question='— each issue can point at an operation and a sketch callout; open ones block the release'
+        question='open ones block release'
         action={
+          // Пустая вкладка: «создать» — единственная главная кнопка экрана.
           <Button
             type='button'
-            variant='underline'
-            size='xs' className='text-labelColor hover:text-textColor'
+            variant={rows.length === 0 ? 'main' : 'underline'}
+            size={rows.length === 0 ? 'sm' : 'xs'}
+            className={rows.length === 0 ? undefined : 'text-labelColor hover:text-textColor'}
             onClick={() => {
               append({ ...emptyIssue });
               setPendingAdd(true);
@@ -402,9 +399,7 @@ export function IssuesField() {
       />
 
       {rows.length === 0 ? (
-        <Text size='micro' variant='label'>
-          no issues flagged
-        </Text>
+        <Placeholder className='h-12' label='no issues flagged' />
       ) : (
         <>
           <DataTable>
@@ -516,14 +511,6 @@ export function IssuesField() {
               })}
             </tbody>
           </DataTable>
-
-          <Text size='micro' variant='label' className='mt-1'>
-            {openCount > 0
-              ? `${openCount} open issue${openCount > 1 ? 's' : ''} block${
-                  openCount > 1 ? '' : 's'
-                } the release`
-              : 'no open issues — this tab is not holding the release'}
-          </Text>
         </>
       )}
     </div>

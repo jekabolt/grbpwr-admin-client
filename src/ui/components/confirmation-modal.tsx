@@ -45,9 +45,9 @@ interface Props {
   /** Hide the footer entirely — for shells that render their own actions. */
   hideActions?: boolean;
   /**
-   * Подпись у САМИХ КНОПОК, слева в подвале. Место ровно для одного рода вещей — сочетания
-   * клавиш, которое делает то же, что кнопка рядом. В теле формы такая подпись уезжает со
-   * скроллом и теряется среди полей, а подвал не скроллится и всегда виден.
+   * Подпись у САМИХ КНОПОК, слева в подвале, одной строкой: сочетание клавиш, которое делает то
+   * же, что кнопка рядом, или причина, по которой главная кнопка выключена. В теле формы такая
+   * подпись уезжает со скроллом и теряется среди полей, а подвал не скроллится и всегда виден.
    */
   footerHint?: React.ReactNode;
   /**
@@ -83,6 +83,13 @@ interface Props {
   onOpenAutoFocus?: (event: Event) => void;
   /** The cancel button disabled — for a dialog whose cancel is a second answer, not a way out. */
   cancelDisabled?: boolean;
+  /**
+   * Rendered in the head strip right after the title (needs `title`). The place for the modal's
+   * warnings: a `HeaderWarnings` with doors, never a paragraph in the body.
+   */
+  headerActions?: React.ReactNode;
+  /** Drop the footer's cancel button: the head's ✕ is the one way out. */
+  hideCancel?: boolean;
 }
 
 export function ConfirmationModal({
@@ -103,6 +110,8 @@ export function ConfirmationModal({
   onCloseAutoFocus,
   onOpenAutoFocus,
   cancelDisabled,
+  headerActions,
+  hideCancel,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
@@ -155,6 +164,9 @@ export function ConfirmationModal({
                   {title}
                 </Text>
               </DialogPrimitives.Title>
+              {headerActions && (
+                <div className='flex min-w-0 items-center gap-1.5'>{headerActions}</div>
+              )}
               <DialogPrimitives.Close asChild>
                 <button type='button' aria-label='close' className='ml-auto text-labelColor'>
                   ✕
@@ -203,24 +215,26 @@ export function ConfirmationModal({
               )}
               {!hideActions && (
                 <>
-              <Button
-                type='button'
-                onClick={handleCancel}
-                variant='secondary'
-                size='sm'
-                disabled={cancelDisabled}
-              >
-                {cancelLabel}
-              </Button>
-              <Button
-                type='button'
-                onClick={handleConfirm}
-                variant='main'
-                size='sm'
-                disabled={confirmDisabled || guardUnmet}
-              >
-                {confirmLabel}
-              </Button>
+                  {!hideCancel && (
+                    <Button
+                      type='button'
+                      onClick={handleCancel}
+                      variant='secondary'
+                      size='sm'
+                      disabled={cancelDisabled}
+                    >
+                      {cancelLabel}
+                    </Button>
+                  )}
+                  <Button
+                    type='button'
+                    onClick={handleConfirm}
+                    variant='main'
+                    size='sm'
+                    disabled={confirmDisabled || guardUnmet}
+                  >
+                    {confirmLabel}
+                  </Button>
                 </>
               )}
             </div>

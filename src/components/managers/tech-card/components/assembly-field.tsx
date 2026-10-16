@@ -1,4 +1,8 @@
-import { StyleAssemblyItem, StyleAssemblyLine, common_TechCardListItem } from 'api/proto-http/admin';
+import {
+  StyleAssemblyItem,
+  StyleAssemblyLine,
+  common_TechCardListItem,
+} from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
@@ -252,7 +256,9 @@ function AssemblyTile({
           name={`assembly-print-${row.key}`}
           value={row.printNote}
           disabled={!canEdit}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPatch({ printNote: e.target.value })}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onPatch({ printNote: e.target.value })
+          }
         />
       </Field>
       <Field label='position note'>
@@ -297,7 +303,12 @@ function AssemblyTile({
 
   return (
     // relative so the remove ✕ sits at the top-right OUTSIDE the popover trigger.
-    <div className={cn('relative border bg-bgColor', rowInvalid ? 'border-error' : 'border-borderColor')}>
+    <div
+      className={cn(
+        'relative border bg-bgColor',
+        rowInvalid ? 'border-error' : 'border-borderColor',
+      )}
+    >
       {canEdit && (
         <Button
           type='button'
@@ -333,7 +344,6 @@ function AssemblyTile({
           onOpenChange={setPickerOpen}
           selectedId={row.componentTechCardId}
           title='change the on-garment auxiliary item'
-          hint='labels, tags and any other auxiliary card that ships attached to the garment'
           onPick={(card) => {
             onPatch({
               componentTechCardId: card.id ?? 0,
@@ -429,7 +439,9 @@ export function AssemblyField({
   // at all-sizes is a distinct line).
   const alreadyAddedIds = useMemo(
     () =>
-      rows.filter((r) => r.sizeId === 0 && r.componentTechCardId > 0).map((r) => r.componentTechCardId),
+      rows
+        .filter((r) => r.sizeId === 0 && r.componentTechCardId > 0)
+        .map((r) => r.componentTechCardId),
     [rows],
   );
 
@@ -504,9 +516,6 @@ export function AssemblyField({
   return (
     <div className='flex flex-col gap-2'>
       <Toolbar>
-        <Text size='micro' variant='label' component='span'>
-          auxiliary items attached on or into the garment — per size, or all sizes
-        </Text>
         <ToolbarSpacer />
         {canEdit && (
           <Button
@@ -541,7 +550,6 @@ export function AssemblyField({
       ) : rows.length === 0 ? (
         <Text size='micro' variant='label'>
           no assembly lines yet
-          {canEdit ? ' — pick the auxiliary items that ship on this garment' : ''}
         </Text>
       ) : (
         <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'>
@@ -581,7 +589,6 @@ export function AssemblyField({
           onOpenChange={setPickerOpen}
           alreadyAddedIds={alreadyAddedIds}
           title='pick the on-garment auxiliary items'
-          hint='labels, tags and any other auxiliary card that ships attached to the garment'
           onPick={(cards) => {
             addCards(cards);
             setPickerOpen(false);

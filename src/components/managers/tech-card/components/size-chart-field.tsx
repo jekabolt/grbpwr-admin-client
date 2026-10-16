@@ -13,7 +13,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Placeholder } from 'ui/components/placeholder';
 import { TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
@@ -229,25 +229,13 @@ export function SizeChartField({
   }, [staging, styleId, canEdit, dirty, touched, cells, ordered]);
 
   if (!styleId) {
-    return (
-      <Text size='micro' variant='label'>
-        Save the tech card first, then enter the size chart here.
-      </Text>
-    );
+    return <Placeholder className='h-12' label='save the card first' />;
   }
   if (sizeIds.length === 0) {
-    return (
-      <Text size='micro' variant='label'>
-        Add sizes in “size range” above to enter measurements.
-      </Text>
-    );
+    return <Placeholder className='h-12' label='pick sizes first' />;
   }
   if (measurements.length === 0) {
-    return (
-      <Text size='micro' variant='label'>
-        This category has no measurement columns.
-      </Text>
-    );
+    return <Placeholder className='h-12' label='no measurement columns' />;
   }
 
   return (
@@ -297,9 +285,6 @@ export function SizeChartField({
       {canEdit && dirty && (
         <div className='flex flex-wrap items-center gap-2'>
           <Pill tone='attention'>{saving ? 'saving…' : 'staged'}</Pill>
-          <Text size='micro' variant='label' component='span' className='ml-auto'>
-            saves with the card
-          </Text>
         </div>
       )}
     </div>

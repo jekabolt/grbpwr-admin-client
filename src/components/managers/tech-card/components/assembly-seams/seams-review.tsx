@@ -15,6 +15,7 @@ import type { EdgeId, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/typ
 import type { StoredSeam, StoredSeamDirection } from 'lib/seams';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { Progress } from 'ui/components/progress';
 import { Section } from 'ui/components/section';
@@ -405,18 +406,9 @@ export function SeamsReview({
 
           <Section
             title='seams'
-            question={`— ${title}${size ? ` · size ${size}` : ''} · which edge is sewn to which`}
+            question={`${title}${size ? ` · size ${size}` : ''}`}
             action={
               <>
-                <Chip
-                  quiet
-                  onClick={acceptAllSure}
-                  disabled={frozen || sure === 0 || rereading}
-                  title='confirm every proposal the engine is sure of and reads one way only; likely and check are looked at one by one'
-                  data-seams-door='accept-sure'
-                >
-                  accept all sure ({sure})
-                </Chip>
                 <Chip
                   quiet
                   selected={!!hand}
@@ -449,16 +441,15 @@ export function SeamsReview({
                 />
               </div>
             </div>
-            <Text size='micro' variant='label' component='p'>
-              decisions are stored on the card · the engine’s proposals are read from the pattern
-              laid flat (seam lines) · a changed DXF marks them stale
-              {unreadable > 0
-                ? ` · ${unreadable} ${unreadable === 1 ? 'decision was' : 'decisions were'} written by a newer version and are not shown`
-                : ''}
-            </Text>
+            {unreadable > 0 && (
+              <Text size='micro' variant='label' component='p'>
+                {unreadable} {unreadable === 1 ? 'decision' : 'decisions'} from a newer version not
+                shown
+              </Text>
+            )}
             {frozen && (
               <Text size='micro' variant='label' component='p' data-seams-frozen=''>
-                {FROZEN_REFUSAL} — every decision is shown, none can be changed
+                {FROZEN_REFUSAL}
               </Text>
             )}
           </Section>
@@ -466,11 +457,7 @@ export function SeamsReview({
           <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px] gap-gutter'>
             <Section
               title='pieces'
-              question={
-                hand
-                  ? '— click the edges to connect'
-                  : '— every piece laid flat; an edge finds its seam, a free edge starts a connection'
-              }
+              question={hand ? 'click the edges to connect' : undefined}
               className='flex min-h-0 flex-col overflow-hidden'
             >
               <div className='min-h-0 flex-1'>
@@ -492,11 +479,7 @@ export function SeamsReview({
                 )}
               </div>
             </Section>
-            <Section
-              title='seams'
-              question='— decide each one'
-              className='flex min-h-0 flex-col overflow-hidden'
-            >
+            <Section title='seams' className='flex min-h-0 flex-col overflow-hidden'>
               <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
                 {review && (
                   <SeamRail
@@ -516,6 +499,22 @@ export function SeamsReview({
             </Section>
           </div>
 
+          {/* ONE FOOTER, ONE MAIN ACTION: confirm everything the engine is sure of (and reads one way
+              only); likely and check are decided row by row in the rail. */}
+          {!hand && !frozen && (
+            <div className='flex shrink-0 justify-end'>
+              <Button
+                type='button'
+                variant='main'
+                size='sm'
+                onClick={acceptAllSure}
+                disabled={sure === 0 || rereading}
+                data-seams-door='accept-sure'
+              >
+                accept {sure} sure ›
+              </Button>
+            </div>
+          )}
           {hand && (
             <Section>
               <ConnectStrip

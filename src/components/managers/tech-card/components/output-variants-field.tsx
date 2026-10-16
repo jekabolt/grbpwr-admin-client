@@ -232,7 +232,7 @@ function AddColourDialog({
         title={title}
         width='sm'
         confirmLabel={confirmLabel}
-        cancelLabel='cancel'
+        hideCancel
         confirmDisabled={!ready || upsert.isPending}
         // The handler closes it on success only — a refusal has to keep the answers on screen or the
         // operator retypes them blind.
@@ -243,7 +243,7 @@ function AddColourDialog({
         {availableColors.length === 0 ? (
           <CalloutBox tone='note'>
             <Text size='micro' component='span'>
-              no colours in the dictionary yet — add them under <b>settings › colors</b>
+              no colours yet · add them in <b>settings › colors</b>
             </Text>
           </CalloutBox>
         ) : (
@@ -305,11 +305,6 @@ function AddColourDialog({
                 </div>
               )}
             </div>
-            <Text size='micro' variant='label'>
-              A variant is not restricted to packaging — any material can be the bucket. The server
-              checks it is unitless-free, un-archived, and claimed by no other card, and that its
-              unit agrees with the colours already registered here.
-            </Text>
           </div>
         )}
       </ConfirmationModal>
@@ -406,12 +401,6 @@ export function OutputVariantsPanel({
 
   return (
     <div className='flex flex-col gap-2'>
-      <Text variant='inactive' size='small'>
-        this card produces one warehouse bucket per colour — each colour has its own on-hand and its
-        own moving average. The single output material no longer applies while any colour is
-        registered.
-      </Text>
-
       <GroupLabel>
         colour variants · {variants.length} ({liveCount} active)
       </GroupLabel>
@@ -490,7 +479,7 @@ export function OutputVariantsPanel({
         onOpenChange={setAddOpen}
         techCardId={techCardId}
         usedCodes={usedCodes}
-        title='register a colour'
+        title='register colour'
         confirmLabel='register'
       />
 
@@ -500,9 +489,9 @@ export function OutputVariantsPanel({
           width='sm'
           // Closable mid-flight for the same reason as the add dialog — see there.
           onOpenChange={(next) => !next && setPendingDelete(null)}
-          title={`delete ${pendingDelete.colorCode || 'colour'}?`}
-          confirmLabel='delete'
-          cancelLabel='cancel'
+          title={`delete colour ${pendingDelete.colorCode || ''}?`}
+          confirmLabel='delete colour'
+          hideCancel
           confirmDisabled={del.isPending}
           closeOnConfirm={false}
           onConfirm={confirmDelete}
@@ -510,16 +499,8 @@ export function OutputVariantsPanel({
           <Row label='colour' value={pendingDelete.colorCode || '—'} />
           <Row label='bucket' value={pendingDelete.materialName || '—'} />
           <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || '—'} />
-          <Text size='micro' variant='label' className='mt-2'>
-            Deleting unhooks the colour from this card. The material keeps its stock and its history
-            — nothing is written off and no movement is recorded. To stop planning a colour without
-            unhooking it, retire it instead.
-          </Text>
           {variants.length === 1 && (
-            <Text size='micro' variant='label' className='mt-2'>
-              This is the last colour: deleting it returns the card to single-output mode and
-              un-pins the auxiliary purpose — a registered colour is what pins it.
-            </Text>
+            <Row label='last colour' value='card goes back to one output' />
           )}
         </ConfirmationModal>
       )}
@@ -561,15 +542,8 @@ export function AdoptLegacyOutputButton({
         techCardId={techCardId}
         usedCodes={new Set<string>()}
         seedMaterialId={materialId}
-        title='adopt the output material as a colour'
+        title='adopt output as colour'
         confirmLabel='adopt'
-        note={
-          <Text size='micro' variant='label' className='mb-2'>
-            Name the colour this card has been producing all along. The material below keeps every
-            unit of stock and its whole history — this only files it under a colour, after which the
-            card switches to per-colour buckets and new colours get their own.
-          </Text>
-        }
       />
     </div>
   );

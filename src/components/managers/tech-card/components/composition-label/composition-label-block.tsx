@@ -23,6 +23,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
+import Tooltip from 'ui/components/tooltip';
 import { colorwayFullKey } from '../../care-labels/adapter';
 import { overrideRowsOf } from '../../care-labels/composition-override';
 import { isBlocking, type Hole } from '../../care-labels/holes';
@@ -879,7 +880,7 @@ export function CompositionLabelBlock({
   return (
     <Section
       title='composition label'
-      question='— sewn into every garment; click a printed value to change it'
+      question={<LegendHelp />}
       action={printDoor}
       className='w-full'
     >
@@ -1022,9 +1023,7 @@ export function CompositionLabelBlock({
             <>
               {aRow ? (
                 <div className='flex flex-col'>
-                  <GroupLabel flush action={<LabelNote>duplex · flip on the short edge</LabelNote>}>
-                    ribbon A · main label · 100 × 30 mm
-                  </GroupLabel>
+                  <GroupLabel flush>ribbon A · main label · 100 × 30 mm</GroupLabel>
                   <div className='pt-2'>{bench(aRow)}</div>
                 </div>
               ) : null}
@@ -1073,7 +1072,6 @@ export function CompositionLabelBlock({
               {shownRow && shown ? bench(shownRow, shown) : null}
             </div>
           )}
-          {rows.length > 0 && width > 0 ? <Legend /> : null}
         </div>
       </div>
     </Section>
@@ -1088,37 +1086,54 @@ function LabelNote({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Одна тихая строка под лентами: что значат линии. */
-function Legend() {
+/** `?` у заголовка: что это за лента и что значат линии — по наведению, не строкой на экране. */
+function LegendHelp() {
   const item = (glyph: React.ReactNode, text: string) => (
     <span className='flex items-center gap-2'>
       <svg aria-hidden width={18} height={10} className='shrink-0'>
         {glyph}
       </svg>
-      <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-        {text}
-      </Text>
+      {text}
     </span>
   );
   return (
-    <div className='flex flex-wrap items-center gap-x-8 gap-y-2' data-composition-legend=''>
-      {item(
-        <rect x={0.5} y={0.5} width={17} height={9} fill='#fff' stroke='var(--color-labelColor)' />,
-        'solid · cut edge',
-      )}
-      {item(
-        <line x1={9} y1={0} x2={9} y2={10} stroke='#000' strokeDasharray='2 2' />,
-        'dash · fold / sew',
-      )}
-      {item(
-        <g stroke='var(--color-borderColor)'>
-          {[0, 5, 10, 15, 20].map((x) => (
-            <line key={x} x1={x - 6} y1={10} x2={x + 4} y2={0} />
-          ))}
-        </g>,
-        'hatch · 10 mm seam, sewn in',
-      )}
-    </div>
+    <Tooltip
+      side='bottom'
+      align='start'
+      trigger={
+        <button type='button' aria-label='about the label' className='text-labelColor'>
+          ?
+        </button>
+      }
+    >
+      <div className='flex flex-col gap-1 uppercase' data-composition-legend=''>
+        <span>sewn into every garment; click a printed value to change it</span>
+        {item(
+          <rect
+            x={0.5}
+            y={0.5}
+            width={17}
+            height={9}
+            fill='#fff'
+            stroke='var(--color-labelColor)'
+          />,
+          'solid · cut edge',
+        )}
+        {item(
+          <line x1={9} y1={0} x2={9} y2={10} stroke='#000' strokeDasharray='2 2' />,
+          'dash · fold / sew',
+        )}
+        {item(
+          <g stroke='var(--color-borderColor)'>
+            {[0, 5, 10, 15, 20].map((x) => (
+              <line key={x} x1={x - 6} y1={10} x2={x + 4} y2={0} />
+            ))}
+          </g>,
+          'hatch · 10 mm seam, sewn in',
+        )}
+        <span>ribbon A: duplex, flip on the short edge</span>
+      </div>
+    </Tooltip>
   );
 }
 
