@@ -13,7 +13,7 @@ import { useMeasurements } from 'components/managers/product/utility/useMeasurem
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
@@ -97,6 +97,11 @@ export function SizeChartField({
 }) {
   const { dictionary } = useDictionary();
   const { control } = useFormContext<TechCardFormData>();
+  // Subscribed here (getFieldState alone reads dirtyFields only if someone subscribed to them).
+  const { dirtyFields } = useFormState({ control, name: 'sizeIds' });
+  // RHF marks an array field per index ([false, true, …]) or as a plain true.
+  const runDirty = dirtyFields.sizeIds as unknown;
+  const runEdited = Array.isArray(runDirty) ? runDirty.some(Boolean) : !!runDirty;
 
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
@@ -162,6 +167,9 @@ export function SizeChartField({
   const markTouched = (key: string) =>
     setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
 
+  // The chart answered at least once: before that an empty grid is «not read yet», not «empty».
+  const [chartLoaded, setChartLoaded] = useState(false);
+
   const loadChart = useCallback(() => {
     if (!styleId) return;
     adminService
@@ -191,9 +199,11 @@ export function SizeChartField({
             lastRule.current.set(nameId, { baseId: loadedBase, base, step });
         });
         setDirty(false);
+        setChartLoaded(true);
       })
       .catch(() => {
         /* no chart yet (draft) — leave the grid empty */
+        setChartLoaded(true);
         if (dirtyRef.current) return;
         setDirty(false);
       });
@@ -292,6 +302,35 @@ export function SizeChartField({
     markTouched(`reset:${nameId}`);
     writeCells(writes);
   };
+
+  // A size ADDED to the run gets its computed values written into the graded rows, so the save
+  // carries them (a placeholder alone would leave the chart without that size). Only an operator's
+  // add counts: the run seen once the chart has loaded is the baseline, and a run that moves while
+  // `sizeIds` is not dirty (the card's own read / reset) only moves the baseline. Viewing writes
+  // nothing.
+  const seenRun = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    if (!chartLoaded || ordered.length === 0) return;
+    const prev = seenRun.current;
+    seenRun.current = new Set(ordered);
+    if (!prev || !canEdit || basePos < 0 || !runEdited) return;
+    const added = ordered.filter((id) => !prev.has(id));
+    if (added.length === 0) return;
+    const writes: Array<[number, number, string]> = [];
+    for (const sizeId of added) {
+      for (const m of measurements) {
+        if (stored(sizeId, m.id) !== '') continue;
+        const c = computedOf(sizeId, m.id);
+        if (c != null) writes.push([sizeId, m.id, c]);
+      }
+    }
+    if (writes.length === 0) return;
+    setDirty(true);
+    for (const [sizeId, nameId] of writes) markTouched(cellKey(sizeId, nameId));
+    writeCells(writes);
+    // Runs on a run change only; the cells, steps and base it reads are this render's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, chartLoaded]);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
