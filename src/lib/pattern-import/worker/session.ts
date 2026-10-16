@@ -133,6 +133,8 @@ import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
 import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
+import { acceptMissing, missingEvidence } from '../assemble/holes';
+import { holeChainEnds, holeGuard } from '../pieces/holes';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -1008,6 +1010,13 @@ export class Session {
         })),
       };
     }
+    // UXHOOKS: the evidence on every missing cell (lines it cuts, line work around it), then the
+    // cells accepted as blank pages move to `holes` (a refused placement stays refused)
+    if (sheet.missing.length)
+      sheet = acceptMissing(
+        { ...sheet, missing: missingEvidence(sheet, sheet.missing) },
+        input.acceptMissing,
+      );
     this.sheet = sheet;
     const live = clean ? sheet.paths.filter((p) => !p.background) : sheet.paths;
     return {
@@ -1423,6 +1432,8 @@ export class Session {
     // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
     // own piece: its lines are not the host's internal lines.
     families = exceptNested(families);
+    // UXHOOKS (D3): no piece closes across a missing page accepted as blank
+    families = holeGuard(families, set, sheet.holes);
     const shown = seeds;
     // what was set aside and is not a piece now
     const taken = new Set<number>();
@@ -1779,6 +1790,23 @@ export class Session {
               pages: p.pages.length,
               maxResidualMm: p.maxResidualMm,
             })),
+          }
+        : {}),
+      // UXHOOKS: missing pages imported as blank, with the lines each one cuts
+      ...(this.sheet?.holes?.length
+        ? {
+            holes: (() => {
+              const hs = this.sheet!.holes!;
+              const chainEnds = this.chains ? holeChainEnds(this.chains, hs) : hs.map(() => 0);
+              return hs.map((h, k) => ({
+                sheet: h.sheet,
+                row: h.row,
+                col: h.col,
+                lineEnds: h.lineEnds,
+                chainEnds: chainEnds[k],
+                origin: h.origin,
+              }));
+            })(),
           }
         : {}),
       sizeEncoding: this.run?.encoding ?? 'single',

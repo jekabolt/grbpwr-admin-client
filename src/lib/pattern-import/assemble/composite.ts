@@ -167,7 +167,16 @@ export function assembleAllSheets(
           : p,
       );
     out.pairs.push(...s.pairs);
-    out.missing.push(...s.missing.map((m) => ({ ...m, sheet: k })));
+    // UXHOOKS: a missing cell's paper moves with its sheet
+    const mv = (b: BoxMm) => (dx || dy ? shiftBox(b, dx, dy) : b);
+    out.missing.push(
+      ...s.missing.map((m) => ({
+        ...m,
+        sheet: k,
+        ...(m.box ? { box: mv(m.box) } : {}),
+        ...(m.open ? { open: mv(m.open) } : {}),
+      })),
+    );
     // REG (D3): a refused placement of any one sheet refuses the drawing
     if (s.refused?.length)
       (out.refused ??= []).push(...s.refused.map((r) => (multi ? `sheet ${k + 1}: ${r}` : r)));
