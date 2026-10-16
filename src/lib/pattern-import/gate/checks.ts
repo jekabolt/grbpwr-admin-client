@@ -44,7 +44,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { foldShapeProblem } from '../semantics/fold';
-import { GRAIN_INSIDE_TOL_MM, grainOutsideMm } from '../semantics/grain-inside';
+import { GRAIN_INSIDE_TOL_MM, grainOutsideMm, pointOnRings } from '../semantics/grain-inside';
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
@@ -675,8 +675,7 @@ export function g5(ctx: GateCtx): GateCheck {
         // short piece by design; its middle may not leave it)
         if (cut && cut.length >= 3) {
           const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-          if (grainOutsideMm(mid, mid, [cut]) > 0)
-            bad('the grain arrow is centred outside the cut line');
+          if (!pointOnRings(mid, [cut])) bad('the grain arrow is centred outside the cut line');
         }
       }
     }
@@ -689,7 +688,7 @@ export function g5(ctx: GateCtx): GateCheck {
       const g = s.grain;
       if ((g.evidence ?? []).includes('dxf-layer')) {
         const mid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
-        if (grainOutsideMm(mid, mid, [s.cut]) > 0)
+        if (!pointOnRings(mid, [s.cut]))
           bad(`the source's grain arrow (${g.origin}) is centred outside the cut line`);
       } else {
         const off = grainOutsideMm(g.a, g.b, [s.cut]);

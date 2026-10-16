@@ -116,6 +116,18 @@ function unit() {
     true,
   );
   check('ok' in edge, 'a fold line on the drawn edge (0.6 mm off) is offered', edge);
+  // the gate's midpoint test: a zero-length segment is one point
+  check(
+    grainOutsideMm({ x: 892, y: 2300 }, { x: 892, y: 2300 }, [drawn]) === 0 &&
+      grainOutsideMm({ x: 1000, y: 2300 }, { x: 1000, y: 2300 }, [drawn]) === Infinity,
+    'one point: 0 on the piece, Infinity off it',
+  );
+  // a line along an edge and through vertices: parity holds, the edge is on the piece
+  check(
+    grainOutsideMm({ x: 862, y: 2150 }, { x: 862, y: 2600 }, [drawn]) === 0 &&
+      grainOutsideMm({ x: 850, y: 2140 }, { x: 930, y: 2140 }, [drawn]) > 15,
+    'along an edge: on it; along the fold edge past both corners: the overhang counts',
+  );
   // too short
   const tiny = rect(0, 0, 12, 18);
   const t = vetProposal({ a: { x: 6, y: 2 }, b: { x: 6, y: 16 }, why: 'long axis' }, [tiny], true);
@@ -166,6 +178,12 @@ function corpus() {
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Rec[] | { cases?: Rec[]; results?: Rec[] };
   const recs: Rec[] = Array.isArray(raw) ? raw : raw.cases ?? raw.results ?? [];
   console.log(`  ${file}: ${recs.length} cases`);
+  if (!recs.some((r) => 'grainProposals' in r)) {
+    console.log(
+      '  the report predates the grainProposals field (e2e-entry.ts) — corpus part skipped',
+    );
+    return;
+  }
   let n = 0;
   let off = 0;
   let minLen = Infinity;

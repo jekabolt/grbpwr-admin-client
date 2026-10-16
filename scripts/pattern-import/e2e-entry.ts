@@ -15,7 +15,7 @@ import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { readPieceText } from 'lib/pattern-import/dictionary';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
-import { grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
+import { fitGrainInside, grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
@@ -1327,7 +1327,19 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         if (!f) continue;
         const bb = f.candidates[0].bbox;
         const cx = (bb.minX + bb.maxX) / 2;
-        grain[sd] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
+        const a = { x: cx, y: bb.minY + 30 };
+        const b = { x: cx, y: bb.maxY - 30 };
+        // the operator clicks both ends ON the piece (G5 refuses a grain off it): the vertical
+        // through the box, kept to the stretch inside every exported size
+        const fit = fitGrainInside(
+          a,
+          b,
+          f.candidates
+            .filter((x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank))
+            .map((x) => x.outer),
+          { minMm: 5 },
+        );
+        grain[sd] = fit ? { a: fit[0], b: fit[1] } : { a, b };
       }
       if (drawn.length)
         op('grain', `draw grain on ${drawn.length} pieces (row + 2 ends each)`, drawn.length);

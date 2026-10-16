@@ -66,6 +66,7 @@ import {
 } from '../use-import-session';
 import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
 import { fallbackGrain } from './grain';
+import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { deterministicCodes } from './names';
 import { bulkNames, codeBlocked } from '../bulk-names';
 import { seedPoints } from './seeds';
@@ -1535,8 +1536,22 @@ function meaningStep(snap: Snap): AutopilotDecision {
       continue;
     }
     const ring = outlineOf(famOf(b.seed), mapped);
-    const g = ring ? fallbackGrain(ring) : null;
-    if (!g) return stopAt('meaning', `${subj(b.seed)}: no outline to lay a grainline on`);
+    const g0 = ring ? fallbackGrain(ring) : null;
+    if (!g0) return stopAt('meaning', `${subj(b.seed)}: no outline to lay a grainline on`);
+    // GRAIN lane: measured on the largest outline, applied as drawn to every size — so fitted
+    // onto every exported size's outline (G5 refuses a grain off its piece), else asked
+    const rings = (famOf(b.seed)?.candidates ?? [])
+      .filter(
+        (c) => c.outcome === 'closed' && c.outer.length > 2 && (!mapped || mapped.has(c.rank)),
+      )
+      .map((c) => c.outer);
+    const fit = fitGrainInside(g0.a, g0.b, rings.length ? rings : [ring!]);
+    if (!fit)
+      return stopAt(
+        'meaning',
+        `${subj(b.seed)}: no grainline along ${g0.from === 'edge' ? 'its straight edge' : 'its axis'} fits inside the piece in every size — draw it`,
+      );
+    const g = { ...g0, a: fit[0], b: fit[1] };
     operatorGrain[b.seed] = { a: g.a, b: g.b };
     out.push(
       A(

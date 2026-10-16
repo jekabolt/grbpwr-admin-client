@@ -10,25 +10,74 @@
 // (G5) re-measures the written grain against the written cut line with the same test.
 
 import type { PtMm } from '../types';
-import { closestOnPolyline, pointInPolygon } from './geom';
+import { SegIndex, closestOnPolyline, pointInPolygon } from './geom';
 
 /** A point within this of an outline is on it (a fold line along the drawn half's edge). */
 export const GRAIN_INSIDE_TOL_MM = 1;
 /** A proposal shorter than this is no grainline to lay a piece by. */
 export const GRAIN_PROPOSAL_MIN_MM = 20;
-/** Sampling step along a line (≤ the tolerance, so nothing wider than it is stepped over). */
+/** Sampling step along a line (≤ the tolerance, so nothing wider than it is stepped over)… */
 const STEP_MM = 0.5;
+/** …and at most this many samples per line (a 2 m line is still sampled every 0.5 mm). */
+const MAX_SAMPLES = 4000;
 /** The fitted line spans this share of the stretch it lies on (grain-propose.ts CHORD_SHARE). */
 const FIT_SHARE = 0.7;
 
-const insideRing = (p: PtMm, ring: readonly PtMm[], tol: number) =>
-  pointInPolygon(p, ring) || closestOnPolyline(p, ring, true).d <= tol;
-const insideAll = (p: PtMm, rings: readonly (readonly PtMm[])[], tol: number) =>
-  rings.every((r) => r.length < 3 || insideRing(p, r, tol));
+/** One point on every outline (inside, or within `tol` of its line). */
+export function pointOnRings(
+  p: PtMm,
+  rings: readonly (readonly PtMm[])[],
+  tol = GRAIN_INSIDE_TOL_MM,
+): boolean {
+  return rings.every(
+    (r) => r.length < 3 || pointInPolygon(p, r) || closestOnPolyline(p, r, true).d <= tol,
+  );
+}
+
+/**
+ * Containment of the points of ONE line (through `a` along unit `u`) in every ring: each ring is
+ * crossed once (its crossings with the line, half-open rule — parity is exact even through a vertex
+ * or along an edge), and a point outside by parity is still on the ring within `tol` of its line
+ * (grid index). Linear in the rings' size, then O(log n) per sample — no per-sample polygon scan.
+ */
+function lineProbe(a: PtMm, u: PtMm, rings: readonly (readonly PtMm[])[], tol: number) {
+  const nrm = { x: -u.y, y: u.x };
+  const per = rings.map((r) => {
+    const ts: number[] = [];
+    const n = r.length;
+    for (let i = 0; i < n; i++) {
+      const p = r[i];
+      const q = r[(i + 1) % n];
+      const sp = (p.x - a.x) * nrm.x + (p.y - a.y) * nrm.y;
+      const sq = (q.x - a.x) * nrm.x + (q.y - a.y) * nrm.y;
+      if (sp > 0 === sq > 0) continue;
+      const k = sp / (sp - sq);
+      ts.push((p.x + (q.x - p.x) * k - a.x) * u.x + (p.y + (q.y - p.y) * k - a.y) * u.y);
+    }
+    ts.sort((x, y) => x - y);
+    return { ts, idx: new SegIndex([{ pts: r, closed: true }], Math.max(2, 4 * tol)) };
+  });
+  return (t: number): boolean =>
+    per.every(({ ts, idx }) => {
+      // crossings strictly before t
+      let lo = 0;
+      let hi = ts.length;
+      while (lo < hi) {
+        const m = (lo + hi) >> 1;
+        if (ts[m] < t) lo = m + 1;
+        else hi = m;
+      }
+      if (lo % 2 === 1) return true;
+      return idx.nearest({ x: a.x + u.x * t, y: a.y + u.y * t }, tol) <= tol;
+    });
+}
+
+const liveRings = (rings: readonly (readonly PtMm[])[]) => rings.filter((r) => r.length >= 3);
 
 /**
  * How much of the segment a→b lies outside any of `rings` by more than `tol` (mm, sampled every
- * 0.5 mm, both ends included). 0 = the segment lies on every outline.
+ * ≤ 0.5 mm — at most 4000 samples — both ends included). 0 = the segment lies on every outline.
+ * A zero-length segment is one point: 0 on the outlines, else Infinity.
  */
 export function grainOutsideMm(
   a: PtMm,
@@ -36,14 +85,15 @@ export function grainOutsideMm(
   rings: readonly (readonly PtMm[])[],
   tol = GRAIN_INSIDE_TOL_MM,
 ): number {
+  const live = liveRings(rings);
   const L = Math.hypot(b.x - a.x, b.y - a.y);
-  const n = Math.max(1, Math.ceil(L / STEP_MM));
+  if (!(L > 0)) return pointOnRings(a, live, tol) ? 0 : Infinity;
+  if (!live.length) return 0;
+  const inside = lineProbe(a, { x: (b.x - a.x) / L, y: (b.y - a.y) / L }, live, tol);
+  const n = Math.min(MAX_SAMPLES, Math.max(1, Math.ceil(L / STEP_MM)));
   let out = 0;
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    if (!insideAll({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, rings, tol))
-      out += i === 0 || i === n ? L / n / 2 : L / n;
-  }
+  for (let i = 0; i <= n; i++)
+    if (!inside((L * i) / n)) out += i === 0 || i === n ? L / n / 2 : L / n;
   return out;
 }
 
@@ -63,9 +113,8 @@ export function fitGrainInside(
   const minMm = opts.minMm ?? GRAIN_PROPOSAL_MIN_MM;
   const L = Math.hypot(b.x - a.x, b.y - a.y);
   if (!(L > 0)) return null;
-  const live = rings.filter((r) => r.length >= 3);
-  if (!live.length) return L >= minMm ? [a, b] : null;
-  if (grainOutsideMm(a, b, live, tol) === 0) return L >= minMm ? [a, b] : null;
+  const live = liveRings(rings);
+  if (!live.length || grainOutsideMm(a, b, live, tol) === 0) return L >= minMm ? [a, b] : null;
   const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
   // the line's parameter range over every outline (projections of their vertices)
   let lo = Infinity;
@@ -78,13 +127,14 @@ export function fitGrainInside(
     }
   lo -= tol;
   hi += tol;
-  const n = Math.max(1, Math.ceil((hi - lo) / STEP_MM));
+  const inside = lineProbe(a, u, live, tol);
+  const n = Math.min(MAX_SAMPLES, Math.max(1, Math.ceil((hi - lo) / STEP_MM)));
   const at = (i: number) => lo + ((hi - lo) * i) / n;
   // runs of samples inside every outline; the one that overlaps [0, L] most (else the longest)
   let best: { t0: number; t1: number; score: number } | null = null;
   let start = -1;
   for (let i = 0; i <= n + 1; i++) {
-    const ok = i <= n && insideAll({ x: a.x + u.x * at(i), y: a.y + u.y * at(i) }, live, tol);
+    const ok = i <= n && inside(at(i));
     if (ok && start < 0) start = i;
     if (!ok && start >= 0) {
       const t0 = at(start);
