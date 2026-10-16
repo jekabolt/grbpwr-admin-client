@@ -334,7 +334,13 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
     };
     const closed = f.candidates.filter((c) => c.outcome === 'closed' && c.outer.length > 2);
     const box = closed.length ? bboxOf(closed.flatMap((c) => c.outer)) : null;
+    const nlMemo = new Map<number, PtMm[][]>();
     const neighbourLines = (r: number): PtMm[][] => {
+      let hit = nlMemo.get(r);
+      if (!hit) nlMemo.set(r, (hit = neighbourLines0(r)));
+      return hit;
+    };
+    const neighbourLines0 = (r: number): PtMm[][] => {
       if (!wm || !box) return [];
       const mine = new Set([...(wm.byRank[r] ?? []), ...wm.common]);
       const out2: PtMm[][] = [];

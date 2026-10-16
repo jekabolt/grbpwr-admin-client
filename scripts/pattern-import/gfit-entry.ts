@@ -233,6 +233,15 @@ function famMode(dump: string, png: string | null): number {
     const tolName = process.env.GFIT_FAM_TOL ?? 'P0';
     const fam = fitFamily(sizesIn, {
       tol: tolName === 'CAD' ? GFIT_TOL_CAD : tolName === 'DESIGN' ? GFIT_TOL_DEFAULT : GFIT_TOL_P0,
+      // GFIT_FAM_NEIGH=1: the other sizes' outlines stand in for their drawn lines (timing / causes)
+      ...(process.env.GFIT_FAM_NEIGH
+        ? {
+            neighbourLines: (r: number) =>
+              cands
+                .filter((c) => c.rank !== r && c.outer.length > 2)
+                .map((c) => [...c.outer, c.outer[0]]),
+          }
+        : {}),
     });
     // the plain leave-one-out residuals (calibration: no robust removal, no break fallback)
     const plain = fitFamily(sizesIn, { robust: false });

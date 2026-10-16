@@ -7,7 +7,7 @@
 // does not agree is localised to its worst edge and its cause read: notch (a short in/out stretch),
 // neighbour (the off stretch lies on another size's line), other.
 import type { PtMm } from 'lib/pattern-import/types';
-import { bboxOf, segNearest } from 'lib/pattern-import/pieces/geom';
+import { bboxOf, segNearest, SegGrid } from 'lib/pattern-import/pieces/geom';
 
 import { matchCorners, type GfitMatch } from './match';
 import { analyseOutline, type GfitOutline } from './outline';
@@ -207,6 +207,28 @@ function iou(a: PtMm[], b: PtMm[]): number {
   return U > 0 ? I / U : 0;
 }
 
+/** A predicate "p lies within `tol` of one of these polylines" over a segment grid (memoised on the
+ * lines array: repeated fits of one family share it). */
+const nearMemoG = new WeakMap<object, (p: PtMm) => boolean>();
+export function nearLines(lines: readonly (readonly PtMm[])[], tol: number): (p: PtMm) => boolean {
+  const hit0 = nearMemoG.get(lines);
+  if (hit0) return hit0;
+  const f = nearLines0(lines, tol);
+  nearMemoG.set(lines, f);
+  return f;
+}
+function nearLines0(lines: readonly (readonly PtMm[])[], tol: number): (p: PtMm) => boolean {
+  const grid = new SegGrid(Math.max(1, 4 * tol));
+  lines.forEach((l, k) => grid.addPolyline(k, l));
+  return (p) => {
+    let hit = false;
+    grid.near(p, tol, (k, i) => {
+      if (!hit && segNearest(p, lines[k][i], lines[k][i + 1]).d <= tol) hit = true;
+    });
+    return hit;
+  };
+}
+
 const mean = (ps: readonly PtMm[]): PtMm => {
   let x = 0;
   let y = 0;
@@ -227,7 +249,8 @@ export type FitOpts = {
   tol?: GfitTol;
   /** Robust fit: an anchor out of tolerance leaves the model (default true; false = calibration). */
   robust?: boolean;
-  /** Other sizes' drawn lines near this size (for the 'neighbour' cause); not this rank, not common. */
+  /** Other sizes' drawn lines near this size (for the 'neighbour' cause); not this rank, not common.
+   * Indexed once per rank (`nearLines`). */
   neighbourLines?: (rank: number) => readonly (readonly PtMm[])[];
   /** Force the frame (default: stacked when the anchors' boxes overlap). */
   frame?: 'stacked' | 'registered';
@@ -373,6 +396,16 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     if (!stacked) s.off = mean(s.idx.map((i) => s.o.pts[i]));
   }
   const byRank = new Map(sizes.map((s) => [s.rank, s]));
+  const nearMemo = new Map<number, ((p: PtMm) => boolean) | null>();
+  const nearOf = (r: number) => {
+    if (!opts.neighbourLines) return null;
+    let f = nearMemo.get(r);
+    if (f === undefined) {
+      const ls = opts.neighbourLines(r);
+      nearMemo.set(r, (f = ls.length ? nearLines(ls, 0.6) : null));
+    }
+    return f;
+  };
   const gpos = (s: Size, g: number) => sub(s.o.pts[s.idx[g]], s.off);
   const edgeLen = (s: Size, e: number) => {
     const n = s.o.pts.length;
@@ -453,7 +486,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
       points.push({ g, strong: gps[g].strong, resid, step, tol: t });
       if (gps[g].strong) score = Math.max(score, resid / t);
     }
-    const others = opts.neighbourLines?.(s.rank) ?? [];
+    const near = nearOf(s.rank);
     let worst = -1;
     let worstScore = -1;
     for (let e = 0; e < G; e++) {
@@ -490,16 +523,9 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
           offMm += 0.5;
           run += 0.5;
           bestRun = Math.max(bestRun, run);
-          if (others.length) {
+          if (near) {
             offN++;
-            const q = { x: drawn[j].x + s.off.x, y: drawn[j].y + s.off.y };
-            let hit = false;
-            for (const line of others) {
-              for (let i = 0; i + 1 < line.length && !hit; i++)
-                if (segNearest(q, line[i], line[i + 1]).d <= 0.6) hit = true;
-              if (hit) break;
-            }
-            if (hit) onN++;
+            if (near({ x: drawn[j].x + s.off.x, y: drawn[j].y + s.off.y })) onN++;
           }
         } else run = 0;
       }
