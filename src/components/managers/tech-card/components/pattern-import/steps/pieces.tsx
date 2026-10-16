@@ -1962,6 +1962,11 @@ export function PiecesStep({
                         key={x.label}
                         type='button'
                         {...ask(ASK_KEY.model, i === 0)}
+                        // the garment the card itself names (strong evidence) is the one-click
+                        // fix; a suggestion or no name stays a choice, coached
+                        {...(i === 0 && named?.strong && x.label === named.pick
+                          ? { 'data-ask-fix': ASK_KEY.model }
+                          : {})}
                         data-ask-hint={i === 0 ? x.how : undefined}
                         aria-label={`garment ${x.label}`}
                         title={x.title}
@@ -2041,6 +2046,8 @@ export function PiecesStep({
                       size='xs'
                       className='text-labelColor hover:text-textColor'
                       title='every outline still to ask stays as it is now'
+                      // the offer's «go on as is»: every guess stays, each still a tile to flip
+                      data-ask-fix={ASK_KEY.aside}
                       disabled={!!session.busy}
                       onClick={() => quizEnd()}
                     >

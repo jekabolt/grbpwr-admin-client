@@ -17,7 +17,7 @@ import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import Input from 'ui/components/input';
-import { ask } from '../ui-bits';
+import { ask, useAnsweredAndGo } from '../ui-bits';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
@@ -53,6 +53,8 @@ export function OutlineQuestion({
   const [draft, setDraft] = useState('');
   const draftN = draft.trim() === '' ? NaN : Number(draft);
   const draftMm = Number.isFinite(draftN) && draftN >= 0 ? draftN : null;
+  // ANSWERED AND GO: the outline answered, the next question shows — or the step moves on
+  const go = useAnsweredAndGo();
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -81,7 +83,7 @@ export function OutlineQuestion({
   const seam = (v: number) => {
     if (!(v >= 0)) return;
     setMm(v);
-    void api.answerOutline('seam', v);
+    go(api.answerOutline('seam', v));
   };
   const answers = (
     <span className='flex flex-wrap items-start gap-2'>
@@ -89,11 +91,14 @@ export function OutlineQuestion({
         <button
           type='button'
           {...ask('details-outline')}
+          // the file names the layer every outline lies on (PASSPORT (c)): that answer is the
+          // one-click fix; with no such word the outline is a choice, coached
+          {...(prefill === 'cut' ? { 'data-ask-fix': '' } : {})}
           data-ask-hint='pick a picture'
           data-testid='outline-answer-cut'
           disabled={busy}
           title={`the allowance is already in the drawing: cut exactly on the drawn line${prefill === 'cut' ? ' (the file names the layer so)' : ''}`}
-          onClick={() => void api.answerOutline('cut', mm)}
+          onClick={() => go(api.answerOutline('cut', mm))}
           className={cn(OUTLINE_CARD, prefill === 'cut' && 'border-warning')}
         >
           <OutlinePicture outer={outer} kind='cut' />
