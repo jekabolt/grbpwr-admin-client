@@ -125,6 +125,8 @@ export function parseRul(bytes: ArrayBuffer, name = 'the RUL'): RulTable {
       if (!/^-?\d+$/.test(rule[2]))
         throw refuse(`${name} line ${i + 1}: rule id "${rule[2]}" is not an integer`);
       const id = Number(rule[2]);
+      if (!Number.isSafeInteger(id))
+        throw refuse(`${name} line ${i + 1}: rule id ${rule[2]} is too large`);
       if (rules.has(id)) throw refuse(`${name} line ${i + 1}: rule ${id} is defined twice`);
       cur = { id, nums: [], line: i + 1 };
       continue;

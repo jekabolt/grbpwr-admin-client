@@ -11,7 +11,7 @@ import type { RawDxf } from '../dxf/ast';
 import { buildAst, str } from '../dxf/ast';
 import { bareSize } from '../dxf/segment';
 import { loadDxf } from '../dxf/tags';
-import { modelLabelsOf, unitsOf } from '../dxf/extract';
+import { INSUNITS_MM, modelLabelsOf, unitsOf } from '../dxf/extract';
 import { isUnsupportedFormat } from '../sniff/errors';
 import { expandRul, sizeNameToken } from './expand';
 import { type ModelEntity, type PieceBlock, PointIndex, labelOf, pieceBlocks } from './model';
@@ -84,6 +84,9 @@ const markerSig = (p: PieceBlock) =>
     .map((m) => `${sig(m)}:${m.slots.length}`)
     .sort()
     .join(';');
+
+/** Entity types whose whole geometry is their points + `SHAPE_CODES` tags. */
+const PACKABLE = new Set(['POLYLINE', 'LWPOLYLINE', 'LINE', 'POINT', 'CIRCLE', 'ARC']);
 
 /** Tags that shape an entity besides its points: arcs (bulge), radii, angles, notch depth. */
 const SHAPE_CODES = new Set([30, 38, 39, 40, 41, 42, 43, 50, 51]);
@@ -229,6 +232,11 @@ export function packRul(
   const raw = buildAst(loadDxf(bytes).tok.tags);
   const units = unitsOf(raw, modelLabelsOf(raw));
   const reasons: string[] = [];
+  if (!Object.values(INSUNITS_MM).includes(units.mmPerUnit))
+    return {
+      ok: false,
+      reasons: [`the drawing's unit (${units.mmPerUnit} mm) has no $INSUNITS code`],
+    };
   const fams = familiesOf(raw, sizes, reasons, opts.pick);
   if (!fams.length) reasons.push('the DXF has no piece blocks');
   if (reasons.length) return { ok: false, reasons };
@@ -251,6 +259,18 @@ export function packRul(
     // markers drawn alike in every size are graded and proved too; sample-only ones follow
     const mk = markerSig(b);
     const markers = !!mk && sizes.every((z) => markerSig(f.bySize.get(z)!) === mk);
+    // left out of the proof only when the base alone draws them (a CAD's sample-size markers)
+    const baseOnly = sizes.every((z) => z === base || !markerSig(f.bySize.get(z)!));
+    if (mk !== '' && !markers && !baseOnly) {
+      reasons.push(`${f.piece}: its turn / curve / validation points differ between sizes`);
+      continue;
+    }
+    if (!mk && sizes.some((z) => markerSig(f.bySize.get(z)!))) {
+      reasons.push(
+        `${f.piece}: turn / curve / validation points drawn in other sizes but not in ${base}`,
+      );
+      continue;
+    }
     markersOf.set(f, markers);
     const nested = sizes.find((z) =>
       f.bySize.get(z)!.entities.some((m) => m.raw.type === 'INSERT'),
@@ -588,7 +608,7 @@ function writeBase(
   // one INSERT per base block, where the source inserted that block
   const insertAt = new Map<string, { x: number; y: number }>();
   for (const e of raw.entities)
-    if (e.type === 'INSERT') {
+    if (e.type === 'INSERT' && !e.paper) {
       const nm = str(e.tags, 2) ?? '';
       const x = Number(e.tags.find((t) => t.code === 10)?.value ?? 0);
       const y = Number(e.tags.find((t) => t.code === 20)?.value ?? 0);

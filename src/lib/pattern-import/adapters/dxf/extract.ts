@@ -70,7 +70,7 @@ import { decodeLabel, decodeMText, decodeTextValue, type DecodedLabel } from './
 const MAX_DEPTH = 16;
 const MAX_INSTANCES = 50_000;
 
-const INSUNITS_MM: Record<number, number> = {
+export const INSUNITS_MM: Record<number, number> = {
   1: 25.4,
   2: 304.8,
   3: 1_609_344,

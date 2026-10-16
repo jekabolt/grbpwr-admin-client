@@ -130,7 +130,7 @@ export function modelEntity(e: RawEntity): ModelEntity {
           ...base,
           kind: 'rule',
           slots,
-          rule: /^-?\d+$/.test(r[1]) ? Number(r[1]) : NaN,
+          rule: /^-?\d+$/.test(r[1]) && Number.isSafeInteger(Number(r[1])) ? Number(r[1]) : NaN,
           text,
         };
       return {

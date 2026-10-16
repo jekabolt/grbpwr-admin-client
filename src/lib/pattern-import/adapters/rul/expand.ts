@@ -214,6 +214,10 @@ function gradePiece(
     const best = Math.min(...here.map((b) => rank(b.layer)));
     const pick = here.filter((b) => rank(b.layer) === best);
     const found = [...new Set(pick.map((b) => b.rule).filter(real))];
+    if (found.length && pick.some((b) => !real(b.rule)))
+      throw refuse(
+        `${label}: "# -1" (no rule) and rule #${found[0]} sit at one point (${x.toFixed(3)}, ${y.toFixed(3)}) for a point on layer ${m.layer} — whether it is graded is not defined`,
+      );
     // two lines that meet at a point may each carry their own rule there (Richpeace writes one
     // text per line end): harmless when the table moves both alike, undefined otherwise
     if (found.length > 1 && found.every((r) => sameRow(r, found[0])))
@@ -266,13 +270,14 @@ function gradePiece(
     const arc = ents.find(
       (m) =>
         m.kind === 'chain' &&
-        [m.raw, ...m.raw.children].some((r) =>
-          r.tags.some((t) => t.code === 42 && Math.abs(Number(t.value)) > 1e-9),
-        ),
+        (m.raw.type === 'SPLINE' ||
+          [m.raw, ...m.raw.children].some((r) =>
+            r.tags.some((t) => t.code === 42 && Math.abs(Number(t.value)) > 1e-9),
+          )),
     );
     if (arc)
       throw refuse(
-        `${label}: a ${arc.raw.type} on layer ${arc.layer} has arc segments (bulges); AAMA grades points, and an arc's grade is not defined by its points`,
+        `${label}: a ${arc.raw.type} on layer ${arc.layer} is curved between its points (bulges / spline); AAMA grades points, and such a curve's grade is not defined by its points`,
       );
   }
 
@@ -311,18 +316,29 @@ function gradePiece(
       );
     return top[0].g;
   };
-  ents.forEach((m, e) => {
-    if (!gradable(m) || graded.has(e)) return;
-    m.slots.forEach((s, k) => {
-      if (out.of[e][k]) return;
-      const g = follow(m, s);
-      if (g) {
-        out.of[e][k] = g;
-        out.following++;
+  // to a fixed point: a line graded by following can carry the points that lie on it in turn
+  for (let grew = true; grew; ) {
+    grew = false;
+    ents.forEach((m, e) => {
+      if (!gradable(m) || graded.has(e)) return;
+      let got = false;
+      m.slots.forEach((s, k) => {
+        if (out.of[e][k]) return;
+        const g = follow(m, s);
+        if (g) {
+          out.of[e][k] = g;
+          out.following++;
+          got = true;
+        }
+      });
+      if (!got) return;
+      grew = true;
+      if (m.kind === 'chain') {
+        out.interpolated += interpolateChain(ptsOf(m), m.closed, out.of[e]);
+        graded.add(e);
       }
     });
-    if (m.kind === 'chain') out.interpolated += interpolateChain(ptsOf(m), m.closed, out.of[e]);
-  });
+  }
   // 4 · whatever is left stays as drawn
   ents.forEach((m, e) => {
     if (!gradable(m)) return;
@@ -455,7 +471,7 @@ export function expandRul(input: ExpandInput): RulExpansion {
     !named.has(sample) &&
     [...tails.values()].length === pieces.length &&
     pieces.length > 1;
-  if ([...tails.values()].some((v) => v.size > 1) || allOther)
+  if (named.size > 1 || allOther)
     throw refuse(
       `${input.dxfName} names sizes ${[...named].join(', ')} in its block names; a RUL grades ONE base size (${rul.sample}) — import the DXF alone`,
     );
@@ -470,7 +486,8 @@ export function expandRul(input: ExpandInput): RulExpansion {
   const warnings: string[] = [];
   // compared on their ASCII letters: the two files of one export may use different codepages
   const ascii = (v: string) => v.replace(/[^\x21-\x7e]+/g, '').toUpperCase();
-  if (declaredTable && rul.name && ascii(declaredTable) !== ascii(rul.name))
+  const key = (v: string) => ascii(v) || v.trim().toUpperCase();
+  if (declaredTable && key(declaredTable) !== key(rul.name))
     throw refuse(
       `${input.dxfName} names grade rule table "${declaredTable}", but ${input.rulName} is "${rul.name}" — they are not one export`,
     );
@@ -550,6 +567,17 @@ export function expandRul(input: ExpandInput): RulExpansion {
     taken.add(stem);
     pieceName[p.block.name] = stem;
   }
+
+  const generated = new Set(
+    pieces.flatMap((p) => rul.sizes.map((z) => `${pieceName[p.block.name]}_${sizeNameToken(z)}`)),
+  );
+  const clash = raw.blockOrder.find(
+    (b) => generated.has(b.name) && !pieces.some((p) => p.block.name === b.name),
+  );
+  if (clash)
+    throw refuse(
+      `${input.dxfName} already has a block "${clash.name}", the name a graded size would take`,
+    );
 
   // ── the per-size drawing ──
   const T: [number, string][] = [];
