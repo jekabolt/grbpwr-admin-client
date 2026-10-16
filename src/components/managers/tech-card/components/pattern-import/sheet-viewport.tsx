@@ -45,6 +45,7 @@ export function SheetViewport({
   className,
   children,
   focus,
+  reveal,
 }: {
   bbox: BoxMm;
   tool?: ViewTool;
@@ -57,6 +58,11 @@ export function SheetViewport({
   className?: string;
   /** Zoom to this box when it changes (e.g. the selected piece). null = leave the view alone. */
   focus?: BoxMm | null;
+  /**
+   * Bring this box into view without zooming (a hovered tile's outline): the view pans only when
+   * the box is off-screen, and fits it when it is larger than the view. null = leave it alone.
+   */
+  reveal?: BoxMm | null;
   children: (v: { box: ViewBox; unit: number }) => React.ReactNode;
 }) {
   const fit = boxOf(bbox, 0.03);
@@ -86,6 +92,20 @@ export function SheetViewport({
     // focusKey stands for `focus`: a new object with the same numbers must not re-zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusKey]);
+
+  const revealKey = reveal ? `${reveal.minX}|${reveal.minY}|${reveal.maxX}|${reveal.maxY}` : '';
+  useEffect(() => {
+    if (!reveal) return;
+    setView((v) => {
+      const b = v ?? fit;
+      const r = boxOf(reveal, 0);
+      if (r.x >= b.x && r.y >= b.y && r.x + r.w <= b.x + b.w && r.y + r.h <= b.y + b.h) return v;
+      if (r.w > b.w || r.h > b.h) return boxOf(reveal, 0.25);
+      return { ...b, x: r.x + r.w / 2 - b.w / 2, y: r.y + r.h / 2 - b.h / 2 };
+    });
+    // revealKey stands for `reveal` (same numbers, no pan)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealKey]);
 
   const metricsOf = (b: ViewBox) => {
     const svg = svgRef.current;
