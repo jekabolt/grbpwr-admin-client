@@ -274,7 +274,25 @@ export function DetailsStep({
       null
     );
   };
-  const noGrain = sem.blocked.filter((b) => b.reason === 'no-grain').map((b) => b.seed);
+  /**
+   * The pieces [all vertical] may lay a grain on: blocked for the grainline only, with no grain the
+   * operator already gave (a pair whose mirroring failed keeps its line), no proposal (a fold line
+   * proposed as the grain is the operator's choice) and no fold in play (asked, answered, missed).
+   * Called from the card, after the fold lookups below exist.
+   */
+  const bulkVertical = () =>
+    sem.blocked
+      .filter((b) => b.reason === 'no-grain')
+      .map((b) => b.seed)
+      .filter(
+        (sd) =>
+          !inputs.operatorGrain[sd] &&
+          !proposalOf(sd) &&
+          !inputs.operatorFold[sd] &&
+          inputs.overrides[sd]?.unfoldedFold == null &&
+          !foldAskOf(sd) &&
+          !foldMissOf(sd),
+      );
   /** One click: these pieces' grain along the sheet's vertical (90°) or horizontal (0°). */
   const setGrainAxis = (seeds: SeedId[], angleDeg: number) => {
     const lines = seeds.flatMap((sd) => {
@@ -942,19 +960,34 @@ export function DetailsStep({
       const pr = proposalOf(seed);
       if (p.reason === 'no-grain') {
         why = pr ? `proposed: ${pr.why}` : 'the sheet draws no grainline on this piece';
-        const many = noGrain.length >= 2;
+        const bulkSeeds = bulkVertical();
+        const many = bulkSeeds.length >= 2;
         answers = (
           <span className='flex flex-wrap items-center gap-1.5'>
+            {proposals.length >= 2 && (
+              // every proposal at once: the overview shows each on its piece, "accept these N"
+              // there applies them (D3: nothing accepted unseen) — two clicks for the whole file
+              <Button
+                {...ask('details-blocked')}
+                variant='secondary'
+                size='xs'
+                disabled={busy}
+                title='every proposed grainline on its piece, then accept them together'
+                onClick={() => setReviewing(true)}
+              >
+                all proposed ({proposals.length})
+              </Button>
+            )}
             {many && (
               <Button
                 {...ask('details-blocked')}
                 variant='secondary'
                 size='xs'
                 disabled={busy}
-                title={`every ${noGrain.length} pieces without a grainline: straight grain along the sheet's vertical`}
-                onClick={() => setGrainAxis(noGrain, 90)}
+                title={`the ${bulkSeeds.length} pieces with no grainline, no proposal and no fold: straight grain along the sheet's vertical`}
+                onClick={() => setGrainAxis(bulkSeeds, 90)}
               >
-                all vertical
+                all vertical ({bulkSeeds.length})
               </Button>
             )}
             {pr && (
