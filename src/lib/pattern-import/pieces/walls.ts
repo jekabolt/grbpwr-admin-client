@@ -1734,12 +1734,13 @@ export function connectRanks(
     if (!rs.some((r) => r !== undefined)) continue;
     const dupRank = rs.some((r, k) => r !== undefined && rs.indexOf(r) !== k);
     if (!dupRank && !rs.some((r) => r === undefined)) {
-      // KINKS (ULMUS-DIAG F2): ≥ 3 closed loops, each its own rank (evidence 1: the pen), nested
-      // by size — area growing with the rank (evidence 2): every size draws its WHOLE edge, so no
-      // stretch of one is another size's lone wall (Ulmus' ruffle: where the sizes' tips fan out
-      // > 20 mm apart the larger sizes' lines were "lone", walls of every rank, and walked the
-      // smaller ranks' outlines 22–61 mm off their own loops)
-      if (group.length >= 3 && !probeOff('KINKS_LOOPS_OFF')) {
+      // KINKS (ULMUS-DIAG F2): one closed loop for EVERY size of the run (≥ 3), each its own rank
+      // (evidence 1: the pen), nested by size — area growing with the rank (evidence 2): every size
+      // draws its WHOLE edge, so no stretch of one is another size's lone wall (Ulmus' ruffle:
+      // where the sizes' tips fan out > 20 mm apart the larger sizes' lines were "lone", walls of
+      // every rank, and walked the smaller ranks' outlines 22–61 mm off their own loops). A group
+      // of loops that misses a size is not that: the sizes without a loop may run on them
+      if (group.length >= 3 && group.length === m.n && !probeOff('KINKS_LOOPS_OFF')) {
         const byR = group
           .map((g, k) => ({ id: g.id, r: rs[k]!, a: Math.abs(loopArea(set.chains[g.id].pts)) }))
           .sort((x, y) => x.r - y.r);
