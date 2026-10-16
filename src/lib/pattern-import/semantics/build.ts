@@ -77,6 +77,7 @@ import { wallModel } from '../pieces/walls';
 import { hausdorffMm } from '../pieces/fill';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
+import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
 import { classifyFeatures } from './features';
 import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
@@ -1090,13 +1091,30 @@ export function buildPieceSpecsDetailed(
       ]),
     );
     const featOpts = { sizeCount: run.sizes.length, region: famBox };
+    // SHAPE: notch marks (small closed marks centred on the line) are notches, never outline —
+    // read over every size of the family at once (semantics/notch-marks.ts)
+    const markReads =
+      traced || p.all.some(({ c }) => featuresOf(c).length)
+        ? new Map<number, MarkRead>()
+        : readNotchMarks(
+            p.all.map(({ c }) => c),
+            set,
+          );
 
     for (const { c, card } of p.cands) {
       const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });
+      const mr = markReads.get(c.rank);
+      if (mr) {
+        feats.push(...mr.notches);
+        if (mr.cleaned.length || mr.notches.length || mr.refused.length)
+          pieceNotes.push(
+            `${card.token}: ${mr.notches.length} notch mark(s) read as notches${mr.cleaned.length ? `, outline straightened across ${mr.cleaned.length}` : ''}${mr.refused.length ? `, ${mr.refused.length} on the line without a second evidence (not used)` : ''}`,
+          );
+      }
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
-      let outer = ccw(c.outer);
+      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
       // Every candidate outline (F4 fill, operator refill, DXF fast path) passes here before fold
       // and offset: a stretch that runs out and back along itself — a corner overshot and retraced
       // (reef HB_4XL, 0.57 mm), the fill wandering up a bundle of lines and back (kombinezon, 12
@@ -1388,7 +1406,7 @@ export function buildPieceSpecsDetailed(
         internal,
         fold: fold2,
         offset,
-        walls: c.walls,
+        walls: mr?.cleaned.length ? c.walls.filter((w) => !mr.cleaned.includes(w)) : c.walls,
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),

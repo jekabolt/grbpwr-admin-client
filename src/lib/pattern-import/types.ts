@@ -961,6 +961,12 @@ export type PieceCandidate = {
    * source provenance and the ONLY chains that may carry it in G15 (F14e/S1, Codex round 3).
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
+  /**
+   * SHAPE (pieces/notch-marks.ts): notch marks (small closed marks centred on the line) the outline
+   * ran around and now crosses on the size's own line — taken out of `walls`, read as notches by
+   * semantics. Absent = none.
+   */
+  notchMarks?: ChainId[];
 };
 
 /**

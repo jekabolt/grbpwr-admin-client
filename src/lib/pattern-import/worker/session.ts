@@ -129,6 +129,7 @@ import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
+import { cleanNotchMarks } from '../pieces/notch-marks';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
@@ -1423,6 +1424,8 @@ export class Session {
     // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
     // own piece: its lines are not the host's internal lines.
     families = exceptNested(families);
+    // SHAPE: a notch mark on the line is a notch, never outline (pieces/notch-marks.ts)
+    families = cleanNotchMarks(families, set);
     const shown = seeds;
     // what was set aside and is not a piece now
     const taken = new Set<number>();

@@ -41,6 +41,7 @@ import { runCase } from './e2e-entry';
 
 export const ARCHIVE = '/Users/jekabolt/Downloads/archive 600 pcs';
 const DIR = process.env.PATIMPORT_MOOD_DIR ?? ARCHIVE;
+export const MOOD_DIR = DIR;
 
 const NUM18 = [
   '00',
