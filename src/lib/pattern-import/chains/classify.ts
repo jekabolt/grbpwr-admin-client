@@ -584,6 +584,9 @@ export const TILE_MARK = {
 export function tileMarks(chains: readonly Chain[], poses: readonly PagePose[] = []): number[] {
   if (poses.length < 3) return [];
   const rects = poses.map(pageRect);
+  // a page POSITION, not a pose: overlaid per-size files sit at one position and vote once (Codex)
+  const posOf = rects.map((r) => `${Math.round(r.minX)},${Math.round(r.minY)}`);
+  if (new Set(posOf).size < 3) return [];
   const groups = new Map<string, { i: number; m: PtMm }[]>();
   chains.forEach((c, i) => {
     if (c.closed || c.pts.length < 2) return;
@@ -607,19 +610,20 @@ export function tileMarks(chains: readonly Chain[], poses: readonly PagePose[] =
     };
     const lattice = g.filter((_, k) => share((p) => p.x, k) >= 2 && share((p) => p.y, k) >= 2);
     if (lattice.length < TILE_MARK.minLattice) continue;
-    // the page-relative spots of each member (every page whose rect holds its middle) → pages
+    // the page-relative spots of each member (every page whose rect holds its middle) → the page
+    // positions that print a mark there
     const spotsOf = (m: PtMm) =>
       rects.flatMap((r, p) =>
         m.x >= r.minX && m.x <= r.maxX && m.y >= r.minY && m.y <= r.maxY
           ? [{ p, k: `${Math.round((m.x - r.minX) / 2)},${Math.round((m.y - r.minY) / 2)}` }]
           : [],
       );
-    const pages = new Map<string, Set<number>>();
+    const pages = new Map<string, Set<string>>();
     const spots = lattice.map((o) => spotsOf(o.m));
     for (const ss of spots)
       for (const { p, k } of ss) {
-        const set = pages.get(k) ?? new Set<number>();
-        set.add(p);
+        const set = pages.get(k) ?? new Set<string>();
+        set.add(posOf[p]);
         pages.set(k, set);
       }
     const onPages = lattice.filter((_, k) =>
@@ -642,6 +646,9 @@ export function tileMarks(chains: readonly Chain[], poses: readonly PagePose[] =
 export function tileFrameLines(chains: Chain[], poses: PagePose[]): number[] {
   if (poses.length < 3) return [];
   const rects = poses.map(pageRect);
+  // a page POSITION, not a pose: overlaid per-size files sit at one position and vote once (Codex)
+  const posOf = rects.map((r) => `${Math.round(r.minX)},${Math.round(r.minY)}`);
+  if (new Set(posOf).size < 3) return [];
   const posKey = (r: (typeof rects)[number]) => `${Math.round(r.minX)},${Math.round(r.minY)}`;
   const positions = new Set(rects.map(posKey)).size;
   if (positions < 3) return [];
