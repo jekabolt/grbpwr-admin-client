@@ -43,7 +43,6 @@ import {
   useSampleMovementCount,
 } from './sample-panels';
 import {
-  sampleFabricSourceHint,
   sampleFabricSourceOptions,
   samplePurposeLabel,
   samplePurposeOptions,
@@ -206,7 +205,6 @@ export function SamplesTab({
       <div className='flex flex-col border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='new sample'
-          question='— one short form; the material write-off is optional and can be done later'
           action={
             <Button
               type='button'
@@ -253,23 +251,7 @@ export function SamplesTab({
 
   return (
     <div className='flex flex-col border border-borderColor bg-bgColor p-4'>
-      <SectionHeader
-        title='samples'
-        question='— every physical sample made; each one consumed real material and carries a cost'
-        action={
-          canEdit ? (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              onClick={() => setExpanded('new')}
-            >
-              + sample
-            </Button>
-          ) : undefined
-        }
-      />
+      <SectionHeader title='samples' />
       {isLoading ? (
         <Text size='micro' variant='label'>
           loading…
@@ -299,12 +281,6 @@ export function SamplesTab({
           )}
         </Tiles>
       )}
-      {!isLoading && samples.length === 0 ? (
-        <Text size='micro' variant='label' className='mt-2'>
-          No samples yet. A sample is one sewn prototype — start with purpose “proto” in the base
-          size.
-        </Text>
-      ) : null}
     </div>
   );
 }
@@ -979,7 +955,7 @@ function SampleEditor({
                 ))}
               </select>
             </InlineRow>
-            <InlineRow label='fabric' editable={canEdit} select hint={sampleFabricSourceHint}>
+            <InlineRow label='fabric' editable={canEdit} select>
               <select
                 className={inlineCell}
                 disabled={!canEdit}
@@ -1067,9 +1043,6 @@ function SampleEditor({
                 sizeId={d.sizeId}
                 canReadCosting={canReadCosting}
               />
-              <Text size='micro' variant='label'>
-                {sampleFabricSourceHint}
-              </Text>
               {/* 10.5 — one batch sheet of BOM lines instead of pick-a-material → modal → repeat. */}
               <SampleMovements
                 sampleId={sampleId}

@@ -2,7 +2,7 @@ import { common_TechCard } from 'api/proto-http/admin';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
@@ -17,7 +17,6 @@ import {
 } from './sample-panels';
 import {
   sampleFabricSourceFieldLabel,
-  sampleFabricSourceHint,
   sampleFabricSourceOptions,
   samplePurposeOptions,
   sampleStatusOptions,
@@ -55,7 +54,6 @@ type BasicsDraft = {
   fabricSource: string;
   startedAt: string;
   finishedAt: string;
-  notes: string;
 };
 
 const emptyBasics: BasicsDraft = {
@@ -66,7 +64,6 @@ const emptyBasics: BasicsDraft = {
   fabricSource: 'sample',
   startedAt: '',
   finishedAt: '',
-  notes: '',
 };
 
 const colorwayText = (c?: Colorway): string =>
@@ -98,7 +95,19 @@ export function SampleCreationWizard({
   const issuer = useWriteoffBatch();
   const busy = save.isPending || issuer.isPending;
 
-  const [d, setD] = useState<BasicsDraft>(emptyBasics);
+  // The card's base sample size is what a sample is sewn in unless someone says otherwise.
+  const baseSizeId = techCard?.techCard?.baseSampleSizeId ?? 0;
+  const [d, setD] = useState<BasicsDraft>(() => ({
+    ...emptyBasics,
+    sizeId: (techCard?.techCard?.sizeIds ?? []).includes(baseSizeId) ? baseSizeId : 0,
+  }));
+  // The card can arrive after the form mounts — fill the size then, unless someone already chose.
+  const sizeTouched = useRef(false);
+  useEffect(() => {
+    if (sizeTouched.current || d.sizeId) return;
+    if ((techCard?.techCard?.sizeIds ?? []).includes(baseSizeId)) set({ sizeId: baseSizeId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseSizeId, techCard]);
   const set = (patch: Partial<BasicsDraft>) => setD((prev) => ({ ...prev, ...patch }));
 
   // The write-off sheet reads the style's BOM and pre-fills each line from the colourway recipe's
@@ -138,7 +147,7 @@ export function SampleCreationWizard({
           colorwayId: d.colorwayId || 0,
           status: d.status,
           fabricSource: d.fabricSource,
-          notes: d.notes.trim(),
+          notes: '',
           startedAt: d.startedAt,
           finishedAt: d.finishedAt,
           mediaIds: [],
@@ -250,7 +259,10 @@ export function SampleCreationWizard({
             className={selectCell}
             disabled={!canEdit}
             value={d.sizeId || 0}
-            onChange={(e) => set({ sizeId: Number(e.target.value) || 0 })}
+            onChange={(e) => {
+              sizeTouched.current = true;
+              set({ sizeId: Number(e.target.value) || 0 });
+            }}
           >
             <option value={0}>— unset —</option>
             {sizeIds.map((sid) => (
@@ -277,7 +289,7 @@ export function SampleCreationWizard({
         </Field>
       </div>
 
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
         <Field label='started'>
           <input
             className={selectCell}
@@ -301,10 +313,7 @@ export function SampleCreationWizard({
             ))}
           </select>
         </Field>
-      </div>
-
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-        <Field label={sampleFabricSourceFieldLabel} hint={sampleFabricSourceHint}>
+        <Field label={sampleFabricSourceFieldLabel}>
           <select
             className={selectCell}
             disabled={!canEdit}
@@ -318,14 +327,6 @@ export function SampleCreationWizard({
             ))}
           </select>
         </Field>
-        <Field label='notes'>
-          <input
-            className={selectCell}
-            disabled={!canEdit}
-            value={d.notes}
-            onChange={(e) => set({ notes: e.target.value })}
-          />
-        </Field>
       </div>
 
       {/* Material write-off — pre-filled from the BOM lines whose material is marked "sample".
@@ -334,12 +335,11 @@ export function SampleCreationWizard({
         <div className='flex flex-col gap-1'>
           <Text size='micro'>
             <b>Material write-off</b>
-            {' — pre-filled from the BOM lines marked “sample”: '}
             {wo.stockLoading
-              ? 'reading stock…'
-              : wo.selected.length === 0
-                ? 'nothing pre-fills (no sample-marked BOM line carries a consumption norm) — expand to pick lines by hand'
-                : `${wo.summary}${wo.selected.length > 3 ? ` +${wo.selected.length - 3} more` : ''}`}
+              ? ' · reading stock…'
+              : wo.selected.length > 0
+                ? ` · ${wo.summary}${wo.selected.length > 3 ? ` +${wo.selected.length - 3} more` : ''}`
+                : null}
             {wo.hasCost ? (
               <>
                 {' ≈ '}
@@ -386,11 +386,6 @@ export function SampleCreationWizard({
           you don't have permission to create samples on this card
         </Text>
       ) : null}
-
-      <Text size='micro' variant='label'>
-        Photos, fittings, provenance (round · spec release · previous sample) and dev expenses are
-        added next, in the sample editor.
-      </Text>
 
       <div className='flex flex-wrap items-center justify-between gap-2 border-t border-borderColor pt-2'>
         <Button type='button' variant='secondary' size='sm' onClick={onCancel}>
