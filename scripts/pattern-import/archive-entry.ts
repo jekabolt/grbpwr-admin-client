@@ -468,6 +468,7 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
         set: S.wallSet ?? S.chains,
         sheet: S.sheet,
         key: gen === 'G0' ? G0_KEY : printedKey,
+        raw: S.chains,
         ...(pd
           ? {
               png: {

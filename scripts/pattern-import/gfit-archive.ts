@@ -286,6 +286,8 @@ export type GfitArchiveCtx = {
   /** The printed key labels for the pen judge (Mood); empty = no judge. */
   key: string[];
   png?: { dir: string; prefix: string; all: boolean };
+  /** GRADE REVIEW: the traced (raw) chain set, for the review dump (GFIT_REVIEW_DIR). */
+  raw?: ChainSet | null;
 };
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -452,6 +454,84 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
     }
     if (brackets.length) rec.brackets = brackets;
     out.push(rec);
+    // GRADE REVIEW: GFIT_REVIEW_DIR=<dir> — a JSON per flagged family: the sizes' outlines, the verdicts,
+    // the predictions of the disagreeing sizes, and the line work around the family (raw + wall chains
+    // with their pen look, the printed key rows each pen matches, and the wall model's size classes).
+    const rvDir = process.env.GFIT_REVIEW_DIR;
+    if (rvDir && fam && rec.dis && box && ctx.png) {
+      try {
+        const R = (x: number) => Math.round(x * 100) / 100;
+        const P = (ps: readonly PtMm[]) => ps.map((p) => [R(p.x), R(p.y)]);
+        const m = 25;
+        const near = (c: Chain) => {
+          const b = bboxOf(c.pts);
+          return !(
+            b.maxX < box.minX - m ||
+            b.minX > box.maxX + m ||
+            b.maxY < box.minY - m ||
+            b.minY > box.maxY + m
+          );
+        };
+        const wmRanks = new Map<number, number[]>();
+        wm?.byRank.forEach((ids, k) => {
+          for (const id of ids) wmRanks.set(id, [...(wmRanks.get(id) ?? []), k]);
+        });
+        const common = new Set(wm?.common ?? []);
+        const chainOut = (c: Chain) => {
+          const l = chainLook(c, styles);
+          return {
+            id: c.id,
+            closed: !!c.closed,
+            look: l,
+            keys: l ? key.filter((r) => r.look && looseSame(l, r.look)).map((r) => r.label) : [],
+            wm: wmRanks.get(c.id) ?? [],
+            common: common.has(c.id),
+            pts: P(c.pts),
+          };
+        };
+        const json = {
+          prefix: ctx.png.prefix,
+          seed: f.seed,
+          label: rec.label,
+          ranks,
+          labels: (run?.sizes ?? []).map((x) => x.label),
+          key: key.map((r) => ({ label: r.label, look: r.look })),
+          model: fam.model,
+          why: fam.why ?? null,
+          frame: fam.frame,
+          trusted: fam.trusted,
+          stepMm: fam.stepMm,
+          cands: f.candidates.map((c) => ({ rank: c.rank, o: outcomeOf(c), outer: P(c.outer) })),
+          sizes: fam.sizes.map((v) => ({
+            rank: v.rank,
+            status: v.status,
+            cause: v.cause ?? null,
+            score: v.score,
+            how: v.how ?? null,
+            from: v.from ?? null,
+            offAt: v.offAt ? [R(v.offAt.x), R(v.offAt.y)] : null,
+            offRunMm: v.offRunMm ?? null,
+            onNeighbour: v.onNeighbour ?? null,
+            worstEdge: v.worstEdge ?? null,
+            pointsMax: Math.max(0, ...v.points.filter((x) => x.strong).map((x) => x.resid)),
+            edges: v.edges.map((e) => ({ e: e.e, p95: R(e.p95), max: R(e.max), run: R(e.run), offAt: e.offAt ? [R(e.offAt.x), R(e.offAt.y)] : null })),
+          })),
+          preds: Object.fromEntries(
+            fam.sizes
+              .filter((v) => v.status === 'disagrees')
+              .map((v) => [v.rank, fam!.predict(v.rank).map((p) => ({ how: p.how, from: p.from, pts: P(p.pts) }))]),
+          ),
+          wall: (set?.chains ?? []).filter((c) => c.pts.length > 1 && near(c)).map(chainOut),
+          raw: (ctx.raw && ctx.raw !== set ? ctx.raw.chains : [])
+            .filter((c) => c.pts.length > 1 && near(c))
+            .map(chainOut),
+        };
+        mkdirSync(rvDir, { recursive: true });
+        writeFileSync(`${rvDir}/${ctx.png.prefix}__seed${f.seed}.json`, JSON.stringify(json));
+      } catch (e) {
+        rec.reviewError = String((e as Error)?.stack ?? e).slice(0, 300);
+      }
+    }
     if (ctx.png && fam && (ctx.png.all || rec.dis))
       try {
         renderGfit(
