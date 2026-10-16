@@ -240,8 +240,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
           {
             label: `yes, ${purposes.map(purposeName).join(' + ')}`,
             title: 'keep the AI fabric for this piece',
-            // the AI's call on screen, its piece lit on the sheet: confirming keeps every tick
-            fix: true,
+            // an AI guess: confirmed by a direct click on this answer only, never from the footer
             run: () => set(answered(sds)),
           },
           ...(main

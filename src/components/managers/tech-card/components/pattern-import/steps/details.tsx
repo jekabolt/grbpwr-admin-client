@@ -638,8 +638,6 @@ export function DetailsStep({
             <ChipRow>
               <Chip
                 {...ask('details-blocked')}
-                // one evidence already says one piece for all: the likely answer, undone in the table
-                data-ask-fix=''
                 onClick={() => answer(override(seed, { ungraded: true }))}
                 title='written once, cut alike in every size'
               >
@@ -1012,6 +1010,21 @@ export function DetailsStep({
 
   /** A question is open on its card: the step shows that card and nothing else to read. */
   const asking = !!active && active.kind !== 'gate';
+  /** Is the open question the no-grain (or fold) question of this very piece? */
+  const activeIsFor = (seed: SeedId, what: 'grain' | 'fold') => {
+    if (!active) return false;
+    if (what === 'grain')
+      return (
+        (active.kind === 'blocked' && active.reason === 'no-grain' && active.seed === seed) ||
+        (active.kind === 'group' && active.group === 'grain' && !!active.seeds?.includes(seed))
+      );
+    return (
+      active.seed === seed &&
+      (active.kind === 'fold' ||
+        (active.kind === 'blocked' &&
+          (active.reason === 'fold-question' || active.reason === 'fold-unresolved')))
+    );
+  };
 
   /** The outline a question shows: the size the piece is built on, else the largest drawn. */
   const outerOf = (seed: SeedId) => {
@@ -1889,17 +1902,21 @@ export function DetailsStep({
                     onPoint={(pt) => {
                       if (pickingFold && selPick) {
                         const e = edgeAt(selPick, pt);
-                        if (e) answer(pickFold(sel, e));
+                        if (!e) return;
+                        const p = pickFold(sel, e);
+                        // only the active fold question of this same piece moves the step on
+                        if (activeIsFor(sel, 'fold')) answer(p);
                         return;
                       }
                       if (!drawing) return;
                       if (!grainA) setGrainA(pt);
                       else {
-                        answer(
-                          rerun({
-                            operatorGrain: { ...inputs.operatorGrain, [sel]: { a: grainA, b: pt } },
-                          }),
-                        );
+                        const p = rerun({
+                          operatorGrain: { ...inputs.operatorGrain, [sel]: { a: grainA, b: pt } },
+                        });
+                        // a free "draw grainline" edit is committed as is; only the drawing that
+                        // answers the active no-grain question of this same piece moves on
+                        if (activeIsFor(sel, 'grain')) answer(p);
                         setGrainA(null);
                         setDrawing(false);
                       }

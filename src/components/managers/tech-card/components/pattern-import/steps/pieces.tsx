@@ -2046,8 +2046,8 @@ export function PiecesStep({
                       size='xs'
                       className='text-labelColor hover:text-textColor'
                       title='every outline still to ask stays as it is now'
-                      // the offer's «go on as is»: every guess stays, each still a tile to flip
-                      data-ask-fix={ASK_KEY.aside}
+                      // an explicit operator choice (it keeps the guesses for unseen outlines):
+                      // never the ask line's one-click fix
                       disabled={!!session.busy}
                       onClick={() => quizEnd()}
                     >
