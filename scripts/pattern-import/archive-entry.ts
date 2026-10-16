@@ -458,6 +458,7 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
   // (gfit-archive.ts); ARCHIVE_GFIT_PNG=<dir> a picture of each family the check flags
   // (ARCHIVE_GFIT_PNG_ALL=1: of every family)
   if (process.env.ARCHIVE_PERSIZE && S) {
+    const tg = Date.now();
     try {
       const pd = process.env.ARCHIVE_GFIT_PNG;
       rec.gfit = gfitArchive({
@@ -480,6 +481,7 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     } catch (e) {
       rec.gfitError = String((e as Error)?.stack ?? e).slice(0, 400);
     }
+    rec.gfitMs = Date.now() - tg;
   }
   // the written files
   const wr = outs.write as StageIO['write']['out'] | undefined;
