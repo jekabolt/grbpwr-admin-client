@@ -10,25 +10,19 @@ import {
   composeArticleFromMaterial,
   materialCompositionCode,
   materialCompositionText,
-  materialSpec,
 } from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
-  MaterialPicker,
   MaterialPickerDialog,
   useMaterialStockFacts,
 } from 'components/managers/materials/components/material-picker';
-import {
-  MaterialThumb,
-  materialImageUrl,
-} from 'components/managers/materials/components/material-thumb';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   useFieldArray,
@@ -38,18 +32,16 @@ import {
   type FieldErrors,
 } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { HeaderWarnings } from 'ui/components/header-warnings';
-import Media from 'ui/components/media';
 import { Placeholder } from 'ui/components/placeholder';
 import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
-import { Tile } from 'ui/components/tiles';
-import { FormField, FormItem, FormLabel } from 'ui/form';
+import Tooltip from 'ui/components/tooltip';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { carriesGarmentComposition } from 'utils/care-label';
 import { FIELD_REVEAL_EVENT, revealField, type FieldRevealDetail } from 'utils/field-errors';
 import { sectionShort } from './bom-line-picker';
@@ -71,7 +63,7 @@ import {
 } from './bom-purpose';
 import { resolveBomPrice } from './bom-price';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
-import { defaultRoleFor, roleCollision, roleSuggestions } from './bom-roles';
+import { defaultRoleFor, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
 import { bornBomLine, emptyBomItem } from './form-writers';
 import {
   LABEL_PART_NAME,
@@ -84,12 +76,6 @@ import {
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { TechCardFormData, wireInt } from './schema';
 import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
-import { deriveComposition } from './colorway-recipe';
-import { fromRead } from './colorway-usage-wire';
-import { archivedRef, colorwayLabel } from './design/colorway-picker';
-import { ColourwayCreatePopover } from './design/colourway-create';
-import { Swatch } from './design/render/field-row';
-import { findDictionaryColour } from './design/render/model';
 
 // БОЛВАНКА НОВОЙ СТРОКИ ПЕРЕЕХАЛА В `form-writers.ts` (`emptyBomItem` + `bornBomLine`), И ЭТО
 // ПЕРЕНОС, А НЕ ВТОРОЙ АДРЕС. У строки BOM появилось второе место рождения — принятое
@@ -133,7 +119,7 @@ function materialLineFields(m: common_Material) {
 //     про ворс говорит только `any` — «кладётся как угодно», то есть ANY строки. Остальные значения
 //     о ворсе молчат и не переносятся;
 //   · цвет и пантон артикула;
-//   · семпл: артикул с назначением SAMPLE;
+//   · семпл НЕ выводится (владелец 16.10: семплы — это колорвеи-семплы, не флаг строки BOM);
 //   · вид (нерулонные секции): по словам имени артикула против подписей видов этой секции.
 // Кромка (selvedgeCm) и коэффициент раскроя на строку не пишутся: первое — read-only обогащение
 // чтения, второго у строки нет вовсе (сервер берёт его с артикула).
@@ -155,14 +141,12 @@ function materialAutoFields(m: common_Material, section: string) {
       isRollGoodsSection(section) && grain === 'any' ? 'TECH_CARD_FABRIC_DIRECTION_ANY' : '',
     color: m.color?.trim() ?? '',
     pantone: m.pantone?.trim() ?? '',
-    isSample: m.purpose === 'MATERIAL_PURPOSE_SAMPLE',
     kind: kind ?? '',
   };
 }
 
-// Значения, которые на СУЩЕСТВУЮЩЕЙ строке значат «не задано». `isSample: false` сюда не входит:
-// булево не отличает «не трогали» от осознанного «не семпл», поэтому на старой строке флаг
-// семпла каталогом не переписывается; новая строка получает его из `materialAutoFields` при рождении.
+// Значения, которые на СУЩЕСТВУЮЩЕЙ строке значат «не задано». Флаг семпла (`isSample`) каталог
+// больше не пишет вовсе: значение на строке лежит как лежало, экран BOM его не показывает.
 const EMPTY_AUTO: Record<string, unknown> = {
   fabricDirection: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
   kind: UNSET_KIND,
@@ -388,8 +372,9 @@ export function SlotIdentityFields({ index }: { index: number }) {
     labelPartFromWire(rowLabelPart) === undefined;
 
   // ОДИН РЯД РАВНЫХ КОРОБОК (владелец: ряд полей ввода = один размер плиток). Сетка переносит
-  // коробки по ширине панели, но каждая ячейка одна и та же: селект, комбо, примечание и
-  // переключатель семпла одного роста и одной ширины.
+  // коробки по ширине панели, но каждая ячейка одна и та же: селект, комбо и примечание одного
+  // роста и одной ширины. Направление ворса стоит не здесь, а в редакторе строки: это решение
+  // человека, а не автозаполненная личность слота.
   return (
     <div className='flex flex-col gap-3'>
       <div className={BOX_GRID}>
@@ -469,15 +454,6 @@ export function SlotIdentityFields({ index }: { index: number }) {
               : []),
           ]}
         />
-        {rollGoods && <SampleBox index={index} />}
-        {/* Направление ворса — поле СТРОКИ (сервер судит маркер по нему), только у полотна. */}
-        {rollGoods && (
-          <SelectField
-            name={`bomItems.${index}.fabricDirection`}
-            label='fabric direction'
-            items={techCardFabricDirectionOptions}
-          />
-        )}
       </div>
       {/* ПОЛОСА ОСТАТКОВ — сразу под рядом: значение, у которого на этой секции нет контрола. */}
       <ResidueStrip
@@ -492,38 +468,56 @@ export function SlotIdentityFields({ index }: { index: number }) {
 
 // Сетка равных коробок редактора: шесть в ряд на широком экране, ширина ячейки одна.
 const BOX_GRID = 'grid grid-cols-2 items-start gap-3 sm:grid-cols-3 lg:grid-cols-6';
-const BOX_CLASS =
-  'flex min-h-[22px] w-full min-w-0 items-center justify-between gap-2 border px-[7px] py-[3px] text-left text-textBaseSize';
 
-// СЕМПЛ — переключатель ТОЙ ЖЕ коробкой, что селект рядом, а не чекбокс с подписью: чекбокс в ряду
-// селектов был «маленьким контролом рядом с большой плиткой», который владелец запретил.
-function SampleBox({ index }: { index: number }) {
+// Поля личности строки: дверь к любому из них раскрывает коробки вместо тихой строки.
+const IDENTITY_FIELDS = new Set([
+  'name',
+  'section',
+  'purpose',
+  'purposeNote',
+  'kind',
+  'kindNote',
+  'labelPart',
+]);
+
+/**
+ * Личность слота одной тихой строкой: роль · секция · назначение (или вид) · часть составника.
+ * Всё это заполняется само; правят по `edit`, который ставит на место строки равные коробки.
+ */
+function IdentitySummary({ index }: { index: number }) {
   const { control } = useFormContext<TechCardFormData>();
+  const line = (useWatch({ control, name: `bomItems.${index}` }) ?? {}) as {
+    name?: string;
+    section?: string;
+    purpose?: string;
+    purposeNote?: string;
+    kind?: string;
+    kindNote?: string;
+    labelPart?: string;
+  };
+  const roll = isRollGoodsSection(line.section);
+  const purposeSet = !!line.purpose && line.purpose !== UNSET_PURPOSE;
+  const kindSet = !!line.kind && line.kind !== UNSET_KIND;
+  const part =
+    line.labelPart && line.labelPart !== LABEL_PART_UNSPECIFIED
+      ? (() => {
+          const p = labelPartFromWire(line.labelPart);
+          return p ? LABEL_PART_NAME[p] : line.labelPart;
+        })()
+      : LABEL_PART_NAME[defaultLabelPart(line.section, line.purpose)];
+  const text = join(
+    line.name?.trim() || 'no role',
+    sectionShort(line.section) || 'other',
+    roll ? (purposeSet ? bomPurposeLabel(line.purpose) : 'no purpose') : undefined,
+    roll ? line.purposeNote : undefined,
+    !roll && kindSet ? kindLabel(line.kind) : undefined,
+    !roll ? line.kindNote : undefined,
+    part,
+  );
   return (
-    <FormField
-      control={control}
-      name={`bomItems.${index}.isSample`}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel>sample</FormLabel>
-          <button
-            type='button'
-            role='switch'
-            aria-checked={!!field.value}
-            onClick={() => field.onChange(!field.value)}
-            className={cn(
-              BOX_CLASS,
-              'transition-colors focus:outline-none',
-              field.value
-                ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-borderColor bg-bgColor hover:border-textColor focus:border-textColor',
-            )}
-          >
-            {field.value ? 'sample fabric' : 'no'}
-          </button>
-        </FormItem>
-      )}
-    />
+    <Text component='span' size='micro' variant='label' className='min-w-0 truncate'>
+      {text}
+    </Text>
   );
 }
 
@@ -531,21 +525,67 @@ function SampleBox({ index }: { index: number }) {
 // refuses that delete; this is what the refusal is turned into on the way in.
 type BlockingUser = { colorwayId: number; sku: string };
 
-// Дверь-ссылка редактора: подчёркнутое слово, а не кнопка в рамке (owner: «underline doors»).
+// Дверь-ссылка: подчёркнутое слово, а не кнопка в рамке (owner: «underline doors»).
 const DOOR =
-  'text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor';
+  'text-micro text-labelColor underline underline-offset-2 hover:text-textColor disabled:no-underline disabled:text-textInactiveColor';
 
-// РЕДАКТОР СТРОКИ — РАЗВОРОТ ПОД ЕЁ СТРОКОЙ МАТРИЦЫ (BOM-LITE, решение владельца 16.10). Ни модалки,
-// ни боковой панели, ни вложенных коробок: одна сетка равных полей, артикул одной строкой с
-// дверями `open` `change` `unlink`, комментарий во всю ширину и `remove`. Поля пишут прямо в форму
-// карточки, сохраняет её общая кнопка.
+/**
+ * Дверь, которая только СМОТРИТ (открыть строку, рецепт, закрыть разворот): span role=button, а не
+ * <button> — на выпущенной карточке всё лежит в <fieldset disabled>, а смотреть надо и там.
+ * Двери, которые ПИШУТ (change, unlink, remove, + секция), остаются настоящими <button>: fieldset
+ * гасит их сам — так замороженная карточка и устроена.
+ */
+function ViewDoor({
+  onActivate,
+  className,
+  children,
+  label,
+  expanded,
+}: {
+  onActivate: () => void;
+  className?: string;
+  children?: ReactNode;
+  label?: string;
+  expanded?: boolean;
+}) {
+  return (
+    <span
+      role='button'
+      tabIndex={0}
+      aria-label={label}
+      aria-expanded={expanded}
+      onClick={(e) => {
+        e.stopPropagation();
+        onActivate();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          onActivate();
+        }
+      }}
+      className={cn('cursor-pointer', className)}
+    >
+      {children}
+    </span>
+  );
+}
+
+// РЕДАКТОР СТРОКИ — РАЗВОРОТ ПОД ЕЁ СТРОКОЙ (BOM-LITE, владелец 16.10 «complicated af»). Только то,
+// что решает человек: артикул (`change` `unlink` `open`), направление ворса у полотна, комментарий
+// одной растущей строкой. Автозаполненная личность слота — одна тихая строка с `edit`. Ни модалки,
+// ни вложенных коробок; поля пишут прямо в форму карточки, сохраняет её общая кнопка.
 //
 // Надбавки раскроя здесь НЕТ (владелец: она своя у каждого кроя и задаётся в раскладке). Значение
-// на строке не трогается: форма отправляет то, что лежало, просто без контрола.
+// на строке не трогается: форма отправляет то, что лежало, просто без контрола. Так же и флаг
+// семпла: семплы — колорвеи-семплы, строка BOM его не показывает и не пишет.
 function BomLineEditor({
   index,
   highlight,
   blockedBy,
+  identityOpen,
+  onToggleIdentity,
   onClose,
   onRemove,
   onGoToColorway,
@@ -554,6 +594,9 @@ function BomLineEditor({
   highlight?: boolean;
   /** Колорвеи, чьи рецепты держат эту строку: удаление отказано, список стоит прямо здесь. */
   blockedBy?: BlockingUser[];
+  /** Коробки личности вместо тихой строки (`edit`, или дверь пришла к полю личности). */
+  identityOpen: boolean;
+  onToggleIdentity: () => void;
   onClose: () => void;
   onRemove: () => void;
   onGoToColorway: (colorwayId: number) => void;
@@ -571,13 +614,21 @@ function BomLineEditor({
   const [createOpen, setCreateOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
 
+  // Отказ схемы по полю личности держит коробки открытыми: тихая строка спрятала бы его контрол.
+  const { errors } = useFormState({ control, name: `bomItems.${index}` });
+  const rowErrors = (errors.bomItems as FieldErrors[] | undefined)?.[index] as
+    | Record<string, unknown>
+    | undefined;
+  const identityError = !!rowErrors && Object.keys(rowErrors).some((f) => IDENTITY_FIELDS.has(f));
+  const showBoxes = identityOpen || identityError;
+
   const linked = materialId > 0;
+  const rollGoods = isRollGoodsSection(rowSection);
   // ВКЛЮЧАЯ АРХИВНЫЕ — по списку ищут УЖЕ привязанный артикул (иначе архивный терял цену).
   const { data } = useMaterials('', true);
   const material = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
-  const stockFacts = useMaterialStockFacts(linked);
 
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained).
   const snapshotFrom = (m: common_Material) => {
@@ -600,18 +651,12 @@ function BomLineEditor({
 
   const rowValue = (field: string): string =>
     (getValues(`bomItems.${index}.${field}` as never) as string) ?? '';
-  // Live catalog value first, the line's own snapshot second — never blank while linked.
-  const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
-    catalogValue?.trim() ? catalogValue : rowValue(field);
 
   // Цена — та ступень лестницы (bom-price.ts), по которой строка реально считается, и её источник.
   const linePrice = resolveBomPrice(
     { unitPrice: rowValue('unitPrice'), currency: rowValue('currency'), unit: rowValue('unit') },
     material,
   );
-  const stock = stockFacts.get(materialId);
-  const stockUnit = stock?.unit ?? '';
-  const stockWord = stock?.onHand ? `stock ${stock.onHand}${stockUnit ? ` ${stockUnit}` : ''}` : '';
 
   // Якорь `#bom-composition-{index}`: вкладка labels ведёт сюда за пустым составом.
   const composition = (
@@ -626,14 +671,9 @@ function BomLineEditor({
     </span>
   );
 
-  // АРТИКУЛ ОДНОЙ СТРОКОЙ: свотч · имя · код · ширина · плотность · состав · цена · склад.
-  const articleFacts = linked
-    ? [
-        material ? composeArticleFromMaterial(material, true) : '',
-        widthLabel(mirror(materialFabricWidth(material), 'fabricWidth')),
-        weightLabel(mirror(materialFabricWeight(material), 'fabricWeightGsm')),
-      ].filter((s) => !!s?.trim())
-    : [];
+  // Имя, плотность, ширина и склад уже стоят в строке над разворотом — здесь только то, чего там
+  // нет: код артикула, состав и откуда взята цена.
+  const code = material ? composeArticleFromMaterial(material, true) : `article #${materialId}`;
   // Непривязанная строка старого образца: то, что на ней набрали руками, одной серой строкой (B5).
   const legacyLine = linked
     ? ''
@@ -648,60 +688,39 @@ function BomLineEditor({
         canReadCosting ? linePrice.label : '',
       );
 
-  // span role=button, не <button>: на выпущенной карточке всё лежит в <fieldset disabled>, а
-  // закрыть разворот надо и там.
-  const closeDoor = (
-    <span
-      role='button'
-      tabIndex={0}
-      aria-label='close'
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClose();
-        }
-      }}
-      className='cursor-pointer px-1 text-textColor'
-    >
-      ×
-    </span>
-  );
-
   return (
-    <div className='flex min-w-0 flex-col gap-3'>
-      <div className='flex items-center justify-end'>{closeDoor}</div>
+    <div className='flex min-w-0 flex-col gap-3 py-3'>
+      {/* (личность) тихая строка ↔ равные коробки, на одном и том же месте */}
+      <div className='flex min-w-0 items-start gap-3'>
+        <div className='flex min-w-0 flex-1 items-center'>
+          {showBoxes ? <SlotIdentityFields index={index} /> : <IdentitySummary index={index} />}
+        </div>
+        {!identityError && (
+          <ViewDoor onActivate={onToggleIdentity} className={DOOR}>
+            {showBoxes ? 'done' : 'edit'}
+          </ViewDoor>
+        )}
+        <ViewDoor onActivate={onClose} label='close' className='px-1 text-micro text-textColor'>
+          ✕
+        </ViewDoor>
+      </div>
 
-      <SlotIdentityFields index={index} />
-
+      {/* (a) артикул */}
       <div
         data-field={`bomItems.${index}.materialId`}
         className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-micro'
       >
         {linked ? (
           <>
-            <MaterialThumb material={material} size='sm' />
-            <Text component='span' size='micro' className='min-w-0 truncate font-bold uppercase'>
-              {material?.name?.trim() || `article #${materialId}`}
+            <Text component='span' size='micro' className='min-w-0 truncate'>
+              {code}
             </Text>
-            {articleFacts.map((f) => (
-              <Text key={f} component='span' size='micro' variant='label' className='truncate'>
-                {f}
-              </Text>
-            ))}
             <Text component='span' size='micro' variant='label' className='flex min-w-0'>
               {composition}
             </Text>
-            {canReadCosting && (
-              <Text component='span' size='micro' variant='label' className='tabular-nums'>
-                {linePrice.label
-                  ? `${linePrice.label} · ${linePrice.source === 'line' ? 'card' : 'catalog'}`
-                  : 'no price'}
-              </Text>
-            )}
-            {stockWord ? (
-              <Text component='span' size='micro' variant='label' className='tabular-nums'>
-                {stockWord}
+            {canReadCosting && linePrice.label ? (
+              <Text component='span' size='micro' variant='label'>
+                {linePrice.source === 'line' ? 'card price' : 'catalog price'}
               </Text>
             ) : null}
             <span className='flex items-center gap-3'>
@@ -718,16 +737,9 @@ function BomLineEditor({
           </>
         ) : (
           <>
-            <div className='w-full max-w-[280px]'>
-              {/* 11.3: the BOM links through the SWATCH dialog; its tile is the one `create`. */}
-              <MaterialPicker
-                variant='grid'
-                value={materialId}
-                section={rowSection ?? ''}
-                onChange={(id, m) => pick(id, m)}
-                onCreate={() => setCreateOpen(true)}
-              />
-            </div>
+            <button type='button' className={DOOR} onClick={() => setChangeOpen(true)}>
+              link article
+            </button>
             {legacyLine ? (
               <Text component='span' size='micro' variant='label' className='min-w-0 truncate'>
                 {legacyLine}
@@ -737,13 +749,17 @@ function BomLineEditor({
         )}
       </div>
 
-      <TextareaField
-        name={`bomItems.${index}.comment`}
-        label='comment'
-        rows={2}
-        maxLength={1000}
-        enhance='note'
-      />
+      {/* (b) направление ворса — только у полотна. Комментария строки здесь нет (владелец 16.10:
+          «no comment needed»): значение на строке не трогается, форма отправляет то, что лежало. */}
+      {rollGoods && (
+        <div className={BOX_GRID}>
+          <SelectField
+            name={`bomItems.${index}.fabricDirection`}
+            label='fabric direction'
+            items={techCardFabricDirectionOptions}
+          />
+        </div>
+      )}
 
       <div className='flex flex-col gap-1'>
         <button type='button' className={cn(DOOR, 'self-start')} onClick={onRemove}>
@@ -780,7 +796,7 @@ function BomLineEditor({
           initialSection={rowSection ?? ''}
           value={materialId}
           clearable={false}
-          title='change article'
+          title={linked ? 'change article' : 'link article'}
           confirmLabel='link'
           onPick={(m) => {
             if (m && wireInt(m.id)) pick(wireInt(m.id), m);
@@ -804,152 +820,11 @@ function BomLineEditor({
   );
 }
 
-// ── МАТРИЦА: строки = слоты BOM, столбцы = артикул по умолчанию + колорвеи (вид SIDES) ─────────
+// ── СПИСОК: одна строка на слот, группы по секциям. Колорвеев здесь нет (владелец 16.10: у них
+// своя вкладка); рецепты колорвеев видны только там, где они держат удаление строки. ──────────
 
-// Дорожки — мерой SIDES (`design/render/side-row.tsx`): ячейка 138, хвост `+ colourway` забирает
-// остаток ширины.
-const COL_PX = 138;
-const PLUS_COL_PX = 104;
-
-const HEAD = 'uppercase';
-
-/** Плитка артикула в ячейке: фото, имя, код, одна строка спецификации, цена. */
-function ArticleTile({
-  material,
-  fallbackName,
-  note,
-  priceLine,
-  tone,
-  selected,
-  onOpen,
-}: {
-  material?: common_Material;
-  fallbackName: string;
-  /** Короткое слово под именем (`pin`, `pin +1`). */
-  note?: string;
-  /** Ценовые поля строки: плитка артикула по умолчанию печатает цену, по которой строка считается. */
-  priceLine?: { unitPrice?: string; currency?: string; unit?: string };
-  tone?: BomLineTone;
-  selected?: boolean;
-  onOpen: () => void;
-}) {
-  const { canReadCosting } = usePermissions();
-  const imageUrl = materialImageUrl(material);
-  const name = material?.name?.trim() || fallbackName;
-  const price = resolveBomPrice(priceLine ?? {}, material);
-  const spec = material ? join(materialSpec(material), material.color) : '';
-  return (
-    // div role=button: на выпущенной карточке матрица в <fieldset disabled>, а смотреть надо.
-    <div
-      role='button'
-      tabIndex={0}
-      aria-pressed={selected}
-      title={name}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
-      className='relative cursor-pointer'
-    >
-      <Tile
-        selected={selected}
-        tone={tone === 'error' ? 'error' : 'default'}
-        className='hover:border-textColor'
-        media={
-          imageUrl ? (
-            <span className='relative block aspect-square w-full overflow-hidden'>
-              <Media src={imageUrl} alt={name} aspectRatio='1/1' fit='cover' />
-            </span>
-          ) : (
-            <Placeholder aspect='square' label='no photo' className='w-full' />
-          )
-        }
-        name={name}
-        sub={material ? composeArticleFromMaterial(material, true) : undefined}
-      >
-        {spec ? (
-          <Text size='micro' variant='label' className='truncate'>
-            {spec}
-          </Text>
-        ) : null}
-        {note ? (
-          <Text size='micro' variant='label' className='truncate'>
-            {note}
-          </Text>
-        ) : null}
-        {canReadCosting && price.label ? (
-          <Text size='micro' variant='label' className='truncate tabular-nums'>
-            {price.label}
-          </Text>
-        ) : null}
-      </Tile>
-      {tone === 'warning' && (
-        <span
-          aria-label='needs attention'
-          className='absolute right-1.5 top-1.5 size-1.5 bg-warning'
-        />
-      )}
-    </div>
-  );
-}
-
-/** Пунктирная штрихованная ячейка-приглашение (как `+ media` в SIDES). */
-function AddCell({
-  label,
-  onClick,
-  tone,
-  title,
-}: {
-  label: string;
-  onClick?: () => void;
-  tone?: 'error';
-  title?: string;
-}) {
-  const box = (
-    <Placeholder
-      dashed
-      tone={tone === 'error' ? 'error' : 'default'}
-      aspect='square'
-      label={label}
-      className='w-full'
-    />
-  );
-  if (!onClick) return box;
-  return (
-    <button
-      type='button'
-      title={title}
-      onClick={onClick}
-      className='group block w-full [&>div]:group-hover:border-textColor'
-    >
-      {box}
-    </button>
-  );
-}
-
-/** Колорвей берёт артикул слота как есть — тихая ячейка-призрак. */
-function GhostCell({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <span
-      role='button'
-      tabIndex={0}
-      title={title}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      className='flex aspect-square w-full cursor-pointer items-center justify-center border border-hairline text-micro uppercase tracking-label text-labelColor hover:border-borderColor'
-    >
-      = article
-    </span>
-  );
-}
+// Столбцы строки: свотч · роль · артикул · плотность · ширина · цена · склад.
+const LEAD_COLS = 7;
 
 type MatrixLine = {
   id?: number | string;
@@ -963,9 +838,11 @@ type MatrixLine = {
   unitPrice?: string;
   currency?: string;
   unit?: string;
+  fabricWidth?: string;
+  fabricWeightGsm?: string;
 };
 
-// Порядок секций матрицы — порядок селекта секции, «other» и незнакомые — в хвосте.
+// Порядок секций — порядок селекта секции, «other» и незнакомые — в хвосте.
 const SECTION_ORDER = techCardBomSectionOptions.map((o) => o.value as string);
 
 function groupBySection(lines: MatrixLine[]): Array<{ section: string; indices: number[] }> {
@@ -1010,37 +887,51 @@ function uniqueRole(base: string, lines: Array<{ name?: string }>): string {
   return '';
 }
 
-// Bill of materials = catalog of all material articles used by this style, read as a matrix of
-// slots × colourways. The recipe itself (which article on which part, consumption) is edited per
-// colourway on the colorways tab — the cells here are its doors.
+// Назначение (или вид) рядом с ролью — только когда оно что-то добавляет: «main fabric» уже
+// говорит «main material», «lining 2» уже говорит «lining».
+function extraOfRole(role: string, extra: string): string {
+  const e = normalizeRole(extra);
+  if (!e) return '';
+  const r = normalizeRole(role);
+  const words = new Set(r.split(/\s+/));
+  if (r.includes(e) || e.split(/\s+/).every((w) => words.has(w))) return '';
+  if (e.split(/\s+/).some((w) => w.length > 3 && r.includes(w))) return '';
+  return extra;
+}
+
+// Bill of materials = catalog of all material articles used by this style, read as a list of
+// slots grouped by section. The recipe itself (which article on which part, consumption) is edited
+// per colourway on the colorways tab; this list links there only from a refused remove.
 export function BomField({
   highlightComposition = 0,
   colorways,
   markers,
   headerEl,
-  techCardId = 0,
   canEdit = true,
 }: {
   highlightComposition?: number;
   /**
    * The style's colourways as READ (techCard.colorways) — NOT the RHF `colorways` array, which is
    * permanently empty since colourways stopped being style-owned. Their recipes are the one class
-   * of reference to a BOM article this form cannot clear on its own, and the matrix columns.
+   * of reference to a BOM article this form cannot clear on its own (the refused-remove block).
    */
   colorways?: common_AdminColorwayRef[];
   /** Карточные раскладки как READ — «норма не снята с раскладки» в шапке. */
   markers?: common_TechCardMarkerSummary[];
   /** Слот в шапке секции: сюда порталятся HeaderNote и HeaderWarnings (как у PATTERNS). */
   headerEl?: HTMLElement | null;
-  /** Карточка для двери `+ colourway`; 0 — карточка ещё не создана, двери нет. */
+  /**
+   * Не используется: дверь `+ colourway` ушла из BOM вместе со столбцами колорвеев. Проп оставлен,
+   * чтобы не трогать вызывающий экран (index.tsx) в этой правке.
+   */
   techCardId?: number;
-  /** Карточка не выпущена и право есть: строки `+ section`, `+ colourway`. */
+  /** Карточка не выпущена и право есть: двери `+ section`, `link article`. */
   canEdit?: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
   const warnNoPrice = useNoPriceWarning();
-  const { dictionary } = useDictionary();
+  const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as MatrixLine[];
@@ -1052,16 +943,18 @@ export function BomField({
   const materials = useMemo(() => materialsData?.materials ?? [], [materialsData]);
   const materialById = (id: number) =>
     id > 0 ? materials.find((m) => wireInt(m.id) === id) : undefined;
+  const stockFacts = useMaterialStockFacts(fields.length > 0);
 
-  // The line whose editor is open under its row. ONE editor for the whole matrix, keyed by index.
+  // The line whose editor is open under its row. ONE editor for the whole list, keyed by index.
   const [selected, setSelected] = useState<number | null>(null);
+  // Строка, у которой личность раскрыта коробками (`edit` или дверь к полю личности).
+  const [identityFor, setIdentityFor] = useState<number | null>(null);
   const [highlightActive, setHighlightActive] = useState(false);
   const [blocked, setBlocked] = useState<{ index: number; users: BlockingUser[] } | null>(null);
   // Пикер каталога: новая строка в секции (`section`) или артикул для пустой строки (`line`).
   const [picking, setPicking] = useState<{ section: string; line?: number } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const createTarget = useRef<{ section: string; line?: number } | null>(null);
-  const [creatingColourway, setCreatingColourway] = useState(false);
   // Поле, которое надо сфокусировать, как только редактор строки смонтируется (дверь B7).
   const focusPath = useRef<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
@@ -1071,21 +964,23 @@ export function BomField({
   const openLine = (index: number, field?: string) => {
     setSelected(index);
     if (!field) return;
+    if (IDENTITY_FIELDS.has(field)) setIdentityFor(index);
     const path = `bomItems.${index}.${field}`;
     focusPath.current = path;
     setFocusTick((t) => t + 1);
     requestAnimationFrame(() => revealField(path));
   };
 
-  // Отказ удаления относится к ОДНОЙ строке: уход с неё его снимает.
+  // Отказ удаления и раскрытая личность относятся к ОДНОЙ строке: уход с неё их снимает.
   useEffect(() => {
     setBlocked((b) => (b && b.index !== selected ? null : b));
+    setIdentityFor((f) => (f !== null && f !== selected ? null : f));
   }, [selected]);
 
   // ДВЕРЬ К ПОЛЮ СТРОКИ (B7). Поля строки живут только в развороте выбранной строки, так что
   // `revealField('bomItems.N.x')` без этого слушателя не находил ничего. Просьбу забираем
-  // (`preventDefault` = «я покажу»), открываем строку N, фокус ставит эффект ниже. Слушатель на
-  // document: якоря нет в DOM вовсе, и событие идёт туда.
+  // (`preventDefault` = «я покажу»), открываем строку N (и её коробки, если поле — личность),
+  // фокус ставит эффект ниже. Слушатель на document: якоря нет в DOM вовсе, и событие идёт туда.
   useEffect(() => {
     const onAsk = (e: Event) => {
       const path = (e as CustomEvent<FieldRevealDetail>).detail?.path ?? '';
@@ -1096,6 +991,7 @@ export function BomField({
       e.preventDefault();
       focusPath.current = path;
       setSelected(index);
+      if (IDENTITY_FIELDS.has(m[2].split('.')[0])) setIdentityFor(index);
       setFocusTick((t) => t + 1);
     };
     document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
@@ -1259,7 +1155,7 @@ export function BomField({
     remove(bi);
   };
 
-  // Привязать артикул к УЖЕ существующей строке (ячейка `+ article`).
+  // Привязать артикул к УЖЕ существующей строке (дверь `link article`).
   const linkLine = (index: number, m: common_Material) => {
     setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
     Object.entries(materialLineFields(m)).forEach(([field, val]) => {
@@ -1270,7 +1166,7 @@ export function BomField({
     warnNoPrice(m);
   };
 
-  // ДОБАВЛЕНИЕ = ОДИН ВЫБОР (B3, уроки L3/L4/L5). Строка `+ section` уже знает секцию, пикер
+  // ДОБАВЛЕНИЕ = ОДИН ВЫБОР (B3, уроки L3/L4/L5). Дверь `+ section` уже знает секцию, пикер
   // отфильтрован по ней; выбор артикула сразу рождает строку и открывает её редактор. Роль и
   // назначение выводятся сами (первая ткань = основная, роль из назначения или секции, с номером
   // при совпадении) и правятся в редакторе; ни одного промежуточного окна.
@@ -1292,6 +1188,7 @@ export function BomField({
     const auto = materialAutoFields(m, section);
     const next = fields.length;
     // `bornBomLine` — тот же конструктор, которым рождается строка из черновика construction.
+    // Флаг семпла не передаётся: строка рождается с болванкой, каталог его не решает.
     append(
       bornBomLine({
         ...materialLineFields(m),
@@ -1299,7 +1196,6 @@ export function BomField({
         purpose,
         purposeNote: '',
         kind: auto.kind || UNSET_KIND,
-        isSample: auto.isSample,
         color: auto.color,
         pantone: auto.pantone,
         fabricDirection: auto.fabricDirection || emptyBomItem.fabricDirection,
@@ -1318,25 +1214,29 @@ export function BomField({
     onOpenColorways: () => openRecipe(),
   });
 
-  // Столбцы — живые колорвеи карточки в её порядке (архивные не рисуются: этим цветом не работают).
-  const columns = (colorways ?? []).filter((c) => (c.colorwayId ?? 0) > 0 && !archivedRef(c));
-  // Состав — у КОЛОРВЕЯ, не у стиля: колорвеи законно берут разные артикулы. Считается тем же
-  // `deriveComposition`, что полоса состава в рецепте.
-  const bomRefs = lines.map((l) => ({ id: wireInt(l.id), lineKey: l.lineKey ?? '' }));
-  const compositionOf = (c: common_AdminColorwayRef): string => {
-    const usages = (c.usages ?? []).map((u) => fromRead(u, bomRefs, []));
-    const { fibers } = deriveComposition(usages, lines as never, materials);
-    return fibers.map((f) => `${f.percent}% ${f.name}`).join(', ');
-  };
-
   const presentSections = new Set(lines.map((l) => l.section));
   const emptySections = techCardBomSectionOptions.filter((o) => !presentSections.has(o.value));
-  const span = columns.length + 3;
+  const spanAll = { gridColumn: '1 / -1' };
 
   const header = (
     <>
       {fields.length > 0 && <HeaderNote>articles {fields.length}</HeaderNote>}
       <HeaderWarnings items={warnings} />
+      {/* ГЛАВНАЯ ДВЕРЬ ДОБАВЛЕНИЯ (владелец 16.10: «forgot a button for creating a slot»). Пикер со
+          ВСЕМИ секциями, без пресета: строка рождается в секции артикула, роль и назначение — как у
+          `+ секция`. На пустом BOM — главная кнопка, на полном — вторичная. Выпущенная карточка и
+          нет права — кнопки нет. */}
+      {canEdit && (
+        <Button
+          type='button'
+          variant={fields.length === 0 ? 'main' : 'secondary'}
+          size='sm'
+          className='ml-auto shrink-0'
+          onClick={() => setPicking({ section: '' })}
+        >
+          + slot
+        </Button>
+      )}
     </>
   );
 
@@ -1344,45 +1244,156 @@ export function BomField({
     const m = materialById(wireInt(l.materialId));
     return l.name?.trim() || m?.name?.trim() || `line ${i + 1}`;
   };
-  const subLabel = (l: MatrixLine) =>
-    isRollGoodsSection(l.section)
-      ? l.purpose && l.purpose !== UNSET_PURPOSE
-        ? bomPurposeLabel(l.purpose)
-        : 'purpose not set'
-      : kindLabel(l.kind) ?? '';
+  // Назначение у полотна, вид у остального — рядом с ролью, только если оно новое.
+  const roleExtra = (l: MatrixLine, role: string) => {
+    if (isRollGoodsSection(l.section)) {
+      return l.purpose && l.purpose !== UNSET_PURPOSE
+        ? extraOfRole(role, bomPurposeLabel(l.purpose))
+        : '';
+    }
+    return extraOfRole(role, kindLabel(l.kind) ?? '');
+  };
 
   const toggle = (i: number) => setSelected(selected === i ? null : i);
 
-  const cellFor = (c: common_AdminColorwayRef, l: MatrixLine, i: number) => {
-    const usages = usagesOf(c, l);
-    const defaultId = wireInt(l.materialId);
-    const pins = [
-      ...new Set(
-        usages.map((u) => wireInt(u.materialId)).filter((id) => id > 0 && id !== defaultId),
-      ),
-    ];
-    const name = colorwayLabel(c);
-    // Пины пишет рецепт колорвея (полная замена строк с замком версии) — отсюда ячейка ведёт туда.
-    const door = () => openRecipe(c.colorwayId ?? 0);
-    if (pins.length > 0) {
-      const m = materialById(pins[0]);
-      return (
-        <ArticleTile
-          material={m}
-          fallbackName={`#${pins[0]}`}
-          note={pins.length > 1 ? `pin +${pins.length - 1}` : 'pin'}
-          onOpen={door}
-        />
-      );
-    }
-    if (defaultId > 0) return <GhostCell title={`${name}: the slot's article`} onClick={door} />;
+  const factText = (v: string) => (
+    <Text component='span' size='micro' variant='label' className='whitespace-nowrap tabular-nums'>
+      {v}
+    </Text>
+  );
+
+  const slotRow = (i: number, first: boolean) => {
+    const l = lines[i];
+    const materialId = wireInt(l.materialId);
+    const linked = materialId > 0;
+    const m = materialById(materialId);
+    const isSelected = selected === i;
+    const error = tones.get(i) === 'error';
+    const role = roleLabel(l, i);
+    const extra = roleExtra(l, role);
+    const roll = isRollGoodsSection(l.section);
+    const articleName = m?.name?.trim() || `article #${materialId}`;
+    const price = resolveBomPrice(l, m);
+    const stock = stockFacts.get(materialId);
+    const gsm = roll ? weightLabel(materialFabricWeight(m) || l.fabricWeightGsm) : '';
+    const width = roll ? widthLabel(materialFabricWidth(m) || l.fabricWidth) : '';
     return (
-      <AddCell
-        label='+ article'
-        title={`${name}: pin an article in the recipe`}
-        onClick={door}
-        tone={tones.get(i) === 'error' ? 'error' : undefined}
-      />
+      <div key={fields[i]?.id ?? i} className='grid grid-cols-subgrid' style={spanAll}>
+        <div
+          className={cn(
+            'relative grid grid-cols-subgrid items-center',
+            !first && 'border-t border-hairline',
+          )}
+          style={spanAll}
+        >
+          {/* Ошибка строки — тонкая красная черта слева и `!` у роли; СЛОВА — в шапке блока. */}
+          {error && <span aria-hidden className='absolute inset-y-0 -left-2 w-px bg-error' />}
+          <span
+            role='button'
+            tabIndex={0}
+            aria-expanded={isSelected}
+            onClick={() => toggle(i)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggle(i);
+              }
+            }}
+            className={cn(
+              'grid min-h-11 cursor-pointer grid-cols-subgrid items-center py-1.5 hover:bg-bgZebra',
+              isSelected && 'bg-bgZebra',
+            )}
+            style={{ gridColumn: `span ${LEAD_COLS} / span ${LEAD_COLS}` }}
+          >
+            {linked ? (
+              <MaterialThumb material={m} size='sm' />
+            ) : (
+              <span className='size-8 border border-hairline' />
+            )}
+            <Tooltip
+              trigger={
+                <span className='block min-w-0 max-w-[220px]'>
+                  <Text
+                    component='span'
+                    size='micro'
+                    className={cn(
+                      'block truncate',
+                      isSelected && 'underline underline-offset-2',
+                      error && 'text-error',
+                    )}
+                  >
+                    {error ? '! ' : ''}
+                    {role}
+                    {l.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN' ? (
+                      <span className='font-bold'> *</span>
+                    ) : null}
+                    {extra ? <span className='text-labelColor'> · {extra}</span> : null}
+                  </Text>
+                </span>
+              }
+            >
+              {join(role, extra || undefined, sectionShort(l.section))}
+            </Tooltip>
+            {linked ? (
+              <>
+                <Tooltip
+                  trigger={
+                    <span className='block min-w-0'>
+                      <Text component='span' size='micro' className='block truncate'>
+                        {articleName}
+                      </Text>
+                    </span>
+                  }
+                >
+                  {join(
+                    articleName,
+                    m ? composeArticleFromMaterial(m, true) : undefined,
+                    m ? materialCompositionText(m) : undefined,
+                  )}
+                </Tooltip>
+                {factText(gsm)}
+                {factText(width)}
+                {factText(canReadCosting ? price.label || 'no price' : '')}
+                {factText(
+                  stock?.onHand ? `stock ${stock.onHand}${stock.unit ? ` ${stock.unit}` : ''}` : '',
+                )}
+              </>
+            ) : (
+              <span className='min-w-0' style={{ gridColumn: 'span 5 / span 5' }}>
+                {canEdit ? (
+                  <button
+                    type='button'
+                    className={cn(DOOR, error && 'text-error hover:text-error')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPicking({ section: l.section || '', line: i });
+                    }}
+                  >
+                    link article
+                  </button>
+                ) : (
+                  factText('no article')
+                )}
+              </span>
+            )}
+          </span>
+        </div>
+        {isSelected && (
+          <div className='sticky left-0 border-t border-hairline' style={spanAll}>
+            <BomLineEditor
+              key={fields[i]?.id ?? i}
+              index={i}
+              highlight={highlightActive}
+              blockedBy={blocked?.index === i ? blocked.users : undefined}
+              identityOpen={identityFor === i}
+              onToggleIdentity={() => setIdentityFor((f) => (f === i ? null : i))}
+              onClose={() => setSelected(null)}
+              onRemove={() => removeArticle(i)}
+              onGoToColorway={goToColorway}
+            />
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -1394,208 +1405,48 @@ export function BomField({
         <div className='flex flex-wrap items-center gap-1.5'>{header}</div>
       )}
 
-      {/* ⚠ МАТРИЦА СКРОЛЛИТСЯ ВНУТРИ СВОЕЙ КОРОБКИ, А НЕ УВОЗИТ СТРАНИЦУ ВБОК (DESIGN.md). */}
-      <div className='overflow-x-auto'>
-        <div
-          className='grid items-start gap-x-6'
-          style={{
-            gridTemplateColumns: `minmax(72px, max-content) ${COL_PX}px ${columns
-              .map(() => `${COL_PX}px`)
-              .join(' ')} minmax(${PLUS_COL_PX}px, 1fr)`,
-          }}
-        >
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            slot
-          </Text>
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            article
-          </Text>
-          {columns.map((c) => {
-            const hex =
-              (c.devHex ?? '').trim() ||
-              (findDictionaryColour(dictionary?.colors, c.colorCode)?.hex ?? '').trim();
-            const comp = compositionOf(c);
-            return (
-              <button
-                key={c.colorwayId}
-                type='button'
-                onClick={() => openRecipe(c.colorwayId ?? 0)}
-                className='group flex min-w-0 flex-col items-start gap-0.5 py-0.5 text-left'
-              >
-                <span className='flex min-w-0 items-center gap-1.5'>
-                  <Swatch hex={hex} size={11} />
-                  <Text
-                    size='micro'
-                    variant='label'
-                    tracking='label'
-                    component='span'
-                    className='min-w-0 truncate uppercase underline underline-offset-2 group-hover:text-textColor'
-                  >
-                    {colorwayLabel(c)}
-                  </Text>
-                </span>
-                {comp ? (
-                  <Text
-                    size='nano'
-                    variant='label'
-                    component='span'
-                    className='min-w-0 truncate'
-                    title={comp}
-                  >
-                    {comp}
-                  </Text>
-                ) : null}
-              </button>
-            );
-          })}
-          <div className='flex min-w-0 self-stretch'>
-            {canEdit && techCardId > 0 ? (
-              <ColourwayCreatePopover
-                techCardId={techCardId}
-                open={creatingColourway}
-                onOpenChange={setCreatingColourway}
-                readOnly={!canEdit}
-                onCreated={() => {}}
-                anchor={
-                  <button
-                    type='button'
-                    onClick={() => setCreatingColourway(true)}
-                    className='flex shrink-0 items-center self-start whitespace-nowrap border border-dashed border-borderColor px-2 py-px text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor'
-                  >
-                    + colourway
-                  </button>
-                }
-              />
-            ) : (
-              <div className='border-l border-dashed border-borderColor' />
-            )}
-          </div>
-
-          {groups.map((g) => (
-            <div
-              key={g.section}
-              className='grid grid-cols-subgrid'
-              style={{ gridColumn: `span ${span} / span ${span}` }}
-            >
-              <div style={{ gridColumn: `span ${span} / span ${span}` }}>
-                <GroupLabel>{sectionShort(g.section) || 'other'}</GroupLabel>
-              </div>
-              {g.indices.map((i) => {
-                const l = lines[i];
-                const linked = wireInt(l.materialId) > 0;
-                const isSelected = selected === i;
-                const tone = tones.get(i);
-                return (
-                  <div
-                    key={fields[i]?.id ?? i}
-                    className='grid grid-cols-subgrid'
-                    style={{ gridColumn: `span ${span} / span ${span}` }}
-                  >
-                    <div
-                      className='grid grid-cols-subgrid items-start border-t border-hairline py-3'
-                      style={{ gridColumn: `span ${span} / span ${span}` }}
-                    >
-                      <span
-                        role='button'
-                        tabIndex={0}
-                        aria-expanded={isSelected}
-                        onClick={() => toggle(i)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            toggle(i);
-                          }
-                        }}
-                        className='flex min-w-0 cursor-pointer flex-col gap-0.5'
-                      >
-                        <Text
-                          size='micro'
-                          variant={isSelected ? undefined : 'label'}
-                          tracking='label'
-                          component='span'
-                          className={cn(
-                            'uppercase underline-offset-2 hover:underline',
-                            isSelected && 'underline',
-                            tone === 'error' && 'text-error',
-                          )}
-                        >
-                          {roleLabel(l, i)}
-                          {l.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN' ? (
-                            <span className='font-bold'> *</span>
-                          ) : null}
-                        </Text>
-                        {subLabel(l) ? (
-                          <Text size='nano' variant='label' component='span'>
-                            {subLabel(l)}
-                          </Text>
-                        ) : null}
-                      </span>
-                      <div style={{ maxWidth: COL_PX }} className='min-w-0'>
-                        {linked ? (
-                          <ArticleTile
-                            material={materialById(wireInt(l.materialId))}
-                            fallbackName={`#${wireInt(l.materialId)}`}
-                            priceLine={l}
-                            tone={tone}
-                            selected={isSelected}
-                            onOpen={() => toggle(i)}
-                          />
-                        ) : (
-                          <AddCell
-                            label='+ article'
-                            tone={tone === 'error' ? 'error' : undefined}
-                            onClick={
-                              canEdit
-                                ? () => setPicking({ section: l.section || '', line: i })
-                                : undefined
-                            }
-                          />
-                        )}
-                      </div>
-                      {columns.map((c) => (
-                        <div key={c.colorwayId} style={{ maxWidth: COL_PX }} className='min-w-0'>
-                          {cellFor(c, l, i)}
-                        </div>
-                      ))}
-                      <div className='self-stretch border-l border-dashed border-borderColor' />
-                    </div>
-                    {isSelected && (
-                      <div
-                        className='sticky left-0 max-w-[960px] border-t border-hairline pb-3'
-                        style={{ gridColumn: '1 / -1' }}
-                      >
-                        <BomLineEditor
-                          key={fields[i]?.id ?? i}
-                          index={i}
-                          highlight={highlightActive}
-                          blockedBy={blocked?.index === i ? blocked.users : undefined}
-                          onClose={() => setSelected(null)}
-                          onRemove={() => removeArticle(i)}
-                          onGoToColorway={goToColorway}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {canEdit && (
-                <div
-                  className='grid grid-cols-subgrid items-start border-t border-hairline py-3'
-                  style={{ gridColumn: `span ${span} / span ${span}` }}
-                >
-                  <span />
-                  <div style={{ maxWidth: COL_PX }} className='min-w-0'>
-                    <AddCell
-                      label={`+ ${sectionShort(g.section) || 'article'}`}
-                      onClick={() => setPicking({ section: g.section })}
-                    />
-                  </div>
+      {/* ⚠ СПИСОК СКРОЛЛИТСЯ ВНУТРИ СВОЕЙ КОРОБКИ, А НЕ УВОЗИТ СТРАНИЦУ ВБОК (DESIGN.md). Отступ
+          слева — место под красную черту строки с ошибкой. */}
+      {fields.length > 0 && (
+        <div className='overflow-x-auto pl-2'>
+          <div
+            className='grid items-center gap-x-4'
+            style={{
+              gridTemplateColumns: [
+                '32px',
+                'minmax(80px, max-content)',
+                'minmax(140px, 1fr)',
+                'max-content',
+                'max-content',
+                'max-content',
+                'max-content',
+              ].join(' '),
+            }}
+          >
+            {groups.map((g, gi) => (
+              <div key={g.section} className='grid grid-cols-subgrid' style={spanAll}>
+                {/* ОДНА черта под подписью секции — своя у GroupLabel; первая строка группы своей
+                    верхней черты не рисует (владелец: «double underline»). */}
+                <div style={spanAll}>
+                  <GroupLabel flush={gi === 0}>{sectionShort(g.section) || 'other'}</GroupLabel>
                 </div>
-              )}
-            </div>
-          ))}
+                {g.indices.map((i, k) => slotRow(i, k === 0))}
+                {canEdit && (
+                  <div className='pb-1 pt-2' style={spanAll}>
+                    <button
+                      type='button'
+                      className={DOOR}
+                      onClick={() => setPicking({ section: g.section })}
+                    >
+                      + {sectionShort(g.section) || 'article'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Пустые секции — одна тихая строка ссылок; пустая вкладка — только она. */}
       {canEdit && emptySections.length > 0 && (
@@ -1628,7 +1479,9 @@ export function BomField({
           picking
             ? picking.line !== undefined
               ? 'link article'
-              : `add ${sectionShort(picking.section) || 'article'}`
+              : picking.section
+                ? `add ${sectionShort(picking.section) || 'article'}`
+                : 'add slot'
             : undefined
         }
         confirmLabel={picking?.line !== undefined ? 'link' : 'add'}
