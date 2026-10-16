@@ -283,7 +283,14 @@ export function cleanPages(
     // A9: the file's tile chrome (what a page set aside is tested against) and its tile format
     tilePcs.set(
       doc.file.id,
-      pcs.map((pc) => ({ pc, sheet: roleOf.get(pageKey(doc.file.id, pc.page.page))?.sheet })),
+      pcs.map((pc, k) => ({
+        pc,
+        sheet: roleOf.get(pageKey(doc.file.id, pc.page.page))?.sheet,
+        furniture: new Set(
+          // tile chrome stays chrome when a garment line ends on it (offered, not applied)
+          foundOf[k].filter((f) => f.repeated || f.proof || f.chrome).flatMap((f) => f.chains),
+        ),
+      })),
     );
     if (tiles.length) {
       const fmts = new Map<string, { widthMm: number; heightMm: number; n: number }>();
@@ -383,7 +390,13 @@ export function cleanPages(
  * touched (the AI's word on a tile is a note). The operator's role edits are their own answer.
  */
 /** A tile page's line work, its sheet, and its piece shapes (computed once, when a rule asks). */
-type TilePc = { pc: PageChains; sheet?: number; shapes?: ReturnType<typeof shapesOf> };
+type TilePc = {
+  pc: PageChains;
+  sheet?: number;
+  shapes?: ReturnType<typeof shapesOf>;
+  /** STOPS: the chains proven page furniture (repeated, proof, tile chrome) — no pattern pen. */
+  furniture?: ReadonlySet<number>;
+};
 
 function aiPass(
   dropped: CleanOutput['dropped'],
@@ -486,7 +499,10 @@ function inkPass(
     let f = perFile.get(d.file);
     if (!f) {
       f = {
-        pens: tilePensOf(tiles.map((t) => t.pc)),
+        pens: tilePensOf(
+          tiles.map((t) => t.pc),
+          tiles.map((t) => t.furniture),
+        ),
         shapes: tiles.flatMap(
           (t) => (t.shapes ??= shapesOf(t.pc.chains, PATIMPORT.minPieceAreaMm2)),
         ),

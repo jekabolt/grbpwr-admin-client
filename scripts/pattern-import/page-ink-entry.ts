@@ -57,6 +57,12 @@ async function dump(files: string[]) {
       for (const ch of pc.chains)
         if (ch.lengthMm >= 100) {
           const k = penOf(pg, ch.style);
+          if (process.env.INK_PEN && k.startsWith(process.env.INK_PEN) && !tilePens.has(k)) {
+            const b = pc.box[pc.chains.indexOf(ch)];
+            console.log(
+              `   tile p${pg.page + 1} pen ${k}: len ${Math.round(ch.lengthMm)} box ${Math.round(b.minX)},${Math.round(b.minY)} ${Math.round(b.maxX - b.minX)}x${Math.round(b.maxY - b.minY)} closed ${ch.closed}`,
+            );
+          }
           tilePens.set(k, (tilePens.get(k) ?? 0) + 1);
         }
     }
