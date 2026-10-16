@@ -1443,9 +1443,10 @@ export class Session {
     const variants = variantLabels(sheet.texts.map((t) => t.text));
     // what tells those models apart on the drawing: each printed cutting line, its pieces, and —
     // before a model is chosen (the fill uncut) — those pieces as each model cuts them
+    // (`[]` only when the models are proven one garment; absent = unknown, the wizard asks)
     const variantMarks = variants.length
       ? variantMarksOut(sheet, set, variants, shown, families, run, !opts.variant)
-      : [];
+      : undefined;
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
@@ -1455,7 +1456,7 @@ export class Session {
       families,
       sheets: this.sheetRead,
       variants,
-      ...(variantMarks.length ? { variantMarks } : {}),
+      ...(variantMarks ? { variantMarks } : {}),
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
     };

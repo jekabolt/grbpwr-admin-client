@@ -103,6 +103,17 @@ function cutLineModels(sheet: Sheet): string[] {
   return [...out];
 }
 
+/**
+ * The label set marks are classified with: the given models + the models the cutting-line labels
+ * name. The session (variantMarks) and the knives (variantKnifeItems) use the same set, so a
+ * model's cutLines are exactly its knives.
+ */
+export function markLabels(sheet: Sheet, labels: readonly string[]): string[] {
+  const all = [...labels];
+  for (const m of cutLineModels(sheet)) if (!all.some((l) => norm(l) === norm(m))) all.push(m);
+  return all;
+}
+
 /** One label per place: the copies a file prints once per size layer (kombinezon: 8) collapse. */
 function labelPlaces(sheet: Sheet, variant: string): IRText[] {
   const out: IRText[] = [];
@@ -351,8 +362,7 @@ export function variantKnifeItems(sheet: Sheet, set: ChainSet, variant: string):
   const v = norm(variant);
   // every model the sheet names, its cutting-line labels included (an EDGE mark needs the other
   // model's CUT mark as its second evidence even when only the instruction pages name the models)
-  const all = [...variantLabels(sheet.texts.map((t) => t.text))];
-  for (const m of cutLineModels(sheet)) if (!all.some((l) => norm(l) === norm(m))) all.push(m);
+  const all = markLabels(sheet, variantLabels(sheet.texts.map((t) => t.text)));
   if (!all.some((l) => norm(l) === v)) all.push(variant);
   for (const m of variantMarksOf(sheet, set, all))
     if (norm(m.label) === v && !m.uncertain)
@@ -446,7 +456,9 @@ export function variantMarksOut(
   families: readonly PieceFamily[],
   run: SizeRun | null,
   uncut: boolean,
-): VariantMark[] {
+): VariantMark[] | undefined {
+  const models = labels;
+  labels = markLabels(sheet, labels);
   const marks = variantMarksOf(sheet, set, labels);
   const famOf = new Map(families.map((f) => [f.seed, f]));
   const repOf = (id: SeedId) => {
@@ -476,7 +488,8 @@ export function variantMarksOut(
           : {}),
     };
   });
-  if (!marks.length) return owned;
+  if (!marks.length)
+    return owned.length ? owned : sameGarment(sheet, models, seeds, families) ? [] : undefined;
   const rings = set.chains.filter((c) => c.lengthMm >= 200 && isClosed(set, c.id));
   const cutMarks = marks.map((m) => {
     const base = { label: m.label, at: m.at, text: m.text, kind: m.kind };
@@ -532,6 +545,48 @@ export function variantMarksOut(
     return out;
   });
   return [...cutMarks, ...owned];
+}
+
+const SEP = String.raw`\s*(?:,|&|\/|\+|\band\b|\bund\b|\bet\b|\bи\b)\s*`;
+const JOINT = new RegExp(
+  String.raw`^(?:styles?|views?|versions?|variants?)\s+([A-Z0-9]{1,3}(?:${SEP}[A-Z0-9]{1,3})+)$`,
+  'i',
+);
+const JOINT_MOD = new RegExp(String.raw`^mod(?:ell?|el)?\.?\s*(\d{2,4}(?:${SEP}\d{2,4})+)$`, 'i');
+
+/**
+ * `variantMarks: []` — the models are PROVEN one garment (the client then picks without asking).
+ * Called only when the sheet prints no cutting-line label and no single-model label in a piece
+ * (no mark of any kind). Needs, besides that absence: ≥ 2 models; no seed tied to a model; and
+ * the positive claim — every piece's outline (middle closed size) holds a printed text naming ALL
+ * the models together ("Style A and B", "Mod. 123, 124"). Anything short of that: undefined (ask).
+ */
+function sameGarment(
+  sheet: Sheet,
+  models: readonly string[],
+  seeds: readonly Seed[],
+  families: readonly PieceFamily[],
+): boolean {
+  if (models.length < 2 || !families.length) return false;
+  if (seeds.some((sd) => sd.variant != null)) return false;
+  const want = new Set(models.map(norm));
+  const joint = sheet.texts.flatMap((t) => {
+    const s = t.text.trim();
+    const m = s.match(JOINT);
+    const k = s.match(JOINT_MOD);
+    const ids = (m ?? k)?.[1].split(new RegExp(SEP, 'i')).map((x) => x.trim().toUpperCase());
+    if (!ids) return [];
+    const named = new Set(ids.map((x) => norm(m ? `Style ${x}` : `Mod. ${x}`)));
+    return [...want].every((w) => named.has(w)) ? [centreOf(t)] : [];
+  });
+  if (!joint.length) return false;
+  return families.every((f) => {
+    const cs = f.candidates
+      .filter((c) => c.outcome === 'closed' && c.outer.length > 2)
+      .sort((x, y) => x.rank - y.rank);
+    const rep = cs[Math.floor(cs.length / 2)];
+    return !!rep && joint.some((p) => pointInPoly(p, rep.outer));
+  });
 }
 
 const BARE = /^(?:style|view|version|variante?)\s+([A-Z0-9]{1,3})$/i;

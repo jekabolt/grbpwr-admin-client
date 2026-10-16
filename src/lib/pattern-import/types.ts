@@ -2412,8 +2412,10 @@ export type StageIO = {
       variants?: string[];
       /**
        * What tells the models apart on the drawing (pieces/variants `variantMarksOut`): one entry
-       * per printed "Cutting line <model>" label, with the line it names in sheet mm — absent when
-       * the sheet prints none. See VariantMark.
+       * per printed "Cutting line <model>" label (and per single-model label in a piece), with the
+       * line it names in sheet mm. `[]` = the models are PROVEN one garment (≥ 2 models, no mark of
+       * any kind, no seed tied to a model, every piece holds a text naming all models together) —
+       * the wizard may pick without asking. Absent = unknown: ask. See VariantMark.
        */
       variantMarks?: VariantMark[];
       /**
