@@ -30,8 +30,10 @@ import type {
   StageName,
   WizardEvent,
   WizardStep,
+  SheetAcceptMissing,
   SheetAnswer,
 } from 'lib/pattern-import/types';
+import { holePagesKey } from 'lib/pattern-import/assemble/holes';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import {
   classifyFilePages,
@@ -63,7 +65,13 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
-import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
+import {
+  asideDigests,
+  scaleUncertain,
+  stepOffer,
+  weakAsides,
+  type AutoResolver,
+} from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
@@ -142,6 +150,12 @@ export type Inputs = {
   /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
   residualsAccepted: boolean;
   /**
+   * UXHOOKS: missing tile cells accepted as blank pages, one entry per tile sheet (the event
+   * `sheet-accept-missing`; auto-advance/UX-HOOKS.md). Bound to the sheet's pages; a new hand grid
+   * takes it back. No piece closes across an accepted cell (pieces/holes.ts).
+   */
+  sheetAcceptMissing: SheetAcceptMissing[];
+  /**
    * D6: answers to the cross-sheet questions of the pieces step, by geometric key
    * (pieces/sheets.ts): a copy / an alternative rendering kept or not, a split piece.
    */
@@ -149,6 +163,12 @@ export type Inputs = {
   /** D6: the per-sheet size-line reading the operator confirmed (`SheetLegend.sig`); null = none. */
   sheetLegendOk: string | null;
   legend: LegendEdit[];
+  /**
+   * UXHOOKS: per tile sheet, the digest (`asideDigests`) of the outlines set aside on a guess the
+   * operator has looked at — the pieces step's offer is dropped for that set; a set that changes
+   * asks again. The operator's answer only: the autopilot never sets it (a replay gives it back).
+   */
+  asideReviewed: Record<number, string>;
   /** Low-confidence legend rows the operator has looked at and accepted (`legendKey`). */
   legendConfirmed: string[];
   sizeMap: SizeMapEntry[] | null;
@@ -201,9 +221,11 @@ const EMPTY_INPUTS: Inputs = {
   gridOverride: undefined,
   sheetIndex: 0,
   residualsAccepted: false,
+  sheetAcceptMissing: [],
   sheetAnswers: {},
   sheetLegendOk: null,
   legend: [],
+  asideReviewed: {},
   legendConfirmed: [],
   sizeMap: null,
   drawnSizes: null,
@@ -693,6 +715,7 @@ export function useImportSession(deps: {
             const out = await run('assemble', {
               sheet: iRef.current.sheetIndex,
               override: iRef.current.gridOverride,
+              acceptMissing: iRef.current.sheetAcceptMissing,
             });
             patch({ sheet: out, step: 'sheet' });
           }
@@ -705,6 +728,7 @@ export function useImportSession(deps: {
           const out = await run('assemble', {
             sheet: iRef.current.sheetIndex,
             override: iRef.current.gridOverride,
+            acceptMissing: iRef.current.sheetAcceptMissing,
           });
           // A0.2: one page is the sheet — nothing to assemble or pick; the step stays a door back
           if (singlePageSheet(sRef.current.pages, out, iRef.current.gridOverride)) {
@@ -720,17 +744,47 @@ export function useImportSession(deps: {
           // back) the hand grid of ONE sheet and re-assembles. The answers given on the pieces are
           // settled against the new drawing after its pieces run (S3: the grid is in the print).
           const sheetIndex = ev.override ? ev.sheet : 0;
+          // UXHOOKS: the cells accepted as blank were cells of the old grid — asked again
           patchInputs({
             gridOverride: ev.override,
             sheetIndex,
             residualsAccepted: false,
+            sheetAcceptMissing: [],
           });
           iRef.current = {
             ...iRef.current,
             gridOverride: ev.override,
             sheetIndex,
+            sheetAcceptMissing: [],
           };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
+          patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
+          return;
+        }
+        case 'sheet-accept-missing': {
+          // UXHOOKS: the missing cells of one tile sheet are blank pages (`cells` = the whole set
+          // of that sheet, [] takes it back), bound to the pages the sheet has now; the sheet is
+          // assembled again and everything after it re-runs (D3: no piece closes across a hole)
+          const pages = holePagesKey(sRef.current.sheet?.sheet, ev.sheet);
+          const rest = iRef.current.sheetAcceptMissing.filter((a) => a.sheet !== ev.sheet);
+          const sheetAcceptMissing = ev.cells.length
+            ? [
+                ...rest,
+                {
+                  sheet: ev.sheet,
+                  cells: ev.cells.map((c) => ({ row: c.row, col: c.col })),
+                  pages,
+                  origin: ev.origin ?? 'operator',
+                },
+              ]
+            : rest;
+          patchInputs({ sheetAcceptMissing });
+          iRef.current = { ...iRef.current, sheetAcceptMissing };
+          const out = await run('assemble', {
+            sheet: iRef.current.sheetIndex,
+            override: iRef.current.gridOverride,
+            acceptMissing: sheetAcceptMissing,
+          });
           patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
           return;
         }
@@ -1434,7 +1488,9 @@ export function useImportSession(deps: {
         const refused = s.sheet?.sheet.refused ?? [];
         if (refused.length) return `the tile placement is refused — ${refused[0]}`;
         const miss = s.sheet?.sheet.missing.length ?? 0;
-        if (miss) return `${miss} pages are missing — set the grid by hand`;
+        // UXHOOKS: answered by `sheet-accept-missing` (blank pages) or a hand grid
+        if (miss)
+          return `${miss} pages are missing — accept them as blank pages or set the grid by hand`;
         const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
         if (worst > PATIMPORT.registrationMaxResidualMm && !inputs.residualsAccepted)
           return `tiles do not close: ${worst.toFixed(2)} mm > ${PATIMPORT.registrationMaxResidualMm} mm — check the seams, then accept or set the grid`;
@@ -1596,6 +1652,7 @@ export function useImportSession(deps: {
         cleanEdits: inputs.cleanEdits,
         scopes: rc().scopes.length,
         fabricsEdited: inputs.assignment != null,
+        asideReviewed: inputs.asideReviewed,
       });
 
   // ── N1 auto-advance: forward through every step that asks nothing ─────────────────────
@@ -1733,6 +1790,46 @@ export function useImportSession(deps: {
     await tracked(() => dispatchRaw(ev));
     prunePassed();
     if (ev.type === 'files' && !sRef.current.error && sRef.current.sessionId != null) arm();
+  }
+
+  /**
+   * UXHOOKS: "the missing pages are blank" — the missing cells of the sheet step (all of them, or
+   * `only`) added to what each tile sheet already accepted, one `sheet-accept-missing` per sheet.
+   */
+  async function acceptMissing(only?: readonly { sheet?: number; row: number; col: number }[]) {
+    const missing = sRef.current.sheet?.sheet.missing ?? [];
+    const pick = only
+      ? missing.filter((m) =>
+          only.some((o) => (o.sheet ?? 0) === (m.sheet ?? 0) && o.row === m.row && o.col === m.col),
+        )
+      : missing;
+    for (const k of [...new Set(pick.map((m) => m.sheet ?? 0))]) {
+      const had = iRef.current.sheetAcceptMissing.find((a) => a.sheet === k)?.cells ?? [];
+      await dispatch({
+        type: 'sheet-accept-missing',
+        sheet: k,
+        cells: [
+          ...had,
+          ...pick.filter((m) => (m.sheet ?? 0) === k).map((m) => ({ row: m.row, col: m.col })),
+        ],
+      });
+    }
+  }
+
+  /**
+   * UXHOOKS: "I looked at the outlines set aside" (the pieces step's offer) — bound per tile sheet
+   * to the set as it is now (`asideDigests`): the offer is dropped until that set changes.
+   */
+  function reviewAsides() {
+    operatorActs();
+    const s = sRef.current;
+    const now = asideDigests(
+      weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds),
+      s.sheet?.sheet.parts,
+    );
+    const asideReviewed = { ...iRef.current.asideReviewed, ...now };
+    iRef.current = { ...iRef.current, asideReviewed };
+    patchInputs({ asideReviewed });
   }
 
   /** The operator's "next": this step, then on through every step that asks nothing. */
@@ -2020,6 +2117,8 @@ export function useImportSession(deps: {
       operatorActs();
       patchInputs(p);
     },
+    acceptMissing,
+    reviewAsides,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
     semanticsInput,

@@ -64,7 +64,8 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
+import { PAGE_SURE, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
+import { holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { bulkNames, codeBlocked } from '../bulk-names';
@@ -113,6 +114,11 @@ export type AutopilotAction =
   | { kind: 'seeds'; seeds: Seed[] }
   /** The tile sheet to import (sheet step). */
   | { kind: 'sheet'; sheet: number }
+  /**
+   * UXHOOKS: missing cells of one tile sheet accepted as blank pages — `cells` the whole accepted
+   * set of that sheet (D5: only on two evidences that the cell holds no pattern).
+   */
+  | { kind: 'accept-missing'; sheet: number; cells: { row: number; col: number }[] }
   /** D6: a cross-sheet answer with the "not a piece" edits it stands for. */
   | { kind: 'sheet-answer'; key: string; answer: SheetAnswer; edits: PieceEdit[] }
   /** Go on past an offer the run leaves as it is (pages set aside to check). */
@@ -341,6 +347,12 @@ function toWizard(
       return { proceed: true };
     case 'sheet':
       return { events: [{ type: 'sheet', sheet: a.sheet, override: i.gridOverride }] };
+    case 'accept-missing':
+      return {
+        events: [
+          { type: 'sheet-accept-missing', sheet: a.sheet, cells: a.cells, origin: 'autopilot' },
+        ],
+      };
     case 'sheet-answer':
       return {
         events: [
@@ -464,6 +476,10 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
       return act?.kind === 'sheet' ? { sheet: act.sheet } : null;
     case 'residuals':
       return { residualsAccepted: true };
+    case 'missing-accepted': {
+      const m = a.ref?.match(/^(\d+):(\d+):(\d+)$/);
+      return m ? { sheet: +m[1], row: +m[2], col: +m[3] } : null;
+    }
     case 'drawn-sizes':
       return act?.kind === 'drawn-sizes' ? { n: act.n } : null;
     case 'legend-row':
@@ -824,13 +840,53 @@ function sheetStep({ session: s, inputs: i }: Snap): AutopilotDecision {
   const refused = s.sheet?.sheet.refused ?? [];
   if (refused.length)
     return stopAt('sheet', `the tile placement is refused — ${refused.join(' · ')}`, info);
-  const miss = s.sheet?.sheet.missing.length ?? 0;
-  if (miss)
-    return stopAt(
-      'sheet',
-      `${miss} pages are missing — the grid cannot be closed without them`,
-      info,
-    );
+  const missing = s.sheet?.sheet.missing ?? [];
+  if (missing.length) {
+    // UXHOOKS (D5): a missing cell is accepted as a blank page only on two evidences that it
+    // holds no pattern (assemble/holes `holeAutoEvidence`); any other stays the operator's
+    const sure = missing.flatMap((m) => {
+      const ev = holeAutoEvidence(m);
+      return ev ? [{ m, ev }] : [];
+    });
+    if (!sure.length)
+      return stopAt(
+        'sheet',
+        `${missing.length} pages are missing — the grid cannot be closed without them ` +
+          `(lines run into them: accept them as blank pages or set the grid)`,
+        info,
+      );
+    const sheets = [...new Set(sure.map((x) => x.m.sheet ?? 0))];
+    return {
+      actions: sheets.map((k) => ({
+        kind: 'accept-missing' as const,
+        sheet: k,
+        // the event names the WHOLE accepted set of the sheet: what was accepted before stays
+        cells: [
+          ...(i.sheetAcceptMissing.find((a) => a.sheet === k)?.cells ?? []),
+          ...sure
+            .filter((x) => (x.m.sheet ?? 0) === k)
+            .map((x) => ({ row: x.m.row, col: x.m.col })),
+        ],
+      })),
+      assumptions: [
+        ...info,
+        ...sure.map(({ m, ev }) =>
+          A(
+            'sheet',
+            'missing-accepted',
+            `tile row ${m.row + 1} col ${m.col + 1}${(s.sheet?.sheet.parts?.length ?? 0) > 1 ? ` of sheet ${(m.sheet ?? 0) + 1}` : ''}`,
+            'a blank page',
+            'a missing tile is taken as a blank page only on two evidences that it holds no pattern',
+            ev,
+            0.7,
+            false,
+            undefined,
+            `${m.sheet ?? 0}:${m.row}:${m.col}`,
+          ),
+        ),
+      ],
+    };
+  }
   const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
   const lim = PATIMPORT.registrationMaxResidualMm;
   if (worst > lim && !i.residualsAccepted) {
@@ -1349,7 +1405,12 @@ function piecesStep(snap: Snap): AutopilotDecision {
     };
   }
   // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
-  const weak = weakAsides(s.pieces?.setAside, fams, s.pieces?.seeds);
+  // UXHOOKS: a set the operator reviewed (inputs.asideReviewed, never set here) is answered
+  const weak = openAsides(
+    weakAsides(s.pieces?.setAside, fams, s.pieces?.seeds),
+    s.sheet?.sheet.parts,
+    i.asideReviewed,
+  );
   if (!weak.length) return NONE;
   const host = (box: { minX: number; minY: number; maxX: number; maxY: number }) =>
     Math.max(
