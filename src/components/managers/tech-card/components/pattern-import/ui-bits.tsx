@@ -365,12 +365,36 @@ export function focusAsk(
   return true;
 }
 
+// ═══ ONE-CLICK FIX (`data-ask-fix`) ═══════════════════════════════════════════════════════════════
+//
+// Owner 16.10: «every warning / stop line must be a link that FIXES it». A step marks the ONE
+// button that is the most likely one-click fix of its current blocker / autopilot stop:
+//
+//   <Chip data-ask-fix='' {...ask('sheet-missing')} onClick={setAsideMissing}>go on without them</Chip>
+//
+// The shell turns every stop line — the footer's ask link and the ask / stop / notice lines of the
+// header warnings popover — into a link: clicking it closes the popover and CLICKS that button
+// (its own handler runs, so the run's busy state is the feedback). No live `[data-ask-fix]` (none
+// marked, or it is disabled / hidden): the link falls back to coach mode — focus, highlight,
+// bubble. Mark only a fix that is safe to take in one click (no deletion of the operator's work);
+// a choice between answers stays a coached question. The first live one in document order wins.
+
+/** Click the first live `[data-ask-fix]` under `root`; false when there is none (coach instead). */
+export function clickAskFix(root: ParentNode | null): boolean {
+  if (!root) return false;
+  const el = Array.from(root.querySelectorAll<HTMLElement>('[data-ask-fix]')).find(usable);
+  if (!el) return false;
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  el.click();
+  return true;
+}
+
 function mark(el: HTMLElement) {
   el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   el.focus({ preventScroll: true });
   const before = el.style.outline;
   const offset = el.style.outlineOffset;
-  el.style.outline = '2px solid var(--color-warning)';
+  el.style.outline = '1px solid var(--color-warning)';
   el.style.outlineOffset = '2px';
   window.setTimeout(() => {
     el.style.outline = before;
@@ -461,40 +485,70 @@ export type CoachTarget = {
   bare?: boolean;
 };
 
-// one pulse of the tint, then the calm state; the outline sits inside the zone so a scroller's
-// overflow does not clip it
+// Owner 16.10 («not that bold, the hints must not run into each other»): a 1px blue outline 2px
+// OUTSIDE the zone — an outline never grows the box, so nothing moves — and a faint tint on the
+// zone only, faded in once (no pulse). A zone with a neighbour or an edge closer than 3px is
+// `tight`: its outline goes 1px INSIDE, so it never draws over the next tile or gets clipped.
 const COACH_CSS = `
-[data-ask-coached]{outline:2px solid #2323ff!important;outline-offset:-2px!important;box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)!important;animation:ask-coach-pulse 900ms ease-out 1}
-@keyframes ask-coach-pulse{0%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .2)}100%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)}}
+[data-ask-coached]{outline:1px solid #2323ff!important;outline-offset:2px!important;box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .035)!important;animation:ask-coach-in 200ms ease-out 1}
+[data-ask-coached=tight]{outline-offset:-1px!important}
+@keyframes ask-coach-in{from{outline-color:transparent;box-shadow:none}}
 @media (prefers-reduced-motion: reduce){[data-ask-coached]{animation:none}}
 `;
 
-const BUBBLE_W = 260;
+/** Is there under 3px between the zone and a sibling or the edge of a clipping parent? */
+function tightZone(zone: HTMLElement): boolean {
+  const r = zone.getBoundingClientRect();
+  const near = (o: DOMRect) =>
+    !(
+      o.right + 3 <= r.left ||
+      o.left - 3 >= r.right ||
+      o.bottom + 3 <= r.top ||
+      o.top - 3 >= r.bottom
+    );
+  for (const sib of [zone.previousElementSibling, zone.nextElementSibling])
+    if (
+      sib instanceof HTMLElement &&
+      sib.getClientRects().length &&
+      near(sib.getBoundingClientRect())
+    )
+      return true;
+  for (let p: HTMLElement | null = zone.parentElement; p; p = p.parentElement) {
+    if (getComputedStyle(p).overflow === 'visible') continue;
+    const q = p.getBoundingClientRect();
+    return (
+      r.left - q.left < 3 || q.right - r.right < 3 || r.top - q.top < 3 || q.bottom - r.bottom < 3
+    );
+  }
+  return false;
+}
+
+const BUBBLE_W = 240;
 const GAP = 8;
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
 /**
- * Beside the zone (below, above, left, right — the first that fits inside `area`), else under /
- * over the control. `area` = the stage: the bubble never covers the footer's primary.
+ * OUTSIDE the zone — it holds the control and its sibling answers, so the bubble covers none of
+ * them: right, left, below, above (the first that fits inside `area`); else under / over the
+ * control itself. `area` = the stage: the bubble never covers the footer's primary.
  */
-function place(zone: Box, ctl: Box, h: number, area: Box) {
-  const clampX = (x: number) => Math.min(Math.max(area.left, x), area.right - BUBBLE_W);
+function place(zone: Box, ctl: Box, w: number, h: number, area: Box) {
+  const clampX = (x: number) => Math.min(Math.max(area.left, x), area.right - w);
   const clampY = (y: number) => Math.min(Math.max(area.top, y), area.bottom - h);
+  if (zone.right + GAP + w <= area.right) return { left: zone.right + GAP, top: clampY(ctl.top) };
+  // beside before below: what sits below a zone is usually the step's next answer
+  if (zone.left - GAP - w >= area.left) return { left: zone.left - GAP - w, top: clampY(ctl.top) };
   if (zone.bottom + GAP + h <= area.bottom)
     return { left: clampX(zone.left), top: zone.bottom + GAP };
   if (zone.top - GAP - h >= area.top) return { left: clampX(zone.left), top: zone.top - GAP - h };
-  if (zone.left - GAP - BUBBLE_W >= area.left)
-    return { left: zone.left - GAP - BUBBLE_W, top: clampY(ctl.top) };
-  if (zone.right + GAP + BUBBLE_W <= area.right)
-    return { left: zone.right + GAP, top: clampY(ctl.top) };
   return ctl.bottom + GAP + h <= area.bottom
     ? { left: clampX(ctl.left), top: ctl.bottom + GAP }
     : { left: clampX(ctl.left), top: clampY(ctl.top - GAP - h) };
 }
 
 /**
- * Coach mode's picture: the zone outlined + tinted (one pulse), a fixed bubble beside it with
+ * Coach mode's picture: the zone outlined + tinted (faded in once), a small bubble beside it with
  * what is asked and how. Fixed-position inside the dialog: no overflow container clips it. It
  * goes away on ✕, on any act inside the zone, or when the zone leaves the page; the shell drops
  * it when the blocker changes.
@@ -517,9 +571,12 @@ export function AskCoach({
   // the zone: lit, pulsing once per coach click, unlit on any act inside it
   useEffect(() => {
     if (!zone) return;
-    zone.removeAttribute('data-ask-coached');
-    void zone.offsetWidth; // restart the pulse
-    zone.setAttribute('data-ask-coached', '');
+    // ONE highlight at a time: whatever an earlier coach left lit goes first
+    document
+      .querySelectorAll('[data-ask-coached]')
+      .forEach((n) => n.removeAttribute('data-ask-coached'));
+    void zone.offsetWidth; // restart the fade-in
+    zone.setAttribute('data-ask-coached', tightZone(zone) ? 'tight' : '');
     const acted = () => close.current();
     const evs = ['pointerdown', 'keydown', 'input', 'change'] as const;
     // a tick later: the click that opened a fold for us must not count as the operator's act
@@ -558,6 +615,7 @@ export function AskCoach({
         const p = place(
           anchor.getBoundingClientRect(),
           target.el.getBoundingClientRect(),
+          b.offsetWidth,
           b.offsetHeight,
           a
             ? {
@@ -586,8 +644,8 @@ export function AskCoach({
         role='status'
         aria-live='polite'
         data-testid='pattern-import-coach'
-        className='pointer-events-none fixed z-[var(--z-popover)] flex flex-col gap-1 border border-textColor bg-bgColor px-2 py-1.5 shadow-[var(--shadow-popover)]'
-        style={{ width: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
+        className='pointer-events-none fixed z-[var(--z-popover)] flex w-max flex-col gap-0.5 border border-borderColor bg-bgColor px-2 py-1'
+        style={{ maxWidth: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
       >
         <span className='flex items-start gap-2'>
           <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>

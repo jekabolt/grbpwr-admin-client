@@ -368,6 +368,33 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   // the assumption the question asks about, shown in the rows until it is answered (never a column
   // of «leave out»): smallest → the first card size
   const assumed = showOrderBar && noneMapped ? windowOf(0) : null;
+  // Owner 16.10 (kombinezon: the waistband strips of 8…18 were read into size 6): each size's
+  // lines should close as many piece outlines as the others. The reference is the most any size
+  // closes, leaving out a size that closes far more (it holds other sizes' lines). Only a warning
+  // for now: moving a line to another size needs the engine's per-line answer (LINE-ASSIGN).
+  const outlines = new Map(
+    drawn.flatMap((e) =>
+      e.source.classId != null ? [[e.source.classId, outlineCount(chains, e.source.classId)]] : [],
+    ),
+  );
+  const counts = [...outlines.values()].sort((a, b) => a - b);
+  const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+  const refCount = Math.max(0, ...counts.filter((n) => n <= median * 1.5));
+  const outlineNote = (classId: number): { text: string; title: string } | null => {
+    const n = outlines.get(classId);
+    if (n == null || counts.length < 3 || !refCount) return null;
+    if (n > median * 1.5)
+      return {
+        text: `${n - refCount} extra pieces`,
+        title: `these lines close ${n} piece outlines, the other sizes ${refCount}: lines of other sizes were read into this one`,
+      };
+    if (n < refCount)
+      return {
+        text: `${refCount - n} ${refCount - n === 1 ? 'piece' : 'pieces'} missing`,
+        title: `these lines close ${n} piece outlines, other sizes ${refCount}: a piece of this size was read into another size`,
+      };
+    return null;
+  };
   const assumedOf = (e: SizeMapEntry | undefined) => {
     const i = e && assumed ? drawn.indexOf(e) : -1;
     return i >= 0 ? assumed![i] : null;
@@ -571,7 +598,18 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 />
               )}
             </SwatchCell>
-            <span className='min-w-0 truncate'>{name}</span>
+            <span className='flex min-w-0 flex-col'>
+              <span className='min-w-0 truncate'>{name}</span>
+              {c &&
+                (() => {
+                  const note = outlineNote(c.id);
+                  return note ? (
+                    <span className='min-w-0 truncate text-warning' title={note.title}>
+                      {note.text}
+                    </span>
+                  ) : null;
+                })()}
+            </span>
           </>
         }
         linked={e?.card ? true : assumedOf(e) ? 'guess' : false}
@@ -1342,6 +1380,22 @@ function RowDetail({
   );
 }
 
+/** How many piece outlines (closed, ≥ 200 mm round) a size's lines draw. */
+function outlineCount(chains: NonNullable<ImportSessionApi['session']['chains']>, classId: number) {
+  const c = chains.classes.find((x) => x.id === classId);
+  let n = 0;
+  for (const id of c?.chains ?? []) {
+    const a = chains.chainPreview[id];
+    if (!a || a.length < 8) continue;
+    const k = a.length;
+    if (Math.hypot(a[0] - a[k - 2], a[1] - a[k - 1]) > 2) continue;
+    let len = 0;
+    for (let i = 0; i + 3 < k; i += 2) len += Math.hypot(a[i + 2] - a[i], a[i + 3] - a[i + 1]);
+    if (len >= 200) n++;
+  }
+  return n;
+}
+
 /**
  * The biggest closed outline a size's lines draw, mm² (shoelace over the chain previews; a chain
  * is closed when its ends meet within 2 mm). 0 = none closed: the geometry cannot order it.
@@ -1380,7 +1434,7 @@ type RowAsk = {
 
 /** The mapping's four columns: the file · the arrow · the card · the row's `?`. */
 const MAP_GRID: React.CSSProperties = {
-  gridTemplateColumns: 'minmax(0,1fr) 36px minmax(0,1fr) 28px',
+  gridTemplateColumns: 'minmax(0,1.4fr) 36px minmax(0,1fr) 28px',
 };
 
 const FOCUS =

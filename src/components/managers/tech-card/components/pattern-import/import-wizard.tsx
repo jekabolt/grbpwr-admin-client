@@ -61,6 +61,7 @@ import {
   AnsweredAndGoContext,
   AskCoach,
   QuizHistoryContext,
+  clickAskFix,
   firstAsk,
   focusAsk,
   useAskLabel,
@@ -421,6 +422,11 @@ function WizardBody({
     if (!focusAsk(mainRef.current, (el) => show(el))) bare();
   };
 
+  /** A stop line clicked: its step's one-click fix (`data-ask-fix`), else the coach. */
+  const fixOrCoach = () => {
+    if (!clickAskFix(mainRef.current)) onAsk();
+  };
+
   // ── the one primary: action + count, derived from the session ──────────────────────────────
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
@@ -559,17 +565,25 @@ function WizardBody({
 
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
-  if (api.notice && !session.error && api.notice !== askText) warnings.push(api.notice);
+  // every line is a link that fixes it (ui-bits ONE-CLICK FIX): the step's marked fix, else the coach
+  const fix = { label: 'fix it', onClick: () => fixOrCoach() };
+  if (api.notice && !session.error && api.notice !== askText)
+    warnings.push({ text: api.notice, action: fix });
   // the footer shows the step's plain question: the session's own sentence stays visible here
   if (askText && askShown !== askText)
-    warnings.push(askKind === 'stop' ? `autopilot stopped · ${askText}` : askText);
+    warnings.push({
+      text: askKind === 'stop' ? `autopilot stopped · ${askText}` : askText,
+      action: fix,
+    });
   if (autopilotStop && autopilotStop !== askText)
-    warnings.push(`autopilot stopped · ${autopilotStop}`);
+    warnings.push({ text: `autopilot stopped · ${autopilotStop}`, action: fix });
   if (card.downloadOnly)
-    warnings.push(
-      'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
-    );
-  if (replayOn) for (const m of misses) warnings.push(`not replayed · ${m.why}`);
+    warnings.push({
+      text: 'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
+      action: { label: 'close the import and add it on the BOM tab', onClick: requestClose },
+    });
+  if (replayOn)
+    for (const m of misses) warnings.push({ text: `not replayed · ${m.why}`, action: fix });
 
   const body = (() => {
     switch (session.step) {
@@ -862,7 +876,7 @@ function WizardBody({
                             ? `${askText} — click to see where`
                             : 'show the control that answers this'
                       }
-                      onClick={onAsk}
+                      onClick={fixOrCoach}
                     >
                       {askKind === 'offer' ? askShown : `! ${askShown}`}
                     </button>
