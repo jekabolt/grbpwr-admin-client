@@ -251,6 +251,7 @@ export function ColorwayRecipes({
   return (
     <ColourwaysMatrix
       techCardId={techCardId}
+      techCard={techCard}
       colorways={colorways}
       bomItems={bomItems}
       materials={materials}

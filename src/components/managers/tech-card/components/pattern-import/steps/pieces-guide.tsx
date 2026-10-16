@@ -137,6 +137,89 @@ function chainBoxes(previews: readonly Float32Array[]): Float32Array {
 }
 
 /**
+ * The drawn lines that lie wholly inside a box (its own lines, not the neighbours' running past),
+ * and how many of them are small marks (under a tenth of the box: text, sketch strokes, notches).
+ */
+export function ownChains(box: BoxMm, previews: readonly Float32Array[]) {
+  const bx = chainBoxes(previews);
+  const w = Math.max(box.maxX - box.minX, 1);
+  const h = Math.max(box.maxY - box.minY, 1);
+  const tol = Math.max(w, h) * 0.02;
+  const idx: number[] = [];
+  let small = 0;
+  for (let i = 0; i < previews.length; i++) {
+    if (previews[i].length < 4) continue;
+    const [x0, y0, x1, y1] = [bx[i * 4], bx[i * 4 + 1], bx[i * 4 + 2], bx[i * 4 + 3]];
+    if (x0 < box.minX - tol || y0 < box.minY - tol || x1 > box.maxX + tol || y1 > box.maxY + tol)
+      continue;
+    idx.push(i);
+    if (Math.max(x1 - x0, y1 - y0) < 0.1 * Math.max(w, h)) small++;
+  }
+  return { idx, small };
+}
+
+/**
+ * One outline alone, as a silhouette: only the lines inside its box (no page crop, no neighbours),
+ * the closed ones lightly filled, biggest first so the inner ones stay on top.
+ */
+export function AsideSilhouette({
+  box,
+  previews,
+  title,
+  className,
+  style,
+}: {
+  box: BoxMm;
+  previews: readonly Float32Array[];
+  /** The tooltip (why it was left out); the words are never on the picture. */
+  title?: string;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const v = pad(box, 0.04);
+  const unit = Math.max(v.w, v.h) / 160;
+  const bx = chainBoxes(previews);
+  const { idx } = ownChains(box, previews);
+  const span = (i: number) => (bx[i * 4 + 2] - bx[i * 4]) * (bx[i * 4 + 3] - bx[i * 4 + 1]);
+  const closed = (a: Float32Array) =>
+    a.length >= 8 &&
+    Math.hypot(a[0] - a[a.length - 2], a[1] - a[a.length - 1]) <=
+      Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.01;
+  const order = [...idx].sort((a, b) => span(b) - span(a));
+  return (
+    <svg
+      viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
+      preserveAspectRatio='xMidYMid meet'
+      role='img'
+      aria-label='the outline asked about'
+      className={className}
+      style={style}
+    >
+      {title && <title>{title}</title>}
+      {order.map((i) =>
+        closed(previews[i]) ? (
+          <polygon
+            key={i}
+            points={f32Attr(previews[i])}
+            fill={SHEET_INK.fill}
+            stroke={SHEET_INK.ink}
+            strokeWidth={unit * 0.8}
+          />
+        ) : (
+          <polyline
+            key={i}
+            points={f32Attr(previews[i])}
+            fill='none'
+            stroke={SHEET_INK.ink}
+            strokeWidth={unit * 0.8}
+          />
+        ),
+      )}
+    </svg>
+  );
+}
+
+/**
  * A square tile of one outline: the drawn lines round it, the outline's own lines in ink (a piece:
  * its filled outline). Picked = ink edge and a ✓ in the corner; hot = the canvas shows it (blue).
  */
@@ -259,22 +342,35 @@ export function OutlineTile({
   );
 }
 
-/** One garment's pieces on the whole sheet, as filled outlines. */
+/**
+ * One garment's pieces on the whole sheet, as filled outlines. When the file says how this garment
+ * differs (the engine's variant marks), the difference is drawn on it: its cutting lines in blue,
+ * the pieces it changes tinted, its own outlines dashed — every one optional.
+ */
 export function ModelThumb({
   sheet,
   outlines,
   hot = false,
+  tinted,
+  cutLines = [],
+  extra = [],
   className,
   style,
 }: {
   sheet: BoxMm;
   outlines: readonly (readonly PtMm[])[];
   hot?: boolean;
+  /** Per outline: a piece this garment changes (tinted blue). */
+  tinted?: readonly boolean[];
+  /** This garment's cutting lines (blue polylines). */
+  cutLines?: readonly (readonly PtMm[])[];
+  /** Outlines only this garment has (dashed blue). */
+  extra?: readonly (readonly PtMm[])[];
   className?: string;
   style?: React.CSSProperties;
 }) {
   // the pieces' own box, not the sheet's: a sheet is mostly empty paper round the pieces
-  const all = outlines.flat();
+  const all = [...outlines, ...cutLines, ...extra].flat();
   const v = pad(
     all.length
       ? {
@@ -295,15 +391,41 @@ export function ModelThumb({
       className={className}
       style={style}
     >
-      {outlines.map((o, i) =>
-        o.length > 2 ? (
+      {outlines.map((o, i) => {
+        if (o.length <= 2) return null;
+        const tint = !hot && !!tinted?.[i];
+        return (
           <polygon
             key={i}
             points={ptsAttr(o as PtMm[])}
-            fill={hot ? SHEET_INK.blue : SHEET_INK.fill}
-            fillOpacity={hot ? 0.12 : 1}
-            stroke={hot ? SHEET_INK.blue : SHEET_INK.ink}
+            fill={hot || tint ? SHEET_INK.blue : SHEET_INK.fill}
+            fillOpacity={hot || tint ? 0.12 : 1}
+            stroke={hot || tint ? SHEET_INK.blue : SHEET_INK.ink}
             strokeWidth={unit * 0.5}
+          />
+        );
+      })}
+      {extra.map((o, i) =>
+        o.length > 2 ? (
+          <polygon
+            key={`x${i}`}
+            points={ptsAttr(o as PtMm[])}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={unit * 0.6}
+            strokeDasharray={`${unit * 2} ${unit * 1.5}`}
+          />
+        ) : null,
+      )}
+      {cutLines.map((l, i) =>
+        l.length > 1 ? (
+          <polyline
+            key={`c${i}`}
+            points={ptsAttr(l as PtMm[])}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={unit * 0.9}
+            strokeLinecap='round'
           />
         ) : null,
       )}

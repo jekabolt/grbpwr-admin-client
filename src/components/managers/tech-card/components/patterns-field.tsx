@@ -106,6 +106,8 @@ import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
+import { drawingFromDxf } from 'lib/pattern-export/drawing';
+import { PatternExportMenu } from './pattern-export/export-menu';
 import { useTechCardStaging } from './useTechCardStaging';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -1418,6 +1420,33 @@ export function PatternsField({
               >
                 ⇄
               </Button>
+            )}
+            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles) or as PLT for a
+                plotter, cut line on the card's contour layer (a converter manifest overrides). */}
+            {dxf && row.url && (
+              <PatternExportMenu
+                label={labelOf(row)}
+                drawing={async () =>
+                  drawingFromDxf(
+                    await (await fetchMediaBlob(row.url as string)).arrayBuffer(),
+                    labelOf(row),
+                  )
+                }
+                plot={async () => {
+                  const [{ plotFromDxfBytes }, blob] = await Promise.all([
+                    import('lib/pattern-export/plot-dxf'),
+                    fetchMediaBlob(row.url as string),
+                  ]);
+                  return {
+                    plot: await plotFromDxfBytes(
+                      await blob.arrayBuffer(),
+                      labelOf(row),
+                      dxfIndex?.contourLayer,
+                    ),
+                    title: labelOf(row),
+                  };
+                }}
+              />
             )}
             <Button
               type='button'

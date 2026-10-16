@@ -21,7 +21,6 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
@@ -63,6 +62,7 @@ import {
   SplitStage,
   ask,
   fmtPct,
+  useAnsweredAndGo,
   useQuizSlot,
 } from '../ui-bits';
 import { plural } from '../stages';
@@ -236,6 +236,8 @@ export function DetailsStep({
     setSplitN((n) => n + 1);
   };
   const [synced, setSynced] = useState<string | null>(null);
+  // ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves the step on
+  const go = useAnsweredAndGo();
   // the active question's free answer (a count not offered, a new name) is open
   const [other, setOther] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -313,16 +315,16 @@ export function DetailsStep({
       const g = ring ? axisGrain(ring, angleDeg) : null;
       return g ? [[sd, g] as const] : [];
     });
-    if (!lines.length) return;
+    if (!lines.length) return undefined;
     setDrawing(false);
     setGrainA(null);
-    rerun({ operatorGrain: { ...inputs.operatorGrain, ...Object.fromEntries(lines) } });
+    return rerun({ operatorGrain: { ...inputs.operatorGrain, ...Object.fromEntries(lines) } });
   };
   /** One proposal, accepted from its card (the side panel shows it dashed on the piece). */
   const acceptProposal = (seed: SeedId) => {
     const g = proposalOf(seed);
-    if (!g) return;
-    rerun({
+    if (!g) return undefined;
+    return rerun({
       operatorGrain: {
         ...inputs.operatorGrain,
         [seed]: { a: g.a, b: g.b, accepted: g.evidence },
@@ -331,7 +333,7 @@ export function DetailsStep({
   };
   const acceptProposals = () => {
     setReviewing(false);
-    rerun({
+    return rerun({
       operatorGrain: {
         ...inputs.operatorGrain,
         ...Object.fromEntries(
@@ -377,7 +379,7 @@ export function DetailsStep({
         (sd) => session.pieces?.seeds.find((x) => x.id === sd)?.text?.text ?? null,
       )
     : new Map<SeedId, never>();
-  const nameAll = () => void api.editNames(bulk);
+  const nameAll = () => api.editNames(bulk);
 
   /** Re-run semantics with a patch to the operator's answers. */
   const rerun = (
@@ -391,7 +393,7 @@ export function DetailsStep({
     const i = { ...inputs, ...p };
     // only an operator answer travels as the file's allowance: a shown 'measured'/'text' value is
     // the worker's own reading and is re-read by it (sent back, it would pass as proven everywhere)
-    void api.dispatch({
+    return api.dispatch({
       type: 'semantics',
       input: {
         ...api.semanticsInput(i),
@@ -419,7 +421,7 @@ export function DetailsStep({
   /** Unfold across the picked edge: every size takes its own matching edge (semantics). */
   const pickFold = (seed: SeedId, e: { a: PtMm; b: PtMm }) => {
     setPickingFold(false);
-    rerun({
+    return rerun({
       operatorFold: { ...inputs.operatorFold, [seed]: { a: e.a, b: e.b } },
       overrides: {
         ...inputs.overrides,
@@ -430,7 +432,7 @@ export function DetailsStep({
   const notFold = (seed: SeedId) => {
     setPickingFold(false);
     const { [seed]: _drop, ...operatorFold } = inputs.operatorFold;
-    rerun({
+    return rerun({
       operatorFold,
       overrides: {
         ...inputs.overrides,
@@ -440,6 +442,13 @@ export function DetailsStep({
   };
   const confirm = (seed: SeedId) =>
     patchInputs((i) => ({ confirmedNames: [...new Set([...i.confirmedNames, seed])] }));
+  /**
+   * An answer given on the question card (ANSWERED AND GO): with nothing left to ask the step moves
+   * on by itself. The same controls in the side panel (no question open) are row edits: no move.
+   */
+  const answer = (p?: Promise<unknown>) => {
+    if (asking) go(p);
+  };
 
   const selFamily = families.find((f) => f.seed === sel);
   const selSpec = sel != null ? specsOf(sel)[0] : undefined;
@@ -540,7 +549,7 @@ export function DetailsStep({
               </Chip>
               <Chip
                 {...ask('details-blocked')}
-                onClick={() => notFold(seed)}
+                onClick={() => answer(notFold(seed))}
                 title='the outline is cut exactly as drawn — only if it is the whole piece'
               >
                 not a fold
@@ -559,16 +568,16 @@ export function DetailsStep({
               {pr && (
                 <Chip
                   {...ask('details-blocked')}
-                  onClick={() => acceptProposal(seed)}
+                  onClick={() => answer(acceptProposal(seed))}
                   title={`proposed · ${pr.why}`}
                 >
                   proposed
                 </Chip>
               )}
-              <Chip {...ask('details-blocked')} onClick={() => setGrainAxis([seed], 90)}>
+              <Chip {...ask('details-blocked')} onClick={() => answer(setGrainAxis([seed], 90))}>
                 vertical
               </Chip>
-              <Chip {...ask('details-blocked')} onClick={() => setGrainAxis([seed], 0)}>
+              <Chip {...ask('details-blocked')} onClick={() => answer(setGrainAxis([seed], 0))}>
                 horizontal
               </Chip>
               <Chip
@@ -590,7 +599,7 @@ export function DetailsStep({
             <Chip
               {...ask('details-blocked')}
               {...hint('say it is not a fold')}
-              onClick={() => notFold(seed)}
+              onClick={() => answer(notFold(seed))}
             >
               not a fold
             </Chip>
@@ -613,7 +622,7 @@ export function DetailsStep({
               )}
               <Chip
                 {...ask('details-blocked')}
-                onClick={() => notFold(seed)}
+                onClick={() => answer(notFold(seed))}
                 title='the outline is cut exactly as drawn'
               >
                 not a fold
@@ -629,7 +638,7 @@ export function DetailsStep({
             <ChipRow>
               <Chip
                 {...ask('details-blocked')}
-                onClick={() => override(seed, { ungraded: true })}
+                onClick={() => answer(override(seed, { ungraded: true }))}
                 title='written once, cut alike in every size'
               >
                 one for all sizes
@@ -656,7 +665,7 @@ export function DetailsStep({
                 <Chip
                   {...ask('details-blocked')}
                   {...hint('name every piece in one click')}
-                  onClick={nameAll}
+                  onClick={() => answer(nameAll())}
                 >
                   name {plural(bulk.size, 'piece')}
                 </Chip>
@@ -746,7 +755,7 @@ export function DetailsStep({
             <Chip
               {...ask('details-fold-edge')}
               {...hint('unfold on the suggested solid edge')}
-              onClick={() => pickFold(seed, fa.edges[fa.suggested!])}
+              onClick={() => answer(pickFold(seed, fa.edges[fa.suggested!]))}
             >
               solid edge
             </Chip>
@@ -765,7 +774,7 @@ export function DetailsStep({
           >
             pick edge
           </Chip>
-          <Chip {...ask('details-fold-edge')} onClick={() => notFold(seed)}>
+          <Chip {...ask('details-fold-edge')} onClick={() => answer(notFold(seed))}>
             not a fold
           </Chip>
         </ChipRow>
@@ -961,17 +970,30 @@ export function DetailsStep({
       )) ||
     problems[0] ||
     null;
-  // the side panel always shows the piece of the active question (a new question moves it there)
+  // the file-wide questions (outline, cutting list) have no piece of their own: the preview shows
+  // the largest piece — the one the outline's picture answers are drawn from
+  const bigSeed =
+    [...rows].sort(
+      (x, y) =>
+        (y.candidates[y.candidates.length - 1]?.areaMm2 ?? 0) -
+        (x.candidates[x.candidates.length - 1]?.areaMm2 ?? 0),
+    )[0]?.seed ?? null;
+  const pieceOf = (p: Problem): SeedId | null =>
+    p.seed ?? (p.kind === 'outline' ? bigSeed : sel ?? bigSeed);
+  // the canvas (left) always shows the piece of the active question (a new question moves it
+  // there) — never "select a row" while a question is open
   if (active && active.key !== synced) {
     setSynced(active.key);
     setOther(false);
-    if (active.seed != null && active.seed !== sel && !reviewing) {
-      setSel(active.seed);
+    const want = pieceOf(active);
+    if (want != null && want !== sel && !reviewing) {
+      setSel(want);
       setDrawing(false);
       setGrainA(null);
       setPickingFold(false);
     }
-  }
+  } else if (active && active.kind !== 'gate' && sel == null && bigSeed != null && !reviewing)
+    setSel(pieceOf(active) ?? bigSeed);
 
   // owner 16.10: while a question is open only "question k of n" and its one card are on screen
   // (the full list was information nobody acts on; the table's state cells still jump to any row)
@@ -988,6 +1010,21 @@ export function DetailsStep({
 
   /** A question is open on its card: the step shows that card and nothing else to read. */
   const asking = !!active && active.kind !== 'gate';
+  /** Is the open question the no-grain (or fold) question of this very piece? */
+  const activeIsFor = (seed: SeedId, what: 'grain' | 'fold') => {
+    if (!active) return false;
+    if (what === 'grain')
+      return (
+        (active.kind === 'blocked' && active.reason === 'no-grain' && active.seed === seed) ||
+        (active.kind === 'group' && active.group === 'grain' && !!active.seeds?.includes(seed))
+      );
+    return (
+      active.seed === seed &&
+      (active.kind === 'fold' ||
+        (active.kind === 'blocked' &&
+          (active.reason === 'fold-question' || active.reason === 'fold-unresolved')))
+    );
+  };
 
   /** The outline a question shows: the size the piece is built on, else the largest drawn. */
   const outerOf = (seed: SeedId) => {
@@ -1013,10 +1050,12 @@ export function DetailsStep({
       <span className='flex flex-col items-stretch gap-1.5'>
         <Button
           {...ask('details-grain-accept')}
+          // every proposal is on screen (left): accepting them is the seen, one-click fix
+          data-ask-fix=''
           variant='secondary'
           size='xs'
           disabled={busy}
-          onClick={acceptProposals}
+          onClick={() => answer(acceptProposals())}
         >
           accept these {proposals.length}
         </Button>
@@ -1030,18 +1069,12 @@ export function DetailsStep({
     let answers: React.ReactNode = null;
     if (p.kind === 'outline') {
       why = 'the sheet does not say whether the seam allowance is in the drawing';
-      // the pictures are drawn from the largest piece: the outline reads best there
-      const big = [...rows].sort(
-        (x, y) =>
-          (y.candidates[y.candidates.length - 1]?.areaMm2 ?? 0) -
-          (x.candidates[x.candidates.length - 1]?.areaMm2 ?? 0),
-      )[0];
+      // the pictures are drawn from the largest piece (the one on the canvas): it reads best there
       answers = (
         <OutlineQuestion
           api={api}
           current={fileAllowance}
-          answersOnly
-          outer={big ? grainRing(big.seed) ?? outerOf(big.seed) : []}
+          outer={bigSeed != null ? grainRing(bigSeed) ?? outerOf(bigSeed) : []}
         />
       );
     } else if (p.kind === 'group' && p.seeds) {
@@ -1062,6 +1095,8 @@ export function DetailsStep({
             {props.length > 0 && (
               <Button
                 {...ask('details-blocked')}
+                // the fix opens the overview; there "accept these N" is the fix (nothing unseen)
+                data-ask-fix='details-blocked'
                 variant='secondary'
                 size='xs'
                 disabled={busy}
@@ -1078,7 +1113,7 @@ export function DetailsStep({
                 size='xs'
                 disabled={busy}
                 title={`the ${bulkSeeds.length} pieces with no grainline, no proposal and no fold: straight grain along the sheet's vertical`}
-                onClick={() => setGrainAxis(bulkSeeds, 90)}
+                onClick={() => answer(setGrainAxis(bulkSeeds, 90))}
               >
                 all vertical ({bulkSeeds.length})
               </Button>
@@ -1097,7 +1132,7 @@ export function DetailsStep({
                 size='xs'
                 disabled={busy}
                 title='codes in sheet order; the sheet words stay the names'
-                onClick={nameAll}
+                onClick={() => answer(nameAll())}
               >
                 name {plural(bulk.size, 'piece')}
               </Button>
@@ -1150,6 +1185,8 @@ export function DetailsStep({
               size='xs'
               disabled={busy || !shown.length}
               title='keep every count exactly as listed'
+              // keep counts as shown: what the file builds now, each still editable
+              data-ask-fix=''
               onClick={() => {
                 const live = shown.filter(({ sd, key }) => {
                   const u = qtyOpen(open, sd);
@@ -1161,6 +1198,7 @@ export function DetailsStep({
                     ...Object.fromEntries(live.map(({ sd, key }) => [sd, key])),
                   },
                 }));
+                answer();
               }}
             >
               all right
@@ -1196,11 +1234,14 @@ export function DetailsStep({
               variant='secondary'
               size='xs'
               disabled={busy}
-              onClick={() =>
+              // keep the names as shown: each stays editable in the table
+              data-ask-fix=''
+              onClick={() => {
                 patchInputs((i) => ({
                   confirmedNames: [...new Set([...i.confirmedNames, ...sds])],
-                }))
-              }
+                }));
+                answer();
+              }}
             >
               all right
             </Button>
@@ -1223,6 +1264,7 @@ export function DetailsStep({
               // there applies them (D3: nothing accepted unseen) — two clicks for the whole file
               <Button
                 {...ask('details-blocked')}
+                data-ask-fix='details-blocked'
                 variant='secondary'
                 size='xs'
                 disabled={busy}
@@ -1239,7 +1281,7 @@ export function DetailsStep({
                 size='xs'
                 disabled={busy}
                 title={`the ${bulkSeeds.length} pieces with no grainline, no proposal and no fold: straight grain along the sheet's vertical`}
-                onClick={() => setGrainAxis(bulkSeeds, 90)}
+                onClick={() => answer(setGrainAxis(bulkSeeds, 90))}
               >
                 all vertical ({bulkSeeds.length})
               </Button>
@@ -1247,11 +1289,13 @@ export function DetailsStep({
             {pr && (
               <Button
                 {...ask('details-blocked')}
+                // the proposal is drawn dashed on the piece (left): seen, so the one-click fix
+                {...(proposals.length < 2 ? { 'data-ask-fix': 'details-blocked' } : {})}
                 variant='secondary'
                 size='xs'
                 disabled={busy}
                 title={`the dashed line on the piece · ${pr.why}`}
-                onClick={() => acceptProposal(seed)}
+                onClick={() => answer(acceptProposal(seed))}
               >
                 proposed
               </Button>
@@ -1262,7 +1306,7 @@ export function DetailsStep({
               size='xs'
               disabled={busy}
               title="straight grain along the sheet's vertical"
-              onClick={() => setGrainAxis([seed], 90)}
+              onClick={() => answer(setGrainAxis([seed], 90))}
             >
               vertical
             </Button>
@@ -1272,7 +1316,7 @@ export function DetailsStep({
               size='xs'
               disabled={busy}
               title="straight grain along the sheet's horizontal"
-              onClick={() => setGrainAxis([seed], 0)}
+              onClick={() => answer(setGrainAxis([seed], 0))}
             >
               horizontal
             </Button>
@@ -1300,7 +1344,7 @@ export function DetailsStep({
                 {...hint('name every piece in one click')}
                 variant='secondary'
                 size='xs'
-                onClick={nameAll}
+                onClick={() => answer(nameAll())}
               >
                 name {plural(bulk.size, 'piece')}
               </Button>
@@ -1327,9 +1371,13 @@ export function DetailsStep({
           variant='secondary'
           size='xs'
           onClick={() =>
-            rerun({
-              foldListChecked: [...new Set([...inputs.foldListChecked, ...sem.foldList!.entries])],
-            })
+            answer(
+              rerun({
+                foldListChecked: [
+                  ...new Set([...inputs.foldListChecked, ...sem.foldList!.entries]),
+                ],
+              }),
+            )
           }
         >
           list is right
@@ -1348,10 +1396,15 @@ export function DetailsStep({
           <Button
             {...ask('details-confirm')}
             {...hint('pick how many per garment')}
+            // the count as shown: the one-click fix
+            data-ask-fix=''
             variant='secondary'
             size='xs'
             disabled={busy}
-            onClick={() => confirmQty(seed)}
+            onClick={() => {
+              confirmQty(seed);
+              answer();
+            }}
           >
             {shown}
           </Button>
@@ -1359,7 +1412,7 @@ export function DetailsStep({
             variant='secondary'
             size='xs'
             disabled={busy}
-            onClick={() => override(seed, { piecesPerGarment: alt })}
+            onClick={() => answer(override(seed, { piecesPerGarment: alt }))}
           >
             {alt}
           </Button>
@@ -1370,7 +1423,9 @@ export function DetailsStep({
               aria-label={`pieces per garment${d.pair ? ' per hand' : ''} of piece ${mark(seed)}`}
               className='w-12'
               onCommit={(v) =>
-                v && v !== shown ? override(seed, { piecesPerGarment: Math.round(v) }) : undefined
+                v && v !== shown
+                  ? answer(override(seed, { piecesPerGarment: Math.round(v) }))
+                  : undefined
               }
             />
           ) : (
@@ -1404,10 +1459,15 @@ export function DetailsStep({
           <Button
             {...ask('details-confirm')}
             {...hint('keep the name, or rename it')}
+            // the name as shown: the one-click fix
+            data-ask-fix=''
             variant='secondary'
             size='xs'
             disabled={busy}
-            onClick={() => confirm(seed)}
+            onClick={() => {
+              confirm(seed);
+              answer();
+            }}
           >
             keep it
           </Button>
@@ -1438,29 +1498,27 @@ export function DetailsStep({
     } else {
       why = 'open all pieces below: the field it names is marked';
     }
+    // owner 16.10: one plain question and its answers, beside the preview — no callout box, no
+    // bold, one font size; why it is asked is the hover. The piece is the canvas on the left
     return (
-      <CalloutBox tone='warning' className='mt-2 flex items-start gap-3 py-2'>
-        <span className='flex min-w-0 flex-1 flex-col gap-1.5'>
-          {/* owner 16.10: the question and its answers; why it is asked is the hover. The
-              piece itself is the big preview on the left — no thumbnail here */}
-          <Text size='micro' component='p' title={why ?? undefined}>
-            <b>{p.label}</b>
-            {p.kind === 'outline' && (
-              <Text size='micro' variant='label' component='span'>
-                {' '}
-                for all pieces
-              </Text>
-            )}
-          </Text>
-          {/* where the answer is not on the card itself, the why says where it is */}
-          {why && (p.kind === 'gate' || p.kind === 'cutlist') && (
-            <Text size='micro' variant='label' component='p'>
-              {why}
+      <div className='mt-2 flex min-w-0 flex-col gap-2'>
+        <Text size='micro' component='p' title={why ?? undefined}>
+          {p.label}
+          {p.kind === 'outline' && (
+            <Text size='micro' variant='label' component='span'>
+              {' '}
+              for all pieces
             </Text>
           )}
-          {answers}
-        </span>
-      </CalloutBox>
+        </Text>
+        {/* where the answer is not on the card itself, the why says where it is */}
+        {why && (p.kind === 'gate' || p.kind === 'cutlist') && (
+          <Text size='micro' variant='label' component='p'>
+            {why}
+          </Text>
+        )}
+        {answers}
+      </div>
     );
   };
 
@@ -1712,7 +1770,7 @@ export function DetailsStep({
                 <Chip quiet onClick={() => setReviewing(false)}>
                   back
                 </Chip>
-                <Chip {...ask('details-grain-accept')} onClick={acceptProposals}>
+                <Chip {...ask('details-grain-accept')} onClick={() => answer(acceptProposals())}>
                   accept these {proposals.length}
                 </Chip>
               </span>
@@ -1844,15 +1902,21 @@ export function DetailsStep({
                     onPoint={(pt) => {
                       if (pickingFold && selPick) {
                         const e = edgeAt(selPick, pt);
-                        if (e) pickFold(sel, e);
+                        if (!e) return;
+                        const p = pickFold(sel, e);
+                        // only the active fold question of this same piece moves the step on
+                        if (activeIsFor(sel, 'fold')) answer(p);
                         return;
                       }
                       if (!drawing) return;
                       if (!grainA) setGrainA(pt);
                       else {
-                        rerun({
+                        const p = rerun({
                           operatorGrain: { ...inputs.operatorGrain, [sel]: { a: grainA, b: pt } },
                         });
+                        // a free "draw grainline" edit is committed as is; only the drawing that
+                        // answers the active no-grain question of this same piece moves on
+                        if (activeIsFor(sel, 'grain')) answer(p);
                         setGrainA(null);
                         setDrawing(false);
                       }

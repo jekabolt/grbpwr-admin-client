@@ -37,7 +37,7 @@ await esbuild({
   outfile,
   logLevel: 'silent',
 });
-const { proposePins, deltaE2000, findPantone } = await import(pathToFileURL(outfile).href);
+const { proposePins, deltaE2000, findPantone, planAuto } = await import(pathToFileURL(outfile).href);
 rmSync(outfile, { force: true });
 
 // ─── фикстуры ────────────────────────────────────────────────────────────────────────────────
@@ -328,6 +328,85 @@ head('8 — детерминизм');
     ),
   );
   ck(a === b, 'порядок каталога не влияет на ответ');
+}
+
+head('9 — planAuto + предложения матчера (наша точная молчит: у колорвея нет ключей цвета)');
+{
+  const mat = (id, code, color) => ({ id, name: `m${id}`, code, color, section: FABRIC, archived: false });
+  const M1 = mat(1, 'TW100 black', 'black');
+  const M2 = mat(2, 'TW100 navy', 'navy');
+  const M3 = mat(3, 'XY200 navy', 'navy');
+  const slot = { lineKey: 'L1', section: FABRIC, unit: 'm', materialId: 1, material: M1 };
+  const prop = (materialId, exact, score = 0.9) => ({
+    lineKey: 'L1', materialId, score, confidence: 'high', exact, deltaE: 0, reasons: [], reason: '',
+  });
+  const plan = (proposals) =>
+    planAuto({
+      colorway: { colorwayId: 7 },
+      cardSlots: [slot],
+      rowsBySlot: new Map(),
+      materials: [M1, M2, M3],
+      otherColorways: [],
+      bomItems: [slot],
+      pieces: [],
+      proposals,
+    });
+  const a = plan([prop(2, true)]);
+  ck(a.pins.length === 1 && a.pins[0].patch.materialId === 2, 'exact + то же семейство → пин', JSON.stringify(a.pins));
+  const b = plan([prop(3, true)]);
+  ck(
+    b.pins.length === 0 && b.ambiguous[0]?.candidates?.[0] === 3,
+    'exact, но другое семейство → не пин, pick one of',
+    JSON.stringify(b),
+  );
+  const c = plan([prop(2, false, 0.8), prop(3, false, 0.9)]);
+  ck(
+    c.pins.length === 0 && c.ambiguous[0]?.count === 2 && c.ambiguous[0].candidates.join() === '3,2',
+    'не-exact → не пин, кандидаты лучшие первыми',
+    JSON.stringify(c),
+  );
+  // Секция слота сменена в форме (не сохранено): матчер читал старый BOM, артикул — старой секции.
+  const live = { ...slot, section: TRIM };
+  const d = planAuto({
+    colorway: { colorwayId: 7 },
+    cardSlots: [live],
+    rowsBySlot: new Map(),
+    materials: [M1, M2, M3],
+    otherColorways: [],
+    bomItems: [live],
+    pieces: [],
+    proposals: [prop(2, true)],
+  });
+  ck(d.pins.length === 0, 'exact + семейство, но секция живого слота другая → не пин', JSON.stringify(d.pins));
+  ck(d.ambiguous.length === 0, 'фолбэк: кандидат чужой секции выкинут, ноль валидных → нет ambiguous', JSON.stringify(d.ambiguous));
+  const f = plan([prop(3, false, 0.7), { ...prop(9, false, 0.99) }, prop(2, false, 0.7)]);
+  ck(
+    f.ambiguous[0]?.count === 2 && f.ambiguous[0].candidates.join() === '2,3',
+    'фолбэк: несуществующий выкинут, равный балл → по имени, другое семейство допустимо',
+    JSON.stringify(f.ambiguous),
+  );
+  // 2+ своих точных: слияние с предложениями — только валидные, по баллу, затем по имени.
+  const N4 = { ...mat(4, 'TW100 navy', 'navy'), name: 'aaa' };
+  const N7 = { ...mat(7, 'TW100 navy', 'navy'), name: 'zzz' };
+  const P5 = mat(5, 'TW100 ecru', 'ecru'); // то же семейство, другой цвет — валиден как предложение
+  const P6 = { ...mat(6, 'TW100 navy', 'navy'), archived: true };
+  const e = planAuto({
+    colorway: { colorwayId: 7, devName: 'navy' },
+    cardSlots: [slot],
+    rowsBySlot: new Map(),
+    materials: [M1, M2, M3, N4, P5, P6, N7],
+    otherColorways: [],
+    bomItems: [slot],
+    pieces: [],
+    proposals: [prop(3, false, 0.99), prop(5, false, 0.95), prop(6, false, 0.9), prop(2, false, 0.5)],
+  });
+  ck(
+    e.pins.length === 0 &&
+      e.ambiguous[0]?.count === 4 &&
+      e.ambiguous[0].candidates.join() === '5,2,4',
+    'слияние: другое семейство и архив выкинуты, count до среза, балл → имя',
+    JSON.stringify(e.ambiguous),
+  );
 }
 
 console.log(
