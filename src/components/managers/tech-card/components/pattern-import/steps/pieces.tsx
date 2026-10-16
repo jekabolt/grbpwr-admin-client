@@ -235,9 +235,11 @@ type Hot =
   | null;
 
 /**
- * A two-parts split in progress: stage 1 = the first loop sent, 2 = waiting for the loop round the
- * other part, 3 = the second loop sent. `edits` = the edit count once the loop has applied; `sent`
- * = the pieces output the loop was drawn on (the check waits for a newer one). Kept in the quiz
+ * A two-parts split in progress, as one transaction: stage 1 = the first loop sent, 2 = waiting
+ * for the loop round the other part, 3 = the second loop sent. `baseline` = the edits before the
+ * first loop, `cuts` = the exact split edits sent since (the edits must be baseline + cuts, by
+ * identity — any other edit in between ends the transaction, keeping what is there); `sent` = the
+ * pieces output the last loop was drawn on (the check waits for a newer one). Kept in the quiz
  * slot: the step unmounts while the pieces run again.
  */
 type SplitCheck = {
@@ -246,8 +248,9 @@ type SplitCheck = {
   orig: number;
   a1: number;
   first: number;
-  other: number | null;
-  edits: number;
+  other: number;
+  baseline: readonly PieceEdit[];
+  cuts: PieceEdit[];
   sent: unknown;
 };
 
@@ -364,14 +367,18 @@ export function PiecesStep({
     if (tool === 'pan') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Esc here cancels the drawing only: never the wizard's own Esc (discard this import?)
+      e.preventDefault();
+      e.stopPropagation();
       if (splitRef.current?.stage === 2) splitRef.current = null;
       setGapA(null);
       setTool('pan');
       setLassoJoin(false);
       setLassoSplit(false);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // capture on window: before the dialog's own Esc listener on the document
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [tool]);
   // the outlines left out on a guess that are big enough to be a piece: the optional check
   const weakList = out ? weakAsides(out.setAside, families, out.seeds) : [];
@@ -432,28 +439,41 @@ export function PiecesStep({
     setTool('pan');
     // the same region asked again after an answer (two pieces → a gap) is a new question too
   }, [active?.key, activeRegion?.outcome, activeRegion?.rank]);
-  // a loop has applied: did it split? (one part closed and smaller; both parts = the region)
+  // a loop has applied: did it split? Two identified parts, both closed, adding up to the region
   useEffect(() => {
     const p = splitRef.current;
-    if (!p || p.stage === 2 || session.busy || inputs.edits.length !== p.edits || out === p.sent)
+    if (!p) return;
+    const want = [...p.baseline, ...p.cuts];
+    const same = (n: number) =>
+      inputs.edits.length >= n && want.slice(0, n).every((e, i) => inputs.edits[i] === e);
+    // another edit came in between (an undo, a drop, a gap): the transaction ends, nothing undone
+    if (!same(Math.min(inputs.edits.length, want.length)) || inputs.edits.length > want.length) {
+      splitRef.current = null;
+      setHint('split stopped — answer again');
       return;
-    const at = (seed: number | null) =>
-      seed == null
-        ? undefined
-        : families.find((f) => f.seed === seed)?.candidates.find((c) => c.rank === p.rank);
-    const undo = (n: number) => {
+    }
+    if (p.stage === 2 || session.busy || inputs.edits.length !== want.length || out === p.sent)
+      return;
+    const at = (seed: number) =>
+      families.find((f) => f.seed === seed)?.candidates.find((c) => c.rank === p.rank);
+    // back to exactly the edits before the first loop: the cuts are the last edits (checked above),
+    // so taking them off one by one restores that list (the session has no 'set edits' answer
+    // that keeps its own copy in step)
+    const restore = () => {
       splitRef.current = null;
       setHint("didn't split — try again");
       void (async () => {
-        for (let k = 0; k < n; k++) await api.editPieces('undo');
+        for (let k = 0; k < p.cuts.length; k++) await api.editPieces('undo');
       })();
     };
+    const a = at(p.first);
+    const b = at(p.other);
+    const partition = (x: number, y: number) => Math.abs(x + y - p.orig) <= 0.05 * p.orig;
     if (p.stage === 1) {
-      const a = at(p.first);
-      if (!a || a.outcome !== 'closed' || a.areaMm2 > 0.97 * p.orig) return undo(1);
-      if (p.other != null && at(p.other)?.outcome === 'merged') {
+      if (!a || a.outcome !== 'closed' || a.areaMm2 > 0.97 * p.orig) return restore();
+      if (b?.outcome === 'merged') {
         // the other part still reads as the whole region: ask for its loop
-        splitRef.current = { ...p, stage: 2, a1: a.areaMm2, edits: -1 };
+        splitRef.current = { ...p, stage: 2, a1: a.areaMm2 };
         setHint(null);
         setSel(p.other);
         setRank(p.rank);
@@ -463,18 +483,20 @@ export function PiecesStep({
         setTool('lasso');
         return;
       }
-      splitRef.current = null;
-      setHint('split');
-      return;
+      // the other part closed by itself: it must still be the rest of the region
+      if (b?.outcome === 'closed' && partition(a.areaMm2, b.areaMm2)) {
+        splitRef.current = null;
+        setHint('split into two parts');
+        return;
+      }
+      return restore();
     }
-    const b = at(p.other);
-    const ok =
-      !!b && b.outcome === 'closed' && Math.abs(p.a1 + b.areaMm2 - p.orig) <= 0.05 * p.orig;
-    if (!ok) return undo(2);
+    if (!b || b.outcome !== 'closed' || !a || a.outcome !== 'closed') return restore();
+    if (!partition(a.areaMm2, b.areaMm2)) return restore();
     splitRef.current = null;
     setHint('split into two parts');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [out, session.busy, inputs.edits.length]);
+  }, [out, session.busy, inputs.edits]);
   // a new question closes the pieces list: while one is open, the card is the only thing to read
   useEffect(() => {
     setClosedOpen(false);
@@ -665,23 +687,35 @@ export function PiecesStep({
         // result is checked (it cut something, it closed); the other part is asked for next, and
         // both parts must add up to the region — else the loops are undone ("didn't split")
         const p = splitRef.current;
+        const cut: PieceEdit = { kind: 'split', seed: target.seed, lassoMm: poly };
         if (p?.stage === 2 && p.other === target.seed) {
-          splitRef.current = { ...p, stage: 3, edits: inputs.edits.length + 1, sent: out };
+          splitRef.current = { ...p, stage: 3, cuts: [...p.cuts, cut], sent: out };
         } else {
           const tc = target.candidates.find((x) => x.rank === rank) ?? cand(target);
-          const other = partnersOf(target, tc);
+          // the other part: the proven pair, else the one other number inside this outline
+          const proven = partnersOf(target, tc);
+          const raw = rawPartners(target, tc);
+          const other = proven.length === 1 ? proven[0] : raw.length === 1 ? raw[0] : null;
+          if (!other) {
+            // two parts need two numbers to tell them apart: nothing is cut
+            setHint('no second number in this outline — use not a piece, or add a piece');
+            setTool('pan');
+            setLassoSplit(false);
+            return;
+          }
           splitRef.current = {
             stage: 1,
             rank: tc.rank,
             orig: tc.areaMm2,
             a1: 0,
             first: target.seed,
-            other: other[0]?.seed ?? null,
-            edits: inputs.edits.length + 1,
+            other: other.seed,
+            baseline: [...inputs.edits],
+            cuts: [cut],
             sent: out,
           };
         }
-        void api.editPieces({ kind: 'split', seed: target.seed, lassoMm: poly });
+        void api.editPieces(cut);
         setHint('splitting…');
       } else
         setHint('no piece number inside the lasso and no touching pieces under it — nothing to do');
@@ -789,10 +823,20 @@ export function PiecesStep({
     activeFam && seen.split?.stage === 2 && seen.split.other === activeFam.seed
       ? families.find((g) => g.seed === seen.split!.first)
       : undefined;
-  const parts = activeFam
-    ? [activeFam, ...others, ...(cutPart && !others.includes(cutPart) ? [cutPart] : [])]
-    : [];
   const broughtBack = new Set([...seen.promoted.values()].map((x) => x.seed));
+  // a brought-back outline whose number sits in this region is one of its parts too (after a cut
+  // it no longer reads as the same region, so the pair rule alone would miss it)
+  const backInside =
+    activeFam && activeCand && activeCand.outcome === 'merged' && activeCand.outer.length > 2
+      ? families.filter((g) => {
+          if (g.seed === activeFam.seed || !broughtBack.has(g.seed)) return false;
+          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
+          return !!at && inside(at, activeCand.outer);
+        })
+      : [];
+  const parts = activeFam
+    ? [...new Set([activeFam, ...others, ...(cutPart ? [cutPart] : []), ...backInside])]
+    : [];
   const backParts = parts.filter((g) => broughtBack.has(g.seed));
   const dropAnswers: Answer[] = (backParts.length === 1 ? backParts : parts).map((g) => ({
     label: `drop ${markWord(g.seed)}`,
