@@ -1314,6 +1314,9 @@ export function PatternsField({
       dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
     const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
     const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
+    const nameTitle =
+      [row.filename, converted ? convertedTitle(converted) : ''].filter(Boolean).join('\n') ||
+      undefined;
     const meta = [rev != null ? `v${rev}` : '', row.sizeBytes ? formatBytes(row.sizeBytes) : '']
       .filter(Boolean)
       .join(' · ');
@@ -1349,24 +1352,24 @@ export function PatternsField({
                   <button
                     type='button'
                     onClick={() => (rowGroup ? openPieces(rowGroup) : setViewing(row))}
-                    title={row.filename || undefined}
+                    title={nameTitle}
                     className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
                   >
                     {labelOf(row)}
                   </button>
                 ) : (
-                  <span title={row.filename || undefined} className='min-w-0 truncate text-micro'>
+                  <span title={nameTitle} className='min-w-0 truncate text-micro'>
                     {labelOf(row)}
                   </span>
                 )}
                 {!dxf && <Pill tone='mut'>pdf</Pill>}
-                {converted && (
-                  <Pill tone='mut' title={convertedTitle(converted)}>
-                    converted
-                  </Pill>
-                )}
+                {/* «converted» carried no decision: what the importer wrote rides in the name's
+                    tooltip; only the autopilot's «auto · N to check» stays beside the name */}
                 {converted?.autopilot && (
-                  <AutopilotPill assumptions={converted.autopilot.assumptions} />
+                  <AutopilotPill
+                    assumptions={converted.autopilot.assumptions}
+                    onCheckPieces={rowGroup ? () => openPieces(rowGroup) : undefined}
+                  />
                 )}
                 {converted && distrust && (
                   <Pill tone='warn' title={distrust}>
