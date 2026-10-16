@@ -266,7 +266,7 @@ export async function extractRasterPdfDetailed(
   // in rows stands in as a placeholder (big-image.ts) and is read below, window by window; any
   // other is refused, never traced as an empty page
   const max = cfg.maxPixels ?? PATIMPORT.maxRasterPixels;
-  const plan = planBigImages(file.bytes, max);
+  const plan = planBigImages(file.bytes); // the pdf.js guard's limit, not the trace budget
   if (plan.refused.length) throw inputTooLarge(bigImagesRefusal(plan.refused));
   if (plan.unknown) throw inputTooLarge(unreadablePdfImagesMessage(plan.unknown));
   const sha = await sha256Hex(file.bytes);
