@@ -49,13 +49,17 @@ export function pickCutLayer(pieces: readonly PieceDTO[]): string | undefined {
 
 const roleOfLayer = (layer: string): PlotRole => (layer === NOTCH_LAYER ? 'notch' : 'draw');
 
-/** Identity of a polyline at 0.01 mm — the loose pool repeats one `inner` on every piece. */
+/**
+ * Identity of a polyline at 0.01 mm: role, layer, closure and EVERY vertex. The loose pool repeats
+ * one `inner` on every piece, and an ungraded cut layer repeats one outline in every size block —
+ * those are dropped. A key built from a sample of vertices could equate two different lines (same
+ * ends, same middle, different shape) and silently drop a real one; this key cannot.
+ */
 function sig(pl: PlotPolyline): string {
   const r = (v: number) => Math.round(v * 100);
-  const a = pl.pts[0];
-  const b = pl.pts[pl.pts.length - 1];
-  const m = pl.pts[pl.pts.length >> 1];
-  return `${pl.role}|${pl.pts.length}|${r(a.x)},${r(a.y)}|${r(m.x)},${r(m.y)}|${r(b.x)},${r(b.y)}`;
+  let k = `${pl.role}|${pl.layer ?? ''}|${pl.closed ? 1 : 0}|`;
+  for (const p of pl.pts) k += `${r(p.x)},${r(p.y)};`;
+  return k;
 }
 
 function labelFor(name: string, pts: readonly Pt[], maxH: number): PlotText | null {

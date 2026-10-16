@@ -105,6 +105,147 @@ for (const path of inputs) {
   } else plts.push(resolve(path));
 }
 
+// ── Guards (Codex review majors) ────────────────────────────────────────────────────────────
+const enc = (t) => new TextEncoder().encode(t);
+const guard = async (name, fn) => {
+  try {
+    const r = await fn();
+    if (r === true) console.log(`ok   guard: ${name}`);
+    else {
+      failed++;
+      console.log(`FAIL guard: ${name} — ${r}`);
+    }
+  } catch (e) {
+    failed++;
+    console.log(`FAIL guard: ${name} — threw ${e.message}`);
+  }
+};
+const refuses = async (fn, re) => {
+  try {
+    await fn();
+    return 'did not refuse';
+  } catch (e) {
+    return re.test(e.message) ? true : `wrong message: ${e.message}`;
+  }
+};
+// 1. Two different lines with the same ends, middle vertex and vertex count both survive.
+await guard('distinct lines sharing ends+middle are both kept', async () => {
+  const pieces = [
+    {
+      id: 1,
+      name: 'A',
+      blockName: 'A',
+      layer: '1',
+      source: 'x',
+      fileIndex: 0,
+      poly: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+      bboxW: 10,
+      bboxH: 10,
+      areaCm2: 100,
+      originX: 0,
+      originY: 0,
+      inner: [
+        {
+          layer: '8',
+          closed: false,
+          pts: [
+            { x: 1, y: 1 },
+            { x: 2, y: 5 },
+            { x: 5, y: 5 },
+            { x: 8, y: 5 },
+            { x: 9, y: 9 },
+          ],
+        },
+        {
+          layer: '8',
+          closed: false,
+          pts: [
+            { x: 1, y: 1 },
+            { x: 4, y: 2 },
+            { x: 5, y: 5 },
+            { x: 6, y: 8 },
+            { x: 9, y: 9 },
+          ],
+        },
+        {
+          layer: '8',
+          closed: false,
+          pts: [
+            { x: 1, y: 1 },
+            { x: 2, y: 5 },
+            { x: 5, y: 5 },
+            { x: 8, y: 5 },
+            { x: 9, y: 9 },
+          ],
+        },
+      ],
+    },
+  ];
+  const d = m.plotFromPattern(pieces);
+  const n = d.polylines.filter((p) => p.role === 'draw').length;
+  return n === 2 ? true : `${n} drawn lines, expected 2 (one exact duplicate dropped)`;
+});
+// 2. Units: the same file at 1000/in is 40/(1000/25.4) = 1.016 × larger than at 40/mm.
+await guard('unitsPerMm reaches the sheet (1000/in vs 40/mm)', async () => {
+  const f = enc('IN;SP1;PU0,0;PD4000,0,4000,2000,0,2000,0,0;PU;');
+  const a = await m.readPltSheet(f, { unitsPerMm: 40 });
+  const b = await m.readPltSheet(f, { unitsPerMm: 1000 / 25.4 });
+  const ok = Math.abs(a.widthMm - 100) < 1e-6 && Math.abs(b.widthMm - 101.6) < 1e-6;
+  return ok ? true : `widths ${a.widthMm} / ${b.widthMm}`;
+});
+await guard('IP/SC self-scaling is reported', async () => {
+  const s = await m.readPltSheet(
+    enc('IN;IP0,0,4000,4000;SC0,100,0,100;SP1;PU0,0;PD100,0,100,50;PU;'),
+  );
+  return s.selfScaled.ip && s.selfScaled.sc && Math.abs(s.widthMm - 100) < 1e-6
+    ? true
+    : JSON.stringify(s.selfScaled) + ' ' + s.widthMm;
+});
+// 3. RO before drawing is applied (a 100 × 50 rectangle becomes 50 × 100); RO mid-drawing refused.
+await guard('RO 90 before drawing is applied', async () => {
+  const s = await m.readPltSheet(enc('IN;RO90;SP1;PU0,0;PD4000,0,4000,2000,0,2000,0,0;PU;'));
+  return Math.abs(s.widthMm - 50) < 1e-6 &&
+    Math.abs(s.heightMm - 100) < 1e-6 &&
+    s.rotationDeg === 90
+    ? true
+    : `${s.widthMm} x ${s.heightMm}, ro ${s.rotationDeg}`;
+});
+await guard('RO changed after drawing is refused', () =>
+  refuses(
+    () => m.readPltSheet(enc('IN;SP1;PU0,0;PD4000,0;RO90;PD4000,2000;PU;')),
+    /RO 90 changes the rotation/,
+  ),
+);
+await guard('IN before drawing cancels an earlier RO', async () => {
+  const s = await m.readPltSheet(enc('RO90;IN;SP1;PU0,0;PD4000,0,4000,2000;PU;'));
+  return s.rotationDeg === 0 && Math.abs(s.widthMm - 100) < 1e-6
+    ? true
+    : `ro ${s.rotationDeg}, w ${s.widthMm}`;
+});
+// 4. Non-finite coordinates are refused, never tiled.
+await guard('non-finite coordinates are refused', () =>
+  refuses(
+    () => m.pltToPdf(enc(`IN;SP1;PU0,0;PD1${'0'.repeat(400)},0;PD0,4000;PU;`), 'a4'),
+    /finite|damaged|not a finite|Infinity|non-finite|numbers?/i,
+  ),
+);
+// 5. Absurd sizes are refused before tiling (reader cap and tiler cap).
+await guard('a 40 m drawing is refused before planning', () =>
+  refuses(() => m.pltToPdf(enc('IN;SP1;PU0,0;PD1600000,0,1600000,4000;PU;'), 'a4'), /limit/),
+);
+await guard('tiler refuses > 500 pages without allocating', async () => {
+  const r = await refuses(async () => m.planTiles(19_000, 19_000), /page limit/);
+  return r;
+});
+await guard('tiler refuses infinite extents', () =>
+  refuses(async () => m.planTiles(Infinity, 10), /cannot tile/),
+);
+
 const pngs = [];
 for (const f of plts) {
   const buf = await readFile(f);

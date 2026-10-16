@@ -4,15 +4,27 @@
 // Self-contained: the parser and jsPDF load only when a file is picked, so the tech-card list
 // that hosts the button pays nothing for it.
 import type { PltSheet } from 'lib/pattern-export/plt-pdf';
-import { planTiles } from 'lib/pattern-export/tiles';
+import { planTiles, type TilePlan } from 'lib/pattern-export/tiles';
 import { downloadFile } from 'lib/pattern-export/download';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 
 type Mode = 'a4' | 'sheet';
+
+// SOURCE UNITS. A PLT never states the size of its plotter unit: 40/mm is the HP standard, but a
+// driver set to 1000/in draws 1.6 % smaller, and the PDF's own test square cannot catch that — it
+// checks the PRINTER, not the file. So the unit is the operator's answer, shown next to the size it
+// produces, and the same answer drives preview and download.
+const UNIT_PRESETS = [
+  { key: 'hp', label: '40 / mm (HP)', perMm: 40 },
+  { key: 'in1000', label: '1000 / in', perMm: 1000 / 25.4 },
+  { key: 'tenth', label: '0.1 mm', perMm: 10 },
+] as const;
+type UnitKey = (typeof UNIT_PRESETS)[number]['key'] | 'custom';
 
 const ACCEPT = '.plt,.hpgl,.hpg,.hgl,.pen';
 /** tiles.ts pads the sheet by this much in tiled mode (sheet-pdf.ts PAD). */
@@ -35,31 +47,66 @@ export function PltToPdfDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<Mode>('a4');
+  const [unitKey, setUnitKey] = useState<UnitKey>('hp');
+  const [customPerMm, setCustomPerMm] = useState('40');
+
+  const unitsPerMm =
+    unitKey === 'custom'
+      ? Number(customPerMm.replace(',', '.'))
+      : UNIT_PRESETS.find((u) => u.key === unitKey)!.perMm;
+  const unitsValid = Number.isFinite(unitsPerMm) && unitsPerMm > 0;
 
   const oneFits = !!sheet && sheet.widthMm <= ONE_PAGE_MAX && sheet.heightMm <= ONE_PAGE_MAX;
-  const effectiveMode: Mode = mode === 'sheet' && !oneFits ? 'a4' : mode;
-  const plan = useMemo(
-    () => (sheet ? planTiles(sheet.widthMm + 2 * TILE_PAD, sheet.heightMm + 2 * TILE_PAD) : null),
-    [sheet],
-  );
+  // The tiler refuses absurd sizes (tiles.ts caps); the refusal is shown, never thrown at render.
+  const tiling = useMemo((): { plan: TilePlan | null; problem: string | null } => {
+    if (!sheet) return { plan: null, problem: null };
+    try {
+      return {
+        plan: planTiles(sheet.widthMm + 2 * TILE_PAD, sheet.heightMm + 2 * TILE_PAD),
+        problem: null,
+      };
+    } catch (e) {
+      return { plan: null, problem: e instanceof Error ? e.message : String(e) };
+    }
+  }, [sheet]);
+  const plan = tiling.plan;
+  const effectiveMode: Mode =
+    mode === 'sheet' && !oneFits ? 'a4' : mode === 'a4' && !plan && oneFits ? 'sheet' : mode;
+  const canDownload = !!sheet && (effectiveMode === 'sheet' ? oneFits : !!plan);
+
+  // (Re)read whenever the file or the source unit changes: preview and download share one answer.
+  useEffect(() => {
+    if (!file || !unitsValid) {
+      setSheet(null);
+      return;
+    }
+    let live = true;
+    setBusy(true);
+    setError(null);
+    (async () => {
+      try {
+        const { readPltSheet } = await import('lib/pattern-export/plt-pdf');
+        const s = await readPltSheet(file.bytes, { name: file.name, unitsPerMm });
+        if (live) setSheet(s);
+      } catch (e) {
+        if (live) {
+          setSheet(null);
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (live) setBusy(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [file, unitsPerMm, unitsValid]);
 
   const pick = async (f: File | undefined) => {
     if (!f) return;
-    setBusy(true);
     setError(null);
     setSheet(null);
-    try {
-      const bytes = await f.arrayBuffer();
-      const { readPltSheet } = await import('lib/pattern-export/plt-pdf');
-      const s = await readPltSheet(bytes, { name: f.name });
-      setFile({ name: f.name, bytes });
-      setSheet(s);
-    } catch (e) {
-      setFile(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    setFile({ name: f.name, bytes: await f.arrayBuffer() });
   };
 
   const download = async () => {
@@ -68,7 +115,7 @@ export function PltToPdfDialog({
     setError(null);
     try {
       const { pltToPdf } = await import('lib/pattern-export/plt-pdf');
-      const res = await pltToPdf(file.bytes, effectiveMode, { name: file.name });
+      const res = await pltToPdf(file.bytes, effectiveMode, { name: file.name, unitsPerMm });
       downloadFile(res.bytes, res.fileName, 'application/pdf');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -93,7 +140,7 @@ export function PltToPdfDialog({
       width='lg'
       title='plt → pdf'
       confirmLabel={busy ? 'working…' : 'download pdf'}
-      confirmDisabled={busy || !sheet}
+      confirmDisabled={busy || !canDownload || !unitsValid}
       cancelLabel='close'
       closeOnConfirm={false}
       onOpenChange={close}
@@ -131,6 +178,8 @@ export function PltToPdfDialog({
               <Chip
                 selected={effectiveMode === 'a4'}
                 pressed={effectiveMode === 'a4'}
+                disabled={!plan}
+                title={tiling.problem ?? 'A4 tiles with overlap, marks and a map page'}
                 onClick={() => setMode('a4')}
               >
                 a4 tiles{plan ? ` · ${plan.tiles.length + 1} pages` : ''}
@@ -150,6 +199,48 @@ export function PltToPdfDialog({
           )}
         </div>
 
+        {file && (
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' variant='label'>
+              source units
+            </Text>
+            <ChipRow>
+              {UNIT_PRESETS.map((u) => (
+                <Chip
+                  key={u.key}
+                  selected={unitKey === u.key}
+                  pressed={unitKey === u.key}
+                  onClick={() => setUnitKey(u.key)}
+                >
+                  {u.label}
+                </Chip>
+              ))}
+              <Chip
+                selected={unitKey === 'custom'}
+                pressed={unitKey === 'custom'}
+                onClick={() => setUnitKey('custom')}
+              >
+                custom
+              </Chip>
+            </ChipRow>
+            {unitKey === 'custom' && (
+              <div className='flex items-center gap-1'>
+                <Input
+                  className='w-20'
+                  value={customPerMm}
+                  inputMode='decimal'
+                  aria-label='plotter units per mm'
+                  aria-invalid={!unitsValid || undefined}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setCustomPerMm(e.target.value)
+                  }
+                />
+                <Text size='micro'>units / mm</Text>
+              </div>
+            )}
+          </div>
+        )}
+
         {error && (
           <Text size='micro' variant='error' component='p'>
             {error}
@@ -163,13 +254,27 @@ export function PltToPdfDialog({
           </Text>
         )}
 
-        {sheet && plan && (
+        {sheet && (
           <>
             <Text size='micro' component='p'>
-              {Math.round(sheet.widthMm)} × {Math.round(sheet.heightMm)} mm
-              {effectiveMode === 'a4'
-                ? ` · ${plan.cols} × ${plan.rows} ${plan.paper}${plan.landscape ? ' landscape' : ''} + map page, ${plan.overlap} mm overlap`
-                : ' · one page'}
+              <b>
+                drawing {sheet.widthMm.toFixed(1)} × {sheet.heightMm.toFixed(1)} mm
+              </b>{' '}
+              at {+sheet.unitsPerMm.toFixed(4)} plotter units / mm — check one known garment
+              dimension against this: the test square checks the printer, not the file&apos;s units.
+              {(sheet.selfScaled.ip || sheet.selfScaled.sc) &&
+                ` The file scales itself (${[sheet.selfScaled.ip && 'IP', sheet.selfScaled.sc && 'SC'].filter(Boolean).join(' + ')}); that scaling is applied.`}
+              {sheet.rotationDeg ? ` Rotated ${sheet.rotationDeg}° (RO) as the file asks.` : ''}
+            </Text>
+            {tiling.problem && (
+              <Text size='micro' variant='error' component='p'>
+                {tiling.problem}
+              </Text>
+            )}
+            <Text size='micro' component='p'>
+              {effectiveMode === 'a4' && plan
+                ? `${plan.cols} × ${plan.rows} ${plan.paper}${plan.landscape ? ' landscape' : ''} + map page, ${plan.overlap} mm overlap`
+                : 'one page'}
               {' · '}
               {sheet.pens.map((p) => (
                 <span key={p.pen} className='mr-1.5 whitespace-nowrap'>

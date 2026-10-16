@@ -95,3 +95,16 @@ one option away.
 side), `'a4'` = A4 tiles with 10 mm overlap, ⊕ registration marks in the overlap strips, column
 letters / row numbers, neighbour labels, and a page-1 map with the test square. Pens on paper:
 1 black, 2 blue, 3 red, others grey.
+
+Reading rules on the PDF side:
+- **Source units are the operator's answer.** A PLT never states the size of its plotter unit;
+  `pltToPdf(…, { unitsPerMm })` defaults to 40/mm and the dialog offers 40/mm, 1000/in, 0.1 mm or
+  a custom value, with the resulting drawing size in mm next to it. The test square on the PDF
+  checks the printer only — it prints 100 mm whatever the file's unit was. IP/SC scaling inside the
+  file is applied by the reader and reported (`PltSheet.selfScaled`).
+- **RO** (plot rotation) is ignored by the import reader, so `plt-pdf.ts` scans the commands: one
+  rotation set before anything is drawn is applied to the whole drawing (`PltSheet.rotationDeg`);
+  RO changed after drawing started, or a non-right angle, is refused — never printed unrotated.
+- **Damaged numbers** are refused (`assertFiniteDoc` after extraction, then finite extents).
+- **Size caps**, checked before anything is allocated: a drawing over 20 m on a side is refused
+  ("check the units"), and the tiler refuses more than 500 pages (`tiles.ts`).

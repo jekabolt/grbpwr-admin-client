@@ -68,7 +68,17 @@ function count(len: number, win: number, ov: number): number {
   return Math.ceil((len - ov) / (win - ov) - 1e-9);
 }
 
+/** Refused before any array is allocated: a pattern is never this big, a wrong unit or a damaged file is. */
+export const TILE_MAX_PAGES = 500;
+export const TILE_MAX_SIDE_MM = 20_000;
+
 export function planTiles(sheetW: number, sheetH: number, opts: TilePlanOptions = {}): TilePlan {
+  if (!(Number.isFinite(sheetW) && Number.isFinite(sheetH) && sheetW > 0 && sheetH > 0))
+    throw new Error(`cannot tile a sheet of ${sheetW} × ${sheetH} mm`);
+  if (sheetW > TILE_MAX_SIDE_MM || sheetH > TILE_MAX_SIDE_MM)
+    throw new Error(
+      `${Math.round(sheetW)} × ${Math.round(sheetH)} mm is over the ${TILE_MAX_SIDE_MM / 1000} m tiling limit — check the units`,
+    );
   const paper = opts.paper ?? 'A4';
   const margin = opts.marginMm ?? 10;
   const [pw, ph] = PAPER_MM[paper];
@@ -84,6 +94,11 @@ export function planTiles(sheetW: number, sheetH: number, opts: TilePlanOptions 
   const P = variant(false);
   const L = variant(true);
   const v = L.cols * L.rows < P.cols * P.rows ? L : P;
+  // Counted, not allocated: the cap holds before a single tile or mark exists.
+  if (v.cols * v.rows > TILE_MAX_PAGES)
+    throw new Error(
+      `${v.cols * v.rows} ${paper} pages (${v.cols} × ${v.rows}) — over the ${TILE_MAX_PAGES}-page limit; print it on a plotter as one sheet`,
+    );
   const stepX = v.winW - v.overlap;
   const stepY = v.winH - v.overlap;
 
