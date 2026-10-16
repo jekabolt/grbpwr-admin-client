@@ -160,10 +160,12 @@ function materialAutoFields(m: common_Material, section: string) {
   };
 }
 
+// Значения, которые на СУЩЕСТВУЮЩЕЙ строке значат «не задано». `isSample: false` сюда не входит:
+// булево не отличает «не трогали» от осознанного «не семпл», поэтому на старой строке флаг
+// семпла каталогом не переписывается; новая строка получает его из `materialAutoFields` при рождении.
 const EMPTY_AUTO: Record<string, unknown> = {
   fabricDirection: 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
   kind: UNSET_KIND,
-  isSample: false,
 };
 
 /** Кладёт автозаполнение в строку `index`, не трогая полей, где уже есть значение. */
