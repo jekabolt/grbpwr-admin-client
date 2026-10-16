@@ -106,6 +106,7 @@ import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
+import { useTechCardStaging } from './useTechCardStaging';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -353,7 +354,7 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
-  const [, setParams] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
   const { showMessage } = useSnackBarStore();
@@ -483,6 +484,11 @@ export function PatternsField({
     // сохранения не зависит: слот решает, на какую строку BOM ляжет длина, а не какой деталью
     // кроя является блок.
     aliases: Array<{ blockName?: string; pieceLineKey?: string }>;
+    // Opened by the colourways deep link (`&auto=1`): the modal presses «run» once by itself.
+    autoRun?: boolean;
+    // The colourway the deep link came from (`markerColorway`): preselected, so the width is ITS
+    // pinned article's, not the BOM line's. 0/absent = the shared marker.
+    colorwayId?: number;
   } | null>(null);
   // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
   // nesting engine (null = closed).
@@ -1574,6 +1580,7 @@ export function PatternsField({
       <div
         key={key}
         className={cn('group/slot', dragKey === key && 'outline outline-2 outline-textColor')}
+        data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
         {...dropProps(key)}
       >
         <Tile
@@ -1818,6 +1825,76 @@ export function PatternsField({
         }
       : undefined;
   };
+  // DEEP LINK from COLOURWAYS: `?tab=patterns&marker=<bomLineKey>[&auto=1]`. Opens the marker of
+  // the slot holding that line exactly as its «marker» button does (lock = that line), once per
+  // link, then drops `marker`/`auto` from the URL so a reload does not reopen it. Waits for the
+  // card's BOM to reach the form; a slot without DXF gets scrolled to and pulsed instead.
+  const deepMarker = params.get('marker') ?? '';
+  const deepAuto = params.get('auto') === '1';
+  const deepColorway = Number(params.get('markerColorway') ?? 0) || 0;
+  // Identity-stable; `peek` reads the staged list without subscribing this panel to it.
+  const staging = useTechCardStaging();
+  const deepHandled = useRef('');
+  useEffect(() => {
+    if (!deepMarker) {
+      deepHandled.current = '';
+      return;
+    }
+    if (deepHandled.current === deepMarker) return;
+    const g = scopeGroups.find((x) => x.scope.lines.some((l) => l.lineKey === deepMarker));
+    // BOM not in the form yet: wait. A card whose BOM loaded without that line falls through.
+    if (!g && scopes.length === 0) return;
+    deepHandled.current = deepMarker;
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('marker');
+        p.delete('auto');
+        p.delete('markerColorway');
+        return p;
+      },
+      { replace: true },
+    );
+    if (g && g.entries.length > 0) {
+      setSelectedKey(g.scope.key);
+      setNesting({
+        sizeId: g.entries[0]?.row.sizeId || storageSizeId,
+        files: filesOf(g.entries),
+        bomLineKey: deepMarker,
+        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+        fabricDirection: strictestDirection(
+          g.scope.lines.some((l) => !l.isSample)
+            ? g.scope.lines.filter((l) => !l.isSample)
+            : g.scope.lines,
+        ),
+        // Unsaved recipe edits on that colourway = the saved pin may be stale: open, never run.
+        autoRun:
+          deepAuto &&
+          !(
+            deepColorway &&
+            (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
+          ),
+        colorwayId: deepColorway || undefined,
+      });
+      return;
+    }
+    // No pattern for that fabric: show its slot (anchor on the tile), else the shelf.
+    if (g) setSelectedKey(g.scope.key);
+    const anchor = g ? `patterns.slot.${g.scope.lines[0]?.lineKey ?? deepMarker}` : '';
+    window.setTimeout(() => {
+      if (!anchor || !revealField(anchor)) revealField('patterns.shelf');
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepMarker, scopeGroups, scopes.length]);
+  // autoRun waits until the deep link's colourway is known from the SAVED card and its pinned
+  // article for that line is loaded — otherwise the run would measure the BOM line's width.
+  const nestingCwReady = (() => {
+    if (!nesting?.colorwayId) return true;
+    const cw = colorwayOptions.find((c) => c.colorwayId === nesting.colorwayId);
+    if (!cw) return false;
+    const pin = cw.widthByLine.get(nesting.bomLineKey);
+    return !pin || materialById.has(pin.materialId ?? 0);
+  })();
   // The size range lives on its own SIZES tab now (index.tsx). The door switches the card there —
   // a sibling `hidden` panel, already mounted — and revealField pulses its `data-field` anchor.
   const sizeRangeDoor: HeaderWarningAction | undefined = headerEl
@@ -2158,6 +2235,8 @@ export function PatternsField({
             styleNumber={styleNumber}
             pieceAliases={nesting.aliases}
             requiredSeamAllowanceMm={cardSeamAllowanceMm}
+            autoRun={!!nesting.autoRun && nestingCwReady}
+            initialColorwayId={nesting.colorwayId}
             onClose={() => setNesting(null)}
           />
         </Suspense>
