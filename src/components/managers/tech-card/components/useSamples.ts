@@ -94,6 +94,28 @@ export function useSaveSample() {
   });
 }
 
+/**
+ * An INSTANT write of a few fields (auto status: in sewing after the write-off, done at the first
+ * fitting). Reads the sample fresh right before writing — server copy + patch, fresh lockVersion —
+ * so it never overwrites a colleague's edit with a stale render.
+ */
+export function usePatchSampleNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, patch }: { id: number; patch: Partial<common_SampleInsert> }) => {
+      const fresh = await adminService.GetSample({ id });
+      const cur = fresh.sample;
+      if (!cur?.sample) throw new Error('sample not found');
+      await adminService.UpdateSample({
+        id,
+        expectedLockVersion: cur.lockVersion ?? 0,
+        sample: { ...cur.sample, ...patch },
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
+  });
+}
+
 // Optimistic-lock rejection (Aborted → 409) reads clearly: someone else saved the sample.
 export function saveSampleErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;

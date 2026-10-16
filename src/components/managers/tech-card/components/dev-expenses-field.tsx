@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_TechCardDevExpense } from 'api/proto-http/admin';
+import { common_TechCardDevExpense, common_TechCardDevExpenseInsert } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useStyleEconomics } from 'components/managers/page/useStyleEconomics';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
@@ -48,6 +48,31 @@ export function useDevExpenses(techCardId?: number) {
     queryKey: devExpenseKeys.list(techCardId),
     queryFn: () => adminService.ListTechCardDevExpenses({ techCardId: techCardId ?? 0 }),
     enabled: !!techCardId,
+  });
+}
+
+// The ledger's two writes, shared with the sample screen's R&D block. Both refresh the sample tree
+// too: a sample-attributed expense changes that sample's composed cost (GetSample.manualBase).
+export function useAddDevExpense(techCardId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (expense: common_TechCardDevExpenseInsert) =>
+      adminService.AddTechCardDevExpense({ expense }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: devExpenseKeys.list(techCardId) });
+      qc.invalidateQueries({ queryKey: sampleKeys.all });
+    },
+  });
+}
+
+export function useDeleteDevExpense(techCardId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminService.DeleteTechCardDevExpense({ id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: devExpenseKeys.list(techCardId) });
+      qc.invalidateQueries({ queryKey: sampleKeys.all });
+    },
   });
 }
 
@@ -168,9 +193,6 @@ export function DevExpensesField({
   const scoped = !!scopedSampleId;
   const { canReadCosting, canWriteCosting } = usePermissions();
   const { showMessage } = useSnackBarStore();
-  const qc = useQueryClient();
-  const key = devExpenseKeys.list(techCardId);
-
   const { data, isLoading } = useDevExpenses(techCardId);
 
   // Per-card sample numbers for labelling rows (`образец #N` rather than the DB id). Cached from
@@ -199,10 +221,12 @@ export function DevExpensesField({
     setForm(blankForm());
   };
 
-  const add = useMutation({
-    mutationFn: () =>
-      adminService.AddTechCardDevExpense({
-        expense: {
+  const addMutation = useAddDevExpense(techCardId);
+  const add = {
+    isPending: addMutation.isPending,
+    mutate: () =>
+      addMutation.mutate(
+        {
           techCardId,
           kind: form.kind,
           description: form.description.trim(),
@@ -212,30 +236,27 @@ export function DevExpensesField({
           sampleId: scopedSampleId ?? form.sampleId ?? 0,
           incurredAt: form.incurredAt ? new Date(form.incurredAt).toISOString() : undefined,
         },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: key });
-      // A sample-attributed expense changes that sample's composed cost (GetSample.manualBase) —
-      // refresh the sample tree too, or the "cost: … + manual …" line above stays stale.
-      qc.invalidateQueries({ queryKey: sampleKeys.all });
-      // Close HERE, not on confirm (closeOnConfirm={false}): a backend rejection must leave the
-      // filled form standing instead of dismissing the dialog and wiping what was typed.
-      closeAdd();
-      showMessage('expense added', 'success');
-    },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
-  });
+        {
+          // Close HERE, not on confirm (closeOnConfirm={false}): a backend rejection must leave the
+          // filled form standing instead of dismissing the dialog and wiping what was typed.
+          onSuccess: () => {
+            closeAdd();
+            showMessage('expense added', 'success');
+          },
+          onError: (e) =>
+            showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
+        },
+      ),
+  };
 
-  const del = useMutation({
-    mutationFn: (id: number) => adminService.DeleteTechCardDevExpense({ id }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: key });
-      qc.invalidateQueries({ queryKey: sampleKeys.all });
-      showMessage('expense deleted', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : "couldn't delete", 'error'),
-  });
+  const delMutation = useDeleteDevExpense(techCardId);
+  const del = {
+    mutate: (id: number) =>
+      delMutation.mutate(id, {
+        onSuccess: () => showMessage('expense deleted', 'success'),
+        onError: (e) => showMessage(e instanceof Error ? e.message : "couldn't delete", 'error'),
+      }),
+  };
 
   // Deleting a financial record is immediate and permanent server-side (no undo) — confirm first,
   // same as every other destructive delete in this app (materials/, order/, tech-cards list).

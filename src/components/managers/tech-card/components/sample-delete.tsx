@@ -83,6 +83,7 @@ export function SampleDeleteControl({
   label,
   techCardId,
   onDeleted,
+  renderTrigger,
 }: {
   sampleId: number;
   /** Как семпл назван на экране — «#3». Он же в заголовке диалога и в сообщении об успехе. */
@@ -90,6 +91,8 @@ export function SampleDeleteControl({
   /** Карточка семпла — её примерки и dev-расходы вердикт трогает, и их кэш надо сбросить. */
   techCardId: number;
   onDeleted: () => void;
+  /** Own trigger (e.g. a row of the sample's ⋯ menu) in place of the default button. */
+  renderTrigger?: (open: () => void) => React.ReactNode;
 }) {
   const { showMessage } = useSnackBarStore();
   const preview = useSampleDeletionPreview();
@@ -136,9 +139,13 @@ export function SampleDeleteControl({
 
   return (
     <>
-      <Button type='button' variant='secondary' size='sm' onClick={openDialog}>
-        delete the sample
-      </Button>
+      {renderTrigger ? (
+        renderTrigger(openDialog)
+      ) : (
+        <Button type='button' variant='secondary' size='sm' onClick={openDialog}>
+          delete the sample
+        </Button>
+      )}
 
       <ConfirmationModal
         open={open}
