@@ -2,9 +2,12 @@
 // naming the blocks it failed and the step where the answer lives. Beside it, the pieces drawn
 // by the card's OWN sheet component (nesting/piece-sheet.tsx) under their block names — what the
 // card will see once the files land, not a second opinion about it.
-// import-ux PR5: only the checks that block are rows; the passing ones fold into one count line;
-// warnings and what the files leave out are the header's `! N warnings`; values, limits and the
-// run time are diagnostics (?debug=1).
+// Owner 16.10: the card's preview on the LEFT (the block a failing check names selected, in its
+// size), the one question on the RIGHT — a failing check, its blocks, its door (fix in <step>, or
+// the report when no step fixes it); "next check" walks the others. No check has a one-click fix
+// (every door leaves the step), so the ask line coaches. The passing ones fold into one count
+// line; warnings, what the files leave out and every other blocking check are the header's
+// `! N warnings`; values and limits are each check's tooltip; the run time is diagnostics.
 import { useContext, useMemo, useState } from 'react';
 import type {
   DraftScope,
@@ -87,17 +90,33 @@ export function CheckStep({
   const report = scope ? session.gate[scope.target.scopeKey] : undefined;
   const tokens = scope?.manifest.sizes.map((s) => s.token) ?? [];
   const [token, setToken] = useState<string | null>(null);
-  const size =
-    token && tokens.includes(token) ? token : tokens[Math.floor(tokens.length / 2)] ?? null;
-  const [picked, setPicked] = useState<string | null>(null);
+  // the block the operator picked, kept only for the question it was picked on
+  const [pick, setPick] = useState<{ q: string | null; b: string | null } | null>(null);
+  // the failing check shown as the question (one at a time, "next" walks them)
+  const [at, setAt] = useState(0);
 
   const specs = useMemo(
     () => (session.semantics?.pieces ?? []).filter((p) => scope?.identities.includes(p.identity)),
     [session.semantics, scope],
   );
-  const dtos = useMemo(() => (size ? piecesForCard(specs, size) : []), [specs, size]);
 
   const { labels } = useContext(DroppedLabels);
+
+  const blocking = (r = report) => r?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
+  const failing = blocking();
+  const active = failing.length ? failing[Math.min(at, failing.length - 1)] : null;
+  const qKey = active ? `${scope?.target.scopeKey}:${active.id}:${active.blocks.join(',')}` : null;
+  // the left preview shows the first block the question names, in that block's size
+  const blockSize = (b: string) =>
+    tokens.find((t) => b.toLowerCase().endsWith(`_${t.toLowerCase()}`)) ?? null;
+  const askedBlock = active?.blocks[0] ?? null;
+  const picked = pick && pick.q === qKey ? pick.b : askedBlock?.toLowerCase() ?? null;
+  const size =
+    token && tokens.includes(token)
+      ? token
+      : (askedBlock && blockSize(askedBlock)) ?? tokens[Math.floor(tokens.length / 2)] ?? null;
+  const dtos = useMemo(() => (size ? piecesForCard(specs, size) : []), [specs, size]);
+
   if (!scopes.length)
     return (
       <Panel title='check'>
@@ -107,7 +126,6 @@ export function CheckStep({
       </Panel>
     );
 
-  const blocking = (r = report) => r?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   const quiet = (c: GateCheck) => !!report?.passed && isG9Fallback(c);
   const warns = report?.checks.filter((c) => !c.ok && c.severity === 'warn' && !quiet(c)) ?? [];
   const fix = (c: GateCheck, to: WizardStep) => {
@@ -116,9 +134,10 @@ export function CheckStep({
     else void api.dispatch({ type: 'back', to });
   };
   const stepWord = (to: WizardStep) => STEPS.find((s) => s.id === to)?.label ?? to;
-  const failing = blocking();
   // a check that passes, or the G9 single-size note on a passing run: one count line
   const passing = report?.checks.filter((c) => c.ok || quiet(c)) ?? [];
+  const limitOf = (c: GateCheck) =>
+    c.value != null ? `${c.value}${c.threshold != null ? ` · limit ${c.threshold}` : ''}` : '';
 
   // what is true but blocks nothing: the header's `! N warnings`, each text the door to its fix
   const left = leftOut(api, labels);
@@ -151,30 +170,27 @@ export function CheckStep({
           },
         ]
       : []),
+    // every blocking check stays readable here, the one asked now included (its note, its blocks)
+    ...failing
+      .filter((c) => c !== active)
+      .map(
+        (c): HeaderWarning => ({
+          text: `${c.id.split('-')[0]} ${CHECK[c.id].what} — blocks the export${c.note ? ` · ${c.note}` : ''}`,
+          error: true,
+        }),
+      ),
   ];
 
+  /** One check as a row of the passing fold / the diagnostics table. */
   const checkRow = (c: GateCheck, i: number, full: boolean) => {
     const meta = CHECK[c.id];
-    const failed = !c.ok && c.severity === 'block';
     return (
       <tr
         key={`${c.id}-${i}`}
-        className={failed ? 'bg-error/5' : undefined}
-        title={
-          c.value != null
-            ? `${c.value}${c.threshold != null ? ` · limit ${c.threshold}` : ''}`
-            : undefined
-        }
+        title={[c.note, limitOf(c)].filter(Boolean).join(' · ') || undefined}
       >
         <td className='whitespace-nowrap'>{c.id.split('-')[0]}</td>
-        <td data-align='left'>
-          {meta.what}
-          {failed && c.note && (
-            <Text size='micro' variant='label' component='span' className='block'>
-              {c.note}
-            </Text>
-          )}
-        </td>
+        <td data-align='left'>{meta.what}</td>
         {full && (
           <>
             <td data-align='left'>
@@ -194,122 +210,176 @@ export function CheckStep({
             <td className='text-labelColor'>{c.threshold ?? '—'}</td>
           </>
         )}
-        {!full && (
-          <>
-            <td data-align='left'>
-              {c.blocks.length ? (
-                <span className='flex flex-wrap gap-1'>
-                  {c.blocks.map((b) => (
-                    <button
-                      key={b}
-                      type='button'
-                      className='underline decoration-borderColor hover:decoration-textColor'
-                      onClick={() => setPicked(b.toLowerCase())}
-                    >
-                      {b}
-                    </button>
-                  ))}
-                </span>
-              ) : null}
-            </td>
-            <td data-align='left'>
-              {failed && meta.fix && (
-                <Button
-                  {...ask('check-fix', 'open the step that fixes it')}
-                  variant='underline'
-                  size='xs'
-                  className='whitespace-nowrap text-labelColor hover:text-textColor'
-                  title={
-                    meta.fix === 'pieces' && c.blocks.length
-                      ? `opens pieces with ${c.blocks.length === 1 ? c.blocks[0] : `${c.blocks.length} blocks`} selected`
-                      : undefined
-                  }
-                  onClick={() => fix(c, meta.fix!)}
-                >
-                  ← fix in {stepWord(meta.fix)}
-                </Button>
-              )}
-            </td>
-          </>
-        )}
       </tr>
     );
   };
 
+  const activeFix = active ? CHECK[active.id].fix : null;
+  const question = active ? `${active.id.split('-')[0]} fails: ${CHECK[active.id].what}` : null;
+
   return (
     <SplitStage
-      sideWidth={420}
+      sideWidth={380}
       canvas={
         <Panel
-          title='gate'
+          title='what the card will see'
+          bodyClassName='flex flex-col gap-2'
           aside={
-            <>
-              {scopes.length > 1 && (
-                <span data-ask-zone=''>
-                  <ChipRow>
-                    {scopes.map((s) => {
-                      const bad = blocking(session.gate[s.target.scopeKey]).length;
-                      const here = s.target.scopeKey === scope?.target.scopeKey;
-                      return (
-                        <Chip
-                          // this file's own failing rows answer first; another file's chip only
-                          // when this one is clean
-                          {...ask(
-                            'check-scope',
-                            !!bad && !here && !failing.length,
-                            'open the file whose checks block',
-                          )}
-                          key={s.target.scopeKey}
-                          quiet
-                          selected={here}
-                          tone={bad ? 'error' : 'default'}
-                          onClick={() => setKey(s.target.scopeKey)}
-                        >
-                          {bad ? '! ' : ''}
-                          {s.filename}
-                        </Chip>
-                      );
-                    })}
-                  </ChipRow>
-                </span>
-              )}
-              <HeaderWarnings items={warnings} />
-            </>
+            <ChipRow>
+              {tokens.map((t) => (
+                <Chip key={t} quiet selected={t === size} onClick={() => setToken(t)}>
+                  {t}
+                </Chip>
+              ))}
+            </ChipRow>
           }
         >
+          {scope && <ScopeSummary scope={scope} />}
+          {dtos.length > 0 && (
+            <PieceSheet
+              pieces={dtos}
+              keyOf={(p) => (p.blockName ?? '').toLowerCase()}
+              markOf={() => 'mapped'}
+              labelOf={(p) => p.blockName ?? p.name}
+              selectedKey={picked}
+              onPick={(k) => setPick({ q: qKey, b: k === picked ? null : k })}
+              grainLayer='7'
+              innerLayers={new Set(['14'])}
+            />
+          )}
+        </Panel>
+      }
+      side={
+        <Panel
+          title='check'
+          bodyClassName='flex flex-col gap-2'
+          aside={<HeaderWarnings items={warnings} />}
+        >
+          {scopes.length > 1 && (
+            <span data-ask-zone=''>
+              <ChipRow>
+                {scopes.map((s) => {
+                  const bad = blocking(session.gate[s.target.scopeKey]).length;
+                  const here = s.target.scopeKey === scope?.target.scopeKey;
+                  return (
+                    <Chip
+                      // this file's own failing checks answer first; another file's chip only
+                      // when this one is clean
+                      {...ask(
+                        'check-scope',
+                        !!bad && !here && !failing.length,
+                        'open the file whose checks block',
+                      )}
+                      key={s.target.scopeKey}
+                      quiet
+                      selected={here}
+                      tone={bad ? 'error' : 'default'}
+                      title={s.target.label}
+                      onClick={() => {
+                        setKey(s.target.scopeKey);
+                        setAt(0);
+                      }}
+                    >
+                      {bad ? '! ' : ''}
+                      {s.filename}
+                    </Chip>
+                  );
+                })}
+              </ChipRow>
+            </span>
+          )}
           {scope && report && (
             <>
-              {failing.length > 0 ? (
-                // the blocking checks and their doors: the coach's zone
-                <div data-ask-zone=''>
-                  <div className='mb-1 flex items-baseline gap-2'>
-                    <Text size='micro' component='p' className='text-error'>
-                      ! {plural(failing.length, 'check')}{' '}
-                      {failing.length === 1 ? 'blocks' : 'block'} the export
-                    </Text>
-                    <Button
-                      variant='underline'
-                      size='xs'
-                      className='ml-auto whitespace-nowrap text-labelColor hover:text-textColor'
-                      title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
-                      onClick={api.downloadReport}
-                      // no step fixes any of them (round trip, probe square, …): the report is
-                      // the only door left
-                      {...ask(
-                        'check-report',
-                        failing.every((c) => !CHECK[c.id].fix),
-                        'no step fixes it — download the report',
-                      )}
+              {active && question ? (
+                <>
+                  <Text size='micro' variant='label' component='p'>
+                    question {Math.min(at, failing.length - 1) + 1} of {failing.length}
+                  </Text>
+                  {/* the failing check and its doors: the coach's zone */}
+                  <div
+                    data-ask-zone=''
+                    data-ask-label={question}
+                    data-testid='check-question'
+                    className='flex min-w-0 flex-col gap-2'
+                  >
+                    <Text
+                      size='micro'
+                      component='p'
+                      title={
+                        [active.note, limitOf(active)].filter(Boolean).join(' · ') || undefined
+                      }
                     >
-                      download report
-                    </Button>
+                      {question}
+                    </Text>
+                    {active.blocks.length > 0 && (
+                      <span className='flex flex-wrap gap-1'>
+                        {active.blocks.map((b) => (
+                          <Chip
+                            key={b}
+                            quiet
+                            selected={picked === b.toLowerCase()}
+                            title='show it on the left'
+                            onClick={() => {
+                              setPick({ q: qKey, b: b.toLowerCase() });
+                              const t = blockSize(b);
+                              if (t) setToken(t);
+                            }}
+                          >
+                            {b}
+                          </Chip>
+                        ))}
+                      </span>
+                    )}
+                    <span className='flex flex-col items-stretch gap-1.5'>
+                      {activeFix && (
+                        // a door back, not a fix: the answer is given on that step (coached)
+                        <Button
+                          {...ask('check-fix', 'open the step that fixes it')}
+                          variant='secondary'
+                          size='xs'
+                          title={
+                            activeFix === 'pieces' && active.blocks.length
+                              ? `opens pieces with ${active.blocks.length === 1 ? active.blocks[0] : `${active.blocks.length} blocks`} selected`
+                              : undefined
+                          }
+                          onClick={() => fix(active, activeFix)}
+                        >
+                          fix in {stepWord(activeFix)}
+                        </Button>
+                      )}
+                      <Button
+                        // no step fixes it (round trip, probe square, …): the report is the door
+                        {...ask(
+                          'check-report',
+                          !activeFix,
+                          'no step fixes it — download the report',
+                        )}
+                        variant='secondary'
+                        size='xs'
+                        title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
+                        onClick={api.downloadReport}
+                      >
+                        download report
+                      </Button>
+                      {failing.length > 1 && (
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          className='text-labelColor hover:text-textColor'
+                          onClick={() =>
+                            setAt((i) => (Math.min(i, failing.length - 1) + 1) % failing.length)
+                          }
+                        >
+                          next check
+                        </Button>
+                      )}
+                    </span>
                   </div>
-                  <DataTable>
-                    <tbody>{failing.map((c, i) => checkRow(c, i, false))}</tbody>
-                  </DataTable>
-                </div>
+                </>
               ) : (
-                <Pill tone='ok'>passes</Pill>
+                <Text size='micro' variant='label' component='p'>
+                  passes ✓
+                </Text>
               )}
               {passing.length > 0 && (
                 <Fold label={`${plural(passing.length, 'check')} pass`}>
@@ -337,35 +407,6 @@ export function CheckStep({
                 </DataTable>
               </DebugFold>
             </>
-          )}
-        </Panel>
-      }
-      side={
-        <Panel
-          title='what the card will see'
-          bodyClassName='flex flex-col gap-2'
-          aside={
-            <ChipRow>
-              {tokens.map((t) => (
-                <Chip key={t} quiet selected={t === size} onClick={() => setToken(t)}>
-                  {t}
-                </Chip>
-              ))}
-            </ChipRow>
-          }
-        >
-          {scope && <ScopeSummary scope={scope} />}
-          {dtos.length > 0 && (
-            <PieceSheet
-              pieces={dtos}
-              keyOf={(p) => (p.blockName ?? '').toLowerCase()}
-              markOf={() => 'mapped'}
-              labelOf={(p) => p.blockName ?? p.name}
-              selectedKey={picked}
-              onPick={(k) => setPicked(k === picked ? null : k)}
-              grainLayer='7'
-              innerLayers={new Set(['14'])}
-            />
           )}
         </Panel>
       }
