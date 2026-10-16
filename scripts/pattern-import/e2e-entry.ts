@@ -1325,18 +1325,20 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       for (const sd of drawn) {
         const f = fams.find((x) => x.seed === sd);
         if (!f) continue;
-        const bb = f.candidates[0].bbox;
+        // the operator clicks both ends ON the piece (G5 refuses a grain off it): the vertical
+        // through the box of a size that closed (a leaking size has no outline — scan:synth drew
+        // its grain at the origin), kept to the stretch inside every exported size
+        const on = f.candidates.filter(
+          (x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank),
+        );
+        const bb = (on[0] ?? f.candidates[0]).bbox;
         const cx = (bb.minX + bb.maxX) / 2;
         const a = { x: cx, y: bb.minY + 30 };
         const b = { x: cx, y: bb.maxY - 30 };
-        // the operator clicks both ends ON the piece (G5 refuses a grain off it): the vertical
-        // through the box, kept to the stretch inside every exported size
         const fit = fitGrainInside(
           a,
           b,
-          f.candidates
-            .filter((x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank))
-            .map((x) => x.outer),
+          on.map((x) => x.outer),
           { minMm: 5 },
         );
         grain[sd] = fit ? { a: fit[0], b: fit[1] } : { a, b };
@@ -1553,7 +1555,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         const c0 = f.candidates[0];
         if (!c0 || c0.outer.length < 3) continue;
         const b = c0.bbox;
-        const box = { minX: b.minX - 15, minY: b.minY - 15, maxX: b.maxX + 15, maxY: b.maxY + 15 };
+        // GRAIN: the frame holds the proposal too (one off the piece shows where it runs)
+        const pr0 = firstProposal.get(f.seed);
+        const xs = [b.minX, b.maxX, ...(pr0 ? [pr0.a.x, pr0.b.x] : [])];
+        const ys = [b.minY, b.maxY, ...(pr0 ? [pr0.a.y, pr0.b.y] : [])];
+        const box = {
+          minX: Math.min(...xs) - 40,
+          minY: Math.min(...ys) - 40,
+          maxX: Math.max(...xs) + 40,
+          maxY: Math.max(...ys) + 40,
+        };
         const strokes: Stroke[] = [...grey];
         for (const c of f.candidates)
           if (c.outer.length > 2)
