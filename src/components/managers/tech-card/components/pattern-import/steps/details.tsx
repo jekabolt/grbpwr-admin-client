@@ -1107,27 +1107,61 @@ export function DetailsStep({
         );
       } else if (p.group === 'qty') {
         why = 'no sheet text gives these counts';
+        // each piece with the count it is built with now and why it is asked; [all right]
+        // confirms exactly these shown entries (a count that changed since is left open)
+        const shown = sds.flatMap((sd) => {
+          const u = qtyOpen(open, sd);
+          return u ? [{ sd, u, key: questionKey(u, api.answersNow) }] : [];
+        });
         answers = (
           <span className='flex flex-col items-stretch gap-1.5'>
+            {shown.map(({ sd, u }) => (
+              <span key={sd} className='flex flex-col gap-0.5'>
+                <span className='flex items-center gap-1.5'>
+                  <MarkBox n={mark(sd)} />
+                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                    {pieceWord(sd)}
+                  </Text>
+                  <Text size='micro' component='span' className='font-bold'>
+                    {u.shown}
+                  </Text>
+                  {u.foldAlt && (
+                    <Chip
+                      tone='attention'
+                      disabled={busy}
+                      title='one long straight edge: this outline may be the half of a piece cut on fold — pick the fold edge next'
+                      onClick={() => {
+                        override(sd, { unfoldedFold: true });
+                        startFold(sd);
+                      }}
+                    >
+                      on fold?
+                    </Chip>
+                  )}
+                </span>
+                <Text size='micro' variant='label' component='span'>
+                  {u.detail}
+                </Text>
+              </span>
+            ))}
             <Button
               {...ask('details-confirm')}
               variant='secondary'
               size='xs'
-              disabled={busy}
-              title='keep every count as shown'
-              onClick={() =>
+              disabled={busy || !shown.length}
+              title='keep every count exactly as listed'
+              onClick={() => {
+                const live = shown.filter(({ sd, key }) => {
+                  const u = qtyOpen(open, sd);
+                  return u && questionKey(u, api.answersNow) === key;
+                });
                 api.patchInputs((i) => ({
                   confirmedQuantities: {
                     ...i.confirmedQuantities,
-                    ...Object.fromEntries(
-                      sds.flatMap((sd) => {
-                        const u = qtyOpen(open, sd);
-                        return u ? [[sd, questionKey(u, api.answersNow)]] : [];
-                      }),
-                    ),
+                    ...Object.fromEntries(live.map(({ sd, key }) => [sd, key])),
                   },
-                }))
-              }
+                }));
+              }}
             >
               all right
             </Button>

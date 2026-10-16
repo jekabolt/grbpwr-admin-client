@@ -17,7 +17,8 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
-import { NumberField, ask } from '../ui-bits';
+import Input from 'ui/components/input';
+import { ask } from '../ui-bits';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
@@ -53,6 +54,9 @@ export function OutlineQuestion({
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
   const [otherMm, setOtherMm] = useState(false);
+  const [draft, setDraft] = useState('');
+  const draftN = draft.trim() === '' ? NaN : Number(draft);
+  const draftMm = Number.isFinite(draftN) && draftN >= 0 ? draftN : null;
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -83,7 +87,6 @@ export function OutlineQuestion({
     setMm(v);
     void api.answerOutline('seam', v);
   };
-  const preset = MM_CHIPS.includes(mm);
   const answers = (
     <span className='flex flex-wrap items-start gap-2'>
       <span className='flex flex-col gap-1.5'>
@@ -137,16 +140,31 @@ export function OutlineQuestion({
               {v}
             </Chip>
           ))}
-          {otherMm || !preset ? (
-            <NumberField
-              value={preset ? null : mm}
-              min={0}
-              disabled={busy}
-              autoFocus={otherMm}
-              aria-label='allowance to add around a seam line, mm'
-              className='w-12'
-              onCommit={(v) => v != null && seam(v)}
-            />
+          {otherMm ? (
+            // a draft: nothing is sent on blur (a chip or a picture clicked next sends its own
+            // value) — only Enter or the [use N mm] chip answer with the typed value
+            <>
+              <Input
+                type='number'
+                min={0}
+                value={draft}
+                disabled={busy}
+                autoFocus
+                aria-label='allowance to add around a seam line, mm'
+                className='h-[22px] w-12 tabular-nums'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setDraft(e.currentTarget.value)
+                }
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter' && draftMm != null) seam(draftMm);
+                }}
+              />
+              {draftMm != null && (
+                <Chip disabled={busy} onClick={() => seam(draftMm)}>
+                  use {draftMm} mm
+                </Chip>
+              )}
+            </>
           ) : (
             <Chip disabled={busy} onClick={() => setOtherMm(true)}>
               other…
