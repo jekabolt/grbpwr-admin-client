@@ -183,7 +183,6 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   const folded = permitted.filter((g) => g !== primary && selectedIn(g) === 0);
   // N = folded permitted systems + the out-of-category systems behind the picker.
   const moreCount = folded.length + (narrowed ? other.length : 0);
-  const osOnly = osSelected && !sizeIds.some((id) => !isOs(id));
 
   const renderChip = (sz: (typeof permitted)[number]['sizes'][number]) => {
     const id = sz.id ?? 0;
@@ -295,14 +294,6 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         </div>
       )}
 
-      <div className='flex flex-wrap items-center gap-2 pt-1'>
-        <Text size='micro' variant='label'>
-          {osOnly
-            ? 'one size'
-            : `${sizeIds.length} in the run${sizeIds.length === 0 ? ' — pick the sizes above' : ''}`}
-        </Text>
-      </div>
-
       <ConfirmationModal
         open={pendingRemove != null}
         width='sm'
@@ -313,13 +304,10 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           if (pendingRemove != null) pruneAndRemove(pendingRemove);
           setPendingRemove(null);
         }}
-        title='delete the size?'
-        confirmLabel='delete the size'
-        cancelLabel='cancel'
+        title={`delete size ${pendingName}?`}
+        confirmLabel='delete size'
+        hideCancel
       >
-        <Text size='micro' variant='label' className='mb-2'>
-          size {pendingName} is in use. what will happen:
-        </Text>
         {pendingRemove != null && patternCount(pendingRemove) > 0 && (
           <Row label='pattern PDFs' value={patternCount(pendingRemove)} />
         )}
@@ -327,14 +315,14 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           <Row
             label={
               refileTarget(pendingRemove) > 0
-                ? `DXF — won't be deleted, they'll be re-filed onto ${nameOf(refileTarget(pendingRemove))}`
-                : "DXF — won't be deleted, they'll stay WITHOUT a size: no sizes will be left in the range, and the sizes are written in the files themselves anyway"
+                ? `DXF · moved to ${nameOf(refileTarget(pendingRemove))}`
+                : 'DXF · kept without a size'
             }
             value={dxfCount(pendingRemove)}
           />
         )}
         <Row
-          label='per-size consumption lines (colourways)'
+          label='per-size consumption lines'
           value={pendingRemove != null ? usageLineCount(pendingRemove) : 0}
         />
       </ConfirmationModal>

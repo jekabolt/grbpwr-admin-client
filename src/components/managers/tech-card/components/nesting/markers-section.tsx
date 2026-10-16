@@ -22,6 +22,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import {
   cardMarkers,
@@ -135,7 +136,11 @@ function isAutoName(m: common_TechCardMarkerSummary, sizeLabels: readonly string
   // раскладка (даже автоматическая по происхождению) остаётся видна по имени (Codex r5).
   const name = (m.name ?? '').trim();
   if (!name.includes(' · ')) return false;
-  const head = name.split(' · ')[0].trim().toLowerCase().replace(/\s*[×x]\s*\d+$/, '');
+  const head = name
+    .split(' · ')[0]
+    .trim()
+    .toLowerCase()
+    .replace(/\s*[×x]\s*\d+$/, '');
   return sizeLabels.some((l) => l.trim().toLowerCase() === head);
 }
 
@@ -239,6 +244,19 @@ export function MarkersSection({
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Удаление нормы: куда она переедет (тот же план, что у автоматики, без удаляемой раскладки).
+  const deletingNorm =
+    deleting != null && markers.some((m) => Number(m.id) === deleting.id && m.isNorm);
+  const nextNorm = useMemo(() => {
+    if (!deleting || !deletingNorm) return undefined;
+    const gone = markers.find((m) => Number(m.id) === deleting.id);
+    const scope = (gone?.bomLineKey ?? '').trim();
+    const rest = markers.filter((m) => Number(m.id) !== deleting.id);
+    return (
+      planAutoNorm(rest).find((st) => st.scope === scope)?.marker ??
+      rest.find((m) => m.isNorm && (m.bomLineKey ?? '').trim() === scope)
+    );
+  }, [deleting, deletingNorm, markers]);
   // НОРМА НАЗНАЧАЕТСЯ САМА (auto-norm.ts): последняя созданная годная раскладка ткани. Попытки
   // помнятся по ключу id@updated_at — одна и та же версия раскладки не назначается дважды, и отказ
   // сервера не превращается в ретрай на каждом рендере. `normRunning` не пускает второй проход,
@@ -649,16 +667,19 @@ export function MarkersSection({
         onCancel={() => {
           if (!deleteBusy) setDeleting(null);
         }}
-        title='delete the marker?'
-        confirmLabel={deleteBusy ? 'deleting…' : 'delete'}
+        title={`delete marker ${deleting?.name ?? ''}?`}
+        confirmLabel={deleteBusy ? 'deleting…' : 'delete marker'}
         confirmDisabled={deleteBusy}
         closeOnConfirm={false}
+        hideCancel
       >
-        <Text size='micro' component='p'>
-          “{deleting?.name}” will be deleted for good. the consumption already written into the
-          recipes will not change — only the marker itself and its hint in costing will go. if it
-          was the norm, the newest complete marker of the same fabric becomes the norm.
-        </Text>
+        {deletingNorm && (
+          <Row
+            label='norm moves to'
+            value={nextNorm ? nextNorm.name ?? '' : 'none'}
+            tone={nextNorm ? undefined : 'error'}
+          />
+        )}
       </ConfirmationModal>
     </div>
   );

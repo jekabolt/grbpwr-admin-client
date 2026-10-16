@@ -44,10 +44,19 @@ export function DxfSizesDialog({
     <ConfirmationModal
       open={!!ask}
       width='sm'
-      title='sizes'
+      title='map file sizes to card sizes'
       confirmLabel={busy ? 'uploading…' : 'map sizes'}
       confirmDisabled={busy || !ready}
-      cancelDisabled={busy}
+      footerHint={
+        busy
+          ? undefined
+          : conflicts.size > 0
+            ? 'two file sizes on one card size'
+            : included.length === 0
+              ? 'tick a size to upload'
+              : undefined
+      }
+      hideCancel
       closeOnConfirm={false}
       onOpenChange={(o) => {
         if (!o && !busy) onCancel();

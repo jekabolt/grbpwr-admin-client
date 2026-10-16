@@ -1,6 +1,6 @@
 import type { common_Color, common_ColorwayColour, common_Language } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 
@@ -11,6 +11,7 @@ import {
   paletteFromWire,
   rowText,
   suggestFamily,
+  suggestedName,
   suggestionWords,
   TOKEN_CAPTION,
   withHex,
@@ -131,10 +132,9 @@ export function PaletteSwatches({
 }
 
 /**
- * ТОКЕН SKU — ТОЛЬКО ЧТЕНИЕ, С ПОДПИСЬЮ. Чеканится сервером при создании и не меняется никогда
- * (решение владельца 1); поля ввода у него нет ни на одном экране. Пустой токен (колорвей ещё
- * не создан, старый список без поля) — прочерк, а не пустота: строка обязана сказать, что
- * здесь стоит, даже когда стоять ещё нечему.
+ * ТОКЕН SKU — ТОЛЬКО ЧТЕНИЕ. Чеканится сервером при создании и не меняется никогда (решение
+ * владельца 1); поля ввода у него нет ни на одном экране. Подписи под ним нет (TABS-LITE): что это
+ * токен, говорит `title`. Пустой токен (колорвей ещё не создан, старый список без поля) — прочерк.
  */
 export function SkuToken({
   token,
@@ -147,12 +147,13 @@ export function SkuToken({
 }): JSX.Element {
   const t = (token ?? '').trim();
   return (
-    <span className={cn('flex min-w-0 flex-col gap-0.5', className)} {...rest}>
+    <span
+      className={cn('flex min-w-0 flex-col gap-0.5', className)}
+      title={TOKEN_CAPTION}
+      {...rest}
+    >
       <Text component='span' className='tabular-nums uppercase' data-cw-token=''>
         {t || '—'}
-      </Text>
-      <Text size='micro' variant='label' component='span'>
-        {TOKEN_CAPTION}
       </Text>
     </span>
   );
@@ -219,12 +220,30 @@ export function ColourwayPaletteEditor({
    * отступал (пусто или равно прежней). Подсказка «сверху» (`suggested`) не зависит от палитры,
    * поэтому с ней семейство просто стоит.
    */
+  // Имя идёт за главным цветом по тому же правилу, что семейство: пока оно пусто или равно прежней
+  // подсказке (человек его не трогал), правка палитры ставит новую подсказку (suggestedName).
+  const autoName = suggestedName(value.rows, suggestion);
   const setRows = (rows: PaletteRow[]) => {
     const before = suggestion?.code ?? '';
-    const after = suggested ? before : suggestFamily(rows[0]?.hex, colours)?.code ?? '';
+    const nextFamily = suggested ?? suggestFamily(rows[0]?.hex, colours);
+    const after = suggested ? before : nextFamily?.code ?? '';
     const following = !value.colorCode || value.colorCode === before;
-    onChange({ ...value, rows, colorCode: following && after ? after : value.colorCode });
+    const nameFollowing = withName && (!value.name.trim() || value.name === autoName);
+    const nextName = nameFollowing ? suggestedName(rows, nextFamily) || value.name : value.name;
+    onChange({
+      ...value,
+      rows,
+      name: nextName,
+      colorCode: following && after ? after : value.colorCode,
+    });
   };
+  // Пустое имя при уже известном главном цвете (предложение ИИ, форма продукта) — предзаполняется
+  // один раз на появление подсказки. Стёртое рукой имя не возвращается: подсказка та же.
+  useEffect(() => {
+    if (readOnly || !withName || value.name.trim() || !autoName) return;
+    onChange({ ...value, name: autoName });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoName]);
   const setRow = (i: number, row: PaletteRow) =>
     setRows(value.rows.map((r, j) => (j === i ? row : r)));
 
@@ -234,11 +253,9 @@ export function ColourwayPaletteEditor({
   );
   const filled = langs.filter((l) => (value.nameI18n[String(l.id)] ?? '').trim()).length;
 
-  const familyCaption = suggestion
-    ? `${suggestionWords(suggestion)}${
-        value.colorCode === suggestion.code ? ' · nearest to the main colour' : ''
-      }`
-    : 'suggested from the main colour’s hex';
+  // Подсказка семейства говорит только когда расходится с выбранным: совпавшая — шум.
+  const familyCaption =
+    suggestion && value.colorCode !== suggestion.code ? suggestionWords(suggestion) : '';
 
   if (readOnly) {
     return (
@@ -254,7 +271,7 @@ export function ColourwayPaletteEditor({
         <div className='flex flex-col gap-0.5'>
           <Label>palette</Label>
           {value.rows.length === 0 ? (
-            <Hint>no palette — the colour reads from the family</Hint>
+            <Hint>no palette</Hint>
           ) : (
             <div className='flex flex-col'>
               {value.rows.map((r, i) => (
@@ -321,7 +338,7 @@ export function ColourwayPaletteEditor({
             value={value.name}
             maxLength={64}
             autoFocus={autoFocusName}
-            placeholder='name this colourway'
+            placeholder={autoName || 'name this colourway'}
             data-cw-name=''
             onChange={(e: { target: { value: string } }) =>
               onChange({ ...value, name: e.target.value })
@@ -334,6 +351,9 @@ export function ColourwayPaletteEditor({
               onEnter();
             }}
           />
+          {!!autoName && value.name === autoName && (
+            <Hint data-cw-name-auto=''>from the main colour</Hint>
+          )}
         </label>
       )}
 
@@ -407,7 +427,7 @@ export function ColourwayPaletteEditor({
             + colour
           </button>
         ) : (
-          <Hint>a palette holds up to {PALETTE_MAX} colours</Hint>
+          <Hint>{PALETTE_MAX} colours max</Hint>
         )}
       </div>
 
@@ -439,7 +459,11 @@ export function ColourwayPaletteEditor({
             )}
           </select>
         </span>
-        <Hint data-cw-family-suggested={suggestion?.code ?? ''}>{familyCaption}</Hint>
+        {familyCaption ? (
+          <Hint data-cw-family-suggested={suggestion?.code ?? ''}>{familyCaption}</Hint>
+        ) : (
+          <span hidden data-cw-family-suggested={suggestion?.code ?? ''} />
+        )}
       </div>
 
       {/* ═══ ПЕРЕВОДЫ ИМЕНИ — СВЁРНУТЫ: нужны не каждому колорвею. Пусто = имя оператора. */}
@@ -461,7 +485,7 @@ export function ColourwayPaletteEditor({
         </button>
         {i18nOpen &&
           (langs.length === 0 ? (
-            <Hint>no other storefront languages are configured</Hint>
+            <Hint>no other storefront languages</Hint>
           ) : (
             <div className='flex flex-col gap-1.5' data-cw-i18n-list=''>
               {langs.map((l) => {

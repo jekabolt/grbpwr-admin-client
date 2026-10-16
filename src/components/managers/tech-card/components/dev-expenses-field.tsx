@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
+import { FoldCaret } from 'ui/components/fold-caret';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -347,14 +348,108 @@ export function DevExpensesField({
 
   if (isLoading) return <Text size='micro'>loading…</Text>;
 
+  const ledger = (
+    <div>
+      <GroupLabel flush>{scoped ? 'expenses' : 'ledger'}</GroupLabel>
+      {expenses.length === 0 ? (
+        <Text size='micro' variant='label'>
+          no development expenses yet
+        </Text>
+      ) : (
+        <DataTable>
+          <thead>
+            <tr>
+              <th aria-sort={ariaSort('date')}>
+                <SortHeader
+                  label='date'
+                  active={sort.by === 'date'}
+                  dir={sort.dir}
+                  onToggle={() => toggleSort('date')}
+                />
+              </th>
+              <th>description</th>
+              <th>kind</th>
+              {!scoped && <th>sample</th>}
+              <th>amount</th>
+              <th aria-sort={ariaSort('amount')}>
+                <SortHeader
+                  label='base'
+                  active={sort.by === 'amount'}
+                  dir={sort.dir}
+                  onToggle={() => toggleSort('amount')}
+                />
+              </th>
+              {canWriteCosting && <th aria-label='actions' />}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedExpenses.map((e) => (
+              <tr key={e.id}>
+                <td>{shortDate(e.incurredAt) || <EmptyCell />}</td>
+                <td>{e.description || <EmptyCell />}</td>
+                <td>{kindLabel(e.kind) || <EmptyCell />}</td>
+                {!scoped && (
+                  <td>
+                    {e.sampleId ? (
+                      `#${sampleNumberById.get(e.sampleId) || e.sampleId}`
+                    ) : (
+                      <EmptyCell />
+                    )}
+                  </td>
+                )}
+                <td>
+                  {decimalToInput(e.amount) || '—'} {e.currency}
+                </td>
+                <td>
+                  {e.amountBase?.value ? (
+                    decimalToInput(e.amountBase)
+                  ) : (
+                    <Pill tone='warn'>{noFx(e.currency)}</Pill>
+                  )}
+                </td>
+                {canWriteCosting && (
+                  <td>
+                    <button
+                      type='button'
+                      className='text-labelColor hover:text-error'
+                      onClick={() => setPendingDelete(e)}
+                      aria-label='delete'
+                    >
+                      ✕
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <TotalRow>
+              <td>total</td>
+              <td />
+              <td />
+              {!scoped && <td />}
+              <td />
+              <td>
+                {scoped
+                  ? scopedTotal > 0
+                    ? scopedTotal.toFixed(2)
+                    : '—'
+                  : totalBaseNum > 0
+                    ? totalBaseNum.toFixed(2)
+                    : '—'}
+              </td>
+              {canWriteCosting && <td />}
+            </TotalRow>
+          </tfoot>
+        </DataTable>
+      )}
+    </div>
+  );
+
   return (
     <div className='flex flex-col gap-3'>
       {scoped ? (
         <>
-          <Text size='micro' variant='label'>
-            development expenses attributed to this sample — part of the style's R&amp;D, outside
-            the garment's unit cost.
-          </Text>
           {expenses.length > 0 && (
             <div>
               <GroupLabel flush>put into the sample</GroupLabel>
@@ -368,184 +463,109 @@ export function DevExpensesField({
               />
             </div>
           )}
+          {ledger}
         </>
-      ) : (
-        /* Two questions, two columns: what went in, and when it comes back. Everything that used
-           to be nine stat cells lives inside one of the two. */
-        <div className='grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-2'>
-          <div>
-            <GroupLabel flush>put into the style</GroupLabel>
-            <BigFigure
-              value={totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}
-              sub={
-                totalBaseNum <= 0
-                  ? 'no development expenses yet'
-                  : summary?.hasUnconverted
-                    ? `incomplete — for some lines, ${noFx()}`
-                    : 'in the base currency'
-              }
-            />
-            {byKind.length > 0 && (
-              <div className='mt-2 flex flex-col'>
-                {byKind.map((b) => (
+      ) : expenses.length === 0 ? null : (
+        /* R&D свёрнут: одна строка «сколько вложено · когда окупится», остальное по клику.
+           `<details>`, не кнопка: на выпущенной карточке fieldset гасит кнопки, а читать надо. */
+        <details className='group'>
+          <summary className='flex cursor-pointer list-none items-center gap-2 border-b border-borderColor pb-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
+            <Text size='micro' component='span' className='font-bold uppercase'>
+              {`R&D ${totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}`}
+            </Text>
+            <Text size='micro' variant='label' component='span'>
+              {recoveredAtUnits != null
+                ? `pays back at ${recoveredAtUnits} pcs`
+                : `${expenses.length} ${expenses.length === 1 ? 'expense' : 'expenses'}`}
+            </Text>
+            {summary?.hasUnconverted && <Pill tone='warn'>{noFx()}</Pill>}
+            <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
+              <FoldCaret open='details' />
+            </Text>
+          </summary>
+          <div className='flex flex-col gap-3 pt-2'>
+            {/* Two questions, two columns: what went in, and when it comes back. */}
+            <div className='grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-2'>
+              <div>
+                <GroupLabel flush>put into the style</GroupLabel>
+                <BigFigure
+                  value={totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}
+                  sub={
+                    totalBaseNum <= 0
+                      ? 'no development expenses yet'
+                      : summary?.hasUnconverted
+                        ? `incomplete — for some lines, ${noFx()}`
+                        : 'in the base currency'
+                  }
+                />
+                {byKind.length > 0 && (
+                  <div className='mt-2 flex flex-col'>
+                    {byKind.map((b) => (
+                      <Row
+                        key={b.kind}
+                        label={
+                          <span className='flex items-baseline gap-1.5'>
+                            <span>{kindLabel(b.kind)}</span>
+                            {totalBaseNum > 0 && (
+                              <Text size='micro' variant='label' component='span'>
+                                {`${Math.round((b.amount / totalBaseNum) * 100)}%`}
+                              </Text>
+                            )}
+                          </span>
+                        }
+                        value={b.amount.toFixed(2)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <GroupLabel
+                  flush
+                  action={
+                    <HelpMark title='when it pays back'>
+                      Computed from the ACTUAL margin of the pieces sold. The break-even at the top
+                      of the tab is from the catalogue retail, that is, the plan. The figures
+                      disagree legitimately: one is about how the style sells, the other about how
+                      it was conceived.
+                    </HelpMark>
+                  }
+                >
+                  when it pays back
+                </GroupLabel>
+                <BigFigure
+                  value={recoveredAtUnits != null ? String(recoveredAtUnits) : '—'}
+                  unit={recoveredAtUnits != null ? 'pcs' : undefined}
+                  sub={breakEvenBasis()}
+                />
+                {coverPct != null && (
+                  <div className='mt-2 flex flex-col gap-0.5'>
+                    <Progress value={coverPct} />
+                    <Text size='micro' variant='label'>
+                      {coverPct <= 100
+                        ? `${recoveredAtUnits} of ${plannedUnits} planned pcs`
+                        : `${recoveredAtUnits} pcs against a plan of ${plannedUnits} — the planned quantity doesn't pay back R&D`}
+                    </Text>
+                  </div>
+                )}
+                <div className='mt-2 flex flex-col'>
                   <Row
-                    key={b.kind}
-                    label={
-                      <span className='flex items-baseline gap-1.5'>
-                        <span>{kindLabel(b.kind)}</span>
-                        {totalBaseNum > 0 && (
-                          <Text size='micro' variant='label' component='span'>
-                            {`${Math.round((b.amount / totalBaseNum) * 100)}%`}
-                          </Text>
-                        )}
-                      </span>
-                    }
-                    value={b.amount.toFixed(2)}
+                    label='at the actual sales margin'
+                    value={unitMargin > 0 ? unitMargin.toFixed(2) : '—'}
                   />
-                ))}
+                  <Row
+                    label={plannedUnits > 0 ? `per garment at ${plannedUnits} pcs` : 'per garment'}
+                    value={perUnit != null ? perUnit.toFixed(2) : '—'}
+                    tone={plannedUnits > 0 ? undefined : 'label'}
+                  />
+                </div>
               </div>
-            )}
-          </div>
-
-          <div>
-            <GroupLabel
-              flush
-              action={
-                <HelpMark title='when it pays back'>
-                  Computed from the ACTUAL margin of the pieces sold. The break-even at the top of
-                  the tab is from the catalogue retail, that is, the plan. The figures disagree
-                  legitimately: one is about how the style sells, the other about how it was
-                  conceived.
-                </HelpMark>
-              }
-            >
-              when it pays back
-            </GroupLabel>
-            <BigFigure
-              value={recoveredAtUnits != null ? String(recoveredAtUnits) : '—'}
-              unit={recoveredAtUnits != null ? 'pcs' : undefined}
-              sub={breakEvenBasis()}
-            />
-            {coverPct != null && (
-              <div className='mt-2 flex flex-col gap-0.5'>
-                <Progress value={coverPct} />
-                <Text size='micro' variant='label'>
-                  {coverPct <= 100
-                    ? `${recoveredAtUnits} of ${plannedUnits} planned pcs`
-                    : `${recoveredAtUnits} pcs against a plan of ${plannedUnits} — the planned quantity doesn't pay back R&D`}
-                </Text>
-              </div>
-            )}
-            <div className='mt-2 flex flex-col'>
-              <Row
-                label='at the actual sales margin'
-                value={unitMargin > 0 ? unitMargin.toFixed(2) : '—'}
-              />
-              <Row
-                label={plannedUnits > 0 ? `per garment at ${plannedUnits} pcs` : 'per garment'}
-                value={perUnit != null ? perUnit.toFixed(2) : '—'}
-                tone={plannedUnits > 0 ? undefined : 'label'}
-              />
             </div>
+            {ledger}
           </div>
-        </div>
+        </details>
       )}
-
-      <div>
-        <GroupLabel flush>{scoped ? 'expenses' : 'ledger'}</GroupLabel>
-        {expenses.length === 0 ? (
-          <Text size='micro' variant='label'>
-            no development expenses yet
-          </Text>
-        ) : (
-          <DataTable>
-            <thead>
-              <tr>
-                <th aria-sort={ariaSort('date')}>
-                  <SortHeader
-                    label='date'
-                    active={sort.by === 'date'}
-                    dir={sort.dir}
-                    onToggle={() => toggleSort('date')}
-                  />
-                </th>
-                <th>description</th>
-                <th>kind</th>
-                {!scoped && <th>sample</th>}
-                <th>amount</th>
-                <th aria-sort={ariaSort('amount')}>
-                  <SortHeader
-                    label='base'
-                    active={sort.by === 'amount'}
-                    dir={sort.dir}
-                    onToggle={() => toggleSort('amount')}
-                  />
-                </th>
-                {canWriteCosting && <th aria-label='actions' />}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedExpenses.map((e) => (
-                <tr key={e.id}>
-                  <td>{shortDate(e.incurredAt) || <EmptyCell />}</td>
-                  <td>{e.description || <EmptyCell />}</td>
-                  <td>{kindLabel(e.kind) || <EmptyCell />}</td>
-                  {!scoped && (
-                    <td>
-                      {e.sampleId ? (
-                        `#${sampleNumberById.get(e.sampleId) || e.sampleId}`
-                      ) : (
-                        <EmptyCell />
-                      )}
-                    </td>
-                  )}
-                  <td>
-                    {decimalToInput(e.amount) || '—'} {e.currency}
-                  </td>
-                  <td>
-                    {e.amountBase?.value ? (
-                      decimalToInput(e.amountBase)
-                    ) : (
-                      <Pill tone='warn'>{noFx(e.currency)}</Pill>
-                    )}
-                  </td>
-                  {canWriteCosting && (
-                    <td>
-                      <button
-                        type='button'
-                        className='text-labelColor hover:text-error'
-                        onClick={() => setPendingDelete(e)}
-                        aria-label='delete'
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <TotalRow>
-                <td>total</td>
-                <td />
-                <td />
-                {!scoped && <td />}
-                <td />
-                <td>
-                  {scoped
-                    ? scopedTotal > 0
-                      ? scopedTotal.toFixed(2)
-                      : '—'
-                    : totalBaseNum > 0
-                      ? totalBaseNum.toFixed(2)
-                      : '—'}
-                </td>
-                {canWriteCosting && <td />}
-              </TotalRow>
-            </tfoot>
-          </DataTable>
-        )}
-      </div>
 
       {/* One trigger where the six-field strip used to be. Still a <button>, so a RELEASED card's
           `fieldset[disabled]` keeps disabling it — a frozen card must not gain the ability to log
@@ -564,9 +584,10 @@ export function DevExpensesField({
         onConfirm={() => add.mutate()}
         closeOnConfirm={false}
         title='add an expense'
-        confirmLabel={add.isPending ? 'adding…' : 'add'}
+        confirmLabel={add.isPending ? 'adding…' : 'add expense'}
         confirmDisabled={!form.amount.trim() || add.isPending}
         width='md'
+        hideCancel
       >
         <div className='flex flex-col gap-2 lg:min-w-[500px]'>
           <div className='grid grid-cols-2 gap-2'>
@@ -636,11 +657,6 @@ export function DevExpensesField({
               </Field>
             )}
           </div>
-          <Text size='micro' variant='label'>
-            the expense lands in the style's R&amp;D and does NOT change the garment's unit cost /
-            COGS — only the break-even moves. attribution to a sample additionally enters that
-            sample's cost.
-          </Text>
         </div>
       </ConfirmationModal>
 
@@ -649,17 +665,22 @@ export function DevExpensesField({
         onOpenChange={(open) => !open && setPendingDelete(null)}
         onConfirm={() => pendingDelete?.id && del.mutate(pendingDelete.id)}
         title='delete the expense?'
-        confirmLabel='delete'
+        confirmLabel='delete expense'
         width='sm'
+        hideCancel
       >
-        <Text size='micro'>
-          The “{kindLabel(pendingDelete?.kind) || '—'}” expense
-          {pendingDelete?.description ? ` — “${pendingDelete.description}”` : ''}
-          {pendingDelete
-            ? ` (${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency})`
-            : ''}{' '}
-          will be deleted permanently. This can't be undone.
-        </Text>
+        <Row label='kind' value={kindLabel(pendingDelete?.kind) || '—'} />
+        {pendingDelete?.description && (
+          <Row label='description' value={pendingDelete.description} />
+        )}
+        <Row
+          label='amount'
+          value={
+            pendingDelete
+              ? `${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency ?? ''}`
+              : '—'
+          }
+        />
       </ConfirmationModal>
     </div>
   );

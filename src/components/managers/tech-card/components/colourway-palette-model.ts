@@ -33,8 +33,8 @@ export const LABEL_MAX = 40;
 export const PANTONE_MAX = 24;
 export const NAME_I18N_MAX = 128;
 
-/** Подпись токена — одна фраза на все экраны (спека T45 п.2). */
-export const TOKEN_CAPTION = 'sku token · minted by the server';
+/** Подсказка токена (title на самом токене) — одна фраза на все экраны (спека T45 п.2). */
+export const TOKEN_CAPTION = 'sku token';
 
 /**
  * СИСТЕМА ПАНТОНА — ХВОСТ ЕГО ЖЕ КОДА, а не второе поле формы. `normalizePantone` уже привёл
@@ -263,4 +263,20 @@ export function suggestFamily(
 export function suggestionWords(c: common_Color | undefined): string {
   if (!c) return '';
   return `suggested: ${(c.name ?? '').trim().toLowerCase() || (c.code ?? '')}`;
+}
+
+/**
+ * ИМЯ КОЛОРВЕЯ ПРЕДЗАПОЛНЯЕТСЯ ИЗ ГЛАВНОГО ЦВЕТА (TABS-LITE авто #5): имя пантона из библиотеки
+ * («fiery red»), иначе метка ряда, иначе имя ближайшего семейства словаря (`suggestFamily`).
+ * Это подсказка, а не значение: редактор ставит её только в пустое имя или поверх прежней
+ * подсказки, и никогда — поверх набранного рукой.
+ */
+export function suggestedName(
+  rows: readonly PaletteRow[],
+  family: common_Color | undefined,
+): string {
+  const main = rows[0];
+  const fromPantone = main?.pantone ? (findPantone(main.pantone)?.name ?? '').trim() : '';
+  const words = fromPantone || (main?.label ?? '').trim() || (family?.name ?? '').trim();
+  return words.toLowerCase().slice(0, 64);
 }
