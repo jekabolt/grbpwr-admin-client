@@ -106,6 +106,8 @@ import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
+import { drawingFromDxf } from 'lib/pattern-export/drawing';
+import { PatternExportMenu } from './pattern-export/export-menu';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -1412,6 +1414,19 @@ export function PatternsField({
               >
                 ⇄
               </Button>
+            )}
+            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles); a PLT item lands in
+                lib/pattern-export/formats.ts and shows up here by itself. */}
+            {dxf && row.url && (
+              <PatternExportMenu
+                label={labelOf(row)}
+                drawing={async () =>
+                  drawingFromDxf(
+                    await (await fetchMediaBlob(row.url as string)).arrayBuffer(),
+                    labelOf(row),
+                  )
+                }
+              />
             )}
             <Button
               type='button'

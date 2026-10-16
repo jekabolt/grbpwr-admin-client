@@ -56,6 +56,8 @@ import {
 import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
+import { drawingFromMarker } from 'lib/pattern-export/drawing';
+import { PatternExportItems } from '../pattern-export/export-menu';
 import { CANVAS_ICON_BTN, LayoutEditor } from './layout-editor';
 import { isFetchFailure } from './dxf-warnings';
 import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
@@ -3198,7 +3200,7 @@ export function NestingModal({
     effective && !running ? (
       <GenericPopover
         noTail
-        className='w-[120px]'
+        className='w-[190px]'
         contentProps={{ align: 'end', side: 'top', sideOffset: 4 }}
         triggerProps={{
           'aria-label': 'download',
@@ -3233,6 +3235,21 @@ export function NestingModal({
           >
             DXF
           </Button>
+          {/* The marker at 1:1 on paper (one sheet / tiles) — the EFFECTIVE placements, as DXF. */}
+          <PatternExportItems
+            disabled={!dxfReady}
+            title={exportBlockReason || undefined}
+            drawing={() =>
+              drawingFromMarker(
+                effective,
+                displayPieces,
+                displayWidth,
+                fileParts()
+                  .filter((x): x is string => !!x && !!x.trim())
+                  .join('-') || 'marker',
+              )
+            }
+          />
           {/* Плоттерный выход без чертежа — только когда чертёж не восстановлен (решение Р4). */}
           {drawing.phase === 'error' && !viewDegraded && (
             <Button
