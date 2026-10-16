@@ -15,6 +15,7 @@ import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { readPieceText } from 'lib/pattern-import/dictionary';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
+import { grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
@@ -1279,13 +1280,35 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     const codeBulk: { seed: number; pass: number; label: string; code: string; mods: string[] }[] =
       [];
     const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
+    const grainSeen: {
+      piece: string;
+      why: string;
+      lenMm: number;
+      outsideMm: number;
+      sizes: number;
+    }[] = [];
     for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
       for (const b of sem.blocked)
         byReason.set(b.reason, [...(byReason.get(b.reason) ?? []), b.seed]);
       const noGrain = byReason.get('no-grain') ?? [];
       for (const g of sem.grainProposals ?? [])
-        if (!firstProposal.has(g.seed)) firstProposal.set(g.seed, g);
+        if (!firstProposal.has(g.seed)) {
+          firstProposal.set(g.seed, g);
+          // GRAIN lane: every proposal offered lies on its piece in every exported size that
+          // closed (the grain probe sums these over the corpus)
+          const rings = (fams.find((x) => x.seed === g.seed)?.candidates ?? [])
+            .filter((x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank))
+            .map((x) => x.outer);
+          grainSeen.push({
+            piece: labelOf(seedsNow)(g.seed),
+            why: g.why,
+            lenMm: +Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y).toFixed(1),
+            outsideMm: +grainOutsideMm(g.a, g.b, rings).toFixed(1),
+            sizes: rings.length,
+          });
+        }
+      rec.grainProposals = grainSeen;
       // A1: the proposals first — one click accepts them all; the rest are drawn by hand. N3: the
       // review sheet lists every proposal not taken yet, an unnamed piece's too (details.tsx)
       const unnamed = byReason.get('grammar') ?? [];
