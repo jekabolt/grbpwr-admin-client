@@ -159,6 +159,14 @@ class WallIndex {
 
 type Run = { kind: 'wall'; item: number; hits: Hit[] } | { kind: 'raw'; item: -1; raw: PtMm[] };
 
+/** KINKS: the longest excursion onto another wall that is read back onto the wall around it. */
+export const EXCURSION_MM = 6;
+
+/** Probe switch (node only): the A/B column of a measurement. */
+function snapProbeOff(k: string): boolean {
+  return typeof process !== 'undefined' && !!process.env?.[k];
+}
+
 export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): SnapResult {
   const idx = new WallIndex(items);
   const samples = resample(raster, o.stepMm, true);
@@ -188,6 +196,39 @@ export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): Sna
             hits[k % n] = h;
           }
         }
+      }
+    }
+  // KINKS: a short excursion (≤ EXCURSION_MM) onto another wall between two stretches of ONE wall
+  // that runs on through it — the traced boundary sits ~1.5 px outside its wall, and at a convex
+  // corner a neighbouring size's line ~1 mm further out is the nearer one: the outline bent onto
+  // it and back (Ulmus 24/26's corners onto 28/30, Hilde XS's chamfer onto the centre front). The
+  // region cannot cross the wall it stays inside of, so when every sample of the excursion is in
+  // reach of that wall and the wall's own stretch between the two runs is no longer than the
+  // excursion + 3 mm (it runs straight on, no way round), the stretch is that wall's.
+  if (!snapProbeOff('KINKS_SNAP_OFF'))
+    for (let i = 0; i < n; i++) {
+      if (lab[i] === -1 || lab[i] === lab[(i + n - 1) % n]) continue;
+      let j = i;
+      while (lab[(j + 1) % n] === lab[i] && j - i < n) j++;
+      const len = j - i + 1;
+      const before = lab[(i + n - 1) % n];
+      const after = lab[(j + 1) % n];
+      if (len * o.stepMm > EXCURSION_MM || before !== after || before === -1) continue;
+      const re: Hit[] = [];
+      for (let k = i; k <= j; k++) {
+        const h = idx.nearest(samples[k % n], o.reachMm, before, Infinity);
+        if (!h || h.item !== before) break;
+        re.push(h);
+      }
+      if (re.length !== len) continue;
+      const hb = hits[(i + n - 1) % n];
+      const ha = hits[(j + 1) % n];
+      if (!hb || !ha) continue;
+      const [s0, s1] = idx.unwrap(before, [hb.s, ha.s]);
+      if (Math.abs(s1 - s0) > (len + 1) * o.stepMm + 3) continue;
+      for (let k = i; k <= j; k++) {
+        lab[k % n] = before;
+        hits[k % n] = re[k - i];
       }
     }
   // rotate so that index 0 starts a run
