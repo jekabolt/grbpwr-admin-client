@@ -566,6 +566,11 @@ export function TechCardForm({
   // filled (`createReady`), lands on its own address without a remount and walks the studio's guide.
   // Every other new card («new idea», a typed /add-tech-card) keeps its `add` button (A5).
   const guidedCreate = !isEditMode && params.get('guided') === '1';
+  // The chip quiz CARD DETAILS opens with on a guided create. Owned here, not in CardDetails, because
+  // the studio's step footer (`next · moodboard ›`) must stay away while it is open: the quiz has its
+  // own `create`, and a disabled second door under it read as a dead end.
+  const [createQuizDone, setCreateQuizDone] = useState(false);
+  const createQuizOpen = guidedCreate && !createQuizDone;
   // One key per create session of this mount: a lost answer or a doubled trigger replays the card the
   // first call made instead of minting a second one (CreateTechCard `client_request_id`).
   const clientRequestId = useRef<string>(
@@ -2985,6 +2990,8 @@ export function TechCardForm({
             : undefined
         }
         onGoColourways={() => navTo('colorways')}
+        quizOpen={createQuizOpen}
+        onQuizDone={() => setCreateQuizDone(true)}
       />
 
       {isAux && (
@@ -3569,7 +3576,11 @@ export function TechCardForm({
                 /* THE GUIDE (onboarding S4): the server's flag once the card exists, the address's
                    promise (`?guided=1`) before it does. */
                 guided={techCard?.guided ?? guidedCreate}
-                onCreate={guidedCreate ? () => createGuided('mood', true) : undefined}
+                /* No create door while the quiz is open: `onCreate` unset on a new card means no
+                   step footer at all (studio-tab), and the quiz's own `create` is the door. */
+                onCreate={
+                  guidedCreate && !createQuizOpen ? () => createGuided('mood', true) : undefined
+                }
                 onExitGuide={
                   numId
                     ? () =>

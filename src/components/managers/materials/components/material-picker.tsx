@@ -17,6 +17,10 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 import { decimalToInput } from 'utils/decimal';
+import {
+  TrimPictogram,
+  trimPictogramKind,
+} from 'components/managers/tech-card/components/design/pattern/trim-pictograms';
 import { materialCompositionText, materialSpec } from './material-code';
 import { MaterialThumb, materialImageUrl } from './material-thumb';
 import { useMaterials } from './useMaterials';
@@ -616,7 +620,7 @@ const CSS_KEYWORDS = new Set([
 // The article's own colour as a paintable CSS value, when its free-text colour IS one ("black",
 // "navy", "#1a1a1a", "1a1a1a"). Anything else ("чёрный меланж", a pantone code) is not guessed at:
 // it is printed as text on the strip instead.
-function swatchColour(m: common_Material): string {
+export function materialSwatchColour(m: common_Material): string {
   const c = m.color?.trim() ?? '';
   if (!c || CSS_KEYWORDS.has(c.toLowerCase())) return '';
   const v = /^[0-9a-f]{6}$/i.test(c) ? `#${c}` : c;
@@ -913,24 +917,29 @@ function ArticleTile({
   onPick: () => void;
 }) {
   const url = materialImageUrl(m);
-  const colour = swatchColour(m);
+  const colour = materialSwatchColour(m);
   const name = m.name || `#${numId(m.id)}`;
   const line = keyFacts(m);
   const composition = materialCompositionText(m);
   const unit = m.unit?.trim() ?? '';
+  // Квадрат, как плитка матрицы колорвеев: фото, иначе цвет артикула, иначе бледная пиктограмма
+  // секции. Серой плашки с названием секции больше нет.
   const strip = url ? (
     <Media src={url} alt='' aspectRatio='auto' fit='cover' />
   ) : colour ? (
     <span aria-hidden className='block h-full w-full' style={{ background: colour }} />
   ) : (
-    <Text
-      component='span'
-      size='nano'
-      variant='inactive'
-      className='flex h-full items-center justify-center px-1 text-center uppercase tracking-label'
-    >
-      {m.color?.trim() || m.pantone?.trim() || sectionShortLabel(m.section)}
-    </Text>
+    <span aria-hidden className='flex h-full w-full items-center justify-center text-textColor'>
+      <TrimPictogram
+        kind={trimPictogramKind({
+          family: isFabricLike(m) ? 'fabric' : 'hardware',
+          kind: m.materialClass ?? '',
+          section: m.section ?? '',
+          name: m.name ?? '',
+        })}
+        className='size-1/2 opacity-20'
+      />
+    </span>
   );
 
   return (
@@ -946,12 +955,7 @@ function ArticleTile({
             className={cn('gap-0.5', armed && !selected && 'border-textColor')}
           >
             <span className='sr-only'>{verb} </span>
-            <span
-              className={cn(
-                'block h-12 w-full overflow-hidden border border-hairline',
-                !url && !colour && 'bg-bgZebra',
-              )}
-            >
+            <span className='block aspect-square w-full overflow-hidden border border-hairline'>
               {strip}
             </span>
             <Text
@@ -984,13 +988,14 @@ function ArticleTile({
         </div>
       }
     >
-      <ArticleCard m={m} url={url} colour={colour} stock={stock} facts={facts} />
+      <MaterialHoverCard m={m} url={url} colour={colour} stock={stock} facts={facts} />
     </Tooltip>
   );
 }
 
-// The full article on hover / keyboard focus: everything the tile had to leave out.
-function ArticleCard({
+// The full article on hover / keyboard focus: everything the tile had to leave out. Exported: the
+// colourways matrix shows the same card on a filled material tile.
+export function MaterialHoverCard({
   m,
   url,
   colour,

@@ -422,6 +422,8 @@ export function NestingModal({
   requiredSeamAllowanceMm,
   workshopDefaultSeamAllowanceMm,
   productionRunId = 0,
+  autoRun = false,
+  initialColorwayId,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -474,6 +476,11 @@ export function NestingModal({
   // выкройки несут линию кроя»), и спутать её с «не настроено» значит объявить каждую раскладку с
   // припуском нарушающей эталон, которого никто не задавал.
   requiredSeamAllowanceMm?: number | null;
+  // Deep link (colourways → `?marker=<lineKey>&auto=1`): press «run» once by itself as soon as the
+  // parse is ready and nothing blocks the run. Blocked = nothing happens; the header says why.
+  autoRun?: boolean;
+  // Колорвей, выбранный при открытии (deep link из COLOURWAYS). Только начальное значение.
+  initialColorwayId?: number;
   // Припуск цеха по умолчанию, мм (admin.WorkshopSettings.default_seam_allowance_mm). Тот же
   // договор: `null` = не настроено, и это НЕ ноль.
   workshopDefaultSeamAllowanceMm?: number | null;
@@ -1521,7 +1528,7 @@ export function NestingModal({
   // Колорвей, ПОД КОТОРЫЙ считается раскладка. 0 = общая, «ширина у всех одинаковая». Он выбран
   // до запуска, а не при сохранении: от него зависит ширина полотна, а ширина — это вход
   // алгоритма, а не подпись к результату.
-  const [colorwayId, setColorwayId] = useState<number>(0);
+  const [colorwayId, setColorwayId] = useState<number>(initialColorwayId ?? 0);
 
   // A slot added in the UI but never saved (id 0) cannot be linked — the server resolves
   // bom_line_key against SAVED rows and would reject the whole marker after a paid nest.
@@ -3180,6 +3187,25 @@ export function NestingModal({
     !!doubleAllowanceRefusal ||
     !!uniRefusal ||
     fitting != null;
+  // autoRun: the same `startRun` the «run» button calls, at most once. It is decided ONE task after
+  // the parse settles (ready or error), so the prefill effects (slot → width) of that commit land
+  // first; the gate is re-read from the LATEST render through a ref. Blocked at that moment = the
+  // offer lapses for good — fixing the width later does not start a run behind the user's back.
+  const autoRunFired = useRef(false);
+  const autoRunLatest = useRef({ startRun, runBlocked, running, fitting, effective, manual });
+  autoRunLatest.current = { startRun, runBlocked, running, fitting, effective, manual };
+  const parseSettled = parse.phase === 'ready' || parse.phase === 'error';
+  useEffect(() => {
+    if (!autoRun || autoRunFired.current || viewData || !parseSettled) return;
+    const t = window.setTimeout(() => {
+      const l = autoRunLatest.current;
+      if (autoRunFired.current) return;
+      autoRunFired.current = true;
+      if (l.runBlocked || l.running || l.fitting || l.effective || l.manual) return;
+      l.startRun();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [autoRun, viewData, parseSettled, runBlocked, widthCm, widthUnset]);
   // ЕДИНСТВЕННОЕ МЕСТО, где собирается шапка: служебные заметки разбора, протокол припуска и
   // прежняя заметка о ручной правке (её заменяет живая проверка выше) отсюда не выходят — ни из
   // свежего разбора, ни из блоба сохранённой раскладки.

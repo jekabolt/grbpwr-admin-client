@@ -6937,6 +6937,20 @@ export type WorkshopSettings = {
   // Usable WIDTH of the cutting/spreading table, in CENTIMETRES (0413) — the length's partner, so the
   // marker modal can draw the table to scale. ABSENT = not configured ⇒ no width verdict, never 0.
   cuttingTableWidthCm: googletype_Decimal | undefined;
+  // 0414 — costing / label DEFAULTS, read only to PREFILL a new costing and the «made in» line.
+  // Each is ABSENT when not configured ⇒ no prefill (never a zero or an empty string on the wire).
+  // ISO 4217 code every money default here is in (any expense currency, e.g. EUR; USDT legal).
+  costingCurrency?: string;
+  // Cost of one production minute (SAM), in costing_currency.
+  labourRatePerMin: googletype_Decimal | undefined;
+  // Overhead as a percentage of direct cost, 0..1000.
+  overheadPct: googletype_Decimal | undefined;
+  // Брак / запас allowance, percent 0..100 (same band as TechCardCosting.defect_percent).
+  defectPercent: googletype_Decimal | undefined;
+  // Gross-margin target, percent 0..100 (same band as TechCardCosting.target_margin_pct).
+  targetMarginPct: googletype_Decimal | undefined;
+  // ISO 3166-1 alpha-2 country of origin («made in»), upper-case, e.g. "PT".
+  countryOfOrigin?: string;
 };
 
 export type GetWorkshopSettingsRequest = {
@@ -6987,6 +7001,15 @@ export type UpdateWorkshopSettingsRequest = {
   // 0413 — table width, CENTIMETRES, band [50, 1000] (entity.Min/MaxCuttingTableWidthCm). Tri-state
   // like the length: absent = leave alone, empty message = clear, number = set.
   cuttingTableWidthCm: googletype_Decimal | undefined;
+  // 0414 — costing / label defaults, all tri-state. Decimals: absent = leave alone, empty message =
+  // clear, number = set. Strings are proto3 `optional` for the same presence: absent = leave alone,
+  // "" = clear, value = set (trimmed, upper-cased server-side).
+  costingCurrency?: string;
+  labourRatePerMin: googletype_Decimal | undefined;
+  overheadPct: googletype_Decimal | undefined;
+  defectPercent: googletype_Decimal | undefined;
+  targetMarginPct: googletype_Decimal | undefined;
+  countryOfOrigin?: string;
 };
 
 export type UpdateWorkshopSettingsResponse = {

@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -152,6 +153,15 @@ export function CompositionLabelBlock({
   // The picker offers active countries only; a stored code still resolves to its name when inactive.
   const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
+  // WORKSHOP COUNTRY OF ORIGIN (0414) — a SUGGESTION for a colourway with no country, never a pick.
+  // «Made in» is legal text: the suggestion is shown on the ribbon and in the strip, but it only
+  // becomes a staged write when a person confirms it, so the `no-country` hole keeps counting the
+  // colourway as needing someone until then. An inactive / unknown code suggests nothing.
+  const { data: workshopData } = useWorkshopSettings();
+  const workshopCountryCode = (workshopData?.settings?.countryOfOrigin ?? '').trim().toUpperCase();
+  const workshopCountry = workshopCountryCode
+    ? pickableCountries.find((c) => c.code === workshopCountryCode)
+    : undefined;
   const titleOf = (id: number) => {
     const c = colorways.find((x) => x.id === id);
     return c?.baseSku || c?.colourName || `#${id}`;
@@ -430,6 +440,9 @@ export function CompositionLabelBlock({
   const s = setValue;
   const edit = canEdit;
   const picked = cw ? picks.get(cw.id) : undefined;
+  // По КОДУ, не по имени: код, которого нет в словаре, даёт пустое имя, но страна на этикетке задана —
+  // предложение мастерской затёрло бы юридическое происхождение.
+  const suggested = cw && !cw.countryCode && !picked ? workshopCountry : undefined;
 
   const overriddenOf = (line: LineKey): boolean => {
     switch (line) {
@@ -498,12 +511,14 @@ export function CompositionLabelBlock({
           ...base,
           label: cw?.countryName
             ? `made in ${cw.countryName}`
-            : 'made in: country missing, click to set it',
+            : suggested
+              ? `made in: country missing, the workshop suggests ${suggested.name}, click to confirm`
+              : 'made in: country missing, click to set it',
           disabled: !edit || !techCardId || unavailable,
           title,
           placeholder: !cw?.countryName ? (
             <span className='flex h-full items-center justify-end whitespace-nowrap px-1 text-nano uppercase leading-none text-error'>
-              ! set country
+              {suggested ? `! confirm ${suggested.code}` : '! set country'}
             </span>
           ) : null,
         };
@@ -655,7 +670,9 @@ export function CompositionLabelBlock({
                 ? 'staged · saves with the card'
                 : cw.countryName
                   ? 'from the colourway · a new pick saves with the card'
-                  : 'missing · set it here'
+                  : suggested
+                    ? 'missing · workshop suggests one'
+                    : 'missing · set it here'
             }
           >
             <MadeInValue
@@ -664,6 +681,7 @@ export function CompositionLabelBlock({
               unavailable={isUnavailable(cw)}
               countries={pickableCountries}
               othersWithout={othersWithout}
+              suggested={suggested}
               disabled={!edit || !techCardId}
               onPick={pickCountry}
             />

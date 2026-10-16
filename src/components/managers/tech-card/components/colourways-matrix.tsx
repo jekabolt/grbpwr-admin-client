@@ -10,7 +10,13 @@ import {
   common_TechCardMarkerSummary,
   UpdateColorwayRequest,
 } from 'api/proto-http/admin';
-import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
+import {
+  MaterialHoverCard,
+  MaterialPickerDialog,
+  materialSwatchColour,
+  useMaterialStockFacts,
+  type MaterialStockFacts,
+} from 'components/managers/materials/components/material-picker';
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -18,6 +24,7 @@ import { techCardLabDipStatusOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
@@ -25,6 +32,7 @@ import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warning
 import GenericPopover from 'ui/components/popover';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import Tooltip from 'ui/components/tooltip';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
 import {
@@ -37,6 +45,8 @@ import {
 import { readColorwayVersion } from './colorway-version';
 import { paletteValueFromRead } from './colourway-palette';
 import { ColourwayCreatePopover } from './design/colourway-create';
+import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
+import { Swatch } from './design/render/field-row';
 import { DxfApplyHint } from './dxf-apply';
 import { KitMarkerHint } from './kit-marker';
 import { MarkerApplyHint } from './marker-apply';
@@ -117,17 +127,6 @@ function colourwaySwatchHex(cw: common_AdminColorwayRef, dictHex?: string): stri
   const dev = (cw.devHex ?? '').trim();
   if (/^#?[0-9a-f]{6}$/i.test(dev)) return dev.startsWith('#') ? dev : `#${dev}`;
   return dictHex || undefined;
-}
-
-const CSS_KEYWORDS = new Set(['inherit', 'initial', 'unset', 'revert', 'currentcolor', 'transparent']);
-
-// Цвет артикула как CSS-значение, когда его свободный текст им И ЯВЛЯЕТСЯ («black», «#1a1a1a»).
-// Остальное («чёрный меланж», код пантона) не угадывается — тогда плитка нейтральная.
-function swatchColour(m?: common_Material): string {
-  const c = m?.color?.trim() ?? '';
-  if (!c || CSS_KEYWORDS.has(c.toLowerCase())) return '';
-  const v = /^[0-9a-f]{6}$/i.test(c) ? `#${c}` : c;
-  return typeof CSS !== 'undefined' && CSS.supports('color', v) ? v : '';
 }
 
 // Число под плиткой: диапазон по размерам, иначе скаляр, иначе штуки. Пусто на измеряемом слоте —
@@ -442,8 +441,6 @@ function useLabDipDraft(
       }),
   };
 }
-
-type LabDip = ReturnType<typeof useLabDipDraft>;
 
 // ═══ ЧЕРНОВИК РЕЦЕПТА ОДНОГО КОЛОРВЕЯ ═════════════════════════════════════════════════════════
 //
@@ -989,105 +986,162 @@ const FB_COL = 'cwm-col';
 const FB_HEAD = 'cwm-head';
 const FB_AUTO = 'cwm-auto';
 const FB_SLOT = 'cwm-slot';
-const FB_LAB = 'cwm-lab';
 const SUBGRID_FALLBACK = `@supports not (grid-template-rows: subgrid) {
   .cwm-col { display: flex !important; flex-direction: column; }
   .cwm-col > * { flex: none; overflow: hidden; }
-  .cwm-head { height: 88px; }
+  .cwm-head { height: 190px; }
   .cwm-auto { height: 36px; }
   .cwm-slot { height: 220px; }
-  .cwm-lab { height: 36px; }
 }`;
+
+// Пиктограмма слота для пустой плитки: рулонные секции рисуются тканью, остальное — фурнитурой по
+// словам строки BOM (назначение, секция, имя).
+function slotPictogram(slot: BomLine) {
+  return trimPictogramKind({
+    family: PIECE_SECTIONS.has(slot.section ?? '') ? 'fabric' : 'hardware',
+    kind: slot.purpose ?? '',
+    section: slot.section ?? '',
+    name: slot.name ?? '',
+  });
+}
 
 function MaterialCell({
   cw,
   slot,
   draft: d,
   materials,
+  stockFacts,
   canEdit,
   normOpen,
   onOpenPicker,
   onNormOpenChange,
+  onNoNorm,
   editor,
 }: {
   cw: common_AdminColorwayRef;
   slot: BomLine;
   draft: UsageDraft;
   materials: common_Material[];
+  stockFacts: ReadonlyMap<number, MaterialStockFacts>;
   canEdit: boolean;
   normOpen: boolean;
   onOpenPicker: () => void;
   onNormOpenChange: (open: boolean) => void;
+  /** `no norm` ведёт на раскладку слота во вкладке PATTERNS (авто-режим), а не в поповер. */
+  onNoNorm: () => void;
   editor: React.ReactNode;
 }) {
   const { material, materialId, pinnedDifferent } = resolveSlotArticle(d, slot, materials);
   const url = materialImageUrl(material);
-  const fill = swatchColour(material);
+  const fill = material ? materialSwatchColour(material) : '';
   const name = material?.name?.trim() || (materialId ? `article #${materialId}` : '');
   const colour = [material?.color?.trim(), material?.pantone?.trim()].filter(Boolean).join(' ');
   const amount = consumptionLabel(d, slot);
   const empty = materialId === 0;
   const where = `${colourwayName(cw)} · ${slotLabel(slot)}`;
+  const facts = materialId ? stockFacts.get(materialId) : undefined;
+  const onHand = facts ? Number(facts.onHand) : NaN;
+  const amountClass = cn(
+    'min-h-[1.5em] min-w-6 shrink-0 uppercase tracking-label tabular-nums enabled:cursor-pointer enabled:hover:underline',
+    amount.missing ? 'text-error' : 'text-textColor',
+  );
+
+  const tile = (
+    <button
+      type='button'
+      disabled={!canEdit}
+      onClick={onOpenPicker}
+      aria-label={empty ? `pick a material for ${where}` : `change the material of ${where}`}
+      className={cn(
+        'group relative block shrink-0 overflow-hidden border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor enabled:cursor-pointer',
+        empty
+          ? 'flex flex-col items-center justify-center gap-1 border-dashed border-borderColor text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor'
+          : 'border-borderColor bg-bgZebra enabled:hover:border-textColor',
+      )}
+      style={{
+        width: TILE,
+        height: TILE,
+        backgroundColor: !empty && !url && fill ? fill : undefined,
+      }}
+    >
+      {empty ? (
+        <>
+          <TrimPictogram kind={slotPictogram(slot)} className='size-16 text-textColor opacity-20' />
+          <span className='text-micro uppercase tracking-label'>+ material</span>
+        </>
+      ) : url ? (
+        <img src={url} alt={name} className='size-full object-cover' />
+      ) : null}
+    </button>
+  );
 
   return (
     <div className={cn(ROW_CELL, 'flex flex-col gap-1', FB_SLOT)} style={{ width: TILE + 12 }}>
-      <button
-        type='button'
-        disabled={!canEdit}
-        onClick={onOpenPicker}
-        aria-label={empty ? `pick a material for ${where}` : `change the material of ${where}`}
-        className={cn(
-          'group relative block shrink-0 overflow-hidden border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor enabled:cursor-pointer',
-          empty
-            ? 'flex flex-col items-center justify-center gap-1 border-dashed border-borderColor text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor'
-            : 'border-borderColor bg-bgZebra enabled:hover:border-textColor',
-        )}
-        style={{ width: TILE, height: TILE, backgroundColor: !empty && !url && fill ? fill : undefined }}
-      >
-        {empty ? (
-          <>
-            <span className='text-[18px] leading-none text-textColor'>+</span>
-            <span className='text-micro uppercase tracking-label'>material</span>
-          </>
-        ) : url ? (
-          <img src={url} alt={name} className='size-full object-cover' />
-        ) : null}
-      </button>
-      <span className='flex min-w-0 flex-col uppercase tracking-label'>
-        <span
-          className={cn(
-            'line-clamp-2 min-h-[1.5em] text-control',
-            pinnedDifferent ? 'text-textColor' : 'text-labelColor',
-          )}
+      {empty || !material ? (
+        tile
+      ) : (
+        // Обёртка, а не сама кнопка: у выключенной кнопки нет событий наведения.
+        <Tooltip
+          side='right'
+          align='start'
+          delayDuration={450}
+          className='w-[260px] p-0'
+          trigger={<div className='w-fit'>{tile}</div>}
         >
-          {name || ' '}
-        </span>
+          <MaterialHoverCard
+            m={material}
+            url={url}
+            colour={fill}
+            stock={Number.isFinite(onHand) ? onHand : undefined}
+            facts={facts}
+          />
+        </Tooltip>
+      )}
+      <span className='flex min-w-0 flex-col uppercase tracking-label'>
+        {!empty && (
+          <span
+            className={cn(
+              'line-clamp-2 min-h-[1.5em] text-control',
+              pinnedDifferent ? 'text-textColor' : 'text-labelColor',
+            )}
+          >
+            {name}
+          </span>
+        )}
         <span className='mt-0.5 flex items-baseline justify-between gap-2 border-t border-hairline pt-0.5 text-micro'>
           {empty ? (
             <span className='text-error'>no material</span>
           ) : (
             <>
               <span className='min-w-0 truncate text-labelColor' title={colour || undefined}>
-                {colour || ' '}
+                {colour || ' '}
               </span>
-              <GenericPopover
-                open={normOpen}
-                onOpenChange={onNormOpenChange}
-                noTail
-                title={`${slotLabel(slot)} · consumption`}
-                className='w-[320px]'
-                triggerProps={{
-                  disabled: !canEdit,
-                  'aria-label': `consumption of ${where}`,
-                  className: cn(
-                    'min-h-[1.5em] min-w-6 shrink-0 tabular-nums enabled:cursor-pointer enabled:hover:underline',
-                    amount.missing ? 'text-error' : 'text-textColor',
-                  ),
-                }}
-                openElement={amount.text}
-              >
-                {editor}
-              </GenericPopover>
+              {amount.missing ? (
+                <button
+                  type='button'
+                  aria-label={`norm of ${where}: open the marker`}
+                  className={amountClass}
+                  onClick={onNoNorm}
+                >
+                  {amount.text}
+                </button>
+              ) : (
+                <GenericPopover
+                  open={normOpen}
+                  onOpenChange={onNormOpenChange}
+                  noTail
+                  title={`${slotLabel(slot)} · consumption`}
+                  className='w-[320px]'
+                  triggerProps={{
+                    disabled: !canEdit,
+                    'aria-label': `consumption of ${where}`,
+                    className: amountClass,
+                  }}
+                  openElement={amount.text}
+                >
+                  {editor}
+                </GenericPopover>
+              )}
             </>
           )}
         </span>
@@ -1096,26 +1150,67 @@ function MaterialCell({
   );
 }
 
-// Последний ряд: `approve` (раунд идёт), `approved` серым, `+ round` (раундов нет). Отказ, номер
-// раунда и статус — за `⋯`.
-function LabDipCell({
-  lab,
+// ═══ ЛАБДИП — СВОЙ БЛОК ПОД МАТРИЦЕЙ (R1) ══════════════════════════════════════════════════════
+//
+// Строка на живой колорвей: квадрат цвета + имя, статус раунда, `approve` (раунд идёт) / `approved`
+// серым / `+ round` (раундов нет). Отказ, номер раунда и статус — за `reject…`. Черновик и стейджинг
+// (`labDip:<id>`) живут здесь; статус черновика уходит колонке — на нём держится предупреждение.
+function LabDipLine({
+  colorway,
+  techCardId,
+  lockVersion,
+  hex,
   canEdit,
   open,
   onOpenChange,
+  onStatus,
 }: {
-  lab: LabDip;
+  colorway: common_AdminColorwayRef;
+  techCardId: number;
+  lockVersion: number;
+  hex?: string;
   canEdit: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onStatus: (colorwayId: number, status: string) => void;
 }) {
+  const lab = useLabDipDraft(colorway, techCardId, lockVersion, canEdit);
+  const colorwayId = colorway.colorwayId ?? 0;
   const [reason, setReason] = useState('');
   const status = lab.draft.labDipStatus;
   const approved = status === APPROVED;
   const last = lab.recorded[lab.recorded.length - 1];
   const word = cn('text-micro uppercase tracking-label');
+  const round = parseInt(lab.draft.labDipRound, 10) || 0;
+  const statusText =
+    lab.started && !approved
+      ? [
+          round ? `R${round}` : '',
+          labDipStatusLabel.get(status as common_TechCardLabDipStatus) ?? '',
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : '';
+  useEffect(() => {
+    onStatus(colorwayId, status);
+  }, [colorwayId, status, onStatus]);
+  // Дверь из шапки («lab dip waiting») открывает строку — блок ниже матрицы, его надо показать.
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [open]);
   return (
-    <div className={cn(ROW_CELL, 'flex items-baseline gap-2', FB_LAB)}>
+    <div
+      ref={rowRef}
+      className='flex items-center gap-3 border-t border-hairline py-1.5 first:border-t-0'
+    >
+      <span className='flex min-w-0 items-center gap-1.5' style={{ width: TILE + 40 }}>
+        <Swatch hex={hex ?? ''} size={11} />
+        <span className='min-w-0 truncate text-control uppercase tracking-label'>
+          {colourwayName(colorway)}
+        </span>
+      </span>
+      {statusText && <span className={cn(word, 'text-labelColor')}>{statusText}</span>}
       {approved ? (
         <span className={cn(word, 'text-labelColor')}>approved</span>
       ) : (
@@ -1143,7 +1238,7 @@ function LabDipCell({
           'aria-label': 'lab dip rounds',
           className: cn(word, 'text-labelColor hover:text-textColor cursor-pointer'),
         }}
-        openElement='⋯'
+        openElement='reject…'
       >
         <div className='flex flex-col gap-1.5'>
           {last ? (
@@ -1238,6 +1333,7 @@ type ColumnProps = {
   cardSlots: BomLine[];
   bomKeySet: ReadonlySet<string>;
   materials: common_Material[];
+  stockFacts: ReadonlyMap<number, MaterialStockFacts>;
   markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
   colorwayPins: readonly MarkerColorway[];
@@ -1256,6 +1352,10 @@ type ColumnProps = {
   onHighlightDone: () => void;
   focus: Focus;
   setFocus: (f: Focus) => void;
+  /** Статус лабдипа из черновика строки блока `lab dip` (предупреждение шапки). */
+  labDipStatus: string;
+  /** PATTERNS → раскладка слота, авто-режим. */
+  onGoToMarker: (bomLineKey: string, colorwayId?: number) => void;
   seed?: UsageDraft[];
   onSeedUsed: (colorwayId: number) => void;
   registerLive: (colorwayId: number, ref: { current: UsageDraft[] } | null) => void;
@@ -1271,6 +1371,7 @@ function ColourwayColumn({
   cardSlots,
   bomKeySet,
   materials,
+  stockFacts,
   markers,
   pieces,
   colorwayPins,
@@ -1289,6 +1390,8 @@ function ColourwayColumn({
   onHighlightDone,
   focus,
   setFocus,
+  labDipStatus,
+  onGoToMarker,
   seed,
   onSeedUsed,
   registerLive,
@@ -1306,7 +1409,6 @@ function ColourwayColumn({
     techCardId,
     canEdit,
   });
-  const lab = useLabDipDraft(colorway, techCardId, lockVersion, canEdit);
   // Раскладки ЭТОГО колорвея (плюс общие; прогонные однодневки отсеяны) — длина, снятая на артикуле
   // другого колорвея, выглядела бы совершенно нормально и была бы неверной.
   const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
@@ -1384,11 +1486,18 @@ function ColourwayColumn({
         materials,
         markers: cwMarkers,
         plan,
-        labDipStatus: lab.draft.labDipStatus,
+        labDipStatus,
         strayCount: draft.strayCount,
         orphanCount: draft.orphanCount,
         openPicker: (key) => setFocus({ cwId: colorwayId, kind: 'picker', key }),
-        openNorm: (key) => setFocus({ cwId: colorwayId, kind: 'norm', key }),
+        // `no norm` уводит на раскладку; есть число (например, раскладка сдвинулась) — поповер.
+        openNorm: (key) => {
+          const slot = cardSlots.find((s) => s.lineKey === key);
+          const missing =
+            !!slot && consumptionLabel(slotDraft(draft.rowsBySlot.get(key), key), slot).missing;
+          if (missing) onGoToMarker(key, colorwayId);
+          else setFocus({ cwId: colorwayId, kind: 'norm', key });
+        },
         openLabDip: () => setFocus({ cwId: colorwayId, kind: 'labDip', key: '' }),
         cleanUp: (what) => cleanUpRef.current(what),
         clearPieceNorms: () => clearPieceNormsRef.current(),
@@ -1417,7 +1526,8 @@ function ColourwayColumn({
       materials,
       cwMarkers,
       plan,
-      lab.draft.labDipStatus,
+      labDipStatus,
+      onGoToMarker,
       draft.strayCount,
       draft.orphanCount,
       draft.duplicates,
@@ -1462,16 +1572,16 @@ function ColourwayColumn({
       style={{ gridColumn: column }}
       data-cw-column={colorwayId}
     >
-      {/* ШАПКА: полоска рендера/цвета + имя. Клик по имени — меню `delete`. Триггер — span
-          role=button (его не глушит `<fieldset disabled>` выпущенной карточки, архивное правило
-          удаления не зависит от выпуска), меню не размонтируется при закрытии: диалог удаления
-          живёт внутри контрола и портируется, и закрытое меню не должно уносить открытую модалку. */}
-      <div className={cn('pb-1.5 pr-3', FB_HEAD)}>
-        {canDeleteProduct ? (
-          <ColumnMenu
-            label={`${name} menu`}
-            head={<ColumnHead name={name} hex={swatchHex} frontUrl={frontUrl} />}
-          >
+      {/* ШАПКА: плитка 140×140 (рендер спереди, иначе цвет колорвея) + имя. Удаление — ✕ в углу
+          плитки, виден на наведении/фокусе. Это триггер ColorwayDeleteControl: span role=button,
+          `<fieldset disabled>` выпущенной карточки его не глушит (удаление не зависит от выпуска). */}
+      <div className={cn('group/head flex flex-col gap-1 pb-1.5 pr-3', FB_HEAD)}>
+        <div
+          className='relative shrink-0 overflow-hidden border border-borderColor bg-bgZebra'
+          style={{ width: TILE, height: TILE, backgroundColor: !frontUrl ? swatchHex : undefined }}
+        >
+          {frontUrl && <img src={frontUrl} alt='' className='size-full object-cover' />}
+          {canDeleteProduct && (
             <ColorwayDeleteControl
               colorwayId={colorwayId}
               code={name}
@@ -1479,13 +1589,17 @@ function ColourwayColumn({
               lockVersion={colorway.lockVersion ?? lockVersion}
               isLastColorway={isLastColorway}
               onDeleted={() => onDeleted(colorwayId)}
+              triggerClassName='absolute right-1 top-1 flex size-[18px] cursor-pointer items-center justify-center border border-borderColor bg-bgColor text-[11px] leading-none text-labelColor opacity-0 hover:border-error hover:text-error focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover/head:opacity-100 group-focus-within/head:opacity-100 [@media(hover:none)]:size-6 [@media(hover:none)]:opacity-100'
+              trigger='✕'
             />
-          </ColumnMenu>
-        ) : (
-          <div className='flex flex-col gap-1'>
-            <ColumnHead name={name} hex={swatchHex} frontUrl={frontUrl} />
-          </div>
-        )}
+          )}
+        </div>
+        <span
+          className='line-clamp-2 text-control uppercase tracking-label'
+          style={{ width: TILE }}
+        >
+          {name}
+        </span>
       </div>
       <div className={cn('pb-2 pr-3', FB_AUTO)}>
         <Button
@@ -1512,10 +1626,12 @@ function ColourwayColumn({
             slot={slot}
             draft={d}
             materials={materials}
+            stockFacts={stockFacts}
             canEdit={canEdit}
             normOpen={normOpen}
             onOpenPicker={() => setFocus({ cwId: colorwayId, kind: 'picker', key })}
             onNormOpenChange={(o) => setFocus(o ? { cwId: colorwayId, kind: 'norm', key } : null)}
+            onNoNorm={() => onGoToMarker(key, colorwayId)}
             editor={
               normOpen ? (
                 <ConsumptionEditor
@@ -1542,12 +1658,6 @@ function ColourwayColumn({
           />
         );
       })}
-      <LabDipCell
-        lab={lab}
-        canEdit={canEdit}
-        open={focus?.cwId === colorwayId && focus.kind === 'labDip'}
-        onOpenChange={(o) => setFocus(o ? { cwId: colorwayId, kind: 'labDip', key: '' } : null)}
-      />
       {/* Каталог грузится только открытым диалогом; секция слота — жёсткий фильтр. Выбор артикула
           самого слота = «пина нет» (pinPatch). */}
       <MaterialPickerDialog
@@ -1562,75 +1672,6 @@ function ColourwayColumn({
         onClose={() => setFocus(null)}
       />
     </div>
-  );
-}
-
-// Меню колонки: span role=button (его не глушит `<fieldset disabled>`), всплывашка остаётся
-// смонтированной и только прячется — в ней живёт контрол удаления с порталом модалки.
-function ColumnMenu({
-  label,
-  head,
-  children,
-}: {
-  label: string;
-  head: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return (
-    <div ref={rootRef} className='relative'>
-      <span
-        role='button'
-        tabIndex={0}
-        aria-label={label}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setOpen((v) => !v);
-          }
-          if (e.key === 'Escape') setOpen(false);
-        }}
-        className='flex cursor-pointer flex-col gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-      >
-        {head}
-      </span>
-      <div
-        hidden={!open}
-        className='absolute left-0 top-full z-10 mt-1 border border-textColor bg-bgColor px-2 py-1.5'
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ColumnHead({ name, hex, frontUrl }: { name: string; hex?: string; frontUrl?: string }) {
-  return (
-    <>
-      <span
-        className={cn(
-          'block overflow-hidden border',
-          hex || frontUrl ? 'border-borderColor' : 'border-dashed border-borderColor',
-        )}
-        style={{ width: TILE, height: 40, backgroundColor: !frontUrl ? hex : undefined }}
-      >
-        {frontUrl && <img src={frontUrl} alt='' className='size-full object-cover' />}
-      </span>
-      <span className='line-clamp-2 text-control uppercase tracking-label' style={{ width: TILE }}>
-        {name}
-      </span>
-    </>
   );
 }
 
@@ -1690,6 +1731,27 @@ export function ColourwaysMatrix({
   );
   const [focus, setFocus] = useState<Focus>(null);
   const [creating, setCreating] = useState(false);
+  const stockFacts = useMaterialStockFacts();
+  // Статус лабдипа из ЧЕРНОВИКА строки блока `lab dip` — колонке, для предупреждения шапки.
+  const [labStatusById, setLabStatusById] = useState<Record<number, string>>({});
+  const onLabStatus = useCallback((id: number, status: string) => {
+    setLabStatusById((prev) => (prev[id] === status ? prev : { ...prev, [id]: status }));
+  }, []);
+  // `no norm` → PATTERNS, раскладка этого слота, авто-режим. Остальные параметры URL сохраняются.
+  const [, setSearchParams] = useSearchParams();
+  const goToMarker = useCallback(
+    (bomLineKey: string, colorwayId?: number) =>
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'patterns');
+        next.set('marker', bomLineKey);
+        if (colorwayId) next.set('markerColorway', String(colorwayId));
+        else next.delete('markerColorway');
+        next.set('auto', '1');
+        return next;
+      }),
+    [setSearchParams],
+  );
   const [seed, setSeed] = useState<{ colorwayId: number; usages: UsageDraft[] } | null>(null);
 
   // Остальные колорвеи для ступени «соседний колорвей» — стабильной ссылкой, иначе план каждой
@@ -1775,106 +1837,138 @@ export function ColourwaysMatrix({
     [],
   );
 
-  const rowCount = 2 + cardSlots.length + 1;
+  const rowCount = 2 + cardSlots.length;
   const plusColumn = colorways.length + 2;
 
   return (
-    <Section title='colourways' action={<HeaderWarnings items={warnings} />}>
-      <style>{SUBGRID_FALLBACK}</style>
-      <div className='overflow-x-auto pb-1'>
-        <div
-          className='grid w-max'
-          style={{
-            gridTemplateColumns: `max-content repeat(${colorways.length}, max-content) max-content`,
-            gridTemplateRows: `repeat(${rowCount}, auto)`,
-          }}
-        >
-          {/* подписи рядов */}
-          <div className={cn('row-span-full grid grid-rows-subgrid', FB_COL)} style={{ gridColumn: 1 }}>
-            <div className={FB_HEAD} />
-            <div className={FB_AUTO} />
-            {cardSlots.map((slot) => (
-              <div key={slot.lineKey} className={cn(ROW_CELL, LABEL, 'self-stretch pr-8', FB_SLOT)}>
-                {slotLabel(slot)}
-              </div>
-            ))}
-            <div className={cn(ROW_CELL, LABEL, 'pr-8', FB_LAB)}>lab dip</div>
-          </div>
-
-          {colorways.map((cw, i) => {
-            const id = cw.colorwayId ?? 0;
-            return (
-              <ColourwayColumn
-                key={id}
-                colorway={cw}
-                column={i + 2}
-                techCardId={techCardId}
-                bomItems={bomItems}
-                cardSlots={cardSlots}
-                bomKeySet={bomKeySet}
-                materials={materials}
-                markers={markers}
-                pieces={pieces}
-                colorwayPins={colorwayPins}
-                otherColorways={othersById.get(id) ?? EMPTY_COLORWAYS}
-                sizeIds={sizeIds}
-                sizeNameById={sizeNameById}
-                colours={colours}
-                swatchHex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
-                frontUrl={frontUrlById.get(id)}
-                lockVersion={lockVersion}
-                canEdit={canEdit}
-                frozen={frozen}
-                canDeleteProduct={canDeleteProduct}
-                isLastColorway={colorways.length === 1}
-                highlighted={highlightId === id}
-                onHighlightDone={onHighlightDone}
-                focus={focus}
-                setFocus={setFocus}
-                seed={seed?.colorwayId === id ? seed.usages : undefined}
-                onSeedUsed={onSeedUsed}
-                registerLive={registerLive}
-                onWarnings={onWarnings}
-                onDeleted={onDeleted}
-              />
-            );
-          })}
-
-          {/* `+` — новый колорвей копией последнего; линейки рядов продолжаются под ним */}
+    <>
+      <Section title='colourways' action={<HeaderWarnings items={warnings} />}>
+        <style>{SUBGRID_FALLBACK}</style>
+        <div className='overflow-x-auto pb-1'>
           <div
-            className={cn('row-span-full grid grid-rows-subgrid', FB_COL)}
-            style={{ gridColumn: plusColumn }}
+            className='grid w-max'
+            style={{
+              gridTemplateColumns: `max-content repeat(${colorways.length}, max-content) max-content`,
+              gridTemplateRows: `repeat(${rowCount}, auto)`,
+            }}
           >
-            <div className={cn('pb-1.5', FB_HEAD)}>
-              {canEdit && (
-                <ColourwayCreatePopover
-                  techCardId={techCardId}
-                  open={creating}
-                  onOpenChange={openCreate}
-                  onCreated={onCreated}
-                  seed={createSeed}
-                  anchor={
-                    <button
-                      type='button'
-                      aria-label='new colourway'
-                      className='flex cursor-pointer items-center justify-center border border-dashed border-borderColor text-[18px] text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                      style={{ width: TILE, height: 40 }}
-                    >
-                      +
-                    </button>
-                  }
-                />
-              )}
+            {/* подписи рядов */}
+            <div
+              className={cn('row-span-full grid grid-rows-subgrid', FB_COL)}
+              style={{ gridColumn: 1 }}
+            >
+              <div className={FB_HEAD} />
+              <div className={FB_AUTO} />
+              {cardSlots.map((slot) => (
+                <div
+                  key={slot.lineKey}
+                  className={cn(ROW_CELL, LABEL, 'self-stretch pr-8', FB_SLOT)}
+                >
+                  {slotLabel(slot)}
+                </div>
+              ))}
             </div>
-            <div className={FB_AUTO} />
-            {cardSlots.map((slot) => (
-              <div key={slot.lineKey} className={cn(ROW_CELL, FB_SLOT)} style={{ width: TILE }} />
-            ))}
-            <div className={cn(ROW_CELL, FB_LAB)} />
+
+            {colorways.map((cw, i) => {
+              const id = cw.colorwayId ?? 0;
+              return (
+                <ColourwayColumn
+                  key={id}
+                  colorway={cw}
+                  column={i + 2}
+                  techCardId={techCardId}
+                  bomItems={bomItems}
+                  cardSlots={cardSlots}
+                  bomKeySet={bomKeySet}
+                  materials={materials}
+                  stockFacts={stockFacts}
+                  markers={markers}
+                  pieces={pieces}
+                  colorwayPins={colorwayPins}
+                  otherColorways={othersById.get(id) ?? EMPTY_COLORWAYS}
+                  sizeIds={sizeIds}
+                  sizeNameById={sizeNameById}
+                  colours={colours}
+                  swatchHex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
+                  frontUrl={frontUrlById.get(id)}
+                  lockVersion={lockVersion}
+                  canEdit={canEdit}
+                  frozen={frozen}
+                  canDeleteProduct={canDeleteProduct}
+                  isLastColorway={colorways.length === 1}
+                  highlighted={highlightId === id}
+                  onHighlightDone={onHighlightDone}
+                  focus={focus}
+                  setFocus={setFocus}
+                  labDipStatus={labStatusById[id] ?? fromRefLabDip(cw).labDipStatus}
+                  onGoToMarker={goToMarker}
+                  seed={seed?.colorwayId === id ? seed.usages : undefined}
+                  onSeedUsed={onSeedUsed}
+                  registerLive={registerLive}
+                  onWarnings={onWarnings}
+                  onDeleted={onDeleted}
+                />
+              );
+            })}
+
+            {/* `+` — новый колорвей копией последнего; линейки рядов продолжаются под ним */}
+            <div
+              className={cn('row-span-full grid grid-rows-subgrid', FB_COL)}
+              style={{ gridColumn: plusColumn }}
+            >
+              <div className={cn('pb-1.5', FB_HEAD)}>
+                {canEdit && (
+                  <ColourwayCreatePopover
+                    techCardId={techCardId}
+                    open={creating}
+                    onOpenChange={openCreate}
+                    onCreated={onCreated}
+                    seed={createSeed}
+                    anchor={
+                      <button
+                        type='button'
+                        aria-label='new colourway'
+                        className='flex cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        style={{ width: TILE, height: TILE }}
+                      >
+                        <span className='text-[18px] leading-none text-textColor'>+</span>
+                        <span className='text-micro uppercase tracking-label'>colourway</span>
+                      </button>
+                    }
+                  />
+                )}
+              </div>
+              <div className={FB_AUTO} />
+              {cardSlots.map((slot) => (
+                <div key={slot.lineKey} className={cn(ROW_CELL, FB_SLOT)} style={{ width: TILE }} />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
-    </Section>
+      </Section>
+      {colorways.length > 0 && (
+        <Section title='lab dip'>
+          <div className='flex flex-col'>
+            {colorways.map((cw) => {
+              const id = cw.colorwayId ?? 0;
+              return (
+                <LabDipLine
+                  key={id}
+                  colorway={cw}
+                  techCardId={techCardId}
+                  lockVersion={lockVersion}
+                  hex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
+                  canEdit={canEdit}
+                  open={focus?.cwId === id && focus.kind === 'labDip'}
+                  onOpenChange={(o) => setFocus(o ? { cwId: id, kind: 'labDip', key: '' } : null)}
+                  onStatus={onLabStatus}
+                />
+              );
+            })}
+          </div>
+        </Section>
+      )}
+    </>
   );
 }
 
