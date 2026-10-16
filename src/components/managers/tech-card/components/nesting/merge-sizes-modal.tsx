@@ -56,11 +56,16 @@ export function MergeSizesModal({
   open,
   onClose,
   onReady,
+  initialFiles,
+  scopeKey,
 }: {
   open: boolean;
   onClose: () => void;
-  /** Готовый файл — родитель отдаёт его обычной модалке загрузки (имя, материал, upload). */
-  onReady: (file: File) => void;
+  /** Готовый файл — родитель грузит его в слот `scopeKey` (тот, на который бросили файлы). */
+  onReady: (file: File, scopeKey?: string) => void;
+  /** Файлы, уже брошенные на слот: склейка стартует с них, без своего выбора. */
+  initialFiles?: File[];
+  scopeKey?: string;
 }) {
   const dictTokens = useDictionarySizeTokens();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -141,7 +146,7 @@ export function MergeSizesModal({
     };
   }, [picked, dictTokens]);
 
-  function handleFiles(list: FileList | null) {
+  function handleFiles(list: FileList | File[] | null) {
     const files = list ? Array.from(list) : [];
     if (files.length === 0) return;
     const bad = files
@@ -163,6 +168,12 @@ export function MergeSizesModal({
     setError(null);
     setPicked(files);
   }
+
+  // Брошенные на слот файлы: разбор стартует сразу, при каждом открытии с новой пачкой.
+  useEffect(() => {
+    if (open && initialFiles && initialFiles.length > 0) handleFiles(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFiles]);
 
   const previewFiles = useMemo(
     () => (built ? [{ name: built.file.name, url: built.url }] : null),
@@ -188,7 +199,7 @@ export function MergeSizesModal({
         if (!o && !busy) onClose();
       }}
       onConfirm={() => {
-        if (built) onReady(built.file);
+        if (built) onReady(built.file, scopeKey);
       }}
       onCancel={() => {
         if (!busy) onClose();

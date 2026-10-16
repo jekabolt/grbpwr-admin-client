@@ -14,7 +14,6 @@ import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
@@ -43,7 +42,16 @@ const cellKey = (sizeId: number, nameId: number) => `${sizeId}:${nameId}`;
 // A plain hand-filled grid: measurements (rows) × sizes (columns), every cell typed by hand. There
 // is no grade rule — the chart is saved with no base size and no grade steps (gradeBaseSizeId 0,
 // gradeSteps []); the per-size cells are the sole source of truth.
-export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
+export function SizeChartField({
+  styleId,
+  canEdit,
+  onFilledChange,
+}: {
+  styleId?: number;
+  canEdit: boolean;
+  /** Whether any cell of the current range holds a measurement — the SIZES tab's ✓ reads it. */
+  onFilledChange?: (filled: boolean) => void;
+}) {
   const { dictionary } = useDictionary();
   const { control } = useFormContext<TechCardFormData>();
 
@@ -122,6 +130,15 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   }, [loadChart]);
 
   const stored = (sizeId: number, nameId: number) => cells.get(sizeId)?.get(nameId) ?? '';
+
+  // Same rule as the save (`put`): an empty or zero cell is not a measurement. Only sizes still in
+  // the range count — a value parked under a removed size is not one the tab shows.
+  const filled = ordered.some((sizeId) =>
+    [...(cells.get(sizeId)?.values() ?? [])].some((v) => !!v && v !== '0'),
+  );
+  useEffect(() => {
+    onFilledChange?.(filled);
+  }, [filled, onFilledChange]);
 
   const setCell = (sizeId: number, nameId: number, value: string) => {
     setDirty(true);
@@ -233,23 +250,8 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     );
   }
 
-  const totalCells = ordered.length * measurements.length;
-  let filled = 0;
-  for (const sizeId of ordered)
-    for (const m of measurements) if (stored(sizeId, m.id).trim()) filled += 1;
-
   return (
     <div className='space-y-2'>
-      <Toolbar>
-        <Text size='micro' variant='label' component='span'>
-          measurements per size — fill in each cell by hand
-        </Text>
-        <ToolbarSpacer />
-        <Pill tone={totalCells > 0 && filled === totalCells ? 'ok' : 'mut'}>
-          {filled}/{totalCells} cells
-        </Pill>
-      </Toolbar>
-
       <DataTable
         variant='grid'
         className={cn(
@@ -267,7 +269,12 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
         </thead>
         <tbody>
           {measurements.map((m) => (
-            <tr key={m.id}>
+            // Подсветка строки — на ЯЧЕЙКАХ, не на <tr>: первая ячейка липкая и красит себя сама,
+            // фон строки ушёл бы под неё. focus-within держит строку, пока в ней печатают.
+            <tr
+              key={m.id}
+              className='[&>td]:transition-colors hover:[&>td]:bg-trackBg focus-within:[&>td]:bg-trackBg'
+            >
               <td className='uppercase'>{m.name}</td>
               {ordered.map((sizeId) => (
                 <td key={sizeId} className='w-20'>

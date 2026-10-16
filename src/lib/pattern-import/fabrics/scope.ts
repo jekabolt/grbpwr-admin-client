@@ -264,3 +264,38 @@ export function planScopes(
   }
   return { scopes, problems };
 }
+
+/**
+ * Files dropped on ONE card slot (patterns-field → ImportWizard `initialScopeKey`): the operator
+ * already said which cloth this sheet is, so every piece defaults to that scope — not to the
+ * sheet's inferred main fabric. The fabrics step still lets the operator change any tick; nothing
+ * waits for confirmation (no AI-only or defaulted cloth, nothing refused). An unknown key keeps the
+ * proposal as is.
+ */
+export function pinToScope(
+  a: FabricAssignment,
+  scopeKey: string,
+  seeds: readonly SeedId[],
+  targets: readonly DraftScopeTarget[],
+): FabricAssignment {
+  const t = targets.find((x) => x.scopeKey === scopeKey);
+  if (!t) return a;
+  const all = [...new Set(seeds)];
+  return {
+    byPurpose: { [scopeKey]: all },
+    interliningInBom: a.interliningInBom,
+    proposals: [
+      {
+        label: t.label,
+        purpose: t.fabricPurpose || scopeKey,
+        seeds: all,
+        evidence: [],
+        confidence: 1,
+        scopeKey,
+      },
+    ],
+    refused: [],
+    aiOnly: [],
+    defaulted: [],
+  };
+}

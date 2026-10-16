@@ -306,7 +306,6 @@ export function carrySampleNotches(groups: EntityGroup[], warnings: string[]): v
     list.push(g);
     byStem.set(stem, list);
   }
-  let carried = 0;
   const stranded: string[] = [];
   for (const [stem, list] of byStem) {
     if (list.length < 2) continue;
@@ -332,15 +331,10 @@ export function carrySampleNotches(groups: EntityGroup[], warnings: string[]): v
           layer: c.layer,
           notch: true,
         });
-        carried++;
       }
     }
   }
-  if (carried > 0) {
-    warnings.push(
-      `notches are drawn only in the sample size — ${carried} carried to the other sizes along the graded contour`,
-    );
-  }
+  // A successful carry is silent (owner, patterns-lite r2): only stranded blocks are a warning.
   if (stranded.length > 0) {
     warnings.push(
       `notches are drawn only in the sample size and could not be carried to ${stranded.length} block(s) (${stranded

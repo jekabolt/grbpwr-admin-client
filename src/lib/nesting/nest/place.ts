@@ -286,6 +286,9 @@ export function placeOrder(
   lMaxCm: number,
   nfps: NfpCache,
   abort?: () => boolean,
+  // lMaxCm — это КАП стола (NestConfig.maxLengthCm), а не естественная граница: тогда «упёрлись в
+  // правый край» значит «стол кончился» ('table-full'), а не патологию ('no-space').
+  lengthCapped = false,
 ): PlacementResult | null {
   const placed: PlacedGene[] = [];
   const unplaced: UnplacedPiece[] = [];
@@ -314,7 +317,7 @@ export function placeOrder(
       unplaced.push({
         pieceId: g.piece.id,
         instance: g.instance,
-        reason: yLo > yHi ? 'width' : 'no-space',
+        reason: yLo > yHi ? 'width' : lengthCapped ? 'table-full' : 'no-space',
       });
       continue;
     }
@@ -361,6 +364,7 @@ export function placeOrder(
     let x = best ? best.x : Math.min(xHi, Math.max(xLo, usedLength + m - bMinX));
     const y = best ? best.y : yLo;
     let seated = !!best;
+    let hitEnd = false;
     if (!best) {
       const step = Math.max(1, Math.round((bMaxX - bMinX) / 4));
       let guard = 0;
@@ -373,13 +377,21 @@ export function placeOrder(
         // in a placement. The old loop exited on `x >= xHi` or on the guard and then pushed
         // the piece regardless — an overlapping placement whose length the marker счёл
         // честной. A run that reaches here has nothing true to say except «не влезло».
-        if (x >= xHi || guard >= 4096) break;
+        if (x >= xHi) {
+          hitEnd = true;
+          break;
+        }
+        if (guard >= 4096) break;
         x = Math.min(xHi, x + step);
         guard++;
       }
     }
     if (!seated) {
-      unplaced.push({ pieceId: g.piece.id, instance: g.instance, reason: 'no-space' });
+      unplaced.push({
+        pieceId: g.piece.id,
+        instance: g.instance,
+        reason: lengthCapped && hitEnd ? 'table-full' : 'no-space',
+      });
       continue;
     }
     placed.push({ ...g, x, y });

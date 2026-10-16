@@ -78,6 +78,10 @@ type WizardProps = {
   onRetryFollowUp?: (only?: { scopeKey?: string; step?: FollowUpStep }) => void;
   /** MF-C: close the wizard and open the piece-match modal of this scope (vanished pieces). */
   onReviewPieces?: (scopeKey: string) => void;
+  /** Files dropped on a pattern slot: the run starts reading them at once. */
+  initialFiles?: File[];
+  /** The slot the files were dropped on: every piece defaults to this fabric scope. */
+  initialScopeKey?: string;
 };
 
 /**
@@ -140,6 +144,8 @@ function WizardBody({
   followUp,
   onRetryFollowUp,
   onReviewPieces,
+  initialFiles,
+  initialScopeKey,
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
@@ -185,9 +191,25 @@ function WizardBody({
         : undefined,
     [client],
   );
-  const api = useImportSession({ client, card, namer, buildDraft, applyDraft, pageRoles });
+  const api = useImportSession({
+    client,
+    card,
+    namer,
+    buildDraft,
+    applyDraft,
+    pageRoles,
+    pinScopeKey: initialScopeKey,
+  });
   latest.current = api.session;
   const { session, blocker } = api;
+  // files dropped on a pattern slot: read them once, as if picked on the files step
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !initialFiles?.length) return;
+    seeded.current = true;
+    void api.dispatch({ type: 'files', files: initialFiles });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
   // explicit gated apply. A stop says why in the footer, with "resume autopilot".

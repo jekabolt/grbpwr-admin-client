@@ -41,6 +41,34 @@ export type UploadedPattern = {
 // Твил 2» for a назначение, «подкладка · Cupro 90» for a line nobody has sorted yet.
 export type PatternScopeOption = { key: string; label: string };
 
+export type DirectUpload = Omit<UploadedPattern, 'scopeKey'>;
+
+/** File name without its extension: the display name a slot drop gives a sheet. */
+export function patternNameOfFile(file: File): string {
+  return clampPatternName(file.name.replace(/\.[^./\\]+$/, ''));
+}
+
+/**
+ * Direct upload, no naming modal: File → Admin.UploadPattern → {url, filename, sizeBytes, name}.
+ * `name` defaults to the file name without its extension. Throws on failure; map the error with
+ * patternUploadErrorMessage.
+ */
+export async function uploadPatternFile(file: File, name?: string): Promise<DirectUpload> {
+  const raw = stripDataUrlPrefix(await getBase64File(file));
+  // Byte-clamped, not char-sliced — the server counts BYTES and slice() can split a surrogate pair.
+  const filename = clampUtf8Bytes(file.name, MAX_PATTERN_FILENAME);
+  const res = await adminService.UploadPattern({ raw, filename });
+  return {
+    url: res.url ?? '',
+    filename: res.filename ?? filename,
+    // size_bytes is an int64 — grpc-gateway serialises it as a STRING in JSON (despite the
+    // generated `number` type). Coerce so the form holds a real number (z.number() rejects a
+    // string, which silently blocks the whole save).
+    sizeBytes: Number(res.sizeBytes ?? file.size) || 0,
+    name: name ?? patternNameOfFile(file),
+  };
+}
+
 // One picked file staged in the naming modal, with its per-file upload status.
 type StagedFile = {
   file: File;
@@ -128,21 +156,8 @@ export function PatternUploadModal({
       rows[i] = { ...rows[i], status: 'uploading', error: undefined };
       setStaged([...rows]);
       try {
-        const raw = stripDataUrlPrefix(await getBase64File(rows[i].file));
-        // Byte-clamped, not char-sliced — the server counts BYTES and slice() can split a
-        // surrogate pair.
-        const filename = clampUtf8Bytes(rows[i].file.name, MAX_PATTERN_FILENAME);
-        const res = await adminService.UploadPattern({ raw, filename });
-        onUploaded({
-          url: res.url ?? '',
-          filename: res.filename ?? filename,
-          // size_bytes is an int64 — grpc-gateway serialises it as a STRING in JSON (despite
-          // the generated `number` type). Coerce so the form holds a real number (z.number()
-          // rejects a string, which silently blocks the whole save).
-          sizeBytes: Number(res.sizeBytes ?? rows[i].file.size) || 0,
-          name: clampPatternName(rows[i].name),
-          scopeKey: rows[i].scopeKey,
-        });
+        const up = await uploadPatternFile(rows[i].file, clampPatternName(rows[i].name));
+        onUploaded({ ...up, scopeKey: rows[i].scopeKey });
         rows[i] = { ...rows[i], status: 'done' };
       } catch (e) {
         console.error('UploadPattern failed', e);

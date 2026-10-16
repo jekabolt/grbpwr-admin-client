@@ -5,9 +5,11 @@
 import type {
   common_TechCardMarker,
   common_TechCardMarkerLayout,
+  common_TechCardMarkerSpread,
   common_TechCardMarkerSummary,
   googletype_Decimal,
 } from 'api/proto-http/admin';
+import type { SpreadMode } from 'lib/nesting/spread';
 import type { NestConfig, NestResult, PieceDTO, RotationDeg, Unit } from 'lib/nesting/types';
 
 // The BOM fabric line as the marker features need it — a projection of the card form's
@@ -41,6 +43,11 @@ export type MarkerBomLine = {
   purpose?: string;
   fabricDirection?: string;
   isSample?: boolean;
+  // Толщина слоя артикула этой строки, мм (Material.fabricThicknessMm) — для настила под
+  // раскроечный стол. Отсутствует = не задана (не ноль).
+  fabricThicknessMm?: number;
+  // Артикул строки (каталог материалов) — дверь «set on the article» в шапке раскладки.
+  materialId?: number;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -824,6 +831,9 @@ export function buildMarkerLayout(args: {
   // Размер градации каждой РАЗОБРАННОЙ детали: id размера карточки, 0/нет = деталь не
   // градуируется (блок без размерного хвоста — такая кроится по одной на КАЖДОЕ изделие состава).
   sizeIdByPieceId?: ReadonlyMap<number, number>;
+  // НАСТИЛ, под который снималась раскладка (layout.spread): слои, запас, режим, длина стола.
+  // undefined — не записан (одиночный настил, путь авто-сохранения): ключа в JSON нет вовсе.
+  spread?: common_TechCardMarkerSpread;
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
@@ -983,6 +993,59 @@ export function buildMarkerLayout(args: {
       flipped: pl.flipped === true,
     })),
     warnings: [...(args.parseWarnings ?? []), ...result.warnings],
+    spread: args.spread,
+  };
+}
+
+// ── настил (layout.spread) ──────────────────────────────────────────────────────────────
+
+// Границы, которые держит сервер (dto.validateMarkerSpread): вне них сохранение отказывает.
+const SPREAD_MAX_PLIES = 1000;
+const SPREAD_MAX_END_LOSS_CM = 100;
+const SPREAD_MIN_TABLE_CM = 50;
+const SPREAD_MAX_TABLE_CM = 5000;
+
+export type StoredSpread = {
+  plies: number;
+  endLossCm: number;
+  mode: SpreadMode;
+  // ФИЗИЧЕСКАЯ длина стола; null = не записана.
+  tableCm: number | null;
+};
+
+// Настил прогона → layout.spread. undefined, если слои или запас вне границ сервера: лучше не
+// записать настил, чем получить отказ на всю раскладку. Стол вне границ пишется как «не записан».
+export function spreadToWire(s: StoredSpread): common_TechCardMarkerSpread | undefined {
+  const plies = Math.round(s.plies);
+  if (!(plies >= 1 && plies <= SPREAD_MAX_PLIES)) return undefined;
+  if (!(s.endLossCm >= 0 && s.endLossCm <= SPREAD_MAX_END_LOSS_CM)) return undefined;
+  const table =
+    s.tableCm != null && s.tableCm >= SPREAD_MIN_TABLE_CM && s.tableCm <= SPREAD_MAX_TABLE_CM
+      ? Math.round(s.tableCm * 100) / 100
+      : 0;
+  return {
+    plies,
+    endLossCm: Math.round(s.endLossCm * 100) / 100,
+    mode:
+      s.mode === 'face_to_face'
+        ? 'TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE'
+        : 'TECH_CARD_MARKER_SPREAD_MODE_FACE_UP',
+    tableLengthCm: table,
+  };
+}
+
+// layout.spread → настил для показа. null — блоб настила не несёт (снят до поля или одиночный
+// настил); такой маркер может нести СТАРУЮ запись стола — см. TABLE_NOTE_PREFIX в модалке.
+export function storedSpreadOf(l?: common_TechCardMarkerLayout): StoredSpread | null {
+  const sp = l?.spread;
+  const plies = sp?.plies ?? 0;
+  if (!sp || plies < 1) return null;
+  const table = sp.tableLengthCm ?? 0;
+  return {
+    plies,
+    endLossCm: sp.endLossCm ?? 0,
+    mode: sp.mode === 'TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE' ? 'face_to_face' : 'face_up',
+    tableCm: table > 0 ? table : null,
   };
 }
 

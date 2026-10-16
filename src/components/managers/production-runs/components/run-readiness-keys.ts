@@ -36,7 +36,7 @@ export const RUN_REQ_TAB: Record<string, string> = {
   card_pieces: 'pieces',
   card_pieces_dxf_matched: 'pieces',
   pattern_binding_resolved: 'patterns',
-  card_size_range: 'patterns',
+  card_size_range: 'sizes',
   colorway_live: 'colorways',
   slot_article: 'colorways',
   slot_norm: 'colorways',
@@ -54,7 +54,8 @@ export const RUN_REQ_TAB: Record<string, string> = {
   piece_role_conflict: 'colorways',
   piece_main_fabric: 'colorways',
   piece_fabric_sorted: 'bom',
-  sizes_in_range: 'patterns',
+  // The card's range is edited on SIZES; whether the DXF draws those sizes stays a PATTERNS fix.
+  sizes_in_range: 'sizes',
   sizes_in_dxf: 'patterns',
   stock_shortage: 'bom',
 };

@@ -6745,12 +6745,10 @@ export function OperationsField({
     // материала и только когда у той есть файлы: оператор, оставивший выбранным пустой материал,
     // «без материала» или PDF, пришёл бы на вкладку, где подсвечивать нечего. Поэтому переход
     // отступает на полку материалов — она стоит всегда и объясняет следующий шаг.
+    // Pieces come only from pattern files now: without a DXF the target is the slot grid (drop
+    // files there), with one it is the selected slot's `pieces` door, falling back to the grid.
     window.setTimeout(() => {
-      if (!hasDxf) {
-        revealField('pieces.add');
-        return;
-      }
-      if (!revealField('patterns.match')) revealField('patterns.shelf');
+      if (!hasDxf || !revealField('patterns.match')) revealField('patterns.shelf');
     }, 120);
   };
 
@@ -7663,16 +7661,8 @@ export function OperationsField({
           )}
           {/* Чип называет ДЕЙСТВИЕ, которое оператор увидит по приезде, а не абстрактное
               «добавить»: с чертежом это модалка сопоставления, без чертежа — ручная кнопка. */}
-          <Chip
-            dashed
-            onClick={goToPiecesTab}
-            title={
-              hasDxf
-                ? 'pieces are created from a DXF — “↔ cut pieces” on the patterns tab'
-                : 'create a piece on the PATTERNS tab'
-            }
-          >
-            {hasDxf ? '↔ cut pieces' : '+ new piece'}
+          <Chip dashed onClick={goToPiecesTab}>
+            {hasDxf ? 'pieces' : '+ pattern files'}
           </Chip>
           <ToolbarSpacer />
           <Text
