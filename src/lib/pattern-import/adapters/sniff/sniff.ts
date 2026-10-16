@@ -5,6 +5,7 @@ import type { SourceKind } from '../../types';
 import type { UnsupportedCode } from './errors';
 import { looksLikeHpgl } from '../hpgl/tokenize';
 import { classifyNative } from './native';
+import { looksLikeRul } from '../rul/parse';
 
 export type SniffRoute = 'pdf' | 'dxf' | 'hpgl' | 'svg' | 'raster';
 
@@ -142,6 +143,11 @@ export function sniffFormat(bytes: ArrayBuffer, name: string): SniffResult {
   if (/^\s*(999\s*\r?\n[^\n]*\r?\n\s*)*0\s*\r?\nSECTION\s*\r?\n/.test(text))
     return { route: 'dxf', kind: 'dxf', why: '0/SECTION' };
   if (looksLikeHpgl(head)) return { route: 'hpgl', kind: 'hpgl', why: 'plotter mnemonics' };
+
+  // RUL · a TEXT AAMA/ASTM grade rule table is read only with its base DXF (the session pairs
+  // them); alone it is refused with that instruction. An AccuMark binary .rul falls through (F17).
+  if (looksLikeRul(bytes))
+    return { route: null, refusal: 'rul-alone', why: 'AAMA/ASTM grade rule table (text)' };
 
   // F17 · not a format we read: say what it is and what to export (DWG, CLO/Gerber/Lectra/
   // Optitex/Valentina natives, ZIPs, office documents, HEIC/PSD).
