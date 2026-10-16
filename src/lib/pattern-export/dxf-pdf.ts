@@ -25,9 +25,25 @@ export const TILE_MARGIN_MM = 10;
 /** Tiles overlap by this much: the strip where the next page is laid and aligned. */
 export const TILE_OVERLAP_MM = 10;
 export const TEST_SQUARE_MM = 100;
-/** Past this a tiled PDF is not a sane way to print the pattern: refuse and point at PLT. */
+/**
+ * THE limits of every 1:1 print in the app (DXF, marker, PLT): past them a tiled PDF is not a sane
+ * way to print the pattern — a wrong unit or a damaged file is. Refused, pointing at PLT.
+ */
 export const TILED_MAX_PAGES = 500;
 export const TILED_MAX_SIDE_MM = 20_000;
+
+/**
+ * One size check for every source, run before anything per page is planned. `hint` names what
+ * the caller can check (e.g. a PLT's plotter units); the message is otherwise the same for all.
+ */
+export function assertPrintableSize(wMm: number, hMm: number, hint = ''): void {
+  if (!(Number.isFinite(wMm) && Number.isFinite(hMm)) || wMm < 0 || hMm < 0)
+    throw new Error('the drawing has no finite size — the file is damaged');
+  if (wMm > TILED_MAX_SIDE_MM || hMm > TILED_MAX_SIDE_MM)
+    throw new Error(
+      `too large to print (${(wMm / 1000).toFixed(1)} x ${(hMm / 1000).toFixed(1)} m, limit ${TILED_MAX_SIDE_MM / 1000} m a side)${hint ? ` ${hint}` : ''} — use PLT for a plotter`,
+    );
+}
 
 export const TILE_PAPERS = {
   A4: [210, 297],
@@ -87,8 +103,23 @@ export type TileCell = { row: number; col: number; label: string; blank: boolean
 export type PdfPlan = {
   layout: PdfLayout;
   pages: PlanPage[];
-  /** Tiled only: the full grid, blank cells included (they are on the map but not printed). */
-  grid?: { rows: number; cols: number; cells: TileCell[]; paper: TilePaper };
+  /**
+   * Tiled only: the full grid, blank cells included (they are on the map but not printed). Cell
+   * (r, c) shows the drawing window x ∈ [c·sx − ox, c·sx − ox + cw], y likewise — previews draw
+   * the grid from these numbers, never from a second plan.
+   */
+  grid?: {
+    rows: number;
+    cols: number;
+    cells: TileCell[];
+    paper: TilePaper;
+    sx: number;
+    sy: number;
+    cw: number;
+    ch: number;
+    ox: number;
+    oy: number;
+  };
   fileName: string;
   warnings: string[];
 };
@@ -227,11 +258,21 @@ const safeStem = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'patt
 const SHEET_FOOT_MM = 130;
 const SHEET_MIN_W = 260;
 
+const sheetPageOf = (d: Pick<PatternDrawing, 'w' | 'h'>) => ({
+  w: Math.max(d.w + 2 * TILE_MARGIN_MM, SHEET_MIN_W),
+  h: d.h + 2 * TILE_MARGIN_MM + SHEET_FOOT_MM,
+});
+
+/** Does the drawing fit ONE PDF page (with its margin and the test-square strip)? */
+export function fitsOneSheet(d: Pick<PatternDrawing, 'w' | 'h'>): boolean {
+  const { w, h } = sheetPageOf(d);
+  return w <= PDF_PAGE_LIMIT_MM && h <= PDF_PAGE_LIMIT_MM;
+}
+
 function planSheet(d: PatternDrawing): PdfPlan | null {
   const M = TILE_MARGIN_MM;
-  const w = Math.max(d.w + 2 * M, SHEET_MIN_W);
-  const h = d.h + 2 * M + SHEET_FOOT_MM;
-  if (w > PDF_PAGE_LIMIT_MM || h > PDF_PAGE_LIMIT_MM) return null;
+  const { w, h } = sheetPageOf(d);
+  if (!fitsOneSheet(d)) return null;
   const footY = M + d.h + 12;
   const marks: Mark[] = [
     {
@@ -284,10 +325,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
   const sy = ch - OV;
   // The size is checked from the extent alone, BEFORE anything per page is allocated: a
   // mis-scaled DXF (mm read as inches) would otherwise plan tens of thousands of pages.
-  if (d.w > TILED_MAX_SIDE_MM || d.h > TILED_MAX_SIDE_MM)
-    throw new Error(
-      `too large for a tiled PDF (${(d.w / 1000).toFixed(1)} x ${(d.h / 1000).toFixed(1)} m, limit ${TILED_MAX_SIDE_MM / 1000} m a side) — use PLT for a plotter`,
-    );
+  assertPrintableSize(d.w, d.h);
   const cols = Math.max(1, Math.ceil((d.w - cw) / sx - 1e-9) + 1);
   const rows = Math.max(1, Math.ceil((d.h - ch) / sy - 1e-9) + 1);
   if (rows * cols > TILED_MAX_PAGES)
@@ -583,7 +621,7 @@ function planTiles(d: PatternDrawing, paper: TilePaper, extraWarnings: string[] 
   return {
     layout: { kind: 'tiles', paper },
     pages: [map, ...tiles],
-    grid: { rows, cols, cells, paper },
+    grid: { rows, cols, cells, paper, sx, sy, cw, ch, ox, oy },
     fileName: `${safeStem(d.title)}-1to1-${paper}-${printed}tiles.pdf`,
     warnings,
   };
@@ -631,9 +669,11 @@ function mapPage(
   const k = Math.min(boxW / gridW, boxH / gridH);
   const mx = M + (boxW - gridW * k) / 2;
   const my = top + (boxH - gridH * k) / 2;
-  // Thumbnail: cutting lines only, grey (furniture to the importer, a picture to a person).
+  // Thumbnail: cutting lines only, grey (furniture to the importer, a picture to a person). A
+  // drawing without cutting lines (a foreign PLT plotted with one pen) shows all its lines.
+  const hasCut = d.strokes.some((s) => s.kind === 'cut');
   for (const s of d.strokes) {
-    if (s.kind !== 'cut') continue;
+    if (hasCut && s.kind !== 'cut') continue;
     marks.push({
       k: 'path',
       pts: s.pts.map(([x, y]) => [mx + (x + g.ox) * k, my + (y + g.oy) * k] as [number, number]),
@@ -688,6 +728,7 @@ function mapPage(
 
 /** Lay out a drawing as PDF pages. A sheet beyond the PDF page limit falls back to A4 tiles. */
 export function planPdf(d: PatternDrawing, layout: PdfLayout): PdfPlan {
+  assertPrintableSize(d.w, d.h);
   if (layout.kind === 'sheet') {
     const sheet = planSheet(d);
     if (sheet) return sheet;
@@ -786,13 +827,20 @@ function drawContent(pdf: JsPdf, d: PatternDrawing, page: PlanPage, family: stri
   // Internals first, cutting lines on top.
   for (const kind of ['line', 'notch', 'cut'] as const) {
     pdf.setLineWidth(PEN[kind]);
+    let dashed = false;
     for (const s of d.strokes) {
       if (s.kind !== kind || s.pts.length < 2) continue;
       // Drawn WHOLE (not cut at the window): the importer finds the tile pitch from a path that
       // recurs, unchanged, on two pages.
       if (win && !(overlaps(boxOf(s.pts), win) && strokeHitsBox(s, win))) continue;
+      const dash = s.dash && s.dash.length ? s.dash : null;
+      if (dash || dashed) {
+        pdf.setLineDashPattern(dash ? [...dash] : [], 0);
+        dashed = !!dash;
+      }
       drawPath(pdf, s.pts, s.closed, c.tx, c.ty);
     }
+    if (dashed) pdf.setLineDashPattern([], 0);
   }
   pdf.setLineJoin('miter');
   pdf.setLineCap('butt');
@@ -800,6 +848,23 @@ function drawContent(pdf: JsPdf, d: PatternDrawing, page: PlanPage, family: stri
   pdf.setFontSize(9);
   pdf.setTextColor(0, 0, 0);
   for (const l of d.labels) {
+    if (l.sizeMm != null) {
+      // A placed text (PLT LB): baseline-left, its own size and angle. It reaches far from its
+      // anchor when rotated, so only what is clearly elsewhere is culled; the clip does the rest.
+      const reach = l.sizeMm * (l.s.length + 2);
+      if (
+        win &&
+        (l.x > win.x1 + reach ||
+          l.x < win.x0 - reach ||
+          l.y > win.y1 + reach ||
+          l.y < win.y0 - reach)
+      )
+        continue;
+      pdf.setFontSize(l.sizeMm / PT_MM);
+      pdf.text(l.s, l.x + c.tx, l.y + c.ty, { angle: l.angle ?? 0, baseline: 'alphabetic' });
+      pdf.setFontSize(9);
+      continue;
+    }
     if (win && (l.x < win.x0 || l.x > win.x1 || l.y < win.y0 || l.y > win.y1)) continue;
     pdf.text(l.s, l.x + c.tx, l.y + c.ty, { align: 'center', baseline: 'middle' });
   }

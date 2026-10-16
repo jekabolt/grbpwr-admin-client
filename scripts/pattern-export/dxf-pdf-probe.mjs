@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PATTERN-EXPORT probe: DXF → PDF 1:1 (one sheet + tiles) and the ROUND TRIP through our own PDF
 // importer (scale detection + tile assembly), so «our export re-imports» is measured, not hoped.
-//   node scripts/pattern-export/dxf-pdf-probe.mjs <file.dxf> <out-dir> [A4|A3|Letter]
+//   node scripts/pattern-export/dxf-pdf-probe.mjs <file.dxf|file.plt> <out-dir> [A4|A3|Letter]
 // Writes <stem>-sheet.pdf, <stem>-tiles-<paper>.pdf and PNGs of page 1 + one tile (pdftoppm).
 import { build as esbuild } from 'esbuild';
 import { spawnSync } from 'node:child_process';

@@ -1415,8 +1415,8 @@ export function PatternsField({
                 ⇄
               </Button>
             )}
-            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles); a PLT item lands in
-                lib/pattern-export/formats.ts and shows up here by itself. */}
+            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles) or as PLT for a
+                plotter, cut line on the card's contour layer (a converter manifest overrides). */}
             {dxf && row.url && (
               <PatternExportMenu
                 label={labelOf(row)}
@@ -1426,6 +1426,20 @@ export function PatternsField({
                     labelOf(row),
                   )
                 }
+                plot={async () => {
+                  const [{ plotFromDxfBytes }, blob] = await Promise.all([
+                    import('lib/pattern-export/plot-dxf'),
+                    fetchMediaBlob(row.url as string),
+                  ]);
+                  return {
+                    plot: await plotFromDxfBytes(
+                      await blob.arrayBuffer(),
+                      labelOf(row),
+                      dxfIndex?.contourLayer,
+                    ),
+                    title: labelOf(row),
+                  };
+                }}
               />
             )}
             <Button

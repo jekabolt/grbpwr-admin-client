@@ -57,6 +57,7 @@ import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { drawingFromMarker } from 'lib/pattern-export/drawing';
+import { plotFromMarker } from 'lib/pattern-export/plot-drawing';
 import { PatternExportItems } from '../pattern-export/export-menu';
 import { CANVAS_ICON_BTN, LayoutEditor } from './layout-editor';
 import { isFetchFailure } from './dxf-warnings';
@@ -3249,6 +3250,13 @@ export function NestingModal({
                   .join('-') || 'marker',
               )
             }
+            plot={async () => ({
+              plot: plotFromMarker(effective, displayPieces, { fabricWidthCm: displayWidth }),
+              title:
+                fileParts()
+                  .filter((x): x is string => !!x && !!x.trim())
+                  .join('-') || 'marker',
+            })}
           />
           {/* Плоттерный выход без чертежа — только когда чертёж не восстановлен (решение Р4). */}
           {drawing.phase === 'error' && !viewDegraded && (

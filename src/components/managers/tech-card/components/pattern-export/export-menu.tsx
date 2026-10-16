@@ -2,20 +2,27 @@
 // underline buttons in the popover shell. One component for the DXF row and the marker window.
 import type { PatternDrawing } from 'lib/pattern-export/drawing';
 import { EXPORT_FORMATS, type ExportFormatId } from 'lib/pattern-export/formats';
+import type { PlotDrawing } from 'lib/pattern-export/hpgl';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
-import { downloadPatternExport } from './download';
+import { downloadPatternExport, downloadPlotExport } from './download';
+
+/** The plotter input (pens per role, plotter-sized labels) and the file's name, built on demand. */
+export type PlotSource = () => Promise<{ plot: PlotDrawing; title: string }>;
 
 /** Buttons only — for a popover that already exists (the marker's download corner). */
 export function PatternExportItems({
   drawing,
+  plot,
   disabled,
   title,
   onDone,
 }: {
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
+  /** Given → the «PLT · plotter» item is shown. */
+  plot?: PlotSource;
   disabled?: boolean;
   title?: string;
   onDone?: () => void;
@@ -25,7 +32,12 @@ export function PatternExportItems({
   const run = async (id: ExportFormatId) => {
     setBusy(id);
     try {
-      const warnings = await downloadPatternExport(drawing, id);
+      const warnings =
+        id === 'plt'
+          ? plot
+            ? await downloadPlotExport(plot)
+            : []
+          : await downloadPatternExport(drawing, id);
       if (warnings.length > 0) showMessage(warnings.join(' · '), 'error');
       onDone?.();
     } catch (e) {
@@ -36,7 +48,7 @@ export function PatternExportItems({
   };
   return (
     <>
-      {EXPORT_FORMATS.map((f) => (
+      {EXPORT_FORMATS.filter((f) => f.id !== 'plt' || plot).map((f) => (
         <Button
           key={f.id}
           type='button'
@@ -55,9 +67,11 @@ export function PatternExportItems({
 /** A small «⤓» trigger with the list — the per-file menu on the patterns tab. */
 export function PatternExportMenu({
   drawing,
+  plot,
   label,
 }: {
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
+  plot?: PlotSource;
   label: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -81,7 +95,7 @@ export function PatternExportMenu({
       }
     >
       <div className='flex flex-col items-start gap-1'>
-        <PatternExportItems drawing={drawing} onDone={() => setOpen(false)} />
+        <PatternExportItems drawing={drawing} plot={plot} onDone={() => setOpen(false)} />
       </div>
     </GenericPopover>
   );

@@ -1,20 +1,22 @@
 // Browser side of the pattern export: lazy jsPDF + the FeatureMono the assembly sheet embeds,
-// one export, one file saved. The menus call `downloadPatternExport` and show its warnings.
+// one export, one file saved. The menus call these and show the warnings they resolve to.
 import {
   paperFontData,
   registerPaperFonts,
 } from 'components/managers/tech-card/assembly-print/paper-pdf';
+import { downloadFile } from 'lib/pattern-export/download';
 import type { PatternDrawing } from 'lib/pattern-export/drawing';
-import { exportDrawing, type ExportFormatId } from 'lib/pattern-export/formats';
+import type { PdfFont } from 'lib/pattern-export/dxf-pdf';
+import { exportDrawing, exportPlot, type PdfFormatId } from 'lib/pattern-export/formats';
+import type { PlotDrawing } from 'lib/pattern-export/hpgl';
 
-function saveBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.click();
-  // Deferred: Safari/Firefox may not have started the download when click() returns.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+/** jsPDF + the font every 1:1 PDF of the app embeds (also the PLT → PDF dialog). */
+export async function pdfDeps(): Promise<{ jsPDF: typeof import('jspdf').jsPDF; font: PdfFont }> {
+  const [{ jsPDF }, fonts] = await Promise.all([import('jspdf'), paperFontData()]);
+  return {
+    jsPDF,
+    font: { family: 'FeatureMono', register: (pdf) => void registerPaperFonts(pdf, fonts) },
+  };
 }
 
 /**
@@ -23,17 +25,20 @@ function saveBlob(blob: Blob, fileName: string) {
  */
 export async function downloadPatternExport(
   drawing: () => PatternDrawing | Promise<PatternDrawing>,
-  format: ExportFormatId,
+  format: PdfFormatId,
 ): Promise<string[]> {
-  const [{ jsPDF }, fonts, d] = await Promise.all([
-    import('jspdf'),
-    paperFontData(),
-    Promise.resolve().then(drawing),
-  ]);
-  const res = exportDrawing(d, format, {
-    jsPDF,
-    font: { family: 'FeatureMono', register: (pdf) => void registerPaperFonts(pdf, fonts) },
-  });
-  saveBlob(res.blob, res.fileName);
+  const [deps, d] = await Promise.all([pdfDeps(), Promise.resolve().then(drawing)]);
+  const res = exportDrawing(d, format, deps);
+  downloadFile(res.blob, res.fileName);
+  return res.warnings;
+}
+
+/** The plotter file: build the plot, write HP-GL, save. Resolves to the warnings. */
+export async function downloadPlotExport(
+  plot: () => Promise<{ plot: PlotDrawing; title: string }>,
+): Promise<string[]> {
+  const { plot: p, title } = await plot();
+  const res = exportPlot(p, title);
+  downloadFile(res.blob, res.fileName);
   return res.warnings;
 }

@@ -13,7 +13,8 @@ import {
 } from 'lib/pattern-import/adapters/pdf';
 import { detectScale } from 'lib/pattern-import/adapters/pdf/scale';
 import { assembleSheetDetailed, classifyPages } from 'lib/pattern-import/assemble';
-import { drawingFromDxf } from 'lib/pattern-export/drawing';
+import { drawingFromDxf, type PatternDrawing } from 'lib/pattern-export/drawing';
+import { drawingFromPltSheet, readPltSheet } from 'lib/pattern-export/plt-pdf';
 import { planPdf, renderPdf, type PdfFont, type TilePaper } from 'lib/pattern-export/dxf-pdf';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
@@ -43,7 +44,13 @@ export async function main(args: string[]) {
   const stem = basename(dxfPath)
     .replace(/\.[^.]+$/, '')
     .replace(/\s+/g, '_');
-  const d = drawingFromDxf(ab(readFileSync(dxfPath)), basename(dxfPath));
+  // A .plt goes through the PLT reader into the same drawing type — the same tiler and the same
+  // round trip below, so «PLT → PDF re-imports» is measured exactly like the DXF.
+  const d: PatternDrawing = /\.(plt|hpgl?|hgl)$/i.test(dxfPath)
+    ? drawingFromPltSheet(
+        await readPltSheet(ab(readFileSync(dxfPath)), { name: basename(dxfPath) }),
+      )
+    : drawingFromDxf(ab(readFileSync(dxfPath)), basename(dxfPath));
   const kinds: Record<string, number> = {};
   for (const s of d.strokes) kinds[s.kind] = (kinds[s.kind] ?? 0) + 1;
   console.log(

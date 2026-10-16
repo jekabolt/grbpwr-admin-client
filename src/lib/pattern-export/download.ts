@@ -12,5 +12,6 @@ export function downloadFile(
   document.body.appendChild(a);
   a.click();
   a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // Deferred: Safari/Firefox may not have started the download when click() returns.
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

@@ -89,12 +89,14 @@ one option away.
 
 ## PLT → PDF
 
-`pltToPdf(bytes, mode)` (`plt-pdf.ts`) reads any HP-GL/HP-GL/2 file through the import's reader
-(`lib/pattern-import/adapters/hpgl`: IP/SC scaling, PE, arcs, line types, labels) and prints it at
-1:1: `'sheet'` = one page the size of the drawing + a 100 × 100 mm test square (limit 5080 mm per
-side), `'a4'` = A4 tiles with 10 mm overlap, ⊕ registration marks in the overlap strips, column
-letters / row numbers, neighbour labels, and a page-1 map with the test square. Pens on paper:
-1 black, 2 blue, 3 red, others grey.
+`pltToPdf(bytes, format)` (`plt-pdf.ts`) reads any HP-GL/HP-GL/2 file through the import's reader
+(`lib/pattern-import/adapters/hpgl`: IP/SC scaling, PE, arcs, line types, labels) into a
+`PltSheet` (`readPltSheet`), turns it into the same `PatternDrawing` a DXF or a marker becomes
+(`drawingFromPltSheet`: pen 1 → cutting line, 2 → drawn line, 3 → notch, others → drawn line;
+dashes and LB texts kept) and prints it with THE 1:1 tiler, `dxf-pdf.ts` — the same one sheet /
+A4 / A3 / Letter tiles, marks, page-1 map, test square and limits as every other 1:1 print, and
+the same re-import guarantees (`scripts/pattern-export/dxf-pdf-probe.mjs` accepts a `.plt`).
+Pen colours exist only in the dialog's preview; the PDF prints by role (line weight).
 
 Reading rules on the PDF side:
 - **Source units are the operator's answer.** A PLT never states the size of its plotter unit;
@@ -106,5 +108,6 @@ Reading rules on the PDF side:
   rotation set before anything is drawn is applied to the whole drawing (`PltSheet.rotationDeg`);
   RO changed after drawing started, or a non-right angle, is refused — never printed unrotated.
 - **Damaged numbers** are refused (`assertFiniteDoc` after extraction, then finite extents).
-- **Size caps**, checked before anything is allocated: a drawing over 20 m on a side is refused
-  ("check the units"), and the tiler refuses more than 500 pages (`tiles.ts`).
+- **Size caps** are the tiler's (`dxf-pdf.ts` `assertPrintableSize`, `TILED_MAX_*`), checked
+  before anything is allocated: over 20 m on a side is refused (the PLT reader adds the plotter
+  units to the message), and more than 500 pages is refused.

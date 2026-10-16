@@ -11,6 +11,9 @@
 //
 // Fails (exit 1) when a deviation exceeds 0.05 mm (rounding to 0.025 mm plotter units allows
 // ≤ 0.018 mm) or a count disagrees.
+//
+// The PDFs come from THE 1:1 tiler (dxf-pdf.ts). Their re-import by our importer (scale, tile
+// labels, no missing pages) is measured by scripts/pattern-export/dxf-pdf-probe.mjs <file.plt>.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -230,20 +233,36 @@ await guard('IN before drawing cancels an earlier RO', async () => {
 // 4. Non-finite coordinates are refused, never tiled.
 await guard('non-finite coordinates are refused', () =>
   refuses(
-    () => m.pltToPdf(enc(`IN;SP1;PU0,0;PD1${'0'.repeat(400)},0;PD0,4000;PU;`), 'a4'),
+    () => m.pltToPdf(enc(`IN;SP1;PU0,0;PD1${'0'.repeat(400)},0;PD0,4000;PU;`), 'pdf-a4'),
     /finite|damaged|not a finite|Infinity|non-finite|numbers?/i,
   ),
 );
 // 5. Absurd sizes are refused before tiling (reader cap and tiler cap).
 await guard('a 40 m drawing is refused before planning', () =>
-  refuses(() => m.pltToPdf(enc('IN;SP1;PU0,0;PD1600000,0,1600000,4000;PU;'), 'a4'), /limit/),
+  refuses(() => m.pltToPdf(enc('IN;SP1;PU0,0;PD1600000,0,1600000,4000;PU;'), 'pdf-a4'), /limit/),
 );
-await guard('tiler refuses > 500 pages without allocating', async () => {
-  const r = await refuses(async () => m.planTiles(19_000, 19_000), /page limit/);
-  return r;
+const fake = (w, h) => ({
+  w,
+  h,
+  strokes: [
+    {
+      kind: 'cut',
+      closed: false,
+      pts: [
+        [0, 0],
+        [w, h],
+      ],
+    },
+  ],
+  labels: [],
+  title: 'x',
+  warnings: [],
 });
+await guard('tiler refuses > 500 pages without allocating', () =>
+  refuses(async () => m.planPdf(fake(19_000, 19_000), { kind: 'tiles', paper: 'A4' }), /limit 500/),
+);
 await guard('tiler refuses infinite extents', () =>
-  refuses(async () => m.planTiles(Infinity, 10), /cannot tile/),
+  refuses(async () => m.planPdf(fake(Infinity, 10), { kind: 'tiles', paper: 'A4' }), /finite/),
 );
 
 const pngs = [];
@@ -253,7 +272,7 @@ for (const f of plts) {
   for (const mode of ['sheet', 'a4']) {
     let res;
     try {
-      res = await m.pltToPdf(buf, mode, { name: basename(f) });
+      res = await m.pltToPdf(buf, `pdf-${mode}`, { name: basename(f) });
     } catch (e) {
       console.log(`     ${s} ${mode}: ${e.message}`);
       continue;
@@ -266,7 +285,7 @@ for (const f of plts) {
       ? `${((+size[1] * 25.4) / 72).toFixed(1)} x ${((+size[2] * 25.4) / 72).toFixed(1)} mm`
       : '?';
     console.log(
-      `pdf  ${s} ${mode}: ${res.pages} page(s)${mode === 'a4' ? ` (${res.cols}x${res.rows} tiles)` : ''}, first page ${mm}, sheet ${res.sheet.widthMm.toFixed(1)} x ${res.sheet.heightMm.toFixed(1)} mm, pens ${res.sheet.pens.map((p) => `${p.pen}:${p.runs}`).join(' ')}`,
+      `pdf  ${s} ${mode}: ${res.pages} page(s)${res.plan.grid ? ` (${res.plan.grid.cols}x${res.plan.grid.rows} grid, ${res.plan.grid.cells.filter((c) => c.blank).length} blank)` : ''}, first page ${mm}, sheet ${res.sheet.widthMm.toFixed(1)} x ${res.sheet.heightMm.toFixed(1)} mm, pens ${res.sheet.pens.map((p) => `${p.pen}:${p.runs}`).join(' ')}${res.warnings.length ? `, warnings ${JSON.stringify(res.warnings)}` : ''}`,
     );
     const last = mode === 'a4' ? Math.min(2, res.pages) : 1;
     const prefix = resolve(outDir, `${s}.${mode}`);

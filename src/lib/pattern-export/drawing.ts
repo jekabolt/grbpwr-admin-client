@@ -1,7 +1,8 @@
 // A pattern drawing ready for a 1:1 output: every line of the source in millimetres, Y pointing
 // DOWN, origin at the drawing's top-left corner. One shape for two sources — a DXF sheet as it was
-// drawn (the patterns tab) and a marker as it was laid out (the marker window) — so the PDF (and,
-// later, the PLT/HPGL writer) has a single input and never knows where the lines came from.
+// drawn (the patterns tab), a marker as it was laid out (the marker window) and a plotter file as
+// it plots (plt-pdf.ts drawingFromPltSheet) — so the PDF has a single input and never knows where
+// the lines came from.
 //
 // Geometry comes from the nesting parser, not a second DXF reader: the same block expansion, unit
 // detection and AAMA notch recovery the marker and the piece table already trust.
@@ -19,8 +20,19 @@ import { NEST_DEFAULTS, placedPoly } from 'lib/nesting/types';
  */
 export type StrokeKind = 'cut' | 'line' | 'notch';
 
-export type DrawingStroke = { kind: StrokeKind; closed: boolean; pts: [number, number][] };
-export type DrawingLabel = { x: number; y: number; s: string };
+export type DrawingStroke = {
+  kind: StrokeKind;
+  closed: boolean;
+  pts: [number, number][];
+  /** Dash pattern, mm (on, off, …) — a PLT line type; DXF and marker lines are solid. */
+  dash?: number[];
+};
+/**
+ * A text of the drawing. Without `sizeMm`: a piece name, centred on (x, y) at the renderer's own
+ * label size. With `sizeMm`: a text placed by its source (a PLT `LB`) — (x, y) is the baseline
+ * start, `sizeMm` the font size, `angle` degrees CCW as seen on paper.
+ */
+export type DrawingLabel = { x: number; y: number; s: string; sizeMm?: number; angle?: number };
 
 export type PatternDrawing = {
   /** Extent of the line work, mm. */

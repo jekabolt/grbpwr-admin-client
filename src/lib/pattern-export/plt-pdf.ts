@@ -1,34 +1,53 @@
-// PLT / HP-GL → PDF at its physical size (1:1), one sheet or tiled A4.
+// PLT / HP-GL → PDF at its physical size (1:1), one sheet or tiled A4 / A3 / Letter.
 //
 // The file is READ by the pattern import's own HP-GL adapter (lib/pattern-import/adapters/hpgl:
 // tokenizer, interpreter with IP/SC scaling, PE, arcs, labels) — never by a second parser here,
 // so "what the import sees" and "what the print shows" are one reading of the file. Its output is
-// mm, y-up, one style per pen ("pen N"); this module only flips it onto paper and colours pens.
+// mm, y-up, one style per pen ("pen N"); this module flips it onto paper (readPltSheet), turns it
+// into the same PatternDrawing a DXF becomes (drawingFromPltSheet) and prints it with THE 1:1
+// tiler, dxf-pdf.ts — one plan, one set of limits and marks for every 1:1 print in the app.
 import { assertFiniteDoc } from 'lib/pattern-import/adapters/budget';
 import { makeExtractHpgl } from 'lib/pattern-import/adapters/hpgl';
 import { tokenize } from 'lib/pattern-import/adapters/hpgl/tokenize';
 import { latin1 } from 'lib/pattern-import/adapters/sniff/sniff';
 import type { IRPage } from 'lib/pattern-import/types';
-import {
-  sheetToPdf,
-  type PrintSheet,
-  type Rgb,
-  type SheetLine,
-  type SheetPdfMode,
-  type SheetPdfOptions,
-  type SheetPdfResult,
-  type SheetText,
-} from './sheet-pdf';
+import type { DrawingStroke, PatternDrawing, StrokeKind } from './drawing';
+import { assertPrintableSize, planPdf, renderPdf, type PdfFont, type PdfPlan } from './dxf-pdf';
+import { pdfLayoutOf, type PdfFormatId } from './formats';
 
-/** Pen colours on paper — the PLT dialect of hpgl.ts: 1 cut, 2 drawn lines/text, 3 notches. */
-const PEN_INK: Record<number, { rgb: Rgb; widthMm: number }> = {
-  1: { rgb: [0, 0, 0], widthMm: 0.3 },
-  2: { rgb: [40, 80, 190], widthMm: 0.2 },
-  3: { rgb: [210, 30, 40], widthMm: 0.25 },
+export type Rgb = [number, number, number];
+
+/**
+ * Pens → the roles of the 1:1 print, in the PLT dialect of hpgl.ts: 1 cut, 2 drawn lines and text,
+ * 3 notches; any other pen is a drawn line. `rgb` is the on-screen preview colour only — the PDF
+ * prints by role (line weight), like every other 1:1 print.
+ */
+const PEN_ROLE: Record<number, { kind: StrokeKind; rgb: Rgb }> = {
+  1: { kind: 'cut', rgb: [0, 0, 0] },
+  2: { kind: 'line', rgb: [40, 80, 190] },
+  3: { kind: 'notch', rgb: [210, 30, 40] },
 };
-const OTHER_PEN = { rgb: [90, 90, 90] as Rgb, widthMm: 0.2 };
+const OTHER_PEN = { kind: 'line' as StrokeKind, rgb: [90, 90, 90] as Rgb };
+export const penRole = (pen: number) => PEN_ROLE[pen] ?? OTHER_PEN;
 
-export type PltSheet = PrintSheet & {
+/** A stroked polyline in sheet mm (y-down, origin top-left). */
+export type PltLine = {
+  pts: [number, number][];
+  closed: boolean;
+  pen: number;
+  dashMm?: number[] | null;
+};
+
+/** Baseline-left text; rotation CCW as seen on paper. */
+export type PltText = { text: string; x: number; y: number; sizeMm: number; rotationDeg: number };
+
+export type PltSheet = {
+  widthMm: number;
+  heightMm: number;
+  lines: PltLine[];
+  texts: PltText[];
+  /** The file name ("pattern.plt"). */
+  title: string;
   warnings: string[];
   /** Plotter units per mm the sheet was read with. */
   unitsPerMm: number;
@@ -46,9 +65,6 @@ export type PltReadOptions = {
   /** Plotter units per mm (HP-GL standard 40). */
   unitsPerMm?: number;
 };
-
-/** Past this the drawing is not a pattern: refused before any page is planned. */
-export const PLT_MAX_SIDE_MM = 20_000;
 
 // RO (plot rotation) — the import reader ignores it (warning only). A 1:1 print cannot: a rotated
 // drawing printed unrotated is a different garment on the table. Supported when the file sets ONE
@@ -163,34 +179,32 @@ export async function readPltSheet(
     ])
       grow(...rot(x, y));
   if (!Number.isFinite(minX)) throw new Error('the file draws nothing');
-  if (!Number.isFinite(maxX - minX) || !Number.isFinite(maxY - minY))
-    throw new Error('the drawing has no finite size — the file is damaged');
-  if (maxX - minX > PLT_MAX_SIDE_MM || maxY - minY > PLT_MAX_SIDE_MM)
-    throw new Error(
-      `the drawing is ${Math.round(maxX - minX)} × ${Math.round(maxY - minY)} mm at ${+unitsPerMm.toFixed(3)} plotter units/mm — over the ${PLT_MAX_SIDE_MM / 1000} m limit; check the units`,
-    );
+  // The 1:1 print's own limits, refused here — before the sheet is built — with the units named.
+  assertPrintableSize(
+    maxX - minX,
+    maxY - minY,
+    `at ${+unitsPerMm.toFixed(3)} plotter units/mm; check the units`,
+  );
 
   const X = (x: number) => x - minX;
   const Y = (y: number) => maxY - y; // y-up → y-down
   const runs = new Map<number, number>();
-  const lines: SheetLine[] = [];
+  const lines: PltLine[] = [];
   for (const p of page.paths) {
     const st = styles.get(p.style);
     const pen = penOfLayer(st?.layer ?? null);
     runs.set(pen, (runs.get(pen) ?? 0) + 1);
-    const ink = PEN_INK[pen] ?? OTHER_PEN;
     lines.push({
       pts: p.pts.map((q) => {
         const [x, y] = rot(q.x, q.y);
         return [X(x), Y(y)] as [number, number];
       }),
       closed: p.closed,
-      widthMm: ink.widthMm,
-      rgb: ink.rgb,
+      pen,
       dashMm: st?.dash ?? null,
     });
   }
-  const texts: SheetText[] = page.texts.map((t) => {
+  const texts: PltText[] = page.texts.map((t) => {
     const [ax, ay] = rot(t.anchor.x, t.anchor.y);
     return {
       text: t.text,
@@ -216,30 +230,70 @@ export async function readPltSheet(
     rotationDeg: ro,
     pens: [...runs.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([pen, n]) => ({ pen, runs: n, rgb: (PEN_INK[pen] ?? OTHER_PEN).rgb })),
+      .map(([pen, n]) => ({ pen, runs: n, rgb: penRole(pen).rgb })),
   };
 }
 
-export type PltPdfResult = SheetPdfResult & {
+/**
+ * The plotter sheet as the drawing THE 1:1 tiler prints: pens become roles (cut / line / notch),
+ * dashes are kept, LB texts keep their size, angle and baseline-left anchor. Same frame (mm,
+ * y-down, origin top-left) — nothing moves.
+ */
+export function drawingFromPltSheet(sheet: PltSheet): PatternDrawing {
+  const strokes: DrawingStroke[] = sheet.lines.map((l) => ({
+    kind: penRole(l.pen).kind,
+    closed: l.closed,
+    pts: l.pts,
+    ...(l.dashMm && l.dashMm.length ? { dash: l.dashMm } : {}),
+  }));
+  return {
+    w: sheet.widthMm,
+    h: sheet.heightMm,
+    strokes,
+    labels: sheet.texts.map((t) => ({
+      x: t.x,
+      y: t.y,
+      s: t.text,
+      sizeMm: t.sizeMm,
+      angle: t.rotationDeg,
+    })),
+    title: sheet.title.replace(/\.[^.]+$/, '') || 'drawing',
+    warnings: [...sheet.warnings],
+  };
+}
+
+export type PltPdfResult = {
+  bytes: Uint8Array;
+  pages: number;
+  plan: PdfPlan;
   sheet: PltSheet;
+  drawing: PatternDrawing;
   fileName: string;
+  warnings: string[];
 };
 
 /**
- * PLT bytes → PDF bytes at 1:1. `mode`: 'sheet' = one page the size of the drawing (+ margin and
- * a test square; refused past the PDF page limit of 5080 mm), 'a4' = tiled A4 with a page-1 map.
+ * PLT bytes → PDF bytes at 1:1 through THE tiler (dxf-pdf.ts). `format`: 'pdf-sheet' = one page
+ * the size of the drawing (falls back to A4 tiles past the PDF page limit, with a warning), the
+ * others = tiled paper with a page-1 map. jsPDF is loaded here unless the caller passes it.
  */
 export async function pltToPdf(
   bytes: ArrayBuffer | Uint8Array,
-  mode: SheetPdfMode = 'a4',
-  opts: PltReadOptions & SheetPdfOptions = {},
+  format: PdfFormatId = 'pdf-a4',
+  opts: PltReadOptions & { jsPDF?: typeof import('jspdf').jsPDF; font?: PdfFont } = {},
 ): Promise<PltPdfResult> {
   const sheet = await readPltSheet(bytes, opts);
-  const res = await sheetToPdf(sheet, mode, opts);
-  const stem = (opts.name ?? 'drawing.plt').replace(/\.[^.]+$/, '') || 'drawing';
-  const fileName =
-    mode === 'sheet'
-      ? `${stem}-1to1.pdf`
-      : `${stem}-1to1-${res.pages - 1}x${res.plan?.paper ?? 'A4'}.pdf`;
-  return { ...res, sheet, fileName };
+  const drawing = drawingFromPltSheet(sheet);
+  const plan = planPdf(drawing, pdfLayoutOf(format));
+  const JsPDF = opts.jsPDF ?? (await import('jspdf')).jsPDF;
+  const pdf = renderPdf(JsPDF, drawing, plan, opts.font);
+  return {
+    bytes: new Uint8Array(pdf.output('arraybuffer')),
+    pages: plan.pages.length,
+    plan,
+    sheet,
+    drawing,
+    fileName: plan.fileName,
+    warnings: plan.warnings,
+  };
 }

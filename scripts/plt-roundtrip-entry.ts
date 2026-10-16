@@ -18,8 +18,8 @@ import { plotFromMarker, plotFromPattern } from '../src/lib/pattern-export/plot-
 import { pltToPdf } from '../src/lib/pattern-export/plt-pdf';
 
 export { pltToPdf, dxfToHpgl };
-export { readPltSheet } from '../src/lib/pattern-export/plt-pdf';
-export { planTiles } from '../src/lib/pattern-export/tiles';
+export { readPltSheet, drawingFromPltSheet } from '../src/lib/pattern-export/plt-pdf';
+export { planPdf } from '../src/lib/pattern-export/dxf-pdf';
 
 type P = { x: number; y: number };
 
