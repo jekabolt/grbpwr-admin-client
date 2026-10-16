@@ -206,38 +206,6 @@ const STYLE: Record<FillOutcome, { fill: string; stroke: string; dash: boolean }
   refused: { fill: '#ffffff', stroke: SHEET_INK.blue, dash: true },
 };
 
-/**
- * The region round a loop, as ONE ring: the box (grown 20 mm), a zero-width cut in to the loop, the
- * loop the other way round, and back — filled even-odd it is the box minus the loop (the split
- * edit takes a single ring).
- */
-function keyhole(box: { minX: number; minY: number; maxX: number; maxY: number }, loop: PtMm[]) {
-  const g = 20;
-  const ring: PtMm[] = [
-    { x: box.minX - g, y: box.minY - g },
-    { x: box.maxX + g, y: box.minY - g },
-    { x: box.maxX + g, y: box.maxY + g },
-    { x: box.minX - g, y: box.maxY + g },
-  ];
-  const area = (ps: PtMm[]) =>
-    ps.reduce((a, p, i) => {
-      const q = ps[(i + 1) % ps.length];
-      return a + p.x * q.y - q.x * p.y;
-    }, 0);
-  const l = Math.sign(area(loop)) === Math.sign(area(ring)) ? [...loop].reverse() : [...loop];
-  let k = 0;
-  let bd = Infinity;
-  l.forEach((p, i) => {
-    const d = Math.hypot(p.x - ring[0].x, p.y - ring[0].y);
-    if (d < bd) {
-      bd = d;
-      k = i;
-    }
-  });
-  const hole = [...l.slice(k), ...l.slice(0, k), l[k]];
-  return [...ring, ring[0], ...hole];
-}
-
 const centre = (pts: PtMm[]) => {
   let x = 0;
   let y = 0;
@@ -265,6 +233,23 @@ type Hot =
   | { kind: 'aside'; id: number }
   | { kind: 'garment'; v: string }
   | null;
+
+/**
+ * A two-parts split in progress: stage 1 = the first loop sent, 2 = waiting for the loop round the
+ * other part, 3 = the second loop sent. `edits` = the edit count once the loop has applied; `sent`
+ * = the pieces output the loop was drawn on (the check waits for a newer one). Kept in the quiz
+ * slot: the step unmounts while the pieces run again.
+ */
+type SplitCheck = {
+  stage: 1 | 2 | 3;
+  rank: number;
+  orig: number;
+  a1: number;
+  first: number;
+  other: number | null;
+  edits: number;
+  sent: unknown;
+};
 
 /** A set-aside reason in two or three words, the caption of its tiles. */
 const ASIDE_SHORT: Partial<Record<SetAside['reason'] | 'size-copy?', string>> = {
@@ -304,7 +289,16 @@ export function PiecesStep({
     asideOk: false,
     /** Outlines brought back from the set-aside check: aside id → the piece it became. */
     promoted: new Map<number, { aside: SetAside; seed: number }>(),
+    split: null as SplitCheck | null,
   }));
+  const splitRef = {
+    get current() {
+      return seen.split;
+    },
+    set current(v: SplitCheck | null) {
+      seen.split = v;
+    },
+  };
   const out = session.pieces;
   const runSizes = session.sizes?.run.sizes ?? [];
   const [rank, setRank] = useState(
@@ -330,6 +324,9 @@ export function PiecesStep({
   const [hint, setHint] = useState<string | null>(null);
   // the lasso armed by «one piece»: it joins the parts drawn around, it does not split
   const [lassoJoin, setLassoJoin] = useState(false);
+  // the lasso armed by «two parts»: a loop round ONE part; round both is asked again, never joined
+  const [lassoSplit, setLassoSplit] = useState(false);
+
   /** Every tool on the toolbar, not only the ones the selected region's problem needs. */
   const [allTools, setAllTools] = useState(false);
   /** The closed regions' list, opened by hand (a closed region picked on the sheet opens it too). */
@@ -367,9 +364,11 @@ export function PiecesStep({
     if (tool === 'pan') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (splitRef.current?.stage === 2) splitRef.current = null;
       setGapA(null);
       setTool('pan');
       setLassoJoin(false);
+      setLassoSplit(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -418,6 +417,7 @@ export function PiecesStep({
     for (const k of [...seen.rows.keys()]) if (k !== 'model') seen.rows.delete(k);
     seen.asideOk = false;
     seen.promoted.clear();
+    seen.split = null;
   }
   // the card follows the active question: a resolved region hands over to the next one by itself
   const guided = useRef(false);
@@ -432,6 +432,49 @@ export function PiecesStep({
     setTool('pan');
     // the same region asked again after an answer (two pieces → a gap) is a new question too
   }, [active?.key, activeRegion?.outcome, activeRegion?.rank]);
+  // a loop has applied: did it split? (one part closed and smaller; both parts = the region)
+  useEffect(() => {
+    const p = splitRef.current;
+    if (!p || p.stage === 2 || session.busy || inputs.edits.length !== p.edits || out === p.sent)
+      return;
+    const at = (seed: number | null) =>
+      seed == null
+        ? undefined
+        : families.find((f) => f.seed === seed)?.candidates.find((c) => c.rank === p.rank);
+    const undo = (n: number) => {
+      splitRef.current = null;
+      setHint("didn't split — try again");
+      void (async () => {
+        for (let k = 0; k < n; k++) await api.editPieces('undo');
+      })();
+    };
+    if (p.stage === 1) {
+      const a = at(p.first);
+      if (!a || a.outcome !== 'closed' || a.areaMm2 > 0.97 * p.orig) return undo(1);
+      if (p.other != null && at(p.other)?.outcome === 'merged') {
+        // the other part still reads as the whole region: ask for its loop
+        splitRef.current = { ...p, stage: 2, a1: a.areaMm2, edits: -1 };
+        setHint(null);
+        setSel(p.other);
+        setRank(p.rank);
+        setZoomTo({ seed: p.other, rank: p.rank });
+        setLassoJoin(false);
+        setLassoSplit(true);
+        setTool('lasso');
+        return;
+      }
+      splitRef.current = null;
+      setHint('split');
+      return;
+    }
+    const b = at(p.other);
+    const ok =
+      !!b && b.outcome === 'closed' && Math.abs(p.a1 + b.areaMm2 - p.orig) <= 0.05 * p.orig;
+    if (!ok) return undo(2);
+    splitRef.current = null;
+    setHint('split into two parts');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [out, session.busy, inputs.edits.length]);
   // a new question closes the pieces list: while one is open, the card is the only thing to read
   useEffect(() => {
     setClosedOpen(false);
@@ -463,6 +506,7 @@ export function PiecesStep({
     setGapA(null);
     setTool(t);
     setLassoJoin(false);
+    setLassoSplit(false);
   };
 
   const seedAt = (id: number) => out.seeds.find((s) => s.id === id);
@@ -574,7 +618,7 @@ export function PiecesStep({
    * inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
    * closes on its own — 'closed', another area — so it is never taken for a part of this one.
    */
-  const partnersOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] =>
+  const rawPartners = (f: PieceFamily, c: PieceCandidate): PieceFamily[] =>
     c.outcome !== 'merged' || c.outer.length < 3
       ? []
       : families.filter((g) => {
@@ -585,12 +629,24 @@ export function PiecesStep({
           const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
           return !!at && inside(at, c.outer);
         });
+  /** Proven only when reciprocal and unique: each of the two lists exactly the other. */
+  const partnersOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] => {
+    const raw = rawPartners(f, c);
+    if (raw.length !== 1) return [];
+    const gc = raw[0].candidates.find((x) => x.rank === c.rank);
+    const back = gc ? rawPartners(raw[0], gc) : [];
+    return back.length === 1 && back[0].seed === f.seed ? raw : [];
+  };
 
   const onLasso = (poly: PtMm[]) => {
     const ins = families.filter((f) => {
       const s = seedAt(f.seed);
       return s && inside(s.at, poly);
     });
+    if (ins.length >= 2 && lassoSplit) {
+      setHint('loop one part only — try again');
+      return;
+    }
     if (ins.length >= 2) {
       void api.editPieces({ kind: 'merge', seeds: ins.map((f) => f.seed) });
       setHint(`joined ${ins.length} parts into one piece`);
@@ -605,21 +661,34 @@ export function PiecesStep({
       const target =
         ins[0] ?? families.find((f) => outcomeOf(f) === 'merged' && inside(c, cand(f).outer));
       if (target) {
-        // two numbers in the region: the loop is one part, the rest of the region the other —
-        // both are cut in one go, so no second loop is asked for
-        const tc = target.candidates.find((x) => x.rank === rank) ?? cand(target);
-        const other = partnersOf(target, tc);
-        const rest = other.length === 1 ? keyhole(tc.bbox, poly) : null;
-        void (async () => {
-          await api.editPieces({ kind: 'split', seed: target.seed, lassoMm: poly });
-          if (rest) await api.editPieces({ kind: 'split', seed: other[0].seed, lassoMm: rest });
-        })();
-        setHint(rest ? 'split into two parts' : 'region split along the loop');
+        // the loop the operator drew is the only cut sent: one part per loop. The first loop's
+        // result is checked (it cut something, it closed); the other part is asked for next, and
+        // both parts must add up to the region — else the loops are undone ("didn't split")
+        const p = splitRef.current;
+        if (p?.stage === 2 && p.other === target.seed) {
+          splitRef.current = { ...p, stage: 3, edits: inputs.edits.length + 1, sent: out };
+        } else {
+          const tc = target.candidates.find((x) => x.rank === rank) ?? cand(target);
+          const other = partnersOf(target, tc);
+          splitRef.current = {
+            stage: 1,
+            rank: tc.rank,
+            orig: tc.areaMm2,
+            a1: 0,
+            first: target.seed,
+            other: other[0]?.seed ?? null,
+            edits: inputs.edits.length + 1,
+            sent: out,
+          };
+        }
+        void api.editPieces({ kind: 'split', seed: target.seed, lassoMm: poly });
+        setHint('splitting…');
       } else
         setHint('no piece number inside the lasso and no touching pieces under it — nothing to do');
     }
     setTool('pan');
     setLassoJoin(false);
+    setLassoSplit(false);
   };
 
   // ── the guide's checklist: every question seen open, fixed ones greyed with a ✓ ──
@@ -666,8 +735,10 @@ export function PiecesStep({
   // inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
   // closes on its own — 'closed', another area — so it is never taken for a part of this one.
   const partners = activeFam && activeCand ? partnersOf(activeFam, activeCand) : [];
+  /** The other numbers inside this outline (shown large even when not proven a pair). */
+  const others = activeFam && activeCand ? rawPartners(activeFam, activeCand) : [];
   /** The pieces the active question is about: lit on the canvas, their numbers drawn large. */
-  const asked = activeFam ? new Set([activeFam.seed, ...partners.map((g) => g.seed)]) : null;
+  const asked = activeFam ? new Set([activeFam.seed, ...others.map((g) => g.seed)]) : null;
   const markWord = (seed: number) => markOf.get(seed) ?? '?';
   /**
    * The card's picture: the region's own outline, or around the gap. A 4-point outline is the
@@ -713,6 +784,22 @@ export function PiecesStep({
         onClick: () => notAPiece(activeFam),
       }
     : null;
+  // mid-split, the part already cut is still one of the two (its outline no longer overlaps)
+  const cutPart =
+    activeFam && seen.split?.stage === 2 && seen.split.other === activeFam.seed
+      ? families.find((g) => g.seed === seen.split!.first)
+      : undefined;
+  const parts = activeFam
+    ? [activeFam, ...others, ...(cutPart && !others.includes(cutPart) ? [cutPart] : [])]
+    : [];
+  const broughtBack = new Set([...seen.promoted.values()].map((x) => x.seed));
+  const backParts = parts.filter((g) => broughtBack.has(g.seed));
+  const dropAnswers: Answer[] = (backParts.length === 1 ? backParts : parts).map((g) => ({
+    label: `drop ${markWord(g.seed)}`,
+    how: 'one piece, or two parts',
+    title: `part ${markWord(g.seed)} is not a piece`,
+    onClick: () => notAPiece(g),
+  }));
   const answers: Answer[] = (() => {
     if (active?.kind === 'model') {
       const order = named?.pick
@@ -791,7 +878,7 @@ export function PiecesStep({
       case 'merged':
         return [
           // one click: the two numbers become one piece (the merge edit, these numbers exactly)
-          ...(partners.length
+          ...(partners.length === 1
             ? [
                 {
                   label: 'one piece',
@@ -809,7 +896,20 @@ export function PiecesStep({
                   },
                 },
               ]
-            : []),
+            : [
+                // not proven a pair: the loop round the parts to join (the banner says so)
+                {
+                  label: 'one piece',
+                  how: 'one piece, or two parts',
+                  title: 'draw a loop around the parts that are one piece',
+                  pressed: tool === 'lasso' && lassoJoin && sel === activeFam.seed,
+                  onClick: () => {
+                    arm('lasso');
+                    setLassoJoin(true);
+                    setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
+                  },
+                },
+              ]),
           // a split needs the line between the parts: the sheet is already on the region, the
           // numbers are large, and the hint says which loop to draw
           {
@@ -819,10 +919,13 @@ export function PiecesStep({
             pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
             onClick: () => {
               arm('lasso');
+              setLassoSplit(true);
               setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
             },
           },
-          notThis,
+          // which part is not a piece: the brought-back outline when it is one of them, else
+          // one answer per part with its number (never an ambiguous «not a piece»)
+          ...dropAnswers,
         ];
       case 'tiny':
         return [
@@ -867,7 +970,9 @@ export function PiecesStep({
         ? lassoJoin
           ? 'draw a loop around both parts'
           : sel != null
-            ? `draw a loop around part ${selMark} only`
+            ? splitRef.current?.stage === 2
+              ? `now draw a loop around part ${selMark}`
+              : `draw a loop around part ${selMark} only`
             : 'draw a loop'
         : tool === 'reseed'
           ? `click another spot inside piece ${selMark}`
@@ -1082,7 +1187,11 @@ export function PiecesStep({
             </div>
           )}
           {/* while an answer is drawn on the sheet, the sheet is where the coach points */}
-          <div className='relative min-h-0 flex-1' data-ask-zone={tool !== 'pan' ? '' : undefined}>
+          <div
+            className='relative min-h-0 flex-1'
+            data-ask-zone={tool !== 'pan' ? '' : undefined}
+            data-ask-label={tool !== 'pan' ? banner : undefined}
+          >
             {/* a drawing tool is only ever started by an answer: the sheet says what to do */}
             {tool !== 'pan' && (
               <div
@@ -1571,6 +1680,11 @@ export function PiecesStep({
           {active && (
             <div
               data-ask-zone
+              data-ask-label={
+                active.kind === 'aside'
+                  ? '1 optional check'
+                  : `${active.kind === 'region' && markOf.get(active.seed) ? `${markOf.get(active.seed)} · ` : ''}${question}`
+              }
               className={cn('flex flex-col gap-3', listed && 'mt-3 border-t border-hairline pt-3')}
             >
               <Text
@@ -1750,7 +1864,7 @@ export function PiecesStep({
 
           {/* no piece found at all: the one answer is to click one on the sheet */}
           {!active && !families.length && (
-            <div data-ask-zone className='flex flex-col gap-3'>
+            <div data-ask-zone data-ask-label='no pieces found' className='flex flex-col gap-3'>
               <Text size='micro' component='p'>
                 no pieces found
               </Text>
