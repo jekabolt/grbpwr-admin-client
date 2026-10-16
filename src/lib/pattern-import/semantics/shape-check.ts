@@ -24,6 +24,8 @@ export type SizeShape = {
   corners: PtMm[];
   /** weak corners (turn > CORNER_WEAK_DEG), counted */
   weak: number;
+  /** per scale × convex / concave: strong and weak turn counts (the comparison's input) */
+  events: { key: string; strong: number; weak: number; at: PtMm[] }[];
 };
 
 /** The point `d` mm along the closed polyline from vertex i, forward (dir 1) or back (dir −1). */
@@ -44,8 +46,15 @@ function along(pts: readonly PtMm[], i: number, d: number, dir: 1 | -1): PtMm {
   return pts[k];
 }
 
-/** Turn angles (deg, 0 = straight) at each vertex of the simplified closed outline. */
-export function turnsOf(outline: readonly PtMm[]): { at: PtMm; deg: number }[] {
+/**
+ * Signed turn angles (deg; > 0 = left turn on the counter-clockwise outline, i.e. convex) at each
+ * vertex of the simplified closed outline, measured between the line `reach` mm before and after
+ * it; local maxima at least 2·reach apart.
+ */
+export function turnsOf(
+  outline: readonly PtMm[],
+  reach = CORNER_REACH_MM,
+): { at: PtMm; deg: number }[] {
   let pts = simplify(outline, true, 0.4);
   if (
     pts.length > 2 &&
@@ -53,60 +62,92 @@ export function turnsOf(outline: readonly PtMm[]): { at: PtMm; deg: number }[] {
   )
     pts = pts.slice(0, -1);
   if (pts.length < 3) return [];
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    area += p.x * q.y - q.x * p.y;
+  }
+  if (area < 0) pts = [...pts].reverse();
   const out: { at: PtMm; deg: number }[] = [];
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
-    const a = along(pts, i, CORNER_REACH_MM, -1);
-    const b = along(pts, i, CORNER_REACH_MM, 1);
+    const a = along(pts, i, reach, -1);
+    const b = along(pts, i, reach, 1);
     const u = { x: p.x - a.x, y: p.y - a.y };
     const v = { x: b.x - p.x, y: b.y - p.y };
     const lu = Math.hypot(u.x, u.y);
     const lv = Math.hypot(v.x, v.y);
     if (lu < 1e-6 || lv < 1e-6) continue;
     const c = Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / (lu * lv)));
-    out.push({ at: p, deg: (Math.acos(c) * 180) / Math.PI });
+    const sign = u.x * v.y - u.y * v.x >= 0 ? 1 : -1;
+    out.push({ at: p, deg: (sign * Math.acos(c) * 180) / Math.PI });
   }
-  // a corner turned over two close vertices counts once: keep local maxima 2 mm apart
+  // a corner turned over two close vertices counts once: keep local maxima 2·reach apart
   const keep: { at: PtMm; deg: number }[] = [];
-  const order = out.map((_, i) => i).sort((x, y) => out[y].deg - out[x].deg);
+  const order = out.map((_, i) => i).sort((x, y) => Math.abs(out[y].deg) - Math.abs(out[x].deg));
   for (const i of order) {
     const t = out[i];
-    if (keep.some((k) => Math.hypot(k.at.x - t.at.x, k.at.y - t.at.y) < 2 * CORNER_REACH_MM))
-      continue;
+    if (keep.some((k) => Math.hypot(k.at.x - t.at.x, k.at.y - t.at.y) < 2 * reach)) continue;
     keep.push(t);
   }
   return keep;
 }
 
+/**
+ * Two scales: sharp corners (±1.5 mm, strong 60° / weak 25°) and notch-sized bends (±6 mm, strong
+ * 45° / weak 20° — a smooth Ø 11 mm dip or bump turns well past 45° there, a garment curve of
+ * radius ≥ 20 mm stays under 35°), each split into convex and concave events.
+ */
+const SCALES = [
+  { reach: CORNER_REACH_MM, strong: CORNER_STRONG_DEG, weak: CORNER_WEAK_DEG },
+  { reach: 6, strong: 45, weak: 20 },
+] as const;
+
+function eventsOf(cut: readonly PtMm[]): {
+  corners: PtMm[];
+  weak: number;
+  events: { key: string; strong: number; weak: number; at: PtMm[] }[];
+} {
+  const events: { key: string; strong: number; weak: number; at: PtMm[] }[] = [];
+  let corners: PtMm[] = [];
+  let weak = 0;
+  SCALES.forEach((sc, k) => {
+    const t = turnsOf(cut, sc.reach);
+    if (k === 0) {
+      corners = t.filter((x) => Math.abs(x.deg) > sc.strong).map((x) => x.at);
+      weak = t.filter((x) => Math.abs(x.deg) > sc.weak).length;
+    }
+    for (const sign of [1, -1]) {
+      const own = t.filter((x) => x.deg * sign > 0);
+      events.push({
+        key: `${sc.reach}mm ${sign > 0 ? 'convex' : 'concave'}`,
+        strong: own.filter((x) => Math.abs(x.deg) > sc.strong).length,
+        weak: own.filter((x) => Math.abs(x.deg) > sc.weak).length,
+        at: own.filter((x) => Math.abs(x.deg) > sc.strong).map((x) => x.at),
+      });
+    }
+  });
+  return { corners, weak, events };
+}
+
 /** The same, from a written block: its cut line and the counts read back from the file. */
 export function shapeOfCut(cut: readonly PtMm[], notches: number, drills: number): SizeShape {
-  const t = turnsOf(cut);
-  return {
-    notches,
-    drills,
-    corners: t.filter((x) => x.deg > CORNER_STRONG_DEG).map((x) => x.at),
-    weak: t.filter((x) => x.deg > CORNER_WEAK_DEG).length,
-  };
+  return { notches, drills, ...eventsOf(cut) };
 }
 
 export function shapeOf(z: Pick<PieceSizeSpec, 'cut' | 'notches' | 'drills'>): SizeShape {
-  const t = turnsOf(z.cut);
-  return {
-    notches: z.notches.length,
-    drills: z.drills.length,
-    corners: t.filter((x) => x.deg > CORNER_STRONG_DEG).map((x) => x.at),
-    weak: t.filter((x) => x.deg > CORNER_WEAK_DEG).length,
-  };
+  return { notches: z.notches.length, drills: z.drills.length, ...eventsOf(z.cut) };
 }
 
 /**
  * The first difference between the sizes of one family, or null when they are one shape:
- * a feature count that differs, or a size with more strong corners than another has weak ones.
- * Indices are into the given array.
+ * a feature count that differs, or a size with more strong events of one kind (scale × convex /
+ * concave) than another size has weak ones. Indices are into the given array.
  */
 export function shapeMismatch(
   sh: readonly SizeShape[],
-): { what: string; a: number; b: number } | null {
+): { what: string; a: number; b: number; at?: PtMm[] } | null {
   for (let i = 1; i < sh.length; i++) {
     if (sh[i].notches !== sh[0].notches)
       return { what: `notches ${sh[0].notches}≠${sh[i].notches}`, a: 0, b: i };
@@ -114,8 +155,19 @@ export function shapeMismatch(
       return { what: `drills ${sh[0].drills}≠${sh[i].drills}`, a: 0, b: i };
   }
   for (let i = 0; i < sh.length; i++)
-    for (let j = 0; j < sh.length; j++)
-      if (i !== j && sh[i].corners.length > sh[j].weak)
-        return { what: `corners ${sh[i].corners.length}>${sh[j].weak}`, a: i, b: j };
+    for (let j = 0; j < sh.length; j++) {
+      if (i === j) continue;
+      for (let k = 0; k < sh[i].events.length; k++) {
+        const a = sh[i].events[k];
+        const b = sh[j].events[k];
+        if (b && a.strong > b.weak)
+          return {
+            what: `corners ${a.key} ${a.strong}>${b.weak}`,
+            a: i,
+            b: j,
+            at: a.at,
+          };
+      }
+    }
   return null;
 }

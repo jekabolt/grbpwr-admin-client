@@ -67,7 +67,7 @@ export function shapeFamilies(ctx: GateCtx): { failed: string[]; notes: string[]
     const a = rows[d.a];
     const b = rows[d.b];
     const what = d.what.startsWith('corners')
-      ? `${a.token} has ${a.sh.corners.length} corners on the cut line, ${b.token} ${b.sh.weak} (a bump, dip or step in one size only)`
+      ? `${a.token}'s cut line turns where ${b.token}'s does not (${d.what.slice(8)}: a bump, dip or step in one size only)`
       : d.what.startsWith('notches')
         ? `${a.token} has ${a.sh.notches} notch(es), ${b.token} ${b.sh.notches}`
         : `${a.token} has ${a.sh.drills} drill(s), ${b.token} ${b.sh.drills}`;

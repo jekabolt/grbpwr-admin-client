@@ -127,7 +127,9 @@ function analyse(
       drills: sh.map((x) => x.drills),
       internal: p.sizes.map((z) => z.internal.length),
       corners: sh.map((x) => x.corners.length),
-      diff: diff ? diff.what : '',
+      diff: diff
+        ? `${diff.what} [${p.sizes[diff.a].sizeToken} vs ${p.sizes[diff.b].sizeToken}${diff.at ? ` at ${diff.at.map((q) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`).join(' ')}` : ''}]`
+        : '',
       passing: written.has(p.identity) && !bad.has(p.identity),
     });
     if (process.env.SHAPE_MARKS) marksOn(p, s);

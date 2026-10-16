@@ -19,7 +19,7 @@
 //                   size's line, and marks of about its size sit centred on ≥ 3 sizes' lines
 //                   nearby — the graded copies of one notch.
 //      A series mark drawn a little off its size's line (it crosses exactly one size's line, and
-//      that size has no mark of the series) is that size's copy (series + crossing).
+//      that size has no notch at that spot) is that size's copy (series + crossing).
 //      A size whose line carries no mark of its own gets none here: nothing is invented. The family
 //      gate (gate/shape.ts, in G5) then holds the export when the sizes differ.
 //
@@ -33,7 +33,9 @@ import { areaOf, bboxOf, closestOnPolyline, dist, pointInPolygon } from '../sema
 /** A mark is at most this big across (its bbox's longer side), mm — a notch circle (kombinezon:
  * 11.3 mm), not a buttonhole. */
 export const MARK_MAX_MM = 13;
-export const MARK_MIN_MM = 1.5;
+export const MARK_MIN_MM = 3;
+/** …and compact: its box's shorter side at least this share of the longer. */
+const MARK_COMPACT = 0.6;
 /** An outline vertex this close to a mark runs along it, mm. */
 const ALONG_MM = 0.5;
 /** A mark's centre this close to a size's clean outline sits ON it: 15 % of the mark, 0.75–1.5 mm. */
@@ -78,6 +80,8 @@ function marksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
     const b = bboxOf(ch.pts);
     const across = Math.max(b.maxX - b.minX, b.maxY - b.minY);
     if (across > MARK_MAX_MM || across < MARK_MIN_MM) continue;
+    // compact (a circle, a square, a triangle) — a buttonhole or a slot is long and thin
+    if (Math.min(b.maxX - b.minX, b.maxY - b.minY) < MARK_COMPACT * across) continue;
     if (b.maxX < box.minX || b.minX > box.maxX || b.maxY < box.minY || b.minY > box.maxY) continue;
     out.push({
       id: ch.id,
@@ -89,6 +93,21 @@ function marksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
   }
   return out;
 }
+
+/** Marks with ≥ SERIES_MIN_RANKS alike marks (itself included) within reach: graded copies. */
+const seriesOf = (marks: readonly Mark[]): Set<ChainId> =>
+  new Set(
+    marks
+      .filter(
+        (m) =>
+          marks.filter(
+            (o) =>
+              dist(o.centre, m.centre) <= SERIES_REACH_MM &&
+              Math.abs(o.across - m.across) <= SERIES_SIZE_TOL * m.across,
+          ).length >= SERIES_MIN_RANKS,
+      )
+      .map((m) => m.id),
+  );
 
 const near = (m: Mark, p: PtMm, tol: number) =>
   p.x >= m.box.minX - tol &&
@@ -139,6 +158,11 @@ function lineUnder(
   const chord = dist(P, Q);
   let best: PtMm[] | null = null;
   let bestLen = Infinity;
+  // every short path found: two drawn lines that disagree under the mark (> 0.3 mm) = no answer
+  const found: PtMm[][] = [];
+  const apart = (a: PtMm[], b: PtMm[]) =>
+    a.some((q) => closestOnPolyline(q, b, false).d > 0.3) ||
+    b.some((q) => closestOnPolyline(q, a, false).d > 0.3);
   for (const l of lines) {
     const n = l.pts.length;
     if (n < 2) continue;
@@ -168,6 +192,7 @@ function lineUnder(
     }
     for (const w of ways) consider(w);
   }
+  if (found.length > 1 && found.some((w) => apart(w, found[0]))) return null;
   if (best) return best;
   // the line split where the mark sits on it: P on one chain, Q on another, two of their ends meet
   // (≤ 1 mm) between them
@@ -195,7 +220,9 @@ function lineUnder(
   function consider(w: PtMm[]) {
     let L = 0;
     for (let i = 1; i < w.length; i++) L += dist(w[i - 1], w[i]);
-    if (L <= 1.6 * chord + 1 && L < bestLen) {
+    if (L > 1.6 * chord + 1) return;
+    found.push(w);
+    if (L < bestLen) {
       best = w;
       bestLen = L;
     }
@@ -212,6 +239,8 @@ export function cleanAroundMarks(
   marks: readonly Mark[],
   lines: readonly { pts: readonly PtMm[]; closed: boolean }[] = [],
   log?: string[],
+  /** marks of a graded series (≥ 3 alike nearby): only these may be crossed without a drawn line */
+  series?: ReadonlySet<ChainId>,
 ): { outer: PtMm[]; cleaned: ChainId[] } {
   const n = outer.length;
   if (n < 4 || !marks.length) return { outer: [...outer], cleaned: [] };
@@ -278,7 +307,10 @@ export function cleanAroundMarks(
         break;
       }
     }
-    // else straight across, or the corner the two edges meet at
+    // else straight across, or the corner the two edges meet at — only for a mark of a graded
+    // series (the mark's kind is proven by its copies; one lone mark without the line under it is
+    // left as drawn and the family gate asks)
+    if (!path && series && !series.has(m.id)) continue;
     if (!path) {
       const P = outer[r.s];
       const Q = outer[r.e];
@@ -369,10 +401,12 @@ export function readNotchMarks(
   if (!marks.length) return out;
   const clsOf = new Map<number, { id: number; role: string }>();
   for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, { id: k.id, role: k.role });
-  // 1 · clean every size
+  // 1 · clean every size (a no-op after the pieces stage's cleanNotchMarks, kept for the DXF-less
+  // callers and as the read's own outline)
+  const series = seriesOf(marks);
   const clean = live.map((c) => {
     log?.push(`r${c.rank}:`);
-    return { c, ...cleanAroundMarks(c.outer, marks, linesOf(c, set), log) };
+    return { c, ...cleanAroundMarks(c.outer, marks, linesOf(c, set), log, series) };
   });
   // 2 · which sizes' clean lines each mark is centred on (and how far each line passes it)
   const dOf = new Map<ChainId, Map<number, number>>();
@@ -475,10 +509,12 @@ export function readNotchMarks(
     const [r, d] = ds[0] ?? [-1, Infinity];
     if (!(d <= m.across / 2) || (ds[1] && ds[1][1] < 2 * d)) return;
     const acc = accepted.get(r);
-    if (!acc || acc.groups.has(find(i))) return;
+    if (!acc) return;
     const x = clean.find((c) => c.c.rank === r)!;
-    acc.notches.push(notchAt(x.outer, m.centre, m.across));
-    acc.groups.add(find(i));
+    const n = notchAt(x.outer, m.centre, m.across);
+    // the size already has a notch at this spot (its own mark): not a second one
+    if (acc.notches.some((o) => dist(o.at, n.at) < m.across)) return;
+    acc.notches.push(n);
   });
   for (const x of clean) {
     const acc = accepted.get(x.c.rank)!;
@@ -494,9 +530,22 @@ export function readNotchMarks(
 
 /** The size's own drawn lines (its walls that are no mark), for the line under a mark. */
 function linesOf(c: PieceCandidate, set: ChainSet): { pts: PtMm[]; closed: boolean }[] {
+  // the size's own pen (its longest size class among its walls) and the common lines — never
+  // another size's line that also bounds it somewhere
+  const clsOf = new Map<number, { id: number; role: string }>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, { id: k.id, role: k.role });
+  const lenBy = new Map<number, number>();
+  for (const id of c.walls) {
+    const k = clsOf.get(id);
+    if (k?.role === 'size')
+      lenBy.set(k.id, (lenBy.get(k.id) ?? 0) + (set.chains[id]?.lengthMm ?? 0));
+  }
+  const own = [...lenBy].sort((a, b) => b[1] - a[1])[0]?.[0];
   return c.walls.flatMap((id) => {
     const ch = set.chains[id];
     if (!ch || ch.pts.length < 2) return [];
+    const k = clsOf.get(id);
+    if (k && k.role !== 'common' && !(k.role === 'size' && k.id === own)) return [];
     const b = bboxOf(ch.pts);
     if (Math.max(b.maxX - b.minX, b.maxY - b.minY) <= MARK_MAX_MM && ch.closed) return [];
     return [{ pts: ch.pts, closed: ch.closed }];
@@ -521,10 +570,11 @@ export function cleanNotchMarks(families: PieceFamily[], set: ChainSet): PieceFa
     );
     const marks = marksOf(set, fb);
     if (!marks.length) return f;
+    const series = seriesOf(marks);
     let changed = false;
     const candidates = f.candidates.map((c) => {
       if (c.outer.length < 3 || c.features?.length) return c;
-      const r = cleanAroundMarks(c.outer, marks, linesOf(c, set));
+      const r = cleanAroundMarks(c.outer, marks, linesOf(c, set), undefined, series);
       if (!r.cleaned.length) return c;
       changed = true;
       const gone = new Set(r.cleaned);
