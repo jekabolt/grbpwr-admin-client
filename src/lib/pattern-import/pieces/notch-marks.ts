@@ -94,20 +94,50 @@ function marksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
   return out;
 }
 
-/** Marks with ≥ SERIES_MIN_RANKS alike marks (itself included) within reach: graded copies. */
-const seriesOf = (marks: readonly Mark[]): Set<ChainId> =>
-  new Set(
-    marks
-      .filter(
-        (m) =>
-          marks.filter(
-            (o) =>
-              dist(o.centre, m.centre) <= SERIES_REACH_MM &&
-              Math.abs(o.across - m.across) <= SERIES_SIZE_TOL * m.across,
-          ).length >= SERIES_MIN_RANKS,
+/**
+ * Marks of a graded series: each mark belongs to exactly one size's outline (the one outline that
+ * runs along it, else the one that straddles it: its nearest, the next at least twice as far), and the alike marks within reach straddle ≥ SERIES_MIN_RANKS distinct
+ * sizes' outlines (non-transitive; the mark's own included).
+ */
+function seriesOf(
+  marks: readonly Mark[],
+  cands: readonly Pick<PieceCandidate, 'rank' | 'outer'>[],
+): Set<ChainId> {
+  const rankOf = new Map<ChainId, number>();
+  for (const m of marks) {
+    // the one size whose outline runs along the mark (its wall: the outline detours round it)…
+    const along = cands.filter(
+      (c) => c.outer.length >= 3 && c.outer.filter((q) => near(m, q, ALONG_MM)).length >= 2,
+    );
+    if (along.length === 1) {
+      rankOf.set(m.id, along[0].rank);
+      continue;
+    }
+    if (along.length > 1) continue;
+    // …else the one whose line straddles it
+    const ds = cands
+      .filter((c) => c.outer.length >= 3)
+      .map((c) => [c.rank, closestOnPolyline(m.centre, c.outer, true).d] as const)
+      .sort((x, y) => x[1] - y[1]);
+    if (!ds.length || ds[0][1] > m.across / 2) continue;
+    if (ds[1] && ds[1][1] < 2 * Math.max(ds[0][1], 0.25)) continue;
+    rankOf.set(m.id, ds[0][0]);
+  }
+  const out = new Set<ChainId>();
+  for (const m of marks) {
+    if (!rankOf.has(m.id)) continue;
+    const rs = new Set<number>();
+    for (const o of marks)
+      if (
+        rankOf.has(o.id) &&
+        dist(o.centre, m.centre) <= SERIES_REACH_MM &&
+        Math.abs(o.across - m.across) <= SERIES_SIZE_TOL * m.across
       )
-      .map((m) => m.id),
-  );
+        rs.add(rankOf.get(o.id)!);
+    if (rs.size >= SERIES_MIN_RANKS) out.add(m.id);
+  }
+  return out;
+}
 
 const near = (m: Mark, p: PtMm, tol: number) =>
   p.x >= m.box.minX - tol &&
@@ -192,8 +222,7 @@ function lineUnder(
     }
     for (const w of ways) consider(w);
   }
-  if (found.length > 1 && found.some((w) => apart(w, found[0]))) return null;
-  if (best) return best;
+  if (best) return found.some((w) => apart(w, found[0])) ? null : best;
   // the line split where the mark sits on it: P on one chain, Q on another, two of their ends meet
   // (≤ 1 mm) between them
   const toEnds = (l: { pts: readonly PtMm[] }, from: PtMm) => {
@@ -215,7 +244,7 @@ function lineUnder(
           if (dist(ea, eb) <= 1) consider([...pa, ...[...qb].reverse()]);
         }
       }
-  return best;
+  return found.length > 1 && found.some((w) => apart(w, found[0])) ? null : best;
 
   function consider(w: PtMm[]) {
     let L = 0;
@@ -403,7 +432,7 @@ export function readNotchMarks(
   for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, { id: k.id, role: k.role });
   // 1 · clean every size (a no-op after the pieces stage's cleanNotchMarks, kept for the DXF-less
   // callers and as the read's own outline)
-  const series = seriesOf(marks);
+  const series = seriesOf(marks, live);
   const clean = live.map((c) => {
     log?.push(`r${c.rank}:`);
     return { c, ...cleanAroundMarks(c.outer, marks, linesOf(c, set), log, series) };
@@ -423,33 +452,22 @@ export function readNotchMarks(
     onRanks.set(m.id, rs);
   }
   const ranks = new Set(clean.map((x) => x.c.rank));
-  // series: marks of about one size near each other (union-find); a series is graded copies when
-  // its marks are centred on at least SERIES_MIN_RANKS distinct sizes' lines, one size each
-  const parent = marks.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  for (let a = 0; a < marks.length; a++)
-    for (let b = a + 1; b < marks.length; b++)
-      if (
-        dist(marks[a].centre, marks[b].centre) <= SERIES_REACH_MM &&
-        Math.abs(marks[a].across - marks[b].across) <= SERIES_SIZE_TOL * marks[a].across
-      )
-        parent[find(a)] = find(b);
-  const seriesRanks = new Map<number, Set<number>>();
-  marks.forEach((m, i) => {
-    const rs = onRanks.get(m.id)!;
-    if (rs.size !== 1) return;
-    const g = find(i);
-    const set0 = seriesRanks.get(g) ?? new Set<number>();
-    for (const r of rs) set0.add(r);
-    seriesRanks.set(g, set0);
-  });
-  const inSeries = (i: number) =>
-    ranks.size >= 2 &&
-    (seriesRanks.get(find(i))?.size ?? 0) >= Math.min(SERIES_MIN_RANKS, ranks.size);
-  const accepted = new Map<
-    number,
-    { notches: NotchFeature[]; refused: ChainId[]; groups: Set<number> }
-  >();
+  // series (non-transitive): the alike marks within reach of a mark, each centred on exactly one
+  // size's line, sit on at least SERIES_MIN_RANKS distinct sizes' lines (the mark's own included)
+  const alike = (m: Mark, o: Mark) =>
+    dist(o.centre, m.centre) <= SERIES_REACH_MM &&
+    Math.abs(o.across - m.across) <= SERIES_SIZE_TOL * m.across;
+  const inSeries = (i: number, ownRank?: number) => {
+    if (ranks.size < SERIES_MIN_RANKS) return false;
+    const m = marks[i];
+    const rs = new Set<number>(ownRank != null ? [ownRank] : []);
+    for (const o of marks) {
+      const on = onRanks.get(o.id)!;
+      if (on.size === 1 && alike(m, o)) rs.add([...on][0]);
+    }
+    return rs.size >= SERIES_MIN_RANKS;
+  };
+  const accepted = new Map<number, { notches: NotchFeature[]; refused: ChainId[] }>();
   for (const x of clean) {
     const r = x.c.rank;
     const wallCls = new Set(
@@ -461,7 +479,6 @@ export function readNotchMarks(
     const walls = new Set(x.c.walls);
     const notches: NotchFeature[] = [];
     const refused: ChainId[] = [];
-    const groups = new Set<number>();
     marks.forEach((m, i) => {
       const rs = onRanks.get(m.id)!;
       if (!rs.has(r)) return;
@@ -482,7 +499,6 @@ export function readNotchMarks(
       const ok = !otherSizeOnIt && (ownPen || wall || (rs.size === 1 && inSeries(i)));
       if (ok) {
         notches.push(notchAt(x.outer, m.centre, m.across));
-        groups.add(find(i));
       } else refused.push(m.id);
     });
     // a mark the size's own outline ran around (its wall) that straddles its line off centre: the
@@ -495,19 +511,20 @@ export function readNotchMarks(
       const ok = wall && d <= CROSS_SHARE * m.across;
       if (ok) {
         notches.push(notchAt(x.outer, m.centre, m.across));
-        groups.add(find(i));
       }
     });
-    accepted.set(r, { notches, refused, groups });
+    accepted.set(r, { notches, refused });
   }
   // 3 · a series mark drawn off its size's line (kombinezon P01: sizes 8 and 18, ~3 mm off): it
   // crosses exactly one size's line, no size's line passes its centre, and that size has no mark of
   // this series yet — the size's copy of the graded notch (series + crossing: two evidences)
   marks.forEach((m, i) => {
-    if (onRanks.get(m.id)!.size || !inSeries(i)) return;
+    if (onRanks.get(m.id)!.size) return;
     const ds = [...dOf.get(m.id)!].sort((a, b) => a[1] - b[1]);
     const [r, d] = ds[0] ?? [-1, Infinity];
     if (!(d <= m.across / 2) || (ds[1] && ds[1][1] < 2 * d)) return;
+    // the series: its alike neighbours centred on other sizes' lines, and this size (≥ 3 in all)
+    if (!inSeries(i, r)) return;
     const acc = accepted.get(r);
     if (!acc) return;
     const x = clean.find((c) => c.c.rank === r)!;
@@ -540,7 +557,13 @@ function linesOf(c: PieceCandidate, set: ChainSet): { pts: PtMm[]; closed: boole
     if (k?.role === 'size')
       lenBy.set(k.id, (lenBy.get(k.id) ?? 0) + (set.chains[id]?.lengthMm ?? 0));
   }
-  const own = [...lenBy].sort((a, b) => b[1] - a[1])[0]?.[0];
+  // the longest size class is the size's own pen only where its walls came from its class (F4
+  // 'class' / one-size 'single'); otherwise (inner plug, bundle rank, continuity, grade) only the
+  // common lines may run under a mark
+  const own =
+    c.rankFrom == null || c.rankFrom === 'class' || c.rankFrom === 'single'
+      ? [...lenBy].sort((a, b) => b[1] - a[1])[0]?.[0]
+      : undefined;
   return c.walls.flatMap((id) => {
     const ch = set.chains[id];
     if (!ch || ch.pts.length < 2) return [];
@@ -570,7 +593,7 @@ export function cleanNotchMarks(families: PieceFamily[], set: ChainSet): PieceFa
     );
     const marks = marksOf(set, fb);
     if (!marks.length) return f;
-    const series = seriesOf(marks);
+    const series = seriesOf(marks, f.candidates);
     let changed = false;
     const candidates = f.candidates.map((c) => {
       if (c.outer.length < 3 || c.features?.length) return c;
