@@ -85,13 +85,38 @@ function unit() {
     'nested sizes: fitted onto every size',
     f2,
   );
-  // a line beside the piece (the sheet / a neighbour)
+  // a line beside the piece: the direction is the piece's own — laid onto it, parallel
   const beside = vetProposal(
     { a: { x: 1000, y: 2200 }, b: { x: 1000, y: 2500 }, why: 'symmetry axis' },
     [drawn],
     true,
   );
-  check('dropped' in beside, 'a geometric line beside the piece is not offered', beside);
+  check(
+    'ok' in beside &&
+      grainOutsideMm(beside.ok.a, beside.ok.b, [drawn]) === 0 &&
+      Math.abs(beside.ok.a.x - beside.ok.b.x) < 1e-6,
+    'a geometric line beside the piece is laid onto it, same direction',
+    beside,
+  );
+  // a file per size, side by side (redcafe): one line cannot lie on both — not offered
+  const apart = vetProposal(
+    { a: { x: 892, y: 2200 }, b: { x: 892, y: 2500 }, why: 'long axis' },
+    [drawn, rect(2262, 2140, 2322, 2615)],
+    true,
+  );
+  check('dropped' in apart, 'sizes laid apart (a file per size): not offered', apart);
+  // a nest graded by shifting (r4454 seed 9: 160 × 94, each size 12 mm lower): the long axis
+  // through the largest misses the smallest — the parallel line through their common band
+  const nest = [0, 1, 2, 3, 4, 5].map((k) => rect(2149 - k, 705 + 11.3 * k, 2310, 799 + 12 * k));
+  const nf = fitGrainInside({ x: 2160, y: 810 }, { x: 2300, y: 810 }, nest);
+  check(
+    !!nf &&
+      nest.every((r) => grainOutsideMm(nf[0], nf[1], [r]) === 0) &&
+      Math.abs(nf[0].y - nf[1].y) < 1e-6 &&
+      len(nf) > 100,
+    'a shifted nest: the parallel line on every size',
+    nf,
+  );
   // a drawn line that leaves the piece: kept or dropped, never moved
   const leaving = vetProposal(
     { a: { x: 892, y: 2000 }, b: { x: 892, y: 2400 }, why: 'line in every size' },

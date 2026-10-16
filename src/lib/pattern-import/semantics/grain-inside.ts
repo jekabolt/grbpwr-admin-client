@@ -131,25 +131,16 @@ export function grainOutsideMm(
 }
 
 /**
- * The proposal a→b fitted onto every outline in `rings`: kept as is when it lies on all of them;
- * else re-placed on the same line, at `FIT_SHARE` of the stretch of that line lying on every
- * outline that overlaps it most (a line that misses the outlines entirely, or a stretch too short,
- * gives null — the piece asks).
+ * The stretch of the line through `a` along `u` that lies on every outline (sampled), the one that
+ * overlaps [0, L] most (else the longest); null when the line misses them.
  */
-export function fitGrainInside(
+function runAlong(
   a: PtMm,
-  b: PtMm,
-  rings: readonly (readonly PtMm[])[],
-  opts: { tol?: number; minMm?: number } = {},
-): [PtMm, PtMm] | null {
-  const tol = opts.tol ?? GRAIN_INSIDE_TOL_MM;
-  const minMm = opts.minMm ?? GRAIN_PROPOSAL_MIN_MM;
-  const L = Math.hypot(b.x - a.x, b.y - a.y);
-  if (!(L > 0)) return null;
-  const live = liveRings(rings);
-  if (!live.length || grainOutsideMm(a, b, live, tol) === 0) return L >= minMm ? [a, b] : null;
-  const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
-  // the line's parameter range over every outline (projections of their vertices)
+  u: PtMm,
+  live: readonly (readonly PtMm[])[],
+  tol: number,
+  L: number,
+): { t0: number; t1: number } | null {
   let lo = Infinity;
   let hi = -Infinity;
   for (const r of live)
@@ -163,7 +154,6 @@ export function fitGrainInside(
   const inside = lineProbe(a, u, live, tol);
   const n = Math.min(MAX_SAMPLES, Math.max(1, Math.ceil((hi - lo) / STEP_MM)));
   const at = (i: number) => lo + ((hi - lo) * i) / n;
-  // runs of samples inside every outline; the one that overlaps [0, L] most (else the longest)
   let best: { t0: number; t1: number; score: number } | null = null;
   let start = -1;
   for (let i = 0; i <= n + 1; i++) {
@@ -178,15 +168,73 @@ export function fitGrainInside(
       start = -1;
     }
   }
-  if (!best || !(best.t1 - best.t0 > 0)) return null;
-  const pad = ((best.t1 - best.t0) * (1 - FIT_SHARE)) / 2;
-  const t0 = best.t0 + pad;
-  const t1 = best.t1 - pad;
-  if (t1 - t0 < minMm) return null;
-  const pa = { x: a.x + u.x * t0, y: a.y + u.y * t0 };
-  const pb = { x: a.x + u.x * t1, y: a.y + u.y * t1 };
-  // the sampled run's ends are inside; a sliver between samples narrower than the step is not
-  return grainOutsideMm(pa, pb, live, tol) === 0 ? [pa, pb] : null;
+  return best && best.t1 - best.t0 > 0 ? best : null;
+}
+
+/** Offsets tried across the outlines when the line itself does not fit (a graded nest shifted). */
+const PARALLEL_TRIES = 64;
+
+/**
+ * The proposal a→b fitted onto every outline in `rings`: kept as is when it lies on all of them;
+ * else re-placed on the same line, at `FIT_SHARE` of the stretch of that line lying on every
+ * outline that overlaps it most; else (that stretch too short — sizes graded apart, so the line
+ * through one size's middle misses another) on the PARALLEL line, same direction, with the longest
+ * such stretch (nearest the original on a tie). Null when no line of that direction lies on every
+ * outline for `minMm` — the outlines share no room (a file per size, laid side by side), the piece
+ * asks.
+ */
+export function fitGrainInside(
+  a: PtMm,
+  b: PtMm,
+  rings: readonly (readonly PtMm[])[],
+  opts: { tol?: number; minMm?: number } = {},
+): [PtMm, PtMm] | null {
+  const tol = opts.tol ?? GRAIN_INSIDE_TOL_MM;
+  const minMm = opts.minMm ?? GRAIN_PROPOSAL_MIN_MM;
+  const L = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(L > 0)) return null;
+  const live = liveRings(rings);
+  if (!live.length || grainOutsideMm(a, b, live, tol) === 0) return L >= minMm ? [a, b] : null;
+  const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+  const nrm = { x: -u.y, y: u.x };
+  const shrunk = (o: PtMm, r: { t0: number; t1: number }): [PtMm, PtMm] | null => {
+    const pad = ((r.t1 - r.t0) * (1 - FIT_SHARE)) / 2;
+    const t0 = r.t0 + pad;
+    const t1 = r.t1 - pad;
+    if (t1 - t0 < minMm) return null;
+    const pa = { x: o.x + u.x * t0, y: o.y + u.y * t0 };
+    const pb = { x: o.x + u.x * t1, y: o.y + u.y * t1 };
+    // the sampled run's ends are inside; a sliver between samples narrower than the step is not
+    return grainOutsideMm(pa, pb, live, tol) === 0 ? [pa, pb] : null;
+  };
+  const own = runAlong(a, u, live, tol, L);
+  const onLine = own ? shrunk(a, own) : null;
+  if (onLine) return onLine;
+  // parallel lines across the outlines' common width
+  let dlo = Infinity;
+  let dhi = -Infinity;
+  for (const r of live)
+    for (const p of r) {
+      const d = (p.x - a.x) * nrm.x + (p.y - a.y) * nrm.y;
+      if (d < dlo) dlo = d;
+      if (d > dhi) dhi = d;
+    }
+  let best: { fit: [PtMm, PtMm]; len: number; d: number } | null = null;
+  for (let k = 1; k < PARALLEL_TRIES; k++) {
+    const d = dlo + ((dhi - dlo) * k) / PARALLEL_TRIES;
+    const o = { x: a.x + nrm.x * d, y: a.y + nrm.y * d };
+    const r = runAlong(o, u, live, tol, L);
+    const f = r ? shrunk(o, r) : null;
+    if (!f) continue;
+    const len = Math.hypot(f[1].x - f[0].x, f[1].y - f[0].y);
+    if (
+      !best ||
+      len > best.len + 1e-6 ||
+      (Math.abs(len - best.len) <= 1e-6 && Math.abs(d) < Math.abs(best.d))
+    )
+      best = { fit: f, len, d };
+  }
+  return best?.fit ?? null;
 }
 
 /** Probe switch (node only): GRAIN_FIT_OFF offers every proposal as measured (the "before" column). */
