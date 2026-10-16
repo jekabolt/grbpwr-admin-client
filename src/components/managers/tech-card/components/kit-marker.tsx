@@ -127,13 +127,15 @@ export function KitMarkerHint({
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
-      <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        title="lay out this fabric's pieces at the article width: measured length, waste included"
+        onClick={() => setOpen(true)}
+      >
         kit marker…
       </Button>
-      <Text size='nano' variant='label' component='span'>
-        lay out the pieces of THIS fabric at this article's width — a measured length, waste already
-        inside it
-      </Text>
       {open && (
         <Suspense fallback={null}>
           <KitMarkerDialog

@@ -877,7 +877,7 @@ const pictureWords = (p: QuizPicture | null) =>
 /** 97: над вопросом роли — `role · picture N`, а не нынешняя роль (её и спрашивают). */
 const roleWords = (p: QuizPicture | null) => (p ? `role · picture ${p.n}` : 'role');
 /** C3: двери строки заголовка (`‹`, `later`) — слово цвета подписи, без подчёркивания. */
-const headDoor =
+export const headDoor =
   'inline-flex cursor-pointer items-center justify-center text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor';
 
 /**

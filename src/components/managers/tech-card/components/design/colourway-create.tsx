@@ -62,6 +62,7 @@ export function ColourwayCreatePopover({
   onCreated,
   anchor,
   readOnly = false,
+  seed,
 }: {
   techCardId: number;
   open: boolean;
@@ -75,6 +76,11 @@ export function ColourwayCreatePopover({
    */
   anchor?: React.ReactNode;
   readOnly?: boolean;
+  /**
+   * С чего начинается форма (COLOURWAYS-LITE D7: `+` на вкладке — копия последнего колорвея, его
+   * палитра и семейство, имя пустое). Сброс по закрытию и каждое открытие возвращаются к нему.
+   */
+  seed?: PaletteValue;
 }): JSX.Element {
   /* ⚠ ЧИТАЕТСЯ ТОЛЬКО `isDirty`, И ЭТО ПОДПИСКА, А НЕ ПРОСМОТР — тот же довод, что у соседа
      (`colourway-proposals.tsx`): прокси `useFormState` подписывает на прочитанные свойства, и один
@@ -93,7 +99,7 @@ export function ColourwayCreatePopover({
   const { showMessage } = useSnackBarStore();
   const create = useCreateColorway(techCardId);
 
-  const [value, setValue] = useState<PaletteValue>(emptyPaletteValue);
+  const [value, setValue] = useState<PaletteValue>(() => seed ?? emptyPaletteValue());
   const [failed, setFailed] = useState<string | null>(null);
   const touched =
     !!value.name ||
@@ -103,7 +109,7 @@ export function ColourwayCreatePopover({
     !!failed;
 
   const clear = () => {
-    setValue(emptyPaletteValue());
+    setValue(seed ?? emptyPaletteValue());
     setFailed(null);
   };
 
@@ -131,6 +137,8 @@ export function ColourwayCreatePopover({
   if (wasOpen.current !== open) {
     wasOpen.current = open;
     if (!open && touched) clear();
+    // Семя могло смениться, пока окно было закрыто (последний колорвей стал другим).
+    if (open && seed) clear();
   }
 
   const colorways = techCard?.colorways ?? [];

@@ -1,9 +1,14 @@
-// Step 4 · SIZES — a mapping list: each size the file draws → a card size, or left out (owner
-// decision 6). Only size rows are shown; the other legend lines (seam, grain, common…) fold into a
-// count. An automatic answer that needs a look carries a quiet `check`; a legend row the reader is
-// unsure of carries `! confirm`. Evidence, confidence and reader notes live in `?debug=1`.
-// Two size rows given one label are one size (a size drawn in two looks) — the worker merges them.
-import { useRef, useState } from 'react';
+// Step 4 · SIZES — a picture of the mapping (owner 16.10: «make a clearer UI for mapping sizes»):
+// two aligned columns, «in the file» (each drawn size: its line sample, large, and its name) → «on
+// the card» (the card size it goes to, a box; dashed «leave out» when none). One click on a box
+// opens the card sizes, `leave out` and `rename…`. Card sizes nothing goes to close the list as
+// «nothing → XL», so the gap is seen where it is. Above the list, at most ONE question, asked only
+// when the sizes do not map by name: «which file size is your XS?» answered with the drawn sizes
+// as pictures; the rest follow in order. A row's own doubt (a line the reader is unsure of, a
+// guess, a drawn size off the card) is a `?` on the row that opens its yes / no under it.
+// Hovering a row lights its lines on the sheet, blue and thicker. Evidence lives in `?debug=1`.
+// Two size rows given one name are one size (a size drawn in two looks) — the worker merges them.
+import { useEffect, useState } from 'react';
 import type {
   BoxMm,
   ChainRole,
@@ -20,6 +25,7 @@ import { DataTable } from 'ui/components/data-table';
 import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
+import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
 import { drawnUnmapped } from 'lib/pattern-import/sizes/map';
@@ -30,18 +36,37 @@ import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, LegendEdit } from '../use-import-session';
 import { legendKey } from '../use-import-session';
 import { guessedSizes } from '../use-import-session';
-import { DebugFold, Fold, NativeSelect, Panel, SplitStage, ask, fmtPct } from '../ui-bits';
+import {
+  DebugFold,
+  Fold,
+  NativeSelect,
+  Panel,
+  SplitStage,
+  ask,
+  fmtPct,
+  useQuizSlot,
+} from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
 
 const ROLES: { value: ChainRole; label: string }[] = [
-  { value: 'size', label: 'size line' },
-  { value: 'common', label: 'common (all sizes)' },
-  { value: 'seam', label: 'seam line' },
-  { value: 'grain', label: 'grainline' },
-  { value: 'notch', label: 'notch' },
-  { value: 'internal', label: 'internal' },
-  { value: 'ignore', label: 'ignore' },
+  { value: 'size', label: 'a size' },
+  { value: 'common', label: 'all sizes share it' },
+  { value: 'seam', label: 'a seam line' },
+  { value: 'grain', label: 'a grainline' },
+  { value: 'notch', label: 'a notch' },
+  { value: 'internal', label: 'inside pieces' },
+  { value: 'ignore', label: 'not needed' },
 ];
+/** The row question for a line the reader is unsure of, in plain words (the line is beside it). */
+const ROLE_QUESTION: Record<ChainRole, string> = {
+  size: 'is this line a size?',
+  common: 'is this one line that all sizes share?',
+  seam: 'is this line a seam line?',
+  grain: 'is this line a grainline?',
+  notch: 'is this line a notch?',
+  internal: 'is this line drawn inside the pieces (darts, pockets), not a size?',
+  ignore: 'is this line not needed (text, a frame, marks)?',
+};
 const ROLE_WORD = Object.fromEntries(ROLES.map((r) => [r.value, r.label])) as Record<
   ChainRole,
   string
@@ -69,8 +94,10 @@ const around = (p: { x: number; y: number }, r = 60): BoxMm => ({
   maxY: p.y + r,
 });
 
-/** The legend's swatch column: a short stretch, 1:1 — enough to tell the rhythms apart. */
-const SWATCH_MM = 16;
+/** A mapping row's line sample: a 14 mm stretch, 1:1 (≈ 53 px) — two rhythms of most dashes. */
+const ROW_SWATCH_MM = 14;
+/** The quiz's picture strip: a shorter stretch, the chips stay one line. */
+const QUIZ_SWATCH_MM = 10;
 /** The row detail: a longer stretch, still cropped to the narrow column. */
 const DETAIL_MM = 60;
 
@@ -87,9 +114,29 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const [toKey, setToKey] = useState(false);
   // the `other lines` fold: null = follow the step (open while one of them waits for a confirm)
   const [otherOpen, setOtherOpen] = useState<boolean | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  // a row question opened or closed by hand (key → open); otherwise the asked row is open
+  const [qOverride, setQOverride] = useState<Record<string, boolean>>({});
   // the in-order quiz reopened over row answers (it then replaces them, and says so)
   const [reorder, setReorder] = useState(false);
+  // A rename re-reads the lines, and that read starts the size map over (use-import-session
+  // `legend`). The operator's answers are kept by size NAME across it: noted here before the
+  // rename, given back with one `size-map` once the new read has landed. The note lives in the
+  // wizard's slot, not in the step: the step unmounts while the read runs.
+  const kept = useQuizSlot<{ map: KeptMap | null }>('sizes-kept-map', () => ({ map: null }));
+  useEffect(() => {
+    const keepMap = kept.map;
+    if (!keepMap || !sizes || sizes === keepMap.at || session.busy) return;
+    kept.map = null;
+    if (inputs.sizeMap != null) return; // answered again meanwhile: theirs stands
+    const byName = new Map(keepMap.entries.map((k) => [k.name, k.card]));
+    const entries = sizes.map.entries.flatMap((e) => {
+      const name = norm(e.source.label);
+      return !e.notDrawn && byName.has(name)
+        ? [{ ...e, card: byName.get(name) ?? null, origin: 'operator' as const }]
+        : [];
+    });
+    if (entries.length) void api.dispatch({ type: 'size-map', entries });
+  }, [kept, sizes, session.busy, inputs.sizeMap, api]);
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -113,6 +160,21 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       type: 'legend',
       edits: [...inputs.legend.filter((e) => !mine(e)), { ...prev, ...p, classId }],
     });
+  };
+  /** Rename a size; the operator's mapping follows the names (the renamed row its new name). */
+  const rename = (c: LineClass, v: string) => {
+    const own = new Set((inputs.sizeMap ?? []).map((e) => e.source.rank));
+    const notes = sizes.map.entries
+      .filter((e) => own.has(e.source.rank) && !e.notDrawn)
+      // the renamed row last: on a name clash the size renamed onto keeps its card size
+      .sort((a, b) => +(a.source.classId === c.id) - +(b.source.classId === c.id))
+      .map((e) => ({
+        name: norm(e.source.classId === c.id ? v : e.source.label),
+        card: e.card,
+      }));
+    const entries = notes.filter((k, i) => notes.findIndex((o) => o.name === k.name) === i);
+    kept.map = entries.length ? { at: sizes, entries } : null;
+    edit(c.id, { sizeLabel: v || null });
   };
   const setCard = (e: SizeMapEntry, sizeId: string) =>
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
@@ -291,27 +353,27 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     });
     setReorder(false);
   };
-  const drawnName = (e: SizeMapEntry) => e.source.label || `rank ${e.source.rank + 1}`;
+  const drawnName = (e: SizeMapEntry) => e.source.label || `#${e.source.rank + 1}`;
   const windowTitle = (start: number) =>
     windowOf(start)
       .map((c, i) => `${drawnName(drawn[i])} → ${c?.name ?? 'leave out'}`)
       .join(' · ');
   const quiz =
     drawn.length > 0 && cards.length > 0
-      ? `the file has sizes ${drawnName(drawn[0])}…${drawnName(drawn[drawn.length - 1])}, the card ${cards[0].name}…${cards[cards.length - 1].name} — ${
-          span >= 0
-            ? `which file size is ${cards[0].name}?`
-            : `which card size is ${drawnName(drawn[0])}?`
-        }`
+      ? span >= 0
+        ? `which file size is your ${cards[0].name}?`
+        : `file size ${drawnName(drawn[0])} is which card size?`
       : '';
   // the legend row the step asks about first: a size row before the other lines
   const confirmAsk =
     asking === 'confirm' ? sizeRows.find(pending) ?? otherRows.find(pending) ?? null : null;
-  const focusFirstUnmapped = () => {
-    const el = listRef.current?.querySelector<HTMLSelectElement>('select[data-unmapped]');
-    el?.scrollIntoView({ block: 'nearest' });
-    el?.focus();
-  };
+  // the step's first question on a line that is not a size: shown first, above the list, not
+  // inside the folded «other lines» below it (owner: the blocker must be seen on first view)
+  const hoisted = confirmAsk && confirmAsk.role !== 'size' ? confirmAsk : null;
+  // the row question open by the operator's click; the row the footer asks about opens by itself
+  const qOpen = (key: string, active: boolean) => qOverride[key] ?? active;
+  const toggleQ = (key: string, active: boolean) =>
+    setQOverride({ ...qOverride, [key]: !qOpen(key, active) });
 
   const warnings: HeaderWarning[] = [
     ...flags.map((a, i) => ({
@@ -320,113 +382,222 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         ? { action: { label: 'show its lines', onClick: () => setFlag(i) } }
         : {}),
     })),
-    ...(sizes.map.unmapped.length > 0
-      ? [
-          {
-            text: `card sizes with no source: ${sizes.map.unmapped.map((c) => c.name).join(', ')}`,
-            ...(firstUnmapped != null
-              ? { action: { label: 'map a size', onClick: focusFirstUnmapped } }
-              : {}),
-          },
-        ]
-      : []),
-    ...cards.filter((c) => dupe(c.sizeId)).map((c) => `card size ${c.name} twice`),
-    ...(repeats ? ['two size rows carry one label — read as one size'] : []),
+    // a card size given twice is a blocker: the boxes turn red, and it is said here too
+    ...cards.filter((c) => dupe(c.sizeId)).map((c) => `card size ${c.name} is given twice`),
+    ...(repeats ? ['two lines carry one size name: they are read as one size'] : []),
     // The reader's own notes (a refused split, «split … name it») answer an operator action, so
     // they stay visible; only the run/encoding statistics live in the debug fold.
     ...chains.warnings,
   ];
 
-  /** The one marker of a mapping row: the open question on it, else nothing. */
-  const marker = (c: LineClass | null, e: SizeMapEntry | undefined) => {
-    if (c && low(c))
-      return (
-        <Chip
-          quiet
-          tone='attention'
-          {...ask('sizes-confirm', asking === 'confirm')}
-          data-ask-hint='confirm this line'
-          onClick={() => confirmRow(c)}
-          title={confirmTitle(c)}
-        >
-          ! confirm
-        </Chip>
-      );
+  /**
+   * The one open question of a mapping row, asked in the row itself: a line the reader is unsure
+   * of, a size no line draws, a drawn size the card lacks, a guessed card size. The answers are the
+   * same calls the old markers made (`legend-confirm`, `drawnAnyway`, `confirmSize`).
+   */
+  const questionOf = (c: LineClass | null, e: SizeMapEntry | undefined): RowAsk | null => {
+    if (c && low(c)) {
+      const isSize = c.role === 'size' && !!c.sizeLabel;
+      return {
+        text: isSize
+          ? `is this line really size ${c.sizeLabel}?`
+          : ROLE_QUESTION[c.role] ?? `is this line ${ROLE_WORD[c.role] ?? c.role}?`,
+        title: confirmTitle(c),
+        askKey: 'sizes-confirm',
+        askOn: asking === 'confirm' && confirmAsk?.id === c.id,
+        hint: isSize ? 'confirm this line is a size' : 'confirm what this line is',
+        answers: [
+          { label: 'yes', primary: true, onClick: () => confirmRow(c) },
+          {
+            label: c.role === 'size' ? 'no, another size' : 'no, it is something else',
+            title: 'open the line: say what it is, split it or join it to another size',
+            onClick: () => {
+              if (c.role !== 'size') setOtherOpen(true);
+              setPicked(c.id);
+              setToKey(false);
+            },
+          },
+        ],
+      };
+    }
     if (!e) return null;
     if (e.notDrawn)
-      return (
-        <span className='inline-flex items-center gap-1'>
-          <Pill tone='mut' title='the file lists this size, but no line draws it — left out'>
-            not drawn
-          </Pill>
-          <Chip
-            quiet
-            {...ask('sizes-not-drawn', asking === 'offer')}
-            data-ask-hint='say it is drawn on common lines'
-            title='this size is drawn on the shared (common) lines — fill it on them; a piece they do not close stays open'
-            onClick={() => void api.drawnAnyway(e.source.rank)}
-          >
-            it is drawn
-          </Chip>
-        </span>
-      );
-    // an automatic answer waiting for a look: a guessed card size, or a drawn size left out
+      return {
+        text: 'no line draws this size. is it drawn on the shared lines?',
+        title:
+          'this size is drawn on the lines all sizes share: fill it on them; a piece they do not close stays open',
+        askKey: 'sizes-not-drawn',
+        askOn: asking === 'offer',
+        hint: 'say it is drawn on the shared lines',
+        answers: [
+          {
+            label: 'yes, it is drawn',
+            primary: true,
+            onClick: () => void api.drawnAnyway(e.source.rank),
+          },
+        ],
+      };
+    // while the in-order question is up it answers these rows at once: no `?` on each of them
+    if (showOrderBar) return null;
     const leftOut = e.origin === 'auto' && !e.card;
-    if (!leftOut && !isGuess(e)) return null;
+    if (leftOut)
+      return {
+        text: `${drawnName(e)} is not on the card. leave it out?`,
+        title: `drawn, but not on the card${e.evidence?.length ? ` (${e.evidence.join(' · ')})` : ''}`,
+        askKey: 'sizes-check',
+        askOn: mapAsk === 'partial' || asking === 'offer',
+        hint: 'leave it out, or pick a card size in its box',
+        answers: [
+          {
+            label: 'yes, leave it out',
+            primary: true,
+            onClick: () => void api.confirmSize(e.source.rank),
+          },
+        ],
+      };
+    if (isGuess(e))
+      return {
+        text: `${drawnName(e)} → ${e.card?.name} is a guess. is it right?`,
+        title: `${fmtPct(e.confidence ?? 0, 0)} sure${e.evidence?.length ? ` · ${e.evidence.join(' · ')}` : ''}`,
+        askKey: 'sizes-check',
+        askOn: mapAsk === 'guess',
+        hint: 'keep it, or pick another card size in its box',
+        answers: [
+          { label: 'yes', primary: true, onClick: () => void api.confirmSize(e.source.rank) },
+        ],
+      };
+    return null;
+  };
+
+  // which drawn size gives each card size now (the menu says «now from 46»)
+  const sourceOfCard = (sizeId: number, except?: number) =>
+    sizes.map.entries
+      .filter((x) => x.card?.sizeId === sizeId && x.source.rank !== except)
+      .map(drawnName);
+
+  const hoverOf = (id: number | null) =>
+    id == null ? {} : { onMouseEnter: () => setHover(id), onMouseLeave: () => setHover(null) };
+
+  /** A drawn size: its line, its name, the arrow, the card size it goes to, its question. */
+  const mapRow = (key: string, c: LineClass | null, e: SizeMapEntry | undefined) => {
+    const q = questionOf(c, e);
+    const open = !!q && qOpen(key, q.askOn);
+    const boxAsk =
+      !!e &&
+      (mapAsk === 'dupe'
+        ? dupe(e.card?.sizeId)
+        : mapAsk === 'none' && !showOrderBar && e.source.rank === firstUnmapped);
+    const name = c ? c.sizeLabel || '(no name)' : e?.source.label || '(no name)';
     return (
-      <Chip
-        quiet
-        tone='attention'
-        {...ask(
-          'sizes-check',
-          leftOut ? mapAsk === 'partial' || asking === 'offer' : mapAsk === 'guess',
-        )}
-        data-ask-hint={leftOut ? 'leave it out or pick a size' : 'keep it or pick another'}
-        onClick={() => void api.confirmSize(e.source.rank)}
-        title={
-          leftOut
-            ? `drawn, but not on the card — click to leave it out, or pick a card size${e.evidence?.length ? ` (${e.evidence.join(' · ')})` : ''}`
-            : `${fmtPct(e.confidence ?? 0, 0)} sure${e.evidence?.length ? ` · ${e.evidence.join(' · ')}` : ''} — click to keep it, or pick another`
+      <MapRow
+        key={key}
+        zone={!!q?.askOn || boxAsk}
+        hot={c != null && (hover === c.id || picked === c.id)}
+        title={c ? rowTitle(c) : e?.evidence?.join(' · ')}
+        {...hoverOf(c?.id ?? null)}
+        onPick={
+          c
+            ? () => {
+                setPicked(picked === c.id ? null : c.id);
+                setToKey(false);
+              }
+            : undefined
         }
-      >
-        check
-      </Chip>
+        left={
+          <>
+            <SwatchCell>
+              {c && (
+                <LineSwatchView
+                  swatch={chains.swatches?.[c.id]}
+                  widthMm={ROW_SWATCH_MM}
+                  minStrokeMm={0.35}
+                  fallbackDash={motifOf(c.id)}
+                  title={`size ${name} as drawn on the sheet`}
+                />
+              )}
+            </SwatchCell>
+            <span className='min-w-0 truncate'>{name}</span>
+          </>
+        }
+        linked={!!e?.card}
+        right={
+          e ? (
+            <CardSizeBox
+              e={e}
+              cards={cards}
+              invalid={dupe(e.card?.sizeId)}
+              askOn={boxAsk}
+              busy={!!session.busy}
+              takenBy={(sizeId) => sourceOfCard(sizeId, e.source.rank)}
+              onPick={(sizeId) => setCard(e, sizeId)}
+              onRename={c ? (v) => rename(c, v) : undefined}
+              renameFrom={c?.sizeLabel ?? ''}
+              onMore={
+                c
+                  ? () => {
+                      setPicked(c.id);
+                      setToKey(false);
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <span className='text-labelColor'>not in the size list</span>
+          )
+        }
+        q={q}
+        open={open}
+        onToggleQ={() => q && toggleQ(key, q.askOn)}
+      />
     );
   };
 
-  const cardCell = (e: SizeMapEntry | undefined) =>
-    e ? (
-      <CardSizeSelect
-        e={e}
-        invalid={dupe(e.card?.sizeId)}
-        cards={cards}
-        askOn={
-          mapAsk === 'dupe'
-            ? dupe(e.card?.sizeId)
-            : mapAsk === 'none' && !showOrderBar && e.source.rank === firstUnmapped
+  /** A line that is not a size: its sample, what it is (a select), its question. */
+  const otherRow = (c: LineClass) => {
+    const key = `o${c.id}`;
+    const q = questionOf(c, undefined);
+    return (
+      <MapRow
+        key={key}
+        zone={!!q?.askOn}
+        hot={hover === c.id || picked === c.id}
+        title={rowTitle(c)}
+        {...hoverOf(c.id)}
+        onPick={() => {
+          setPicked(picked === c.id ? null : c.id);
+          setToKey(false);
+        }}
+        left={
+          <SwatchCell>
+            <LineSwatchView
+              swatch={chains.swatches?.[c.id]}
+              widthMm={ROW_SWATCH_MM}
+              minStrokeMm={0.35}
+              fallbackDash={motifOf(c.id)}
+              title={`${ROLE_WORD[c.role] ?? c.role} as drawn on the sheet`}
+            />
+          </SwatchCell>
         }
-        onChange={(v) => setCard(e, v)}
+        linked={null}
+        right={
+          <NativeSelect
+            value={c.role}
+            onChange={(v) => setRole(c, v)}
+            options={ROLES}
+            aria-label={`what this line is (line ${c.id})`}
+            className='h-7 w-full max-w-[136px]'
+          />
+        }
+        q={q}
+        open={!!q && qOpen(key, q.askOn)}
+        onToggleQ={() => q && toggleQ(key, q.askOn)}
       />
-    ) : (
-      <span className='text-labelColor'>—</span>
     );
-
-  const rowEvents = (id: number) => ({
-    onMouseEnter: () => setHover(id),
-    onMouseLeave: () => setHover(null),
-    'aria-selected': picked === id,
-    className: cn((hover === id || picked === id) && 'bg-bgZebra', 'cursor-pointer'),
-    onClick: (ev: React.MouseEvent) => {
-      // the row's own controls answer; a click elsewhere on it opens its detail
-      if ((ev.target as HTMLElement).closest('select,input,button')) return;
-      setPicked(picked === id ? null : id);
-      setToKey(false);
-    },
-  });
+  };
 
   return (
     <SplitStage
-      sideWidth={420}
+      sideWidth={440}
       canvas={
         <Panel
           title='lines'
@@ -444,15 +615,27 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               <>
                 <g fill='none' pointerEvents='none'>
                   {chains.chainPreview.map((a, i) =>
-                    a.length < 4 ? null : (
+                    a.length < 4 || hot?.has(i) ? null : (
                       <polyline
                         key={i}
                         points={f32Attr(a)}
-                        stroke={hot ? (hot.has(i) ? SHEET_INK.ink : '#dddddd') : SHEET_INK.mut}
-                        strokeWidth={unit * (hot?.has(i) ? 1.6 : 0.8)}
+                        stroke={hot ? '#dddddd' : SHEET_INK.mut}
+                        strokeWidth={unit * 0.8}
                       />
                     ),
                   )}
+                  {/* the lit size on top: blue and thicker for a row, ink for a flag */}
+                  {hot &&
+                    chains.chainPreview.map((a, i) =>
+                      a.length < 4 || !hot.has(i) ? null : (
+                        <polyline
+                          key={`hot-${i}`}
+                          points={f32Attr(a)}
+                          stroke={hotRow != null ? SHEET_INK.blue : SHEET_INK.ink}
+                          strokeWidth={unit * (hotRow != null ? 2.4 : 1.6)}
+                        />
+                      ),
+                    )}
                 </g>
                 {flagged?.at && (
                   <circle
@@ -502,284 +685,235 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       }
       side={
         <Panel
-          title={`sizes · ${drawn.length} drawn`}
+          title='sizes'
           aside={
             <span {...ask('sizes-flags', asking === 'offer' && !offerInRows && flags.length > 0)}>
               <HeaderWarnings items={warnings} />
             </span>
           }
+          bodyClassName='p-4'
         >
-          {card.sizes.length === 0 && (
-            <Text size='micro' component='p' className='mb-2 text-error'>
-              ! the card has no size range — set it on the card first
-            </Text>
-          )}
-          {sizes.countAsk && (
-            <DrawnSizes
-              ask={sizes.countAsk}
-              expected={sizes.expected}
-              cardCount={card.sizes.length}
-              asking={asking === 'count'}
-              onCommit={(n) => void api.setDrawnSizes(n)}
-            />
-          )}
-          {legendQ && sizes.sheetLegend && (
-            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
-              <Text size='micro' component='span' className='text-warning'>
-                ! {legendQ}
+          <div className='flex flex-col gap-4'>
+            {card.sizes.length === 0 && (
+              <Text component='p' className='text-error'>
+                ! the card has no sizes yet. set them on the card first
               </Text>
-              <Chip
-                tone='attention'
-                className='h-[22px]'
-                {...ask('sizes-legend', asking === 'legend')}
-                data-ask-hint='same size lines on every sheet'
-                disabled={!!session.busy}
-                title='the sheets share the legend as read'
-                onClick={() => patchInputs({ sheetLegendOk: sizes.sheetLegend!.sig })}
-              >
-                same legend
-              </Chip>
-            </div>
-          )}
-
-          {confirmAsk && (
-            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
-              <Text size='micro' component='span'>
-                {confirmAsk.role === 'size' && confirmAsk.sizeLabel
-                  ? `is this line size ${confirmAsk.sizeLabel}?`
-                  : `is this line ${ROLE_WORD[confirmAsk.role] ?? confirmAsk.role}?`}
-              </Text>
-              <LineSwatchView
-                swatch={chains.swatches?.[confirmAsk.id]}
-                widthMm={SWATCH_MM}
-                fallbackDash={motifOf(confirmAsk.id)}
-                title={confirmTitle(confirmAsk)}
+            )}
+            {sizes.countAsk && (
+              <DrawnSizes
+                ask={sizes.countAsk}
+                expected={sizes.expected}
+                cardCount={card.sizes.length}
+                asking={asking === 'count'}
+                onCommit={(n) => void api.setDrawnSizes(n)}
               />
-              <Chip
-                tone='attention'
-                className='h-[22px]'
-                {...ask('sizes-confirm')}
-                data-ask-hint={
-                  confirmAsk.role === 'size'
-                    ? 'confirm this line is a size'
-                    : 'confirm what this line is'
-                }
-                title={confirmTitle(confirmAsk)}
-                onClick={() => confirmRow(confirmAsk)}
+            )}
+            {legendQ && sizes.sheetLegend && (
+              <div
+                data-ask-zone=''
+                data-ask-label='is each line one size?'
+                className='flex flex-col gap-2'
               >
-                yes
-              </Chip>
-              <Chip
-                className='h-[22px]'
-                title='open the line: change its meaning, split it or merge it'
-                onClick={() => {
-                  if (confirmAsk.role !== 'size') setOtherOpen(true);
-                  setPicked(confirmAsk.id);
-                  setToKey(false);
-                }}
-              >
-                no — other line
-              </Chip>
-            </div>
-          )}
-          {orderFolded && (
-            <div className='mb-2'>
-              <Chip
-                quiet
-                className='h-[22px]'
-                title='map every drawn size in grade order — replaces the answers you gave on the rows'
-                onClick={() => setReorder(true)}
-              >
-                map in order again
-              </Chip>
-            </div>
-          )}
-          {showOrderBar && (
-            <div data-ask-zone='' className='mb-2 flex flex-wrap items-center gap-1.5'>
-              <Text size='micro' component='span'>
-                {quiz}
-              </Text>
-              {rowAnswered && (
-                <Text size='micro' component='span' className='text-error'>
-                  replaces your row answers
+                <Text component='p' className='text-warning' title={legendQ}>
+                  the sheets do not draw the sizes with the same lines. is each line one size on
+                  every sheet?
                 </Text>
-              )}
-              {Array.from({ length: slots }, (_, i) => (
-                <Chip
-                  key={i}
-                  className='h-[22px]'
-                  selected={currentStart === i}
-                  pressed={currentStart === i}
-                  disabled={!!session.busy}
-                  {...ask(
-                    'sizes-map',
-                    i === (currentStart ?? centred) &&
-                      (mapAsk === 'none' || mapAsk === 'partial' || mapAsk === 'guess'),
-                  )}
-                  data-ask-hint='map file sizes in order'
-                  title={windowTitle(i)}
-                  onClick={() => mapInOrder(i)}
+                <span className='flex flex-wrap gap-2'>
+                  <Act
+                    primary
+                    {...ask('sizes-legend', asking === 'legend')}
+                    data-ask-hint='say each line is one size on every sheet'
+                    disabled={!!session.busy}
+                    title={legendQ}
+                    onClick={() => patchInputs({ sheetLegendOk: sizes.sheetLegend!.sig })}
+                  >
+                    yes, the same
+                  </Act>
+                </span>
+              </div>
+            )}
+
+            {hoisted && (
+              <div className='flex flex-col'>
+                <Text component='p' className='text-labelColor'>
+                  first, one line to check
+                </Text>
+                {otherRow(hoisted)}
+              </div>
+            )}
+
+            {orderFolded && (
+              <span>
+                <Act
+                  title='map every file size in order again: replaces the answers you gave on the rows'
+                  onClick={() => setReorder(true)}
                 >
-                  {span >= 0 ? drawnName(drawn[i]) : cards[i].name}
-                </Chip>
-              ))}
-            </div>
-          )}
-          <div ref={listRef} data-ask-zone=''>
-            <DataTable>
-              <thead>
-                <tr>
-                  <th data-align='left'>drawn</th>
-                  <th data-align='left' />
-                  <th data-align='left'>card</th>
-                  <th data-align='left' />
-                </tr>
-              </thead>
-              <tbody>
-                {sizeRows.map((c) => {
-                  const e = entryOfClass(c.id);
-                  return (
-                    <tr key={c.id} {...rowEvents(c.id)}>
-                      <td data-align='left' title={rowTitle(c)}>
-                        <span className='flex items-center gap-1.5'>
+                  map in order again
+                </Act>
+              </span>
+            )}
+            {showOrderBar && (
+              <div
+                data-ask-zone=''
+                data-ask-label={quiz || undefined}
+                className='flex flex-col gap-2'
+              >
+                <Text component='p'>{quiz}</Text>
+                <span className='flex flex-wrap gap-2'>
+                  {Array.from({ length: slots }, (_, i) => {
+                    const d = span >= 0 ? drawn[i] : null;
+                    const cls = d?.source.classId ?? null;
+                    return (
+                      <button
+                        key={i}
+                        type='button'
+                        aria-pressed={currentStart === i}
+                        disabled={!!session.busy}
+                        {...ask(
+                          'sizes-map',
+                          i === (currentStart ?? centred) &&
+                            (mapAsk === 'none' || mapAsk === 'partial' || mapAsk === 'guess'),
+                        )}
+                        data-ask-hint='pick the file size that is your first card size'
+                        title={windowTitle(i)}
+                        onClick={() => mapInOrder(i)}
+                        {...hoverOf(cls != null && classIds.has(cls) ? cls : null)}
+                        className={cn(
+                          'flex h-10 items-center gap-2 border bg-bgColor px-2.5 transition-colors',
+                          FOCUS,
+                          currentStart === i
+                            ? 'border-textColor'
+                            : 'border-borderColor hover:border-textColor',
+                          'disabled:cursor-not-allowed disabled:text-labelColor',
+                        )}
+                      >
+                        {d && cls != null && (
                           <LineSwatchView
-                            swatch={chains.swatches?.[c.id]}
-                            widthMm={SWATCH_MM}
-                            fallbackDash={motifOf(c.id)}
-                            title={`${c.sizeLabel ?? c.role} as drawn on the sheet`}
+                            swatch={chains.swatches?.[cls]}
+                            widthMm={QUIZ_SWATCH_MM}
+                            minStrokeMm={0.35}
+                            fallbackDash={motifOf(cls)}
                           />
-                          <Input
-                            defaultValue={c.sizeLabel ?? ''}
-                            key={c.sizeLabel ?? ''}
-                            className='h-[22px] w-14'
-                            aria-label={`size label of line class ${c.id}`}
-                            title='type the label of another row to merge the two into one size'
-                            onBlur={(ev: React.FocusEvent<HTMLInputElement>) => {
-                              const v = ev.currentTarget.value.trim();
-                              if (v !== (c.sizeLabel ?? '')) edit(c.id, { sizeLabel: v || null });
-                            }}
-                            onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
-                              if (ev.key === 'Enter') ev.currentTarget.blur();
-                            }}
-                          />
-                        </span>
-                      </td>
-                      <td data-align='left' className='text-labelColor'>
-                        →
-                      </td>
-                      <td data-align='left'>{cardCell(e)}</td>
-                      <td data-align='left'>{marker(c, e)}</td>
-                    </tr>
-                  );
-                })}
-                {loose.map((e) => (
-                  <tr key={`${e.source.rank}-${e.source.label}`}>
-                    <td data-align='left' className='font-bold' title={e.evidence?.join(' · ')}>
-                      {e.source.label || '(no label)'}
-                    </td>
-                    <td data-align='left' className='text-labelColor'>
-                      →
-                    </td>
-                    <td data-align='left'>{cardCell(e)}</td>
-                    <td data-align='left'>{marker(null, e)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </DataTable>
-          </div>
-          {pickedRow && (
-            <RowDetail
-              row={pickedRow}
-              swatch={chains.swatches?.[pickedRow.id]}
-              keySwatch={sample ? chains.keySwatches?.[sample.chain] : undefined}
-              others={chains.classes.filter(
-                (c) => c.role === 'size' && c.id !== pickedRow.id && !!c.sizeLabel,
-              )}
-              toKey={toKey}
-              onToKey={() => setToKey(!toKey)}
-              onRole={(v) => setRole(pickedRow, v)}
-              onSplit={(by) => edit(pickedRow.id, { split: by })}
-              onMerge={(label) => edit(pickedRow.id, { role: 'size', sizeLabel: label })}
-            />
-          )}
-
-          {otherRows.length > 0 && (
-            <Fold
-              label={`${otherRows.length} other ${otherRows.length === 1 ? 'line' : 'lines'}`}
-              open={otherOpen ?? otherPending > 0}
-              onOpenChange={setOtherOpen}
-              ask={asking === 'confirm' && otherPending > 0 ? 'sizes-confirm' : undefined}
-            >
-              <DataTable>
-                <tbody>
-                  {otherRows.map((c) => (
-                    <tr key={c.id} {...rowEvents(c.id)}>
-                      <td data-align='left' title={rowTitle(c)}>
-                        <LineSwatchView
-                          swatch={chains.swatches?.[c.id]}
-                          widthMm={SWATCH_MM}
-                          fallbackDash={motifOf(c.id)}
-                          title={`${c.sizeLabel ?? c.role} as drawn on the sheet`}
-                        />
-                      </td>
-                      <td data-align='left'>
-                        <NativeSelect
-                          value={c.role}
-                          onChange={(v) => setRole(c, v)}
-                          options={ROLES}
-                          aria-label={`meaning of line class ${c.id}`}
-                          className='w-28'
-                        />
-                      </td>
-                      <td data-align='left'>{marker(c, undefined)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-            </Fold>
-          )}
-
-          <DebugFold>
-            <div className='flex flex-col gap-1'>
-              <Text size='micro' variant='label' component='p'>
-                run read from {sizes.run.encoding.replace('-', ' ')}
-                {sizes.run.evidence.length ? ` · ${sizes.run.evidence.join(' · ')}` : ''}
-              </Text>
-              <Text size='micro' variant='label' component='p'>
-                two size rows with the same label are one size: type the label of the other row to
-                merge them.
-              </Text>
-              <DataTable>
-                <thead>
-                  <tr>
-                    <th>class</th>
-                    <th data-align='left'>meaning</th>
-                    <th data-align='left'>label</th>
-                    <th>sure</th>
-                    <th data-align='left'>evidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {chains.classes.map((c) => (
-                    <tr key={c.id}>
-                      <td>{c.id}</td>
-                      <td data-align='left'>{ROLE_WORD[c.role] ?? c.role}</td>
-                      <td data-align='left'>{c.sizeLabel ?? '—'}</td>
-                      <td>{fmtPct(c.confidence, 0)}</td>
-                      <td data-align='left'>{rowTitle(c)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-              {sizes.map.entries.map((e) => (
-                <Text key={`ev-${e.source.rank}`} size='micro' variant='label' component='p'>
-                  {e.source.label || `rank ${e.source.rank + 1}`} → {e.card?.name ?? '—'} ·{' '}
-                  {e.origin} · {fmtPct(e.confidence ?? null, 0)}
-                  {e.evidence?.length ? ` · ${e.evidence.join(' · ')}` : ''}
+                        )}
+                        <span>{d ? drawnName(d) : cards[i].name}</span>
+                      </button>
+                    );
+                  })}
+                </span>
+                <Text component='p' className='text-labelColor'>
+                  {rowAnswered
+                    ? 'the rest follow in order. this replaces the answers you gave below'
+                    : 'the rest follow in order'}
                 </Text>
-              ))}
+              </div>
+            )}
+
+            <div>
+              <div className='grid gap-x-2 pb-2 text-labelColor' style={MAP_GRID}>
+                <span>in the file</span>
+                <span />
+                <span>on the card</span>
+                <span />
+              </div>
+              <div className='divide-y divide-hairline border-t border-hairline'>
+                {sizeRows.map((c) => mapRow(`c${c.id}`, c, entryOfClass(c.id)))}
+                {loose.map((e) => mapRow(`r${e.source.rank}-${e.source.label}`, null, e))}
+                {/* card sizes no file size goes to: the gap, said where it is */}
+                {sizes.map.unmapped.map((cs) => (
+                  <MapRow
+                    key={`card-${cs.sizeId}`}
+                    left={
+                      <>
+                        <SwatchCell />
+                        <span className='text-labelColor'>nothing</span>
+                      </>
+                    }
+                    linked={false}
+                    right={
+                      <CardGapBox
+                        name={cs.name}
+                        drawn={drawn}
+                        nameOf={drawnName}
+                        busy={!!session.busy}
+                        onPick={(e) => setCard(e, String(cs.sizeId))}
+                      />
+                    }
+                  />
+                ))}
+              </div>
             </div>
-          </DebugFold>
+
+            {pickedRow && (
+              <RowDetail
+                row={pickedRow}
+                swatch={chains.swatches?.[pickedRow.id]}
+                keySwatch={sample ? chains.keySwatches?.[sample.chain] : undefined}
+                others={chains.classes.filter(
+                  (c) => c.role === 'size' && c.id !== pickedRow.id && !!c.sizeLabel,
+                )}
+                toKey={toKey}
+                onToKey={() => setToKey(!toKey)}
+                onRole={(v) => setRole(pickedRow, v)}
+                onSplit={(by) => edit(pickedRow.id, { split: by })}
+                onMerge={(label) => edit(pickedRow.id, { role: 'size', sizeLabel: label })}
+              />
+            )}
+
+            {otherRows.length > 0 && (
+              <Fold
+                label={`${otherRows.length} other ${otherRows.length === 1 ? 'line' : 'lines'} · not sizes`}
+                // the asked line is shown above the list; the fold opens only for the others
+
+                open={otherOpen ?? (otherPending > 0 && !hoisted)}
+                onOpenChange={setOtherOpen}
+                ask={
+                  asking === 'confirm' && otherPending > 0 && !hoisted ? 'sizes-confirm' : undefined
+                }
+              >
+                <div className='divide-y divide-hairline'>
+                  {otherRows.filter((c) => c.id !== hoisted?.id).map(otherRow)}
+                </div>
+              </Fold>
+            )}
+
+            <DebugFold>
+              <div className='flex flex-col gap-1'>
+                <Text size='micro' variant='label' component='p'>
+                  run read from {sizes.run.encoding.replace('-', ' ')}
+                  {sizes.run.evidence.length ? ` · ${sizes.run.evidence.join(' · ')}` : ''}
+                </Text>
+                <DataTable>
+                  <thead>
+                    <tr>
+                      <th>class</th>
+                      <th data-align='left'>meaning</th>
+                      <th data-align='left'>label</th>
+                      <th>sure</th>
+                      <th data-align='left'>evidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chains.classes.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.id}</td>
+                        <td data-align='left'>{ROLE_WORD[c.role] ?? c.role}</td>
+                        <td data-align='left'>{c.sizeLabel ?? '—'}</td>
+                        <td>{fmtPct(c.confidence, 0)}</td>
+                        <td data-align='left'>{rowTitle(c)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </DataTable>
+                {sizes.map.entries.map((e) => (
+                  <Text key={`ev-${e.source.rank}`} size='micro' variant='label' component='p'>
+                    {e.source.label || `rank ${e.source.rank + 1}`} → {e.card?.name ?? '—'} ·{' '}
+                    {e.origin} · {fmtPct(e.confidence ?? null, 0)}
+                    {e.evidence?.length ? ` · ${e.evidence.join(' · ')}` : ''}
+                  </Text>
+                ))}
+              </div>
+            </DebugFold>
+          </div>
         </Panel>
       }
     />
@@ -864,7 +998,11 @@ function DrawnSizes({
 
   const unanswered = asking && set == null;
   return (
-    <div data-ask-zone='' className='mb-3 flex flex-col gap-1'>
+    <div
+      data-ask-zone=''
+      data-ask-label='how many sizes are drawn?'
+      className='mb-3 flex flex-col gap-1'
+    >
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         sizes drawn
       </Text>
@@ -956,39 +1094,6 @@ function DrawnSizes({
 }
 
 const isGuess = (e: SizeMapEntry) => guessedSizes([e]).length > 0;
-
-/** The card size of one source size; `leave out` is a value of the list, not an error. */
-function CardSizeSelect({
-  e,
-  cards,
-  invalid,
-  askOn,
-  onChange,
-}: {
-  e: SizeMapEntry;
-  cards: CardContext['sizes'];
-  invalid: boolean;
-  askOn: boolean;
-  onChange: (sizeId: string) => void;
-}) {
-  return (
-    <NativeSelect
-      value={e.card ? String(e.card.sizeId) : ''}
-      onChange={onChange}
-      invalid={invalid}
-      aria-label={`card size for source size ${e.source.label}`}
-      className={cn('w-24', !e.card && 'text-labelColor')}
-      title={e.evidence?.join(' · ')}
-      {...(!e.card && !e.notDrawn ? { 'data-unmapped': '' } : {})}
-      {...ask('sizes-map', askOn)}
-      data-ask-hint='pick a card size or leave out'
-      options={[
-        { value: '', label: 'leave out' },
-        ...cards.map((c) => ({ value: String(c.sizeId), label: c.name })),
-      ]}
-    />
-  );
-}
 
 type KeySample = Extract<ClassEvidence, { kind: 'legend-sample' }>;
 
@@ -1145,5 +1250,406 @@ function RowDetail({
         </Text>
       </DebugFold>
     </div>
+  );
+}
+
+/** The operator's size map noted before a rename: card size per size name, and the read it was on. */
+type KeptMap = { at: unknown; entries: { name: string; card: SizeMapEntry['card'] }[] };
+const norm = (label: string | null | undefined) => (label ?? '').trim().toLowerCase();
+
+// ═══ THE MAPPING ROW ══════════════════════════════════════════════════════════════════════════════
+
+/** A row's open question and its answers (the old `check` / `! confirm` markers, said in words). */
+type RowAsk = {
+  text: string;
+  title: string;
+  /** `data-ask` key, live while `askOn`: on `?` while folded, on the first answer while open. */
+  askKey: string;
+  askOn: boolean;
+  hint: string;
+  answers: { label: string; onClick: () => void; primary?: boolean; title?: string }[];
+};
+
+/** The mapping's four columns: the file · the arrow · the card · the row's `?`. */
+const MAP_GRID: React.CSSProperties = {
+  gridTemplateColumns: 'minmax(0,1fr) 36px minmax(0,1fr) 28px',
+};
+
+const FOCUS =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+
+/** A plain answer button, 12px like the rest of the step; `primary` = the answer that is asked. */
+function Act({
+  primary,
+  className,
+  children,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  primary?: boolean;
+  [k: `data-${string}`]: string | undefined;
+}) {
+  return (
+    <button
+      type='button'
+      {...rest}
+      className={cn(
+        'inline-flex h-7 items-center border bg-bgColor px-2.5 whitespace-nowrap transition-colors',
+        FOCUS,
+        primary
+          ? 'border-warning text-warning hover:bg-warning hover:text-bgColor'
+          : 'border-borderColor hover:border-textColor',
+        'disabled:cursor-not-allowed disabled:border-borderColor disabled:bg-bgColor disabled:text-labelColor',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The fixed slot the line sample sits in, so the size names line up under one another. */
+function SwatchCell({ children }: { children?: React.ReactNode }) {
+  return (
+    <span className='flex h-6 w-[60px] shrink-0 items-center overflow-hidden'>{children}</span>
+  );
+}
+
+/** The arrow between the two columns: ink when the size goes somewhere, dashed grey when not. */
+function Connector({ on }: { on: boolean }) {
+  const c = on ? 'var(--color-textColor)' : 'var(--color-borderColor)';
+  return (
+    <svg width={36} height={10} viewBox='0 0 36 10' aria-hidden className='block'>
+      <line
+        x1={1}
+        y1={5}
+        x2={30}
+        y2={5}
+        stroke={c}
+        strokeWidth={1}
+        strokeDasharray={on ? undefined : '3 3'}
+      />
+      <path d='M29 1.5 L34 5 L29 8.5' fill='none' stroke={c} strokeWidth={1} />
+    </svg>
+  );
+}
+
+/**
+ * One line of the mapping: left (the file), the arrow, right (the card), and the row's `?`. The
+ * question opens under the row, in the row. Hovering lights the size's lines on the sheet.
+ */
+function MapRow({
+  left,
+  right,
+  linked,
+  q,
+  open,
+  onToggleQ,
+  zone,
+  hot,
+  title,
+  onPick,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  left: React.ReactNode;
+  right: React.ReactNode;
+  /** null: no arrow (a line that is not a size). */
+  linked: boolean | null;
+  q?: RowAsk | null;
+  open?: boolean;
+  onToggleQ?: () => void;
+  zone?: boolean;
+  hot?: boolean;
+  title?: string;
+  onPick?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
+  return (
+    <div
+      {...(zone ? { 'data-ask-zone': '', 'data-ask-label': q?.askOn ? q.text : undefined } : {})}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={cn('transition-colors', hot && 'bg-bgZebra', onPick && 'cursor-pointer')}
+      onClick={(ev) => {
+        // the row's own controls answer; a click elsewhere on it pins its lines and opens its detail
+        if (!onPick || (ev.target as HTMLElement).closest('button,select,input,a')) return;
+        onPick();
+      }}
+    >
+      <div className='grid min-h-12 items-center gap-x-2 py-1.5' style={MAP_GRID}>
+        <span className='flex min-w-0 items-center gap-2' title={title}>
+          {left}
+        </span>
+        <span className='flex justify-center'>{linked != null && <Connector on={linked} />}</span>
+        <span className='min-w-0'>{right}</span>
+        <span className='flex justify-end'>
+          {q && (
+            <button
+              type='button'
+              aria-expanded={!!open}
+              aria-label={q.text}
+              title={q.title}
+              {...(!open ? ask(q.askKey, q.askOn, q.hint) : {})}
+              onClick={onToggleQ}
+              className={cn(
+                'flex size-7 items-center justify-center border transition-colors',
+                FOCUS,
+                open
+                  ? 'border-warning bg-warning text-bgColor'
+                  : 'border-warning bg-bgColor text-warning hover:bg-warning hover:text-bgColor',
+              )}
+            >
+              ?
+            </button>
+          )}
+        </span>
+      </div>
+      {q && open && (
+        <div className='flex flex-col gap-2 pb-3 pl-[68px]'>
+          <Text component='p' className='text-warning' title={q.title}>
+            {q.text}
+          </Text>
+          <span className='flex flex-wrap gap-2'>
+            {q.answers.map((a, i) => (
+              <Act
+                key={a.label}
+                primary={a.primary}
+                title={a.title ?? q.title}
+                {...(i === 0 ? ask(q.askKey, q.askOn, q.hint) : {})}
+                onClick={a.onClick}
+              >
+                {a.label}
+              </Act>
+            ))}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The box a card size sits in: solid ink when set, dashed grey when nothing goes there. */
+const boxCls = (filled: boolean, invalid: boolean) =>
+  cn(
+    'flex h-8 w-full max-w-[136px] items-center justify-between gap-2 border bg-bgColor px-2.5 text-left transition-colors',
+    FOCUS,
+    invalid
+      ? 'border-error text-error'
+      : filled
+        ? 'border-textColor hover:bg-bgZebra'
+        : 'border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
+  );
+
+const Caret = () => (
+  <svg width={8} height={5} viewBox='0 0 8 5' aria-hidden className='shrink-0'>
+    <path d='M0 0h8L4 5z' fill='currentColor' />
+  </svg>
+);
+
+function MenuItem({
+  onSelect,
+  checked,
+  aside,
+  children,
+}: {
+  onSelect: () => void;
+  checked?: boolean;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type='button'
+      role='menuitemradio'
+      aria-checked={!!checked}
+      onClick={onSelect}
+      className={cn(
+        'flex h-8 w-full items-center gap-2 px-1.5 text-left hover:bg-bgZebra',
+        FOCUS,
+        'focus-visible:outline-offset-[-2px]',
+      )}
+    >
+      <span className='w-3 shrink-0'>{checked ? '✓' : ''}</span>
+      <span className='min-w-0 flex-1 truncate'>{children}</span>
+      {aside && <span className='shrink-0 text-labelColor'>{aside}</span>}
+    </button>
+  );
+}
+
+/**
+ * The card size of one file size. One click opens the card sizes, `leave out`, and — for a drawn
+ * line — `rename…` (typing another size's name joins the two) and the line's detail.
+ */
+function CardSizeBox({
+  e,
+  cards,
+  invalid,
+  askOn,
+  busy,
+  takenBy,
+  onPick,
+  onRename,
+  renameFrom,
+  onMore,
+}: {
+  e: SizeMapEntry;
+  cards: CardContext['sizes'];
+  invalid: boolean;
+  askOn: boolean;
+  busy: boolean;
+  takenBy: (sizeId: number) => string[];
+  onPick: (sizeId: string) => void;
+  onRename?: (v: string) => void;
+  renameFrom: string;
+  onMore?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const label = e.card ? e.card.name : e.notDrawn ? 'not drawn' : 'leave out';
+  const askAttrs: Record<string, string> = askOn
+    ? (ask(
+        'sizes-map',
+        true,
+        invalid ? 'pick another card size' : 'pick a card size or leave out',
+      ) as Record<string, string>)
+    : {};
+  const pick = (v: string) => {
+    setOpen(false);
+    onPick(v);
+  };
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setRenaming(false);
+      }}
+      className='w-[232px]'
+      triggerProps={{
+        className: boxCls(!!e.card, invalid),
+        disabled: busy,
+        'aria-label': `card size for file size ${e.source.label || e.source.rank + 1}: ${label}`,
+        'aria-invalid': invalid || undefined,
+        title: e.evidence?.join(' · '),
+        ...(!e.card && !e.notDrawn ? { 'data-unmapped': '' } : {}),
+        ...askAttrs,
+      }}
+      openElement={
+        <>
+          <span className='min-w-0 truncate'>{label}</span>
+          <Caret />
+        </>
+      }
+    >
+      {renaming && onRename ? (
+        <div className='flex flex-col gap-2 py-1'>
+          <Input
+            autoFocus
+            defaultValue={renameFrom}
+            onFocus={(ev: React.FocusEvent<HTMLInputElement>) => ev.currentTarget.select()}
+            aria-label='size name'
+            className='h-7'
+            onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
+              if (ev.key === 'Enter') {
+                const v = ev.currentTarget.value.trim();
+                if (v !== renameFrom) onRename(v);
+                setOpen(false);
+                setRenaming(false);
+              }
+              if (ev.key === 'Escape') setRenaming(false);
+            }}
+          />
+          <Text component='p' className='text-labelColor'>
+            enter to save. the name of another size joins the two
+          </Text>
+        </div>
+      ) : (
+        <div role='menu' className='flex flex-col'>
+          {cards.map((c) => {
+            const from = takenBy(c.sizeId);
+            return (
+              <MenuItem
+                key={c.sizeId}
+                checked={e.card?.sizeId === c.sizeId}
+                aside={from.length ? `from ${from.join(', ')}` : undefined}
+                onSelect={() => pick(String(c.sizeId))}
+              >
+                {c.name}
+              </MenuItem>
+            );
+          })}
+          <MenuItem checked={!e.card} onSelect={() => pick('')}>
+            leave out
+          </MenuItem>
+          {(onRename || onMore) && <span className='my-1 border-t border-hairline' />}
+          {onRename && <MenuItem onSelect={() => setRenaming(true)}>rename…</MenuItem>}
+          {onMore && (
+            <MenuItem
+              onSelect={() => {
+                setOpen(false);
+                onMore();
+              }}
+            >
+              more about this line
+            </MenuItem>
+          )}
+        </div>
+      )}
+    </GenericPopover>
+  );
+}
+
+/** A card size nothing goes to: its dashed box; a click lists the file sizes to give it. */
+function CardGapBox({
+  name,
+  drawn,
+  nameOf,
+  busy,
+  onPick,
+}: {
+  name: string;
+  drawn: SizeMapEntry[];
+  nameOf: (e: SizeMapEntry) => string;
+  busy: boolean;
+  onPick: (e: SizeMapEntry) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      className='w-[232px]'
+      triggerProps={{
+        className: boxCls(false, false),
+        disabled: busy,
+        'aria-label': `card size ${name}: no file size goes to it`,
+        title: `no file size goes to ${name}: pick one`,
+      }}
+      openElement={
+        <>
+          <span className='min-w-0 truncate'>{name}</span>
+          <Caret />
+        </>
+      }
+    >
+      <div role='menu' className='flex flex-col'>
+        <Text component='p' className='px-1.5 pb-1 text-labelColor'>
+          which file size is {name}?
+        </Text>
+        {drawn.map((e) => (
+          <MenuItem
+            key={e.source.rank}
+            aside={e.card ? `now ${e.card.name}` : undefined}
+            onSelect={() => {
+              setOpen(false);
+              onPick(e);
+            }}
+          >
+            {nameOf(e)}
+          </MenuItem>
+        ))}
+      </div>
+    </GenericPopover>
   );
 }

@@ -8,15 +8,18 @@
 //   · ConfirmStrip: quantities nobody printed, names read off construction notes, AI names below
 //     the threshold. One deliberate click confirms them all as shown; each row has its own.
 import { useState } from 'react';
-import type { AllowanceDecision, SeedId } from 'lib/pattern-import/types';
+import type { AllowanceDecision, PtMm, SeedId } from 'lib/pattern-import/types';
+import { cn } from 'lib/utility';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
+import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
-import { NumberField, ask } from '../ui-bits';
+import Input from 'ui/components/input';
+import { ask } from '../ui-bits';
+import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
@@ -37,9 +40,12 @@ export function OutlineQuestion({
   api,
   current,
   answersOnly = false,
+  outer = [],
 }: {
   api: ImportSessionApi;
   current: AllowanceDecision;
+  /** The piece the two pictures are drawn from (the file's own outline). */
+  outer?: readonly PtMm[];
   /** GUIDED: the step's question card says the question — render the answers (and why) only. */
   answersOnly?: boolean;
 }) {
@@ -47,6 +53,10 @@ export function OutlineQuestion({
   const [mm, setMm] = useState(
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
+  const [otherMm, setOtherMm] = useState(false);
+  const [draft, setDraft] = useState('');
+  const draftN = draft.trim() === '' ? NaN : Number(draft);
+  const draftMm = Number.isFinite(draftN) && draftN >= 0 ? draftN : null;
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -68,41 +78,103 @@ export function OutlineQuestion({
   ]
     .filter(Boolean)
     .join(' · ');
+  // owner 16.10 (r2, «hard to understand»): two PICTURE answers drawn from the file's own piece —
+  // the outline as the edge (scissors on it), or as the seam (dashed) with the cut line outside.
+  // A click on a picture answers; the allowance is a chip row under the seam picture, a chip
+  // answers with its value at once ("other…" opens a number field).
+  const seam = (v: number) => {
+    if (!(v >= 0)) return;
+    setMm(v);
+    void api.answerOutline('seam', v);
+  };
   const answers = (
-    <span className='flex flex-wrap items-center gap-1.5'>
-      <Button
-        {...ask('details-outline')}
-        data-ask-hint='pick cut or seam line'
-        variant='secondary'
-        size='xs'
-        disabled={busy}
-        className={prefill === 'cut' ? 'border-warning' : undefined}
-        title='the allowance is already in the drawing: the outline is cut as drawn'
-        onClick={() => void api.answerOutline('cut', mm)}
-      >
-        cut line — as drawn{prefill === 'cut' ? ' (file says so)' : ''}
-      </Button>
-      <Button
-        {...ask('details-outline')}
-        data-ask-hint='pick cut or seam line'
-        variant='secondary'
-        size='xs'
-        disabled={busy}
-        title='the outline is the sewing line: the cut line is built this far outside it'
-        onClick={() => void api.answerOutline('seam', mm)}
-      >
-        seam line — add {mm} mm
-      </Button>
-      <NumberField
-        value={mm}
-        min={0}
-        aria-label='allowance to add to a seam line, mm'
-        className='w-12'
-        onCommit={(v) => v != null && v >= 0 && setMm(v)}
-      />
-      <Text size='micro' variant='label' component='span'>
-        mm
-      </Text>
+    <span className='flex flex-wrap items-start gap-2'>
+      <span className='flex flex-col gap-1.5'>
+        <button
+          type='button'
+          {...ask('details-outline')}
+          data-ask-hint='pick a picture'
+          data-testid='outline-answer-cut'
+          disabled={busy}
+          title={`the allowance is already in the drawing: cut exactly on the drawn line${prefill === 'cut' ? ' (the file names the layer so)' : ''}`}
+          onClick={() => void api.answerOutline('cut', mm)}
+          className={cn(OUTLINE_CARD, prefill === 'cut' && 'border-warning')}
+        >
+          <OutlinePicture outer={outer} kind='cut' />
+          <Text size='micro' component='span' className='uppercase'>
+            cut on this line
+          </Text>
+          <Text size='micro' variant='label' component='span'>
+            the line is the edge
+          </Text>
+        </button>
+      </span>
+      <span className='flex flex-col gap-1.5'>
+        <button
+          type='button'
+          {...ask('details-outline')}
+          data-ask-hint='pick a picture'
+          data-testid='outline-answer-seam'
+          disabled={busy}
+          title='the drawn line is where it is sewn: the cut line is built this far outside it'
+          onClick={() => seam(mm)}
+          className={OUTLINE_CARD}
+        >
+          <OutlinePicture outer={outer} kind='seam' />
+          <Text size='micro' component='span' className='uppercase'>
+            sew on this line
+          </Text>
+          <Text size='micro' variant='label' component='span'>
+            add {mm} mm around
+          </Text>
+        </button>
+        <ChipRow>
+          {MM_CHIPS.map((v) => (
+            <Chip
+              key={v}
+              selected={mm === v}
+              disabled={busy}
+              title={`sew on the drawn line, cut ${v} mm outside it`}
+              onClick={() => seam(v)}
+            >
+              {v}
+            </Chip>
+          ))}
+          {otherMm ? (
+            // a draft: nothing is sent on blur (a chip or a picture clicked next sends its own
+            // value) — only Enter or the [use N mm] chip answer with the typed value
+            <>
+              <Input
+                type='number'
+                min={0}
+                value={draft}
+                disabled={busy}
+                autoFocus
+                aria-label='allowance to add around a seam line, mm'
+                className='h-[22px] w-12 tabular-nums'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setDraft(e.currentTarget.value)
+                }
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter' && draftMm != null) seam(draftMm);
+                }}
+              />
+              {draftMm != null && (
+                <Chip disabled={busy} onClick={() => seam(draftMm)}>
+                  use {draftMm} mm
+                </Chip>
+              )}
+            </>
+          ) : (
+            <Chip disabled={busy} onClick={() => setOtherMm(true)}>
+              other…
+            </Chip>
+          )}
+          <Text size='micro' variant='label' component='span'>
+            mm
+          </Text>
+        </ChipRow>
+      </span>
     </span>
   );
   if (answersOnly)
@@ -122,7 +194,7 @@ export function OutlineQuestion({
       className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
     >
       <Text size='micro' component='p' className='min-w-0 flex-1' title={why}>
-        <b>! what is the drawn outline?</b>
+        <b>drawn outline: cut or seam?</b>
         {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
             the reason the question is asked at all — stays on screen */}
         {clash && ` ${clash}`}
@@ -130,6 +202,83 @@ export function OutlineQuestion({
       </Text>
       {answers}
     </CalloutBox>
+  );
+}
+
+const MM_CHIPS = [7, 10, 15];
+const OUTLINE_CARD =
+  'flex w-[144px] cursor-pointer flex-col items-center gap-1 border border-borderColor bg-bgColor p-2 text-center hover:border-textColor disabled:cursor-default disabled:opacity-50';
+
+/**
+ * One answer's picture: the piece fitted whole in a 132 px square. `cut` — the outline solid ink
+ * with scissors on its top; `seam` — the outline dashed (the sewing line) and the cut line solid
+ * blue outside it (a stroke-ring offset, wide enough to read at this size — not to scale).
+ */
+function OutlinePicture({ outer, kind }: { outer: readonly PtMm[]; kind: 'cut' | 'seam' }) {
+  const S = 112;
+  if (outer.length < 3) return <span style={{ width: S, height: S }} />;
+  const xs = outer.map((p) => p.x);
+  const ys = outer.map((p) => vy(p.y));
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(...xs) - minX || 1;
+  const h = Math.max(...ys) - minY || 1;
+  const side = Math.max(w, h);
+  // room for the offset ring and the scissors
+  const pad = side * 0.14;
+  const box = side + 2 * pad;
+  const px = box / S; // viewBox units per screen pixel
+  const pts = ptsAttr(outer);
+  const top = outer.reduce((a, p) => (vy(p.y) < vy(a.y) ? p : a));
+  return (
+    <svg
+      width={S}
+      height={S}
+      viewBox={`${minX + w / 2 - box / 2} ${minY + h / 2 - box / 2} ${box} ${box}`}
+      aria-hidden
+    >
+      {kind === 'seam' && (
+        <>
+          {/* the ring: a wide blue stroke, a slightly narrower white one, the piece on top */}
+          <polygon
+            points={pts}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={px * 14}
+            strokeLinejoin='round'
+          />
+          <polygon
+            points={pts}
+            fill='none'
+            stroke='#ffffff'
+            strokeWidth={px * 11}
+            strokeLinejoin='round'
+          />
+        </>
+      )}
+      <polygon
+        points={pts}
+        fill={SHEET_INK.fill}
+        stroke={SHEET_INK.ink}
+        strokeWidth={px * (kind === 'cut' ? 2 : 1.5)}
+        strokeDasharray={kind === 'seam' ? `${px * 5} ${px * 3}` : undefined}
+      />
+      {kind === 'cut' && (
+        <text
+          x={top.x}
+          y={vy(top.y)}
+          fontSize={px * 22}
+          textAnchor='middle'
+          dominantBaseline='central'
+          fill={SHEET_INK.ink}
+          stroke='#ffffff'
+          strokeWidth={px * 3}
+          paintOrder='stroke'
+        >
+          ✂
+        </text>
+      )}
+    </svg>
   );
 }
 

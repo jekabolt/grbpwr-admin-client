@@ -281,6 +281,20 @@ export function DashSample({
 //   by every control in it. Missing → the bubble shows the footer sentence alone.
 // * The highlight stays until the operator acts inside the zone (pointer, key, input), presses ✕,
 //   or the blocker changes; nothing else on screen is dimmed.
+//
+// PLAIN WORDS (owner: "minimal plain text"). The session's blocker / offer sentence is the
+// engine's account ('7 pieces have no grainline — draw it (two clicks)'); the step's question card
+// already asks it in plain words. A step publishes that wording for the footer:
+//
+//   <div data-ask-zone data-ask-label='which file size is your XS?'>…</div>
+//
+// * `data-ask-label="<the question, plain, ≤6 words>"`: on the `[data-ask]` control or on its
+//   zone (read like the hint: the control, then up to the zone). The footer then shows it
+//   ('! which file size is your XS?'); the session's sentence moves to the ask link's tooltip and
+//   the header warnings (D5: no stop reason is dropped). Missing → the footer shows the sentence.
+// * For an offer (optional), word it as an offer: '1 optional check'.
+// * Read off the first live `[data-ask]` after every render of the stage: put it only on the
+//   question that is asked NOW (the card on screen), never on every card of a list.
 
 /**
  * Spread onto a control that answers the footer's ask line: `<Chip {...ask('sizes-confirm')}>`.
@@ -360,6 +374,61 @@ export function askHintOf(el: HTMLElement): string | null {
     if (n === zone) break;
   }
   return null;
+}
+
+/** The plain question (`data-ask-label`) of the first live answer under `root`, else null. */
+export function askLabelOf(root: ParentNode | null): string | null {
+  const el = firstAsk(root);
+  if (!el) return null;
+  const zone = askZoneOf(el);
+  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+    const l = n.getAttribute('data-ask-label')?.trim();
+    if (l) return l;
+    if (n === zone) break;
+  }
+  return null;
+}
+
+/**
+ * `askLabelOf(root)` kept current: re-read after each render of the stage (a mutation observer,
+ * batched to one read per frame). `dep` re-reads when the session's sentence changes.
+ */
+export function useAskLabel(root: { current: HTMLElement | null }, dep: unknown): string | null {
+  const [label, setLabel] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!el) return setLabel(null);
+    const read = () => setLabel(askLabelOf(el));
+    read();
+    let raf = 0;
+    const mo = new MutationObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        read();
+      });
+    });
+    mo.observe(el, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        'data-ask',
+        'data-ask-label',
+        'data-ask-zone',
+        'disabled',
+        'aria-disabled',
+        'aria-invalid',
+        'hidden',
+        'class',
+      ],
+    });
+    return () => {
+      mo.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [root, dep]);
+  return label;
 }
 
 export type CoachTarget = {
