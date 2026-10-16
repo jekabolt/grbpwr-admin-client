@@ -450,7 +450,7 @@ export function answerRecordOf(
   }
   // LINEFIX: "these lines are size N" — one answer per entry (≤ LINE_PART keys each), with what
   // the run flagged on them (D3: two sizes, another size's pen) and how many keys were stale
-  for (const a of lineAssignAnswers(i.chainAssign, s.chains))
+  for (const a of lineAssignAnswers(i.chainAssign ?? [], s.chains))
     push('sizes', 'line-assign', a.subject, a.value);
   // D6: the tile sheets' different size rows, confirmed as read (bound to what each sheet drew)
   if (i.sheetLegendOk && s.sizes?.sheetLegend?.sig === i.sheetLegendOk)

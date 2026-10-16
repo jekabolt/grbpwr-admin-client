@@ -99,7 +99,7 @@ export function lineAssignOf(v: unknown): ChainAssign | null {
 
 function lineAnswers(c: Ctx): Out | null {
   const all = c.prior.answers.filter((a) => a.kind === 'line-assign');
-  if (!all.length || c.i.chainAssign.length || !c.fresh('line-assign', { ref: 'line-assign' }))
+  if (!all.length || c.i.chainAssign?.length || !c.fresh('line-assign', { ref: 'line-assign' }))
     return null;
   const drawn = new Set((c.s.chains?.chainLines ?? []).map((l) => `${l.sheet}|${l.key}`));
   const assign: ChainAssign[] = [];

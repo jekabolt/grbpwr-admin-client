@@ -739,7 +739,7 @@ export function useImportSession(deps: {
             opts: chainOpts(),
             legend: ev.edits,
             confirmed: iRef.current.legendConfirmed,
-            chainAssign: iRef.current.chainAssign,
+            chainAssign: iRef.current.chainAssign ?? [],
           });
           const sizes = await run('sizes', {
             card: rc().sizes,
@@ -759,7 +759,7 @@ export function useImportSession(deps: {
             opts: chainOpts(),
             legend: iRef.current.legend,
             confirmed: legendConfirmed,
-            chainAssign: iRef.current.chainAssign,
+            chainAssign: iRef.current.chainAssign ?? [],
           });
           const sizes = await run('sizes', {
             card: rc().sizes,
@@ -1312,7 +1312,7 @@ export function useImportSession(deps: {
       opts: chainOpts(),
       legend: iRef.current.legend,
       confirmed: iRef.current.legendConfirmed,
-      chainAssign: iRef.current.chainAssign,
+      chainAssign: iRef.current.chainAssign ?? [],
     });
     const sizes = await run('sizes', {
       card: rc().sizes,
