@@ -144,6 +144,7 @@
     "patimport:reg": "node scripts/pattern-import/reg.mjs",
     "patimport:legend": "node --max-old-space-size=8192 scripts/pattern-import/legend.mjs",
     "patimport:mood": "node scripts/pattern-import/mood.mjs",
+    "patimport:lineassign": "node scripts/pattern-import/lineassign.mjs",
     "patimport:archive": "node scripts/pattern-import/archive.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
     "doll:shape": "node scripts/doll/shape.mjs"
