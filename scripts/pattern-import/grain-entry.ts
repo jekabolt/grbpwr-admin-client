@@ -128,6 +128,27 @@ function unit() {
       grainOutsideMm({ x: 850, y: 2140 }, { x: 930, y: 2140 }, [drawn]) > 15,
     'along an edge: on it; along the fold edge past both corners: the overhang counts',
   );
+  // a diamond: a line parallel to an edge, 0.5 mm outside it → on; 2 mm outside → off
+  const dia: PtMm[] = [
+    { x: 0, y: -1000 },
+    { x: 1000, y: 0 },
+    { x: 0, y: 1000 },
+    { x: -1000, y: 0 },
+  ];
+  const o = (d: number) => d / Math.SQRT2;
+  check(
+    grainOutsideMm({ x: 200 + o(0.5), y: -800 - o(0.5) }, { x: 800 + o(0.5), y: -200 - o(0.5) }, [
+      dia,
+    ]) === 0 &&
+      grainOutsideMm({ x: 200 + o(2), y: -800 - o(2) }, { x: 800 + o(2), y: -200 - o(2) }, [dia]) >
+        800,
+    'a diagonal edge: 0.5 mm off it is on the piece, 2 mm off is not',
+  );
+  // bounded: five 2 m diagonal graded rings, a line across them all
+  const t0 = Date.now();
+  const big = [0, 1, 2, 3, 4].map((k) => dia.map((p) => ({ x: p.x * (1 + k / 50), y: p.y })));
+  fitGrainInside({ x: -3000, y: -3000 }, { x: 3000, y: 3000 }, big);
+  check(Date.now() - t0 < 2000, `five 2 m diagonal rings fitted in ${Date.now() - t0} ms`);
   // too short
   const tiny = rect(0, 0, 12, 18);
   const t = vetProposal({ a: { x: 6, y: 2 }, b: { x: 6, y: 16 }, why: 'long axis' }, [tiny], true);

@@ -686,7 +686,7 @@ export function g5(ctx: GateCtx): GateCheck {
     // marker that may outrun a short piece (CLO's 180 mm shaft on a 116 mm collar): its middle only.
     else if (s.cut.length >= 3) {
       const g = s.grain;
-      if ((g.evidence ?? []).includes('dxf-layer')) {
+      if (g.origin !== 'operator' && (g.evidence ?? []).includes('dxf-layer')) {
         const mid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
         if (!pointOnRings(mid, [s.cut]))
           bad(`the source's grain arrow (${g.origin}) is centred outside the cut line`);

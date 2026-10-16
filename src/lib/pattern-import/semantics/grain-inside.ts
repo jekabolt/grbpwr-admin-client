@@ -10,7 +10,7 @@
 // (G5) re-measures the written grain against the written cut line with the same test.
 
 import type { PtMm } from '../types';
-import { SegIndex, closestOnPolyline, pointInPolygon } from './geom';
+import { closestOnPolyline, pointInPolygon } from './geom';
 
 /** A point within this of an outline is on it (a fold line along the drawn half's edge). */
 export const GRAIN_INSIDE_TOL_MM = 1;
@@ -37,38 +37,71 @@ export function pointOnRings(
 /**
  * Containment of the points of ONE line (through `a` along unit `u`) in every ring: each ring is
  * crossed once (its crossings with the line, half-open rule — parity is exact even through a vertex
- * or along an edge), and a point outside by parity is still on the ring within `tol` of its line
- * (grid index). Linear in the rings' size, then O(log n) per sample — no per-sample polygon scan.
+ * or along an edge), and a point outside by parity is still on the ring when an edge comes within
+ * `tol` of it (the stretch of the line within `tol` of each edge, merged — over-reaching by ≤ tol
+ * along the line). Linear in the rings' size, O(log n) per sample, memory O(n).
  */
 function lineProbe(a: PtMm, u: PtMm, rings: readonly (readonly PtMm[])[], tol: number) {
   const nrm = { x: -u.y, y: u.x };
+  const sep = (p: PtMm) => (p.x - a.x) * nrm.x + (p.y - a.y) * nrm.y;
+  const par = (p: PtMm) => (p.x - a.x) * u.x + (p.y - a.y) * u.y;
   const per = rings.map((r) => {
     const ts: number[] = [];
+    const band: [number, number][] = [];
     const n = r.length;
     for (let i = 0; i < n; i++) {
       const p = r[i];
       const q = r[(i + 1) % n];
-      const sp = (p.x - a.x) * nrm.x + (p.y - a.y) * nrm.y;
-      const sq = (q.x - a.x) * nrm.x + (q.y - a.y) * nrm.y;
-      if (sp > 0 === sq > 0) continue;
-      const k = sp / (sp - sq);
-      ts.push((p.x + (q.x - p.x) * k - a.x) * u.x + (p.y + (q.y - p.y) * k - a.y) * u.y);
+      const sp = sep(p);
+      const sq = sep(q);
+      const tp = par(p);
+      const tq = par(q);
+      if (sp > 0 !== sq > 0) {
+        const k = sp / (sp - sq);
+        ts.push(tp + (tq - tp) * k);
+      }
+      // the part of the edge within tol of the line (|s| ≤ tol), widened by tol along it
+      let k0 = 0;
+      let k1 = 1;
+      if (sp !== sq) {
+        const ka = (-tol - sp) / (sq - sp);
+        const kb = (tol - sp) / (sq - sp);
+        k0 = Math.max(0, Math.min(ka, kb));
+        k1 = Math.min(1, Math.max(ka, kb));
+      } else if (Math.abs(sp) > tol) continue;
+      if (k0 > k1) continue;
+      const t0 = tp + (tq - tp) * k0;
+      const t1 = tp + (tq - tp) * k1;
+      band.push([Math.min(t0, t1) - tol, Math.max(t0, t1) + tol]);
     }
     ts.sort((x, y) => x - y);
-    return { ts, idx: new SegIndex([{ pts: r, closed: true }], Math.max(2, 4 * tol)) };
+    band.sort((x, y) => x[0] - y[0]);
+    const merged: [number, number][] = [];
+    for (const iv of band) {
+      const last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push([iv[0], iv[1]]);
+    }
+    return { ts, merged };
   });
+  /** Count of sorted values strictly below t. */
+  const below = (xs: readonly number[], t: number, key = (i: number) => xs[i]) => {
+    let lo = 0;
+    let hi = xs.length;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      if (key(m) < t) lo = m + 1;
+      else hi = m;
+    }
+    return lo;
+  };
   return (t: number): boolean =>
-    per.every(({ ts, idx }) => {
-      // crossings strictly before t
-      let lo = 0;
-      let hi = ts.length;
-      while (lo < hi) {
-        const m = (lo + hi) >> 1;
-        if (ts[m] < t) lo = m + 1;
-        else hi = m;
-      }
-      if (lo % 2 === 1) return true;
-      return idx.nearest({ x: a.x + u.x * t, y: a.y + u.y * t }, tol) <= tol;
+    per.every(({ ts, merged }) => {
+      if (below(ts, t) % 2 === 1) return true;
+      // the last band starting at or before t
+      const j = below(merged as unknown as number[], t, (i) => merged[i][0]) - 1;
+      const k = j + 1 < merged.length && merged[j + 1][0] === t ? j + 1 : j;
+      return k >= 0 && merged[k][0] <= t && t <= merged[k][1];
     });
 }
 
