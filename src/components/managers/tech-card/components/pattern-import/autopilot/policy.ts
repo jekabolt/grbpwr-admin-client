@@ -643,6 +643,13 @@ const NOT_PATTERN_WORDS =
 /** Line work (m) a picture-led page stays under; a text-led one gets this per 100 text items. */
 const INK_LINES_MAX_M = 1;
 
+/** The classifier's roles the page-ink evidence pairs with: text-led instructions, an overview
+ *  (the tile lattice), a cover led by pictures or text — never a cover that is only "page 1". */
+function inkRole(c: ImportSession['pages'][number]): boolean {
+  if (c.cls === 'instructions' || c.cls === 'overview') return true;
+  return c.cls === 'cover' && !!c.ink && (c.ink.raster >= 0.3 || c.ink.texts >= 10);
+}
+
 function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
@@ -665,6 +672,13 @@ function notPatternEvidence(
   // whole pieces at a smaller scale (a shape match, not the classifier's lattice; Codex final #5)
   if (c && c.cls === 'overview' && c.confidence >= 0.7 && d.reducedCopy)
     return `overview ${c.confidence.toFixed(2)} + ${d.reducedCopy.matches} of its ${d.reducedCopy.of} outlines are tile pieces at 1:${Math.round(1 / d.reducedCopy.scale)} (shape match)`;
+  // STOPS: the classifier's role (text-led instructions, the overview's tile lattice, a picture-led
+  // cover) AND the page's own line work, every long / piece-sized line of it explained against the
+  // file's tile sheet (clean/page-ink.ts) — rules, frames, the test square, tile pieces reduced,
+  // small drawings in a pen the tiles do not use. A curve at 1:1 in the pattern's pen is never
+  // explained: that page stays the question.
+  if (c && d.ink?.explained && c.confidence >= 0.7 && inkRole(c))
+    return `${c.cls} ${c.confidence.toFixed(2)} (${c.why}) + every line on it is explained: ${d.ink.explained}`;
   const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;
@@ -704,7 +718,7 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
         : '';
     return stopAt(
       'files',
-      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?${ai}`,
+      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''}${blind.ink?.unexplained ? ` — not a table, frame, test square, reduced tile piece or small drawing: ${blind.ink.unexplained}` : ''} — is it a pattern page?${ai}`,
     );
   }
   const roleSet = new Set(
@@ -730,8 +744,9 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
             ...(d.ai ? [`AI: ${aiWords(d.ai)}`] : []),
           ],
           0.6,
-          // an overview set aside holds pattern-like line work: a strong assumption
-          d.cls === 'overview',
+          // an overview set aside holds pattern-like line work, a piece-sized rectangle in the
+          // tile sheet's pen was read as a frame: a strong assumption
+          d.cls === 'overview' || (!!d.ink?.penFrame && !!d.ink.explained),
           undefined,
           `${d.file}:${d.page}`,
         ),
