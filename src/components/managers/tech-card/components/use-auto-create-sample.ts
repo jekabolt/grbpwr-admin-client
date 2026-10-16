@@ -314,20 +314,26 @@ export function useAutoCreateSample({
     let issued = false;
     if (steps.includes('writeoff')) {
       const lines: WriteoffLine[] = [];
+      // Stock left per material across lines: the batch merges lines that share a material (a
+      // stand-in on two main lines), so capping each line by the full balance could overdraw it
+      // and get the whole batch rejected.
+      const left = new Map<number, number>();
       for (const b of bomItems) {
         const materialId = cutFrom(b);
         if (!materialId) continue;
         const spec = parseDecimalNumber(
           specQuantity(techCard, wireInt(b.id), p.colorwayId, p.sizeId),
         );
-        const onHand = stockOnHand(stock.rowByMaterial.get(materialId));
+        const onHand = left.get(materialId) ?? stockOnHand(stock.rowByMaterial.get(materialId));
         if (!(spec > 0) || !(onHand > 0)) continue;
+        const qty = Number(Math.min(spec, onHand).toFixed(3));
+        left.set(materialId, onHand - qty);
         lines.push({
           key: `bom-${wireInt(b.id) || b.lineKey}`,
           materialId,
           label: b.name ?? '',
           unit: b.unit ?? '',
-          quantity: String(Number(Math.min(spec, onHand).toFixed(3))),
+          quantity: String(qty),
         });
       }
       if (lines.length) {
