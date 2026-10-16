@@ -47,6 +47,7 @@ import { foldShapeProblem } from '../semantics/fold';
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
+import { shapeFamilies } from './shape';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -734,6 +735,11 @@ export function g5(ctx: GateCtx): GateCheck {
         bad(`card parser keeps ${n8} of ${s.drills.length + wantInternal} layer-8 paths`);
     }
   }
+  // SHAPE (owner 16.10): one piece, one shape — the sizes of an identity carry the same features
+  // and the same cut-line structure (gate/shape.ts)
+  const fam = shapeFamilies(ctx);
+  failed.push(...fam.failed);
+  notes.push(...fam.notes);
   return check(
     'G5-features',
     failed,

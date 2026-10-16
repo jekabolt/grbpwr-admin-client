@@ -78,6 +78,17 @@ export function turnsOf(outline: readonly PtMm[]): { at: PtMm; deg: number }[] {
   return keep;
 }
 
+/** The same, from a written block: its cut line and the counts read back from the file. */
+export function shapeOfCut(cut: readonly PtMm[], notches: number, drills: number): SizeShape {
+  const t = turnsOf(cut);
+  return {
+    notches,
+    drills,
+    corners: t.filter((x) => x.deg > CORNER_STRONG_DEG).map((x) => x.at),
+    weak: t.filter((x) => x.deg > CORNER_WEAK_DEG).length,
+  };
+}
+
 export function shapeOf(z: Pick<PieceSizeSpec, 'cut' | 'notches' | 'drills'>): SizeShape {
   const t = turnsOf(z.cut);
   return {
