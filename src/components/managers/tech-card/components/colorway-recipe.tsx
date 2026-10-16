@@ -36,12 +36,11 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { FoldCaret } from 'ui/components/fold-caret';
 import { GroupLabel } from 'ui/components/group-label';
-import { HeaderWarnings } from 'ui/components/header-warnings';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
@@ -84,15 +83,9 @@ import {
   bomUnitKind,
   bomUnitStep,
   cardMarkers,
-  consumptionCm,
-  decNum,
-  markerNormProvenance,
   markerNormStaleness,
   markersForLine,
   markersOfColorway,
-  pieceSetChanged,
-  scalarNormRefusal,
-  toBomUnit,
 } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
 import { pieceRefKey } from './piece-block-refs';
@@ -281,7 +274,6 @@ function colourwaySwatchHex(cw: common_AdminColorwayRef, dictHex?: string): stri
 
 /** Стабильная пустая ссылка: колорвей без строк верстака не должен ремоунтить проп на каждый рендер. */
 const EMPTY_SIDES: readonly BenchSide[] = [];
-const EMPTY_DERIVED: ReadonlyMap<string, readonly string[]> = new Map();
 
 // ⚠ СБРОС ПРИ СМЕНЕ КАРТОЧКИ ИДЁТ ЭТИМИ КОНСТАНТАМИ, а не свежими литералами: сброс живёт в теле
 // рендера, а `setState` с НОВЫМ пустым объектом каждый раз считается изменением и запускает рендер
@@ -888,13 +880,10 @@ function UsagePerSizeLocal({
         </tbody>
       </DataTable>
       {extraSizes.length > 0 && (
-        <Text
-          size='nano'
-          variant='label'
-          component='p'
-          title='these numbers are still saved and used: remove them or put the size back in the range'
-        >
-          * not in the card's range
+        <Text size='nano' variant='label' component='p'>
+          * these sizes are not in the card's range, yet the numbers on them are saved and keep
+          working: while the per-size numbers are non-empty the server ignores the scalar. remove
+          them or put the size back in the range
         </Text>
       )}
     </div>
@@ -957,7 +946,9 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
         </Pill>
       ) : value ? (
         <Pill tone='mut'>estimate from the area</Pill>
-      ) : null}
+      ) : (
+        <Pill tone='mut'>the estimate is not computed</Pill>
+      )}
       <details className='inline-block text-nano'>
         <summary
           className='inline-flex h-[18px] w-[18px] cursor-pointer list-none items-center justify-center border border-borderColor text-labelColor [&::-webkit-details-marker]:hidden'
@@ -1262,11 +1253,15 @@ function NormSummary({
       )}
       {uncoveredSizes.length > 0 && (
         <div className='flex flex-wrap items-center gap-1.5'>
-          <Pill tone='attention' title='the run plan sees no consumption for these sizes'>
+          <Pill tone='attention'>
             {`no norm: ${uncoveredSizes
               .map((id) => formatSizeName(sizeNameById.get(id) ?? `#${id}`))
               .join(', ')}`}
           </Pill>
+          <Text size='nano' variant='label' component='span'>
+            the range does not cover these sizes, and the line has no single norm — for them the run
+            plan will not see any consumption at all
+          </Text>
         </div>
       )}
     </div>
@@ -1839,9 +1834,23 @@ function SlotNormBlock({
               onApply={onChange}
             />
           )}
-          {/* ПУСТАЯ НОРМА МОЛЧИТ О ТОМ, КАК СЧИТАЕТСЯ РАСХОД (TABS-LITE: абзац-объяснение снят). Остаётся
-              одна строка и только про факт, который иначе не увидеть: раскладки на этот слот сняты,
-              но в ДРУГОМ колорвее. Только для рулонного слота. */}
+          {/* ПУСТАЯ НОРМА ОБЯЗАНА СКАЗАТЬ, ЧЕГО ЖДЁТ, А НЕ ПРЕДЛАГАТЬ ОДИН ЛИШЬ РУЧНОЙ ВВОД.
+              Каждый инструмент выше возвращает ПУСТОТУ, когда ему нечего предложить: нет снятой
+              раскладки на слот — нет подсказки; нет деталей кроя этой ткани или размерного ряда —
+              нет кнопки «по выкройкам». Пустота вместо кнопки была осознанной (кнопка, которая
+              всегда отказывает, читается как поломка), но объяснения вместо неё не осталось: на
+              строке без нормы весь блок расхода схлопывался в одну свёрнутую «ввести руками…», и
+              экран выглядел ровно так же, как до появления инструментов, — то есть предлагал
+              угадать, ничего не сказав про то, что число вообще-то считается.
+
+              Здесь говорится ТОЛЬКО про раскладку — про неё эта строка и знает (маркеры у неё в
+              пропсах). Про выкройки отвечает сама подсказка «по выкройкам» (dxf-apply.tsx): у неё
+              есть комплект деталей, и утверждать за неё отсюда значило бы однажды сказать «выкроек
+              нет» рядом с её же кнопкой.
+
+              Только для РУЛОННОГО слота: на нитке и тесьме обещание «посчитаем по выкройкам»
+              было бы ложным (площади деталей к ним не применяются), а ручной ввод у них и так
+              стоит развёрнутым — сказать там нечего. */}
           {rollGoods &&
             !hasNorm &&
             lineMarkers === 0 &&
@@ -1855,16 +1864,14 @@ function SlotNormBlock({
                 draft.bomLineKey,
               ).length;
               return (
-                foreign > 0 && (
-                  <Text
-                    size='nano'
-                    variant='label'
-                    component='p'
-                    title="their length was measured on another colourway's article; capture a marker in this colourway or compute from the patterns"
-                  >
-                    {`${foreign} ${plural(foreign, 'marker')} only in another colourway`}
-                  </Text>
-                )
+                <Text size='nano' variant='label' component='p'>
+                  consumption is not typed in by hand, it is computed: from a marker — by the
+                  measured lay length, or from the patterns — by the cut-piece area ÷ the cutting
+                  width.{' '}
+                  {foreign > 0
+                    ? `markers have been captured for this slot (${foreign}), but in a DIFFERENT colourway: their length is measured on that colourway's article, and offering it here would substitute the cloth width — the difference would look like a perfectly normal number. capture a marker in this colourway, or compute it from the patterns.`
+                    : 'there is no marker for this slot yet, so there is nothing to offer capturing from.'}
+                </Text>
               );
             })()}
           {/* РУЧНОЙ ВВОД ОСТАЁТСЯ НАВСЕГДА — и остаётся ЗА РАСКРЫВАШКОЙ, когда норму уже дал
@@ -1893,13 +1900,9 @@ function SlotNormBlock({
             </span>
           )}
           {rowEditing && normEditable && (
-            <Text
-              size='nano'
-              variant='label'
-              component='p'
-              title="costing will add the slot's wastage percent on top again"
-            >
-              source becomes “entered by hand”
+            <Text size='nano' variant='label' component='p'>
+              edited by hand — the source will switch to “entered by hand”, and costing will start
+              charging the slot's wastage percent on top again
             </Text>
           )}
         </div>
@@ -2147,16 +2150,16 @@ function PieceLinkRow({
       {legacyText && (
         <div className='flex flex-col gap-1 pb-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
-            <Pill
-              tone='attention'
-              title="the server adds this number to the fabric's norm. set the norm above and remove this one"
-            >
-              legacy consumption on the pieces
-            </Pill>
+            <Pill tone='attention'>legacy consumption on the pieces</Pill>
             <Text size='small' component='span' className='font-mono tabular-nums'>
               {legacyText}
             </Text>
           </div>
+          <Text size='nano' variant='label' component='p'>
+            the server adds this number to the fabric's norm — into the cost and into the run's
+            requirement: the lines of one slot are summed. the garment's consumption is kept as this
+            fabric's consumption above — set the norm there, and remove this number
+          </Text>
           {canEdit && (
             <span>
               <Button type='button' variant='secondary' size='xs' onClick={clearLegacy}>
@@ -2276,7 +2279,6 @@ function FabricRecipeCard({
   canEdit,
   frozen,
   active,
-  auto,
   onPatchSlot,
   onRemoveRow,
   onTogglePiece,
@@ -2307,8 +2309,6 @@ function FabricRecipeCard({
   /** Карточка выпущена — раскладку комплекта сервер не примет, и это говорится словами. */
   frozen?: boolean;
   active: boolean;
-  /** Что редактор дописал в этот слот сам (авто-черновик): показывается чипом источника. */
-  auto?: { pieces?: boolean; norm?: 'marker' | 'patterns' };
   /** index < 0 значит «строки этого слота ещё нет» — патч её и рождает (patchGarmentSlot). */
   onPatchSlot: (index: number, patch: Partial<UsageDraft>) => void;
   onRemoveRow: (index: number) => void;
@@ -2436,44 +2436,6 @@ function FabricRecipeCard({
       )
       .map(({ row, piece }) => piece?.name?.trim() || row.draft.pieceLineKey),
   );
-
-  // ── СВЁРТКА КАРТОЧКИ В ОДНУ СТРОКУ (TABS-LITE) ───────────────────────────────────────────
-  // Закрытая карточка — строка «ткань · артикул · на изделие · источник». Открыты по умолчанию
-  // только те, где есть что делать: нет артикула, нет нормы, или висит проблема слоёв/легаси.
-  // Решение принимается ОДИН раз на монтировании: открытая человеком не захлопнется, когда он
-  // впишет норму. Свёрнутое тело остаётся смонтированным (`hidden`) — его черновики и попапы
-  // переживают свёртку. Переключатель — span role=button: `<fieldset disabled>` выпуска его не глушит.
-  const cardHasNorm =
-    !!draft.consumption.trim() ||
-    !!draft.quantity.trim() ||
-    draft.sizeConsumptions.some((x) => (x.consumption ?? '').trim() !== '');
-  const cardNeedsWork =
-    missingArticle ||
-    (!offRecipeSection && !cardHasNorm) ||
-    offRecipeSection ||
-    garmentRows.length > 1 ||
-    (rollGoods && isUnsortedLayerRole(layerRole)) ||
-    twoMainsRows.length > 0 ||
-    unsortedRows.length > 0 ||
-    mainlessRows.length > 0 ||
-    legacyPieceNames.length > 0;
-  const [open, setOpen] = useState(cardNeedsWork);
-  const perUnit = draft.sizeConsumptions.some((x) => (x.consumption ?? '').trim() !== '')
-    ? 'per size'
-    : draft.consumption.trim()
-      ? `${draft.consumption.trim()}${unit ? ` ${unit}` : ''}`
-      : draft.quantity.trim()
-        ? `${draft.quantity.trim()}${unit ? ` ${unit}` : ''}`
-        : 'no norm';
-  const foldedLine = [
-    code || (missingArticle ? 'no article' : ''),
-    perUnit,
-    cardHasNorm ? normSourceLabel(draft.consumptionSource) : '',
-    auto?.norm || auto?.pieces ? 'auto' : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const toggleOpen = () => setOpen((v) => !v);
 
   // ── ТУЛБАР НОРМЫ: инструменты, правка руками, снятие ────────────────────────────────────
   //
@@ -2607,7 +2569,7 @@ function FabricRecipeCard({
             перекрывает карточку, и посчитать галочки глазами по сетке из тридцати плиток нельзя. */}
         <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1'>
           {assignedKeys.length === 0
-            ? `0 of ${pieces.length} selected`
+            ? `0 of ${pieces.length} selected — nothing is cut from this fabric yet`
             : `${assignedKeys.length} of the card's ${pieces.length} ${plural(pieces.length, 'piece')} selected`}
         </Text>
       </div>
@@ -2615,117 +2577,86 @@ function FabricRecipeCard({
   );
 
   return (
-    <div data-cw-card={slot.lineKey ?? ''} className='scroll-mt-20'>
+    <div>
       <GroupLabel
-        lead={
-          open ? undefined : (
-            <Text size='micro' variant='label' component='span' className='truncate'>
-              {foldedLine}
-            </Text>
-          )
-        }
         action={
-          open && (
-            <div className='flex flex-wrap items-center justify-end gap-1.5'>
-              {/* ── ТУЛБАР КАРТОЧКИ (макет «лист») ────────────────────────────────────────────
+          <div className='flex flex-wrap items-center justify-end gap-1.5'>
+            {/* ── ТУЛБАР КАРТОЧКИ (макет «лист») ────────────────────────────────────────────
                 Все действия над этой тканью собраны в одном месте справа сверху: артикул,
                 оба инструмента расчёта, правка руками и снятие нормы. Прежде они стояли в
                 четырёх разных местах — пин в шапке, инструменты под числом, ручной ввод под
                 раскрывашкой, «убрать расход» в самом низу, — и порядок чтения карточки
                 прерывался кнопкой на каждом шагу. */}
-              {auto?.norm && (
-                <HeaderNote
-                  data-cw-auto-norm={auto.norm}
-                  title='filled automatically; apply or edit to override'
-                >
-                  {`auto · ${auto.norm}`}
-                </HeaderNote>
-              )}
-              {toolbarNorm}
-              {pinAllowed ? (
-                <div className='flex items-center gap-1.5'>
-                  {/* ПИН АРТИКУЛА — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — стоит в шапке,
+            {toolbarNorm}
+            {pinAllowed ? (
+              <div className='flex items-center gap-1.5'>
+                {/* ПИН АРТИКУЛА — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — стоит в шапке,
                   рядом с именем ткани, которое он и переопределяет. Прежде он висел на плашке
                   артикула внутри строки; плашка уехала в шапку целиком, и пин уехал с ней. */}
-                  <GenericPopover
-                    open={pinOpen}
-                    onOpenChange={setPinOpen}
-                    noTail
-                    title='colourway article'
-                    className='w-[280px]'
-                    triggerProps={{
-                      'aria-label': 'colourway article',
-                      className: buttonVariants({
-                        variant: 'underline',
-                        size: 'xs',
-                        className: 'text-labelColor hover:text-textColor',
-                      }),
-                    }}
-                    openElement={draft.materialId > 0 ? 'pin ✎' : 'another article…'}
-                  >
-                    <div className='flex flex-col gap-1.5'>
-                      <ArticlePinSelect
-                        draft={draft}
-                        slot={slot}
-                        materials={materials}
-                        canEdit={canEdit}
-                        // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним).
-                        // Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО артикула (полная
-                        // ширина × плотность, toBomUnit): маркер 2 м на артикуле 150 см × 200 г/м²
-                        // записан как 0.6 кг, и после пина на 180 см × 250 г/м² строка продолжала бы
-                        // обещать 0.6 при правильных 0.9 — прогон объявил бы честный факт
-                        // перерасходом +50%. На слотах в метрах/сантиметрах число НЕ трогается: длина
-                        // от артикула не зависит (за шириной раскладки следит отдельная проверка
-                        // ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔ явный пин на
-                        // артикул самого слота — та же ткань, и чистить нечего.
-                        //
-                        // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
-                        // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
-                        // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
-                        // не трогается ничего.
-                        onChange={(nextMaterialId) => {
-                          const patch: Partial<UsageDraft> = { materialId: nextMaterialId };
-                          const effectiveBefore = draft.materialId || slot.materialId || 0;
-                          const effectiveAfter = nextMaterialId || slot.materialId || 0;
-                          if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
-                            patch.consumption = '';
-                            patch.sizeConsumptions = [];
-                            Object.assign(patch, MANUAL_PROVENANCE);
-                          }
-                          onPatchSlot(garment?.index ?? -1, patch);
-                          setPinOpen(false);
-                        }}
-                      />
-                    </div>
-                  </GenericPopover>
-                </div>
-              ) : null}
-            </div>
-          )
+                <GenericPopover
+                  open={pinOpen}
+                  onOpenChange={setPinOpen}
+                  noTail
+                  title='colourway article'
+                  className='w-[280px]'
+                  triggerProps={{
+                    'aria-label': 'colourway article',
+                    className: buttonVariants({
+                      variant: 'underline',
+                      size: 'xs',
+                      className: 'text-labelColor hover:text-textColor',
+                    }),
+                  }}
+                  openElement={draft.materialId > 0 ? 'pin ✎' : 'another article…'}
+                >
+                  <div className='flex flex-col gap-1.5'>
+                    <ArticlePinSelect
+                      draft={draft}
+                      slot={slot}
+                      materials={materials}
+                      canEdit={canEdit}
+                      // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним).
+                      // Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО артикула (полная
+                      // ширина × плотность, toBomUnit): маркер 2 м на артикуле 150 см × 200 г/м²
+                      // записан как 0.6 кг, и после пина на 180 см × 250 г/м² строка продолжала бы
+                      // обещать 0.6 при правильных 0.9 — прогон объявил бы честный факт
+                      // перерасходом +50%. На слотах в метрах/сантиметрах число НЕ трогается: длина
+                      // от артикула не зависит (за шириной раскладки следит отдельная проверка
+                      // ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔ явный пин на
+                      // артикул самого слота — та же ткань, и чистить нечего.
+                      //
+                      // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
+                      // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
+                      // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
+                      // не трогается ничего.
+                      onChange={(nextMaterialId) => {
+                        const patch: Partial<UsageDraft> = { materialId: nextMaterialId };
+                        const effectiveBefore = draft.materialId || slot.materialId || 0;
+                        const effectiveAfter = nextMaterialId || slot.materialId || 0;
+                        if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
+                          patch.consumption = '';
+                          patch.sizeConsumptions = [];
+                          Object.assign(patch, MANUAL_PROVENANCE);
+                        }
+                        onPatchSlot(garment?.index ?? -1, patch);
+                        setPinOpen(false);
+                      }}
+                    />
+                    <Text size='micro' variant='label'>
+                      overrides the slot's article in this colourway only. “default” brings back the
+                      article from the BOM.
+                    </Text>
+                  </div>
+                </GenericPopover>
+              </div>
+            ) : null}
+          </div>
         }
       >
-        <span
-          role='button'
-          tabIndex={0}
-          aria-expanded={open}
-          onClick={toggleOpen}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              toggleOpen();
-            }
-          }}
-          className={cn(
-            'inline-flex cursor-pointer items-center hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-            missingArticle && 'text-error',
-          )}
-        >
-          {heading}
-          <FoldCaret open={open} />
-        </span>
+        {heading}
       </GroupLabel>
 
-      <div className='flex gap-3 pt-1' hidden={!open}>
+      <div className='flex gap-3 pt-1'>
         <MaterialThumb material={material} />
         <div className='flex min-w-0 flex-1 flex-col gap-2'>
           {meta && (
@@ -2733,17 +2664,18 @@ function FabricRecipeCard({
               {meta}
             </Text>
           )}
-          {/* Пин здесь НЕ повторяется: он свойство строки и стоит в её блоке расхода (SlotNormBlock).
-              «Нет артикула» — не пилюлей здесь, а `! N without article` в шапке блока и красным
-              именем карточки (TABS-LITE). */}
-          {offRecipeSection && (
+          {/* Пин здесь НЕ повторяется: он свойство строки и стоит в её блоке расхода (SlotNormBlock). */}
+          {(missingArticle || offRecipeSection) && (
             <div className='flex flex-wrap items-center gap-1.5'>
-              <Pill
-                tone='attention'
-                title='lines of this section are left over from the previous model: remove them and set the consumption on the right fabric'
-              >
-                section is not in a recipe
-              </Pill>
+              {missingArticle && <Pill tone='warn'>no article — a production blocker</Pill>}
+              {offRecipeSection && (
+                <Pill
+                  tone='attention'
+                  title='a colourway recipe is written on fabrics, threads, hardware, trim and decoration; the lines of this section are left over from the previous model. there is nowhere to move the line to — remove it and set the consumption on the right fabric'
+                >
+                  the section is not written into a recipe
+                </Pill>
+              )}
             </div>
           )}
 
@@ -2771,12 +2703,11 @@ function FabricRecipeCard({
               <div key={i}>
                 {i > 0 && (
                   <div className='flex flex-col gap-1 pb-1'>
-                    <Pill
-                      tone='warn'
-                      title="the server sums them: this fabric's consumption is their total. leave one"
-                    >
-                      a second consumption line on this fabric
-                    </Pill>
+                    <Pill tone='warn'>a second consumption line on this fabric</Pill>
+                    <Text size='nano' variant='label' component='p'>
+                      more than one line without a piece is set on a single slot; the server SUMS
+                      them — this fabric's consumption is the total of all of them. leave one
+                    </Text>
                   </div>
                 )}
                 <SlotNormBlock
@@ -2816,70 +2747,61 @@ function FabricRecipeCard({
               на всём. Стоит на КАРТОЧКЕ: роль — свойство ткани, чинится на вкладке BOM. */}
           {rollGoods && isUnsortedLayerRole(layerRole) && (
             <div className='flex flex-wrap items-center gap-1.5'>
-              <Pill
-                tone='attention'
-                title='main fabric, lining or fusing is derived from the purpose of this BOM line'
-              >
-                set the purpose on the BOM tab
-              </Pill>
+              <Pill tone='attention'>the layer role is unknown — the purpose is not set</Pill>
+              <Text size='nano' variant='label' component='span'>
+                set the purpose of this line on the BOM tab: whether this is the main fabric, the
+                lining or the fusing is derived from it
+              </Text>
             </div>
           )}
 
           {twoMainsRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill
-                tone='warn'
-                title="the server will not accept such a recipe. set the second fabric's purpose on the BOM tab, or split the piece"
-              >
-                two main fabrics on one piece
-              </Pill>
+              <Pill tone='warn'>two main fabrics on one piece</Pill>
               <Text size='nano' variant='label' component='p'>
-                {uniq(twoMainsRows.map((x) => x.name)).join(', ')} · also{' '}
-                {rivalNames(twoMainsRows.flatMap((x) => x.issue.mainNames)).join(', ')}
+                {uniq(twoMainsRows.map((x) => x.name)).join(', ')} — on each of them, besides this
+                fabric, there is another one with the purpose “main material”:{' '}
+                {rivalNames(twoMainsRows.flatMap((x) => x.issue.mainNames)).join(', ')}. a whole
+                piece is cut from one main fabric: the server will not accept such a recipe, and the
+                run pack will stop. set the second fabric's purpose on the BOM tab (lining, fusing,
+                contrast…) — or split the piece in two
               </Text>
             </div>
           )}
           {unsortedRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill
-                tone='warn'
-                title='a layer without a purpose may be a second main fabric; the run pack will stop. set the purpose on the BOM tab'
-              >
-                the layer purposes are unsorted
-              </Pill>
+              <Pill tone='warn'>the layer purposes are unsorted</Pill>
               <Text size='nano' variant='label' component='p'>
-                {uniq(unsortedRows.map((x) => x.name)).join(', ')} · no purpose:{' '}
+                {uniq(unsortedRows.map((x) => x.name)).join(', ')} have several layers, and{' '}
                 {[
                   ...(selfIsUnsorted ? [selfName] : []),
                   ...rivalNames(unsortedRows.flatMap((x) => x.issue.unsortedNames)),
-                ].join(', ')}
+                ].join(', ')}{' '}
+                have no purpose set — there is no proving it is not a second main fabric, and the
+                run pack will stop. set the purpose on the BOM tab
               </Text>
             </div>
           )}
           {mainlessRows.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill
-                tone='attention'
-                title='add a fabric with the purpose “main material” to these pieces, or leave it if the piece is composed this way'
-              >
-                the piece has no main fabric
-              </Pill>
+              <Pill tone='attention'>the piece has no main fabric</Pill>
               <Text size='nano' variant='label' component='p'>
-                {uniq(mainlessRows.map((x) => x.name)).join(', ')}
+                {uniq(mainlessRows.map((x) => x.name)).join(', ')} are bound to{' '}
+                {uniq(mainlessRows.flatMap((x) => x.issue.layerRoleNames)).join(', ')}, but not to a
+                main one. add a fabric with the purpose “main material” to these pieces — or confirm
+                that the piece really is composed this way
               </Text>
             </div>
           )}
 
           {legacyPieceNames.length > 0 && (
             <div className='flex flex-col gap-1'>
-              <Pill
-                tone='attention'
-                title="left over from the previous model; the server adds them on top of this fabric's consumption. remove them in the rows below"
-              >
-                the pieces carry a consumption number of their own
-              </Pill>
+              <Pill tone='attention'>the pieces carry a consumption number of their own</Pill>
               <Text size='nano' variant='label' component='p'>
-                {legacyPieceNames.join(', ')}
+                {legacyPieceNames.join(', ')} carry a consumption of their own, left over from the
+                previous model. the server SUMS the lines of one slot — these numbers are added on
+                top of this fabric's consumption, both into the cost and into the run's requirement.
+                expand the list of pieces and remove them
               </Text>
             </div>
           )}
@@ -2910,7 +2832,7 @@ function FabricRecipeCard({
             <div className='-mx-4 -mb-4 mt-1 flex flex-col items-start gap-1.5 border-t border-hairline bg-bgZebra px-4 py-2.5'>
               {pieceRows.length === 0 ? (
                 <Text size='nano' variant='label' component='p'>
-                  no pieces assigned
+                  no pieces assigned — nothing is cut from this fabric yet
                 </Text>
               ) : (
                 <div className='flex w-full min-w-0 flex-col gap-1.5'>
@@ -2918,14 +2840,6 @@ function FabricRecipeCard({
                     <Text size='micro' variant='label' component='span' className='uppercase'>
                       {`cut from this fabric · ${pieceRows.length}`}
                     </Text>
-                    {auto?.pieces && (
-                      <HeaderNote
-                        data-cw-auto-pieces=''
-                        title='taken from the pattern links and the other colourways; change the set to override'
-                      >
-                        auto
-                      </HeaderNote>
-                    )}
                   </div>
                   {/* Деталь БЕЗ контура остаётся в полосе пустой клеткой с обрезком имени, а не
                       исчезает: пропав, она сделала бы полосу короче состава — и то, что расчёт по
@@ -3000,14 +2914,17 @@ function FabricRecipeCard({
                   piecePicker(pieceRows.length === 0 ? 'assign pieces' : 'change the set of pieces')
                 ) : (
                   <Text size='nano' variant='label' component='p'>
-                    no cut pieces on the card yet
+                    the card has no cut pieces yet — declare them on the pieces tab, and they can
+                    then be assigned to this fabric
                   </Text>
                 ))}
               {/* Секция уехала из рулонной уже после того, как связи завели. Новые назначать
                   нельзя (деталь кроят из полотна, а не из нитки), а эти — убрать можно и нужно. */}
               {!rollGoods && pieceRows.length > 0 && (
                 <Text size='nano' variant='label' component='p'>
-                  not roll goods any more: remove the piece links above
+                  the section of this BOM line is no longer roll goods — new pieces are not assigned
+                  to it. the links left over from the previous section are listed in the rows above:
+                  remove them
                 </Text>
               )}
             </div>
@@ -3125,12 +3042,13 @@ function OrphanRecipeCard({
           )}
           {!savableUsage(draft) && (
             <div className='flex flex-col gap-1'>
-              <Pill
-                tone='warn'
-                title='set the consumption up again on the right fabric, and remove this line'
-              >
-                the slot is lost too: the line will not be saved
-              </Pill>
+              <Pill tone='warn'>the slot is lost too — the line will not be saved</Pill>
+              <Text size='nano' variant='label' component='p'>
+                this line has neither a live piece nor a resolvable reference to a BOM line. the
+                full replacement of the recipe cannot send it and will delete it on the very first
+                save — “keep” would save nothing here, which is why it is not offered. set the
+                consumption up again on the right fabric, and remove this one
+              </Text>
             </div>
           )}
           {canEdit &&
@@ -3356,72 +3274,53 @@ function LabDipTimeline({
           no lab dip has been sent yet
         </Text>
       ) : (
-        (() => {
-          const roundRow = (r: TimelineRound, i: number) => {
-            const outcome = roundOutcome(r);
-            const latest = i === rounds.length - 1;
-            return (
-              <Row
-                key={r.key}
-                label={
-                  <span className='flex min-w-0 items-center gap-2'>
-                    {/* The hex belongs to the COLOURWAY, not to this round, so it marks the live round
+        rounds.map((r, i) => {
+          const outcome = roundOutcome(r);
+          const latest = i === rounds.length - 1;
+          return (
+            <Row
+              key={r.key}
+              label={
+                <span className='flex min-w-0 items-center gap-2'>
+                  {/* The hex belongs to the COLOURWAY, not to this round, so it marks the live round
                       only — repeated down the timeline it would read as a per-round dye. The empty
                       slot keeps every round's text on one left edge. */}
-                    {latest ? (
-                      <Swatch hex={swatchHex} />
-                    ) : (
-                      <span aria-hidden className='inline-block size-3 shrink-0' />
-                    )}
+                  {latest ? (
+                    <Swatch hex={swatchHex} />
+                  ) : (
+                    <span aria-hidden className='inline-block size-3 shrink-0' />
+                  )}
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='truncate uppercase'
+                  >
+                    R{r.round || i + 1}
+                    {r.submittedAt ? ` · submitted ${fmtDay(r.submittedAt)}` : ''}
+                  </Text>
+                </span>
+              }
+              value={
+                <span className='flex items-center gap-1.5'>
+                  {outcome && (
                     <Text
                       size='micro'
                       variant='label'
                       component='span'
-                      className='truncate uppercase'
+                      className='max-w-48 truncate'
+                      title={outcome}
                     >
-                      R{r.round || i + 1}
-                      {r.submittedAt ? ` · submitted ${fmtDay(r.submittedAt)}` : ''}
+                      {outcome}
                     </Text>
-                  </span>
-                }
-                value={
-                  <span className='flex items-center gap-1.5'>
-                    {outcome && (
-                      <Text
-                        size='micro'
-                        variant='label'
-                        component='span'
-                        className='max-w-48 truncate'
-                        title={outcome}
-                      >
-                        {outcome}
-                      </Text>
-                    )}
-                    {r.staged && <Pill tone='attention'>staged</Pill>}
-                    <LabDipPill status={r.status} />
-                  </span>
-                }
-              />
-            );
-          };
-          // ИСТОРИЯ СВЁРНУТА (TABS-LITE): на виду только живой раунд, прежние — за раскрывашкой
-          // на `<details>` (её не глушит `<fieldset disabled>` выпущенной карточки).
-          const earlier = rounds.slice(0, -1);
-          return (
-            <>
-              {earlier.length > 0 && (
-                <details className='group'>
-                  <summary className='inline-flex cursor-pointer list-none items-center text-micro uppercase tracking-label text-labelColor hover:text-textColor [&::-webkit-details-marker]:hidden'>
-                    {`${earlier.length} earlier ${plural(earlier.length, 'round')}`}
-                    <FoldCaret open='details' />
-                  </summary>
-                  {earlier.map((r, i) => roundRow(r, i))}
-                </details>
-              )}
-              {roundRow(rounds[rounds.length - 1], rounds.length - 1)}
-            </>
+                  )}
+                  {r.staged && <Pill tone='attention'>staged</Pill>}
+                  <LabDipPill status={r.status} />
+                </span>
+              }
+            />
           );
-        })()
+        })
       )}
 
       {canEdit && (
@@ -3531,6 +3430,14 @@ function LabDipTimeline({
           </div>
         </div>
       )}
+
+      {/* No save button of its own any more: the lab-dip write is queued behind the card's own write
+          (the card saves itself, O-60), which is what reports whether it landed. */}
+      {canEdit && staged && (
+        <Text size='micro' variant='label'>
+          saves with the card
+        </Text>
+      )}
     </div>
   );
 }
@@ -3540,7 +3447,7 @@ function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition
   if (fibers.length === 0) return null;
   return (
     <div className='flex flex-col gap-1'>
-      <GroupLabel>composition · approx</GroupLabel>
+      <GroupLabel>derived composition (approx · from BOM)</GroupLabel>
       <div className='flex h-4 w-full overflow-hidden border border-borderColor'>
         {fibers.map((f, i) => (
           <div
@@ -3558,8 +3465,10 @@ function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition
         ))}
       </div>
       <Text size='micro' variant='label'>
-        {fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')}
-        {skipped > 0 ? ` · ${skipped} without composition` : ''}
+        {fibers.map((f) => `${f.percent}% ${f.name}`).join(' · ')} · weighted by consumption
+        {skipped > 0
+          ? ` · ${skipped} article${skipped > 1 ? 's' : ''} excluded (no readable composition)`
+          : ''}
       </Text>
     </div>
   );
@@ -3656,9 +3565,13 @@ function ApplyPaletteModal({
         <span className='flex flex-wrap items-center gap-2'>
           <PaletteSwatches colours={palette} size={4} />
           <Text size='micro' variant='label' component='span'>
-            {colourwayName(colorway)}
+            {colourwayName(colorway)} · the first colour is the main one
           </Text>
         </span>
+        <Text size='micro' variant='label'>
+          each slot below takes the palette colour you pick; a slot left on «keep» is not touched.
+          consumption, pins and per-piece rows stay as they are.
+        </Text>
         <div className='flex flex-col'>
           {slots.map((sl) => {
             const key = sl.lineKey ?? '';
@@ -3729,7 +3642,6 @@ function ColorwayRecipeEditor({
   colorwayPins,
   renderSides,
   bandSpeaks,
-  derivedPieces,
   onOpenStudio,
   onStatus,
 }: {
@@ -3785,12 +3697,6 @@ function ColorwayRecipeEditor({
   renderSides: readonly BenchSide[];
   /** Сервер вообще отвечает на маршруты полосы. Пусто ≠ «рендеров нет» на старом бинаре. */
   bandSpeaks: boolean;
-  /**
-   * bomLineKey → детали, которые карточка УЖЕ связала с этим слотом в другом месте: связи
-   * блок→деталь выкроек, материал детали и рецепты СОСЕДНИХ колорвеев (слот — уровень карточки,
-   * та же связь, что читает piece-cloth.ts). Источник авто-назначения деталей (TABS-LITE авто #4).
-   */
-  derivedPieces: ReadonlyMap<string, readonly string[]>;
   /**
    * Дверь в студию на шаг FABRIC RENDER — С ИМЕНЕМ ЭТОГО КОЛОРВЕЯ. Аргумент обязателен именно
    * здесь: кнопка стоит в блоке рендеров одного продукта, и дверь без id открывала бы студию на
@@ -3936,23 +3842,6 @@ function ColorwayRecipeEditor({
     }
     return m;
   }, [rowsBySlot]);
-  // СЛОТЫ БЕЗ АРТИКУЛА — в шапку блока одной строкой `! N` (TABS-LITE R0.3), а не пилюлей на
-  // каждой карточке. Тот же резолвер, что у карточки (resolveSlotArticle по первой строке слота),
-  // иначе шапка и карточка разошлись бы в счёте.
-  const missingArticleKeys = useMemo(
-    () =>
-      cardSlots
-        .filter((slot) => {
-          const key = slot.lineKey ?? '';
-          const draft = rowsBySlot.get(key)?.garment[0]?.draft ?? {
-            ...blankDraft('', ''),
-            bomLineKey: key,
-          };
-          return resolveSlotArticle(draft, slot, materials).materialId === 0;
-        })
-        .map((slot) => slot.lineKey ?? ''),
-    [cardSlots, rowsBySlot, materials],
-  );
   const applyRefusal = !canEdit
     ? 'this card is read-only'
     : frozen
@@ -4075,164 +3964,6 @@ function ColorwayRecipeEditor({
       return [...prev, { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), bomLineKey }];
     });
   };
-  // ═══ АВТО-ЧЕРНОВИК СЛОТА (TABS-LITE авто #3, #4) ════════════════════════════════════════════
-  // Открытый колорвей сам дописывает в черновик то, что следует из фактов карточки, и ТОЛЬКО туда,
-  // где ничего не стоит: ручное значение не перезаписывается никогда.
-  //   • детали: у рулонного слота нет ни одной строки детали, а карточка уже связала с ним детали
-  //     (derivedPieces) — они назначаются; пикер «assign pieces» остаётся переопределением;
-  //   • норма: у слота нет ни числа, ни количества, ни второй строки, и есть РОВНО ОДНА назначенная
-  //     норма-раскладка (её скаляр, ширина совпадает, набор деталей не менялся) — пишется она со
-  //     штампом; иначе — серверная оценка по площадям выкроек (без отказа, не устаревшая) с
-  //     источником `dxf`. Диалоги применения остаются переопределением.
-  // Каждый слот решается ОДИН раз за монтирование (autoDone): снятое человеком не возвращается.
-  // Результат — staged-правка рецепта, как любая другая: уезжает только с сохранением карточки.
-  const autoDone = useRef<Set<string>>(new Set());
-  const [autoBySlot, setAutoBySlot] = useState<
-    Record<string, { pieces?: boolean; norm?: 'marker' | 'patterns' }>
-  >({});
-  const clearAuto = (key: string, what: 'pieces' | 'norm') =>
-    setAutoBySlot((prev) => {
-      if (!prev[key]?.[what]) return prev;
-      const next = { ...prev, [key]: { ...prev[key] } };
-      delete next[key][what];
-      return next;
-    });
-  useEffect(() => {
-    if (!active || !canEdit || frozen || !colorwayId) return;
-    const pieceAdds: UsageDraft[] = [];
-    const normPatches: {
-      key: string;
-      patch: Partial<UsageDraft>;
-      source: 'marker' | 'patterns';
-    }[] = [];
-    for (const slot of cardSlots) {
-      const key = slot.lineKey ?? '';
-      if (!key || !GARMENT_SECTIONS.has(slot.section ?? '')) continue;
-      if (!PIECE_SECTIONS.has(slot.section ?? '')) continue;
-      const rows = rowsBySlot.get(key);
-
-      if (!autoDone.current.has(`p:${key}`)) {
-        autoDone.current.add(`p:${key}`);
-        if ((rows?.pieces.length ?? 0) === 0) {
-          for (const pk of derivedPieces.get(key) ?? []) {
-            if (!pieceKeySet.has(pk)) continue;
-            pieceAdds.push({
-              ...blankDraft(pk, pieceByKey.get(pk)?.name?.trim() || ''),
-              bomLineKey: key,
-            });
-          }
-        }
-      }
-
-      if (!measured(slot.section) || autoDone.current.has(`n:${key}`)) continue;
-      const garment = rows?.garment ?? [];
-      const g = garment[0]?.draft;
-      const hasValue =
-        !!g &&
-        (!!g.consumption.trim() ||
-          !!g.quantity.trim() ||
-          g.sizeConsumptions.some((x) => (x.consumption ?? '').trim() !== ''));
-      if (hasValue || garment.length > 1) {
-        autoDone.current.add(`n:${key}`);
-        continue;
-      }
-      const unit = slot.unit?.trim() || '';
-      const norms = markersForLine(cwMarkers, key).filter((m) => m.isNorm === true);
-      // Каталог ещё не приехал — ширины артикула нет, и сверить ширину раскладки не с чем: ждём.
-      const articleLoading =
-        effectiveMaterialId(g ?? { ...blankDraft('', ''), bomLineKey: key }, slot) > 0 &&
-        materials.length === 0;
-      if (norms.length === 1 && articleLoading) continue;
-      if (norms.length === 1) {
-        const norm = norms[0];
-        const { articleWidth, weightBasis } = resolveSlotArticle(
-          g ?? { ...blankDraft('', ''), bomLineKey: key },
-          slot,
-          materials,
-        );
-        const cm = scalarNormRefusal(norm) ? null : consumptionCm(norm);
-        const conv =
-          cm != null ? toBomUnit(cm, unit, weightBasis.ok ? weightBasis.basis : undefined) : null;
-        const artW = parseDecimalNumber(articleWidth);
-        const normW = decNum(norm.fabricWidthCm);
-        const widthOff =
-          Number.isFinite(artW) && artW > 0 && normW > 0 && Math.abs(artW - normW) > 0.5;
-        if (conv && conv.value > 0 && !widthOff && !pieceSetChanged(norm)) {
-          autoDone.current.add(`n:${key}`);
-          normPatches.push({
-            key,
-            source: 'marker',
-            patch: {
-              consumption: String(conv.value),
-              sizeConsumptions: [],
-              ...markerNormProvenance([norm], norm.id ?? 0),
-            },
-          });
-          continue;
-        }
-      }
-      // Оценка сервера существует только там, где строки рецепта у слота нет.
-      const est = garment.length === 0 ? estimateBySlot.get(key) : undefined;
-      const estValue = decimalToInput(est?.perGarment).trim();
-      const estUnit = (est?.unit ?? '').trim();
-      if (
-        est &&
-        !est.refusal?.trim() &&
-        !est.stale &&
-        parseDecimalNumber(estValue) > 0 &&
-        (!estUnit || estUnit === unit)
-      ) {
-        autoDone.current.add(`n:${key}`);
-        normPatches.push({
-          key,
-          source: 'patterns',
-          patch: {
-            consumption: estValue,
-            quantity: '',
-            sizeConsumptions: [],
-            consumptionSource: 'dxf',
-            wasteSelvedgePct: '',
-            wasteCutPct: '',
-            normMarkerId: 0,
-          },
-        });
-      }
-    }
-    if (pieceAdds.length === 0 && normPatches.length === 0) return;
-    for (const { key, patch } of normPatches) patchGarmentSlot(key, -1, patch);
-    if (pieceAdds.length > 0) {
-      setDirty(true);
-      setUsages((prev) => [
-        ...prev,
-        ...pieceAdds.filter(
-          (a) =>
-            !prev.some((u) => u.pieceLineKey === a.pieceLineKey && u.bomLineKey === a.bomLineKey),
-        ),
-      ]);
-    }
-    setAutoBySlot((prev) => {
-      const next = { ...prev };
-      for (const a of pieceAdds) next[a.bomLineKey] = { ...next[a.bomLineKey], pieces: true };
-      for (const { key, source } of normPatches) next[key] = { ...next[key], norm: source };
-      return next;
-    });
-    // patchGarmentSlot пересоздаётся каждый рендер и читает только сеттеры состояния.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    active,
-    canEdit,
-    frozen,
-    colorwayId,
-    cardSlots,
-    rowsBySlot,
-    derivedPieces,
-    pieceKeySet,
-    pieceByKey,
-    cwMarkers,
-    materials,
-    estimateBySlot,
-  ]);
-
   const removeUsage = (i: number) => {
     setDirty(true);
     setUsages((prev) => prev.filter((_, idx) => idx !== i));
@@ -4321,31 +4052,26 @@ function ColorwayRecipeEditor({
     () => deriveComposition(usages, bomItems, materials),
     [usages, bomItems, materials],
   );
+  // Легенда к силуэтам — ОДНА на редактор, не на строку (иначе воскрес бы шум, который T3 только
+  // что вычистил), и только когда хоть одна иконка видна: подпись без картинок — обещание.
+  const hasSilhouettes = useMemo(
+    () => !!shapes && pieces.some((p) => !!shapes.get(pieceRefKey(p.lineKey))),
+    [shapes, pieces],
+  );
 
   return (
     <SectionStack>
       <Section
         title={`${title} · fabrics and consumption`}
-        question={colorway.baseSku}
+        question={[
+          colorway.baseSku,
+          `${cardSlots.length} ${plural(cardSlots.length, 'material')}`,
+          `${saveUsages.length} recipe ${plural(saveUsages.length, 'line')}`,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         action={
           <span className='flex items-center gap-2'>
-            {active && (
-              <HeaderWarnings
-                items={[
-                  missingArticleKeys.length > 0 && {
-                    text: `${missingArticleKeys.length} without article`,
-                    error: true,
-                    action: {
-                      label: 'show the first slot without an article',
-                      onClick: () =>
-                        document
-                          .querySelector(`[data-cw-card="${CSS.escape(missingArticleKeys[0])}"]`)
-                          ?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
-                    },
-                  },
-                ]}
-              />
-            )}
             {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
             {/* ═══ ДВЕРЬ «APPLY PALETTE TO SLOTS ›» — ЯВНАЯ, ОДНА, И ТОЛЬКО ПРИ ПАЛИТРЕ (T45, решение
                 владельца 7). Правка палитры рецепт не трогает никогда; сюда цвет попадает лишь этим
@@ -4384,12 +4110,39 @@ function ColorwayRecipeEditor({
           techCardId={techCardId}
           lockVersion={lockVersion}
         />
+        {/* МОДЕЛЬ СКАЗАНА ОДИН РАЗ, В ШАПКЕ РАЗДЕЛА. Прежде она была сказана дважды и разными
+            словами — в разделе «детали» и в разделе «на изделие», — и это само по себе было частью
+            жалобы: два раздела читались как два способа завести одно и то же, а нормой обладал
+            только один из них, ниже по странице. */}
+        <Text size='micro' variant='label'>
+          one fabric — one card: the per-unit consumption, the price and the pieces cut from it.
+          consumption is a property of the GARMENT: there is one per fabric, however many pieces are
+          cut from it; the list of pieces only answers “what is cut from it” and carries no norm of
+          its own
+        </Text>
+
         {bomItems.length === 0 ? (
-          <Placeholder label='add BOM lines first' />
+          <CalloutBox tone='note'>
+            <Text size='micro' component='span'>
+              the BOM has no lines yet. a colourway recipe assigns articles and consumption to BOM
+              lines specifically — set them up on the <b>BOM</b> tab, and a card will appear here
+              for each one
+            </Text>
+          </CalloutBox>
         ) : cardSlots.length === 0 ? (
-          <Placeholder label='no fabric, trim or hardware lines in the BOM' />
+          <Text size='micro' variant='label'>
+            the BOM has no lines of the sections that go into a recipe (fabrics, lining, fusing,
+            insulation, threads, hardware, trim, decoration)
+          </Text>
         ) : (
           <>
+            {pieces.length === 0 && (
+              <Text size='micro' variant='label'>
+                the card has no cut pieces yet — the consumption can be set up right now, and “which
+                pieces are cut from this fabric” will appear once the pieces are declared on the cut
+                pieces tab
+              </Text>
+            )}
             {/* ТЯЖЁЛОЕ ПОДДЕРЕВО — ТОЛЬКО У ОТКРЫТОГО КОЛОРВЕЯ. Редакторы всех колорвеев
                 смонтированы одновременно (черновик обязан пережить прыжок по плиткам), но рисовать
                 у каждого по четыре карточки с их нормами, инструментами и подписками на форму —
@@ -4429,20 +4182,20 @@ function ColorwayRecipeEditor({
                         canEdit={canEdit}
                         frozen={frozen}
                         active={active}
-                        auto={autoBySlot[slot.lineKey ?? '']}
-                        onPatchSlot={(index, patch) => {
-                          clearAuto(slot.lineKey ?? '', 'norm');
-                          patchGarmentSlot(slot.lineKey ?? '', index, patch);
-                        }}
+                        onPatchSlot={(index, patch) =>
+                          patchGarmentSlot(slot.lineKey ?? '', index, patch)
+                        }
                         onRemoveRow={removeUsage}
-                        onTogglePiece={(piece) => {
-                          clearAuto(slot.lineKey ?? '', 'pieces');
-                          togglePieceOnSlot(slot.lineKey ?? '', piece);
-                        }}
+                        onTogglePiece={(piece) => togglePieceOnSlot(slot.lineKey ?? '', piece)}
                       />
                     );
                   })}
                 </div>
+                {hasSilhouettes && (
+                  <Text size='micro' variant='label'>
+                    the silhouettes come from the parsed DXF, at the middle size of the range
+                  </Text>
+                )}
               </>
             ) : (
               <Text size='micro' variant='label'>
@@ -4465,7 +4218,11 @@ function ColorwayRecipeEditor({
           <div>
             <GroupLabel>lines without a slot</GroupLabel>
             <Text size='nano' variant='label' component='p' className='pb-1'>
-              saving deletes these lines: assign a slot or remove them
+              these lines name no live BOM line — the slot was deleted on the BOM tab, or it was
+              never named at all. <b>saving the recipe will delete them</b>: a line with an
+              unresolvable reference cannot be sent, and it goes away together with any neighbouring
+              edit. assign a slot (the number will be dropped in the process — there is nothing left
+              to check which unit it was written in) or remove the line yourself
             </Text>
             {strayRows.map(({ draft, index }) => (
               <Row
@@ -4510,10 +4267,19 @@ function ColorwayRecipeEditor({
         )}
 
         <CompositionBar {...derived} />
+
+        {canEdit && staged && (
+          <Text size='micro' variant='label'>
+            {save.isPending ? 'saving…' : 'staged'} · saves with the card
+          </Text>
+        )}
       </Section>
 
       {orphans.length > 0 && (
-        <Section title={`${title} · unassigned`} question='piece removed: keep or unlink'>
+        <Section
+          title={`${title} · unassigned`}
+          question='piece removed, keep the usage as-is or unlink it'
+        >
           {orphans.map(({ u, i }) => (
             <OrphanRecipeCard
               key={`${usageKey(u)}:${i}`}
@@ -4549,6 +4315,7 @@ function ColorwayRecipeEditor({
       {bandSpeaks && active && (
         <Section
           title={`${title} · renders`}
+          question='marked on the render bench — read-only here'
           action={
             <Button
               type='button'
@@ -4755,49 +4522,6 @@ export function ColorwayRecipes({
     () => formPieces.map((p) => ({ ...p, id: serverPieceIdByKey.get(p.lineKey) ?? 0 })),
     [formPieces, serverPieceIdByKey],
   );
-  // ДЕТАЛИ, УЖЕ СВЯЗАННЫЕ СО СЛОТОМ (TABS-LITE авто #4) — вход авто-назначения деталей в рецепт.
-  // Слот — уровень КАРТОЧКИ, поэтому связь «деталь → слот» одна на все колорвеи: её знают связи
-  // блок→деталь выкроек (pieceDxfAliases), материал самой детали и рецепты соседних колорвеев (тот
-  // же источник, из которого piece-cloth.ts красит деталь). Свой колорвей в выдачу не входит: у него
-  // эти строки либо есть (тогда авто не нужно), либо их сняли.
-  const aliasRows = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ?? []) as Array<{
-    pieceLineKey?: string;
-    bomLineKey?: string;
-  }>;
-  const formPieceRows = (useWatch<TechCardFormData>({ name: 'pieces' }) ?? []) as Array<{
-    lineKey?: string;
-    materials?: { bomLineKey?: string }[];
-  }>;
-  const derivedPiecesByColorway = useMemo(() => {
-    const add = (m: Map<string, Set<string>>, bom?: string, piece?: string) => {
-      const b = bom?.trim();
-      const pk = piece?.trim();
-      if (!b || !pk) return;
-      const set = m.get(b) ?? new Set<string>();
-      set.add(pk);
-      m.set(b, set);
-    };
-    const card = new Map<string, Set<string>>();
-    for (const a of aliasRows) add(card, a.bomLineKey, a.pieceLineKey);
-    for (const pr of formPieceRows)
-      for (const mt of pr.materials ?? []) add(card, mt.bomLineKey, pr.lineKey);
-    const own = new Map<number, Map<string, Set<string>>>();
-    for (const cw of colorways) {
-      const m = new Map<string, Set<string>>();
-      for (const u of cw.usages ?? []) add(m, u.bomLineKey, u.pieceLineKey);
-      own.set(cw.colorwayId ?? 0, m);
-    }
-    const out = new Map<number, Map<string, string[]>>();
-    for (const cw of colorways) {
-      const id = cw.colorwayId ?? 0;
-      const merged = new Map<string, Set<string>>();
-      const sources = [card, ...[...own].filter(([k]) => k !== id).map(([, v]) => v)];
-      for (const src of sources)
-        for (const [bom, set] of src) for (const pk of set) add(merged, bom, pk);
-      out.set(id, new Map([...merged].map(([bom, set]) => [bom, [...set]])));
-    }
-    return out;
-  }, [aliasRows, formPieceRows, colorways]);
   // The catalog materials the BOM lines link to (materialId) — loaded once for the whole tab so each
   // recipe usage can render the SAME square article card the BOM tab shows (photo · code · spec).
   // section '' = all sections; includeArchived so a line linked to an archived material still resolves.
@@ -5050,7 +4774,13 @@ export function ColorwayRecipes({
     <div className='flex flex-col gap-2.5'>
       {/* This half shares the tab with the cut-piece table above it, so it has to announce itself —
           an unlabelled swatch grid under «детали кроя» reads as part of that block. */}
-      <SectionHeader title='colourways' question='article, colour and consumption per part' />
+      <SectionHeader
+        title='colourways'
+        question='— which catalog article goes on each part, in what colour and at what consumption'
+      />
+      <Text size='micro' variant='label'>
+        Each colourway is its own write, and every one you edit saves with the card.
+      </Text>
 
       <Tiles min={150}>
         {colorways.map((cw) => (
@@ -5070,32 +4800,21 @@ export function ColorwayRecipes({
                 рецепт открыт ниже; сетка из N необратимых контролов и приглашает промахнуться, и
                 перестаёт читаться как сетка цветов. Так же это делает жест двухшаговым: сначала
                 выбрать продукт, потом стереть его. */}
-            {/* ⋯ (TABS-LITE): необратимое удаление не стоит голым словом под плиткой — оно за
-                раскрывашкой на `<details>`, которую не глушит `<fieldset disabled>` выпуска. */}
             {canDeleteProduct && wireInt(activeId) === wireInt(cw.colorwayId) && (
-              <details className='self-start'>
-                <summary
-                  className='cursor-pointer list-none px-1 text-micro text-labelColor hover:text-textColor [&::-webkit-details-marker]:hidden'
-                  aria-label={`more for ${colourwayName(cw)}`}
-                  title='more'
-                >
-                  ⋯
-                </summary>
-                <ColorwayDeleteControl
-                  colorwayId={cw.colorwayId ?? 0}
-                  /* ПОДТВЕРЖДЕНИЕ ПРОСИТ НАПЕЧАТАТЬ ТО СЛОВО, КОТОРОЕ СТОИТ НА ПЛИТКЕ. Пока плитка
+              <ColorwayDeleteControl
+                colorwayId={cw.colorwayId ?? 0}
+                /* ПОДТВЕРЖДЕНИЕ ПРОСИТ НАПЕЧАТАТЬ ТО СЛОВО, КОТОРОЕ СТОИТ НА ПЛИТКЕ. Пока плитка
                    называлась словарным кодом, здесь стоял он; теперь плитка ведёт именем колорвея
                    (`ROSSO`), а код — мелкая строка под ним. Просить напечатать «BLK» у продукта,
                    подписанного «ROSSO», значит просить сверить не тот факт — а вся ценность этого
                    поля в сверке. Фолбэк тот же (`colorwayTitle`), так что легаси-колорвей без
                    имени по-прежнему подтверждается кодом. */
-                  code={colourwayName(cw)}
-                  techCardId={techCardId}
-                  lockVersion={cw.lockVersion ?? lockVersion}
-                  isLastColorway={colorways.length === 1}
-                  onDeleted={() => handleDeleted(cw.colorwayId ?? 0)}
-                />
-              </details>
+                code={colourwayName(cw)}
+                techCardId={techCardId}
+                lockVersion={cw.lockVersion ?? lockVersion}
+                isLastColorway={colorways.length === 1}
+                onDeleted={() => handleDeleted(cw.colorwayId ?? 0)}
+              />
             )}
           </div>
         ))}
@@ -5120,11 +4839,12 @@ export function ColorwayRecipes({
       {colorways.length === 0 && (
         <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
           <Text size='micro' variant='label' component='span'>
-            no colourways yet
+            colourways are born in the studio, on a fabric render — a colour becomes a product once
+            you decide to keep it
           </Text>
           {bandSpeaks ? (
-            <Button type='button' variant='main' size='sm' onClick={() => goToRenderStep()}>
-              create in fabric render ›
+            <Button type='button' variant='secondary' size='sm' onClick={() => goToRenderStep()}>
+              studio › fabric render ›
             </Button>
           ) : bandLoading ? null : (
             /* ЧЕРНЫМ, А НЕ СЕРЫМ. `variant='inactive'` — это #ccc (≈1.6:1 к фону, в токенах он
@@ -5133,8 +4853,8 @@ export function ColorwayRecipes({
                (`label`, #666): общее правило системы тише, чем факт про этот сервер. */
             <Text size='micro' component='span'>
               {bandError
-                ? `the render bench could not be read: ${bandError.message}`
-                : 'fabric render is not available on this server'}
+                ? `the render bench could not be read (${bandError.message}), so there is no door to it from here`
+                : 'this server does not serve the render bench yet, so fabric render is not available here'}
             </Text>
           )}
         </div>
@@ -5173,7 +4893,6 @@ export function ColorwayRecipes({
             colorwayPins={colorwayPins}
             renderSides={renderSidesByColorway.get(cw.colorwayId ?? 0) ?? EMPTY_SIDES}
             bandSpeaks={bandSpeaks}
-            derivedPieces={derivedPiecesByColorway.get(cw.colorwayId ?? 0) ?? EMPTY_DERIVED}
             onOpenStudio={goToRenderStep}
             onStatus={reportStatus}
           />
