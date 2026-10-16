@@ -709,7 +709,11 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               />
             )}
             {legendQ && sizes.sheetLegend && (
-              <div data-ask-zone='' className='flex flex-col gap-2'>
+              <div
+                data-ask-zone=''
+                data-ask-label='is each line one size?'
+                className='flex flex-col gap-2'
+              >
                 <Text component='p' className='text-warning' title={legendQ}>
                   the sheets do not draw the sizes with the same lines. is each line one size on
                   every sheet?
@@ -749,7 +753,11 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               </span>
             )}
             {showOrderBar && (
-              <div data-ask-zone='' className='flex flex-col gap-2'>
+              <div
+                data-ask-zone=''
+                data-ask-label={quiz || undefined}
+                className='flex flex-col gap-2'
+              >
                 <Text component='p'>{quiz}</Text>
                 <span className='flex flex-wrap gap-2'>
                   {Array.from({ length: slots }, (_, i) => {
@@ -990,7 +998,11 @@ function DrawnSizes({
 
   const unanswered = asking && set == null;
   return (
-    <div data-ask-zone='' className='mb-3 flex flex-col gap-1'>
+    <div
+      data-ask-zone=''
+      data-ask-label='how many sizes are drawn?'
+      className='mb-3 flex flex-col gap-1'
+    >
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         sizes drawn
       </Text>
@@ -1355,7 +1367,7 @@ function MapRow({
 }) {
   return (
     <div
-      {...(zone ? { 'data-ask-zone': '' } : {})}
+      {...(zone ? { 'data-ask-zone': '', 'data-ask-label': q?.askOn ? q.text : undefined } : {})}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       className={cn('transition-colors', hot && 'bg-bgZebra', onPick && 'cursor-pointer')}

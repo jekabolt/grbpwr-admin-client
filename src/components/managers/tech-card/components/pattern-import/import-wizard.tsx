@@ -62,6 +62,7 @@ import {
   QuizHistoryContext,
   firstAsk,
   focusAsk,
+  useAskLabel,
   type CoachTarget,
   type QuizHistory,
 } from './ui-bits';
@@ -387,6 +388,9 @@ function WizardBody({
   const subSteps = STAGE_OF_STEP[session.step].steps;
 
   const mainRef = useRef<HTMLElement | null>(null);
+  // the step's plain wording of the question asked now (ui-bits PLAIN WORDS), else the sentence
+  const askLabel = useAskLabel(mainRef, `${session.step}|${askText ?? ''}`);
+  const askShown = askText && !offWizard(askText) ? askLabel ?? askText : askText;
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   // ── COACH MODE: a click that cannot advance shows WHERE and HOW instead (ui-bits ASK COACH) ──
   const [coach, setCoach] = useState<CoachTarget | null>(null);
@@ -396,7 +400,7 @@ function WizardBody({
     // an ask fixed on the card closes the wizard only when nothing in the wizard answers it
     // (fabrics' interlining-only blocker names the BOM tab and is answered by a tick here)
     if (askText && offWizard(askText) && !firstAsk(mainRef.current)) return requestClose();
-    const text = askText ?? '';
+    const text = askShown ?? '';
     const show = (el: HTMLElement, bare = false) =>
       setCoach((c) => ({ el, text, n: (c?.n ?? 0) + 1, bare }));
     const bare = () => primaryRef.current && show(primaryRef.current, true);
@@ -535,6 +539,9 @@ function WizardBody({
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
   if (api.notice && !session.error && api.notice !== askText) warnings.push(api.notice);
+  // the footer shows the step's plain question: the session's own sentence stays visible here
+  if (askText && askShown !== askText)
+    warnings.push(askKind === 'stop' ? `autopilot stopped · ${askText}` : askText);
   if (autopilotStop && autopilotStop !== askText)
     warnings.push(`autopilot stopped · ${autopilotStop}`);
   if (card.downloadOnly)
@@ -819,6 +826,7 @@ function WizardBody({
                     className={askKind === 'offer' ? undefined : 'text-warning'}
                     data-testid='pattern-import-blocker'
                     data-ask-kind={askKind}
+                    {...(askShown !== askText ? { 'data-ask-text': askText } : {})}
                     {...(autopilotStop ? { 'data-autopilot-stop': '' } : {})}
                   >
                     <button
@@ -827,11 +835,13 @@ function WizardBody({
                       title={
                         offWizard(askText) && !firstAsk(mainRef.current)
                           ? 'close the import and fix it on the card'
-                          : 'show the control that answers this'
+                          : askShown !== askText
+                            ? `${askText} — click to see where`
+                            : 'show the control that answers this'
                       }
                       onClick={onAsk}
                     >
-                      {askKind === 'offer' ? askText : `! ${askText}`}
+                      {askKind === 'offer' ? askShown : `! ${askShown}`}
                     </button>
                   </Text>
                 ) : null}

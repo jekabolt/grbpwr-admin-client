@@ -1476,7 +1476,12 @@ export function DetailsStep({
           >
             {checklist}
             {active && (
-              <div ref={cardRef} data-ask-zone='' data-testid='details-question'>
+              <div
+                ref={cardRef}
+                data-ask-zone=''
+                data-ask-label={active.label}
+                data-testid='details-question'
+              >
                 {problemCard(active)}
               </div>
             )}
@@ -1680,7 +1685,16 @@ export function DetailsStep({
               <div
                 className='relative min-h-0 flex-1'
                 // the answer is drawn here: the coach rings the drawing, not the card
-                {...(drawing || pickingFold ? { 'data-ask-zone': '' } : {})}
+                {...(drawing || pickingFold
+                  ? {
+                      'data-ask-zone': '',
+                      'data-ask-label': drawing
+                        ? grainA
+                          ? 'now click the other end'
+                          : 'click one end of the grain'
+                        : 'click the fold edge',
+                    }
+                  : {})}
               >
                 {/* owner 16.10: a drawing answer says what to click ON the canvas, big */}
                 {(drawing || (pickingFold && selPick)) && (
