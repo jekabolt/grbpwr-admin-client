@@ -17,7 +17,6 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useId, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { useSearchParams } from 'react-router-dom';
 import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -543,6 +542,8 @@ export function CardDetails({
   colorways,
   seasonPickHint,
   onGoColourways,
+  quizOpen = false,
+  onQuizDone,
 }: {
   /** The SAVED card's id — undefined on a card that does not exist yet. */
   techCardId?: number;
@@ -562,6 +563,9 @@ export function CardDetails({
   seasonPickHint?: string;
   /** The one door out of LINKED PRODUCTS: the colourways tab (`navTo`, owned by index.tsx). */
   onGoColourways: () => void;
+  /** CREATE NEW (`?guided=1`) on a card not created yet: the chip quiz instead of the fields. */
+  quizOpen?: boolean;
+  onQuizDone?: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
@@ -650,9 +654,8 @@ export function CardDetails({
   // CREATE NEW (`?guided=1`, the list's door) opens as the chip quiz (TABS-LITE item 11): the card
   // is answered, not filled in. Every other new card, and a saved one, gets the fields straight away;
   // the quiz folds into them on `create` or `show fields`.
-  const [params] = useSearchParams();
-  const [quizDone, setQuizDone] = useState(false);
-  if (!techCardId && params.get('guided') === '1' && !quizDone) {
+  // The open/closed state lives in index.tsx, which also hides the studio's step footer meanwhile.
+  if (!techCardId && quizOpen) {
     return (
       <Section
         title='new card'
@@ -663,7 +666,7 @@ export function CardDetails({
             variant='underline'
             size='xs'
             className='whitespace-nowrap text-labelColor hover:text-textColor'
-            onClick={() => setQuizDone(true)}
+            onClick={() => onQuizDone?.()}
           >
             show fields
           </Button>
@@ -671,7 +674,7 @@ export function CardDetails({
         id='card-details'
         className={cn('min-w-0', GROUP_SEAM)}
       >
-        <CreateQuiz isAux={isAux} fitLocked={factLocked} onDone={() => setQuizDone(true)} />
+        <CreateQuiz isAux={isAux} fitLocked={factLocked} onDone={() => onQuizDone?.()} />
       </Section>
     );
   }
