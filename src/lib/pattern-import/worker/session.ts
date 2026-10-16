@@ -13,6 +13,7 @@ import type {
   ChromeLine,
   CleanPreview,
   ChainSet,
+  DraftRul,
   DraftScope,
   ExtractOpts,
   FileId,
@@ -77,6 +78,7 @@ import {
   pickExtractor,
   sniffFormat,
   UnsupportedFormat,
+  isUnsupportedFormat,
   type ExtractorRegistry,
 } from '../adapters/sniff';
 import { assembleAllSheets, classifyPages } from '../assemble';
@@ -93,6 +95,10 @@ import { renderPagePng, renderSom } from '../ai/som';
 import { pageChains } from '../clean/page-chains';
 import { marksOn, pageStats } from '../clean/page-roles';
 import { writeAndGate } from '../gate';
+import { writeR12 } from '../write/r12';
+import type { PlannedBlock } from '../write/plan';
+import { expandRul, looksLikeRul, packRul, parseRul, zipRulPair } from '../adapters/rul';
+import { rulSizesMismatch } from '../adapters/rul/settle';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize, splitRows } from '../chains';
 import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
@@ -340,6 +346,11 @@ export class Session {
   private dxfSet: DxfSet | null = null;
   /** The set's sizes as the reader saw them in the merged drawing (`settleDxfSet`). */
   private setSizes: DxfSetSize[] = [];
+  /**
+   * RUL: the grade rule table dropped (or zipped) with a base-size DXF. The read stage grades the
+   * DXF into every size of the table (`expandRul`) and reads THAT drawing; the run is a DXF run.
+   */
+  private rul: { name: string; bytes: number; sha256: string } | null = null;
   // scale
   private decision: ScaleDecision | null = null;
   private fast: DxfFastPath | null = null;
@@ -400,12 +411,49 @@ export class Session {
   /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
   private sha = new Map<string, string>();
 
-  constructor(id: number, files: { name: string; bytes: ArrayBuffer }[]) {
+  constructor(id: number, input: { name: string; bytes: ArrayBuffer }[]) {
+    let files = input;
     this.id = id;
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
     // M6: the main thread checked the File sizes already; the worker re-checks what it received.
     const refusal = checkInputSet(files.map((f) => ({ name: f.name, bytes: f.bytes.byteLength })));
     if (refusal) throw new ImportError(refusal.code, refusal.message);
+    // RUL: one base DXF + one text grade rule table (two files, or one ZIP holding exactly those)
+    let rulFile: { name: string; bytes: ArrayBuffer } | null = null;
+    if (files.length === 1) {
+      let pair: ReturnType<typeof zipRulPair> = null;
+      try {
+        pair = zipRulPair(files[0].bytes);
+      } catch (e) {
+        throw new ImportError(
+          'unsupported-format',
+          `${files[0].name}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (pair) files = [pair.dxf, pair.rul];
+    }
+    const ruls = files.filter((f) => looksLikeRul(f.bytes));
+    if (ruls.length) {
+      const rest = files.filter((f) => !ruls.includes(f));
+      if (ruls.length > 1)
+        throw new ImportError(
+          'unsupported-format',
+          `${ruls.map((f) => f.name).join(', ')}: ${new UnsupportedFormat('rul-alone', 'one grade rule table grades one base DXF').message}`,
+        );
+      const dxfOnly = rest.length === 1 && sniffFormat(rest[0].bytes, rest[0].name).route === 'dxf';
+      if (!dxfOnly)
+        throw new ImportError(
+          'unsupported-format',
+          `${ruls[0].name}: ${
+            new UnsupportedFormat(
+              'rul-alone',
+              rest.length ? `dropped with ${rest.map((f) => f.name).join(', ')}` : 'dropped alone',
+            ).message
+          }`,
+        );
+      rulFile = ruls[0];
+      files = rest;
+    }
     const routes = files.map((f) => {
       const sn = sniffFormat(f.bytes, f.name);
       if (sn.route === null) {
@@ -434,6 +482,10 @@ export class Session {
     }));
     // The ArrayBuffers are copied into Blobs (the browser may page those out) and released.
     files.forEach((f, i) => this.blobs.set(`file:${i}`, new Blob([f.bytes])));
+    if (rulFile) {
+      this.blobs.set('rul', new Blob([rulFile.bytes]));
+      this.rul = { name: rulFile.name, bytes: rulFile.bytes.byteLength, sha256: '' };
+    }
   }
 
   close() {
@@ -574,8 +626,18 @@ export class Session {
           return r.doc;
         },
         dxf: async (f, o, p) => {
-          const read = await readDxf(f, o, p);
+          const graded = this.rul ? await this.gradeByRul(f) : null;
+          const read = await readDxf(graded ? { ...f, bytes: graded.bytes } : f, o, p);
           const seg = segmentDxf(read);
+          if (graded) {
+            const off = rulSizesMismatch(graded.sizes, seg);
+            if (off)
+              throw new ImportError(
+                'unsupported-format',
+                `${this.rul!.name} + ${f.name}: ${new UnsupportedFormat('rul-invalid', off).message}`,
+              );
+            read.doc.warnings.unshift(...graded.warnings);
+          }
           if (seg.presegmented) this.dxf = { read, seg };
           return read.doc;
         },
@@ -610,6 +672,38 @@ export class Session {
     }
     ctx.progress(n, n);
     return docs;
+  }
+
+  /**
+   * RUL: the base DXF graded into every size of its rule table — one per-size drawing, as a graded
+   * CAD export draws it (`expandRul`). A malformed table, a rule the table lacks, a rule text at no
+   * point… refuse the whole run (`rul-invalid`): never a partial grade.
+   */
+  private async gradeByRul(f: {
+    name: string;
+    bytes: ArrayBuffer;
+  }): Promise<{ bytes: ArrayBuffer; sizes: string[]; warnings: string[] }> {
+    const meta = this.rul!;
+    const blob = this.blobs.get('rul');
+    if (!blob) throw new ImportError('no-session', 'the session lost its files — read them again');
+    const bytes = await blob.arrayBuffer();
+    if (!meta.sha256) meta.sha256 = await sha256Hex(bytes);
+    try {
+      const table = parseRul(bytes, meta.name);
+      const ex = expandRul({ dxf: f.bytes, dxfName: f.name, rul: table, rulName: meta.name });
+      return {
+        bytes: new TextEncoder().encode(ex.text).buffer as ArrayBuffer,
+        sizes: ex.sizes,
+        warnings: [
+          `graded by ${meta.name}: ${ex.stats.pieces} pieces × ${ex.sizes.length} sizes (${ex.sizes.join(' ')}), sample ${ex.sample}, ${ex.stats.rulesUsed} rules`,
+          ...ex.warnings,
+        ],
+      };
+    } catch (e) {
+      if (isUnsupportedFormat(e))
+        throw new ImportError('unsupported-format', `${meta.name} + ${f.name}: ${e.message}`);
+      throw e;
+    }
   }
 
   /**
@@ -1750,13 +1844,27 @@ export class Session {
     if (!sem) throw new ImportError('out-of-order', 'piece details have not been built', 'write');
     const raster = this.files.some((f) => f.kind === 'raster');
     const source: ManifestSource = {
-      files: this.files.map((f) => ({
-        name: f.name,
-        sha256: f.sha256,
-        bytes: f.bytes,
-        kind: f.kind,
-        pages: f.pages,
-      })),
+      files: [
+        ...this.files.map((f) => ({
+          name: f.name,
+          sha256: f.sha256,
+          bytes: f.bytes,
+          kind: f.kind,
+          pages: f.pages,
+        })),
+        // RUL: the grade rule table the DXF was graded by is a source file of the run too
+        ...(this.rul
+          ? [
+              {
+                name: this.rul.name,
+                sha256: this.rul.sha256,
+                bytes: this.rul.bytes,
+                kind: 'dxf' as const,
+                pages: 0,
+              },
+            ]
+          : []),
+      ],
       scale: {
         method: this.decision?.method ?? 'none',
         factor: this.decision?.factor ?? 1,
@@ -1891,12 +1999,23 @@ export class Session {
         },
       );
       const base = (this.files[0]?.name ?? 'pattern').replace(/\.[^.]+$/, '');
+      const filename = `${base}-${purposeWord(scope)}.dxf`;
       scopes.push({
         target: scope,
-        filename: `${base}-${purposeWord(scope)}.dxf`,
+        filename,
         name: '',
         dxfText: res.dxfText,
         manifest: res.detail.manifest,
+        ...(input.storage === 'rul'
+          ? {
+              rul: rulPackageOf(
+                res.detail.plan.blocks,
+                input,
+                scope.label || scope.scopeKey,
+                filename,
+              ),
+            }
+          : {}),
         identities: [...new Set(res.detail.plan.blocks.map((b) => b.identity))],
       });
       gate[scope.scopeKey] = res.report;
@@ -1904,6 +2023,40 @@ export class Session {
     ctx.progress(plan.scopes.length, plan.scopes.length);
     return { scopes, gate };
   }
+}
+
+/**
+ * RUL: one scope's written blocks as base DXF + .rul (`packRul`, proved by expanding back). The
+ * package is built from the AAMA R12 rendering of the same blocks whatever dialect the scope file
+ * is written in — base + RUL is an AAMA exchange.
+ */
+function rulPackageOf(
+  blocks: PlannedBlock[],
+  input: StageIO['write']['in'],
+  styleName: string,
+  filename: string,
+): DraftRul {
+  const sizes = [...input.sizes].sort((a, b) => a.rank - b.rank).map((s) => s.token);
+  const base = input.rulBase ?? sizes[Math.floor((sizes.length - 1) / 2)];
+  const perSize = writeR12(blocks, {
+    styleName,
+    createdAt: new Date().toISOString(),
+    sampleSize: base ?? '',
+  });
+  const pack = packRul(perSize, { sizes, base, name: styleName });
+  if (!pack.ok) return pack;
+  const stem = filename.replace(/\.dxf$/i, '');
+  return {
+    ok: true,
+    dxfFilename: `${stem}-base-${base}.dxf`,
+    dxfText: pack.baseDxf,
+    rulFilename: `${stem}.rul`,
+    rulText: pack.rulText,
+    base: pack.base,
+    sizes: pack.sizes,
+    rules: pack.rules,
+    maxErrMm: pack.maxErrMm,
+  };
 }
 
 /** Bounding boxes of a line and a set of walls overlap (a sanity check that both share a frame). */

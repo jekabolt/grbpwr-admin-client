@@ -1595,6 +1595,26 @@ export type ProposeFabricsFn = (
   bom: DraftScopeTarget[],
 ) => FabricAssignment;
 
+/**
+ * RUL: the scope as base-size AAMA DXF + grade rule table (write `storage: 'rul'`), or why it cannot
+ * be — a piece whose sizes are not the same drawing point for point, or a package that does not
+ * expand back to every size within 0.1 mm. Never mixed into `dxfText` (a per-size file).
+ */
+export type DraftRul =
+  | {
+      ok: true;
+      dxfFilename: string;
+      dxfText: string;
+      rulFilename: string;
+      rulText: string;
+      base: string;
+      sizes: string[];
+      rules: number;
+      /** Largest distance of an expanded point from its per-size point, mm (≤ 0.1). */
+      maxErrMm: number;
+    }
+  | { ok: false; reasons: string[] };
+
 export type DraftScope = {
   target: DraftScopeTarget;
   filename: string;
@@ -1602,6 +1622,8 @@ export type DraftScope = {
   name: string;
   dxfText: string;
   manifest: ConversionManifest;
+  /** RUL: the base DXF + .rul package of this scope (write `storage: 'rul'` only). */
+  rul?: DraftRul;
   /** Identities written into THIS file. */
   identities: PieceKey[];
   /**
@@ -2446,6 +2468,14 @@ export type StageIO = {
       autopilot?: AutopilotRecord;
       /** AP-replay: the run's answers in a reproducible form → every manifest. */
       replay?: ReplayRecord;
+      /**
+       * RUL (alternative storage): 'rul' ALSO packs every scope as base-size AAMA DXF + grade rule
+       * table (`DraftScope.rul`), when its pieces are point-for-point gradable; the per-size DXF
+       * (`dxfText`) stays the file of the scope either way. Absent / 'blocks' = per-size only.
+       */
+      storage?: 'blocks' | 'rul';
+      /** RUL: the base (sample) size token; default the middle card size of `sizes`. */
+      rulBase?: string;
     };
     out: { scopes: DraftScope[]; gate: Record<string, GateReport> };
   };
