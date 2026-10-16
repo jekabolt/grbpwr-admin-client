@@ -1,17 +1,21 @@
-// IMPORT PATTERN — the full-screen wizard (F13 shell, 08-CONTRACT §4.2).
+// IMPORT PATTERN — the full-screen wizard (F13 shell, 08-CONTRACT §4.2; import-ux PR1).
 //
 // Lives only in the card's Patterns tab (owner decision 15). Shape = the assembly fullscreen's:
 // a Radix dialog over the whole viewport on the grey ground, a chrome strip on top, the stage in
-// the middle, an action strip below. Nine steps read as words in a `Stepper`; a reached step is a
-// door back (contract: `back{to}` keeps that step's inputs, drops the outputs after it).
+// the middle, an action strip below. The nine internal steps read as FIVE stages (stages.tsx), one
+// glyph each; a stage behind is a door back (contract: `back{to}` keeps that step's inputs, drops
+// the outputs after it). The footer is three things only: ← back · the one question (a link to
+// the control that answers it, `data-ask` in ui-bits.tsx) · the one primary, named by what it does.
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ImportSession, SeedId } from 'lib/pattern-import/types';
+import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
+import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Progress } from 'ui/components/progress';
+import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import { HeaderNote } from 'ui/components/section-header';
 import { Stepper } from 'ui/components/stepper';
 import Text from 'ui/components/text';
@@ -32,7 +36,6 @@ import { CheckStep } from './steps/check';
 import { DetailsStep, firstBlockedSeed } from './steps/details';
 import { FabricsStep } from './steps/fabrics';
 import { FilesStep } from './steps/files';
-import { cleanLine } from './steps/files-clean';
 import { PiecesStep } from './steps/pieces';
 import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
@@ -41,30 +44,33 @@ import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { autopilotApply, resolverFor } from './autopilot/run';
-import { ReplayLine, readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+import { readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+import {
+  PHASE_OF,
+  plural,
+  STAGE_GLYPH,
+  STAGE_OF_STEP,
+  STAGE_WORD,
+  STAGES,
+  WizardPrimaryContext,
+  type PrimaryOverride,
+  type StageState,
+} from './stages';
+import {
+  AskCoach,
+  QuizHistoryContext,
+  firstAsk,
+  focusAsk,
+  type CoachTarget,
+  type QuizHistory,
+} from './ui-bits';
 import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
 import { isReplayed } from './autopilot/replay-record';
 
 /** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
 const nextFrames = () =>
   new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-
-const STAGE_WORD: Record<string, string> = {
-  extract: 'reading files',
-  clean: 'setting aside page furniture',
-  scale: 'applying scale',
-  assemble: 'assembling the sheet',
-  chains: 'tracing lines',
-  sizes: 'reading sizes',
-  pieces: 'finding pieces',
-  'render-som': 'naming pieces',
-  'render-pages': 'drawing the pages for the AI',
-  semantics: 'building pieces',
-  fabrics: 'proposing fabrics',
-  write: 'writing DXF + gate',
-};
 
 type WizardProps = {
   card: CardContext;
@@ -212,7 +218,7 @@ function WizardBody({
   }, []);
 
   // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
-  // explicit gated apply. A stop says why in the footer, with "resume autopilot".
+  // explicit gated apply. A stop says why on the footer's ask line; the primary resumes it.
   const [autopilot, setAutopilot] = useState(readAutopilotPref);
   const apiRef = useRef(api);
   apiRef.current = api;
@@ -318,6 +324,14 @@ function WizardBody({
     }),
     [dropped],
   );
+  // The steps' quiz histories: one per wizard mount, emptied whenever the run's session changes
+  // (a new file read, a reset) — never shared between imports, cards or re-imports of one name.
+  const [quizHistory] = useState<QuizHistory>(() => new Map());
+  const quizSid = useRef<number | null>(session.sessionId);
+  if (quizSid.current !== session.sessionId) {
+    quizSid.current = session.sessionId;
+    quizHistory.clear();
+  }
   const fixInPieces = (f: PieceFocus) => {
     setFocus(f);
     void api.dispatch({ type: 'back', to: 'pieces' });
@@ -325,26 +339,196 @@ function WizardBody({
 
   const at = stepIndex(session.step);
   const nextStep = STEPS[at + 1];
-  // the last step of a download-only run is the download
-  // A0.2: a one-page sheet is passed over — the step reads "1 page", greyed, and stays a door back
-  const passedOver = (s: (typeof STEPS)[number]) => s.id === 'sheet' && api.sheetSkipped;
-  // N1: how the wizard went through a step without the operator — "auto ✓" (shown, nothing asked)
-  // or "skipped" (the fast path jumped it unseen); either stays a door. The one-page sheet keeps
-  // its own word ("1 page").
-  const markOf = (s: (typeof STEPS)[number]) => (passedOver(s) ? undefined : api.passed[s.id]);
-  const labelOf = (s: (typeof STEPS)[number]) =>
-    card.downloadOnly && s.id === 'apply'
-      ? 'download'
-      : passedOver(s)
-        ? `${s.label} · 1 page`
-        : s.label;
   const applied = api.apply.phase === 'done' && api.apply.result.ok;
+  const applyRunning = api.apply.phase === 'running';
   // Leaving discards the run. Nothing is on the card yet (apply is the only writer), but a run
   // with a sheet assembled and pieces named is work — so leaving past the first step asks.
   const requestClose = () => {
     if (at === 0 || applied) onClose();
     else setAskClose(true);
   };
+
+  // ── the five stages (stages.tsx): one glyph per state ─────────────────────────────────────
+  const stageAt = STAGES.indexOf(STAGE_OF_STEP[session.step]);
+  const stageLabel = (st: (typeof STAGES)[number]) =>
+    st.key === 'card' && card.downloadOnly ? 'download' : st.label;
+  /** A step the wizard went through without the operator (N1 'auto'/'skipped', A0.2 one page). */
+  const byItself = (s: WizardStep) => !!api.passed[s] || (s === 'sheet' && api.sheetSkipped);
+
+  // ── what the footer asks (D5: every stop reason stays visible — here or in the popover) ──
+  const offWizard = (t: string) => /on the card first|on the BOM tab/.test(t);
+  const askText = session.error ? null : blocker ?? autopilotStop ?? api.offer ?? null;
+  const askKind: 'blocker' | 'stop' | 'offer' | null = session.error
+    ? null
+    : blocker
+      ? 'blocker'
+      : autopilotStop
+        ? 'stop'
+        : api.offer
+          ? 'offer'
+          : null;
+  const stageState = (i: number): StageState => {
+    if (i > stageAt) return 'ahead';
+    if (i < stageAt) return STAGES[i].steps.every(byItself) ? 'auto' : 'done';
+    if (session.busy) return 'working';
+    if (applied) return 'done';
+    if (askKind === 'blocker' || askKind === 'stop' || session.error) return 'asks';
+    return 'current';
+  };
+  const subSteps = STAGE_OF_STEP[session.step].steps;
+
+  const mainRef = useRef<HTMLElement | null>(null);
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
+  // ── COACH MODE: a click that cannot advance shows WHERE and HOW instead (ui-bits ASK COACH) ──
+  const [coach, setCoach] = useState<CoachTarget | null>(null);
+  // the question changed (answered, another step): the old picture goes
+  useEffect(() => setCoach(null), [askText, session.step, session.busy]);
+  const onAsk = () => {
+    // an ask fixed on the card closes the wizard only when nothing in the wizard answers it
+    // (fabrics' interlining-only blocker names the BOM tab and is answered by a tick here)
+    if (askText && offWizard(askText) && !firstAsk(mainRef.current)) return requestClose();
+    const text = askText ?? '';
+    const show = (el: HTMLElement, bare = false) =>
+      setCoach((c) => ({ el, text, n: (c?.n ?? 0) + 1, bare }));
+    const bare = () => primaryRef.current && show(primaryRef.current, true);
+    // a blocked piece: its row selected, its actions focused in the side panel (details' own
+    // door) — the coach lights what details focused, else its first answer
+    if (askKind === 'blocker' && jumpSeed != null) {
+      setDetailsJump((j) => ({ seed: jumpSeed, n: (j?.n ?? 0) + 1 }));
+      void nextFrames().then(() => {
+        const main = mainRef.current;
+        const a = document.activeElement;
+        const el = a instanceof HTMLElement && main?.contains(a) && a !== main ? a : firstAsk(main);
+        if (el) show(el);
+        else bare();
+      });
+      return;
+    }
+    if (!focusAsk(mainRef.current, (el) => show(el))) bare();
+  };
+
+  // ── the one primary: action + count, derived from the session ──────────────────────────────
+  const [override, setOverride] = useState<PrimaryOverride | null>(null);
+  const draft = session.draft;
+  const created = draft ? draft.pieces.filter((p) => !p.existingLineKey).length : 0;
+  const continueAnyway = () => {
+    if (autopilot) {
+      // the primary IS "resume autopilot": the drive runs on past every step that asks nothing
+      started.current = session.sessionId;
+      resumeAutopilot();
+    } else void api.next();
+  };
+  const primary = ((): PrimaryOverride & { loading?: boolean } => {
+    const nextStage = nextStep ? stageLabel(STAGE_OF_STEP[nextStep.id]) : '';
+    const nextTitle = nextStep ? `next: ${nextStep.label}` : undefined;
+    if (session.busy)
+      return {
+        label: `${STAGE_WORD[session.busy.stage] ?? session.busy.stage}…`,
+        onClick: () => {},
+        disabled: true,
+        loading: true,
+      };
+    if (override) return override;
+    // a blocker never greys the primary out: the click coaches (shows where and how) instead
+    const blocked = !!blocker && !session.error;
+    if (session.step === 'apply') {
+      if (card.downloadOnly)
+        return {
+          label: `download .dxf (${draft?.downloads.length ?? 0})`,
+          onClick: () => void api.dispatch({ type: 'download' }),
+          disabled: !draft,
+        };
+      if (applied) return { label: 'back to the card', onClick: onClose };
+      return {
+        label: `apply ${plural(created, 'piece')} to the card`,
+        onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),
+        disabled: !draft || applyRunning,
+        loading: applyRunning,
+        title: draft
+          ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
+          : undefined,
+      };
+    }
+    // check: the way to the apply screen (replace / add, what goes up) — the ellipsis says one
+    // more screen comes before anything is written
+    if (session.step === 'check')
+      return {
+        label: card.downloadOnly
+          ? `download .dxf (${draft?.downloads.length ?? 0})…`
+          : `apply ${plural(created, 'piece')} to the card…`,
+        onClick: blocked ? onAsk : () => void api.next(),
+        disabled: !nextStep,
+        title: blocked
+          ? `${blocker} — click to see where`
+          : 'review what goes to the card, then apply',
+      };
+    if (blocked)
+      return {
+        label: 'next',
+        onClick: onAsk,
+        disabled: !nextStep,
+        title: `${blocker} — click to see where and how`,
+      };
+    return {
+      label: actionLabel() ?? `continue: ${nextStage}`,
+      onClick: continueAnyway,
+      disabled: !nextStep,
+      title: autopilot ? `${nextTitle ?? ''} · resumes the autopilot after your answer` : nextTitle,
+    };
+  })();
+  /** What "continue" commits on this step, with its count; null = no honest count yet. */
+  function actionLabel(): string | null {
+    const s = session;
+    switch (s.step) {
+      case 'files': {
+        if (!s.scale.candidates.length) return null;
+        const tiles = s.pages.filter((p) => p.cls === 'tile').length;
+        return tiles ? `use ${plural(tiles, 'page')}` : `use ${plural(s.files.length, 'file')}`;
+      }
+      case 'scale': {
+        const f = api.scaleDecision()?.factor;
+        if (f == null) return null;
+        return Math.abs(f - 1) < 5e-4 ? 'use scale 1:1' : `use scale ×${f.toFixed(3)}`;
+      }
+      case 'sheet': {
+        if (api.sheetSkipped) return 'use 1 page';
+        const n = s.sheet?.sheet.poses.length ?? 0;
+        return n ? `accept ${plural(n, 'tile')}` : null;
+      }
+      case 'sizes': {
+        const n = (s.sizes?.map.entries ?? []).filter((e) => e.card).length;
+        return n ? `map ${plural(n, 'size')}` : null;
+      }
+      case 'pieces': {
+        // the regions closed in every size: what goes on as pieces (a leak / tiny one does not)
+        const n = (s.pieces?.families ?? []).filter((f) =>
+          f.candidates.every((c) => c.outcome === 'closed'),
+        ).length;
+        return n ? `use ${plural(n, 'piece')}` : null;
+      }
+      case 'meaning': {
+        const n = s.semantics?.pieces.length ?? 0;
+        return n ? `use ${plural(n, 'named piece')}` : null;
+      }
+      case 'fabrics': {
+        const n = card.downloadOnly ? 1 : api.runCard.scopes.length;
+        return n ? `write ${plural(n, 'dxf file')}` : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
+  const warnings: HeaderWarning[] = [];
+  if (api.notice && !session.error && api.notice !== askText) warnings.push(api.notice);
+  if (autopilotStop && autopilotStop !== askText)
+    warnings.push(`autopilot stopped · ${autopilotStop}`);
+  if (card.downloadOnly)
+    warnings.push(
+      'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
+    );
+  if (replayOn) for (const m of misses) warnings.push(`not replayed · ${m.why}`);
 
   const body = (() => {
     switch (session.step) {
@@ -399,6 +583,8 @@ function WizardBody({
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
         <Dialog.Content
           className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
+          data-testid='pattern-import-wizard'
+          data-step={session.step}
           // The screen itself takes the focus, not the first control: "close" lit up as the
           // focused thing on open read as a prompt to leave.
           onOpenAutoFocus={(e) => {
@@ -418,230 +604,260 @@ function WizardBody({
             convert a pattern file of any format into a DXF with named pieces and the card sizes
           </Dialog.Description>
           <div className='grid h-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 [&>*]:min-h-0 [&>*]:min-w-0'>
-            {/* ── chrome ───────────────────────────────────────────────────────────────── */}
-            <header className='flex flex-col gap-1.5 border border-borderColor bg-bgColor px-2 py-1.5'>
-              <div className='flex flex-wrap items-center gap-2'>
+            {/* ── chrome: what, where in five words, the quiet switches ─────────────────── */}
+            <header className='flex flex-wrap items-center gap-x-4 gap-y-1 border border-borderColor bg-bgColor px-2 py-1.5'>
+              <span className='flex min-w-0 items-baseline gap-2'>
                 <Text
                   size='micro'
                   variant='uppercase'
                   tracking='label'
                   component='span'
-                  className='font-bold'
+                  className='whitespace-nowrap font-bold'
                 >
                   import pattern
                 </Text>
-                {card.styleLabel && (
-                  <Text size='micro' variant='label' component='span'>
-                    {card.styleLabel}
-                  </Text>
-                )}
-                {card.downloadOnly && (
-                  <HeaderNote
-                    tone='mut'
-                    title='the BOM has no fabric line, so nothing can be bound to the card: the run ends in a DXF download. add a fabric line on the BOM tab to apply an import.'
+                {(session.files.length > 0 || card.styleLabel) && (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='min-w-0 max-w-[28ch] truncate'
+                    title={[card.styleLabel, ...session.files.map((f) => f.name)]
+                      .filter(Boolean)
+                      .join(' · ')}
                   >
-                    download only · no fabric in the BOM
-                  </HeaderNote>
-                )}
-                {session.files.length > 0 && (
-                  <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
-                    {session.files.map((f) => f.name).join(', ')}
+                    {session.files.length > 0
+                      ? session.files.map((f) => f.name).join(', ')
+                      : card.styleLabel}
                   </Text>
                 )}
+              </span>
+              <Stepper
+                steps={STAGES.map((st, i) => {
+                  const state = stageState(i);
+                  const glyph = STAGE_GLYPH[state];
+                  const word = (
+                    <>
+                      {stageLabel(st)}
+                      {glyph && (
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'ml-1',
+                            state === 'auto' && 'text-labelColor',
+                            state === 'asks' && 'text-warning',
+                          )}
+                        >
+                          {glyph}
+                        </span>
+                      )}
+                    </>
+                  );
+                  const door = (state === 'done' || state === 'auto') && !session.busy && !applied;
+                  const says =
+                    state === 'auto'
+                      ? 'passed by itself'
+                      : state === 'asks'
+                        ? 'needs you'
+                        : state === 'working'
+                          ? 'working'
+                          : state === 'done'
+                            ? 'done'
+                            : '';
+                  return {
+                    done: i < stageAt,
+                    current: i === stageAt,
+                    label: door ? (
+                      <button
+                        type='button'
+                        aria-label={`${stageLabel(st)}: ${says} — open`}
+                        className={cn(
+                          'uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                          state === 'auto' && 'text-labelColor',
+                        )}
+                        onClick={() => void api.dispatch({ type: 'back', to: st.steps[0] })}
+                        title={
+                          state === 'auto'
+                            ? 'passed by itself — open to check'
+                            : `back to ${stageLabel(st)} — its answers are kept, later steps re-run`
+                        }
+                      >
+                        {word}
+                      </button>
+                    ) : (
+                      <span aria-label={says ? `${stageLabel(st)}: ${says}` : undefined}>
+                        {word}
+                      </span>
+                    ),
+                  };
+                })}
+              />
+              {subSteps.length > 1 && (
+                // inside a stage of several steps: which one, quietly (not in the stepper)
+                <HeaderNote title={subSteps.map((s) => STEPS[stepIndex(s)].label).join(' › ')}>
+                  {STEPS[at].label} · {subSteps.indexOf(session.step) + 1} of {subSteps.length}
+                </HeaderNote>
+              )}
+              <span className='ml-auto flex items-center gap-3'>
                 {client.kind === 'stub' && (
                   <HeaderNote
                     tone='attention'
                     title='the importer core is not wired yet: every step shows fixture data and nothing reaches the card'
                   >
-                    stub worker · fixture data
+                    stub · fixture data
                   </HeaderNote>
                 )}
-                <span className='ml-auto flex items-center gap-2'>
-                  {session.busy && (
-                    <span className='flex items-center gap-2' aria-live='polite'>
-                      <Text
-                        size='micro'
-                        variant='label'
-                        component='span'
-                        className='whitespace-nowrap uppercase tracking-label'
-                      >
-                        {STAGE_WORD[session.busy.stage] ?? session.busy.stage}
-                        {session.busy.note ? ` · ${session.busy.note}` : ''}
-                      </Text>
-                      <Progress
-                        className='w-24'
-                        value={(session.busy.done / Math.max(session.busy.total, 1)) * 100}
-                      />
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        className='text-labelColor hover:text-textColor'
-                        onClick={api.cancel}
-                        title='stop this stage (esc)'
-                      >
-                        stop
-                      </Button>
-                    </span>
-                  )}
-                  <Chip
-                    nonForm
-                    onClick={requestClose}
-                    title='close the import (the card is not changed)'
-                  >
-                    close
-                  </Chip>
-                </span>
-              </div>
-              <Stepper
-                steps={STEPS.map((s, i) => ({
-                  done: i < at,
-                  current: i === at,
-                  label:
-                    i < at && !session.busy && !applied ? (
-                      <>
-                        <button
-                          type='button'
-                          className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) || markOf(s) ? ' text-labelColor' : ''}`}
-                          onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                          title={
-                            passedOver(s)
-                              ? 'one page is the whole sheet — passed over; open it to check'
-                              : markOf(s) === 'auto'
-                                ? `${labelOf(s)} asked nothing — passed by itself; open it to check`
-                                : markOf(s) === 'skipped'
-                                  ? `${labelOf(s)} was skipped — the file answers it; open it to check`
-                                  : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
-                          }
-                        >
-                          {labelOf(s)}
-                        </button>
-                        <PassMark mark={markOf(s)} />
-                      </>
-                    ) : i < at && markOf(s) ? (
-                      <span className='text-labelColor'>
-                        {labelOf(s)}
-                        <PassMark mark={markOf(s)} />
-                      </span>
-                    ) : passedOver(s) && i !== at ? (
-                      <span className='text-labelColor'>{labelOf(s)}</span>
-                    ) : (
-                      labelOf(s)
-                    ),
-                }))}
-              />
+                {prior && !applied && (
+                  // AP-replay: one quiet line; what was not replayed is in the warnings
+                  <span className='flex items-center gap-1.5' data-replay={replayOn ? 'on' : 'off'}>
+                    <HeaderNote
+                      title={`the previous import of ${prior.exact ? 'these files' : `${prior.matched} of ${prior.of} files`} (${prior.label})`}
+                    >
+                      {replayOn ? `replayed ${plural(replayed, 'answer')}` : 'imported before'}
+                    </HeaderNote>
+                    <Chip
+                      quiet
+                      nonForm
+                      onClick={replayOn ? dontReuse : reuse}
+                      title={
+                        replayOn
+                          ? 'read the files again and answer without the previous import'
+                          : 'reuse the answers of the previous import'
+                      }
+                    >
+                      {replayOn ? "don't reuse" : 'reuse answers'}
+                    </Chip>
+                  </span>
+                )}
+                <HeaderWarnings items={warnings} />
+                <Chip
+                  quiet
+                  nonForm
+                  pressed={autopilot}
+                  aria-label='autopilot'
+                  title={
+                    autopilot
+                      ? 'the run answers what it can by itself and stops where it cannot — click to turn off'
+                      : 'every step waits for you — click to let the run answer by itself'
+                  }
+                  onClick={() => {
+                    const on = !autopilot;
+                    // switched on mid-run: it drives from the next "continue", not at once
+                    if (on && session.step !== 'files') started.current = session.sessionId;
+                    setAutopilot(on);
+                    writeAutopilotPref(on);
+                  }}
+                >
+                  autopilot {autopilot ? 'on' : 'off'}
+                </Chip>
+                <Chip
+                  nonForm
+                  onClick={requestClose}
+                  title='close the import (the card is not changed)'
+                >
+                  close
+                </Chip>
+              </span>
             </header>
 
             {/* ── stage ────────────────────────────────────────────────────────────────── */}
-            <main className='min-h-0 min-w-0'>
-              <DroppedLabels.Provider value={droppedCtx}>{body}</DroppedLabels.Provider>
+            <main ref={mainRef} className='relative min-h-0 min-w-0'>
+              <WizardPrimaryContext.Provider value={setOverride}>
+                <DroppedLabels.Provider value={droppedCtx}>
+                  <QuizHistoryContext.Provider value={quizHistory}>
+                    {session.busy ? (
+                      // the last picture the run has, dimmed and out of reach while it works
+                      <div className='h-full opacity-40' inert aria-hidden>
+                        {body}
+                      </div>
+                    ) : (
+                      body
+                    )}
+                  </QuizHistoryContext.Provider>
+                </DroppedLabels.Provider>
+              </WizardPrimaryContext.Provider>
+              {session.busy && <Working busy={session.busy} onStop={api.cancel} />}
             </main>
 
-            {/* ── actions ──────────────────────────────────────────────────────────────── */}
-            <footer className='flex flex-wrap items-center gap-2 border border-borderColor bg-bgColor px-2 py-1.5'>
-              {at > 0 && !applied && (
+            {/* ── actions: back · the one question · the one button ────────────────────── */}
+            <footer className='flex items-center gap-3 border border-borderColor bg-bgColor px-2 py-1.5'>
+              {at > 0 && !applied ? (
                 <Button
                   variant='secondary'
                   size='sm'
-                  disabled={!!session.busy || api.apply.phase === 'running'}
+                  className='shrink-0'
+                  disabled={!!session.busy || applyRunning}
                   onClick={() => void api.dispatch({ type: 'back', to: STEPS[at - 1].id })}
                 >
                   ← back
                 </Button>
-              )}
-              <div className='flex min-w-0 flex-1 flex-col gap-1'>
-                {api.notice && !session.error && (
-                  <CalloutBox tone='note' className='py-1'>
-                    <Text size='micro' component='p'>
-                      {api.notice}
-                    </Text>
-                  </CalloutBox>
-                )}
-                {autopilotStop && !session.busy && (
-                  // A10: where the autopilot stopped and why — the operator answers, then resumes
-                  <span className='flex flex-wrap items-center gap-2' data-autopilot-stop=''>
-                    <Text size='micro' component='span' className='text-warning'>
-                      autopilot stopped · {autopilotStop}
-                    </Text>
-                    <Button variant='secondary' size='sm' onClick={resumeAutopilot}>
-                      resume autopilot
-                    </Button>
-                  </span>
-                )}
-                {prior && !applied && (
-                  <ReplayLine
-                    label={prior.label}
-                    exact={prior.exact}
-                    matched={prior.matched}
-                    of={prior.of}
-                    on={replayOn}
-                    replayed={replayed}
-                    misses={misses}
-                    onReuse={reuse}
-                    onDontReuse={dontReuse}
-                  />
-                )}
+              ) : null}
+              <div className='min-w-0 flex-1'>
                 {session.error ? (
                   <StageMessage
                     code={api.errorCode}
                     message={session.error}
                     onReport={api.downloadReport}
                   />
-                ) : blocker && jumpSeed != null ? (
-                  // a blocked piece: the sentence is the way to it (its row selected, its actions
-                  // focused in the side panel)
-                  <Text size='micro' component='p' className='text-warning'>
+                ) : askText && !session.busy ? (
+                  <Text
+                    component='p'
+                    variant={askKind === 'offer' ? 'label' : undefined}
+                    className={askKind === 'offer' ? undefined : 'text-warning'}
+                    data-testid='pattern-import-blocker'
+                    data-ask-kind={askKind}
+                    {...(autopilotStop ? { 'data-autopilot-stop': '' } : {})}
+                  >
                     <button
                       type='button'
-                      className='cursor-pointer text-left underline'
-                      title='select the first blocked piece and show what to do'
-                      onClick={() =>
-                        setDetailsJump((j) => ({ seed: jumpSeed, n: (j?.n ?? 0) + 1 }))
+                      className='cursor-pointer text-left underline decoration-current/40 underline-offset-2 hover:decoration-current'
+                      title={
+                        offWizard(askText) && !firstAsk(mainRef.current)
+                          ? 'close the import and fix it on the card'
+                          : 'show the control that answers this'
                       }
+                      onClick={onAsk}
                     >
-                      ! {blocker}
+                      {askKind === 'offer' ? askText : `! ${askText}`}
                     </button>
                   </Text>
-                ) : blocker ? (
-                  <Text size='micro' component='p' className='text-warning'>
-                    ! {blocker}
-                  </Text>
-                ) : api.offer ? (
-                  // N1: why the run stopped on a step that does not block — an offer to look at
-                  <Text size='micro' variant='label' component='p'>
-                    {api.offer}
-                  </Text>
                 ) : null}
-                {session.step === 'files' && (
-                  // A10: the autopilot switch — on by default, remembered per viewer
-                  <ToggleSwitch
-                    checked={autopilot}
-                    label='autopilot'
-                    onCheckedChange={(on) => {
-                      setAutopilot(on);
-                      writeAutopilotPref(on);
-                    }}
-                  />
-                )}
-                {/* A8: what the clean stage set aside, seen before the run goes on */}
-                {session.step === 'files' && session.clean && !api.extracted.presegmented && (
-                  <Text size='micro' variant='label' component='p'>
-                    before reading — {cleanLine(session.clean)}
-                  </Text>
-                )}
               </div>
-              {nextStep && session.step !== 'apply' && (
+              {(session.step === 'apply' || (session.step === 'check' && !blocker)) &&
+                draft &&
+                !(card.downloadOnly && session.step === 'apply') && (
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    className='shrink-0'
+                    disabled={applyRunning || !!session.busy}
+                    onClick={() => void api.dispatch({ type: 'download' })}
+                  >
+                    download .dxf ({draft.downloads.length})
+                  </Button>
+                )}
+              {(nextStep || session.step === 'apply') && (
                 <Button
+                  ref={primaryRef}
                   variant='main'
                   size='sm'
-                  disabled={!!blocker || !!session.busy}
-                  loading={!!session.busy}
-                  onClick={() => void api.next()}
+                  className='shrink-0'
+                  data-testid='pattern-import-primary'
+                  data-coach={blocker && !session.error && !session.busy ? '' : undefined}
+                  disabled={!!primary.disabled}
+                  loading={!!primary.loading}
+                  title={primary.title}
+                  onClick={primary.onClick}
                 >
-                  next: {labelOf(nextStep)} →
+                  {primary.label}
                 </Button>
               )}
             </footer>
           </div>
+
+          {coach && !session.busy && (
+            <AskCoach target={coach} area={mainRef.current} onClose={() => setCoach(null)} />
+          )}
 
           <ConfirmationModal
             open={askClose}
@@ -666,16 +882,54 @@ function WizardBody({
   );
 }
 
-/** N1: the mark of a step the wizard passed by itself ("auto ✓") or jumped unseen ("skipped"). */
-function PassMark({ mark }: { mark: 'auto' | 'skipped' | undefined }) {
-  if (!mark) return null;
+/**
+ * The parsing state: which of four phases, the engine's own word for the stage, done / total of
+ * THIS stage (never one percentage across stages), and a quiet stop — over the dimmed last
+ * preview of the run.
+ */
+function Working({
+  busy,
+  onStop,
+}: {
+  busy: NonNullable<ImportSession['busy']>;
+  onStop: () => void;
+}) {
+  const counted = busy.total > 1;
   return (
-    <span
-      aria-label={mark === 'auto' ? 'passed automatically' : 'skipped'}
-      className='ml-1 text-labelColor'
-    >
-      {mark === 'auto' ? 'auto ✓' : 'skipped'}
-    </span>
+    <div className='pointer-events-none absolute inset-0 flex items-center justify-center p-4'>
+      <section
+        className='pointer-events-auto flex w-[min(420px,100%)] flex-col gap-1.5 border border-borderColor bg-bgColor px-3 py-2.5'
+        data-testid='pattern-import-progress'
+        aria-live='polite'
+      >
+        <span className='flex items-baseline gap-2'>
+          <Text
+            size='micro'
+            variant='uppercase'
+            tracking='label'
+            component='span'
+            className='font-bold'
+          >
+            {PHASE_OF[busy.stage] ?? 'working'}
+          </Text>
+          <Button
+            variant='underline'
+            size='xs'
+            className='ml-auto text-labelColor hover:text-textColor'
+            onClick={onStop}
+            title='stop this stage (esc)'
+          >
+            stop
+          </Button>
+        </span>
+        <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
+          {STAGE_WORD[busy.stage] ?? busy.stage}
+          {busy.note ? ` · ${busy.note}` : ''}
+          {counted ? ` · ${busy.done} / ${busy.total}` : ''}
+        </Text>
+        {counted && <Progress value={(busy.done / busy.total) * 100} />}
+      </section>
+    </div>
   );
 }
 

@@ -20,7 +20,8 @@ import { Button } from 'ui/components/button';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
+import { FoldCaret } from 'ui/components/fold-caret';
+import { HeaderWarnings } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
@@ -28,12 +29,14 @@ import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
-import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtMm, fmtPct, useQuizSlot } from '../ui-bits';
+import { plural } from '../stages';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
-import { provenCopy } from '../auto-advance';
+import { provenCopy, weakAsides } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
+import { ModelThumb, RegionCrop } from './pieces-guide';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
@@ -46,6 +49,16 @@ const HINT: Record<Tool, string> = {
   lasso: 'draw around several seeds to merge · inside a two-seed region to split',
   reseed: 'click the new place for the selected seed',
 };
+
+/** The toolbar: tool, word, what it does. */
+const TOOLS = [
+  ['pan', 'pan', 'pan and select'],
+  ['seed', '+ seed', 'click inside a piece the text did not label'],
+  ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
+  ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
+  ['ignore', 'ignore line', 'a line that is not an outline'],
+  ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
+] as const satisfies readonly (readonly [Tool, string, string])[];
 
 type Bridge = Extract<PieceEdit, { kind: 'bridge' }>;
 
@@ -144,6 +157,13 @@ const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
     'two size layouts fit these lines equally well, so no outline is given. reseed: click another spot inside the piece. or mark it not a piece.',
 };
 
+/** A refusal in a row's few words; the whole of REFUSED is the row's title. */
+const REFUSED_SHORT: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
+  'sizes-not-distinguished': 'sizes drawn alike',
+  'size-count': 'size count open',
+  'grade-ambiguous': 'two size layouts fit',
+};
+
 /**
  * The reader's own detail on a refusal, minus the sentence REFUSED already says (FLY-final copy 6:
  * the panel printed it twice). Its generic sentences end in the specific reason in brackets.
@@ -186,6 +206,18 @@ const centre = (pts: PtMm[]) => {
   return { x: x / pts.length, y: y / pts.length };
 };
 
+/**
+ * One thing the operator answers on this step, in the order the footer asks them (model, the
+ * regions, the cross-sheet question). The guide shows ONE at a time; the checklist shows them all.
+ */
+type Problem =
+  | { key: 'model'; kind: 'model' }
+  | { key: string; kind: 'region'; seed: number; rank: number; outcome: FillOutcome }
+  | { key: 'sheet'; kind: 'sheet' };
+
+/** A checklist row as it was last seen open: a fixed one keeps its words, greyed, with a ✓. */
+type SeenRow = { order: number; label: string; seed?: number };
+
 export function PiecesStep({
   api,
   card,
@@ -201,6 +233,12 @@ export function PiecesStep({
 }) {
   const { session, inputs } = api;
   const { remember } = useContext(DroppedLabels);
+  // the checklist's memory for this import (owned by the wizard: the step unmounts while the
+  // pieces run again after an answer, and a fixed question must come back as fixed, not vanish)
+  const seen = useQuizSlot('pieces', () => ({
+    variant: session.variant ?? null,
+    rows: new Map<string, SeenRow>(),
+  }));
   const out = session.pieces;
   const runSizes = session.sizes?.run.sizes ?? [];
   const [rank, setRank] = useState(
@@ -224,6 +262,12 @@ export function PiecesStep({
     lastFocus.current = focus;
   }, [focus]);
   const [hint, setHint] = useState<string | null>(null);
+  // the lasso armed by «one piece»: it joins the parts drawn around, it does not split
+  const [lassoJoin, setLassoJoin] = useState(false);
+  /** Every tool on the toolbar, not only the ones the selected region's problem needs. */
+  const [allTools, setAllTools] = useState(false);
+  /** The closed regions' list, opened by hand (a closed region picked on the sheet opens it too). */
+  const [closedOpen, setClosedOpen] = useState(false);
   /** A2: the set-aside group opened in the list, and the outline the sheet zooms to. */
   const [asideOpen, setAsideOpen] = useState<string | null>(null);
   const [asideAt, setAsideAt] = useState<SetAside | null>(null);
@@ -244,8 +288,57 @@ export function PiecesStep({
       : null;
   const families = useMemo(() => out?.families ?? [], [out]);
   const markOf = useMemo(() => new Map(families.map((f, i) => [f.seed, i + 1])), [families]);
+
+  // ── what needs a fix: only the sizes that are exported must close (the footer's own rule) ──
+  const mapped = exportedRanks(session.sizes?.map);
+  const isExp = (r: number) => !mapped || mapped.has(r);
+  const needsFix = (f: PieceFamily) =>
+    f.candidates.some((c) => isExp(c.rank) && c.outcome !== 'closed');
+  const cand = (f: PieceFamily) => f.candidates[Math.min(rank, f.candidates.length - 1)];
+  /** The size that shows the region's problem: the one on screen, else the first open one. */
+  const problemOf = (f: PieceFamily): PieceCandidate => {
+    const c = cand(f);
+    return c.outcome !== 'closed' && isExp(c.rank)
+      ? c
+      : f.candidates.find((x) => isExp(x.rank) && x.outcome !== 'closed') ?? c;
+  };
+  // D6: a piece (or a whole tile sheet) drawn twice, or one cut between two sheets — asked here
+  const sheetQ = out ? sheetQuestion(out.sheets, api.inputs.sheetAnswers) : null;
+
+  // ── THE GUIDE: every open question in the footer's order; one is on the card at a time ──
+  const openProblems: Problem[] = [
+    ...(variants.length > 1 && !session.variant ? [{ key: 'model', kind: 'model' } as const] : []),
+    ...families.filter(needsFix).map((f): Problem => {
+      const c = problemOf(f);
+      return { key: `r${f.seed}`, kind: 'region', seed: f.seed, rank: c.rank, outcome: c.outcome };
+    }),
+    ...(sheetQ ? [{ key: 'sheet', kind: 'sheet' } as const] : []),
+  ];
+  /** The question the operator picked (a checklist row, a region on the sheet); else the first. */
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const active = openProblems.find((p) => p.key === activeKey) ?? openProblems[0] ?? null;
+  /** Every question seen open since the step opened (or the model last changed): fixed ones stay. */
+  if (seen.variant !== (session.variant ?? null)) {
+    // another model is another set of regions: what the last one asked is not "fixed"
+    seen.variant = session.variant ?? null;
+    for (const k of [...seen.rows.keys()]) if (k !== 'model') seen.rows.delete(k);
+  }
+  // the card follows the active question: a resolved region hands over to the next one by itself
+  const guided = useRef(false);
+  const activeRegion = active?.kind === 'region' ? active : null;
+  useEffect(() => {
+    // the step opened from check / details: the piece it was sent to keeps the view
+    const keep = !guided.current && !!focus;
+    guided.current = true;
+    if (keep || !activeRegion) return;
+    jump({ seed: activeRegion.seed, rank: activeRegion.rank });
+    setGapA(null);
+    setTool('pan');
+  }, [active?.key]);
+
   if (!out || !session.sheet || !session.chains) return null;
   const previews = session.chains.chainPreview;
+  const sheetBox = session.sheet.sheet.bbox;
   // the last word on a line wins: "use line" after "ignore line" makes it a wall again, and back
   const ignored = new Set<number>();
   const used = new Map<number, number | null>();
@@ -264,17 +357,16 @@ export function PiecesStep({
   const movedTo = new Map<number, PtMm>();
   for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
   const focusSeeds = new Set(focus?.items.map((x) => x.seed) ?? []);
-  const mapped = exportedRanks(session.sizes?.map);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
   const pickTool = (t: Tool) => {
     setGapA(null);
     setTool(t);
+    setLassoJoin(false);
   };
 
   const seedAt = (id: number) => out.seeds.find((s) => s.id === id);
   const outcomeOf = (f: PieceFamily): FillOutcome =>
     f.candidates.find((c) => c.outcome !== 'closed')?.outcome ?? 'closed';
-  const cand = (f: PieceFamily) => f.candidates[Math.min(rank, f.candidates.length - 1)];
   const selected = families.find((f) => f.seed === sel) ?? null;
   const refusedSel = !!selected && cand(selected).outcome === 'refused';
   // a refused size has no outline to close: an active bridge tool falls back to the default one
@@ -292,8 +384,6 @@ export function PiecesStep({
       ? zoomCand.bbox
       : null;
   const asides = out.setAside ?? [];
-  // D6: a piece (or a whole tile sheet) drawn twice, or one cut between two sheets — asked here
-  const sheetQ = sheetQuestion(out.sheets, api.inputs.sheetAnswers);
   // a size copy not proven a copy of a seeded piece (auto-advance provenCopy) is a guess: apart
   const asideKey = (a: SetAside) =>
     a.seed
@@ -313,10 +403,65 @@ export function PiecesStep({
         : a.seed
           ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
           : ASIDE_WORD[a.reason];
-  const counts = families.reduce<Record<FillOutcome, number>>(
-    (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
-    { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
-  );
+  const closedFams = families.filter((f) => !needsFix(f));
+  const selClosed = !!selected && !needsFix(selected);
+  const weak = new Set(weakAsides(asides, families, out.seeds));
+  /** What is wrong with a region: a short word on the row, the whole instruction as its title. */
+  const whyOf = (f: PieceFamily, c: PieceCandidate): { short: string; full: string } => {
+    switch (c.outcome) {
+      case 'refused': {
+        const r = c.gradeRefusal ?? 'sizes-not-distinguished';
+        const extra = refusalExtra(c.gradeDetail);
+        return { short: REFUSED_SHORT[r], full: `${REFUSED[r]}${extra ? ` (${extra})` : ''}` };
+      }
+      case 'leak':
+        return seedAt(f.seed)?.origin === 'face' &&
+          f.candidates.every((x) => x.outcome === 'leak' || x.outcome === 'tiny')
+          ? {
+              short: 'outline never closes',
+              full: 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.',
+            }
+          : {
+              short: 'gap in the outline',
+              full: 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.',
+            };
+      case 'merged':
+        return {
+          short: 'two pieces touch',
+          full: 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.',
+        };
+      case 'tiny':
+        return {
+          short: 'too small',
+          full: `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`,
+        };
+      default:
+        return { short: 'closed', full: 'closed and snapped to the drawn lines.' };
+    }
+  };
+  const notAPiece = (f: PieceFamily) => {
+    // keep how the region read, for "not in this file" on check
+    const big = Math.max(...f.candidates.map((c) => c.areaMm2));
+    remember(
+      f.seed,
+      `region ${markOf.get(f.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
+    );
+    void api.editPieces({ kind: 'not-a-piece', seed: f.seed });
+    setSel(null);
+  };
+  // at rest the toolbar is pan (and the tool in hand): the card arms what its answer needs; the
+  // rest is behind "more tools". A sheet with no pieces at all asks for a seed, so that one shows.
+  const ctxTools = new Set<Tool>(['pan', tool]);
+  if (!families.length) ctxTools.add('seed');
+  const editsLine = [
+    plural(inputs.edits.length, 'edit'),
+    bridges.length && `${plural(bridges.length, 'gap')} closed`,
+    used.size && `${plural(used.size, 'line')} used`,
+    ignored.size && `${plural(ignored.size, 'line')} ignored`,
+    `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const onLasso = (poly: PtMm[]) => {
     const ins = families.filter((f) => {
@@ -326,6 +471,12 @@ export function PiecesStep({
     if (ins.length >= 2) {
       void api.editPieces({ kind: 'merge', seeds: ins.map((f) => f.seed) });
       setHint(`merged ${ins.length} seeds into one piece`);
+    } else if (lassoJoin) {
+      // «one piece» never splits: a lasso around fewer than two labels joins nothing
+      setHint('draw around both parts (both labels inside the lasso) to join them');
+      setTool('pan');
+      setLassoJoin(false);
+      return;
     } else {
       const c = centre(poly);
       const target =
@@ -336,6 +487,225 @@ export function PiecesStep({
       } else setHint('the lasso holds no seed and crosses no merged region — nothing to do');
     }
     setTool('pan');
+    setLassoJoin(false);
+  };
+
+  // ── the guide's checklist: every question seen open, fixed ones greyed with a ✓ ──
+  if (variants.length > 1 && !seen.rows.has('model'))
+    seen.rows.set('model', { order: 0, label: 'pick the model' });
+  for (const p of openProblems) {
+    if (p.kind === 'region') {
+      const f = families.find((x) => x.seed === p.seed)!;
+      const m = markOf.get(p.seed) ?? 0;
+      seen.rows.set(p.key, {
+        order: 1 + m,
+        // the number is the region's current mark: a region gone from the sheet has none
+        label: whyOf(f, problemOf(f)).short,
+        seed: p.seed,
+      });
+    } else if (p.kind === 'sheet')
+      seen.rows.set(p.key, { order: 1e6, label: 'pieces across sheets' });
+  }
+  const checklist = [...seen.rows.entries()].sort((a, b) => a[1].order - b[1].order);
+
+  // ── the active card: the region it asks about, and only the answers to its kind ──
+  const activeFam = activeRegion
+    ? families.find((f) => f.seed === activeRegion.seed) ?? null
+    : null;
+  const activeCand = activeFam ? problemOf(activeFam) : null;
+  const activeWhy = activeFam && activeCand ? whyOf(activeFam, activeCand) : null;
+  const expRanks = activeFam
+    ? [...activeFam.candidates].filter((c) => isExp(c.rank)).sort((a, b) => a.rank - b.rank)
+    : [];
+  const badRanks = expRanks.filter((c) => c.outcome !== 'closed');
+  /** The problem is in some sizes only: the card says which ('in 44 46'). */
+  const partly = badRanks.length > 0 && badRanks.length < expRanks.length;
+  // two seeds in one region: another label inside this outline means «one piece» is a possible
+  // answer — only offered, never inferred: a separately closed nested piece (a pocket, a facing)
+  // sits inside too, so the operator lassoes exactly the parts to join
+  const partners =
+    activeFam && activeCand && activeCand.outer.length > 2
+      ? families.filter((g) => {
+          if (g.seed === activeFam.seed) return false;
+          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
+          return !!at && inside(at, activeCand.outer);
+        })
+      : [];
+  const arm = (t: Tool) => {
+    if (!activeFam || !activeCand) return;
+    setSel(activeFam.seed);
+    setRank(activeCand.rank);
+    pickTool(t);
+  };
+  type Answer = {
+    label: string;
+    onClick: () => void;
+    /** ≤8 words: how to answer, for the footer's coach bubble (`data-ask-hint`). */
+    how: string;
+    title?: string;
+    pressed?: boolean;
+    disabled?: boolean;
+  };
+  const notThis: Answer | null = activeFam
+    ? {
+        label: 'not a piece',
+        how: 'mark it as not a piece',
+        title: 'a label, a mark or a frame: drop it from the pieces',
+        onClick: () => notAPiece(activeFam),
+      }
+    : null;
+  const answers: Answer[] = (() => {
+    if (active?.kind === 'model') {
+      const order = named?.pick
+        ? [named.pick, ...variants.filter((v) => v !== named.pick)]
+        : variants;
+      return order.map((v) => ({
+        label: v,
+        how: 'pick the model to import',
+        title:
+          v === named?.pick
+            ? [
+                named.strong ? 'the card names it' : 'suggested by the card',
+                ...named.evidence,
+              ].join(' · ')
+            : undefined,
+        onClick: () => void api.dispatch({ type: 'variant', variant: v }),
+      }));
+    }
+    if (active?.kind === 'sheet' && sheetQ) {
+      return (
+        sheetQ.kind === 'alternative'
+          ? ([
+              ['keep', 'keep one sheet'],
+              ['union', 'different pieces — keep both'],
+            ] as const)
+          : sheetQ.kind === 'copy'
+            ? ([
+                ['copy', 'one piece drawn twice — keep one'],
+                ['both', 'two pieces'],
+              ] as const)
+            : sheetQ.kind === 'empty'
+              ? ([['empty', 'no piece on this sheet']] as const)
+              : ([
+                  ['separate', 'separate pieces'],
+                  ['halves', 'one piece cut between the sheets'],
+                ] as const)
+      ).map(([answer, label]) => ({
+        label,
+        how: 'say how the sheets relate',
+        onClick: () =>
+          void api.dispatch({
+            type: 'sheet-answer',
+            key: sheetQ.key,
+            answer,
+            edits: sheetAnswerEdits(out.sheets, sheetQ.key, answer),
+          }),
+      }));
+    }
+    if (!activeFam || !activeCand || !notThis) return [];
+    switch (activeCand.outcome) {
+      case 'leak':
+        return [
+          {
+            label: 'yes — close the gap',
+            how: 'click both ends of the gap',
+            title: 'two clicks: the two line ends at the red ring',
+            pressed: tool === 'bridge' && sel === activeFam.seed,
+            onClick: () => arm('bridge'),
+          },
+          notThis,
+        ];
+      case 'merged':
+        return [
+          {
+            label: 'two — split',
+            how: 'draw around one of the two pieces',
+            title: 'draw a lasso around one of the two pieces',
+            pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
+            onClick: () => arm('lasso'),
+          },
+          ...(partners.length
+            ? [
+                {
+                  label: 'one piece',
+                  how: 'draw around both parts to join them',
+                  title: 'both labels name one piece: draw a lasso around both parts to join them',
+                  pressed: tool === 'lasso' && lassoJoin && sel === activeFam.seed,
+                  onClick: () => {
+                    arm('lasso');
+                    setLassoJoin(true);
+                  },
+                },
+              ]
+            : // the other label is no piece of this model: nothing to join, it can only go
+              [notThis]),
+        ];
+      case 'tiny':
+        return [
+          { ...notThis, label: 'no — not a piece' },
+          {
+            label: 'yes — keep',
+            how: 'click inside the piece',
+            title: 'click inside the piece: the fill starts again from there',
+            pressed: tool === 'reseed' && sel === activeFam.seed,
+            onClick: () => arm('reseed'),
+          },
+        ];
+      case 'refused':
+        return [
+          activeCand.gradeRefusal === 'size-count'
+            ? {
+                label: '← sizes',
+                how: 'answer the size count on sizes',
+                onClick: () => void api.dispatch({ type: 'back', to: 'sizes' }),
+              }
+            : {
+                label: 'try another spot',
+                how: 'click another spot inside the piece',
+                title: 'click another spot inside the piece (the reading starts from the seed)',
+                pressed: tool === 'reseed' && sel === activeFam.seed,
+                onClick: () => arm('reseed'),
+              },
+          notThis,
+        ];
+      default:
+        return [notThis];
+    }
+  })();
+  /** The answer is drawn on the sheet now: the card says how, in one line. */
+  const armedHint =
+    active?.kind === 'region' && sel === active.seed
+      ? tool === 'bridge'
+        ? gapA
+          ? '! now click the other end of the gap'
+          : 'click both ends of the gap'
+        : tool === 'lasso'
+          ? lassoJoin
+            ? 'draw around both parts to join them'
+            : 'draw around one of the two pieces'
+          : tool === 'reseed'
+            ? 'click inside the piece'
+            : null
+      : null;
+  /** The card asks a question: what the parser is stuck on, in the operator's words. */
+  const question = !active
+    ? null
+    : active.kind === 'model'
+      ? 'which model to import?'
+      : active.kind === 'sheet'
+        ? sheetQ?.text ?? 'how do these sheets relate?'
+        : activeCand?.outcome === 'leak'
+          ? 'is this one outline with a gap?'
+          : activeCand?.outcome === 'merged'
+            ? 'one piece or two?'
+            : activeCand?.outcome === 'tiny'
+              ? 'is this a piece?'
+              : 'can the sizes be read from another spot?';
+  const qIndex = active ? checklist.findIndex(([k]) => k === active.key) : -1;
+  const ASK_KEY: Record<Problem['kind'], string> = {
+    model: 'pieces-model',
+    region: 'pieces-region',
+    sheet: 'pieces-sheet',
   };
 
   return (
@@ -345,17 +715,9 @@ export function PiecesStep({
           title='pieces on the sheet'
           aside={
             <span className='flex flex-wrap items-center gap-1'>
-              {(
-                [
-                  ['pan', 'pan', 'pan and select'],
-                  ['seed', '+ seed', 'click inside a piece the text did not label'],
-                  ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
-                  ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
-                  ['ignore', 'ignore line', 'a line that is not an outline'],
-                  ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
-                ] as const
-              ).map(([t, word, title]) => (
+              {TOOLS.filter(([t]) => allTools || ctxTools.has(t)).map(([t, word, title]) => (
                 <Chip
+                  {...ask('pieces-seed', t === 'seed' && !families.length)}
                   quiet
                   key={t}
                   selected={tool === t}
@@ -366,12 +728,21 @@ export function PiecesStep({
                   title={
                     t === 'bridge' && refusedSel
                       ? 'this size is held back (sizes unclear), not open: a gap closed here would not prove it'
-                      : title
+                      : t === 'pan'
+                        ? HINT.pan
+                        : title
                   }
                 >
                   {word}
                 </Chip>
               ))}
+              <Chip
+                quiet
+                onClick={() => setAllTools((a) => !a)}
+                title={allTools ? 'only the tools for the selected region' : 'every tool'}
+              >
+                {allTools ? 'fewer tools' : 'more tools'}
+              </Chip>
             </span>
           }
           bodyClassName='p-0 flex flex-col'
@@ -398,38 +769,6 @@ export function PiecesStep({
                 </Chip>
               ))}
             </ChipRow>
-            {variants.length > 1 && (
-              <>
-                <Text
-                  size='micro'
-                  variant='label'
-                  tracking='label'
-                  component='span'
-                  className='ml-3 uppercase'
-                >
-                  model
-                </Text>
-                <ChipRow>
-                  <Chip
-                    selected={!session.variant}
-                    tone={!session.variant ? 'attention' : 'default'}
-                    onClick={() => void api.dispatch({ type: 'variant', variant: null })}
-                  >
-                    all
-                  </Chip>
-                  {variants.map((v) => (
-                    <Chip
-                      key={v}
-                      selected={session.variant === v}
-                      pressed={session.variant === v}
-                      onClick={() => void api.dispatch({ type: 'variant', variant: v })}
-                    >
-                      {v}
-                    </Chip>
-                  ))}
-                </ChipRow>
-              </>
-            )}
             {(tool === 'bridge' || tool === 'wall') && (
               <ChipRow className='ml-3'>
                 <Chip
@@ -458,16 +797,23 @@ export function PiecesStep({
                 </Chip>
               </ChipRow>
             )}
-            <Text size='micro' variant='label' component='span' className='ml-auto'>
-              {tool === 'bridge' && gapA ? '! now click the other end of the gap' : HINT[tool]}
-            </Text>
+            {tool !== 'pan' && (
+              <Text size='micro' variant='label' component='span' className='ml-auto'>
+                {tool === 'bridge' && gapA ? '! now click the other end of the gap' : HINT[tool]}
+              </Text>
+            )}
           </div>
-          <div className='min-h-0 flex-1'>
+          {/* while an answer is drawn on the sheet, the sheet is where the coach points */}
+          <div className='min-h-0 flex-1' data-ask-zone={armedHint ? '' : undefined}>
             <SheetViewport
               bbox={session.sheet.sheet.bbox}
               focus={zoomBox}
               tool={tool === 'pan' ? 'pan' : tool === 'lasso' ? 'lasso' : 'point'}
-              onPick={(k) => setSel(k ? Number(k) : null)}
+              onPick={(k) => {
+                setSel(k ? Number(k) : null);
+                // a region with a question picked on the sheet becomes the card's question
+                if (k && openProblems.some((p) => p.key === `r${k}`)) setActiveKey(`r${k}`);
+              }}
               onPoint={(pt) => {
                 if (tool === 'bridge') {
                   if (!gapA) {
@@ -720,26 +1066,27 @@ export function PiecesStep({
       }
       side={
         <Panel
-          title='regions'
+          title={
+            active && qIndex >= 0
+              ? `question ${qIndex + 1} of ${checklist.length}`
+              : families.length
+                ? 'all pieces closed ✓'
+                : 'no pieces yet'
+          }
           aside={
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              {counts.closed} closed
-              {counts.leak ? ` · ${counts.leak} leak` : ''}
-              {counts.merged ? ` · ${counts.merged} two seeds` : ''}
-              {counts.tiny ? ` · ${counts.tiny} tiny` : ''}
-              {counts.refused ? ` · ${counts.refused} sizes unclear` : ''}
-            </Text>
+            /* the grade's open questions: notes behind the header door, not lines in the list */
+            <HeaderWarnings items={(out.grade?.ambiguities ?? []).map((a) => a.message)} />
           }
         >
           {focus && (
             <CalloutBox tone='error' className='mb-2 flex flex-col gap-1.5 py-1.5'>
               <div className='flex items-start gap-2'>
-                <Text size='micro' component='p' className='min-w-0 flex-1'>
+                <Text
+                  size='micro'
+                  component='p'
+                  className='min-w-0 flex-1'
+                  title={FOCUS_HELP[focus.kind]}
+                >
                   <b>! from {focus.from}</b>
                 </Text>
                 {onDismissFocus && (
@@ -778,9 +1125,6 @@ export function PiecesStep({
                   </li>
                 ))}
               </ul>
-              <Text size='micro' component='p'>
-                {FOCUS_HELP[focus.kind]}
-              </Text>
               <ChipRow>
                 {focus.kind !== 'region' && (
                   <Chip
@@ -814,218 +1158,351 @@ export function PiecesStep({
               </ChipRow>
             </CalloutBox>
           )}
-          {variants.length > 1 && !session.variant && (
-            <Text size='micro' component='p' className='mb-2 text-warning'>
-              ! the sheet carries {variants.length} models ({variants.join(', ')}). one run imports
-              one model — pick it above.
-              {named?.pick == null && named?.why ? ` ${named.why}.` : ''}
-            </Text>
+          {/* THE GUIDE: every question as one plain row, the active one answered on the card */}
+          {checklist.length > 0 && (
+            <ol className='flex flex-col'>
+              {checklist.map(([key, row]) => {
+                const open = openProblems.find((p) => p.key === key);
+                const on = !!open && active?.key === key;
+                const fam =
+                  row.seed != null ? families.find((f) => f.seed === row.seed) : undefined;
+                return (
+                  <li key={key} className='flex items-center gap-2'>
+                    <button
+                      type='button'
+                      aria-current={on ? 'step' : undefined}
+                      disabled={!open && !fam}
+                      title={
+                        open?.kind === 'region' && fam ? whyOf(fam, problemOf(fam)).full : undefined
+                      }
+                      onClick={() => {
+                        if (open) {
+                          setActiveKey(key);
+                          if (open.kind === 'region') jump({ seed: open.seed, rank: open.rank });
+                        } else if (fam) jump({ seed: fam.seed, rank: null });
+                      }}
+                      className={cn(
+                        'flex min-w-0 flex-1 items-center gap-2 px-1 py-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
+                        on ? 'bg-bgZebra font-bold' : open ? 'hover:bg-bgZebra' : 'text-labelColor',
+                      )}
+                    >
+                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                        {key === 'model' && !open && session.variant
+                          ? `model ${session.variant}`
+                          : fam && markOf.get(fam.seed)
+                            ? `${markOf.get(fam.seed)} · ${row.label}`
+                            : row.label}
+                      </Text>
+                      {!open && (
+                        <Text size='micro' variant='label' component='span' aria-label='fixed'>
+                          ✓
+                        </Text>
+                      )}
+                    </button>
+                    {key === 'model' && !open && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        className='shrink-0 text-labelColor hover:text-textColor'
+                        disabled={!!session.busy}
+                        onClick={() => void api.dispatch({ type: 'variant', variant: null })}
+                      >
+                        change
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
           )}
-          {named?.pick != null && (
-            <div className='mb-2'>
-              <Button
-                variant='secondary'
-                size='sm'
-                disabled={!!session.busy}
-                onClick={() => void api.dispatch({ type: 'variant', variant: named.pick })}
+
+          {/* the active question: its title, where it is, and only its own answers */}
+          {active && (
+            <div data-ask-zone className='mt-2 flex flex-col gap-1.5 border-t border-hairline pt-2'>
+              <Text
+                size='micro'
+                component='p'
+                className='font-bold'
+                title={
+                  active.kind === 'region'
+                    ? activeWhy?.full
+                    : active.kind === 'sheet' && sheetQ
+                      ? (
+                          out.sheets?.alternatives.find((x) => x.key === sheetQ.key)?.evidence ??
+                          out.sheets?.copies.find((x) => x.key === sheetQ.key)?.evidence ??
+                          out.sheets?.splits.find((x) => x.key === sheetQ.key)?.evidence ??
+                          []
+                        ).join(' · ')
+                      : undefined
+                }
               >
-                use {named.pick} · {named.strong ? 'the card names it' : 'suggested by the card'}
-              </Button>
-              <Text size='micro' variant='label' component='p' className='mt-1'>
-                {named.evidence.join(' · ')}
+                {active.kind === 'region' && markOf.get(active.seed)
+                  ? `${markOf.get(active.seed)} · `
+                  : ''}
+                {question}
               </Text>
-            </div>
-          )}
-          {sheetQ && (
-            <CalloutBox tone='warning' className='mb-2 flex flex-col gap-1.5 py-1.5'>
-              <Text size='micro' component='p'>
-                ! {sheetQ.text}
-              </Text>
-              <Text size='micro' variant='label' component='p'>
-                {(
-                  out.sheets?.alternatives.find((x) => x.key === sheetQ.key)?.evidence ??
-                  out.sheets?.copies.find((x) => x.key === sheetQ.key)?.evidence ??
-                  out.sheets?.splits.find((x) => x.key === sheetQ.key)?.evidence ??
-                  []
-                ).join(' · ')}
-              </Text>
-              <div className='flex flex-wrap gap-2'>
-                {(sheetQ.kind === 'alternative'
-                  ? ([
-                      ['keep', 'keep one sheet'],
-                      ['union', 'different pieces — keep both'],
-                    ] as const)
-                  : sheetQ.kind === 'copy'
-                    ? ([
-                        ['copy', 'one piece drawn twice — keep one'],
-                        ['both', 'two pieces'],
-                      ] as const)
-                    : sheetQ.kind === 'empty'
-                      ? ([['empty', 'no piece on this sheet']] as const)
-                      : ([
-                          ['separate', 'separate pieces'],
-                          ['halves', 'one piece cut between the sheets'],
-                        ] as const)
-                ).map(([answer, label]) => (
+              {active.kind === 'region' && activeCand && activeCand.bbox && (
+                <RegionCrop
+                  box={activeCand.bbox}
+                  outer={activeCand.outer}
+                  previews={previews}
+                  stroke={STYLE[activeCand.outcome].stroke}
+                  leakAt={activeCand.leakAt}
+                  className='w-full border border-hairline bg-bgColor'
+                  style={{ height: 112 }}
+                />
+              )}
+              {active.kind === 'model' && (
+                <div className='grid grid-cols-2 gap-2'>
+                  {answers.map((x) => (
+                    <div key={x.label} className='flex flex-col gap-0.5'>
+                      <ModelThumb
+                        sheet={sheetBox}
+                        outlines={families
+                          .filter((f) => seedAt(f.seed)?.variant === x.label)
+                          .map((f) => cand(f).outer)}
+                        className='w-full border border-hairline bg-bgColor'
+                        style={{ height: 72 }}
+                      />
+                      <Text size='nano' variant='label' component='span'>
+                        {x.label}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {active.kind === 'region' && partly && (
+                <div className='flex flex-wrap items-center gap-1'>
+                  <Text size='micro' variant='label' component='span'>
+                    in
+                  </Text>
+                  {badRanks.map((x) => (
+                    <button
+                      key={x.rank}
+                      type='button'
+                      title={`size ${labelOf(x.rank)}: ${OUTCOME[x.outcome].word}`}
+                      onClick={() => jump({ seed: active.seed, rank: x.rank })}
+                      className={cn(
+                        'text-micro tabular-nums text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                        x.rank === rank && 'text-textColor underline',
+                      )}
+                    >
+                      {labelOf(x.rank)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className='flex flex-wrap items-center gap-2'>
+                {answers.map((x, i) => (
                   <Button
-                    key={answer}
+                    {...ask(ASK_KEY[active.kind], i === 0)}
+                    data-ask-hint={i === 0 ? x.how : undefined}
+                    key={x.label}
                     variant='secondary'
                     size='sm'
-                    disabled={!!session.busy}
-                    onClick={() =>
-                      void api.dispatch({
-                        type: 'sheet-answer',
-                        key: sheetQ.key,
-                        answer,
-                        edits: sheetAnswerEdits(out.sheets, sheetQ.key, answer),
-                      })
-                    }
+                    disabled={!!session.busy || x.disabled}
+                    aria-pressed={x.pressed}
+                    title={x.title}
+                    onClick={x.onClick}
+                    className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
                   >
-                    {label}
+                    {x.label}
                   </Button>
                 ))}
               </div>
-            </CalloutBox>
-          )}
-          {(out.grade?.ambiguities ?? []).map((a, i) => (
-            <Text key={i} size='micro' component='p' className='mb-2 text-warning'>
-              ! {a.message}
-            </Text>
-          ))}
-          <ul className='divide-y divide-hairline'>
-            {families.map((f) => {
-              const c = cand(f);
-              const o = outcomeOf(f);
-              const s = seedAt(f.seed);
-              const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
-              const out_ = ranks.filter((x) => !mapped || mapped.has(x.rank));
-              const shut = out_.filter((x) => x.outcome === 'closed').length;
-              return (
-                <li key={f.seed} className='pb-1'>
-                  <button
-                    type='button'
-                    onClick={() => setSel(f.seed === sel ? null : f.seed)}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                      f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                    )}
+              {armedHint && (
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Text size='micro' component='span' className='text-warning'>
+                    {armedHint}
+                  </Text>
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor hover:text-textColor'
+                    onClick={() => pickTool('pan')}
                   >
-                    <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano text-bgColor tabular-nums'>
-                      {markOf.get(f.seed)}
-                    </span>
-                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                      {SEED_WORD[s?.origin ?? 'text']}
-                      {s?.variant ? ` · ${s.variant}` : ''}
-                    </Text>
-                    <Text size='micro' variant='label' component='span' className='tabular-nums'>
-                      {o === 'closed' ? fmtPct(c.sourceCoverage) : ''}
-                    </Text>
-                    {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
-                    <Pill tone={OUTCOME[o].tone}>{OUTCOME[o].word}</Pill>
-                  </button>
-                  <div className='flex flex-wrap items-center gap-0.5 pl-6'>
-                    {ranks.map((x) => (
-                      <RankCell
-                        key={x.rank}
-                        label={labelOf(x.rank)}
-                        outcome={x.outcome}
-                        exported={!mapped || mapped.has(x.rank)}
-                        current={x.rank === rank}
-                        onClick={() => {
-                          setRank(x.rank);
-                          setSel(f.seed);
-                        }}
-                      />
-                    ))}
-                    <Text size='nano' variant='label' component='span' className='ml-1'>
-                      {shut}/{out_.length} closed
-                    </Text>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                    cancel
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
-          {asideGroups.length > 0 && (
-            <>
-              <GroupLabel>set aside</GroupLabel>
-              <ul className='divide-y divide-hairline'>
-                {asideGroups.map(({ key: k, list }) => (
-                  <li key={k} className='pb-1'>
-                    <button
-                      type='button'
-                      aria-expanded={asideOpen === k}
-                      onClick={() => {
-                        setAsideOpen(asideOpen === k ? null : k);
-                        setAsideAt(null);
-                      }}
+          {/* the regions that closed: one count line, the list behind it */}
+          {closedFams.length > 0 && (
+            <Fold
+              label={plural(closedFams.length, 'piece')}
+              open={closedOpen || selClosed}
+              onOpenChange={(o) => {
+                setClosedOpen(o);
+                if (!o && selClosed) setSel(null);
+              }}
+            >
+              <ul className='flex flex-col'>
+                {closedFams.map((f) => {
+                  const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
+                  return (
+                    <li
+                      key={f.seed}
                       className={cn(
-                        'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                        asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                        'flex items-center gap-2 px-1 py-0.5',
+                        f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
                       )}
                     >
-                      <Text size='micro' component='span' className='min-w-0 flex-1'>
-                        {list.length} {list.length === 1 ? 'outline' : 'outlines'} ·{' '}
-                        {asideWords(list[0])}
-                      </Text>
-                      <Text size='micro' variant='label' component='span'>
-                        {asideOpen === k ? 'hide' : 'show'}
-                      </Text>
-                    </button>
-                    {asideOpen === k && (
-                      <ul className='flex flex-col pl-3'>
-                        {list.map((a) => (
-                          <li key={a.id} className='flex items-center gap-2 py-0.5'>
-                            <button
-                              type='button'
-                              onClick={() => setAsideAt(a === asideAt ? null : a)}
-                              className={cn(
-                                'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                                a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                              )}
-                            >
-                              <Text size='micro' component='span' className='tabular-nums'>
-                                {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
-                                {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
-                                {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
-                              </Text>
-                              {a.why && (
-                                <Text
-                                  size='nano'
-                                  variant='label'
-                                  component='span'
-                                  className='block'
-                                >
-                                  {a.why}
-                                </Text>
-                              )}
-                            </button>
-                            <Button
-                              variant='underline'
-                              size='xs'
-                              disabled={!!session.busy}
-                              onClick={() => {
-                                setAsideAt(null);
-                                void api.promoteAside(a).then((id) => id != null && setSel(id));
-                                setHint('made a piece — the fill runs from it');
-                              }}
-                            >
-                              this is a piece
-                            </Button>
-                          </li>
+                      <button
+                        type='button'
+                        aria-label={`region ${markOf.get(f.seed)}`}
+                        onClick={() => setSel(f.seed === sel ? null : f.seed)}
+                        className='focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+                      >
+                        <MarkSquare n={markOf.get(f.seed)} />
+                      </button>
+                      <span className='flex flex-wrap items-center gap-0.5'>
+                        {ranks.map((x) => (
+                          <RankCell
+                            key={x.rank}
+                            label={labelOf(x.rank)}
+                            outcome={x.outcome}
+                            exported={!mapped || mapped.has(x.rank)}
+                            current={x.rank === rank && f.seed === sel}
+                            onClick={() => {
+                              setRank(x.rank);
+                              setSel(f.seed);
+                            }}
+                          />
                         ))}
-                      </ul>
-                    )}
-                  </li>
-                ))}
+                      </span>
+                      {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
+                    </li>
+                  );
+                })}
               </ul>
-            </>
+              {selected && selClosed && (
+                <div className='mt-1 flex flex-wrap gap-2 pl-6'>
+                  <Chip disabled={!!session.busy} onClick={() => notAPiece(selected)}>
+                    not a piece
+                  </Chip>
+                  <Chip
+                    selected={tool === 'reseed'}
+                    pressed={tool === 'reseed'}
+                    disabled={!!session.busy}
+                    onClick={() => setTool('reseed')}
+                  >
+                    reseed
+                  </Chip>
+                </div>
+              )}
+            </Fold>
+          )}
+
+          {asideGroups.length > 0 && (
+            <Fold
+              label={`${asides.length} set aside`}
+              defaultOpen={weak.size > 0}
+              ask={weak.size ? 'pieces-aside' : undefined}
+            >
+              <ul className='divide-y divide-hairline'>
+                {asideGroups.map(({ key: k, list }) => {
+                  const weakHere = list.some((a) => weak.has(a));
+                  return (
+                    <li key={k} className='pb-1'>
+                      <button
+                        type='button'
+                        aria-expanded={asideOpen === k}
+                        {...(weakHere && asideOpen !== k
+                          ? { 'data-ask': 'pieces-aside', 'data-ask-fold': 'folded' }
+                          : {})}
+                        onClick={() => {
+                          setAsideOpen(asideOpen === k ? null : k);
+                          setAsideAt(null);
+                        }}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                          asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                        )}
+                      >
+                        <Text
+                          size='micro'
+                          component='span'
+                          className={cn('min-w-0 flex-1', weakHere && 'text-warning')}
+                        >
+                          {weakHere ? '! ' : ''}
+                          {list.length} · {asideWords(list[0])}
+                        </Text>
+                        <FoldCaret open={asideOpen === k} />
+                      </button>
+                      {asideOpen === k && (
+                        <ul className='flex flex-col pl-3'>
+                          {list.map((a) => (
+                            <li key={a.id} className='flex items-center gap-2 py-0.5'>
+                              <button
+                                type='button'
+                                title={a.why || undefined}
+                                onClick={() => setAsideAt(a === asideAt ? null : a)}
+                                className={cn(
+                                  'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                                  a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                                )}
+                              >
+                                <Text size='micro' component='span' className='tabular-nums'>
+                                  {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
+                                  {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
+                                  {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
+                                </Text>
+                              </button>
+                              <Button
+                                {...ask('pieces-aside', weak.has(a))}
+                                variant='underline'
+                                size='xs'
+                                disabled={!!session.busy}
+                                onClick={() => {
+                                  setAsideAt(null);
+                                  void api.promoteAside(a).then((id) => id != null && setSel(id));
+                                  setHint('made a piece — the fill runs from it');
+                                }}
+                              >
+                                this is a piece
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Fold>
+          )}
+
+          {(inputs.edits.length > 0 || hint) && (
+            <div className='mt-2 flex flex-wrap items-center gap-2'>
+              {inputs.edits.length > 0 && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
+                  disabled={!!session.busy}
+                  title={editsLine}
+                  onClick={() => void api.editPieces('undo')}
+                >
+                  undo
+                </Button>
+              )}
+              {hint && (
+                <Text size='micro' variant='label' component='span'>
+                  {hint}
+                </Text>
+              )}
+            </div>
           )}
 
           {selected && (
-            <>
-              <GroupLabel>region {markOf.get(selected.seed)}</GroupLabel>
-              {/* a refused size has no outline: no area, no coverage, no growth to show (copy 6) */}
+            <DebugFold label={`region ${markOf.get(selected.seed)} · diagnostics`}>
+              {/* a refused size has no outline: no area, no coverage, no growth (copy 6) */}
+              <Row
+                label='seed'
+                value={`${SEED_WORD[seedAt(selected.seed)?.origin ?? 'text']}${seedAt(selected.seed)?.variant ? ` · ${seedAt(selected.seed)!.variant}` : ''}`}
+              />
               <Row
                 label='area, this size'
                 value={refusedSel ? '—' : `${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`}
@@ -1050,85 +1527,19 @@ export function PiecesStep({
                   )
                 }
               />
-              <Text size='micro' variant='label' component='p' className='mt-1'>
-                {cand(selected).outcome === 'refused'
-                  ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${refusalExtra(cand(selected).gradeDetail) ? ` (${refusalExtra(cand(selected).gradeDetail)})` : ''}`
-                  : outcomeOf(selected) === 'leak' &&
-                      seedAt(selected.seed)?.origin === 'face' &&
-                      selected.candidates.every((c) => c.outcome === 'leak' || c.outcome === 'tiny')
-                    ? 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.'
-                    : outcomeOf(selected) === 'leak'
-                      ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
-                      : outcomeOf(selected) === 'merged'
-                        ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
-                        : outcomeOf(selected) === 'tiny'
-                          ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
-                          : 'closed and snapped to the drawn lines.'}
-              </Text>
-              <div className='mt-2 flex flex-wrap gap-2'>
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  disabled={!!session.busy}
-                  onClick={() => {
-                    // keep how the region read, for "not in this file" on check
-                    const big = Math.max(...selected.candidates.map((c) => c.areaMm2));
-                    remember(
-                      selected.seed,
-                      `region ${markOf.get(selected.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
-                    );
-                    void api.editPieces({ kind: 'not-a-piece', seed: selected.seed });
-                    setSel(null);
-                  }}
-                >
-                  not a piece
-                </Button>
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  disabled={!!session.busy}
-                  onClick={() => setTool('reseed')}
-                >
-                  reseed
-                </Button>
-              </div>
-            </>
-          )}
-
-          <GroupLabel>edits</GroupLabel>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Text size='micro' variant='label' component='span'>
-              {[
-                `${inputs.edits.length} ${inputs.edits.length === 1 ? 'edit' : 'edits'}`,
-                bridges.length &&
-                  `${bridges.length} ${bridges.length === 1 ? 'gap' : 'gaps'} closed`,
-                used.size && `${used.size} ${used.size === 1 ? 'line' : 'lines'} used`,
-                ignored.size && `${ignored.size} ${ignored.size === 1 ? 'line' : 'lines'} ignored`,
-                `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-            {inputs.edits.length > 0 && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                disabled={!!session.busy}
-                onClick={() => void api.editPieces('undo')}
-              >
-                undo last
-              </Button>
-            )}
-          </div>
-          {hint && (
-            <Text size='micro' variant='label' component='p' className='mt-1'>
-              {hint}
-            </Text>
+            </DebugFold>
           )}
         </Panel>
       }
     />
+  );
+}
+
+function MarkSquare({ n }: { n: number | undefined }) {
+  return (
+    <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano text-bgColor tabular-nums'>
+      {n}
+    </span>
   );
 }
 

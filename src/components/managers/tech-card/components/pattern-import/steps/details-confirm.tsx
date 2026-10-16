@@ -16,7 +16,7 @@ import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
-import { NumberField } from '../ui-bits';
+import { NumberField, ask } from '../ui-bits';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
@@ -24,18 +24,30 @@ export function useOpenQuestions(api: ImportSessionApi) {
   return openQuestions(api.session.semantics, api.session.names, api.inputs, api.answersNow);
 }
 
+/**
+ * Is the file's outline still a question? While it is, the question box is the only place the
+ * outline is set (the compact line/allowance fields stay hidden — one decision, one place).
+ */
+export function outlineAsked(api: ImportSessionApi, current: AllowanceDecision): boolean {
+  const open = openQuestions(api.session.semantics, api.session.names, api.inputs, api.answersNow);
+  return open.allowance.length > 0 && current.origin !== 'operator';
+}
+
 export function OutlineQuestion({
   api,
   current,
+  answersOnly = false,
 }: {
   api: ImportSessionApi;
   current: AllowanceDecision;
+  /** GUIDED: the step's question card says the question — render the answers (and why) only. */
+  answersOnly?: boolean;
 }) {
   const open = useOpenQuestions(api).allowance;
   const [mm, setMm] = useState(
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
-  if (!open.length || current.origin === 'operator') return null;
+  if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
   const word = outlineByLayerWord(api.session);
@@ -45,53 +57,78 @@ export function OutlineQuestion({
     current.origin === 'text' || current.origin === 'measured' ? current : null,
   );
   const prefill = word?.kind === 'cut' && !clash ? 'cut' : null;
+  const why = [
+    current.evidence.some((e) => /only for some pieces/.test(e))
+      ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
+      : 'the sheet has no allowance note and no second line',
+    `${open.length} ${open.length === 1 ? 'piece' : 'pieces'} · answer once for the file`,
+    !clash && word?.kind === 'cut'
+      ? `the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const answers = (
+    <span className='flex flex-wrap items-center gap-1.5'>
+      <Button
+        {...ask('details-outline')}
+        data-ask-hint='pick cut or seam line'
+        variant='secondary'
+        size='xs'
+        disabled={busy}
+        className={prefill === 'cut' ? 'border-warning' : undefined}
+        title='the allowance is already in the drawing: the outline is cut as drawn'
+        onClick={() => void api.answerOutline('cut', mm)}
+      >
+        cut line — as drawn{prefill === 'cut' ? ' (file says so)' : ''}
+      </Button>
+      <Button
+        {...ask('details-outline')}
+        data-ask-hint='pick cut or seam line'
+        variant='secondary'
+        size='xs'
+        disabled={busy}
+        title='the outline is the sewing line: the cut line is built this far outside it'
+        onClick={() => void api.answerOutline('seam', mm)}
+      >
+        seam line — add {mm} mm
+      </Button>
+      <NumberField
+        value={mm}
+        min={0}
+        aria-label='allowance to add to a seam line, mm'
+        className='w-12'
+        onCommit={(v) => v != null && v >= 0 && setMm(v)}
+      />
+      <Text size='micro' variant='label' component='span'>
+        mm
+      </Text>
+    </span>
+  );
+  if (answersOnly)
+    return (
+      <span className='flex flex-col items-start gap-1' title={why}>
+        {(clash || word?.kind === 'stop') && (
+          <Text size='micro' variant='label' component='p'>
+            {clash ?? (word?.kind === 'stop' ? word.reason : '')}
+          </Text>
+        )}
+        {answers}
+      </span>
+    );
   return (
     <CalloutBox
       tone='warning'
       className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
     >
-      <Text size='micro' component='p' className='min-w-0 flex-1'>
-        <b>! what is the drawn outline?</b>{' '}
-        {current.evidence.some((e) => /only for some pieces/.test(e))
-          ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
-          : 'the sheet has no allowance note and no second line'}{' '}
-        ({open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
+      <Text size='micro' component='p' className='min-w-0 flex-1' title={why}>
+        <b>! what is the drawn outline?</b>
+        {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
+            the reason the question is asked at all — stays on screen */}
         {clash && ` ${clash}`}
-        {!clash &&
-          word?.kind === 'cut' &&
-          ` the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled.`}
         {word?.kind === 'stop' && ` ${word.reason}`}
       </Text>
-      <span className='flex flex-wrap items-center gap-1.5'>
-        <Button
-          variant={prefill === 'cut' ? 'main' : 'secondary'}
-          size='xs'
-          disabled={busy}
-          title='the allowance is already in the drawing: the outline is cut as drawn'
-          onClick={() => void api.answerOutline('cut', mm)}
-        >
-          cut line · as drawn
-        </Button>
-        <Button
-          variant='secondary'
-          size='xs'
-          disabled={busy}
-          title='the outline is the sewing line: the cut line is built this far outside it'
-          onClick={() => void api.answerOutline('seam', mm)}
-        >
-          seam line · add {mm} mm
-        </Button>
-        <NumberField
-          value={mm}
-          min={0}
-          aria-label='allowance to add to a seam line, mm'
-          className='w-12'
-          onCommit={(v) => v != null && v >= 0 && setMm(v)}
-        />
-        <Text size='micro' variant='label' component='span'>
-          mm
-        </Text>
-      </span>
+      {answers}
     </CalloutBox>
   );
 }
@@ -99,23 +136,20 @@ export function OutlineQuestion({
 export function ConfirmStrip({ api }: { api: ImportSessionApi }) {
   const open = useOpenQuestions(api);
   if (!open.total) return null;
+  const foldAlt = open.quantity.filter((u) => u.foldAlt).length;
+  // no summary line: each open row carries its own "? … · confirm" and the footer's ask line
+  // counts them; this is the secondary shortcut — the footer keeps the one filled button
   return (
-    <div className='mt-2 flex flex-wrap items-center gap-2'>
-      <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
-        ! {countWords(open)} not proven by the sheet: check the marked rows, fix any that are wrong,
-        then confirm the rest.
-        {open.quantity.some((u) => u.foldAlt) &&
-          ` ${open.quantity.filter((u) => u.foldAlt).length} may be cut on fold instead of a pair.`}
-      </Text>
-      <Button
-        variant='main'
-        size='xs'
+    <div className='mt-2 flex justify-end'>
+      <Chip
+        {...ask('details-confirm')}
+        quiet
         disabled={!!api.session.busy}
         onClick={() => api.confirmShown()}
-        title='accept every marked quantity and name as the table shows it now'
+        title={`accept every marked quantity and name as the table shows it now (${countWords(open)})${foldAlt ? ` · ${foldAlt} may be cut on fold instead of a pair` : ''}`}
       >
         confirm all as shown
-      </Button>
+      </Chip>
     </div>
   );
 }
@@ -200,33 +234,26 @@ export function nameNote(open: ReturnType<typeof openQuestions>, seed: SeedId) {
 /**
  * PASSPORT (d), Ф1: the document's own cutting list against the pieces found — a NOTE, never a
  * stop (the list may name other models, other sheets, pieces cut by dimensions or traced from
- * another). Shown only when the list was read from the text layer (our grammar, a cutting section).
+ * another). Read from the text layer only. A `HeaderWarnings` item, and only when the list names
+ * a piece this sheet does not carry (all found = nothing to say).
  */
-export function PassportNote({ api }: { api: ImportSessionApi }) {
+export function passportWarning(api: ImportSessionApi): string | null {
   const p = api.session.semantics?.passport;
   if (!p || !p.pieces.length) return null;
-  const bound = p.pieces.filter((e) => e.binding);
   const missing = p.pieces.filter((e) => !e.binding);
+  const extra = p.extra ?? [];
+  if (!missing.length && !extra.length) return null;
   const tag = (e: (typeof p.pieces)[number]) =>
     `${e.label?.value ?? '?'} «${e.name.value}»${e.qty ? ` ×${e.qty.value.n}${e.qty.value.mode === 'fold' ? ' on fold' : ''}` : ''}`;
-  return (
-    <Text
-      size='micro'
-      component='p'
-      className={`mt-2 ${missing.length ? 'text-warning' : 'text-textInactiveColor'}`}
-    >
-      the document&apos;s cutting list names {p.pieces.length}{' '}
-      {p.pieces.length === 1 ? 'piece' : 'pieces'}; {bound.length} found on this sheet by the
-      printed number
-      {missing.length > 0 &&
-        ` — not found here: ${missing
+  return [
+    missing.length
+      ? `cutting list: not found on this sheet — ${missing
           .slice(0, 6)
           .map(tag)
-          .join(
-            ', ',
-          )}${missing.length > 6 ? ` +${missing.length - 6}` : ''} (another model or sheet, cut by dimensions, or lost — check)`}
-      {(p.extra?.length ?? 0) > 0 &&
-        ` · on the sheet but not in the list: ${(p.extra ?? []).slice(0, 6).join(', ')}`}
-    </Text>
-  );
+          .join(', ')}${missing.length > 6 ? ` +${missing.length - 6}` : ''}`
+      : '',
+    extra.length ? `on the sheet, not in the list: ${extra.slice(0, 6).join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }

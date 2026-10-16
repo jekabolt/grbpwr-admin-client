@@ -1,12 +1,13 @@
-// Step 3 · SHEET — the tiles put back together. Residuals are VISIBLE (Codex C6): every tile says
-// how far its loop closure is off, a weak registration is drawn as a blue seam, and when the
-// automatic registration cannot be trusted the operator sets the grid by hand.
+// Stage 2 · SHEET — the tiles put back together. Residuals are VISIBLE (Codex C6) on the drawing:
+// a tile that does not close is outlined blue with its number, a weak registration is a blue seam.
+// The panel is one line ("44/44 tiles placed"); it asks only when tiles are missing, refused or
+// do not close — accept, or set the grid by hand. Seams, votes and loop numbers are diagnostics.
 import { useMemo, useState } from 'react';
 import type { GridOverride, PagePose } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
+import { Chip } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row } from 'ui/components/row';
@@ -14,8 +15,21 @@ import Text from 'ui/components/text';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
-import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtMm } from '../ui-bits';
+import {
+  DebugFold,
+  Field,
+  Fold,
+  NativeSelect,
+  NumberField,
+  Panel,
+  SplitStage,
+  ask,
+  fmtMm,
+} from '../ui-bits';
 import { SheetCleanRows } from './files-clean';
+
+/** The coach's how (THE ASK CONTRACT, ui-bits) when the grid by hand is the answer. */
+const GRID_HINT = 'set rows, columns and step, then apply';
 
 const keyOf = (p: { file: string; page: number }) => `${p.file}:${p.page}`;
 
@@ -84,6 +98,8 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
   // Tile sheets of the files (a Burda file carries two; r4454 a main sheet + interfacing) — D6:
   // every one is in the drawing; the hand grid is set on one of them.
   const [gridSheet, setGridSheet] = useState<number>(inputs.sheetIndex);
+  /** The hand-grid fold; null = its own rule (open while the grid is the answer). */
+  const [gridOpen, setGridOpen] = useState<boolean | null>(null);
   const sheets = useMemo(
     () =>
       [
@@ -106,6 +122,20 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
     sheet.poses.find((p) => p.file === q.file && p.page === q.page);
   const tilesIn = (n: number) =>
     session.pages.filter((p) => p.cls === 'tile' && p.sheet === n).length;
+  const refused = sheet.refused ?? [];
+  const missing = sheet.missing.length;
+  /** The grid by hand is the answer: pages left off the grid, or a placement refused. */
+  const gridAsks = missing > 0 || refused.length > 0;
+  const acceptAsks = overLimit && !inputs.residualsAccepted && !gridAsks;
+  const gridFold = {
+    open: gridOpen ?? (gridAsks || !!inputs.gridOverride),
+    onOpenChange: setGridOpen,
+  };
+  const fileLegend = multiFile
+    ? [...new Set(sheet.poses.map((p) => p.file))]
+        .map((f) => `${Number(f) + 1} = ${fileName(f)}`)
+        .join(' · ')
+    : '';
 
   return (
     <SplitStage
@@ -113,9 +143,19 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
         <Panel
           title='assembled sheet'
           aside={
-            <Text size='micro' variant='label' component='span'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              title={[
+                'wheel zoom · drag pan',
+                fileLegend && `tiles are named file/cell: ${fileLegend}`,
+              ]
+                .filter(Boolean)
+                .join(' — ')}
+            >
               {((sheet.bbox.maxX - sheet.bbox.minX) / 10).toFixed(1)} ×{' '}
-              {((sheet.bbox.maxY - sheet.bbox.minY) / 10).toFixed(1)} cm · wheel zoom · drag pan
+              {((sheet.bbox.maxY - sheet.bbox.minY) / 10).toFixed(1)} cm
             </Text>
           }
           bodyClassName='p-0'
@@ -149,7 +189,8 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                         fontSize={Math.min(unit * 12, w / 10)}
                         fill={bad ? SHEET_INK.blue : SHEET_INK.mut}
                       >
-                        {tileName(p)} · {p.residualMm.toFixed(2)}
+                        {tileName(p)}
+                        {bad ? ` · ${p.residualMm.toFixed(2)}` : ''}
                       </text>
                     </g>
                   );
@@ -206,11 +247,165 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
       }
       side={
         <Panel title='registration'>
-          {sheets.length > 1 && (
-            <>
-              <Text size='micro' variant='label' component='p' className='mb-1'>
-                {sheets.length} tile sheets — one garment: every sheet is imported, side by side
+          <div className='flex flex-col gap-2'>
+            {/* the state in one line */}
+            <Text size='micro' component='p' className='tabular-nums'>
+              {sheet.poses.length}/{sheet.poses.length + missing} tiles placed
+              {sheets.length > 1 ? ` · ${sheets.length} sheets` : ''}
+              {sheet.overview ? ` · overview p${sheet.overview.page + 1}` : ''}
+            </Text>
+
+            {/* D3: a refused placement has no "accept" — every reason stays in view */}
+            {refused.length > 0 && (
+              <CalloutBox tone='error' className='py-1'>
+                {refused.map((w) => (
+                  <Text key={w} size='micro' component='p'>
+                    {w}
+                  </Text>
+                ))}
+              </CalloutBox>
+            )}
+            {missing > 0 && (
+              <Text size='micro' component='p' className='text-warning'>
+                ! {missing} {missing === 1 ? 'page' : 'pages'} missing
               </Text>
+            )}
+            {overLimit && (
+              <div data-ask-zone='' className='flex flex-wrap items-center gap-2'>
+                <Text
+                  size='micro'
+                  component='span'
+                  className={inputs.residualsAccepted ? 'text-labelColor' : 'text-warning'}
+                >
+                  {inputs.residualsAccepted ? '' : '! '}
+                  {weak.length
+                    ? `${weak.length} blue ${weak.length === 1 ? 'seam' : 'seams'} · `
+                    : ''}
+                  {fmtMm(worst)} (limit {PATIMPORT.registrationMaxResidualMm})
+                </Text>
+                <Chip
+                  tone={inputs.residualsAccepted ? undefined : 'attention'}
+                  selected={inputs.residualsAccepted}
+                  pressed={inputs.residualsAccepted}
+                  onClick={() => patchInputs({ residualsAccepted: !inputs.residualsAccepted })}
+                  title='I looked at the blue seams — the drawing runs on across them'
+                  {...ask('sheet-accept', acceptAsks, 'check the blue seams, then accept')}
+                >
+                  accept {fmtMm(worst)}
+                </Chip>
+              </div>
+            )}
+
+            {/* the sheet offer asks only when no blocker does: the blocker's answer wins the coach */}
+            {out.clean && <SheetCleanRows api={api} clean={out.clean} askOn={!api.blocker} />}
+          </div>
+
+          {/* the hand grid: the coach's zone when pages are missing or the placement is refused */}
+          <div data-ask-zone='' data-ask-hint={GRID_HINT}>
+            <Fold label='grid by hand' ask={gridAsks ? 'sheet-grid' : undefined} {...gridFold}>
+              <div className='grid grid-cols-2 gap-2'>
+                {sheets.length > 1 && (
+                  <Field label='grid of sheet' className='col-span-2'>
+                    <NativeSelect
+                      value={String(gridSheet)}
+                      onChange={(v) => setGridSheet(Number(v))}
+                      options={sheets.map((n) => ({
+                        value: String(n),
+                        label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
+                      }))}
+                    />
+                  </Field>
+                )}
+                <Field label='rows'>
+                  <NumberField
+                    {...ask('sheet-grid', gridAsks, GRID_HINT)}
+                    value={grid.rows}
+                    min={1}
+                    step='1'
+                    onCommit={(v) =>
+                      setGrid((g) => ({ ...g, rows: Math.max(1, Math.round(v ?? 1)) }))
+                    }
+                  />
+                </Field>
+                <Field label='columns'>
+                  <NumberField
+                    value={grid.cols}
+                    min={1}
+                    step='1'
+                    onCommit={(v) =>
+                      setGrid((g) => ({ ...g, cols: Math.max(1, Math.round(v ?? 1)) }))
+                    }
+                  />
+                </Field>
+                <Field label='step across, mm'>
+                  <NumberField
+                    value={grid.stepXMm}
+                    min={1}
+                    onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
+                  />
+                </Field>
+                <Field label='step down, mm'>
+                  <NumberField
+                    value={grid.stepYMm}
+                    min={1}
+                    onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
+                  />
+                </Field>
+                <Field label='page order' className='col-span-2'>
+                  <NativeSelect
+                    value={grid.order}
+                    onChange={(v) => setGrid((g) => ({ ...g, order: v as GridOverride['order'] }))}
+                    options={[
+                      { value: 'row-major', label: 'by rows (A1 A2 A3 … B1)' },
+                      { value: 'col-major', label: 'by columns (A1 B1 C1 … A2)' },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <div className='mt-2 flex flex-wrap gap-2'>
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  disabled={!!session.busy}
+                  {...ask('sheet-grid', gridAsks, 'apply the grid to place the pages')}
+                  onClick={() =>
+                    void api.dispatch({
+                      type: 'sheet',
+                      sheet: gridSheet,
+                      override: {
+                        ...grid,
+                        // The hand grid starts at the first tile page of THAT sheet, in file order.
+                        originPage: (() => {
+                          const t = session.pages.find(
+                            (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
+                          );
+                          return {
+                            file: t?.file ?? first?.file ?? '0',
+                            page: t?.page ?? first?.page ?? 0,
+                          };
+                        })(),
+                      },
+                    })
+                  }
+                >
+                  apply {grid.rows}×{grid.cols} grid
+                </Button>
+                {inputs.gridOverride && (
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor hover:text-textColor'
+                    onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
+                  >
+                    back to detected
+                  </Button>
+                )}
+              </div>
+            </Fold>
+          </div>
+
+          <DebugFold>
+            {sheets.length > 1 && (
               <DataTable>
                 <thead>
                   <tr>
@@ -240,211 +435,64 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   ))}
                 </tbody>
               </DataTable>
-            </>
-          )}
-          <Row label='tiles placed' value={sheet.poses.length} />
-          <Row
-            label='missing tiles'
-            value={
-              <span className={sheet.missing.length ? 'text-error' : undefined}>
-                {sheet.missing.length || '—'}
-              </span>
-            }
-          />
-          <Row
-            label='worst loop closure'
-            value={
-              <span
-                className={worst > PATIMPORT.registrationMaxResidualMm ? 'text-error' : undefined}
-              >
-                {fmtMm(worst)}
-              </span>
-            }
-          />
-          <Row label='limit' value={fmtMm(PATIMPORT.registrationMaxResidualMm, 1)} />
-          {overLimit && (
-            <label className='mt-1 flex items-start gap-2'>
-              <CheckboxCommon
-                name='residuals-accept'
-                checked={inputs.residualsAccepted}
-                onChange={(v) => patchInputs({ residualsAccepted: v })}
-              />
-              <Text size='micro' component='span' className='text-warning'>
-                I looked at the blue seams — the drawing runs on across them; accept {fmtMm(worst)}
-              </Text>
-            </label>
-          )}
-          {sheet.overview && (
-            <Row
-              label='overview page'
-              value={`p. ${sheet.overview.page + 1} · drawn at 1 : ${sheet.overview.factor.toFixed(2)}`}
-            />
-          )}
-
-          {out.clean && <SheetCleanRows api={api} clean={out.clean} />}
-
-          {!!sheet.refused?.length && (
-            <CalloutBox tone='error' className='mt-2'>
-              {sheet.refused.map((w) => (
-                <Text key={w} size='micro' component='p'>
-                  {w}
-                </Text>
-              ))}
-            </CalloutBox>
-          )}
-
-          {sheet.warnings.length > 0 && (
-            <CalloutBox tone='warning' className='mt-2 max-h-40 overflow-y-auto'>
-              {sheet.warnings.map((w) => (
-                <Text key={w} size='micro' component='p'>
-                  {w}
-                </Text>
-              ))}
-            </CalloutBox>
-          )}
-
-          <GroupLabel>tile seams</GroupLabel>
-          <DataTable>
-            <thead>
-              <tr>
-                <th>seam</th>
-                <th data-align='left'>method</th>
-                <th>votes</th>
-                <th title='votes of the runner-up offset / votes of the winner: 0 = one clear answer'>
-                  2nd / best
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sheet.pairs
-                .filter((p) => picked == null || keyOf(p.from) === picked || keyOf(p.to) === picked)
-                .map((p, i) => {
-                  const a = poseOf(p.from);
-                  const b = poseOf(p.to);
-                  const low = isWeak(p);
-                  return (
-                    <tr key={i}>
-                      <td>
-                        {tileName(a)} → {tileName(b)}
-                      </td>
-                      <td data-align='left'>{p.method}</td>
-                      <td>{p.score}</td>
-                      <td className={low ? 'text-warning' : undefined}>
-                        {low ? '! ' : ''}
-                        {p.score > 0 ? p.secondBestRatio.toFixed(2) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </DataTable>
-
-          {multiFile && (
-            <Text size='micro' variant='label' component='p' className='mt-1'>
-              tiles are named file/cell:{' '}
-              {[...new Set(sheet.poses.map((p) => p.file))]
-                .map((f) => `${Number(f) + 1} = ${fileName(f)}`)
-                .join(' · ')}
-            </Text>
-          )}
-
-          <GroupLabel>grid by hand</GroupLabel>
-          <Text size='micro' variant='label' component='p' className='mb-1'>
-            when the tiles do not register (no recurrence, a missing page), say how they were
-            printed.
-          </Text>
-          <div className='grid grid-cols-2 gap-2'>
-            {sheets.length > 1 && (
-              <Field label='grid of sheet' className='col-span-2'>
-                <NativeSelect
-                  value={String(gridSheet)}
-                  onChange={(v) => setGridSheet(Number(v))}
-                  options={sheets.map((n) => ({
-                    value: String(n),
-                    label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
-                  }))}
-                />
-              </Field>
             )}
-            <Field label='rows'>
-              <NumberField
-                value={grid.rows}
-                min={1}
-                step='1'
-                onCommit={(v) => setGrid((g) => ({ ...g, rows: Math.max(1, Math.round(v ?? 1)) }))}
+            <Row label='tiles placed' value={sheet.poses.length} />
+            <Row label='missing tiles' value={missing || '—'} />
+            <Row label='worst loop closure' value={fmtMm(worst)} />
+            <Row label='limit' value={fmtMm(PATIMPORT.registrationMaxResidualMm, 1)} />
+            {sheet.overview && (
+              <Row
+                label='overview page'
+                value={`p. ${sheet.overview.page + 1} · drawn at 1 : ${sheet.overview.factor.toFixed(2)}`}
               />
-            </Field>
-            <Field label='columns'>
-              <NumberField
-                value={grid.cols}
-                min={1}
-                step='1'
-                onCommit={(v) => setGrid((g) => ({ ...g, cols: Math.max(1, Math.round(v ?? 1)) }))}
-              />
-            </Field>
-            <Field label='step across, mm'>
-              <NumberField
-                value={grid.stepXMm}
-                min={1}
-                onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
-              />
-            </Field>
-            <Field label='step down, mm'>
-              <NumberField
-                value={grid.stepYMm}
-                min={1}
-                onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
-              />
-            </Field>
-            <Field label='page order' className='col-span-2'>
-              <NativeSelect
-                value={grid.order}
-                onChange={(v) => setGrid((g) => ({ ...g, order: v as GridOverride['order'] }))}
-                options={[
-                  { value: 'row-major', label: 'by rows (A1 A2 A3 … B1)' },
-                  { value: 'col-major', label: 'by columns (A1 B1 C1 … A2)' },
-                ]}
-              />
-            </Field>
-          </div>
-          <div className='mt-2 flex flex-wrap gap-2'>
-            <Button
-              variant='secondary'
-              size='sm'
-              disabled={!!session.busy}
-              onClick={() =>
-                void api.dispatch({
-                  type: 'sheet',
-                  sheet: gridSheet,
-                  override: {
-                    ...grid,
-                    // The hand grid starts at the first tile page of THAT sheet, in file order.
-                    originPage: (() => {
-                      const t = session.pages.find(
-                        (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
-                      );
-                      return {
-                        file: t?.file ?? first?.file ?? '0',
-                        page: t?.page ?? first?.page ?? 0,
-                      };
-                    })(),
-                  },
-                })
-              }
-            >
-              apply grid
-            </Button>
-            {inputs.gridOverride && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
-              >
-                back to detected
-              </Button>
             )}
-          </div>
+            {sheet.warnings.length > 0 && (
+              <div className='mt-1 max-h-40 overflow-y-auto'>
+                {sheet.warnings.map((w) => (
+                  <Text key={w} size='micro' variant='label' component='p'>
+                    {w}
+                  </Text>
+                ))}
+              </div>
+            )}
+            <GroupLabel>tile seams</GroupLabel>
+            <DataTable>
+              <thead>
+                <tr>
+                  <th>seam</th>
+                  <th data-align='left'>method</th>
+                  <th>votes</th>
+                  <th title='votes of the runner-up offset / votes of the winner: 0 = one clear answer'>
+                    2nd / best
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sheet.pairs
+                  .filter(
+                    (p) => picked == null || keyOf(p.from) === picked || keyOf(p.to) === picked,
+                  )
+                  .map((p, i) => {
+                    const a = poseOf(p.from);
+                    const b = poseOf(p.to);
+                    const low = isWeak(p);
+                    return (
+                      <tr key={i}>
+                        <td>
+                          {tileName(a)} → {tileName(b)}
+                        </td>
+                        <td data-align='left'>{p.method}</td>
+                        <td>{p.score}</td>
+                        <td className={low ? 'text-warning' : undefined}>
+                          {low ? '! ' : ''}
+                          {p.score > 0 ? p.secondBestRatio.toFixed(2) : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </DataTable>
+          </DebugFold>
         </Panel>
       }
     />

@@ -1,8 +1,8 @@
-// Step 1 · FILES — drop anything (owner decision 1: every format), several files = one per size
+// Stage 1 · FILE — drop anything (owner decision 1: every format), several files = one per size
 // (decision 5, merged into one run). Reading runs `open` + `extract`: the worker sniffs each file by
 // its CONTENT (adapters/sniff `pickExtractor`), so the "read as" column before reading is only the
-// extension's guess and the pages panel says what the file really is. The page classification is
-// shown at once so a wrong file is caught before the scale is asked about.
+// extension's guess. Reading IS the stage's primary ("read 2 files", the wizard footer). After
+// reading the pages panel shows only the pages that ask (a doubtful role) — the rest is a count.
 import { useRef, useState } from 'react';
 import { refusalMessage } from 'lib/pattern-import/adapters/sniff/errors';
 import { refusalForName } from 'lib/pattern-import/adapters/sniff/native';
@@ -12,13 +12,15 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
+import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import { Pill } from 'ui/components/pill';
 import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { kindOfName } from '../formats';
+import { plural, useWizardPrimary } from '../stages';
 import type { ImportSessionApi } from '../use-import-session';
-import { Panel, fmtBytes, fmtPct } from '../ui-bits';
-import { CleanBlock, roleEdit } from './files-clean';
+import { DebugFold, Panel, ask, fmtBytes, fmtPct } from '../ui-bits';
+import { CleanBlock, PageRoles, pageRoleWarnings } from './files-clean';
 
 const ACCEPT = '.pdf,.dxf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff';
 const KIND_LABEL: Record<string, string> = {
@@ -46,21 +48,31 @@ export function FilesStep({
   const [over, setOver] = useState(false);
   /** The page drawn with its mask (`file:page`); null = the first page with something set aside. */
   const [shownPage, setShownPage] = useState<string | null>(null);
+  /** The kinds fold on the files panel; null = its own rule (open while a kind is suggested). */
+  const [kindsOpen, setKindsOpen] = useState<boolean | null>(null);
   const masks = new Map(
     (session.clean?.pages ?? []).map((m) => [
       `${m.file}:${m.page}`,
       m.items.reduce((a, it) => a + (it.applied ? it.lines : 0), 0),
     ]),
   );
-  const setRole = (file: string, page: number, role: PageClass) =>
-    void api.dispatch({
-      type: 'clean',
-      edits: roleEdit(inputs.cleanEdits, file, page, role),
-    });
   const pick = useRef<HTMLInputElement>(null);
   const read = session.files.length > 0 && session.scale.candidates.length > 0;
   const dirty =
     staged.length !== inputs.fileList.length || staged.some((f, i) => f !== inputs.fileList[i]);
+  const eps = staged.some((f) => f.name.toLowerCase().endsWith('.eps'));
+
+  // reading the staged files IS the stage's primary; once read, the shell's "use N pages" is
+  useWizardPrimary(
+    staged.length > 0 && (!read || dirty)
+      ? {
+          label: `${read ? 're-read' : 'read'} ${plural(staged.length, 'file')}`,
+          onClick: () => void api.dispatch({ type: 'files', files: staged }),
+          disabled: !!session.busy || eps,
+          title: eps ? 'EPS is not read — export the pattern as PDF or AI' : undefined,
+        }
+      : null,
+  );
 
   const add = (list: FileList | File[] | null) => {
     if (!list) return;
@@ -72,6 +84,17 @@ export function FilesStep({
     (c) => [c, session.pages.filter((p) => p.cls === c).length] as const,
   ).filter(([, n]) => n > 0);
 
+  // what is true of the read but is not a question: the panel header's `! N warnings`
+  const warnings: HeaderWarning[] = read
+    ? [
+        ...pageRoleWarnings(api),
+        ...extracted.warnings.slice(0, 40),
+        ...(extracted.warnings.length > 40
+          ? [`+ ${extracted.warnings.length - 40} more notes from reading`]
+          : []),
+      ]
+    : [];
+
   return (
     <div className='grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 [&>*]:min-h-0'>
       <Panel
@@ -82,7 +105,9 @@ export function FilesStep({
           </Text>
         }
       >
-        <div className='flex h-full flex-col gap-2'>
+        {/* the files' zone (THE ASK CONTRACT, ui-bits): the drop target is its own, the kinds
+            block (files-clean KindTable) too */}
+        <div data-ask-zone='' className='flex h-full flex-col gap-2'>
           <input
             ref={pick}
             type='file'
@@ -99,6 +124,8 @@ export function FilesStep({
           <div
             role='button'
             tabIndex={0}
+            data-ask-zone=''
+            {...ask('files-drop', staged.length === 0, 'drop the files here, or click to pick')}
             onClick={() => pick.current?.click()}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -116,22 +143,19 @@ export function FilesStep({
               setOver(false);
               add(e.dataTransfer.files);
             }}
+            title='vector PDF · DXF from CLO / Gerber / Optitex · PLT / HPGL · SVG · AI · scans (PNG, JPG, TIFF with a known dpi) — several files are read as one file per size'
             style={PLACEHOLDER_SURFACE}
             className={cn(
-              'flex min-h-40 cursor-pointer flex-col items-center justify-center gap-1 border border-dashed px-4 text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              'flex min-h-28 cursor-pointer flex-col items-center justify-center gap-1 border border-dashed px-4 text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
               over ? 'border-textColor' : 'border-borderColor',
               staged.length === 0 && 'flex-1',
             )}
           >
             <Text size='control' variant='uppercase' tracking='label' component='span'>
-              drop pattern files here, or click to choose
+              {staged.length ? '+ add files' : 'drop pattern files'}
             </Text>
             <Text size='micro' variant='label' component='span'>
-              vector PDF · DXF from CLO / Gerber / Optitex · PLT / HPGL · SVG · AI · scans (PNG,
-              JPG, TIFF with a known dpi)
-            </Text>
-            <Text size='micro' variant='label' component='span'>
-              several files are read as one file per size and merged into one run
+              pdf · dxf · plt · svg · ai · scans
             </Text>
           </div>
 
@@ -176,6 +200,11 @@ export function FilesStep({
                           className='text-labelColor hover:text-textColor'
                           onClick={() => setStaged((p) => p.filter((x) => x !== f))}
                           aria-label={`remove ${f.name}`}
+                          {...ask(
+                            'files-eps',
+                            ext === 'eps',
+                            'remove it, export the pattern as pdf',
+                          )}
                         >
                           ✕
                         </Button>
@@ -200,195 +229,123 @@ export function FilesStep({
               })}
             </CalloutBox>
           )}
+          {read && dirty && (
+            <Text size='micro' component='p' className='text-warning'>
+              ! the list changed — read again
+            </Text>
+          )}
 
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              variant='main'
-              size='sm'
-              disabled={
-                staged.length === 0 ||
-                !!session.busy ||
-                staged.some((f) => f.name.toLowerCase().endsWith('.eps'))
-              }
-              loading={session.busy?.stage === 'extract' || session.busy?.stage === 'clean'}
-              onClick={() => void api.dispatch({ type: 'files', files: staged })}
-            >
-              {read && !dirty ? 're-read files' : 'read files'}
-            </Button>
-            {stub && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                onClick={() => {
-                  const sample = new File(['%PDF-1.7 fixture'], 'palto-tiles-44-52.pdf', {
-                    type: 'application/pdf',
-                  });
-                  setStaged([sample]);
-                  void api.dispatch({ type: 'files', files: [sample] });
-                }}
-              >
-                use the sample pattern
-              </Button>
-            )}
-            {read && dirty && (
-              <Text size='micro' component='span' className='text-warning'>
-                ! the list changed — read the files again
-              </Text>
-            )}
-            {onToggleStub && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='ml-auto text-labelColor hover:text-textColor'
-                disabled={!!session.busy}
-                onClick={onToggleStub}
-                title='dev only: the fixture walks every step with made-up data; the worker reads your files'
-              >
-                {stub ? 'use the real importer' : 'use fixture data'}
-              </Button>
-            )}
-          </div>
+          {read && !extracted.presegmented && (
+            <CleanBlock api={api} page={shownPage} open={kindsOpen} onOpenChange={setKindsOpen} />
+          )}
+
+          {(stub || onToggleStub) && (
+            // dev only: the fixture walks every step with made-up data
+            <div className='mt-auto flex flex-wrap items-center gap-2'>
+              {stub && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
+                  onClick={() => {
+                    const sample = new File(['%PDF-1.7 fixture'], 'palto-tiles-44-52.pdf', {
+                      type: 'application/pdf',
+                    });
+                    setStaged([sample]);
+                    void api.dispatch({ type: 'files', files: [sample] });
+                  }}
+                >
+                  use the sample pattern
+                </Button>
+              )}
+              {onToggleStub && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='ml-auto text-labelColor hover:text-textColor'
+                  disabled={!!session.busy}
+                  onClick={onToggleStub}
+                  title='dev only: the fixture walks every step with made-up data; the worker reads your files'
+                >
+                  {stub ? 'use the real importer' : 'use fixture data'}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </Panel>
 
       <Panel
         title='pages'
         aside={
-          counts.length > 0 && (
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              {counts.map(([c, n]) => `${n} ${c}`).join(' · ')}
-            </Text>
-          )
+          <>
+            {counts.length > 0 && (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='uppercase tracking-label'
+              >
+                {counts.map(([c, n]) => `${n} ${c}`).join(' · ')}
+              </Text>
+            )}
+            <HeaderWarnings items={warnings} />
+          </>
         }
       >
-        {!read ? (
-          <Text size='micro' variant='label' component='p'>
-            each page is sorted before anything is drawn: tiles are assembled into the sheet, the
-            overview checks the sizes, instructions and covers are set aside.
-          </Text>
-        ) : (
-          <div className='space-y-2'>
-            {!extracted.presegmented && <CleanBlock api={api} page={shownPage} />}
-            {session.files.map((f) => (
-              <div key={f.id}>
-                <GroupLabel flush>
-                  {f.name} · {KIND_LABEL[f.kind] ?? f.kind} · {f.pages}{' '}
-                  {f.pages === 1 ? 'page' : 'pages'}
-                </GroupLabel>
-                <DataTable>
-                  <thead>
-                    <tr>
-                      <th>page</th>
-                      <th data-align='left'>read as</th>
-                      <th>sure</th>
-                      <th data-align='left'>why</th>
-                      {session.clean && !extracted.presegmented && (
-                        <>
-                          <th title='lines set aside on this page before reading'>set aside</th>
-                          <th aria-label='page role' />
-                        </>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {session.pages
-                      .filter((p) => p.file === f.id)
-                      .map((p) => (
-                        <tr
-                          key={p.page}
-                          className={
-                            shownPage === `${p.file}:${p.page}` ? 'bg-hairline' : 'cursor-pointer'
-                          }
-                          onClick={() => p.cls === 'tile' && setShownPage(`${p.file}:${p.page}`)}
-                        >
-                          <td>{p.page + 1}</td>
-                          <td data-align='left'>
-                            <Pill
-                              tone={
-                                p.cls === 'tile' ? 'ink' : p.cls === 'unknown' ? 'attention' : 'mut'
-                              }
-                            >
-                              {p.cls}
-                            </Pill>
-                          </td>
-                          <td className={p.confidence < 0.7 ? 'text-warning' : undefined}>
-                            {fmtPct(p.confidence, 0)}
-                          </td>
-                          <td data-align='left' className='text-labelColor'>
-                            {p.why}
-                          </td>
-                          {session.clean && !extracted.presegmented && (
-                            <>
-                              <td className='tabular-nums'>
-                                {masks.get(`${p.file}:${p.page}`) || '—'}
-                              </td>
-                              <td>
-                                {/* the door: a tile set aside, a set-aside page read as a tile */}
-                                <Button
-                                  variant='underline'
-                                  size='xs'
-                                  className='text-labelColor hover:text-textColor'
-                                  disabled={!!session.busy}
-                                  onClick={(e: React.MouseEvent) => {
-                                    e.stopPropagation();
-                                    setRole(p.file, p.page, p.cls === 'tile' ? 'blank' : 'tile');
-                                  }}
-                                >
-                                  {p.cls === 'tile' ? 'set aside' : 'read as tile'}
-                                </Button>
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                  </tbody>
-                </DataTable>
-              </div>
-            ))}
-            {session.files.length > 1 && (
-              <CalloutBox tone='note'>
-                {session.files.length} files — read as one file per size and merged into one run.
-              </CalloutBox>
+        {read && (
+          <>
+            {!extracted.presegmented && (
+              <PageRoles
+                api={api}
+                shown={shownPage}
+                onShow={(k) => {
+                  // the tile is drawn with its mask in the files panel's fold
+                  setShownPage(k);
+                  setKindsOpen(true);
+                }}
+              />
             )}
-            {extracted.presegmented && (
-              <CalloutBox tone='note'>
-                the DXF already carries its pieces as blocks, one per size — the sheet, legend and
-                seed steps are answered from the file.
-              </CalloutBox>
-            )}
-            {extracted.warnings.length > 0 && (
-              <CalloutBox tone='warning'>
-                <Text size='micro' component='p' className='mb-0.5'>
-                  <b>
-                    {extracted.warnings.length} {extracted.warnings.length === 1 ? 'note' : 'notes'}{' '}
-                    from reading
-                  </b>
-                </Text>
-                <ul className='max-h-32 space-y-0.5 overflow-y-auto'>
-                  {extracted.warnings.slice(0, 40).map((w, i) => (
-                    <li key={i}>
-                      <Text size='micro' component='span'>
-                        {w}
-                      </Text>
-                    </li>
-                  ))}
-                  {extracted.warnings.length > 40 && (
-                    <li>
-                      <Text size='micro' component='span'>
-                        + {extracted.warnings.length - 40} more
-                      </Text>
-                    </li>
-                  )}
-                </ul>
-              </CalloutBox>
-            )}
-          </div>
+            <DebugFold>
+              {session.files.map((f) => (
+                <div key={f.id}>
+                  <GroupLabel flush>
+                    {f.name} · {KIND_LABEL[f.kind] ?? f.kind} · {plural(f.pages, 'page')}
+                  </GroupLabel>
+                  <DataTable>
+                    <thead>
+                      <tr>
+                        <th>page</th>
+                        <th data-align='left'>read as</th>
+                        <th>sure</th>
+                        <th data-align='left'>why</th>
+                        <th title='lines set aside on this page before reading'>set aside</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {session.pages
+                        .filter((p) => p.file === f.id)
+                        .map((p) => (
+                          <tr key={p.page}>
+                            <td>{p.page + 1}</td>
+                            <td data-align='left'>{p.cls}</td>
+                            <td className={p.confidence < 0.7 ? 'text-warning' : undefined}>
+                              {fmtPct(p.confidence, 0)}
+                            </td>
+                            <td data-align='left' className='text-labelColor'>
+                              {p.why}
+                            </td>
+                            <td className='tabular-nums'>
+                              {masks.get(`${p.file}:${p.page}`) || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </DataTable>
+                </div>
+              ))}
+            </DebugFold>
+          </>
         )}
       </Panel>
     </div>
