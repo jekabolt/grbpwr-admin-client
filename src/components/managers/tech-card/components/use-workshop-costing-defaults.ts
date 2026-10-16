@@ -1,22 +1,26 @@
 // WORKSHOP COSTING DEFAULTS (0414) — the shop's usual currency, labour rate, overhead, defect and
-// margin, read only to PREFILL an empty costing and written back from the costing tab itself.
+// margin, offered to an empty costing and written back from the costing tab itself.
+//
+// NO WRITE ON VIEW. The card autosaves, so anything put into form state on its own would be saved
+// by merely opening the tab. The defaults are therefore only SUGGESTIONS — ghost values in the
+// empty fields — until a person presses `use workshop defaults`, which applies all of them as
+// ordinary dirty form values in one gesture.
 //
 // The rules, in the order they bite:
-//  • only a card whose costing articles are ALL empty is prefilled (decided once per card, on the
-//    first look): an old card with a deliberately blank overhead is not re-filled every visit;
-//  • a field anyone already holds a value in (the server's read, a person's typing) is never
-//    touched, and each field is filled at most once per mount: clearing a prefill sticks;
-//  • the prefill is ordinary dirty form state, i.e. a draft until the card saves;
+//  • only a field that is EMPTY (in the form, i.e. neither the server's read nor a person's typing
+//    holds a value) gets a suggestion, and applying never overwrites a value that appeared since;
+//  • only with costing:write on a card that is not frozen (the caller passes `enabled`);
 //  • money is only derived inside ONE currency: the labour rate is in the workshop currency, so CMT
-//    is derived only when the card's currency is that one; overhead's base (materials + CMT) uses
-//    the server's materials, which are in the SAVED currency, so it waits for that to match.
+//    is suggested only when the card's currency (or the suggested one, applied together) is that
+//    one; overhead's base (materials + CMT) uses the server's materials, which are in the SAVED
+//    currency, so it is suggested only when the card's currency equals the saved one.
 import type { common_TechCardCosting, UpdateWorkshopSettingsRequest } from 'api/proto-http/admin';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import {
   useUpdateWorkshopSettings,
   useWorkshopSettings,
 } from 'components/managers/workshop/useWorkshopSettings';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import type { TechCardFormData } from './schema';
@@ -27,16 +31,6 @@ export type PrefillKey =
   | 'overheadCost'
   | 'defectPercent'
   | 'targetMarginPct';
-
-// The articles whose emptiness makes a costing "not started". Currency is not one of them: a card
-// can carry a currency from creation without anyone having costed it.
-const ARTICLE_KEYS = [
-  'cmtCost',
-  'logisticsCost',
-  'overheadCost',
-  'defectPercent',
-  'targetMarginPct',
-] as const;
 
 const KNOWN_CURRENCIES = new Set(EXPENSE_CURRENCIES.map((c) => c.value));
 
@@ -59,18 +53,18 @@ export type WorkshopCostingDefaults = {
   targetMarginPct?: number;
 };
 
+const empty = (v: string | undefined) => !(v ?? '').trim();
+
 export function useWorkshopCostingDefaults({
-  active,
+  enabled,
   canWrite,
-  techCardId,
   saved,
   totalSam,
 }: {
-  /** The costing tab is on screen and editable (not frozen, costing:write). */
-  active: boolean;
+  /** costing:write on a card that is not frozen: suggestions exist only where they can be applied. */
+  enabled: boolean;
   /** production:write — the right every workshop-settings write needs. */
   canWrite: boolean;
-  techCardId: number | undefined;
   /** The card's SAVED costing (the last read), materials rollup included. */
   saved: common_TechCardCosting | undefined;
   /** Construction total SAM, minutes (smv-else-sam), read off the form. */
@@ -96,80 +90,70 @@ export function useWorkshopCostingDefaults({
   >;
   const materials = pos(decimalToInput(saved?.materialsPerUnit));
   const savedCurrency = saved?.currency ?? '';
-  const materialsComparable = !saved?.hasUnconvertedCurrencies;
 
-  // What this mount wrote, per field. The tag shows while the field still holds exactly that.
-  const [prefilled, setPrefilled] = useState<Partial<Record<PrefillKey, string>>>({});
-  const state = useRef<{
-    card: number | undefined;
-    eligible: boolean | null;
-    done: Set<PrefillKey>;
-  }>({ card: techCardId, eligible: null, done: new Set() });
+  // ── SUGGESTIONS: what `use workshop defaults` would put into each EMPTY field right now.
+  const suggestions: Partial<Record<PrefillKey, string>> = {};
+  if (enabled && defaults) {
+    if (empty(costing.currency) && defaults.currency && KNOWN_CURRENCIES.has(defaults.currency))
+      suggestions.currency = defaults.currency;
+    if (empty(costing.defectPercent) && defaults.defectPercent != null)
+      suggestions.defectPercent = fmtDecimal(defaults.defectPercent, 2);
+    if (empty(costing.targetMarginPct) && defaults.targetMarginPct != null)
+      suggestions.targetMarginPct = fmtDecimal(defaults.targetMarginPct, 2);
 
-  useEffect(() => {
-    if (state.current.card !== techCardId) {
-      state.current = { card: techCardId, eligible: null, done: new Set() };
-      setPrefilled({});
-    }
-    if (!active || !defaults) return;
-    const s = state.current;
-    if (s.eligible === null) {
-      const form = getValues('costing') as Partial<Record<string, string>> | undefined;
-      s.eligible = ARTICLE_KEYS.every(
-        (k) => !decimalToInput(saved?.[k]).trim() && !(form?.[k] ?? '').trim(),
-      );
-    }
-    if (!s.eligible) return;
-
-    const fill = (key: PrefillKey, value: string | undefined) => {
-      if (s.done.has(key) || !value) return;
-      s.done.add(key);
-      if ((getValues(`costing.${key}`) ?? '').trim()) return; // someone holds a value: theirs
-      setValue(`costing.${key}`, value, { shouldDirty: true });
-      setPrefilled((p) => ({ ...p, [key]: value }));
-    };
-
-    if (defaults.currency && KNOWN_CURRENCIES.has(defaults.currency)) {
-      fill('currency', defaults.currency);
-    }
-    if (defaults.defectPercent != null)
-      fill('defectPercent', fmtDecimal(defaults.defectPercent, 2));
-    if (defaults.targetMarginPct != null)
-      fill('targetMarginPct', fmtDecimal(defaults.targetMarginPct, 2));
-
-    const cur = (getValues('costing.currency') ?? '').trim();
+    // The currency the card will have once the suggestions are applied together.
+    const cur = (costing.currency ?? '').trim() || suggestions.currency || '';
     // CMT = rate × SAM, only inside the workshop's own currency and only once SAM exists.
     if (
+      empty(costing.cmtCost) &&
       defaults.labourRatePerMin != null &&
       totalSam > 0 &&
-      defaults.currency &&
+      !!defaults.currency &&
       cur === defaults.currency
-    ) {
-      fill('cmtCost', (defaults.labourRatePerMin * totalSam).toFixed(2));
-    }
+    )
+      suggestions.cmtCost = (defaults.labourRatePerMin * totalSam).toFixed(2);
     // overhead = pct × (materials + CMT), only when both halves of the base are known and in the
     // card's currency (materials arrive denominated in the SAVED currency).
-    const cmtNow = pos(getValues('costing.cmtCost'));
+    const cmtBase = pos(costing.cmtCost) ?? pos(suggestions.cmtCost);
     if (
+      empty(costing.overheadCost) &&
       defaults.overheadPct != null &&
       materials != null &&
-      cmtNow != null &&
-      materialsComparable &&
+      cmtBase != null &&
+      !saved?.hasUnconvertedCurrencies &&
       !!savedCurrency &&
       savedCurrency === cur
-    ) {
-      fill('overheadCost', (((materials + cmtNow) * defaults.overheadPct) / 100).toFixed(2));
+    )
+      suggestions.overheadCost = (((materials + cmtBase) * defaults.overheadPct) / 100).toFixed(2);
+  }
+  const suggestionCount = Object.keys(suggestions).length;
+
+  // What the last `use workshop defaults` wrote, per field: the tag shows while the field still
+  // holds exactly that value.
+  const [applied, setApplied] = useState<Partial<Record<PrefillKey, string>>>({});
+  const apply = () => {
+    const wrote: Partial<Record<PrefillKey, string>> = {};
+    for (const [key, value] of Object.entries(suggestions) as [PrefillKey, string][]) {
+      if (!empty(getValues(`costing.${key}`))) continue; // a value appeared meanwhile: theirs
+      setValue(`costing.${key}`, value, { shouldDirty: true });
+      wrote[key] = value;
     }
-    // `defaults` is rebuilt every render from `settings`; the settings object is the real input.
-    // The typed CMT is deliberately NOT a dependency: overhead derived from the first keystroke
-    // of a CMT quote would be a number nobody meant.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, settings, techCardId, totalSam, materials, savedCurrency, materialsComparable]);
+    setApplied((p) => ({ ...p, ...wrote }));
+  };
 
   const fromWorkshop = (key: PrefillKey) =>
-    prefilled[key] != null && (costing[key] ?? '') === prefilled[key];
+    applied[key] != null && (costing[key] ?? '') === applied[key];
 
-  return { defaults, fromWorkshop, update, canWrite, loaded: !!settings };
+  return {
+    defaults,
+    suggestions,
+    suggestionCount,
+    apply,
+    fromWorkshop,
+    update,
+    canWrite,
+    loaded: !!settings,
+  };
 }
 
 /** The defaults as one hover line: what a new costing would start from today. */

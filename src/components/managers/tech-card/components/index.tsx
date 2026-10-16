@@ -3915,12 +3915,7 @@ export function TechCardForm({
                   </>
                 }
               >
-                <CostingField
-                  techCard={techCard}
-                  frozen={frozen}
-                  headerEl={costingHeaderEl}
-                  active={activeTab === 'costing'}
-                />
+                <CostingField techCard={techCard} frozen={frozen} headerEl={costingHeaderEl} />
               </Section>
               {/* Эти две секции — СОДЕРЖИМОЕ КАРТОЧКИ (статьи разработки, расчёт по колорвею), и
                 заморозку релиза они несут по-прежнему; свой fieldset заменяет им внешний, из-под
