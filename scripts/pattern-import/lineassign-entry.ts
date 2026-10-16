@@ -435,6 +435,11 @@ function crafted() {
     rankGuard(set, { ...run, encoding: 'ocg' }, sm) === null,
   );
 
+  const g2 = rankGuard(r2.set, { ...run, encoding: 'ocg' }, sm)!;
+  check(
+    'R3 guard: a line in two sizes moves nowhere (one rank per line downstream)',
+    !!g2 && !g2.ok(3, 0) && !g2.ok(3, 1),
+  );
   // the record: operator only, value round trip
   const out: StageIO['chains']['out'] = {
     classes: r1.set.classes,

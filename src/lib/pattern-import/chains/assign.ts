@@ -17,7 +17,7 @@
 //         drawing's frame minus the sheet's shift `SheetPart.dx/dy`), quantised to 0.5 mm.
 //
 // A key finds its line exactly, else the one line of that sheet, pen and kind whose length is within
-// max(2 mm, 1 %) and whose ends / box corners are within 1 mm (a re-run that moved a point across a
+// max(1 mm, 0.5 %) and whose ends / box corners are within 1 mm (a re-run that moved a point across a
 // quantisation step). Nothing found, or several lines near and none exact = the key is STALE: it is
 // reported, never applied to another line. The same line drawn twice in one pen (one key, two
 // chains) takes the answer on both.
@@ -283,7 +283,7 @@ export function assignChains(
       let ids = byKey.get(`${e.sheet}|${key}`) ?? [];
       let via: 'exact' | 'near' | 'dup' = ids.length > 1 ? 'dup' : 'exact';
       if (!ids.length) {
-        const tol = Math.max(2, 0.01 * p.len);
+        const tol = Math.max(1, 0.005 * p.len);
         const hits: ChainId[] = [];
         info.forEach((x, id) => {
           const g = geom[id];

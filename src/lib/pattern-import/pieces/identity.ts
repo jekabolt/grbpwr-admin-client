@@ -223,7 +223,13 @@ export function rankGuard(
   // LINEFIX: a line the operator put in a row moves into no other rank (his answer outranks
   // continuity and the pen) — a guard of that alone where the run has no pen identity
   const pin = pinnedRanks(set, run);
-  const pinOk = (id: ChainId, r: number) => pin?.get(id)?.has(r) ?? true;
+  // a line in two sizes moves nowhere (connectRanks holds one rank per line: a move would take it
+  // out of the other)
+  const pinned = (p: Set<number>, r: number) => p.size === 1 && p.has(r);
+  const pinOk = (id: ChainId, r: number) => {
+    const p = pin?.get(id);
+    return p ? pinned(p, r) : true;
+  };
   if (!styles || f0Off()) return pin ? { ok: pinOk } : null;
   const { identity, looks } = rankLooks(set, run, styles);
   if (!identity) return pin ? { ok: pinOk } : null;
@@ -238,7 +244,7 @@ export function rankGuard(
   return {
     ok: (id, r) => {
       const p = pin?.get(id);
-      if (p) return p.has(r);
+      if (p) return pinned(p, r);
       const rl = looks[r];
       const cl = lookOf(id);
       return !rl?.length || !cl || onPen(cl, rl);

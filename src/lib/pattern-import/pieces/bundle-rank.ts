@@ -41,7 +41,9 @@ export function localRanks(
   for (const id of lines) grid.addPolyline(id, set.chains[id].pts);
   // every line is checked: orphans get a rank, a classified line whose bundles disagree with its
   // class is re-ranked, a "common" line inside full bundles is demoted
-  const candidates = lines.filter((id) => set.chains[id].lengthMm >= 10);
+  // LINEFIX: a line the operator put in a row is ranked by him — a neighbour here, never re-ranked
+  const answered = new Set((set.assigned ?? []).map((a) => a.chain));
+  const candidates = lines.filter((id) => set.chains[id].lengthMm >= 10 && !answered.has(id));
   for (const id of candidates) {
     const pts = set.chains[id].pts;
     const votes = new Map<number, number>();

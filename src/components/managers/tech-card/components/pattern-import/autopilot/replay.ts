@@ -102,10 +102,28 @@ function lineAnswers(c: Ctx): Out | null {
   if (!all.length || c.i.chainAssign?.length || !c.fresh('line-assign', { ref: 'line-assign' }))
     return null;
   const drawn = new Set((c.s.chains?.chainLines ?? []).map((l) => `${l.sheet}|${l.key}`));
+  const classes = c.s.chains?.classes ?? [];
+  // the row the answer named must still be read: a size of that nesting rank, a row of that key
+  const hasTarget = (to: ChainAssign['to']) =>
+    'cls' in to ||
+    ('rank' in to
+      ? classes.filter(
+          (k) =>
+            k.role === 'size' &&
+            k.evidence.some((x) => x.kind === 'nesting-order' && x.rank === to.rank),
+        ).length === 1
+      : classes.some((k) => legendKeyOf(k) === to.row));
   const assign: ChainAssign[] = [];
   for (const a of all) {
     const e = lineAssignOf(a.value);
     if (!e) continue;
+    if (!hasTarget(e.to)) {
+      c.miss(
+        `line-assign|to|${JSON.stringify(e.to)}`,
+        'lines were put in a size row that is not read now',
+      );
+      continue;
+    }
     const keys = e.keys.filter((k) => drawn.has(`${e.sheet}|${k}`));
     for (const k of e.keys)
       if (!keys.includes(k))
