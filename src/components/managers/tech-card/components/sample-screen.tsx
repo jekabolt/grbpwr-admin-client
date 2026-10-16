@@ -1250,7 +1250,11 @@ function RndBlock({
               disabled={add.isPending}
               onChange={(e) => setDraft({ ...draft, date: e.target.value })}
               onKeyDown={onKey}
-              className={cell('tabular-nums')}
+              // Date boxes put their text at the top (Safari especially): no native look, flex-centred,
+              // and the value's own line box as tall as the field.
+              className={cell(
+                'flex appearance-none items-center leading-[28px] tabular-nums [&::-webkit-date-and-time-value]:text-left [&::-webkit-date-and-time-value]:leading-[28px] [&::-webkit-datetime-edit]:p-0',
+              )}
             />
             <input
               aria-label='amount'
