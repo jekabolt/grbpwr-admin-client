@@ -38,6 +38,7 @@ import {
   fmtMm,
   fmtPct,
   useAnsweredAndGo,
+  useAutoAnswer,
   useQuizSlot,
 } from '../ui-bits';
 import { plural } from '../stages';
@@ -353,7 +354,8 @@ export function PiecesStep({
     asideDone: [] as number[],
     /** The garment picked without asking (styles the client cannot tell apart); once per import. */
     autoVariant: null as string | null,
-    autoTried: false,
+    /** The run (sessionId) the automatic pick was sent for: one send per run, StrictMode-proof. */
+    autoTried: null as number | null,
     /** «change» on the picked-for-you garment: ask from now on, never pick again. */
     autoReopened: false,
   }));
@@ -416,13 +418,19 @@ export function PiecesStep({
         )
       : null;
   const families = useMemo(() => out?.families ?? [], [out]);
-  // ── garments the client cannot tell apart are not asked (owner 16.10: «why do we need it if
-  // identical»): no sure variant mark draws a difference, and every garment gets the same pieces
-  // (a piece no label claims is in every garment) → the card's suggestion, else the first, is
-  // dispatched as the operator's answer once — recorded like any answer, said in the panel and the
-  // header (D5: never silent), «change» asks the question ──
+  // ── garments PROVABLY the same are not asked (owner 16.10: «why do we need it if identical»):
+  // the engine reported what tells the models apart (`variantMarks` present) and found nothing —
+  // no cutting line (knife), no piece of one model's own, no unsure label — and every garment gets
+  // the same pieces. Without that report the client cannot know: the engine cuts a model along its
+  // own cutting lines (pieces/variants.ts `variantKnives`) even when no seed carries the model,
+  // so styles sharing every seed may still differ (kombinezon: A and B cut the waist and the
+  // bodice at different heights) → asked, each garment's picture with its cutting lines in blue
+  // once the engine draws them. The automatic pick goes through the shell's `autoAnswer` (a
+  // running autopilot is resumed, not disarmed), once per run; said in the panel and the header
+  // (D5: never silent), «change» asks the question ──
   const marks = variantMarksOf(out);
-  const marksDiffer = marks.some(markShows);
+  const rawMarks = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
+  const marksSayNone = Array.isArray(rawMarks) && rawMarks.length === 0;
   const pieceSetOf = (v: string) =>
     families
       .filter((f) => {
@@ -432,23 +440,26 @@ export function PiecesStep({
       .map((f) => f.seed)
       .sort((a, b) => a - b)
       .join(',');
-  const unclaimed = [...(api.baseSeeds ?? []), ...(out?.seeds ?? [])].every((x) => !x.variant);
   const sets = variants.map(pieceSetOf);
-  const looksSame =
-    variants.length > 1 && !marksDiffer && (unclaimed || sets.every((k) => k === sets[0]));
+  const looksSame = variants.length > 1 && marksSayNone && sets.every((k) => k === sets[0]);
   const autoPick = named?.pick ?? variants[0] ?? null;
   const autoGo =
     looksSame &&
     !session.variant &&
-    !seen.autoTried &&
+    seen.autoTried !== session.sessionId &&
     !seen.autoReopened &&
     !!autoPick &&
     families.length > 0;
+  const autoAnswer = useAutoAnswer(api);
   useEffect(() => {
     if (!autoGo || session.busy || !autoPick) return;
-    seen.autoTried = true;
+    // the one-shot guard is read and set HERE, right before the send: a StrictMode replay of this
+    // effect (same render, same `autoGo`) finds it taken and sends nothing
+    const sid = session.sessionId;
+    if (sid == null || seen.autoTried === sid) return;
+    seen.autoTried = sid;
     seen.autoVariant = autoPick;
-    void api.dispatch({ type: 'variant', variant: autoPick });
+    void autoAnswer({ type: 'variant', variant: autoPick });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoGo, session.busy]);
   /** The garment on screen was picked for the operator (not asked). */

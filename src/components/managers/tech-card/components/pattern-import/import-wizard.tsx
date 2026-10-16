@@ -60,11 +60,14 @@ import {
 import {
   AnsweredAndGoContext,
   AskCoach,
+  AutoAnswerContext,
   QuizHistoryContext,
   clickAskFix,
+  currentAskKey,
   firstAsk,
   focusAsk,
   useAskLabel,
+  type AutoAnswer,
   type CoachTarget,
   type QuizHistory,
 } from './ui-bits';
@@ -297,6 +300,22 @@ function WizardBody({
     applying.current = null;
     api.advance(replay.auto);
   };
+  // ── AUTOMATIC ANSWERS (ui-bits): a step's own answer (the garment the file cannot tell apart,
+  // the sizes mapped in order) is dispatched like the operator's — which disarms the drive — and
+  // the autopilot, when it was driving this run (started here, not stopped by a failed apply), is
+  // resumed once the answer has landed: it never sits stopped with no reason on screen ──
+  const autopilotRef = useRef(autopilot);
+  autopilotRef.current = autopilot;
+  const apStopRef = useRef(apStop);
+  apStopRef.current = apStop;
+  const resumeRef = useRef(resumeAutopilot);
+  resumeRef.current = resumeAutopilot;
+  const autoAnswer = useCallback<AutoAnswer>(async (ev) => {
+    const sid = apiRef.current.session.sessionId;
+    const driving = autopilotRef.current && started.current === sid && apStopRef.current == null;
+    await apiRef.current.dispatch(ev);
+    if (driving && autopilotRef.current && started.current === sid) resumeRef.current();
+  }, []);
   /** AP-replay: turn the previous import's answers on — they answer from where the run stands. */
   const reuse = () => {
     if (!prior) return;
@@ -422,9 +441,13 @@ function WizardBody({
     if (!focusAsk(mainRef.current, (el) => show(el))) bare();
   };
 
-  /** A stop line clicked: its step's one-click fix (`data-ask-fix`), else the coach. */
+  /**
+   * The ask line clicked (footer link, or its sentence in the warnings): the one-click fix bound to
+   * the question asked now (ui-bits ONE-CLICK FIX: `data-ask-fix` keyed by the ask), else the coach.
+   */
   const fixOrCoach = () => {
-    if (!clickAskFix(mainRef.current)) onAsk();
+    const main = mainRef.current;
+    if (!clickAskFix(main, currentAskKey(main))) onAsk();
   };
 
   // ── the one primary: action + count, derived from the session ──────────────────────────────
@@ -567,9 +590,12 @@ function WizardBody({
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
   // every line is a link that fixes it (ui-bits ONE-CLICK FIX): the step's marked fix, else the coach
+  // only the ask line's own sentence takes its bound fix; every other line coaches (never a fix
+  // of something else: an old replay miss must not click «accept residuals»)
   const fix = { label: 'fix it', onClick: () => fixOrCoach() };
+  const coachOnly = { label: 'show where', onClick: () => onAsk() };
   if (api.notice && !session.error && api.notice !== askText)
-    warnings.push({ text: api.notice, action: fix });
+    warnings.push({ text: api.notice, action: coachOnly });
   // the footer shows the step's plain question: the session's own sentence stays visible here
   if (askText && askShown !== askText)
     warnings.push({
@@ -577,14 +603,14 @@ function WizardBody({
       action: fix,
     });
   if (autopilotStop && autopilotStop !== askText)
-    warnings.push({ text: `autopilot stopped · ${autopilotStop}`, action: fix });
+    warnings.push({ text: `autopilot stopped · ${autopilotStop}`, action: coachOnly });
   if (card.downloadOnly)
     warnings.push({
       text: 'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
       action: { label: 'close the import and add it on the BOM tab', onClick: requestClose },
     });
   if (replayOn)
-    for (const m of misses) warnings.push({ text: `not replayed · ${m.why}`, action: fix });
+    for (const m of misses) warnings.push({ text: `not replayed · ${m.why}`, action: coachOnly });
 
   const body = (() => {
     switch (session.step) {
@@ -822,14 +848,16 @@ function WizardBody({
                 <DroppedLabels.Provider value={droppedCtx}>
                   <QuizHistoryContext.Provider value={quizHistory}>
                     <AnsweredAndGoContext.Provider value={answeredAndGo}>
-                      {session.busy ? (
-                        // the last picture the run has, dimmed and out of reach while it works
-                        <div className='h-full opacity-40' inert aria-hidden>
-                          {body}
-                        </div>
-                      ) : (
-                        body
-                      )}
+                      <AutoAnswerContext.Provider value={autoAnswer}>
+                        {session.busy ? (
+                          // the last picture the run has, dimmed and out of reach while it works
+                          <div className='h-full opacity-40' inert aria-hidden>
+                            {body}
+                          </div>
+                        ) : (
+                          body
+                        )}
+                      </AutoAnswerContext.Provider>
                     </AnsweredAndGoContext.Provider>
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>

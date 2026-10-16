@@ -6,6 +6,7 @@ import { cn } from 'lib/utility';
 import { FoldCaret } from 'ui/components/fold-caret';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import type { WizardEvent } from 'lib/pattern-import/types';
 
 /**
  * The steps' quiz histories (every question seen open on this run, so a fixed one stays listed,
@@ -36,6 +37,28 @@ export const QuizHistoryContext = createContext<QuizHistory | null>(null);
 export type AnsweredAndGo = (answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => void;
 export const AnsweredAndGoContext = createContext<AnsweredAndGo>(() => {});
 export const useAnsweredAndGo = () => useContext(AnsweredAndGoContext);
+
+// ═══ AUTOMATIC ANSWERS ═════════════════════════════════════════════════════════════════════════
+//
+// A step that answers a question BY ITSELF (owner 16.10: styles the file cannot tell apart, as
+// many sizes drawn as the card has with none matching by name) must not go through the operator's
+// `api.dispatch` alone: that is an operator action — it disarms a running autopilot, which then
+// sits stopped with no reason on screen. The shell's `autoAnswer` dispatches the same event and,
+// when the autopilot was driving this run, resumes it after the answer has landed.
+//
+//   const autoAnswer = useAutoAnswer(api);
+//   useEffect(() => {
+//     if (!due || slot.doneFor === session.sessionId) return;   // one-shot, checked AND set here,
+//     slot.doneFor = session.sessionId;                         // inside the effect (StrictMode
+//     void autoAnswer({ type: 'variant', variant });            // replays an effect: no 2nd send)
+//   });
+//
+// Outside a wizard (no provider): the plain `api.dispatch`.
+
+export type AutoAnswer = (ev: WizardEvent) => Promise<void>;
+export const AutoAnswerContext = createContext<AutoAnswer | null>(null);
+export const useAutoAnswer = (api: { dispatch: AutoAnswer }): AutoAnswer =>
+  useContext(AutoAnswerContext) ?? api.dispatch;
 
 /** A step's slot in the wizard's quiz history; outside a wizard, a slot that lives with the step. */
 export function useQuizSlot<T>(name: string, init: () => T): T {
@@ -371,21 +394,39 @@ export function focusAsk(
 // ═══ ONE-CLICK FIX (`data-ask-fix`) ═══════════════════════════════════════════════════════════════
 //
 // Owner 16.10: «every warning / stop line must be a link that FIXES it». A step marks the ONE
-// button that is the most likely one-click fix of its current blocker / autopilot stop:
+// button that is the most likely one-click fix of a question, BOUND to that question by its ask
+// key (THE ASK CONTRACT above):
 //
-//   <Chip data-ask-fix='' {...ask('sheet-missing')} onClick={setAsideMissing}>go on without them</Chip>
+//   <Chip {...ask('sheet-missing')} data-ask-fix='sheet-missing' onClick={setAsideMissing}>…</Chip>
 //
-// The shell turns every stop line — the footer's ask link and the ask / stop / notice lines of the
-// header warnings popover — into a link: clicking it closes the popover and CLICKS that button
-// (its own handler runs, so the run's busy state is the feedback). No live `[data-ask-fix]` (none
-// marked, or it is disabled / hidden): the link falls back to coach mode — focus, highlight,
-// bubble. Mark only a fix that is safe to take in one click (no deletion of the operator's work);
-// a choice between answers stays a coached question. The first live one in document order wins.
+// `data-ask-fix="<key>"` = this button fixes the question whose control carries `data-ask="<key>"`;
+// an empty value means its own `data-ask` key. The shell's ask line (the footer link, and the same
+// sentence in the header warnings popover) fixes the question asked NOW — the first live
+// `[data-ask]`, the one its door focuses — and clicks only the live fix bound to THAT key (its own
+// handler runs, so the run's busy state is the feedback). Every other warning line (an autopilot
+// stop that is not the ask line, a notice, a replay miss) is not a question with a key: it never
+// clicks anything — it coaches (focus, highlight, bubble). No live fix with the matching key (none
+// marked, disabled / hidden, or the question moved on): coach too. A fix is never taken for a line
+// it does not belong to. Mark only a fix that is safe in one click (no deletion of the operator's
+// work); a choice between answers stays a coached question.
 
-/** Click the first live `[data-ask-fix]` under `root`; false when there is none (coach instead). */
-export function clickAskFix(root: ParentNode | null): boolean {
-  if (!root) return false;
-  const el = Array.from(root.querySelectorAll<HTMLElement>('[data-ask-fix]')).find(usable);
+/** The question a `[data-ask-fix]` fixes: its value, else its own `data-ask` key. */
+const fixKeyOf = (el: HTMLElement) => el.dataset.askFix || el.dataset.ask || '';
+
+/** The key of the question asked now: the first live `[data-ask]` under `root` (null = none). */
+export function currentAskKey(root: ParentNode | null): string | null {
+  return firstAsk(root)?.dataset.ask || null;
+}
+
+/**
+ * Click the live `[data-ask-fix]` under `root` bound to `key`; false when there is none or no key
+ * (the caller coaches instead) — never a fix of another question.
+ */
+export function clickAskFix(root: ParentNode | null, key: string | null): boolean {
+  if (!root || !key) return false;
+  const el = Array.from(root.querySelectorAll<HTMLElement>('[data-ask-fix]')).find(
+    (x) => usable(x) && fixKeyOf(x) === key,
+  );
   if (!el) return false;
   el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   el.click();

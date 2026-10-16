@@ -164,6 +164,18 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
       },
     });
 
+  /**
+   * Every committed grid change (page order, page step across / down) is sent as the whole hand
+   * grid — the same `sheet` event the rows × cols picker sends. Local state alone looked applied
+   * but the assembly never saw it (Codex review 16.10 #4). An unchanged value sends nothing.
+   */
+  const commitGrid = (p: Partial<GridOverride>) => {
+    const g = { ...grid, ...p };
+    if (g.order === grid.order && g.stepXMm === grid.stepXMm && g.stepYMm === grid.stepYMm) return;
+    setGrid(g);
+    applyGrid(g);
+  };
+
   // a page removed by hand = the files step's page-role edit (re-runs clean → scale → assembly)
   const splitKey = (k: string) => {
     const at = k.lastIndexOf(':');
@@ -515,7 +527,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   onClick={() => patchInputs({ residualsAccepted: !inputs.residualsAccepted })}
                   title='I looked at the blue seams — the drawing runs on across them'
                   {...ask('sheet-accept', acceptAsks, 'check the blue seams, then accept')}
-                  {...(acceptAsks ? { 'data-ask-fix': '' } : {})}
+                  {...(acceptAsks ? { 'data-ask-fix': 'sheet-accept' } : {})}
                 >
                   accept {fmtMm(worst)}
                 </Chip>
@@ -552,7 +564,8 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                 )}
                 <OrderPick
                   value={grid.order}
-                  onChange={(order) => setGrid((g) => ({ ...g, order }))}
+                  disabled={busy}
+                  onChange={(order) => commitGrid({ order })}
                 />
                 <LayoutPick
                   rows={grid.rows}
@@ -571,14 +584,16 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                       <NumberField
                         value={grid.stepXMm}
                         min={1}
-                        onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
+                        disabled={busy}
+                        onCommit={(v) => v != null && commitGrid({ stepXMm: v })}
                       />
                     </Field>
                     <Field label='down, mm'>
                       <NumberField
                         value={grid.stepYMm}
                         min={1}
-                        onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
+                        disabled={busy}
+                        onCommit={(v) => v != null && commitGrid({ stepYMm: v })}
                       />
                     </Field>
                   </div>
@@ -794,9 +809,11 @@ function CellMap({
 function OrderPick({
   value,
   onChange,
+  disabled,
 }: {
   value: GridOverride['order'];
   onChange: (v: GridOverride['order']) => void;
+  disabled?: boolean;
 }) {
   const opts = [
     {
@@ -820,6 +837,7 @@ function OrderPick({
           role='radio'
           aria-checked={value === o.v}
           selected={value === o.v}
+          disabled={disabled}
           onClick={() => onChange(o.v)}
           title={o.title}
         >

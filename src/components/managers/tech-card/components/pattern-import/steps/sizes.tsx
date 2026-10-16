@@ -46,6 +46,7 @@ import {
   ask,
   fmtPct,
   useAnsweredAndGo,
+  useAutoAnswer,
   useQuizSlot,
 } from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
@@ -140,9 +141,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     if (entries.length) void api.dispatch({ type: 'size-map', entries });
   }, [kept, sizes, session.busy, inputs.sizeMap, api]);
   // As many sizes drawn as the card has, none matching by name: mapped in order at once, no
-  // question (owner 16.10). Built in render (it needs the order), run after it, once per read.
+  // question (owner 16.10). Built in render (it needs the order), run after it, once per read of
+  // this run: the guard (run + read) is checked and set inside the call, right before the send, so
+  // a StrictMode replay of the effect sends nothing. Sent through the shell's `autoAnswer`: an
+  // automatic answer does not disarm a running autopilot (ui-bits AUTOMATIC ANSWERS).
   const autoMap = useRef<(() => void) | null>(null);
-  const autoMapped = useQuizSlot<{ at: unknown }>('sizes-auto-map', () => ({ at: null }));
+  const autoMapped = useQuizSlot<{ at: unknown; sid: number | null }>('sizes-auto-map', () => ({
+    at: null,
+    sid: null,
+  }));
+  const autoAnswer = useAutoAnswer(api);
   useEffect(() => autoMap.current?.());
   const go = useAnsweredAndGo();
   if (!chains || !sizes || !session.sheet) return null;
@@ -399,12 +407,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     const i = e && assumed ? drawn.indexOf(e) : -1;
     return i >= 0 ? assumed![i] : null;
   };
-  const mapInOrder = (start: number) => {
+  const mapInOrder = (start: number, send: typeof api.dispatch = api.dispatch) => {
     const win = windowOf(start);
     const ranks = new Set(drawn.map((e) => e.source.rank));
     setReorder(false);
     // one `size-map` answer: the entries per-row `setSize` calls would leave, all at once
-    return api.dispatch({
+    return send({
       type: 'size-map',
       entries: [
         ...(inputs.sizeMap ?? []).filter((e) => !ranks.has(e.source.rank)),
@@ -422,10 +430,13 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     drawn.length === cards.length &&
     noneMapped &&
     !inputs.sizeMap?.length &&
-    autoMapped.at !== sizes
+    (autoMapped.at !== sizes || autoMapped.sid !== session.sessionId)
       ? () => {
+          const sid = session.sessionId;
+          if (autoMapped.at === sizes && autoMapped.sid === sid) return;
           autoMapped.at = sizes;
-          void mapInOrder(0);
+          autoMapped.sid = sid;
+          void mapInOrder(0, autoAnswer);
         }
       : null;
   const drawnName = (e: SizeMapEntry) => e.source.label || `#${e.source.rank + 1}`;
