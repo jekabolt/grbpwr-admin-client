@@ -508,6 +508,7 @@ export function MaterialPickerDialog({
   onPick,
   onClose,
   onCreate,
+  preferredIds,
 }: {
   open: boolean;
   // HARD scope: the catalog query itself is narrowed to this section and no section chips render.
@@ -528,6 +529,8 @@ export function MaterialPickerDialog({
   onClose: () => void;
   // Receives the current search text so a create flow can prefill the name from it.
   onCreate?: (query?: string) => void;
+  // Suggested articles, best first: sorted to the front of the grid and marked `suggested`.
+  preferredIds?: readonly number[];
 }) {
   // Only fetched while open — the caller mounts this permanently next to its button.
   const { data, isLoading } = useMaterials(section, includeArchived, open);
@@ -545,6 +548,7 @@ export function MaterialPickerDialog({
       onPick={onPick}
       onClose={onClose}
       onCreate={onCreate}
+      preferredIds={preferredIds}
     />
   );
 }
@@ -648,6 +652,7 @@ function MaterialGridDialog({
   onPick,
   onClose,
   onCreate,
+  preferredIds,
 }: {
   materials: common_Material[];
   loading?: boolean;
@@ -660,6 +665,7 @@ function MaterialGridDialog({
   onPick: (m?: common_Material) => void;
   onClose: () => void;
   onCreate?: (query?: string) => void;
+  preferredIds?: readonly number[];
 }) {
   const [q, setQ] = useState('');
   const [inStockOnly, setInStockOnly] = useState(false);
@@ -671,6 +677,11 @@ function MaterialGridDialog({
 
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  const preferredRank = (id: number): number => {
+    const i = preferredIds?.indexOf(id) ?? -1;
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
 
   const onHand = (m: common_Material): number | undefined => {
     if (!hasStock) return undefined;
@@ -707,15 +718,19 @@ function MaterialGridDialog({
         (s ?? '').toLowerCase().includes(needle),
       );
     });
-    // In stock first, then by name: what can be cut today is what is usually being looked for.
+    // Suggested first (in their order), then in stock, then by name: what can be cut today is
+    // what is usually being looked for.
     return rows.sort((a, b) => {
+      const pa = preferredRank(numId(a.id));
+      const pb = preferredRank(numId(b.id));
+      if (pa !== pb) return pa - pb;
       const sa = (onHand(a) ?? 0) > 0 ? 0 : 1;
       const sb = (onHand(b) ?? 0) > 0 ? 0 : 1;
       if (sa !== sb) return sa - sb;
       return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materials, q, sectionFilter, supplier, inStockOnly, stockFacts]);
+  }, [materials, q, sectionFilter, supplier, inStockOnly, stockFacts, preferredIds]);
 
   const pick = (m: common_Material) => onPick(m);
   const create = onCreate ? () => onCreate(q.trim() || undefined) : undefined;
@@ -867,6 +882,7 @@ function MaterialGridDialog({
                       armed={i === 0 && !!query}
                       stock={onHand(m)}
                       facts={stockFacts.get(numId(m.id))}
+                      suggested={preferredRank(numId(m.id)) !== Number.MAX_SAFE_INTEGER}
                       onPick={() => pick(m)}
                     />
                   ))}
@@ -905,6 +921,7 @@ function ArticleTile({
   armed,
   stock,
   facts,
+  suggested,
   onPick,
 }: {
   m: common_Material;
@@ -914,6 +931,7 @@ function ArticleTile({
   armed: boolean;
   stock?: number;
   facts?: MaterialStockFacts;
+  suggested?: boolean;
   onPick: () => void;
 }) {
   const url = materialImageUrl(m);
@@ -958,6 +976,11 @@ function ArticleTile({
             <span className='block aspect-square w-full overflow-hidden border border-hairline'>
               {strip}
             </span>
+            {suggested ? (
+              <Text component='span' size='micro' variant='label' className='mt-1 block uppercase'>
+                suggested
+              </Text>
+            ) : null}
             <Text
               component='span'
               size='micro'
