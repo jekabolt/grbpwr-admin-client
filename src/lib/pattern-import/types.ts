@@ -1010,6 +1010,36 @@ export type DerivedEdge = {
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
+/**
+ * One printed "Cutting line <model>" label and what it does to the pieces (pieces/variants), sheet
+ * mm, the frame of `families[].candidates[].outer`.
+ *   kind 'cut'  — the label runs along a line drawn ACROSS a piece: the model cuts the piece there
+ *                 (`cutLines` = that line, one polyline per size it is drawn in);
+ *   kind 'edge' — the label runs along the piece's own outline edge: the model keeps the piece as
+ *                 drawn to that edge (`cutLines` = the edge, every size's run on that carrier);
+ *   kind 'piece' — a bare model label ("Style A") in a piece's own label block: the piece belongs
+ *                 to that model alone (`cutLines` empty, `pieces` = [that seed]).
+ * `pieces`: the seeds the line lies in / on. `outlines` (only on a run without a chosen model, the
+ * fill being uncut then): each such piece in one representative size, cut as the model cuts it —
+ * absent where the cut cannot be made safely (the line does not cross the outline as one straight
+ * cut). `uncertain` (D3): the label's line has no second evidence — `cutLines`, `pieces` and
+ * `outlines` are empty, `why` says what is missing; nothing is cut by it.
+ */
+export type VariantMark = {
+  /** The model ("Style A"), spelled as `variants` spells it. */
+  label: string;
+  /** Centre of the printed label. */
+  at: PtMm;
+  /** The printed text ("Cutting line Style A - High Waisted"). */
+  text: string;
+  kind: 'cut' | 'edge' | 'piece';
+  cutLines: PtMm[][];
+  pieces: SeedId[];
+  outlines?: { seed: SeedId; size: string; poly: PtMm[] }[];
+  uncertain?: boolean;
+  why?: string;
+};
+
 export type PieceFamily = {
   seed: SeedId;
   candidates: PieceCandidate[];
@@ -2380,6 +2410,12 @@ export type StageIO = {
        * choice, and the chosen one's cutting lines become knives (FillOpts.variant).
        */
       variants?: string[];
+      /**
+       * What tells the models apart on the drawing (pieces/variants `variantMarksOut`): one entry
+       * per printed "Cutting line <model>" label, with the line it names in sheet mm — absent when
+       * the sheet prints none. See VariantMark.
+       */
+      variantMarks?: VariantMark[];
       /**
        * pieces/grade (H1): what the size solver could not decide (kind 'size-count' /
        * 'grade-ambiguous'), and the size count the fill assumed — the refused candidates carry

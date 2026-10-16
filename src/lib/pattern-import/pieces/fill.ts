@@ -54,7 +54,7 @@ import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
-import { variantKnives } from './variants';
+import { variantKnifeItems } from './variants';
 import { localRanks } from './bundle-rank';
 import {
   continuityWalls,
@@ -563,8 +563,8 @@ function fillOneSheet(
   const graded =
     solved ?? gradeHook(sheet, gradeView(set), run, use, model, opts, progress, edits.exclude);
   const nRanks = graded?.n ?? model.n;
-  const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
-  const knifeItems = itemsOf(set, knives);
+  // the variant's certain marks: cutting lines across a piece, and the outline edge a label names
+  const knifeItems = opts.variant ? variantKnifeItems(sheet, set, opts.variant) : [];
   // a variant's cutting line drawn once per size cuts only its own size (kombinezon's 4XL pants
   // were trimmed at the 2XL cut line inside them); unranked knives cut every size
   const rankOfKnife = new Map<ChainId, number>();
@@ -1069,11 +1069,18 @@ function fillOneSheet(
         out.set(seed.id, cand);
         continue;
       }
-      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r), tickItems(r)), {
-        stepMm: 1,
-        reachMm: 2.5,
-        snapMm: opts.snapMm || PATIMPORT.snapMm,
-      });
+      const sn = snapOutline(
+        raster,
+        ctx.items.concat(
+          knivesOf(r).filter((it) => !it.edge),
+          tickItems(r),
+        ),
+        {
+          stepMm: 1,
+          reachMm: 2.5,
+          snapMm: opts.snapMm || PATIMPORT.snapMm,
+        },
+      );
       const outer = signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer;
       cand.outer = outer;
       cand.walls = sn.walls.filter((id) => id >= 0);

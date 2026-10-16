@@ -121,6 +121,7 @@ import {
   proposeSeeds,
   startSession,
   variantLabels,
+  variantMarksOut,
   wallEditsInto,
   type PieceSession,
   type WallPieceEdit,
@@ -1440,6 +1441,11 @@ export class Session {
     // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
     // of an instruction or overview page naming every model of the magazine
     const variants = variantLabels(sheet.texts.map((t) => t.text));
+    // what tells those models apart on the drawing: each printed cutting line, its pieces, and —
+    // before a model is chosen (the fill uncut) — those pieces as each model cuts them
+    const variantMarks = variants.length
+      ? variantMarksOut(sheet, set, variants, shown, families, run, !opts.variant)
+      : [];
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
@@ -1449,6 +1455,7 @@ export class Session {
       families,
       sheets: this.sheetRead,
       variants,
+      ...(variantMarks.length ? { variantMarks } : {}),
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
     };
