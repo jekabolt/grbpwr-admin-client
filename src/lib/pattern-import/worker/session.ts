@@ -97,6 +97,7 @@ import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize, splitRows
 import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
+import { assignChains, lineKeys } from '../chains/assign';
 import { detectSizeRun } from '../sizes';
 import {
   blobShapes,
@@ -1090,6 +1091,29 @@ export class Session {
       // rows confirmed as proposed are answered (confidence 1): the size checks read the answer
       if (input.confirmed?.length) set = confirmRows(set, input.confirmed);
     }
+    // LINEFIX: the operator's per-line answers, after the legend — everything downstream (faces,
+    // fill, gates) reads the lines where he put them
+    let lineAssign: StageIO['chains']['out']['lineAssign'];
+    if (input.chainAssign?.length) {
+      if (this.fast)
+        lineAssign = {
+          applied: [],
+          flags: [],
+          stale: input.chainAssign.flatMap((e, entry) =>
+            e.keys.map((key) => ({
+              entry,
+              key,
+              why: 'not-here' as const,
+              detail: 'a DXF of pieces has no lines step',
+            })),
+          ),
+        };
+      else {
+        const r = assignChains(set, sheet.styles, sheet.parts, sheet.id, input.chainAssign);
+        set = r.set;
+        lineAssign = r.report;
+      }
+    }
     this.chains = set;
     return {
       classes: set.classes,
@@ -1099,6 +1123,8 @@ export class Session {
       warnings: set.warnings,
       ambiguities: set.ambiguities ?? [],
       ...(this.fast ? {} : legendSwatches(sheet, set)),
+      ...(this.fast ? {} : { chainLines: lineKeys(set, sheet.styles, sheet.parts, sheet.id) }),
+      ...(lineAssign ? { lineAssign } : {}),
     };
   }
 

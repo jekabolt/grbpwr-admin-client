@@ -570,6 +570,12 @@ export type ChainSet = {
    */
   ambiguities?: ChainAmbiguity[];
   warnings: string[];
+  /**
+   * LINEFIX: lines the operator put into a row by hand (chains/assign.ts) and the rows each is in
+   * now (two size rows = a line both sizes run on, flagged). The pen checks take such a line as its
+   * size's own (G22, R3 continuity guard) — only that line. Absent = no line answered.
+   */
+  assigned?: { chain: ChainId; classes: ClassId[] }[];
 };
 
 /**
@@ -620,6 +626,50 @@ export type ApplyLegendFn = (
     split?: 'look' | 'nesting';
   }[],
 ) => ChainSet;
+
+/**
+ * LINEFIX: the operator's "these lines are size N" (chains/assign.ts `assignChains`). `keys` are
+ * line keys as the chains stage hands them out (`chainLines[id].key`), read on tile sheet `sheet`
+ * (`chainLines[id].sheet`). `to`: a size by its nesting rank (the size row whose `nesting-order`
+ * evidence has it), a legend row by its key (`sig`, or `#id` — as `legendConfirmed`), or a role
+ * row: 'common' (every size runs on it) / 'ignore' (no size line). Applied after the legend; the
+ * line LEAVES every row it was in — except that two size answers for one line keep it in both
+ * (flagged 'two-sizes'). A later 'common'/'ignore' answer replaces the line's earlier ones.
+ */
+export type ChainAssign = {
+  sheet: number;
+  keys: string[];
+  to: { rank: number } | { row: string } | { cls: 'common' | 'ignore' };
+};
+
+/** LINEFIX: what the chains stage did with `chainAssign` (index `entry` into it). */
+export type LineAssignReport = {
+  /** Keys that found their line(s): `via` 'exact' key, 'near' (one line within tolerance), 'dup'
+   * (the same line drawn twice in one pen: both take the answer). */
+  applied: {
+    entry: number;
+    key: string;
+    chains: ChainId[];
+    to: ClassId;
+    via: 'exact' | 'near' | 'dup';
+  }[];
+  /**
+   * Keys NOT applied — never handed to another line: 'gone' (no line of that key now), 'ambiguous'
+   * (several lines within tolerance, none exact), 'bad-key' (not a line key), 'no-target' (no size
+   * row of that rank / no row of that key), 'not-here' (the DXF fast path reads no lines).
+   */
+  stale: {
+    entry: number;
+    key: string;
+    why: 'gone' | 'ambiguous' | 'bad-key' | 'no-target' | 'not-here';
+    detail: string;
+  }[];
+  /**
+   * D3: answers taken (the operator is the authority) but shown: 'two-sizes' = the line is now in
+   * two size rows; 'pen' = drawn with another size row's pen, not the target's.
+   */
+  flags: { chain: ChainId; key: string; kind: 'two-sizes' | 'pen'; detail: string }[];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 5. Sizes — source size run → card size run (sizes/, owner F5; detection shared with F3)
@@ -2317,6 +2367,8 @@ export type StageIO = {
        * built set (chains/legend confirmRows). Absent = no row confirmed.
        */
       confirmed?: string[];
+      /** LINEFIX: the operator's per-line answers (chains/assign.ts), applied after the legend. */
+      chainAssign?: ChainAssign[];
     };
     out: {
       classes: LineClass[];
@@ -2331,6 +2383,14 @@ export type StageIO = {
       swatches?: Record<ClassId, LineSwatch>;
       /** MOOD-F1: the key's own samples by their chain id (`legend-sample` evidence `chain`). */
       keySwatches?: Record<ChainId, LineSwatch>;
+      /**
+       * LINEFIX: per chain (index = ChainId, as `chainPreview`): its stable line key, the tile sheet
+       * it lies on and its backbone pen (StyleId) — what a `chainAssign` answer names. Absent on the
+       * DXF fast path.
+       */
+      chainLines?: { key: string; sheet: number; style: StyleId }[];
+      /** LINEFIX: how `chainAssign` landed (absent = none given). */
+      lineAssign?: LineAssignReport;
     };
   };
   sizes: {
@@ -2539,6 +2599,8 @@ export type WizardEvent =
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
   /** A low-confidence legend row confirmed as proposed (its key: sig, or `#id`). */
   | { type: 'legend-confirm'; key: string }
+  /** LINEFIX: the operator's per-line answers — the WHOLE list (replaces the previous one). */
+  | { type: 'line-assign'; assign: ChainAssign[] }
   | { type: 'size-map'; entries: SizeMapEntry[] }
   /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
   | { type: 'drawn-sizes'; n: number | null }
