@@ -44,6 +44,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { foldShapeProblem } from '../semantics/fold';
+import { GRAIN_INSIDE_TOL_MM, grainOutsideMm } from '../semantics/grain-inside';
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
@@ -670,9 +671,34 @@ export function g5(ctx: GateCtx): GateCheck {
           if ((dd * 180) / Math.PI > 0.5)
             bad(`grain direction off by ${((dd * 180) / Math.PI).toFixed(2)}°`);
         }
+        // GRAIN lane: the written arrow is centred on the piece (its 180 mm shaft may outrun a
+        // short piece by design; its middle may not leave it)
+        if (cut && cut.length >= 3) {
+          const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+          if (grainOutsideMm(mid, mid, [cut]) > 0)
+            bad('the grain arrow is centred outside the cut line');
+        }
       }
     }
     if (!s.grain) bad('source has no grain (export blocked)');
+    // GRAIN lane: the grainline lies on its piece — one measured on another size's outline, on an
+    // unfolded half's mirror image, or clicked beside the piece would lay the marker by a line the
+    // piece does not have. A source DXF's own grain arrow (its layer, its author) is a fixed-length
+    // marker that may outrun a short piece (CLO's 180 mm shaft on a 116 mm collar): its middle only.
+    else if (s.cut.length >= 3) {
+      const g = s.grain;
+      if ((g.evidence ?? []).includes('dxf-layer')) {
+        const mid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
+        if (grainOutsideMm(mid, mid, [s.cut]) > 0)
+          bad(`the source's grain arrow (${g.origin}) is centred outside the cut line`);
+      } else {
+        const off = grainOutsideMm(g.a, g.b, [s.cut]);
+        if (off > 0)
+          bad(
+            `grainline (${g.origin}${g.evidence?.length ? ` [${g.evidence.join('+')}]` : ''}) runs ${off.toFixed(1)} mm outside the cut line (> ${GRAIN_INSIDE_TOL_MM} mm off it)`,
+          );
+      }
+    }
     if (!b.mb.hasGrain) bad('manifest hasGrain = false');
     // drills / internal (layer 8)
     const l8 = onLayer(ents, LAYERS.internal).filter(isPoly);
