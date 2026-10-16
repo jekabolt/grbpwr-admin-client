@@ -278,7 +278,16 @@ function WizardBody({
   }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
   const autopilotStop =
     autopilot && started.current === session.sessionId
-      ? apStop ?? (api.driveStop && api.driveStop.why !== 'auto-stop' ? api.driveStop.reason : null)
+      ? apStop ??
+        // the drive's stop speaks only while its question is still open on this step: an operator
+        // answer (the garment picked, the row confirmed) leaves no blocker / offer behind, and the
+        // old reason must not linger in the footer next to a step that is already fine
+        (api.driveStop &&
+        api.driveStop.why !== 'auto-stop' &&
+        api.driveStop.step === session.step &&
+        (blocker || api.offer)
+          ? api.driveStop.reason
+          : null)
       : null;
   const resumeAutopilot = () => {
     setApStop(null);
