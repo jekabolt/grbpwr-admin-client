@@ -989,7 +989,7 @@ const FB_SLOT = 'cwm-slot';
 const SUBGRID_FALLBACK = `@supports not (grid-template-rows: subgrid) {
   .cwm-col { display: flex !important; flex-direction: column; }
   .cwm-col > * { flex: none; overflow: hidden; }
-  .cwm-head { height: 88px; }
+  .cwm-head { height: 190px; }
   .cwm-auto { height: 36px; }
   .cwm-slot { height: 220px; }
 }`;
@@ -1572,35 +1572,34 @@ function ColourwayColumn({
       style={{ gridColumn: column }}
       data-cw-column={colorwayId}
     >
-      {/* ШАПКА: квадрат цвета (или рендера) + имя, под именем видимое `delete`. Удаление —
-          ColorwayDeleteControl: его триггер span role=button, `<fieldset disabled>` выпущенной
-          карточки его не глушит (архивное правило удаления не зависит от выпуска). */}
-      <div className={cn('pb-1.5 pr-3', FB_HEAD)}>
-        <div className='flex items-start gap-1.5' style={{ width: TILE }}>
-          {frontUrl ? (
-            <span
-              aria-hidden
-              className='block size-[22px] shrink-0 overflow-hidden border border-textColor'
-            >
-              <img src={frontUrl} alt='' className='size-full object-cover' />
-            </span>
-          ) : (
-            <Swatch hex={swatchHex ?? ''} size={22} />
+      {/* ШАПКА: плитка 140×140 (рендер спереди, иначе цвет колорвея) + имя. Удаление — ✕ в углу
+          плитки, виден на наведении/фокусе. Это триггер ColorwayDeleteControl: span role=button,
+          `<fieldset disabled>` выпущенной карточки его не глушит (удаление не зависит от выпуска). */}
+      <div className={cn('group/head flex flex-col gap-1 pb-1.5 pr-3', FB_HEAD)}>
+        <div
+          className='relative shrink-0 overflow-hidden border border-borderColor bg-bgZebra'
+          style={{ width: TILE, height: TILE, backgroundColor: !frontUrl ? swatchHex : undefined }}
+        >
+          {frontUrl && <img src={frontUrl} alt='' className='size-full object-cover' />}
+          {canDeleteProduct && (
+            <ColorwayDeleteControl
+              colorwayId={colorwayId}
+              code={name}
+              techCardId={techCardId}
+              lockVersion={colorway.lockVersion ?? lockVersion}
+              isLastColorway={isLastColorway}
+              onDeleted={() => onDeleted(colorwayId)}
+              triggerClassName='absolute right-1 top-1 flex size-[18px] cursor-pointer items-center justify-center border border-borderColor bg-bgColor text-[11px] leading-none text-labelColor opacity-0 hover:border-error hover:text-error focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover/head:opacity-100 group-focus-within/head:opacity-100 [@media(hover:none)]:size-6 [@media(hover:none)]:opacity-100'
+              trigger='✕'
+            />
           )}
-          <span className='flex min-w-0 flex-col gap-0.5'>
-            <span className='line-clamp-2 text-control uppercase tracking-label'>{name}</span>
-            {canDeleteProduct && (
-              <ColorwayDeleteControl
-                colorwayId={colorwayId}
-                code={name}
-                techCardId={techCardId}
-                lockVersion={colorway.lockVersion ?? lockVersion}
-                isLastColorway={isLastColorway}
-                onDeleted={() => onDeleted(colorwayId)}
-              />
-            )}
-          </span>
         </div>
+        <span
+          className='line-clamp-2 text-control uppercase tracking-label'
+          style={{ width: TILE }}
+        >
+          {name}
+        </span>
       </div>
       <div className={cn('pb-2 pr-3', FB_AUTO)}>
         <Button
@@ -1929,10 +1928,11 @@ export function ColourwaysMatrix({
                       <button
                         type='button'
                         aria-label='new colourway'
-                        className='flex cursor-pointer items-center justify-center border border-dashed border-borderColor text-[18px] text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                        style={{ width: 22, height: 22 }}
+                        className='flex cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        style={{ width: TILE, height: TILE }}
                       >
-                        +
+                        <span className='text-[18px] leading-none text-textColor'>+</span>
+                        <span className='text-micro uppercase tracking-label'>colourway</span>
                       </button>
                     }
                   />

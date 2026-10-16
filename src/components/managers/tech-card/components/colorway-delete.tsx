@@ -1,7 +1,7 @@
 import { ColorwayDeletionEntry } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -68,6 +68,8 @@ export function ColorwayDeleteControl({
   lockVersion,
   isLastColorway,
   onDeleted,
+  trigger,
+  triggerClassName,
 }: {
   colorwayId: number;
   /** Слово оператора для этого колорвея — оно же строка, которую он печатает в подтверждении. */
@@ -77,6 +79,10 @@ export function ColorwayDeleteControl({
   /** Удаляем последний колорвей стиля — карточка останется без единого продукта. */
   isLastColorway: boolean;
   onDeleted: () => void;
+  /** Свой вид триггера (например, ✕ на плитке колорвея). Без него — красное `delete product`. */
+  trigger?: ReactNode;
+  /** Классы триггера вместо подчёркнутого по умолчанию; триггер остаётся span role=button. */
+  triggerClassName?: string;
 }) {
   const { showMessage } = useSnackBarStore();
   const preview = useColorwayDeletionPreview();
@@ -153,11 +159,16 @@ export function ColorwayDeleteControl({
             openDialog();
           }
         }}
-        className='cursor-pointer self-start underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className={
+          triggerClassName ??
+          'cursor-pointer self-start underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        }
       >
-        <Text size='micro' variant='error' tracking='label' component='span'>
-          delete product
-        </Text>
+        {trigger ?? (
+          <Text size='micro' variant='error' tracking='label' component='span'>
+            delete product
+          </Text>
+        )}
       </span>
 
       <ConfirmationModal
