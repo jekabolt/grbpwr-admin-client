@@ -411,10 +411,14 @@ function WizardBody({
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
   const created = draft ? draft.pieces.filter((p) => !p.existingLineKey).length : 0;
-  const continueAnyway = () => {
+  const continueAnyway = async () => {
     if (autopilot) {
-      // the primary IS "resume autopilot": the drive runs on past every step that asks nothing
+      // the primary IS "resume autopilot": the drive runs on past every step that asks nothing.
+      // A step that only OFFERS (or where the autopilot stopped) is the operator's explicit «go on
+      // as is»: resuming alone would stop again on the same offer and the click looked dead
+      // (owner, 16.10: «I press use 8 pieces, nothing happens») — step past it first, then resume.
       started.current = session.sessionId;
+      if (askKind === 'offer' || askKind === 'stop') await api.next();
       resumeAutopilot();
     } else void api.next();
   };
