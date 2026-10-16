@@ -440,7 +440,9 @@ export function CompositionLabelBlock({
   const s = setValue;
   const edit = canEdit;
   const picked = cw ? picks.get(cw.id) : undefined;
-  const suggested = cw && !cw.countryName && !picked ? workshopCountry : undefined;
+  // По КОДУ, не по имени: код, которого нет в словаре, даёт пустое имя, но страна на этикетке задана —
+  // предложение мастерской затёрло бы юридическое происхождение.
+  const suggested = cw && !cw.countryCode && !picked ? workshopCountry : undefined;
 
   const overriddenOf = (line: LineKey): boolean => {
     switch (line) {
