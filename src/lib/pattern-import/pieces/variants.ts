@@ -88,6 +88,21 @@ function cutTexts(sheet: Sheet, variant: string): IRText[] {
   });
 }
 
+/** The models the cutting-line labels name ("Cutting line Style B …" → "Style B"). */
+function cutLineModels(sheet: Sheet): string[] {
+  const out = new Set<string>();
+  for (const t of sheet.texts) {
+    const s = norm(t.text);
+    if (!/(cutting|cut) ?line|schnittlinie|линия (кроя|отреза)/.test(s)) continue;
+    const m = s.match(/(style|view|version|mod\.?)\s*([a-z0-9]{1,4})/);
+    if (m)
+      out.add(
+        m[1].startsWith('mod') ? `Mod. ${m[2].toUpperCase()}` : `Style ${m[2].toUpperCase()}`,
+      );
+  }
+  return [...out];
+}
+
 /** One label per place: the copies a file prints once per size layer (kombinezon: 8) collapse. */
 function labelPlaces(sheet: Sheet, variant: string): IRText[] {
   const out: IRText[] = [];
@@ -334,8 +349,11 @@ export function variantKnifeItems(sheet: Sheet, set: ChainSet, variant: string):
   const out: VariantKnife[] = [];
   // the chosen spelling may come from the instruction pages or a stored answer ("MOD. 125")
   const v = norm(variant);
-  const labels = variantLabels(sheet.texts.map((t) => t.text));
-  const all = labels.some((l) => norm(l) === v) ? labels : [...labels, variant];
+  // every model the sheet names, its cutting-line labels included (an EDGE mark needs the other
+  // model's CUT mark as its second evidence even when only the instruction pages name the models)
+  const all = [...variantLabels(sheet.texts.map((t) => t.text))];
+  for (const m of cutLineModels(sheet)) if (!all.some((l) => norm(l) === norm(m))) all.push(m);
+  if (!all.some((l) => norm(l) === v)) all.push(variant);
   for (const m of variantMarksOf(sheet, set, all))
     if (norm(m.label) === v && !m.uncertain)
       for (const l of m.lines) {
