@@ -15,6 +15,25 @@ import Text from 'ui/components/text';
 export type QuizHistory = Map<string, unknown>;
 export const QuizHistoryContext = createContext<QuizHistory | null>(null);
 
+// ═══ ANSWERED AND GO ══════════════════════════════════════════════════════════════════════════════
+//
+// Owner (16.10): «after the answer, go to the next question — or, if nothing else is asked on this
+// step, advance to the next step by itself (no NEXT click)». A step calls the shell's
+// `answeredAndGo` right after an OPERATOR'S QUIZ ANSWER, with the answer's promise:
+//
+//   const go = useAnsweredAndGo();
+//   go(api.dispatch({ type: 'size-map', entries }));
+//
+// The shell waits for that promise, then for the re-run it started to finish (not busy). If the
+// step is still the same one and asks nothing more — no blocker, no offer, no error — the shell
+// runs exactly what its primary would (`continueAnyway`: next, and with the autopilot on, resumes
+// the drive). Anything still asked: nothing happens, the step shows its next question. Only for
+// answers given by hand in a quiz — never for an automatic map, a row edit or a fold toggle.
+
+/** See ANSWERED AND GO above. Outside a wizard: a no-op. */
+export const AnsweredAndGoContext = createContext<(answer?: Promise<unknown>) => void>(() => {});
+export const useAnsweredAndGo = () => useContext(AnsweredAndGoContext);
+
 /** A step's slot in the wizard's quiz history; outside a wizard, a slot that lives with the step. */
 export function useQuizSlot<T>(name: string, init: () => T): T {
   const store = useContext(QuizHistoryContext);

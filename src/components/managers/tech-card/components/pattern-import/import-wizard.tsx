@@ -7,7 +7,7 @@
 // the outputs after it). The footer is three things only: ← back · the one question (a link to
 // the control that answers it, `data-ask` in ui-bits.tsx) · the one primary, named by what it does.
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
@@ -58,6 +58,7 @@ import {
   type StageState,
 } from './stages';
 import {
+  AnsweredAndGoContext,
   AskCoach,
   QuizHistoryContext,
   firstAsk,
@@ -435,6 +436,26 @@ function WizardBody({
       resumeAutopilot();
     } else void api.next();
   };
+  // ── ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves on by itself ──
+  const stepRef = useRef(session.step);
+  stepRef.current = session.step;
+  const goPending = useRef<WizardStep | null>(null);
+  const [goTick, setGoTick] = useState(0);
+  const answeredAndGo = useCallback((answer?: Promise<unknown>) => {
+    const step = stepRef.current;
+    void Promise.resolve(answer).then(() => {
+      goPending.current = step;
+      setGoTick((t) => t + 1);
+    });
+  }, []);
+  useEffect(() => {
+    const step = goPending.current;
+    if (step == null || session.busy) return;
+    goPending.current = null;
+    if (step !== session.step || session.error || blocker || api.offer || !nextStep) return;
+    void continueAnyway();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goTick, session.busy, session.step]);
   const primary = ((): PrimaryOverride & { loading?: boolean } => {
     const nextStage = nextStep ? stageLabel(STAGE_OF_STEP[nextStep.id]) : '';
     const nextTitle = nextStep ? `next: ${nextStep.label}` : undefined;
@@ -785,14 +806,16 @@ function WizardBody({
               <WizardPrimaryContext.Provider value={setOverride}>
                 <DroppedLabels.Provider value={droppedCtx}>
                   <QuizHistoryContext.Provider value={quizHistory}>
-                    {session.busy ? (
-                      // the last picture the run has, dimmed and out of reach while it works
-                      <div className='h-full opacity-40' inert aria-hidden>
-                        {body}
-                      </div>
-                    ) : (
-                      body
-                    )}
+                    <AnsweredAndGoContext.Provider value={answeredAndGo}>
+                      {session.busy ? (
+                        // the last picture the run has, dimmed and out of reach while it works
+                        <div className='h-full opacity-40' inert aria-hidden>
+                          {body}
+                        </div>
+                      ) : (
+                        body
+                      )}
+                    </AnsweredAndGoContext.Provider>
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>

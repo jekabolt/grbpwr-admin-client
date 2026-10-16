@@ -8,9 +8,10 @@
 // guess, a drawn size off the card) is a `?` on the row that opens its yes / no under it.
 // Hovering a row lights its lines on the sheet, blue and thicker. Evidence lives in `?debug=1`.
 // Two size rows given one name are one size (a size drawn in two looks) — the worker merges them.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   BoxMm,
+  CardSize,
   ChainRole,
   ChainAmbiguity,
   ClassEvidence,
@@ -44,6 +45,7 @@ import {
   SplitStage,
   ask,
   fmtPct,
+  useAnsweredAndGo,
   useQuizSlot,
 } from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
@@ -137,6 +139,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     });
     if (entries.length) void api.dispatch({ type: 'size-map', entries });
   }, [kept, sizes, session.busy, inputs.sizeMap, api]);
+  // As many sizes drawn as the card has, none matching by name: mapped in order at once, no
+  // question (owner 16.10). Built in render (it needs the order), run after it, once per read.
+  const autoMap = useRef<(() => void) | null>(null);
+  const autoMapped = useQuizSlot<{ at: unknown }>('sizes-auto-map', () => ({ at: null }));
+  useEffect(() => autoMap.current?.());
+  const go = useAnsweredAndGo();
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -186,10 +194,10 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const flagged = flag != null ? flags[flag] : null;
   const pickedRow = picked != null ? chains.classes.find((c) => c.id === picked) ?? null : null;
   const sample = pickedRow ? keySampleOf(pickedRow) : null;
-  const hotRow = hover ?? pickedRow?.id ?? null;
+  const hotRow0 = hover ?? pickedRow?.id ?? null;
   const hot =
-    hotRow != null
-      ? new Set(chains.classes.find((c) => c.id === hotRow)?.chains ?? [])
+    hotRow0 != null
+      ? new Set(chains.classes.find((c) => c.id === hotRow0)?.chains ?? [])
       : flagged
         ? new Set(flagged.chains.length ? flagged.chains : flaggedClassChains(flagged))
         : null;
@@ -316,9 +324,19 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
 
   // In-order mapping: card sizes in grade order onto consecutive drawn sizes (8 drawn, 5 card:
   // a window of 5 drawn, the rest left out), or the drawn sizes onto a window of the card.
-  const drawn = sizes.map.entries
-    .filter((e) => !e.notDrawn)
-    .sort((a, b) => a.source.rank - b.source.rank);
+  // Owner 16.10: the ASSUMPTION is made from the drawing — the drawn sizes ordered by the size of
+  // their pieces (the biggest closed outline of each size's lines: kombinezon 6…20 grows 340 →
+  // 470 dm² in step), smallest → the card's first size. Only when a drawn size has no closed
+  // outline of its own does the file's grading order stand in.
+  const areaOf = (e: SizeMapEntry) =>
+    e.source.classId != null ? outlineArea(chains, e.source.classId) : 0;
+  const drawnRaw = sizes.map.entries.filter((e) => !e.notDrawn);
+  const byGeometry = drawnRaw.length > 1 && drawnRaw.every((e) => areaOf(e) > 0);
+  const drawn = drawnRaw.sort((a, b) =>
+    byGeometry
+      ? areaOf(a) - areaOf(b) || a.source.rank - b.source.rank
+      : a.source.rank - b.source.rank,
+  );
   const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
   const span = drawn.length - cards.length; // ≥ 0: the window runs over the drawn sizes
   const slots = Math.abs(span) + 1;
@@ -328,9 +346,14 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     windowOf(start).every((c, i) => (drawn[i].card?.sizeId ?? null) === (c?.sizeId ?? null));
   const currentStart = Array.from({ length: slots }, (_, s) => s).find(sameWindow) ?? null;
   const centred = Math.floor(Math.abs(span) / 2);
+  // an in-order answer given (every drawn size answered, as one window): the question is closed
+  const windowAnswered = currentStart != null && drawn.every((e) => e.origin === 'operator');
   // the quiz: asked while the drawn sizes do not all map by name (a size off the card, a guess, a dupe)
   const orderAsked =
-    drawn.length > 0 && cards.length > 0 && (anyDupe || drawn.some((e) => !e.card || isGuess(e)));
+    drawn.length > 0 &&
+    cards.length > 0 &&
+    !windowAnswered &&
+    (anyDupe || drawn.some((e) => !e.card || isGuess(e)));
   // An operator row answer (a manual card size, a leave-out, a kept guess) that no quiz window
   // matches: the bulk quiz would overwrite it, so it folds to a quiet «map in order again» that
   // says so. A map that IS one quiz window keeps the quiz open (picking another window is the quiz).
@@ -338,32 +361,64 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const rowAnswered =
     currentStart == null &&
     (inputs.sizeMap ?? []).some((e) => e.origin === 'operator' && drawnRanks.has(e.source.rank));
-  const showOrderBar = orderAsked && (!rowAnswered || reorder);
-  const orderFolded = orderAsked && rowAnswered && !reorder;
+  const showOrderBar =
+    drawn.length > 0 && cards.length > 0 && (reorder || (orderAsked && !rowAnswered));
+  const orderFolded =
+    !showOrderBar && ((orderAsked && rowAnswered) || (windowAnswered && span !== 0));
+  // the assumption the question asks about, shown in the rows until it is answered (never a column
+  // of «leave out»): smallest → the first card size
+  const assumed = showOrderBar && noneMapped ? windowOf(0) : null;
+  const assumedOf = (e: SizeMapEntry | undefined) => {
+    const i = e && assumed ? drawn.indexOf(e) : -1;
+    return i >= 0 ? assumed![i] : null;
+  };
   const mapInOrder = (start: number) => {
     const win = windowOf(start);
     const ranks = new Set(drawn.map((e) => e.source.rank));
+    setReorder(false);
     // one `size-map` answer: the entries per-row `setSize` calls would leave, all at once
-    void api.dispatch({
+    return api.dispatch({
       type: 'size-map',
       entries: [
         ...(inputs.sizeMap ?? []).filter((e) => !ranks.has(e.source.rank)),
         ...drawn.map((e, i) => ({ ...e, card: win[i], origin: 'operator' as const })),
       ],
     });
-    setReorder(false);
   };
+  /** The operator's answer to the question: that window, then on (ANSWERED AND GO). */
+  const answerOrder = (start: number) => go(mapInOrder(start));
+  autoMap.current =
+    !session.busy &&
+    asking !== 'range' &&
+    asking !== 'count' &&
+    drawn.length > 0 &&
+    drawn.length === cards.length &&
+    noneMapped &&
+    !inputs.sizeMap?.length &&
+    autoMapped.at !== sizes
+      ? () => {
+          autoMapped.at = sizes;
+          void mapInOrder(0);
+        }
+      : null;
   const drawnName = (e: SizeMapEntry) => e.source.label || `#${e.source.rank + 1}`;
   const windowTitle = (start: number) =>
     windowOf(start)
       .map((c, i) => `${drawnName(drawn[i])} → ${c?.name ?? 'leave out'}`)
       .join(' · ');
+  // the question about what we found: the smallest outlines, is that the first card size?
+  const firstWord = byGeometry ? 'the smallest outlines' : 'the first size in the file';
   const quiz =
     drawn.length > 0 && cards.length > 0
-      ? span >= 0
-        ? `which file size is your ${cards[0].name}?`
-        : `file size ${drawnName(drawn[0])} is which card size?`
+      ? `${firstWord} (${drawnName(drawn[0])}): is that ${cards[0].name}?`
       : '';
+  const quizClass = showOrderBar ? drawn[0]?.source.classId ?? null : null;
+  // the canvas: a hovered / picked row, else the size the question asks about, else a flag
+  const hotRow = hotRow0 ?? (flagged ? null : quizClass);
+  const lit =
+    hotRow0 == null && !flagged && quizClass != null
+      ? new Set(chains.classes.find((c) => c.id === quizClass)?.chains ?? [])
+      : hot;
   // the legend row the step asks about first: a size row before the other lines
   const confirmAsk =
     asking === 'confirm' ? sizeRows.find(pending) ?? otherRows.find(pending) ?? null : null;
@@ -519,11 +574,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             <span className='min-w-0 truncate'>{name}</span>
           </>
         }
-        linked={!!e?.card}
+        linked={e?.card ? true : assumedOf(e) ? 'guess' : false}
         right={
           e ? (
             <CardSizeBox
               e={e}
+              assumed={assumedOf(e)}
               cards={cards}
               invalid={dupe(e.card?.sizeId)}
               askOn={boxAsk}
@@ -615,19 +671,19 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               <>
                 <g fill='none' pointerEvents='none'>
                   {chains.chainPreview.map((a, i) =>
-                    a.length < 4 || hot?.has(i) ? null : (
+                    a.length < 4 || lit?.has(i) ? null : (
                       <polyline
                         key={i}
                         points={f32Attr(a)}
-                        stroke={hot ? '#dddddd' : SHEET_INK.mut}
+                        stroke={lit ? '#dddddd' : SHEET_INK.mut}
                         strokeWidth={unit * 0.8}
                       />
                     ),
                   )}
                   {/* the lit size on top: blue and thicker for a row, ink for a flag */}
-                  {hot &&
+                  {lit &&
                     chains.chainPreview.map((a, i) =>
-                      a.length < 4 || !hot.has(i) ? null : (
+                      a.length < 4 || !lit.has(i) ? null : (
                         <polyline
                           key={`hot-${i}`}
                           points={f32Attr(a)}
@@ -745,10 +801,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             {orderFolded && (
               <span>
                 <Act
-                  title='map every file size in order again: replaces the answers you gave on the rows'
+                  title={
+                    rowAnswered
+                      ? 'map every file size in order again: replaces the answers you gave on the rows'
+                      : 'ask again which file size is the first card size'
+                  }
                   onClick={() => setReorder(true)}
                 >
-                  map in order again
+                  {rowAnswered || currentStart == null
+                    ? 'map in order again'
+                    : `${cards[0].name} is ${drawnName(drawn[span >= 0 ? currentStart : 0])}${span < 0 && currentStart ? ` → ${cards[currentStart].name}` : ''} · change`}
                 </Act>
               </span>
             )}
@@ -757,33 +819,56 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 data-ask-zone=''
                 data-ask-label={quiz || undefined}
                 className='flex flex-col gap-2'
+                {...hoverOf(quizClass != null && classIds.has(quizClass) ? quizClass : null)}
               >
-                <Text component='p'>{quiz}</Text>
-                <span className='flex flex-wrap gap-2'>
-                  {Array.from({ length: slots }, (_, i) => {
+                <span className='flex flex-wrap items-center gap-2'>
+                  <Text component='span'>{firstWord}</Text>
+                  {quizClass != null && (
+                    <LineSwatchView
+                      swatch={chains.swatches?.[quizClass]}
+                      widthMm={QUIZ_SWATCH_MM}
+                      minStrokeMm={0.35}
+                      fallbackDash={motifOf(quizClass)}
+                    />
+                  )}
+                  <Text component='span'>
+                    {drawnName(drawn[0])}: is that {cards[0].name}?
+                  </Text>
+                </span>
+                <span className='flex flex-wrap items-center gap-2'>
+                  <Act
+                    primary
+                    disabled={!!session.busy}
+                    {...ask(
+                      'sizes-map',
+                      mapAsk === 'none' || mapAsk === 'partial' || mapAsk === 'guess',
+                    )}
+                    data-ask-hint={`say yes, or pick which size is ${cards[0].name}`}
+                    title={windowTitle(0)}
+                    onClick={() => answerOrder(0)}
+                  >
+                    yes
+                  </Act>
+                  {slots > 1 && (
+                    <Text component='span' className='ml-2 text-labelColor'>
+                      {span >= 0 ? `no, ${cards[0].name} is` : 'no, it is'}
+                    </Text>
+                  )}
+                  {Array.from({ length: slots - 1 }, (_, k) => {
+                    const i = k + 1;
                     const d = span >= 0 ? drawn[i] : null;
                     const cls = d?.source.classId ?? null;
                     return (
                       <button
                         key={i}
                         type='button'
-                        aria-pressed={currentStart === i}
                         disabled={!!session.busy}
-                        {...ask(
-                          'sizes-map',
-                          i === (currentStart ?? centred) &&
-                            (mapAsk === 'none' || mapAsk === 'partial' || mapAsk === 'guess'),
-                        )}
-                        data-ask-hint='pick the file size that is your first card size'
                         title={windowTitle(i)}
-                        onClick={() => mapInOrder(i)}
+                        onClick={() => answerOrder(i)}
                         {...hoverOf(cls != null && classIds.has(cls) ? cls : null)}
                         className={cn(
-                          'flex h-10 items-center gap-2 border bg-bgColor px-2.5 transition-colors',
+                          'flex h-7 items-center gap-2 border border-borderColor bg-bgColor px-2 transition-colors hover:border-textColor',
                           FOCUS,
-                          currentStart === i
-                            ? 'border-textColor'
-                            : 'border-borderColor hover:border-textColor',
                           'disabled:cursor-not-allowed disabled:text-labelColor',
                         )}
                       >
@@ -803,7 +888,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 <Text component='p' className='text-labelColor'>
                   {rowAnswered
                     ? 'the rest follow in order. this replaces the answers you gave below'
-                    : 'the rest follow in order'}
+                    : span > 0
+                      ? `the rest follow in order; the other ${span} are left out`
+                      : 'the rest follow in order'}
                 </Text>
               </div>
             )}
@@ -819,27 +906,29 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 {sizeRows.map((c) => mapRow(`c${c.id}`, c, entryOfClass(c.id)))}
                 {loose.map((e) => mapRow(`r${e.source.rank}-${e.source.label}`, null, e))}
                 {/* card sizes no file size goes to: the gap, said where it is */}
-                {sizes.map.unmapped.map((cs) => (
-                  <MapRow
-                    key={`card-${cs.sizeId}`}
-                    left={
-                      <>
-                        <SwatchCell />
-                        <span className='text-labelColor'>nothing</span>
-                      </>
-                    }
-                    linked={false}
-                    right={
-                      <CardGapBox
-                        name={cs.name}
-                        drawn={drawn}
-                        nameOf={drawnName}
-                        busy={!!session.busy}
-                        onPick={(e) => setCard(e, String(cs.sizeId))}
-                      />
-                    }
-                  />
-                ))}
+                {sizes.map.unmapped
+                  .filter((cs) => !assumed?.some((a) => a?.sizeId === cs.sizeId))
+                  .map((cs) => (
+                    <MapRow
+                      key={`card-${cs.sizeId}`}
+                      left={
+                        <>
+                          <SwatchCell />
+                          <span className='text-labelColor'>nothing</span>
+                        </>
+                      }
+                      linked={false}
+                      right={
+                        <CardGapBox
+                          name={cs.name}
+                          drawn={drawn}
+                          nameOf={drawnName}
+                          busy={!!session.busy}
+                          onPick={(e) => setCard(e, String(cs.sizeId))}
+                        />
+                      }
+                    />
+                  ))}
               </div>
             </div>
 
@@ -1253,6 +1342,25 @@ function RowDetail({
   );
 }
 
+/**
+ * The biggest closed outline a size's lines draw, mm² (shoelace over the chain previews; a chain
+ * is closed when its ends meet within 2 mm). 0 = none closed: the geometry cannot order it.
+ */
+function outlineArea(chains: NonNullable<ImportSessionApi['session']['chains']>, classId: number) {
+  const c = chains.classes.find((x) => x.id === classId);
+  let best = 0;
+  for (const id of c?.chains ?? []) {
+    const a = chains.chainPreview[id];
+    if (!a || a.length < 8) continue;
+    const n = a.length;
+    if (Math.hypot(a[0] - a[n - 2], a[1] - a[n - 1]) > 2) continue;
+    let sh = 0;
+    for (let k = 0; k + 3 < n; k += 2) sh += a[k] * a[k + 3] - a[k + 2] * a[k + 1];
+    best = Math.max(best, Math.abs(sh) / 2);
+  }
+  return best;
+}
+
 /** The operator's size map noted before a rename: card size per size name, and the read it was on. */
 type KeptMap = { at: unknown; entries: { name: string; card: SizeMapEntry['card'] }[] };
 const norm = (label: string | null | undefined) => (label ?? '').trim().toLowerCase();
@@ -1314,9 +1422,17 @@ function SwatchCell({ children }: { children?: React.ReactNode }) {
   );
 }
 
-/** The arrow between the two columns: ink when the size goes somewhere, dashed grey when not. */
-function Connector({ on }: { on: boolean }) {
-  const c = on ? 'var(--color-textColor)' : 'var(--color-borderColor)';
+/**
+ * The arrow between the two columns: ink when the size goes somewhere, dashed grey when not,
+ * dashed blue for the assumption the question asks about.
+ */
+function Connector({ on }: { on: boolean | 'guess' }) {
+  const c =
+    on === 'guess'
+      ? 'var(--color-warning)'
+      : on
+        ? 'var(--color-textColor)'
+        : 'var(--color-borderColor)';
   return (
     <svg width={36} height={10} viewBox='0 0 36 10' aria-hidden className='block'>
       <line
@@ -1326,7 +1442,7 @@ function Connector({ on }: { on: boolean }) {
         y2={5}
         stroke={c}
         strokeWidth={1}
-        strokeDasharray={on ? undefined : '3 3'}
+        strokeDasharray={on === true ? undefined : '3 3'}
       />
       <path d='M29 1.5 L34 5 L29 8.5' fill='none' stroke={c} strokeWidth={1} />
     </svg>
@@ -1354,7 +1470,7 @@ function MapRow({
   left: React.ReactNode;
   right: React.ReactNode;
   /** null: no arrow (a line that is not a size). */
-  linked: boolean | null;
+  linked: boolean | 'guess' | null;
   q?: RowAsk | null;
   open?: boolean;
   onToggleQ?: () => void;
@@ -1430,15 +1546,17 @@ function MapRow({
 }
 
 /** The box a card size sits in: solid ink when set, dashed grey when nothing goes there. */
-const boxCls = (filled: boolean, invalid: boolean) =>
+const boxCls = (filled: boolean, invalid: boolean, guess = false) =>
   cn(
     'flex h-8 w-full max-w-[136px] items-center justify-between gap-2 border bg-bgColor px-2.5 text-left transition-colors',
     FOCUS,
     invalid
       ? 'border-error text-error'
-      : filled
-        ? 'border-textColor hover:bg-bgZebra'
-        : 'border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
+      : guess
+        ? 'border-dashed border-warning text-warning hover:border-solid'
+        : filled
+          ? 'border-textColor hover:bg-bgZebra'
+          : 'border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
   );
 
 const Caret = () => (
@@ -1483,6 +1601,7 @@ function MenuItem({
  */
 function CardSizeBox({
   e,
+  assumed,
   cards,
   invalid,
   askOn,
@@ -1494,6 +1613,8 @@ function CardSizeBox({
   onMore,
 }: {
   e: SizeMapEntry;
+  /** The card size the open question assumes for this row (shown dashed blue until answered). */
+  assumed?: CardSize | null;
   cards: CardContext['sizes'];
   invalid: boolean;
   askOn: boolean;
@@ -1506,7 +1627,14 @@ function CardSizeBox({
 }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const label = e.card ? e.card.name : e.notDrawn ? 'not drawn' : 'leave out';
+  const guess = !e.card && !e.notDrawn && !!assumed;
+  const label = e.card
+    ? e.card.name
+    : e.notDrawn
+      ? 'not drawn'
+      : assumed
+        ? `${assumed.name}?`
+        : 'leave out';
   const askAttrs: Record<string, string> = askOn
     ? (ask(
         'sizes-map',
@@ -1527,11 +1655,13 @@ function CardSizeBox({
       }}
       className='w-[232px]'
       triggerProps={{
-        className: boxCls(!!e.card, invalid),
+        className: boxCls(!!e.card, invalid, guess),
         disabled: busy,
         'aria-label': `card size for file size ${e.source.label || e.source.rank + 1}: ${label}`,
         'aria-invalid': invalid || undefined,
-        title: e.evidence?.join(' · '),
+        title: guess
+          ? `our guess from the sizes of the pieces: answer the question above, or pick here`
+          : e.evidence?.join(' · '),
         ...(!e.card && !e.notDrawn ? { 'data-unmapped': '' } : {}),
         ...askAttrs,
       }}
