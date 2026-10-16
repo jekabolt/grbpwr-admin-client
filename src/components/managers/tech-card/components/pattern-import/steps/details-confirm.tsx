@@ -7,16 +7,18 @@
 //     controls in the table still override it.
 //   · ConfirmStrip: quantities nobody printed, names read off construction notes, AI names below
 //     the threshold. One deliberate click confirms them all as shown; each row has its own.
-import { useRef, useState } from 'react';
-import type { AllowanceDecision, SeedId } from 'lib/pattern-import/types';
+import { useState } from 'react';
+import type { AllowanceDecision, PtMm, SeedId } from 'lib/pattern-import/types';
+import { cn } from 'lib/utility';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
+import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import { NumberField, ask } from '../ui-bits';
+import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
@@ -37,9 +39,12 @@ export function OutlineQuestion({
   api,
   current,
   answersOnly = false,
+  outer = [],
 }: {
   api: ImportSessionApi;
   current: AllowanceDecision;
+  /** The piece the two pictures are drawn from (the file's own outline). */
+  outer?: readonly PtMm[];
   /** GUIDED: the step's question card says the question — render the answers (and why) only. */
   answersOnly?: boolean;
 }) {
@@ -47,8 +52,7 @@ export function OutlineQuestion({
   const [mm, setMm] = useState(
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
-  // the field commits on blur, which runs just before the seam answer's click reads it
-  const mmRef = useRef(mm);
+  const [otherMm, setOtherMm] = useState(false);
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -70,50 +74,88 @@ export function OutlineQuestion({
   ]
     .filter(Boolean)
     .join(' · ');
-  // owner 16.10: two answers of ≤3 words; the allowance is edited inside the seam answer
+  // owner 16.10 (r2, «hard to understand»): two PICTURE answers drawn from the file's own piece —
+  // the outline as the edge (scissors on it), or as the seam (dashed) with the cut line outside.
+  // A click on a picture answers; the allowance is a chip row under the seam picture, a chip
+  // answers with its value at once ("other…" opens a number field).
+  const seam = (v: number) => {
+    if (!(v >= 0)) return;
+    setMm(v);
+    void api.answerOutline('seam', v);
+  };
+  const preset = MM_CHIPS.includes(mm);
   const answers = (
-    <span className='flex flex-wrap items-center gap-1.5'>
-      <Button
-        {...ask('details-outline')}
-        data-ask-hint='pick cut or seam line'
-        variant='secondary'
-        size='xs'
-        disabled={busy}
-        className={prefill === 'cut' ? 'border-warning' : undefined}
-        title={`the allowance is already in the drawing: the outline is cut as drawn${prefill === 'cut' ? ' (the file says so)' : ''}`}
-        onClick={() => void api.answerOutline('cut', mm)}
-      >
-        cut line
-      </Button>
-      <span className='inline-flex items-center border border-borderColor'>
-        <Button
+    <span className='flex flex-wrap items-start gap-2'>
+      <span className='flex flex-col gap-1.5'>
+        <button
+          type='button'
           {...ask('details-outline')}
-          data-ask-hint='pick cut or seam line'
-          variant='secondary'
-          size='xs'
+          data-ask-hint='pick a picture'
+          data-testid='outline-answer-cut'
           disabled={busy}
-          className='border-0'
-          title='the outline is the sewing line: the cut line is built this far outside it'
-          onClick={() => void api.answerOutline('seam', mmRef.current)}
+          title={`the allowance is already in the drawing: cut exactly on the drawn line${prefill === 'cut' ? ' (the file names the layer so)' : ''}`}
+          onClick={() => void api.answerOutline('cut', mm)}
+          className={cn(OUTLINE_CARD, prefill === 'cut' && 'border-warning')}
         >
-          seam line +
-        </Button>
-        <NumberField
-          value={mm}
-          min={0}
+          <OutlinePicture outer={outer} kind='cut' />
+          <Text size='micro' component='span' className='font-bold uppercase'>
+            cut on this line
+          </Text>
+          <Text size='micro' variant='label' component='span'>
+            the line is the edge
+          </Text>
+        </button>
+      </span>
+      <span className='flex flex-col gap-1.5'>
+        <button
+          type='button'
+          {...ask('details-outline')}
+          data-ask-hint='pick a picture'
+          data-testid='outline-answer-seam'
           disabled={busy}
-          aria-label='allowance to add to a seam line, mm'
-          className='w-10 border-0 px-0.5 text-right'
-          onCommit={(v) => {
-            if (v != null && v >= 0) {
-              mmRef.current = v;
-              setMm(v);
-            }
-          }}
-        />
-        <Text size='micro' component='span' className='pr-1.5'>
-          mm
-        </Text>
+          title='the drawn line is where it is sewn: the cut line is built this far outside it'
+          onClick={() => seam(mm)}
+          className={OUTLINE_CARD}
+        >
+          <OutlinePicture outer={outer} kind='seam' />
+          <Text size='micro' component='span' className='font-bold uppercase'>
+            sew on this line
+          </Text>
+          <Text size='micro' variant='label' component='span'>
+            add {mm} mm around
+          </Text>
+        </button>
+        <ChipRow>
+          {MM_CHIPS.map((v) => (
+            <Chip
+              key={v}
+              selected={mm === v}
+              disabled={busy}
+              title={`sew on the drawn line, cut ${v} mm outside it`}
+              onClick={() => seam(v)}
+            >
+              {v}
+            </Chip>
+          ))}
+          {otherMm || !preset ? (
+            <NumberField
+              value={preset ? null : mm}
+              min={0}
+              disabled={busy}
+              autoFocus={otherMm}
+              aria-label='allowance to add around a seam line, mm'
+              className='w-12'
+              onCommit={(v) => v != null && seam(v)}
+            />
+          ) : (
+            <Chip disabled={busy} onClick={() => setOtherMm(true)}>
+              other…
+            </Chip>
+          )}
+          <Text size='micro' variant='label' component='span'>
+            mm
+          </Text>
+        </ChipRow>
       </span>
     </span>
   );
@@ -142,6 +184,83 @@ export function OutlineQuestion({
       </Text>
       {answers}
     </CalloutBox>
+  );
+}
+
+const MM_CHIPS = [7, 10, 15];
+const OUTLINE_CARD =
+  'flex w-[144px] cursor-pointer flex-col items-center gap-1 border border-borderColor bg-bgColor p-2 text-center hover:border-textColor disabled:cursor-default disabled:opacity-50';
+
+/**
+ * One answer's picture: the piece fitted whole in a 132 px square. `cut` — the outline solid ink
+ * with scissors on its top; `seam` — the outline dashed (the sewing line) and the cut line solid
+ * blue outside it (a stroke-ring offset, wide enough to read at this size — not to scale).
+ */
+function OutlinePicture({ outer, kind }: { outer: readonly PtMm[]; kind: 'cut' | 'seam' }) {
+  const S = 112;
+  if (outer.length < 3) return <span style={{ width: S, height: S }} />;
+  const xs = outer.map((p) => p.x);
+  const ys = outer.map((p) => vy(p.y));
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(...xs) - minX || 1;
+  const h = Math.max(...ys) - minY || 1;
+  const side = Math.max(w, h);
+  // room for the offset ring and the scissors
+  const pad = side * 0.14;
+  const box = side + 2 * pad;
+  const px = box / S; // viewBox units per screen pixel
+  const pts = ptsAttr(outer);
+  const top = outer.reduce((a, p) => (vy(p.y) < vy(a.y) ? p : a));
+  return (
+    <svg
+      width={S}
+      height={S}
+      viewBox={`${minX + w / 2 - box / 2} ${minY + h / 2 - box / 2} ${box} ${box}`}
+      aria-hidden
+    >
+      {kind === 'seam' && (
+        <>
+          {/* the ring: a wide blue stroke, a slightly narrower white one, the piece on top */}
+          <polygon
+            points={pts}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={px * 14}
+            strokeLinejoin='round'
+          />
+          <polygon
+            points={pts}
+            fill='none'
+            stroke='#ffffff'
+            strokeWidth={px * 11}
+            strokeLinejoin='round'
+          />
+        </>
+      )}
+      <polygon
+        points={pts}
+        fill={SHEET_INK.fill}
+        stroke={SHEET_INK.ink}
+        strokeWidth={px * (kind === 'cut' ? 2 : 1.5)}
+        strokeDasharray={kind === 'seam' ? `${px * 5} ${px * 3}` : undefined}
+      />
+      {kind === 'cut' && (
+        <text
+          x={top.x}
+          y={vy(top.y)}
+          fontSize={px * 22}
+          textAnchor='middle'
+          dominantBaseline='central'
+          fill={SHEET_INK.ink}
+          stroke='#ffffff'
+          strokeWidth={px * 3}
+          paintOrder='stroke'
+        >
+          ✂
+        </text>
+      )}
+    </svg>
   );
 }
 

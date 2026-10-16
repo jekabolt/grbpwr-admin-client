@@ -135,10 +135,14 @@ const hint = (h: string) => ({ 'data-ask-hint': h });
 type Problem = {
   key: string;
   seed: SeedId | null;
-  kind: 'blocked' | 'fold' | 'cutlist' | 'outline' | 'qty' | 'name' | 'code' | 'gate';
+  kind: 'blocked' | 'fold' | 'cutlist' | 'outline' | 'qty' | 'name' | 'code' | 'gate' | 'group';
   reason?: string;
   label: string;
+  /** A group question (owner 16.10: one question for the same ask on many pieces). */
+  group?: Group;
+  seeds?: SeedId[];
 };
+type Group = 'grain' | 'code' | 'qty' | 'name';
 
 /**
  * The blocked row the footer's "N pieces …" points at — in table order, the same priority as the
@@ -222,6 +226,15 @@ export function DetailsStep({
   // every question seen on this run, in first-seen order: the answered ones stay listed, ticked
   // (the wizard owns it — the step unmounts while a semantics re-run shows the busy screen)
   const seen = useQuizSlot('details', () => new Map<string, Problem>());
+  // the groups the operator opened "one by one" (kept while the step remounts on a re-run)
+  const split = useQuizSlot('details-split', () => new Set<Group>());
+  const [, setSplitN] = useState(0);
+  const splitGroup = (g: Group) => {
+    split.add(g);
+    seen.delete(`grp:${g}`);
+    setPick(null);
+    setSplitN((n) => n + 1);
+  };
   const [synced, setSynced] = useState<string | null>(null);
   // the active question's free answer (a count not offered, a new name) is open
   const [other, setOther] = useState(false);
@@ -833,6 +846,21 @@ export function DetailsStep({
         });
       }
     };
+    // owner 16.10: the file-wide questions first — one answer for every piece
+    if (outlineOpen)
+      problems.push({
+        key: 'outline',
+        seed: null,
+        kind: 'outline',
+        label: 'the drawn outline is…',
+      });
+    if (sem.foldList)
+      problems.push({
+        key: 'cutlist',
+        seed: null,
+        kind: 'cutlist',
+        label: 'cutting list folds right?',
+      });
     blockedPass((r) => r === 'no-grain');
     blockedPass((r) => r === 'fold-question');
     blockedPass(() => true);
@@ -846,20 +874,6 @@ export function DetailsStep({
           label: `${pieceWord(seed)}: cut on fold?`,
         });
       }
-    if (sem.foldList)
-      problems.push({
-        key: 'cutlist',
-        seed: null,
-        kind: 'cutlist',
-        label: 'cutting list folds right?',
-      });
-    if (outlineOpen)
-      problems.push({
-        key: 'outline',
-        seed: null,
-        kind: 'outline',
-        label: 'drawn outline: cut or seam?',
-      });
     for (const f of rows) {
       const seed = f.seed;
       if (taken.has(seed)) continue;
@@ -890,6 +904,53 @@ export function DetailsStep({
     // what the footer still asks that no question above carries: said in its own words
     if (!problems.length && api.blocker)
       problems.push({ key: `gate:${api.blocker}`, seed: null, kind: 'gate', label: api.blocker });
+    // owner 16.10: the same ask on two or more pieces is ONE question (grain, codes, counts,
+    // names); "one by one" opens a group back into its pieces (names stay one list)
+    const groupOf = (p: Problem): Group | null =>
+      p.kind === 'blocked' && p.reason === 'no-grain'
+        ? 'grain'
+        : p.kind === 'code' ||
+            (p.kind === 'blocked' && (p.reason === 'grammar' || p.reason === 'duplicate-identity'))
+          ? 'code'
+          : p.kind === 'qty'
+            ? 'qty'
+            : p.kind === 'name'
+              ? 'name'
+              : null;
+    const members = new Map<Group, Problem[]>();
+    for (const p of problems) {
+      const g = groupOf(p);
+      if (g) members.set(g, [...(members.get(g) ?? []), p]);
+    }
+    const grouped: Problem[] = [];
+    const placed = new Set<Group>();
+    for (const p of problems) {
+      const g = groupOf(p);
+      const m = g ? members.get(g)! : [];
+      if (!g || m.length < 2 || (g !== 'name' && split.has(g))) {
+        grouped.push(p);
+        continue;
+      }
+      if (placed.has(g)) continue;
+      placed.add(g);
+      const n = m.length;
+      grouped.push({
+        key: `grp:${g}`,
+        seed: m[0].seed,
+        seeds: m.flatMap((x) => (x.seed != null ? [x.seed] : [])),
+        kind: 'group',
+        group: g,
+        label:
+          g === 'grain'
+            ? `${n} pieces: grain direction?`
+            : g === 'code'
+              ? `codes of ${n} pieces?`
+              : g === 'qty'
+                ? `${n} counts right?`
+                : 'names right?',
+      });
+    }
+    problems.splice(0, problems.length, ...grouped);
   }
   for (const p of problems) seen.set(p.key, p);
   const listed = [...seen.values()];
@@ -946,15 +1007,172 @@ export function DetailsStep({
   /** The active question: a picture, the question, and only the answers the session takes. */
   const problemCard = (p: Problem) => {
     const busy = !!session.busy;
+    // the proposals overview is open on the left: the card answers it (accept, or back)
+    const reviewOpen = reviewing && proposals.length > 0 && !!reviewBox;
+    const reviewAnswers = (
+      <span className='flex flex-col items-stretch gap-1.5'>
+        <Button
+          {...ask('details-grain-accept')}
+          variant='secondary'
+          size='xs'
+          disabled={busy}
+          onClick={acceptProposals}
+        >
+          accept these {proposals.length}
+        </Button>
+        <Button variant='underline' size='xs' onClick={() => setReviewing(false)}>
+          back
+        </Button>
+      </span>
+    );
     const seed = p.seed;
     let why: string | null = null;
     let answers: React.ReactNode = null;
-    let pic: React.ReactNode = seed != null ? <PieceThumb outer={outerOf(seed)} /> : null;
     if (p.kind === 'outline') {
       why = 'the sheet does not say whether the seam allowance is in the drawing';
-      const first = rows[0]?.seed;
-      pic = first != null ? <PieceThumb outer={outerOf(first)} crop /> : null;
-      answers = <OutlineQuestion api={api} current={fileAllowance} answersOnly />;
+      // the pictures are drawn from the largest piece: the outline reads best there
+      const big = [...rows].sort(
+        (x, y) =>
+          (y.candidates[y.candidates.length - 1]?.areaMm2 ?? 0) -
+          (x.candidates[x.candidates.length - 1]?.areaMm2 ?? 0),
+      )[0];
+      answers = (
+        <OutlineQuestion
+          api={api}
+          current={fileAllowance}
+          answersOnly
+          outer={big ? grainRing(big.seed) ?? outerOf(big.seed) : []}
+        />
+      );
+    } else if (p.kind === 'group' && p.seeds) {
+      const sds = p.seeds;
+      const oneByOne = (
+        <Button variant='underline' size='xs' disabled={busy} onClick={() => splitGroup(p.group!)}>
+          one by one
+        </Button>
+      );
+      if (p.group === 'grain') {
+        const bulkSeeds = bulkVertical();
+        const props = proposals.filter((g) => sds.includes(g.seed));
+        why = 'the sheet draws no grainline on these pieces';
+        answers = reviewOpen ? (
+          reviewAnswers
+        ) : (
+          <span className='flex flex-col items-stretch gap-1.5'>
+            {props.length > 0 && (
+              <Button
+                {...ask('details-blocked')}
+                variant='secondary'
+                size='xs'
+                disabled={busy}
+                title='every proposed grainline on its piece (left), then accept them together'
+                onClick={() => setReviewing(true)}
+              >
+                all proposed ({props.length})
+              </Button>
+            )}
+            {bulkSeeds.length > 0 && (
+              <Button
+                {...ask('details-blocked')}
+                variant='secondary'
+                size='xs'
+                disabled={busy}
+                title={`the ${bulkSeeds.length} pieces with no grainline, no proposal and no fold: straight grain along the sheet's vertical`}
+                onClick={() => setGrainAxis(bulkSeeds, 90)}
+              >
+                all vertical ({bulkSeeds.length})
+              </Button>
+            )}
+            {oneByOne}
+          </span>
+        );
+      } else if (p.group === 'code') {
+        why = 'the export writes the code on every block';
+        answers = (
+          <span className='flex flex-col items-stretch gap-1.5'>
+            {bulk.size > 0 && (
+              <Button
+                {...ask('details-blocked')}
+                variant='secondary'
+                size='xs'
+                disabled={busy}
+                title='codes in sheet order; the sheet words stay the names'
+                onClick={nameAll}
+              >
+                name {plural(bulk.size, 'piece')}
+              </Button>
+            )}
+            {oneByOne}
+          </span>
+        );
+      } else if (p.group === 'qty') {
+        why = 'no sheet text gives these counts';
+        answers = (
+          <span className='flex flex-col items-stretch gap-1.5'>
+            <Button
+              {...ask('details-confirm')}
+              variant='secondary'
+              size='xs'
+              disabled={busy}
+              title='keep every count as shown'
+              onClick={() =>
+                api.patchInputs((i) => ({
+                  confirmedQuantities: {
+                    ...i.confirmedQuantities,
+                    ...Object.fromEntries(
+                      sds.flatMap((sd) => {
+                        const u = qtyOpen(open, sd);
+                        return u ? [[sd, questionKey(u, api.answersNow)]] : [];
+                      }),
+                    ),
+                  },
+                }))
+              }
+            >
+              all right
+            </Button>
+            {oneByOne}
+          </span>
+        );
+      } else {
+        // names: one list, each name editable where it stands, one answer for all
+        why = 'names read off the sheet or proposed: keep them, or type over one';
+        answers = (
+          <span className='flex flex-col items-stretch gap-1.5'>
+            {sds.map((sd) => {
+              const n = rowData(sd).n;
+              return (
+                <label key={sd} className='flex items-center gap-1.5'>
+                  <MarkBox n={mark(sd)} />
+                  <Input
+                    key={n?.displayName ?? ''}
+                    defaultValue={n?.displayName ?? ''}
+                    aria-label={`name of piece ${mark(sd)}`}
+                    className='h-[22px] min-w-0 flex-1'
+                    onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                      const v = e.currentTarget.value.trim();
+                      if (v !== (n?.displayName ?? '')) setName(sd, { displayName: v });
+                    }}
+                  />
+                </label>
+              );
+            })}
+            <Button
+              {...ask('details-confirm')}
+              variant='secondary'
+              size='xs'
+              disabled={busy}
+              onClick={() =>
+                patchInputs((i) => ({
+                  confirmedNames: [...new Set([...i.confirmedNames, ...sds])],
+                }))
+              }
+            >
+              all right
+            </Button>
+          </span>
+        );
+      }
     } else if (p.kind === 'blocked' && seed != null) {
       const b = blockedOf(seed);
       const pr = proposalOf(seed);
@@ -962,8 +1180,10 @@ export function DetailsStep({
         why = pr ? `proposed: ${pr.why}` : 'the sheet draws no grainline on this piece';
         const bulkSeeds = bulkVertical();
         const many = bulkSeeds.length >= 2;
-        answers = (
-          <span className='flex flex-wrap items-center gap-1.5'>
+        answers = reviewOpen ? (
+          reviewAnswers
+        ) : (
+          <span className='flex flex-col items-stretch gap-1.5'>
             {proposals.length >= 2 && (
               // every proposal at once: the overview shows each on its piece, "accept these N"
               // there applies them (D3: nothing accepted unseen) — two clicks for the whole file
@@ -1038,7 +1258,7 @@ export function DetailsStep({
       } else if (p.reason === 'grammar' || p.reason === 'duplicate-identity') {
         why = b?.detail ?? null;
         answers = (
-          <span className='flex flex-wrap items-start gap-1.5'>
+          <span className='flex flex-col items-stretch gap-1.5'>
             {codeField(seed)}
             {bulk.has(seed) && (
               <Button
@@ -1090,7 +1310,7 @@ export function DetailsStep({
         .filter(Boolean)
         .join(' · ');
       answers = (
-        <span className='flex flex-wrap items-center gap-1.5'>
+        <span className='flex flex-col items-stretch gap-1.5'>
           <Button
             {...ask('details-confirm')}
             {...hint('pick how many per garment')}
@@ -1146,7 +1366,7 @@ export function DetailsStep({
         open.name.find((u) => u.seed === seed)?.detail ??
         'an AI name below the auto-accept threshold';
       answers = (
-        <span className='flex flex-wrap items-start gap-1.5'>
+        <span className='flex flex-col items-stretch gap-1.5'>
           <Button
             {...ask('details-confirm')}
             {...hint('keep the name, or rename it')}
@@ -1186,11 +1406,17 @@ export function DetailsStep({
     }
     return (
       <CalloutBox tone='warning' className='mt-2 flex items-start gap-3 py-2'>
-        {pic}
         <span className='flex min-w-0 flex-1 flex-col gap-1.5'>
-          {/* owner 16.10: the question and its answers; why it is asked is the hover */}
+          {/* owner 16.10: the question and its answers; why it is asked is the hover. The
+              piece itself is the big preview on the left — no thumbnail here */}
           <Text size='micro' component='p' title={why ?? undefined}>
             <b>{p.label}</b>
+            {p.kind === 'outline' && (
+              <Text size='micro' variant='label' component='span'>
+                {' '}
+                for all pieces
+              </Text>
+            )}
           </Text>
           {/* where the answer is not on the card itself, the why says where it is */}
           {why && (p.kind === 'gate' || p.kind === 'cutlist') && (
@@ -1439,7 +1665,6 @@ export function DetailsStep({
 
   return (
     <SplitStage
-      sideWidth={340}
       canvas={
         reviewing && proposals.length && reviewBox ? (
           <Panel
@@ -1461,7 +1686,7 @@ export function DetailsStep({
             bodyClassName='p-0 flex flex-col'
           >
             <div className='min-h-[480px] flex-1'>
-              <SheetViewport bbox={reviewBox} focus={null}>
+              <SheetViewport key='review' bbox={reviewBox} focus={null}>
                 {({ unit }) => (
                   <>
                     {families.map((f) => {
@@ -1501,164 +1726,231 @@ export function DetailsStep({
           </Panel>
         ) : (
           <Panel
-            title='pieces'
-            aside={
-              // owner 16.10: nothing beside the open question — the warnings wait until it is answered
-              asking ? null : <HeaderWarnings items={[...sem.warnings, passportWarning(api)]} />
+            title={
+              sel != null ? (
+                <span
+                  title={[
+                    `blocks: ${
+                      specsOf(sel)
+                        .map((s) => s.identity)
+                        .join(', ') || '—'
+                    }`,
+                    `sizes: ${
+                      specsOf(sel)[0]
+                        ?.sizes.map((z) => z.sizeToken)
+                        .join(' ') || '—'
+                    }`,
+                    `fabrics proposed: ${nameOf(sel)?.suggestion?.fabrics.length ?? '—'}`,
+                  ].join(' · ')}
+                >
+                  piece {mark(sel)} · {nameOf(sel)?.displayName || '—'}
+                </span>
+              ) : (
+                'piece'
+              )
             }
+            aside={
+              // a piece without a grainline draws it from the one button under the drawing
+              sel != null &&
+              blockedOf(sel)?.reason !== 'no-grain' && (
+                <Chip
+                  quiet
+                  selected={drawing}
+                  pressed={drawing}
+                  onClick={() => {
+                    setGrainA(null);
+                    setPickingFold(false);
+                    setDrawing((d) => !d);
+                  }}
+                >
+                  {drawing ? 'drawing grainline…' : 'draw grainline'}
+                </Chip>
+              )
+            }
+            bodyClassName='p-0 flex flex-col'
           >
-            {checklist}
-            {active && (
-              <div
-                ref={cardRef}
-                data-ask-zone=''
-                data-ask-label={active.label}
-                data-testid='details-question'
-              >
-                {problemCard(active)}
-              </div>
-            )}
-
-            {!asking && (
+            {sel == null || !selOuter ? (
+              <Text size='micro' variant='label' component='p' className='p-2'>
+                select a row
+              </Text>
+            ) : (
               <>
-                <Fold
-                  label={`all pieces · ${rows.length}`}
-                  // the gate's own words with no row above: its field is in here (aria-invalid)
-                  ask={active?.kind === 'gate' ? 'details-ready' : undefined}
-                  className='mt-3'
+                <div
+                  className='relative min-h-0 flex-1'
+                  // the answer is drawn here: the coach rings the drawing, not the card
+                  {...(drawing || pickingFold
+                    ? {
+                        'data-ask-zone': '',
+                        'data-ask-label': drawing
+                          ? grainA
+                            ? 'now click the other end'
+                            : 'click one end of the grain'
+                          : 'click the fold edge',
+                      }
+                    : {})}
                 >
-                  <ConfirmStrip api={api} />
-                  {pieceTable(rows, true)}
-                </Fold>
-                <Fold
-                  label={`line & allowance · ${
-                    MEANING.find((m) => m.value === fileAllowance.meaning)?.label ??
-                    fileAllowance.meaning
-                  } · ${fileAllowance.allowanceMm} mm`}
-                >
-                  {/* the file's answer: set by the question box above while it is open (one place) */}
-                  {!outlineOpen && (
-                    <div className='mb-1 flex flex-wrap items-end gap-2'>
-                      <Field label='drawn outline' className='w-40'>
-                        <NativeSelect
-                          value={fileAllowance.meaning}
-                          title={fileNote}
-                          onChange={(v) =>
-                            rerun({
-                              fileAllowance: {
-                                ...fileAllowance,
-                                meaning: v as LineMeaning,
-                                origin: 'operator',
-                              },
-                            })
-                          }
-                          options={MEANING}
-                        />
-                      </Field>
-                      <Field label='allowance, mm' className='w-40'>
-                        <NumberField
-                          value={fileAllowance.allowanceMm}
-                          min={0}
-                          title={fileNote}
-                          onCommit={(v) =>
-                            rerun({
-                              fileAllowance: {
-                                ...fileAllowance,
-                                allowanceMm: v ?? 0,
-                                origin: 'operator',
-                              },
-                            })
-                          }
-                        />
-                      </Field>
+                  {/* owner 16.10: a drawing answer says what to click ON the canvas, big */}
+                  {(drawing || (pickingFold && selPick)) && (
+                    <div
+                      data-testid='details-canvas-banner'
+                      className='pointer-events-none absolute inset-x-0 top-0 z-10 bg-warning/90 px-3 py-2 text-center text-[18px] font-bold leading-tight text-white'
+                    >
+                      {drawing
+                        ? grainA
+                          ? 'now click the other end'
+                          : 'click one end of the grain'
+                        : 'click the fold edge'}
                     </div>
                   )}
-                  <DataTable>
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th data-align='left'>code</th>
-                        <th data-align='left'>line</th>
-                        <th>allow., mm</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((f) => {
-                        const d = rowData(f.seed);
-                        return (
-                          <tr key={f.seed}>
-                            <td>
-                              <MarkBox n={mark(f.seed)} />
-                            </td>
-                            <td data-align='left'>{codeOf(f.seed)}</td>
-                            <td data-align='left'>
-                              <NativeSelect
-                                value={d.allowance.meaning}
-                                onChange={(v) =>
-                                  override(f.seed, {
-                                    allowance: {
-                                      ...d.allowance,
-                                      meaning: v as LineMeaning,
-                                      origin: 'operator',
-                                    },
-                                  })
-                                }
-                                aria-label={`line meaning of piece ${mark(f.seed)}`}
-                                className='w-24'
-                                options={MEANING}
-                              />
-                            </td>
-                            <td>
-                              <NumberField
-                                value={d.allowance.allowanceMm}
-                                min={0}
-                                aria-label={`allowance of piece ${mark(f.seed)}`}
-                                className='ml-auto w-16'
-                                onCommit={(v) =>
-                                  override(f.seed, {
-                                    allowance: {
-                                      ...d.allowance,
-                                      allowanceMm: v ?? 0,
-                                      origin: 'operator',
-                                    },
-                                  })
-                                }
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </DataTable>
-                </Fold>
-                <DebugFold>
-                  <Text size='micro' variant='label' component='p'>
-                    {sem.pieces.length} blocks · {sem.blocked.length} blocked ·{' '}
-                    {fileAllowance.origin === 'operator'
-                      ? 'outline set by you'
-                      : fileAllowance.evidence.join(' · ') || fileAllowance.origin}
-                  </Text>
-                  {card.existingPieces.length > 0 && (
-                    <Text size='micro' variant='label' component='p'>
-                      card pieces already here: {card.existingPieces.map((p) => p.name).join(', ')}
-                    </Text>
-                  )}
-                  {rows.map((f) => {
-                    const n = rowData(f.seed).n;
-                    return (
-                      <Text key={f.seed} size='micro' variant='label' component='p'>
-                        {mark(f.seed)} · {codeOf(f.seed)} · name from{' '}
-                        {nameFromWord(n, inputs.confirmedNames.includes(f.seed))}
-                        {n?.source === 'ai' ? ` · ${fmtPct(n.confidence, 0)}` : ''}
-                        {specsOf(f.seed).length
-                          ? ` · ${specsOf(f.seed)
-                              .map((s) => s.identity)
-                              .join(', ')}`
-                          : ''}
+                  <SheetViewport
+                    key='preview'
+                    bbox={session.sheet.sheet.bbox}
+                    focus={selCand?.bbox ?? null}
+                    tool={drawing || pickingFold ? 'point' : 'pan'}
+                    onPoint={(pt) => {
+                      if (pickingFold && selPick) {
+                        const e = edgeAt(selPick, pt);
+                        if (e) pickFold(sel, e);
+                        return;
+                      }
+                      if (!drawing) return;
+                      if (!grainA) setGrainA(pt);
+                      else {
+                        rerun({
+                          operatorGrain: { ...inputs.operatorGrain, [sel]: { a: grainA, b: pt } },
+                        });
+                        setGrainA(null);
+                        setDrawing(false);
+                      }
+                    }}
+                  >
+                    {({ unit }) => (
+                      <>
+                        {families
+                          .filter((f) => f.seed !== sel)
+                          .map((f) => (
+                            <polygon
+                              key={f.seed}
+                              points={ptsAttr(f.candidates[selRank]?.outer ?? [])}
+                              fill='none'
+                              stroke='#dddddd'
+                              strokeWidth={unit}
+                            />
+                          ))}
+                        <polygon
+                          points={ptsAttr(selOuter)}
+                          fill='#f2f2f2'
+                          stroke={SHEET_INK.ink}
+                          strokeWidth={unit * 1.6}
+                        />
+                        {selAsk?.edges.map((e, i) => {
+                          // the suggested edge solid, the others dashed: never colour alone
+                          const sug = i === selAsk.suggested;
+                          return (
+                            <line
+                              key={i}
+                              x1={e.a.x}
+                              y1={vy(e.a.y)}
+                              x2={e.b.x}
+                              y2={vy(e.b.y)}
+                              stroke={sug ? SHEET_INK.blue : SHEET_INK.red}
+                              strokeWidth={unit * (sug ? 4 : 2.5)}
+                              strokeDasharray={sug ? undefined : `${unit * 6} ${unit * 4}`}
+                              pointerEvents='none'
+                            />
+                          );
+                        })}
+                        {selMiss &&
+                          pickingFold &&
+                          selMiss.edges.map((e, i) => (
+                            <line
+                              key={`m${i}`}
+                              x1={e.a.x}
+                              y1={vy(e.a.y)}
+                              x2={e.b.x}
+                              y2={vy(e.b.y)}
+                              stroke={SHEET_INK.red}
+                              strokeWidth={unit * 2.5}
+                              strokeDasharray={`${unit * 6} ${unit * 4}`}
+                              pointerEvents='none'
+                            />
+                          ))}
+                        {selMiss?.picked && (
+                          // the pick that is not found in every size: solid, the candidates dashed
+                          <line
+                            x1={selMiss.picked.a.x}
+                            y1={vy(selMiss.picked.a.y)}
+                            x2={selMiss.picked.b.x}
+                            y2={vy(selMiss.picked.b.y)}
+                            stroke={SHEET_INK.red}
+                            strokeWidth={unit * 4}
+                            pointerEvents='none'
+                          />
+                        )}
+                        {selGrain && (
+                          <GrainMark
+                            a={selGrain.a}
+                            b={selGrain.b}
+                            unit={unit}
+                            tone={inputs.operatorGrain[sel] ? SHEET_INK.blue : SHEET_INK.red}
+                          />
+                        )}
+                        {selProposal && (
+                          <GrainMark
+                            a={selProposal.a}
+                            b={selProposal.b}
+                            unit={unit}
+                            tone={SHEET_INK.blue}
+                            dashed
+                          />
+                        )}
+                        {grainA && (
+                          <circle
+                            cx={grainA.x}
+                            cy={vy(grainA.y)}
+                            r={unit * 4}
+                            fill={SHEET_INK.blue}
+                          />
+                        )}
+                      </>
+                    )}
+                  </SheetViewport>
+                </div>
+                <div ref={actionsRef} className='shrink-0 border-t border-hairline p-2'>
+                  {drawing ? (
+                    <div className='flex items-center justify-end gap-2'>
+                      <Chip
+                        quiet
+                        onClick={() => {
+                          setGrainA(null);
+                          setDrawing(false);
+                        }}
+                      >
+                        cancel
+                      </Chip>
+                    </div>
+                  ) : pickingFold && selPick ? (
+                    <div className='flex items-center gap-2'>
+                      <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                        {selAsk
+                          ? '! click the fold edge (solid = suggested)'
+                          : `! click the fold edge on size ${selMiss!.refSize} (solid = your pick, not found in ${selMiss!.size})`}
                       </Text>
-                    );
-                  })}
-                </DebugFold>
+                      <Chip quiet onClick={() => setPickingFold(false)}>
+                        cancel
+                      </Chip>
+                    </div>
+                  ) : (
+                    <>
+                      {!asking && sel !== active?.seed && (
+                        <>
+                          {selAsk && foldAskActions(sel, true)}
+                          {blockedOf(sel) && !selAsk && blockedActions(sel)}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
               </>
             )}
           </Panel>
@@ -1666,230 +1958,164 @@ export function DetailsStep({
       }
       side={
         <Panel
-          title={
-            sel != null ? (
-              <span
-                title={[
-                  `blocks: ${
-                    specsOf(sel)
-                      .map((s) => s.identity)
-                      .join(', ') || '—'
-                  }`,
-                  `sizes: ${
-                    specsOf(sel)[0]
-                      ?.sizes.map((z) => z.sizeToken)
-                      .join(' ') || '—'
-                  }`,
-                  `fabrics proposed: ${nameOf(sel)?.suggestion?.fabrics.length ?? '—'}`,
-                ].join(' · ')}
-              >
-                piece {mark(sel)} · {nameOf(sel)?.displayName || '—'}
-              </span>
-            ) : (
-              'piece'
-            )
-          }
+          title='details'
           aside={
-            // a piece without a grainline draws it from the one button under the drawing
-            sel != null &&
-            blockedOf(sel)?.reason !== 'no-grain' && (
-              <Chip
-                quiet
-                selected={drawing}
-                pressed={drawing}
-                onClick={() => {
-                  setGrainA(null);
-                  setPickingFold(false);
-                  setDrawing((d) => !d);
-                }}
-              >
-                {drawing ? 'drawing grainline…' : 'draw grainline'}
-              </Chip>
-            )
+            // owner 16.10: nothing beside the open question — the warnings wait until it is answered
+            asking ? null : <HeaderWarnings items={[...sem.warnings, passportWarning(api)]} />
           }
-          bodyClassName='p-0 flex flex-col'
         >
-          {sel == null || !selOuter ? (
-            <Text size='micro' variant='label' component='p' className='p-2'>
-              select a row
-            </Text>
-          ) : (
+          {checklist}
+          {active && (
+            <div
+              ref={cardRef}
+              data-ask-zone=''
+              data-ask-label={active.label}
+              data-testid='details-question'
+            >
+              {problemCard(active)}
+            </div>
+          )}
+
+          {!asking && (
             <>
-              <div
-                className='relative min-h-0 flex-1'
-                // the answer is drawn here: the coach rings the drawing, not the card
-                {...(drawing || pickingFold
-                  ? {
-                      'data-ask-zone': '',
-                      'data-ask-label': drawing
-                        ? grainA
-                          ? 'now click the other end'
-                          : 'click one end of the grain'
-                        : 'click the fold edge',
-                    }
-                  : {})}
+              <Fold
+                label={`all pieces · ${rows.length}`}
+                // the gate's own words with no row above: its field is in here (aria-invalid)
+                ask={active?.kind === 'gate' ? 'details-ready' : undefined}
+                className='mt-3'
               >
-                {/* owner 16.10: a drawing answer says what to click ON the canvas, big */}
-                {(drawing || (pickingFold && selPick)) && (
-                  <div
-                    data-testid='details-canvas-banner'
-                    className='pointer-events-none absolute inset-x-0 top-0 z-10 bg-warning/90 px-3 py-2 text-center text-[18px] font-bold leading-tight text-white'
-                  >
-                    {drawing
-                      ? grainA
-                        ? 'now click the other end'
-                        : 'click one end of the grain'
-                      : 'click the fold edge'}
-                  </div>
-                )}
-                <SheetViewport
-                  bbox={session.sheet.sheet.bbox}
-                  focus={selCand?.bbox ?? null}
-                  tool={drawing || pickingFold ? 'point' : 'pan'}
-                  onPoint={(pt) => {
-                    if (pickingFold && selPick) {
-                      const e = edgeAt(selPick, pt);
-                      if (e) pickFold(sel, e);
-                      return;
-                    }
-                    if (!drawing) return;
-                    if (!grainA) setGrainA(pt);
-                    else {
-                      rerun({
-                        operatorGrain: { ...inputs.operatorGrain, [sel]: { a: grainA, b: pt } },
-                      });
-                      setGrainA(null);
-                      setDrawing(false);
-                    }
-                  }}
-                >
-                  {({ unit }) => (
-                    <>
-                      {families
-                        .filter((f) => f.seed !== sel)
-                        .map((f) => (
-                          <polygon
-                            key={f.seed}
-                            points={ptsAttr(f.candidates[selRank]?.outer ?? [])}
-                            fill='none'
-                            stroke='#dddddd'
-                            strokeWidth={unit}
-                          />
-                        ))}
-                      <polygon
-                        points={ptsAttr(selOuter)}
-                        fill='#f2f2f2'
-                        stroke={SHEET_INK.ink}
-                        strokeWidth={unit * 1.6}
+                <ConfirmStrip api={api} />
+                {pieceTable(rows, true)}
+              </Fold>
+              <Fold
+                label={`line & allowance · ${
+                  MEANING.find((m) => m.value === fileAllowance.meaning)?.label ??
+                  fileAllowance.meaning
+                } · ${fileAllowance.allowanceMm} mm`}
+              >
+                {/* the file's answer: set by the question box above while it is open (one place) */}
+                {!outlineOpen && (
+                  <div className='mb-1 flex flex-wrap items-end gap-2'>
+                    <Field label='drawn outline' className='w-40'>
+                      <NativeSelect
+                        value={fileAllowance.meaning}
+                        title={fileNote}
+                        onChange={(v) =>
+                          rerun({
+                            fileAllowance: {
+                              ...fileAllowance,
+                              meaning: v as LineMeaning,
+                              origin: 'operator',
+                            },
+                          })
+                        }
+                        options={MEANING}
                       />
-                      {selAsk?.edges.map((e, i) => {
-                        // the suggested edge solid, the others dashed: never colour alone
-                        const sug = i === selAsk.suggested;
-                        return (
-                          <line
-                            key={i}
-                            x1={e.a.x}
-                            y1={vy(e.a.y)}
-                            x2={e.b.x}
-                            y2={vy(e.b.y)}
-                            stroke={sug ? SHEET_INK.blue : SHEET_INK.red}
-                            strokeWidth={unit * (sug ? 4 : 2.5)}
-                            strokeDasharray={sug ? undefined : `${unit * 6} ${unit * 4}`}
-                            pointerEvents='none'
-                          />
-                        );
-                      })}
-                      {selMiss &&
-                        pickingFold &&
-                        selMiss.edges.map((e, i) => (
-                          <line
-                            key={`m${i}`}
-                            x1={e.a.x}
-                            y1={vy(e.a.y)}
-                            x2={e.b.x}
-                            y2={vy(e.b.y)}
-                            stroke={SHEET_INK.red}
-                            strokeWidth={unit * 2.5}
-                            strokeDasharray={`${unit * 6} ${unit * 4}`}
-                            pointerEvents='none'
-                          />
-                        ))}
-                      {selMiss?.picked && (
-                        // the pick that is not found in every size: solid, the candidates dashed
-                        <line
-                          x1={selMiss.picked.a.x}
-                          y1={vy(selMiss.picked.a.y)}
-                          x2={selMiss.picked.b.x}
-                          y2={vy(selMiss.picked.b.y)}
-                          stroke={SHEET_INK.red}
-                          strokeWidth={unit * 4}
-                          pointerEvents='none'
-                        />
-                      )}
-                      {selGrain && (
-                        <GrainMark
-                          a={selGrain.a}
-                          b={selGrain.b}
-                          unit={unit}
-                          tone={inputs.operatorGrain[sel] ? SHEET_INK.blue : SHEET_INK.red}
-                        />
-                      )}
-                      {selProposal && (
-                        <GrainMark
-                          a={selProposal.a}
-                          b={selProposal.b}
-                          unit={unit}
-                          tone={SHEET_INK.blue}
-                          dashed
-                        />
-                      )}
-                      {grainA && (
-                        <circle
-                          cx={grainA.x}
-                          cy={vy(grainA.y)}
-                          r={unit * 4}
-                          fill={SHEET_INK.blue}
-                        />
-                      )}
-                    </>
-                  )}
-                </SheetViewport>
-              </div>
-              <div ref={actionsRef} className='shrink-0 border-t border-hairline p-2'>
-                {drawing ? (
-                  <div className='flex items-center justify-end gap-2'>
-                    <Chip
-                      quiet
-                      onClick={() => {
-                        setGrainA(null);
-                        setDrawing(false);
-                      }}
-                    >
-                      cancel
-                    </Chip>
+                    </Field>
+                    <Field label='allowance, mm' className='w-40'>
+                      <NumberField
+                        value={fileAllowance.allowanceMm}
+                        min={0}
+                        title={fileNote}
+                        onCommit={(v) =>
+                          rerun({
+                            fileAllowance: {
+                              ...fileAllowance,
+                              allowanceMm: v ?? 0,
+                              origin: 'operator',
+                            },
+                          })
+                        }
+                      />
+                    </Field>
                   </div>
-                ) : pickingFold && selPick ? (
-                  <div className='flex items-center gap-2'>
-                    <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
-                      {selAsk
-                        ? '! click the fold edge (solid = suggested)'
-                        : `! click the fold edge on size ${selMiss!.refSize} (solid = your pick, not found in ${selMiss!.size})`}
-                    </Text>
-                    <Chip quiet onClick={() => setPickingFold(false)}>
-                      cancel
-                    </Chip>
-                  </div>
-                ) : (
-                  <>
-                    {sel !== active?.seed && (
-                      <>
-                        {selAsk && foldAskActions(sel, true)}
-                        {blockedOf(sel) && !selAsk && blockedActions(sel)}
-                      </>
-                    )}
-                  </>
                 )}
-              </div>
+                <DataTable>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th data-align='left'>code</th>
+                      <th data-align='left'>line</th>
+                      <th>allow., mm</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((f) => {
+                      const d = rowData(f.seed);
+                      return (
+                        <tr key={f.seed}>
+                          <td>
+                            <MarkBox n={mark(f.seed)} />
+                          </td>
+                          <td data-align='left'>{codeOf(f.seed)}</td>
+                          <td data-align='left'>
+                            <NativeSelect
+                              value={d.allowance.meaning}
+                              onChange={(v) =>
+                                override(f.seed, {
+                                  allowance: {
+                                    ...d.allowance,
+                                    meaning: v as LineMeaning,
+                                    origin: 'operator',
+                                  },
+                                })
+                              }
+                              aria-label={`line meaning of piece ${mark(f.seed)}`}
+                              className='w-24'
+                              options={MEANING}
+                            />
+                          </td>
+                          <td>
+                            <NumberField
+                              value={d.allowance.allowanceMm}
+                              min={0}
+                              aria-label={`allowance of piece ${mark(f.seed)}`}
+                              className='ml-auto w-16'
+                              onCommit={(v) =>
+                                override(f.seed, {
+                                  allowance: {
+                                    ...d.allowance,
+                                    allowanceMm: v ?? 0,
+                                    origin: 'operator',
+                                  },
+                                })
+                              }
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </DataTable>
+              </Fold>
+              <DebugFold>
+                <Text size='micro' variant='label' component='p'>
+                  {sem.pieces.length} blocks · {sem.blocked.length} blocked ·{' '}
+                  {fileAllowance.origin === 'operator'
+                    ? 'outline set by you'
+                    : fileAllowance.evidence.join(' · ') || fileAllowance.origin}
+                </Text>
+                {card.existingPieces.length > 0 && (
+                  <Text size='micro' variant='label' component='p'>
+                    card pieces already here: {card.existingPieces.map((p) => p.name).join(', ')}
+                  </Text>
+                )}
+                {rows.map((f) => {
+                  const n = rowData(f.seed).n;
+                  return (
+                    <Text key={f.seed} size='micro' variant='label' component='p'>
+                      {mark(f.seed)} · {codeOf(f.seed)} · name from{' '}
+                      {nameFromWord(n, inputs.confirmedNames.includes(f.seed))}
+                      {n?.source === 'ai' ? ` · ${fmtPct(n.confidence, 0)}` : ''}
+                      {specsOf(f.seed).length
+                        ? ` · ${specsOf(f.seed)
+                            .map((s) => s.identity)
+                            .join(', ')}`
+                        : ''}
+                    </Text>
+                  );
+                })}
+              </DebugFold>
             </>
           )}
         </Panel>
@@ -2091,47 +2317,6 @@ function codeProblem(
         }),
       )
       .find((x) => x) ?? null
-  );
-}
-
-/**
- * The picture of a question: the piece's outline fitted in a small square, or (`crop`) a close-up
- * of its top corner — where the drawn line itself is the subject.
- */
-function PieceThumb({ outer, crop = false }: { outer: readonly PtMm[]; crop?: boolean }) {
-  if (outer.length < 3) return null;
-  const xs = outer.map((p) => p.x);
-  const ys = outer.map((p) => vy(p.y));
-  let minX = Math.min(...xs);
-  let minY = Math.min(...ys);
-  let w = Math.max(...xs) - minX || 1;
-  let h = Math.max(...ys) - minY || 1;
-  if (crop) {
-    const top = outer.reduce((a, p) => (vy(p.y) < vy(a.y) ? p : a));
-    const side = Math.max(w, h) * 0.35;
-    minX = top.x - side / 2;
-    minY = vy(top.y) - side * 0.15;
-    w = side;
-    h = side;
-  }
-  const pad = Math.max(w, h) * 0.06;
-  return (
-    <svg
-      width={88}
-      height={88}
-      viewBox={`${minX - pad} ${minY - pad} ${w + 2 * pad} ${h + 2 * pad}`}
-      preserveAspectRatio='xMidYMid meet'
-      className='shrink-0 border border-hairline bg-bgColor'
-      aria-hidden
-    >
-      <polygon
-        points={ptsAttr(outer)}
-        fill={SHEET_INK.fill}
-        stroke={SHEET_INK.ink}
-        strokeWidth={crop ? 2 : 1.2}
-        vectorEffect='non-scaling-stroke'
-      />
-    </svg>
   );
 }
 
