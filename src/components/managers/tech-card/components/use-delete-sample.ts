@@ -56,9 +56,27 @@ async function outstandingOf(sampleId: number): Promise<Outstanding[]> {
     }
     if (offset + limit >= (res.total ?? 0) || !(res.movements ?? []).length) break;
   }
-  return [...net.values()]
-    .map((o) => ({ ...o, qty: Number(o.qty.toFixed(3)) }))
-    .filter((o) => o.qty > 0);
+  // The material's net is the truth (that is what the server's verdict checks); lots only say
+  // where it goes back. A return booked without a lot (lot 0) still cancels lot A's issue, so the
+  // per-material net is spread over the lots that are still positive — lot-tracked first, then
+  // lot 0 — and never more than that net.
+  const byMaterial = new Map<number, Outstanding[]>();
+  for (const o of net.values())
+    byMaterial.set(o.materialId, [...(byMaterial.get(o.materialId) ?? []), o]);
+  const out: Outstanding[] = [];
+  for (const [materialId, seats] of byMaterial) {
+    let left = Number(seats.reduce((s, o) => s + o.qty, 0).toFixed(3));
+    const positive = seats
+      .filter((o) => o.qty > 0)
+      .sort((a, b) => (a.lotId ? 0 : 1) - (b.lotId ? 0 : 1));
+    for (const o of positive) {
+      if (left <= 0) break;
+      const qty = Number(Math.min(o.qty, left).toFixed(3));
+      if (qty > 0) out.push({ materialId, lotId: o.lotId, qty });
+      left = Number((left - qty).toFixed(3));
+    }
+  }
+  return out;
 }
 
 /** The batch takes one line per material — so lots of one material go in successive batches. */
