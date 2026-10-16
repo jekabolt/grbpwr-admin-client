@@ -1122,7 +1122,7 @@ export function DetailsStep({
                   <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
                     {pieceWord(sd)}
                   </Text>
-                  <Text size='micro' component='span' className='font-bold'>
+                  <Text size='micro' component='span'>
                     {u.shown}
                   </Text>
                   {u.foldAlt && (
@@ -1827,7 +1827,7 @@ export function DetailsStep({
                   {(drawing || (pickingFold && selPick)) && (
                     <div
                       data-testid='details-canvas-banner'
-                      className='pointer-events-none absolute inset-x-0 top-0 z-10 bg-warning/90 px-3 py-2 text-center text-[18px] font-bold leading-tight text-white'
+                      className='pointer-events-none absolute inset-x-0 top-0 z-10 bg-warning/90 px-3 py-2 text-center text-[18px] leading-tight text-white'
                     >
                       {drawing
                         ? grainA

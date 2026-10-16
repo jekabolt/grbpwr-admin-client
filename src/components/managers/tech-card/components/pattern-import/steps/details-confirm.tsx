@@ -101,7 +101,7 @@ export function OutlineQuestion({
           className={cn(OUTLINE_CARD, prefill === 'cut' && 'border-warning')}
         >
           <OutlinePicture outer={outer} kind='cut' />
-          <Text size='micro' component='span' className='font-bold uppercase'>
+          <Text size='micro' component='span' className='uppercase'>
             cut on this line
           </Text>
           <Text size='micro' variant='label' component='span'>
@@ -121,7 +121,7 @@ export function OutlineQuestion({
           className={OUTLINE_CARD}
         >
           <OutlinePicture outer={outer} kind='seam' />
-          <Text size='micro' component='span' className='font-bold uppercase'>
+          <Text size='micro' component='span' className='uppercase'>
             sew on this line
           </Text>
           <Text size='micro' variant='label' component='span'>
