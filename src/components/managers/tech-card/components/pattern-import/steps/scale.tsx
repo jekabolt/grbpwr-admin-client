@@ -3,10 +3,11 @@
 // its two answers: the square on paper typed in, or "it is 100 mm" (contract: a human look when
 // confidence < 0.9, the deviation exceeds 0.3 %, the square is not square, or a page has no
 // certain scale of its own). Candidates, factor and calibrations live in folds.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PATIMPORT } from 'lib/pattern-import/types';
-import type { ScaleCandidate } from 'lib/pattern-import/types';
+import type { BoxMm, CleanPreview, ScaleCandidate } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
+import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
@@ -15,8 +16,10 @@ import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { CALIBRATION_SURE, scaleUncertain } from '../auto-advance';
 import { anisotropyOf, squareSidesOf } from '../formats';
+import { SHEET_INK, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, NumberField, Panel, SplitStage, ask, fmtMm, fmtPct } from '../ui-bits';
+import { pathData } from './files-clean';
 
 const METHOD: Record<string, string> = {
   'test-square': 'test square',
@@ -64,62 +67,63 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
   const [measureOpen, setMeasureOpen] = useState<boolean | null>(null);
   const nominal = chosen?.declaredMm;
 
-  // the one question, worded like the footer's ask line (the % is the question's own evidence)
-  const question = !needsHuman
-    ? null
-    : nonSquare && sides
-      ? `square is ${sides.w.toFixed(2)} × ${sides.h.toFixed(2)} mm — measure the long side`
-      : chosen && chosen.confidence < 0.9
-        ? `${METHOD[chosen.method] ?? chosen.method} not certain (${fmtPct(chosen.confidence, 0)})`
-        : Math.abs(chosen!.factor - 1) > PATIMPORT.scaleWarnRatio
-          ? `${METHOD[chosen!.method] ?? chosen!.method} is off 1:1 by ${((chosen!.factor - 1) * 100).toFixed(2)} %`
-          : 'a page has no scale of its own';
+  const page = chosen?.evidence ? chosen.evidence.page + 1 : null;
+  const square = chosen?.evidence && nominal ? chosen.evidence.bbox : null;
+  // the page the square is on, drawn from the clean stage's page lines (the files step's strip)
+  const pagePreview = chosen?.evidence
+    ? session.clean?.previews.find((p) => p.page === chosen.evidence!.page)
+    : undefined;
+  const cm = nominal ? +(nominal / 10).toFixed(1) : null;
 
-  // the coach's how (THE ASK CONTRACT, ui-bits), per kind of doubt
-  const confirmHint = nonSquare
-    ? 'measure it on paper, or confirm it'
-    : chosen && !scaleUncertain(chosen, chosen.factor)
-      ? 'check the listed pages, then confirm'
-      : 'check the square on paper, then confirm';
-  const confirmChip = needsHuman && !inputs.manualMeasuredMm && (
-    <Chip
-      tone={inputs.scaleConfirmed ? undefined : 'attention'}
-      selected={inputs.scaleConfirmed}
-      pressed={inputs.scaleConfirmed}
-      onClick={() => patchInputs({ scaleConfirmed: !inputs.scaleConfirmed })}
-      title='I checked the square on paper — the detection stands'
-      {...ask('scale-confirm', asks, confirmHint)}
-    >
-      {nominal ? `it is ${nominal} mm` : 'the scale is right'}
-    </Chip>
-  );
-  const measure = !!nominal && (
-    <Fold
-      label='on paper'
-      open={measureOpen ?? ((asks && nonSquare) || !!inputs.manualMeasuredMm)}
-      onOpenChange={setMeasureOpen}
-      ask={asks ? 'scale-measured' : undefined}
-      className='mt-0'
-    >
-      <label className='flex items-center gap-2'>
-        <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-          square
-        </Text>
-        <NumberField
-          value={inputs.manualMeasuredMm}
-          min={1}
-          className='w-24'
-          placeholder={chosen?.measuredMm?.toFixed(2) ?? ''}
-          onCommit={(v) => patchInputs({ manualMeasuredMm: v && v > 0 ? v : null })}
-          title={`print page ${chosen?.evidence ? chosen.evidence.page + 1 : '—'} at 100 %, measure the square with a ruler — it overrides the detection`}
-          aria-label='square on paper, mm'
-          {...ask('scale-measured', asks, 'measure the test square and type mm')}
-        />
-        <Text size='micro' variant='label' component='span'>
-          mm · nominal {nominal} mm
-        </Text>
-      </label>
-    </Fold>
+  // why a look is needed, in plain words (≤ 12): the operator measures, the reason only frames it
+  const why = !needsHuman
+    ? null
+    : !nominal
+      ? 'no test square found in the file'
+      : nonSquare
+        ? 'the square in the file is not quite square'
+        : chosen && chosen.confidence < 0.9
+          ? 'not sure this is the test square'
+          : Math.abs(chosen!.factor - 1) > PATIMPORT.scaleWarnRatio
+            ? `the file looks ${Math.abs((chosen!.factor - 1) * 100).toFixed(1)} % ${
+                chosen!.factor > 1 ? 'smaller' : 'bigger'
+              } than true size`
+            : `${weakCalibs.length === 1 ? 'a page has' : 'some pages have'} no square of their own`;
+  // the one-click fix of the footer's warning only when the file's own evidence says 1:1
+  const fileSaysTrue = !!decision && Math.abs(decision.factor - 1) < 5e-4 && !nonSquare;
+  const keepWord =
+    decision && Math.abs(decision.factor - 1) >= 5e-4
+      ? `keep ${scaleWord(decision.factor)}`
+      : 'the file is 1:1';
+
+  // the measure: a number prefilled with the nominal side, sent only by [use it]
+  const [draft, setDraft] = useState<number | null>(null);
+  const draftMm = draft ?? inputs.manualMeasuredMm ?? nominal ?? null;
+  const measureForm = (live: boolean) => (
+    <div className='flex flex-wrap items-center gap-2'>
+      <NumberField
+        value={draftMm}
+        min={1}
+        className='w-20'
+        onCommit={(v) => setDraft(v && v > 0 ? v : null)}
+        aria-label='the square on paper, mm'
+        {...ask('scale-measured', live, 'type what your ruler shows, then use it')}
+      />
+      <Text size='micro' variant='label' component='span'>
+        mm
+      </Text>
+      <Button
+        variant='secondary'
+        size='sm'
+        disabled={!draftMm}
+        onClick={() => {
+          if (draftMm && draftMm > 0) patchInputs({ manualMeasuredMm: draftMm });
+          setDraft(null);
+        }}
+      >
+        use it
+      </Button>
+    </div>
   );
 
   return (
@@ -128,87 +132,110 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
         <Panel
           title='test square'
           aside={
-            chosen?.evidence ? (
+            page ? (
               <Text size='micro' variant='label' component='span'>
-                page {chosen.evidence.page + 1}
+                page {page}
               </Text>
             ) : null
           }
-          bodyClassName='p-0'
+          bodyClassName='p-0 flex flex-col'
         >
-          <SquareDrawing
-            measured={inputs.manualMeasuredMm ?? chosen?.measuredMm ?? null}
-            sides={inputs.manualMeasuredMm ? null : sides}
-            declared={chosen?.declaredMm ?? null}
-            label={chosen?.evidence?.text
-              ?.replace(/\s*\[measured[^\]]*\]/, '')
-              .replace(/\s*\(traced[^)]*\)/, '')}
-          />
+          <SquareOnPage preview={pagePreview} square={square} ruler={asks} nominal={nominal} />
+          <Text size='micro' variant='label' component='p' className='shrink-0 px-2 pb-2'>
+            {!square
+              ? 'no test square — taken as true size'
+              : asks
+                ? `print page ${page} at 100 % — lay a ruler along the square`
+                : `test square ${cm} × ${cm} cm found`}
+          </Text>
         </Panel>
       }
       side={
         <Panel title='scale'>
           <div className='flex flex-col gap-2'>
-            {/* the state in one line: what the scale is and how it is known */}
-            <Text size='micro' component='p' className='tabular-nums'>
-              {decision ? scaleWord(decision.factor) : '—'}
-              {chosen && (
-                <>
-                  {' · '}
+            {asks ? (
+              /* the one question with a reference: the square on the page, a ruler, a number */
+              <div
+                data-ask-zone=''
+                data-ask-label='how many mm is the square?'
+                className='flex flex-col gap-2'
+              >
+                {why && (
+                  <Text size='micro' variant='label' component='p'>
+                    {why}
+                  </Text>
+                )}
+                {nominal ? (
+                  <>
+                    <Text size='micro' component='p' className='text-warning'>
+                      ! print page {page} at 100 % and measure this square — how many mm?
+                    </Text>
+                    {measureForm(true)}
+                  </>
+                ) : (
+                  <Text size='micro' component='p' className='text-warning'>
+                    ! is the file true size?
+                  </Text>
+                )}
+                {weakCalibs.length > 0 && (
+                  <Text size='micro' variant='label' component='p'>
+                    {weakCalibs
+                      .map(
+                        (c) =>
+                          `${session.files.length > 1 ? `${fileName(c.file)} · ` : ''}page ${c.page + 1}`,
+                      )
+                      .join(' · ')}
+                  </Text>
+                )}
+                <div>
+                  <Chip
+                    tone='attention'
+                    onClick={() => patchInputs({ scaleConfirmed: true })}
+                    title='the file prints true size — keep the scale as found'
+                    {...ask('scale-confirm', true, 'or keep the file as it is')}
+                    {...(fileSaysTrue ? { 'data-ask-fix': '' } : {})}
+                  >
+                    {keepWord}
+                  </Chip>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* nothing to do: the scale in one line, one quiet door to double-check */}
+                <Text size='micro' component='p' className='tabular-nums'>
+                  {decision ? scaleWord(decision.factor) : 'scale 1:1'} ✓
                   {inputs.manualMeasuredMm
-                    ? `measured by hand ${fmtMm(inputs.manualMeasuredMm)}`
-                    : `${METHOD[chosen.method] ?? chosen.method}${nominal ? ` ${nominal} mm` : ''}`}
-                </>
-              )}
-            </Text>
-
-            {/* the one question and its answers: the coach's zone */}
-            <div data-ask-zone='' className='flex flex-col gap-2'>
-              {question && (
-                <Text
-                  size='micro'
-                  component='p'
-                  className={answered ? 'text-labelColor' : 'text-warning'}
-                >
-                  {answered ? '' : '! '}
-                  {question}
+                    ? ` · measured ${fmtMm(inputs.manualMeasuredMm)}`
+                    : inputs.scaleConfirmed
+                      ? ' · confirmed'
+                      : ''}
                 </Text>
-              )}
-              {/* a page whose own calibration is weak: the rows the question is about */}
-              {needsHuman && weakCalibs.length > 0 && (
-                <Text size='micro' variant='label' component='p'>
-                  {weakCalibs
-                    .map(
-                      (c) =>
-                        `${session.files.length > 1 ? `${fileName(c.file)} · ` : ''}p${c.page + 1} ${
-                          c.calibration.method === 'inherited' ? 'inherited' : 'none'
-                        }`,
-                    )
-                    .join(' · ')}
-                </Text>
-              )}
-
-              {nonSquare ? (
-                <>
-                  {measure}
-                  {confirmChip && <div>{confirmChip}</div>}
-                </>
-              ) : (
-                <>
-                  {confirmChip && <div>{confirmChip}</div>}
-                  {measure}
-                </>
-              )}
-              {inputs.manualMeasuredMm != null && (
-                <Chip
-                  quiet
-                  onClick={() => patchInputs({ manualMeasuredMm: null })}
-                  title='drop the hand measure — the detection is used again'
-                >
-                  use the detection
-                </Chip>
-              )}
-            </div>
+                {(inputs.manualMeasuredMm != null || inputs.scaleConfirmed) && (
+                  <div>
+                    <Chip
+                      quiet
+                      onClick={() => patchInputs({ manualMeasuredMm: null, scaleConfirmed: false })}
+                      title='drop the answer — the scale found in the file is used again'
+                    >
+                      {inputs.manualMeasuredMm != null ? 'use the file’s scale' : 'undo'}
+                    </Chip>
+                  </div>
+                )}
+                {!!nominal && (
+                  <Fold
+                    label='printed it? measure to double-check'
+                    open={measureOpen ?? false}
+                    onOpenChange={setMeasureOpen}
+                    className='mt-0'
+                  >
+                    <Text size='micro' variant='label' component='p' className='mb-1'>
+                      print page {page} at 100 %, measure the square
+                    </Text>
+                    {measureForm(false)}
+                  </Fold>
+                )}
+              </>
+            )}
 
             {unique.length > 1 && (
               <div data-ask-zone=''>
@@ -300,6 +327,17 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
               value={`± ${(PATIMPORT.scaleWarnRatio * 100).toFixed(1)} %`}
             />
             {chosen && <Row label='confidence' value={fmtPct(chosen.confidence, 0)} />}
+            {chosen && (
+              <Row
+                label='source'
+                value={`${METHOD[chosen.method] ?? chosen.method}${chosen.measuredMm != null ? ` · ${fmtMm(chosen.measuredMm)} in the file` : ''}`}
+              />
+            )}
+            {chosen?.evidence?.text && (
+              <Text size='micro' variant='label' component='p' className='break-words'>
+                {chosen.evidence.text}
+              </Text>
+            )}
             {sides && (
               <Row
                 label='square in the file'
@@ -366,126 +404,156 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
   );
 }
 
-/** Nominal square dashed, measured square in ink, both from one corner — the gap IS the error. */
-function SquareDrawing({
-  measured,
-  sides,
-  declared,
-  label,
+/**
+ * The page the test square is on, its lines as the file draws them, the square outlined blue. With
+ * `ruler` (the question) the view closes in on the square and a ruler lies along its lower side —
+ * the reference for "how many mm on paper". No measurement prose inside the drawing.
+ */
+function SquareOnPage({
+  preview,
+  square,
+  ruler,
+  nominal,
 }: {
-  measured: number | null;
-  /** Both sides when the file measures them apart (a non-square square). */
-  sides: { w: number; h: number } | null;
-  declared: number | null;
-  label?: string;
+  preview: CleanPreview | undefined;
+  square: BoxMm | null;
+  ruler: boolean;
+  nominal: number | null | undefined;
 }) {
-  if (!declared || !measured)
-    return (
-      <div className='flex h-full items-center justify-center'>
-        <Text size='micro' variant='label'>
-          no test square — taken as true size
-        </Text>
-      </div>
-    );
-  // Exaggerate the difference ×20 so a 0.1 % error is visible at all; the numbers stay true.
-  const k = 20;
-  const shownW = declared + ((sides?.w ?? measured) - declared) * k;
-  const shownH = declared + ((sides?.h ?? measured) - declared) * k;
-  const pad = declared * 0.35;
-  const size = Math.max(declared, shownW, shownH);
+  const live = useMemo(() => (preview ? pathData(preview.live) : ''), [preview]);
+  const masked = useMemo(
+    () => (preview ? pathData(preview.masked.flatMap((m) => m.lines)) : ''),
+    [preview],
+  );
+  if (!square) return <div className='min-h-0 flex-1' aria-hidden />;
+  const side = Math.max(square.maxX - square.minX, square.maxY - square.minY);
+  // the whole page when nothing is asked; the square and its ruler when the operator measures
+  const view =
+    preview && !ruler
+      ? { x: 0, y: -preview.heightMm, w: preview.widthMm, h: preview.heightMm }
+      : {
+          x: square.minX - side * 0.45,
+          y: vy(square.maxY) - side * 0.35,
+          w: side * 1.9,
+          h: side * 1.85,
+        };
+  const pad = Math.max(view.w, view.h) * 0.03;
+  // ruler: 0 at the square's left corner, a tick per mm, longer at 5 and 10, cm numbers
+  const rx = square.minX;
+  const ry = vy(square.minY) + side * 0.04;
+  const rh = side * 0.14;
+  const len = Math.ceil((nominal ?? side) / 10) * 10;
+  const ticks = ruler ? Array.from({ length: len + 1 }, (_, i) => i) : [];
+  const k = side / (nominal ?? side);
   return (
     <svg
-      viewBox={`${-pad} ${-pad} ${size + pad * 2} ${size + pad * 2}`}
-      className='h-full w-full'
+      viewBox={`${view.x - pad} ${view.y - pad} ${view.w + pad * 2} ${view.h + pad * 2}`}
+      className='min-h-0 w-full flex-1'
       fontFamily='monospace'
+      role='img'
+      aria-label={
+        ruler ? 'the test square with a ruler along its side' : 'the test square on its page'
+      }
     >
-      <rect
-        x={0}
-        y={0}
-        width={declared}
-        height={declared}
-        fill='none'
-        stroke='#8a8a8a'
-        strokeWidth={0.4}
-        strokeDasharray='2 1.2'
-      />
-      <rect
-        x={0}
-        y={0}
-        width={shownW}
-        height={shownH}
-        fill='#f2f2f2'
-        fillOpacity={0.6}
-        stroke='#111111'
-        strokeWidth={0.5}
-      />
-      <line
-        x1={0}
-        y1={-pad * 0.35}
-        x2={declared}
-        y2={-pad * 0.35}
-        stroke='#8a8a8a'
-        strokeWidth={0.3}
-      />
-      <text
-        x={declared / 2}
-        y={-pad * 0.5}
-        fontSize={pad * 0.09}
-        textAnchor='middle'
-        fill='#666666'
-      >
-        nominal {declared} mm
-      </text>
-      <line
-        x1={-pad * 0.35}
-        y1={0}
-        x2={-pad * 0.35}
-        y2={shownH}
-        stroke='#111111'
-        strokeWidth={0.3}
-      />
-      <text
-        x={-pad * 0.5}
-        y={shownH / 2}
-        fontSize={pad * 0.09}
-        textAnchor='middle'
-        fill='#111111'
-        transform={`rotate(-90 ${-pad * 0.5} ${shownH / 2})`}
-      >
-        measured {(sides?.h ?? measured).toFixed(2)} mm
-      </text>
-      {sides && (
-        <text
-          x={shownW / 2}
-          y={shownH + pad * 0.3}
-          fontSize={pad * 0.09}
-          textAnchor='middle'
-          fill='#111111'
-        >
-          measured {sides.w.toFixed(2)} mm
-        </text>
+      {preview && (
+        <>
+          <rect
+            x={0}
+            y={-preview.heightMm}
+            width={preview.widthMm}
+            height={preview.heightMm}
+            fill='#ffffff'
+            stroke='#d5d5d5'
+            vectorEffect='non-scaling-stroke'
+          />
+          <path
+            d={masked}
+            fill='none'
+            stroke={SHEET_INK.source}
+            strokeWidth={0.75}
+            vectorEffect='non-scaling-stroke'
+          />
+          <path
+            d={live}
+            fill='none'
+            stroke={SHEET_INK.ink}
+            strokeOpacity={0.6}
+            strokeWidth={0.75}
+            vectorEffect='non-scaling-stroke'
+          />
+        </>
       )}
-      {label && (
-        <text
-          x={declared / 2}
-          y={declared / 2}
-          fontSize={pad * 0.11}
-          textAnchor='middle'
-          dominantBaseline='middle'
-          fill='#111111'
-        >
-          {label}
-        </text>
+      <rect
+        x={square.minX}
+        y={vy(square.maxY)}
+        width={square.maxX - square.minX}
+        height={square.maxY - square.minY}
+        fill={SHEET_INK.blue}
+        fillOpacity={0.06}
+        stroke={SHEET_INK.blue}
+        strokeWidth={2}
+        vectorEffect='non-scaling-stroke'
+      />
+      {ruler && (
+        <g>
+          <rect
+            x={rx - side * 0.04}
+            y={ry}
+            width={len * k + side * 0.08}
+            height={rh}
+            fill='#ffffff'
+            stroke={SHEET_INK.ink}
+            strokeWidth={1}
+            vectorEffect='non-scaling-stroke'
+          />
+          {ticks.map((i) => (
+            <line
+              key={i}
+              x1={rx + i * k}
+              x2={rx + i * k}
+              y1={ry}
+              y2={ry + rh * (i % 10 === 0 ? 0.5 : i % 5 === 0 ? 0.35 : 0.2)}
+              stroke={SHEET_INK.ink}
+              strokeWidth={i % 10 === 0 ? 1 : 0.6}
+              vectorEffect='non-scaling-stroke'
+            />
+          ))}
+          {ticks
+            .filter((i) => i % 10 === 0)
+            .map((i) => (
+              <text
+                key={i}
+                x={rx + i * k}
+                y={ry + rh * 0.85}
+                fontSize={rh * 0.3}
+                textAnchor='middle'
+                fill={SHEET_INK.ink}
+              >
+                {i / 10}
+              </text>
+            ))}
+          {/* the side being measured: corner to corner along the ruler's edge */}
+          <line
+            x1={square.minX}
+            x2={square.maxX}
+            y1={ry}
+            y2={ry}
+            stroke={SHEET_INK.blue}
+            strokeWidth={3}
+            vectorEffect='non-scaling-stroke'
+          />
+          <text
+            x={square.maxX + side * 0.05}
+            y={ry + rh * 0.12}
+            fontSize={rh * 0.3}
+            textAnchor='start'
+            dominantBaseline='hanging'
+            fill={SHEET_INK.blue}
+          >
+            ?
+          </text>
+        </g>
       )}
-      <text
-        x={size / 2}
-        y={size + pad * 0.6}
-        fontSize={pad * 0.08}
-        textAnchor='middle'
-        fill='#666666'
-      >
-        difference drawn × {k}
-      </text>
     </svg>
   );
 }
