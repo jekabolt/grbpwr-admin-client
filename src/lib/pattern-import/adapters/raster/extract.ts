@@ -17,6 +17,7 @@ import {
   assertRasterPixels,
   corruptInput,
   inputTooLarge,
+  oversizedPdfImagesMessage,
   unreadablePdfImagesMessage,
 } from '../budget';
 import { type BigImage, bigImagesRefusal, planBigImages } from './big-image';
@@ -284,6 +285,7 @@ export async function extractRasterPdfDetailed(
     producer = undefined;
   }
   const lib = await loadRasterPdfjs();
+  const matched = new Set<BigImage>();
   for (let n = 0; n < wanted.length; n++) {
     const pi = wanted[n];
     const page = await pdf.getPage(pi + 1);
@@ -297,6 +299,8 @@ export async function extractRasterPdfDetailed(
     // every paint: its full pixel size, placement, and the window of it the page shows
     type Entry = {
       p: (typeof paints)[number];
+      /** index into paints */
+      q: number;
       big: BigImage | null;
       w: number;
       h: number;
@@ -306,30 +310,42 @@ export async function extractRasterPdfDetailed(
       outH: number;
     };
     const entries: Entry[] = [];
-    const inline = new Map<number, Awaited<ReturnType<typeof pixelsOf>>>();
-    for (const p of paints) {
-      const big = p.w === 1 ? plan.byDims.get(`1x${p.h}`) ?? null : null;
+    const decoded = new Map<number, Awaited<ReturnType<typeof pixelsOf>>>();
+    let pdfjsPx = 0;
+    for (let q = 0; q < paints.length; q++) {
+      const p = paints[q];
+      let big = p.w === 1 ? plan.byDims.get(`1x${p.h}`) ?? null : null;
       let w = big ? big.width : p.w;
       let h = big ? big.height : p.h;
       if (!(w > 0 && h > 0)) {
-        // an inline image: its size comes with its pixels (small by nature)
+        // an inline image or a folded repeat: the size comes with the pixels
         const px = await pixelsOf(page, p);
-        inline.set(p.op, px);
-        w = px?.width ?? 0;
-        h = px?.height ?? 0;
+        big = px?.width === 1 ? plan.byDims.get(`1x${px.height}`) ?? null : null;
+        if (big) {
+          w = big.width;
+          h = big.height;
+        } else {
+          decoded.set(q, px);
+          w = px?.width ?? 0;
+          h = px?.height ?? 0;
+        }
         if (!(w > 0 && h > 0)) {
           warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
           continue;
         }
       }
+      if (big) matched.add(big);
+      else pdfjsPx += w * h;
       const pxToPage = compose(shift, placementOf(p.ctm, w, h));
-      const win = pageWindow(pxToPage, w, h, widthMm, heightMm);
-      if (!win) {
-        warnings.push(`page ${pi + 1}: image op ${p.op} lies outside the page — not traced`);
-        continue;
-      }
-      entries.push({ p, big, w, h, pxToPage, win, outW: 0, outH: 0 });
+      // an image read in rows is read only where the page shows it; one pdf.js decoded is traced
+      // whole, as before (its pixels are in memory anyway)
+      const win = big ? pageWindow(pxToPage, w, h, widthMm, heightMm) : { x0: 0, y0: 0, x1: w, y1: h };
+      if (!win) continue; // painted entirely off the page: nothing of it is visible
+      entries.push({ p, q, big, w, h, pxToPage, win, outW: 0, outH: 0 });
     }
+    // C5: what pdf.js decoded for this page is bounded as before the resampling existed (twice the
+    // trace limit: pdf.js holds those pixels whatever we read of them)
+    if (pdfjsPx > 2 * PATIMPORT.maxRasterPixels) assertRasterPagePixels(pdfjsPx, where);
     // C5: one page's images are traced together — the pixels the page shows, together, stay
     // under the limit; above it the page is read at 1/s of its pixels (area mean), the scale kept
     // exact by composing the resampling into pxToPage
@@ -341,8 +357,12 @@ export async function extractRasterPdfDetailed(
       e.outW = s > 1 ? Math.max(1, Math.floor(ww / s)) : ww;
       e.outH = s > 1 ? Math.max(1, Math.floor(wh / s)) : wh;
       if (s > 1) {
-        const m = e.pxToPage;
-        const mmPerPx = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d)) * s;
+        // the factors actually used (floors), through the whole placement: its largest singular
+        // value is the coarsest mm per traced pixel in any direction
+        const m = compose(e.pxToPage, windowAffine(e.win, e.outW, e.outH));
+        const p2 = m.a * m.a + m.b * m.b + m.c * m.c + m.d * m.d;
+        const det = m.a * m.d - m.b * m.c;
+        const mmPerPx = Math.sqrt((p2 + Math.sqrt(Math.max(0, p2 * p2 - 4 * det * det))) / 2);
         if (1 / mmPerPx < MIN_RESAMPLED_PX_PER_MM)
           throw inputTooLarge(
             `${where}: its scanned images hold ${Math.round(area / 1e6)} megapixels on the page; read within the ${Math.round(max / 1e6)} megapixels the importer traces they would keep ${(25.4 / mmPerPx).toFixed(0)} dpi — below the ${(MIN_RESAMPLED_PX_PER_MM * 25.4).toFixed(0)} dpi the tracer needs (a 0.5 mm line must keep 2 pixels). Split the sheet into smaller pages.`,
@@ -383,7 +403,7 @@ export async function extractRasterPdfDetailed(
           throw err;
         }
       } else {
-        const px = inline.get(p.op) ?? (await pixelsOf(page, p));
+        const px = decoded.has(e.q) ? decoded.get(e.q)! : await pixelsOf(page, p);
         const r = px ? rasterFromPdfjs(px, p.ctm, p.op) : null;
         if (!r) {
           warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
@@ -402,7 +422,7 @@ export async function extractRasterPdfDetailed(
         ...(full && outW === e.w && outH === e.h ? {} : { source }),
       });
     }
-    inline.clear();
+    decoded.clear();
     const input: RasterPageInput = {
       file: file.id,
       page: pi,
@@ -420,6 +440,10 @@ export async function extractRasterPdfDetailed(
   }
   const numPages = pdf.numPages;
   await pdf.destroy();
+  // an oversized image that never showed up as a placeholder paint (an operator form we do not
+  // read) on a file that traced nothing: refused as before, never an empty import
+  if (plan.byDims.size && !matched.size && raw.every((pg) => pg.paths.length === 0))
+    throw inputTooLarge(oversizedPdfImagesMessage([...plan.byDims.values()]));
   return finish(
     {
       id: file.id,

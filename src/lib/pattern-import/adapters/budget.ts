@@ -569,7 +569,11 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
   const images: PdfImageStream[] = [];
   const iccN = new Map<string, number>();
   let prev = 0;
-  for (let i = findBytes(u, STREAM, 0); i !== -1; i = findBytes(u, STREAM, i + STREAM.length)) {
+  // the search resumes after each stream's payload: bytes inside a stream are never read as a
+  // dictionary (a payload that spells `obj << /Subtype /Image … >> stream` cannot be patched)
+  let next = 0;
+  const sizeRefs: [PdfImageStream, 'width' | 'height', string][] = [];
+  for (let i = findBytes(u, STREAM, 0); i !== -1; i = findBytes(u, STREAM, Math.max(next, i + STREAM.length))) {
     const after = u[i + STREAM.length];
     const isKw = (i === 0 || !isRegular(u[i - 1])) && !isRegular(after);
     if (!isKw) continue;
@@ -584,10 +588,6 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
     const m = r.v.map;
     const obj = objHeader(u, head - 3);
     const get = (k: string, short?: string) => (m.get(k) ?? (short ? m.get(short) : undefined))?.val;
-    const nv = get('N');
-    if (obj && nv?.t === 'num') iccN.set(obj, nv.n);
-    const sub = get('Subtype');
-    if (!(sub?.t === 'name' && sub.v === 'Image')) continue;
     // the stream's bytes: after the EOL that follows `stream`, up to /Length (direct) or the
     // `endstream` keyword (its EOL trimmed)
     let at = i + STREAM.length;
@@ -608,6 +608,11 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
       if (u[end - 1] === 0x0a) end--;
       if (u[end - 1] === 0x0d) end--;
     }
+    prev = next = end;
+    const nv = get('N');
+    if (obj && nv?.t === 'num') iccN.set(obj, nv.n);
+    const sub = get('Subtype');
+    if (!(sub?.t === 'name' && sub.v === 'Image')) continue;
     const num = (v: PVal | undefined) => (v?.t === 'num' ? v.n : null);
     const span = (k: string, short?: string): [number, number] | null => {
       const e = m.get(k) ?? (short ? m.get(short) : undefined);
@@ -626,9 +631,14 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
     if (pv?.t === 'arr') pv = pv.items.length === 1 ? pv.items[0] : undefined;
     let parms: PdfImageStream['parms'] = null;
     if (pv?.t === 'dict') {
+      // a parameter the decoder uses must be a plain number — an indirect one is not guessed
       const o: Record<string, number> = {};
-      for (const [k, e] of pv.map) if (e.val.t === 'num') o[k] = e.val.n;
-      parms = o;
+      let ok = true;
+      for (const [k, e] of pv.map)
+        if (e.val.t === 'num') o[k] = e.val.n;
+        else if (['Predictor', 'Colors', 'BitsPerComponent', 'Columns', 'ColorTransform'].includes(k))
+          ok = false;
+      parms = ok ? o : 'other';
     } else if (pv && !(pv.t === 'kw' && pv.v === 'null')) parms = 'other';
     const cs = get('ColorSpace', 'CS');
     const colorSpace =
@@ -646,7 +656,7 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
     const w = get('Width', 'W');
     const h = get('Height', 'H');
     const im = get('ImageMask', 'IM');
-    images.push({
+    const rec: PdfImageStream = {
       obj,
       width: num(w),
       height: num(h),
@@ -663,7 +673,15 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
       smask: !!get('SMask'),
       mask: !!get('Mask'),
       data: [at, end],
-    });
+    };
+    if (w?.t === 'ref') sizeRefs.push([rec, 'width', w.v]);
+    if (h?.t === 'ref') sizeRefs.push([rec, 'height', h.v]);
+    images.push(rec);
+  }
+  // indirect sizes resolved as pdfImageScan does (a placeholder code must not equal any image)
+  if (sizeRefs.length) {
+    const ints = plainIntObjects(u, new Set(sizeRefs.map((x) => x[2])));
+    for (const [rec, k, ref] of sizeRefs) rec[k] = ints.get(ref) ?? null;
   }
   return { images, iccN, encrypted: findBytes(u, ENCRYPT, 0) !== -1 };
 }

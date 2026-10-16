@@ -116,6 +116,32 @@ export async function imagePaintsOf(pdfjs: PdfjsModule, page: PdfPage): Promise<
       case OPS.paintInlineImageXObject:
         out.push({ op: i, ctm, objId: null, inline: a[0], w: 0, h: 0 });
         break;
+      case OPS.paintImageXObjectRepeat: {
+        // pdf.js folds ≥ 3 paints of one image into [objId, scaleX, scaleY, positions]; the size
+        // comes with the pixels (w = h = 0)
+        const pos = (a[3] as ArrayLike<number>) ?? [];
+        for (let k = 0; k + 1 < pos.length; k += 2)
+          out.push({
+            op: i,
+            ctm: mul(ctm, [Number(a[1]), 0, 0, Number(a[2]), pos[k], pos[k + 1]]),
+            objId: String(a[0]),
+            inline: null,
+            w: 0,
+            h: 0,
+          });
+        break;
+      }
+      case OPS.beginAnnotation: {
+        // [id, rect, transform, matrix, …]: an appearance starts from the page's default frame
+        stack.push(ctm);
+        ctm = [1, 0, 0, 1, 0, 0];
+        if (Array.isArray(a[2])) ctm = mul(ctm, a[2] as M6);
+        if (Array.isArray(a[3])) ctm = mul(ctm, a[3] as M6);
+        break;
+      }
+      case OPS.endAnnotation:
+        ctm = stack.pop() ?? ctm;
+        break;
       default:
         break;
     }

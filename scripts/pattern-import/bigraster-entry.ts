@@ -27,7 +27,7 @@ async function verify(bytes: ArrayBuffer): Promise<unknown[]> {
   const out: unknown[] = [];
   const { images } = pdfImageStreams(bytes);
   for (const r of images) {
-    if (!r.width || !r.height || r.width * r.height <= 18e6) continue;
+    if (!r.width || !r.height || r.width * r.height <= (Number(process.env.VERIFY_MIN) || 18e6)) continue;
     const data = u.subarray(r.data[0], r.data[1]);
     const W = r.width;
     const H = r.height;

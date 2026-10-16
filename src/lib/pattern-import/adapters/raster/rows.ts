@@ -85,7 +85,7 @@ type Comp = {
 };
 
 /** The entropy decoder's state at the start of an MCU row (to resume a later window there). */
-type Checkpoint = { pos: number; buf: number; cnt: number; preds: number[]; mcu: number };
+type Checkpoint = { pos: number; buf: number; cnt: number; pad: number; preds: number[]; mcu: number };
 
 export class JpegRows implements RowSource {
   readonly width: number;
@@ -105,6 +105,8 @@ export class JpegRows implements RowSource {
   private pos = 0;
   private buf = 0;
   private cnt = 0;
+  /** Zero bits fed after the data's marker / end (the lowest `pad` bits of `buf`). */
+  private pad = 0;
   private marker = false;
 
   /** `colorTransform`: the PDF's /DecodeParms /ColorTransform when given. */
@@ -180,8 +182,10 @@ export class JpegRows implements RowSource {
         if (ns !== this.comps.length)
           throw new RowsUnsupported('a JPEG whose components are in separate scans');
         for (let k = 0; k < ns; k++) {
-          const c = this.comps.find((x) => x.id === d[seg + 1 + 2 * k]);
-          if (!c) throw new RowsUnsupported('a JPEG scan names an unknown component');
+          // the MCU's blocks come in scan order — read here in frame order, so they must agree
+          const c = this.comps[k];
+          if (c.id !== d[seg + 1 + 2 * k])
+            throw new RowsUnsupported('a JPEG scan that orders its components unlike its frame');
           c.dc = dcT[d[seg + 2 + 2 * k] >> 4] ?? null;
           c.ac = acT[d[seg + 2 + 2 * k] & 15] ?? null;
           if (!c.dc || !c.ac || !this.q[c.tq]) throw new RowsUnsupported('a JPEG table is missing');
@@ -227,17 +231,27 @@ export class JpegRows implements RowSource {
           else {
             this.marker = true; // a marker: feed zeros, do not consume it
             b = 0;
+            this.pad += 8;
           }
         } else this.pos++;
-      } else this.marker = true;
+      } else {
+        this.marker = true;
+        this.pad += 8;
+      }
       this.buf = ((this.buf << 8) | b) >>> 0;
       this.cnt += 8;
     }
   }
 
+  /** Bits consumed past the real data (a cut-short or damaged stream): refused, never decoded. */
+  private overrun(): never {
+    throw new RowsUnsupported('the JPEG data ends early (damaged data)');
+  }
+
   private bits(n: number): number {
     if (this.cnt < n) this.fill();
     this.cnt -= n;
+    if (this.cnt < this.pad) this.overrun();
     const v = (this.buf >>> this.cnt) & ((1 << n) - 1);
     this.buf &= this.cnt ? (1 << this.cnt) - 1 : 0;
     return v;
@@ -248,6 +262,7 @@ export class JpegRows implements RowSource {
     const e = t.lut[(this.buf >>> (this.cnt - 9)) & 511];
     if (e) {
       this.cnt -= e >> 8;
+      if (this.cnt < this.pad) this.overrun();
       this.buf &= this.cnt ? (1 << this.cnt) - 1 : 0;
       return e & 255;
     }
@@ -255,6 +270,7 @@ export class JpegRows implements RowSource {
       const code = (this.buf >>> (this.cnt - len)) & ((1 << len) - 1);
       if (code <= t.maxcode[len]) {
         this.cnt -= len;
+        if (this.cnt < this.pad) this.overrun();
         this.buf &= this.cnt ? (1 << this.cnt) - 1 : 0;
         return t.vals[t.valptr[len] + code - t.mincode[len]];
       }
@@ -335,6 +351,7 @@ export class JpegRows implements RowSource {
         this.pos = cp.pos;
         this.buf = cp.buf;
         this.cnt = cp.cnt;
+        this.pad = cp.pad;
         this.marker = false;
         this.comps.forEach((c, k) => (c.pred = cp.preds[k]));
         return r;
@@ -343,23 +360,24 @@ export class JpegRows implements RowSource {
     this.pos = this.scanAt;
     this.buf = 0;
     this.cnt = 0;
+    this.pad = 0;
     this.marker = false;
     for (const c of this.comps) c.pred = 0;
     return 0;
   }
 
-  private restartAt(): void {
-    // byte-align, then expect RSTn (lenient: skip to the next marker as libjpeg does)
+  /** After every `restart` MCUs: byte-align and read exactly the expected RSTn marker. */
+  private restartAt(mcu: number): void {
     this.buf = 0;
     this.cnt = 0;
+    this.pad = 0;
     this.marker = false;
     const d = this.d;
     let p = this.pos;
-    while (p + 1 < d.length && !(d[p] === 0xff && d[p + 1] >= 0xd0 && d[p + 1] <= 0xd7)) {
-      if (d[p] === 0xff && d[p + 1] === 0xd9) throw new RowsUnsupported('the JPEG data ends early (damaged data)');
-      p++;
-    }
-    if (p + 1 >= d.length) throw new RowsUnsupported('the JPEG data ends early (damaged data)');
+    while (d[p] === 0xff && d[p + 1] === 0xff) p++; // fill bytes before a marker
+    const want = 0xd0 + ((mcu / this.restart - 1) & 7);
+    if (d[p] !== 0xff || d[p + 1] !== want)
+      throw new RowsUnsupported('a JPEG restart marker is missing or out of order (damaged data)');
     this.pos = p + 2;
     for (const c of this.comps) c.pred = 0;
   }
@@ -386,14 +404,14 @@ export class JpegRows implements RowSource {
     let mcu = r * this.mcusX;
     for (; r < r1; r++) {
       if (!this.checkpoints[r])
-        this.checkpoints[r] = { pos: this.pos, buf: this.buf, cnt: this.cnt, preds: this.comps.map((c) => c.pred), mcu };
+        this.checkpoints[r] = { pos: this.pos, buf: this.buf, cnt: this.cnt, pad: this.pad, preds: this.comps.map((c) => c.pred), mcu };
       // the data's end (EOI, or no bytes) before an MCU row starts: it was cut short — padding
       // bits would decode as a plausible grey image, so it is refused instead
       if (this.marker && !(this.d[this.pos + 1] >= 0xd0 && this.d[this.pos + 1] <= 0xd7))
         throw new RowsUnsupported('the JPEG data ends early (damaged data)');
       const inside = r >= r0;
       for (let mx = 0; mx < this.mcusX; mx++, mcu++) {
-        if (this.restart && mcu > 0 && mcu % this.restart === 0) this.restartAt();
+        if (this.restart && mcu > 0 && mcu % this.restart === 0) this.restartAt(mcu);
         const keep = inside && mx >= mx0 && mx < mx1;
         for (const c of this.comps) {
           const stride = c.bpl * 8;
@@ -521,15 +539,16 @@ export class FlateRows implements RowSource {
         .stream()
         .pipeThrough(new DecompressionStream(zlib ? 'deflate' : 'deflate-raw'));
       const reader = stream.getReader();
+      // inflated to its end (the checksum included) even past the window: a bit error inside
+      // the window shows only there, and an image that does not inflate cleanly is not read
       try {
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
-          if (take(value)) break;
+          if (y < stop) take(value);
         }
       } catch (e) {
-        // a damaged checksum after the last row is no loss; anything earlier is
-        if (y < stop) throw new RowsUnsupported(`the image data does not inflate (${(e as Error).message})`);
+        throw new RowsUnsupported(`the image data does not inflate (${(e as Error).message})`);
       } finally {
         void reader.cancel().catch(() => undefined);
       }

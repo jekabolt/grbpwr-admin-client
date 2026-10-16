@@ -35,6 +35,9 @@ export type BigImagePlan = {
   unknown: number;
 };
 
+/** Largest source image read in rows (an A0 sheet at 400 dpi is 245 MP). */
+export const MAX_SOURCE_PIXELS = 400_000_000;
+
 const FLATE = new Set(['FlateDecode', 'Fl']);
 const DCT = new Set(['DCTDecode', 'DCT']);
 
@@ -61,6 +64,9 @@ function sourceOf(
   const data = u.subarray(rec.data[0], rec.data[1]);
   const w = rec.width!;
   const h = rec.height!;
+  // the work of one read is bounded: rows are decoded across the full width up to the window
+  if (w * h > MAX_SOURCE_PIXELS || w > 65535 || h > 65535)
+    return `it is larger than ${MAX_SOURCE_PIXELS / 1e6} megapixels or 65535 px a side`;
   const f = rec.filters[0];
   try {
     if (f && DCT.has(f)) {
@@ -68,7 +74,8 @@ function sourceOf(
       if (j.width !== w || j.height !== h)
         return `its JPEG is ${j.width} × ${j.height} px, the PDF says ${w} × ${h}`;
       const n = components(rec, iccN);
-      if (n !== null && n !== j.channels) return `its JPEG has ${j.channels} colour channels, the PDF ${n}`;
+      if (n === null) return `its colour space (${rec.colorSpace ?? 'none'})`;
+      if (n !== j.channels) return `its JPEG has ${j.channels} colour channels, the PDF ${n}`;
       return j;
     }
     if (f === undefined || FLATE.has(f)) {
