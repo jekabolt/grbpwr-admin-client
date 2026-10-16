@@ -59,6 +59,7 @@ import { pointInPoly } from 'lib/pattern-import/pieces/geom';
 import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { leakDiag } from './leak-diag';
+import { gfitArchive } from './gfit-archive';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 export const ARCHIVE_DIR =
@@ -453,6 +454,33 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       .map((a) => `${(a.seed && seedLabel(a.seed)) ?? '?'}:${a.reason}:${a.areaMm2}`),
     named: s.semantics?.pieces.length ?? null,
   };
+  // ARCHIVE_PERSIZE=1 (GRADE P0): per family per size how it closes today + the gfit grade check
+  // (gfit-archive.ts); ARCHIVE_GFIT_PNG=<dir> a picture of each family the check flags
+  // (ARCHIVE_GFIT_PNG_ALL=1: of every family)
+  if (process.env.ARCHIVE_PERSIZE && S) {
+    try {
+      const pd = process.env.ARCHIVE_GFIT_PNG;
+      rec.gfit = gfitArchive({
+        families: fams,
+        seeds: s.pieces?.seeds ?? [],
+        run: (box.s as unknown as { run: SizeRun | null }).run,
+        set: S.wallSet ?? S.chains,
+        sheet: S.sheet,
+        key: gen === 'G0' ? G0_KEY : printedKey,
+        ...(pd
+          ? {
+              png: {
+                dir: pd,
+                prefix: rel.replace(/[^\w.-]+/g, '_').slice(0, 60),
+                all: !!process.env.ARCHIVE_GFIT_PNG_ALL,
+              },
+            }
+          : {}),
+      });
+    } catch (e) {
+      rec.gfitError = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
   // the written files
   const wr = outs.write as StageIO['write']['out'] | undefined;
   if (wr) {

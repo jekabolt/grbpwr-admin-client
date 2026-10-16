@@ -230,12 +230,31 @@ export type FitOpts = {
   frame?: 'stacked' | 'registered';
 };
 
+// one reading per outline and one match per pair, shared by repeated fits (other tolerances)
+const outlineMemo = new WeakMap<readonly PtMm[], GfitOutline | null>();
+const readOutline = (outer: readonly PtMm[]) => {
+  let o = outlineMemo.get(outer);
+  if (o === undefined) outlineMemo.set(outer, (o = analyseOutline(outer)));
+  return o;
+};
+const matchMemo = new WeakMap<GfitOutline, WeakMap<GfitOutline, Map<string, GfitMatch | null>>>();
+const matchOf = (a: GfitOutline, b: GfitOutline, offA: PtMm, offB: PtMm) => {
+  let m1 = matchMemo.get(a);
+  if (!m1) matchMemo.set(a, (m1 = new WeakMap()));
+  let m2 = m1.get(b);
+  if (!m2) m1.set(b, (m2 = new Map()));
+  const k = `${offA.x},${offA.y},${offB.x},${offB.y}`;
+  let m = m2.get(k);
+  if (m === undefined) m2.set(k, (m = matchCorners(a, b, { offA, offB })));
+  return m;
+};
+
 export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): GfitFamily {
   const tol = opts.tol ?? GFIT_TOL_DEFAULT;
   const robust = opts.robust !== false;
   const sizes: Size[] = [];
   for (const s of input) {
-    const o = analyseOutline(s.outer);
+    const o = readOutline(s.outer);
     if (o) sizes.push({ rank: s.rank, anchor: s.anchor, o, off: { x: 0, y: 0 }, idx: [] });
   }
   sizes.sort((a, b) => a.rank - b.rank);
@@ -278,10 +297,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
   let minRatio = Infinity;
   let topoSkips = 0;
   for (let k = 1; k < anchors.length; k++) {
-    const m = matchCorners(anchors[k - 1].o, anchors[k].o, {
-      offA: anchors[k - 1].off,
-      offB: anchors[k].off,
-    });
+    const m = matchOf(anchors[k - 1].o, anchors[k].o, anchors[k - 1].off, anchors[k].off);
     if (!m) return { ...base, frame, why: 'no-match' };
     matches.push(m);
     minRatio = Math.min(minRatio, m.ratio);
@@ -330,7 +346,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     for (let j = 1; j < anchors.length; j++)
       if (Math.abs(anchors[j].rank - s.rank) < Math.abs(anchors[k].rank - s.rank)) k = j;
     const A = anchors[k];
-    const m = matchCorners(A.o, s.o, { offA: A.off, offB: stacked ? s.off : mean(s.o.pts) });
+    const m = matchOf(A.o, s.o, A.off, stacked ? s.off : mean(s.o.pts));
     const map = new Map((m?.pairs ?? []).map(([a, b]) => [a, b]));
     s.idx = gps.map((g, gi) => {
       const cb = map.get(g.corner[k]);
@@ -406,7 +422,16 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     worst: number;
     worstScore: number;
   };
+  const evalMemo = new Map<string, Eval>();
   const evalBasis = (s: Size, b: Basis): Eval => {
+    const key = `${s.rank}|${b.r1}|${b.r2}`;
+    const hit = evalMemo.get(key);
+    if (hit) return hit;
+    const r = evalBasis0(s, b);
+    evalMemo.set(key, r);
+    return r;
+  };
+  const evalBasis0 = (s: Size, b: Basis): Eval => {
     const S1 = byRank.get(b.r1)!;
     const S2 = byRank.get(b.r2)!;
     const dr = Math.abs(b.r2 - b.r1);
@@ -438,7 +463,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
       const ext = 6;
       const drawn = slice(s.o.pts, s.idx[e], s.idx[(e + 1) % G], ext).map((p) => sub(p, s.off));
       const M = drawn.length - 2 * ext;
-      const win = Math.max(20, 0.25 * M);
+      const win = Math.max(16, 0.08 * M);
       const ds: number[] = [];
       for (let k = 0; k <= K; k++) ds.push(nearOn(pred[k], drawn, ext + (k / K) * (M - 1), win));
       const t = mul * (tol.edgeMm + tol.edgeStep * step);
@@ -449,7 +474,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
       let bestRun = 0;
       let onN = 0;
       let offN = 0;
-      const winP = Math.max(20, 0.25 * K);
+      const winP = Math.max(16, 0.08 * K);
       for (let j = ext; j < ext + M; j++) {
         const d = nearOn(drawn[j], pred, ((j - ext) / Math.max(1, M - 1)) * K, winP);
         ds.push(d);
