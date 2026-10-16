@@ -57,6 +57,8 @@ export type RulExpansion = {
   sample: string;
   /** Piece name (block name without the sample size) per base block name. */
   pieces: Record<string, string>;
+  /** Every piece × size block name of `text`. */
+  blocks: string[];
   stats: RulExpandStats;
   warnings: string[];
 };
@@ -178,15 +180,15 @@ function gradePiece(
   piece: PieceBlock,
   eps: number,
   label: string,
-  defined: (rule: number) => boolean,
   sameRow: (a: number, b: number) => boolean,
+  moveKey: (g: Grade) => string,
 ): PieceGrades {
   const ents = piece.entities;
   const odd = ents.find((m) => m.kind === 'rule' && Number.isNaN(m.rule));
   if (odd)
     throw refuse(`${label}: the grade-rule text "${odd.text}" does not name an integer rule`);
-  // `# -1` (CLO) and other negative ids the table does not define: a point explicitly without a rule
-  const real = (r: number) => r >= 0 || defined(r);
+  // `# -1` is CLO's "no rule here" (a curve point); every other id is a rule the table must define
+  const real = (r: number) => r !== -1;
   // 1 · rule texts → bindings by place
   const anyLayer = new PointIndex<{ rule: number; layer: string; e: number }>(eps);
   const bindings: { rule: number; layer: string; x: number; y: number; used: boolean }[] = [];
@@ -259,6 +261,21 @@ function gradePiece(
       `${label}: the rule text "# ${orphan.rule}" on layer ${orphan.layer} at (${orphan.x.toFixed(3)}, ${orphan.y.toFixed(3)}) is at no point of the piece — the point it grades is unknown`,
     );
 
+  // a bulge (arc segment) would be graded as its chord: refused rather than guessed
+  if (out.rules.size) {
+    const arc = ents.find(
+      (m) =>
+        m.kind === 'chain' &&
+        [m.raw, ...m.raw.children].some((r) =>
+          r.tags.some((t) => t.code === 42 && Math.abs(Number(t.value)) > 1e-9),
+        ),
+    );
+    if (arc)
+      throw refuse(
+        `${label}: a ${arc.raw.type} on layer ${arc.layer} has arc segments (bulges); AAMA grades points, and an arc's grade is not defined by its points`,
+      );
+  }
+
   // 2 · chains with graded points: the rest interpolates along the chain
   const ptsOf = (m: ModelEntity) => m.slots.map((s) => ({ x: s.x, y: s.y }));
   const graded = new Set<number>();
@@ -269,18 +286,30 @@ function gradePiece(
   });
   // 3 · lines without a rule of their own / isolated points: follow the graded line they lie on
   const follow = (m: ModelEntity, s: { x: number; y: number }): Grade | null => {
-    const cands = [...graded]
-      .filter((e) => ents[e] !== m)
-      .sort((a, b) => layerRank(m.layer, ents[a].layer) - layerRank(m.layer, ents[b].layer));
-    for (const e of cands) {
+    // every graded line the point lies on, best layer first; lines of one rank must agree
+    const hits: { rank: number; g: Grade; layer: string }[] = [];
+    for (const e of graded) {
       const c = ents[e];
+      if (c === m) continue;
       const hit = onChain(s, ptsOf(c), c.closed, eps);
       if (!hit) continue;
       const g = out.of[e];
       const n = c.slots.length;
-      return blend(g[hit.seg]!, g[(hit.seg + 1) % n] ?? g[hit.seg]!, hit.t);
+      hits.push({
+        rank: layerRank(m.layer, c.layer),
+        g: blend(g[hit.seg]!, g[(hit.seg + 1) % n] ?? g[hit.seg]!, hit.t),
+        layer: c.layer,
+      });
     }
-    return null;
+    if (!hits.length) return null;
+    const best = Math.min(...hits.map((h) => h.rank));
+    const top = hits.filter((h) => h.rank === best);
+    const k0 = moveKey(top[0].g);
+    if (top.some((h) => moveKey(h.g) !== k0))
+      throw refuse(
+        `${label}: a point on layer ${m.layer} at (${s.x.toFixed(3)}, ${s.y.toFixed(3)}) has no rule and lies on graded lines (layers ${[...new Set(top.map((h) => h.layer))].join(', ')}) that move it differently — which one it follows is not defined`,
+      );
+    return top[0].g;
   };
   ents.forEach((m, e) => {
     if (!gradable(m) || graded.has(e)) return;
@@ -406,6 +435,30 @@ export function expandRul(input: ExpandInput): RulExpansion {
     throw refuse(
       `${input.dxfName} is drawn in size ${drawn[0]}, but the RUL's sample size is ${rul.sample}`,
     );
+  // a DXF without SIZE labels can still hold sizes in its block names (FRONT_S, FRONT_M)
+  const listed = new Set(rul.sizes.map(bareSize));
+  const tails = new Map<string, Set<string>>();
+  for (const p of pieces) {
+    const parts = p.block.name.split('_');
+    if (parts.length < 2) continue;
+    const t = bareSize(parts[parts.length - 1]);
+    if (!listed.has(t)) continue;
+    const stem = parts.slice(0, -1).join('_');
+    (tails.get(stem) ?? tails.set(stem, new Set()).get(stem)!).add(t);
+  }
+  const named = new Set([...tails.values()].flatMap((v) => [...v]));
+  // one stem in two sizes, or every block ending in one size that is not the sample (a lone
+  // `SLEEVE_L` may be the left hand, so it alone says nothing)
+  const allOther =
+    !drawn.length &&
+    named.size === 1 &&
+    !named.has(sample) &&
+    [...tails.values()].length === pieces.length &&
+    pieces.length > 1;
+  if ([...tails.values()].some((v) => v.size > 1) || allOther)
+    throw refuse(
+      `${input.dxfName} names sizes ${[...named].join(', ')} in its block names; a RUL grades ONE base size (${rul.sample}) — import the DXF alone`,
+    );
   const declared = modelLabelsOf(raw).find((l) => l.key === 'sampleSize')?.value;
   if (declared && bareSize(declared) !== sample)
     throw refuse(
@@ -415,9 +468,16 @@ export function expandRul(input: ExpandInput): RulExpansion {
     .find((l) => l.key === 'gradeRuleTable')
     ?.value?.trim();
   const warnings: string[] = [];
-  if (declaredTable && rul.name && declaredTable.toUpperCase() !== rul.name.trim().toUpperCase())
-    warnings.push(
-      `the DXF names grade rule table "${declaredTable}", the RUL is "${rul.name}" — graded with the RUL given`,
+  // compared on their ASCII letters: the two files of one export may use different codepages
+  const ascii = (v: string) => v.replace(/[^\x21-\x7e]+/g, '').toUpperCase();
+  if (declaredTable && rul.name && ascii(declaredTable) !== ascii(rul.name))
+    throw refuse(
+      `${input.dxfName} names grade rule table "${declaredTable}", but ${input.rulName} is "${rul.name}" — they are not one export`,
+    );
+
+  if (rul.rules.has(-1))
+    throw refuse(
+      `${input.rulName} defines rule -1, which DXF exporters write as "no rule" ("# -1") — which one is meant is not defined`,
     );
 
   // grades, piece by piece (all or nothing)
@@ -427,12 +487,25 @@ export function expandRul(input: ExpandInput): RulExpansion {
       p,
       eps,
       `${input.dxfName} · ${p.block.name}`,
-      (r) => rul.rules.has(r),
       (a, b) => {
         const A = rul.rules.get(a);
         const B = rul.rules.get(b);
         return !!A && !!B && A.every((d, i) => d.dx === B[i].dx && d.dy === B[i].dy);
       },
+      (g) =>
+        rul.sizes
+          .map((_, si) => {
+            let dx = 0;
+            let dy = 0;
+            for (const t of g) {
+              const d = rul.rules.get(t.rule)?.[si];
+              if (!d) return `?${t.rule}`;
+              dx += t.w * d.dx;
+              dy += t.w * d.dy;
+            }
+            return `${dx.toFixed(4)},${dy.toFixed(4)}`;
+          })
+          .join(' '),
     ),
   );
   const used = new Set<number>();
@@ -684,6 +757,9 @@ export function expandRul(input: ExpandInput): RulExpansion {
     sizes: [...sizes],
     sample: rul.sample,
     pieces: pieceName,
+    blocks: pieces.flatMap((p) =>
+      sizes.map((z) => `${pieceName[p.block.name]}_${sizeNameToken(z)}`),
+    ),
     stats: {
       pieces: pieces.length,
       sizes: sizes.length,

@@ -163,7 +163,14 @@ export function parseRul(bytes: ArrayBuffer, name = 'the RUL'): RulTable {
     throw refuse(
       `${name}: NUMBER OF SIZES says ${head['NUMBER OF SIZES']}, the SIZE LIST names ${sizeList.length} (${sizeList.join(' ')})`,
     );
-  if (new Set(sizeList.map((s) => s.toUpperCase())).size !== sizeList.length)
+  // the importer reads sizes decoration-stripped (`<S>` = `S`, `4-6` = `4/6`): one of those twice is
+  // two columns of one size
+  const canon = (s: string) =>
+    s
+      .replace(/(\d)[^\p{L}\p{N}.,]+(?=\d)/gu, '$1/')
+      .replace(/[^\p{L}\p{N}.,/]+/gu, '')
+      .toUpperCase();
+  if (new Set(sizeList.map(canon)).size !== sizeList.length)
     throw refuse(`${name}: the SIZE LIST names a size twice (${sizeList.join(' ')})`);
   const sample = head['SAMPLE SIZE'];
   if (!sample) throw refuse(`${name} has no SAMPLE SIZE`);

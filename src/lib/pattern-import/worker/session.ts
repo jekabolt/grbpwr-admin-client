@@ -630,7 +630,7 @@ export class Session {
           const read = await readDxf(graded ? { ...f, bytes: graded.bytes } : f, o, p);
           const seg = segmentDxf(read);
           if (graded) {
-            const off = rulSizesMismatch(graded.sizes, seg);
+            const off = rulSizesMismatch(graded.sizes, seg, graded.blocks);
             if (off)
               throw new ImportError(
                 'unsupported-format',
@@ -682,7 +682,7 @@ export class Session {
   private async gradeByRul(f: {
     name: string;
     bytes: ArrayBuffer;
-  }): Promise<{ bytes: ArrayBuffer; sizes: string[]; warnings: string[] }> {
+  }): Promise<{ bytes: ArrayBuffer; sizes: string[]; blocks: string[]; warnings: string[] }> {
     const meta = this.rul!;
     const blob = this.blobs.get('rul');
     if (!blob) throw new ImportError('no-session', 'the session lost its files — read them again');
@@ -694,6 +694,7 @@ export class Session {
       return {
         bytes: new TextEncoder().encode(ex.text).buffer as ArrayBuffer,
         sizes: ex.sizes,
+        blocks: ex.blocks,
         warnings: [
           `graded by ${meta.name}: ${ex.stats.pieces} pieces × ${ex.sizes.length} sizes (${ex.sizes.join(' ')}), sample ${ex.sample}, ${ex.stats.rulesUsed} rules`,
           ...ex.warnings,

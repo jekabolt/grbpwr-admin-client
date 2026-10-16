@@ -67,8 +67,8 @@ const sig = (m: ModelEntity) =>
  * size only, and they follow their line's rules when the base is expanded.
  */
 const MARKER_LAYERS = new Set(['2', '3', '84', '85', '86', '87']);
-function shapeOf(p: PieceBlock): ModelEntity[] {
-  const list = p.entities.filter((m) => gradable(m) && !MARKER_LAYERS.has(m.layer));
+function shapeOf(p: PieceBlock, markers = false): ModelEntity[] {
+  const list = p.entities.filter((m) => gradable(m) && (markers || !MARKER_LAYERS.has(m.layer)));
   // grouped by kind (stable: file order within one kind), so sizes written in another entity order
   // still pair line with line
   const key = (m: ModelEntity) => `${m.layer}|${m.raw.type}|${m.closed ? 1 : 0}`;
@@ -76,6 +76,44 @@ function shapeOf(p: PieceBlock): ModelEntity[] {
     .map((m, i) => ({ m, i }))
     .sort((a, b) => (key(a.m) < key(b.m) ? -1 : key(a.m) > key(b.m) ? 1 : a.i - b.i))
     .map((x) => x.m);
+}
+/** The markers of a block (turn / curve points, quality-validation copies) as a signature. */
+const markerSig = (p: PieceBlock) =>
+  p.entities
+    .filter((m) => gradable(m) && MARKER_LAYERS.has(m.layer))
+    .map((m) => `${sig(m)}:${m.slots.length}`)
+    .sort()
+    .join(';');
+
+/** Tags that shape an entity besides its points: arcs (bulge), radii, angles, notch depth. */
+const SHAPE_CODES = new Set([30, 38, 39, 40, 41, 42, 43, 50, 51]);
+const shapeTags = (m: ModelEntity) =>
+  [m.raw, ...m.raw.children]
+    .map((r) =>
+      r.tags
+        .filter((t) => SHAPE_CODES.has(t.code))
+        .map((t) => `${t.code}=${Number(t.value).toFixed(6)}`)
+        .join(','),
+    )
+    .join('|');
+
+/** An INSERT that only translates (no scale, rotation, extrusion, array): where it puts the block. */
+function plainInsert(tags: { code: number; value: string }[]): { x: number; y: number } | null {
+  const v = (c: number, d: number) => {
+    const t = tags.find((x) => x.code === c);
+    return t ? Number(t.value) : d;
+  };
+  const plain =
+    v(41, 1) === 1 &&
+    v(42, 1) === 1 &&
+    v(43, 1) === 1 &&
+    v(50, 0) === 0 &&
+    v(70, 1) <= 1 &&
+    v(71, 1) <= 1 &&
+    v(210, 0) === 0 &&
+    v(220, 0) === 0 &&
+    v(230, 1) === 1;
+  return plain ? { x: v(10, 0), y: v(20, 0) } : null;
 }
 
 /** Cyclic shift of a closed chain of `size` that best matches `base` (least spread of deltas). */
@@ -201,14 +239,46 @@ export function packRul(
   const ruleOf: Map<PieceBlock, Map<ModelEntity, number[]>> = new Map();
   const shiftsOf = new Map<Family, Map<string, number[]>>();
   const mmU = units.mmPerUnit; // RUL is METRIC (mm); the drawing is in its own units
+  const markersOf = new Map<Family, boolean>();
+  const insertsOf = new Map<string, ({ x: number; y: number } | null)[]>();
+  for (const e of raw.entities)
+    if (e.type === 'INSERT' && !e.paper) {
+      const nm = str(e.tags, 2) ?? '';
+      (insertsOf.get(nm) ?? insertsOf.set(nm, []).get(nm)!).push(plainInsert(e.tags));
+    }
   for (const f of fams) {
     const b = f.bySize.get(base)!;
-    const bShape = shapeOf(b);
+    // markers drawn alike in every size are graded and proved too; sample-only ones follow
+    const mk = markerSig(b);
+    const markers = !!mk && sizes.every((z) => markerSig(f.bySize.get(z)!) === mk);
+    markersOf.set(f, markers);
+    const nested = sizes.find((z) =>
+      f.bySize.get(z)!.entities.some((m) => m.raw.type === 'INSERT'),
+    );
+    if (nested) {
+      reasons.push(
+        `${f.piece}: size ${nested} inserts another block inside the piece — not packed`,
+      );
+      continue;
+    }
+    const at = sizes.map((z) => insertsOf.get(f.bySize.get(z)!.block.name) ?? []);
+    const bad = at.findIndex((list) => list.length !== 1 || !list[0]);
+    if (bad >= 0) {
+      reasons.push(
+        `${f.piece}: size ${sizes[bad]} is inserted ${at[bad].length === 1 ? 'scaled, rotated or mirrored' : `${at[bad].length} times`} — only a plain placement packs`,
+      );
+      continue;
+    }
+    if (at.some((list) => list[0]!.x !== at[bi][0]!.x || list[0]!.y !== at[bi][0]!.y)) {
+      reasons.push(`${f.piece}: its sizes are placed at different insert points`);
+      continue;
+    }
+    const bShape = shapeOf(b, markers);
     const bSig = bShape.map(sig);
     const per = new Map<string, ModelEntity[]>();
     let ok = true;
     for (const s of sizes) {
-      const shape = shapeOf(f.bySize.get(s)!);
+      const shape = shapeOf(f.bySize.get(s)!, markers);
       const sg = shape.map(sig);
       if (sg.length !== bSig.length || sg.some((x, i) => x !== bSig[i])) {
         reasons.push(
@@ -221,6 +291,14 @@ export function packRul(
       if (diff >= 0) {
         reasons.push(
           `${f.piece}: ${sig(bShape[diff])} has ${bShape[diff].slots.length} points in ${base} but ${shape[diff].slots.length} in ${s} — no point-to-point grade`,
+        );
+        ok = false;
+        break;
+      }
+      const arc = shape.findIndex((m, i) => shapeTags(m) !== shapeTags(bShape[i]));
+      if (arc >= 0) {
+        reasons.push(
+          `${f.piece}: ${sig(bShape[arc])} differs from ${base} in size ${s} by more than its points (arc, radius, angle or depth) — not expressible as point grades`,
         );
         ok = false;
         break;
@@ -281,7 +359,7 @@ export function packRul(
 
   // ── the base DXF: base-size blocks + a `# n` text on every point, nothing of the other sizes ──
   const now = opts.now ?? new Date();
-  const baseDxf = writeBase(raw, fams, base, ruleOf, opts.name);
+  const baseDxf = writeBase(raw, fams, base, ruleOf, opts.name, units.mmPerUnit);
   const rulText = formatRul({
     product: opts.product ?? 'grbpwr pattern-import',
     author: opts.author ?? 'GRBPWR',
@@ -320,8 +398,8 @@ export function packRul(
           reasons.push(`${f.piece}: size ${s} does not come back from the RUL`);
           continue;
         }
-        const ws = shapeOf(want);
-        const gs = shapeOf(g);
+        const ws = shapeOf(want, markersOf.get(f));
+        const gs = shapeOf(g, markersOf.get(f));
         if (ws.length !== gs.length) {
           reasons.push(`${f.piece} ${s}: ${gs.length} lines/points back, ${ws.length} drawn`);
           continue;
@@ -329,7 +407,11 @@ export function packRul(
         const sh = shiftsOf.get(f)!.get(s)!;
         ws.forEach((w, i) => {
           const gm = gs[i];
-          if (gm.slots.length !== w.slots.length || sig(gm) !== sig(w)) {
+          if (
+            gm.slots.length !== w.slots.length ||
+            sig(gm) !== sig(w) ||
+            shapeTags(gm) !== shapeTags(w)
+          ) {
             reasons.push(`${f.piece} ${s}: ${sig(w)} does not come back point for point`);
             return;
           }
@@ -376,6 +458,7 @@ function writeBase(
   base: string,
   ruleOf: Map<PieceBlock, Map<ModelEntity, number[]>>,
   tableName: string,
+  mmPerUnit: number,
 ): string {
   const T: [number, string][] = [];
   const E = (c: number, v: string) => T.push([c, v]);
@@ -400,11 +483,17 @@ function writeBase(
   E(2, 'HEADER');
   E(9, '$ACADVER');
   E(1, 'AC1009');
-  const ins = raw.header['$INSUNITS']?.[0]?.value.trim();
-  if (ins) {
-    E(9, '$INSUNITS');
-    E(70, ins);
-  }
+  // the units the per-size drawing was READ in, said explicitly ($INSUNITS, $MEASUREMENT or a
+  // UNITS text may have carried them there; a reader of the base must not guess)
+  const INS: Record<string, string> = {
+    '1': '4',
+    '25.4': '1',
+    '10': '5',
+    '1000': '6',
+    '304.8': '2',
+  };
+  E(9, '$INSUNITS');
+  E(70, INS[String(mmPerUnit)] ?? '4');
   E(0, 'ENDSEC');
   // layers the pieces use (AAMA readers take them from the entities; declared for AutoCAD)
   const layers = new Set<string>(['0', '1']);

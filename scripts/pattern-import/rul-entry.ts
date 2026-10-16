@@ -532,6 +532,81 @@ function sectionC(t: RulTable) {
       /point different ways/,
     ],
   ];
+  cases.push(
+    [
+      'DXF names another grade rule table',
+      () =>
+        expandRul({
+          dxf: enc(baseDxf().replace('Grade Rule Table: B9000', 'Grade Rule Table: SLEEVES')),
+          dxfName: 'f.dxf',
+          rul: t,
+          rulName: 'B9000.rul',
+        }),
+      /not one export/,
+    ],
+    [
+      'table defines rule -1',
+      () =>
+        expandRul({
+          dxf: enc(baseDxf()),
+          dxfName: 'f.dxf',
+          rul: parseRul(enc(SPEC_RUL.replace('RULE: DELTA 1', 'RULE: DELTA -1'))),
+          rulName: 'B9000.rul',
+        }),
+      /defines rule -1/,
+    ],
+    [
+      'label-less blocks in two sizes',
+      () =>
+        expandRul({
+          dxf: enc(
+            baseDxf()
+              .replace(/Size: 36/, 'Note: x')
+              .replace(/FRONT/g, 'FRONT_36')
+              .replace(
+                '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
+                (m) =>
+                  baseDxf()
+                    .split('  0\r\nSECTION\r\n  2\r\nBLOCKS\r\n')[1]
+                    .split('  0\r\nENDSEC\r\n')[0]
+                    .replace(/Size: 36/, 'Note: x')
+                    .replace(/FRONT/g, 'FRONT_38') + m,
+              )
+              .replace(
+                '  0\r\nENDSEC\r\n  0\r\nEOF',
+                '  0\r\nINSERT\r\n  8\r\n1\r\n  2\r\nFRONT_38\r\n 10\r\n0\r\n 20\r\n0\r\n  0\r\nENDSEC\r\n  0\r\nEOF',
+              ),
+          ),
+          dxfName: 'f.dxf',
+          rul: t,
+          rulName: 'B9000.rul',
+        }),
+      /names sizes/,
+    ],
+    [
+      'unruled point on two graded lines that disagree',
+      () =>
+        expandRul({
+          // two layer-8 lines cross at (100,100): one graded by #2 (x), one by #3 (x, other row)
+          dxf: enc(
+            baseDxf({
+              extra:
+                '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n0\r\n 20\r\n100\r\n 11\r\n200\r\n 21\r\n100\r\n' +
+                T('8', 0, 100, '# 2') +
+                T('8', 200, 100, '# 2') +
+                '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n100\r\n 20\r\n0\r\n 11\r\n100\r\n 21\r\n200\r\n' +
+                T('8', 100, 200, '# 3') +
+                P('13', 100, 100),
+              drill: '',
+            }).replace(T('8', 100, 200, '# 3'), T('8', 100, 200, '# 3') + T('8', 100, 0, '# 2')),
+          ),
+          dxfName: 'f.dxf',
+          rul: t,
+          rulName: 'B9000.rul',
+        }),
+      /move it differently/,
+    ],
+  );
   for (const [what, f, re] of cases) {
     const r = refusal(f);
     check('C', `refused: ${what}`, r.startsWith('rul-invalid') && re.test(r), r.slice(0, 160));
@@ -861,7 +936,10 @@ async function sectionE() {
     const go = async () => {
       const t = parseRul(ab(resolve(dir, r)), r);
       const ex = expandRul({ dxf: ab(resolve(dir, d)), dxfName: d, rul: t, rulName: r });
-      const read = await readDxf({ id: '0', name: d, bytes: enc(ex.text) }, { sagittaMm: 0.05, keepFills: true });
+      const read = await readDxf(
+        { id: '0', name: d, bytes: enc(ex.text) },
+        { sagittaMm: 0.05, keepFills: true },
+      );
       const seg = segmentDxf(read);
       return { ex, seg };
     };
