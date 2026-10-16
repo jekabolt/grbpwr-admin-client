@@ -6,6 +6,7 @@ import {
   common_ColorwayDevelopmentInsert,
   common_ColorwayLabDipRound,
   common_Material,
+  common_TechCard,
   common_TechCardLabDipStatus,
   common_TechCardMarkerSummary,
   UpdateColorwayRequest,
@@ -44,6 +45,7 @@ import {
 } from './colorway-usage-wire';
 import { readColorwayVersion } from './colorway-version';
 import { paletteValueFromRead } from './colourway-palette';
+import { proposePins } from './colourway-material-match';
 import { ColourwayCreatePopover } from './design/colourway-create';
 import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
 import { Swatch } from './design/render/field-row';
@@ -1327,6 +1329,8 @@ function LabDipLine({
 
 type ColumnProps = {
   colorway: common_AdminColorwayRef;
+  /** Карточка как прочитана — вход матчера артикулов (сохранённые рецепты и строки BOM). */
+  techCard?: common_TechCard;
   column: number;
   techCardId: number;
   bomItems: BomLine[];
@@ -1365,6 +1369,7 @@ type ColumnProps = {
 
 function ColourwayColumn({
   colorway,
+  techCard,
   column,
   techCardId,
   bomItems,
@@ -1414,6 +1419,25 @@ function ColourwayColumn({
   const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
   const allCardMarkers = useMemo(() => cardMarkers(markers), [markers]);
 
+  // МАТЧЕР АРТИКУЛОВ (чистый): предложения под цвет колорвея. Сам ничего не пишет — план решает,
+  // что из них пинится (точное + то же семейство), остальное уходит в `pick one of N`.
+  const stockOnHand = useMemo(() => {
+    if (stockFacts.size === 0) return undefined;
+    const out = new Map<number, number>();
+    for (const [id, f] of stockFacts) {
+      const n = Number(f.onHand);
+      if (Number.isFinite(n)) out.set(id, n);
+    }
+    return out;
+  }, [stockFacts]);
+  const proposals = useMemo(
+    () =>
+      canEdit && techCard && colorwayId
+        ? proposePins({ techCard, colorwayId, catalog: materials, colours, stock: stockOnHand })
+        : [],
+    [canEdit, techCard, colorwayId, materials, colours, stockOnHand],
+  );
+
   // Аргументы плана — переменной, а не литералом в вызове: планировщик живёт в соседнем файле, и
   // поле, которое он перестал читать, не должно ронять сборку матрицы.
   const planInput = (rowsBySlot: Map<string, SlotRows>) => {
@@ -1427,6 +1451,7 @@ function ColourwayColumn({
       bomItems,
       pieces,
       colours,
+      proposals,
     };
     return input;
   };
@@ -1445,6 +1470,7 @@ function ColourwayColumn({
       bomItems,
       pieces,
       colours,
+      proposals,
     ],
   );
 
@@ -1553,6 +1579,9 @@ function ColourwayColumn({
   const pickerKey = focus?.cwId === colorwayId && focus.kind === 'picker' ? focus.key : '';
   const pickerSlot = pickerKey ? cardSlots.find((s) => s.lineKey === pickerKey) : undefined;
   const pickerDraft = pickerSlot ? slotDraft(draft.rowsBySlot.get(pickerKey), pickerKey) : undefined;
+  const pickerPreferred = pickerKey
+    ? plan.ambiguous.find((a) => a.key === pickerKey)?.candidates
+    : undefined;
 
   const pin = (slot: BomLine, materialId: number) => {
     const key = slot.lineKey ?? '';
@@ -1665,6 +1694,7 @@ function ColourwayColumn({
         section={pickerSlot?.section ?? ''}
         value={pickerSlot && pickerDraft ? pickerDraft.materialId || pickerSlot.materialId || 0 : 0}
         title={pickerSlot ? `${name} · ${slotLabel(pickerSlot)}` : undefined}
+        preferredIds={pickerPreferred}
         onPick={(m) => {
           if (pickerSlot) pin(pickerSlot, m ? wireInt(m.id) : 0);
           setFocus(null);
@@ -1679,6 +1709,7 @@ function ColourwayColumn({
 
 export function ColourwaysMatrix({
   techCardId,
+  techCard,
   colorways,
   bomItems,
   materials,
@@ -1699,6 +1730,8 @@ export function ColourwaysMatrix({
   onDeleted,
 }: {
   techCardId: number;
+  /** Карточка как прочитана — вход матчера артикулов. */
+  techCard?: common_TechCard;
   /** Живые колорвеи (архивные и удалённые уже отсеяны). */
   colorways: common_AdminColorwayRef[];
   bomItems: BomLine[];
@@ -1875,6 +1908,7 @@ export function ColourwaysMatrix({
                 <ColourwayColumn
                   key={id}
                   colorway={cw}
+                  techCard={techCard}
                   column={i + 2}
                   techCardId={techCardId}
                   bomItems={bomItems}

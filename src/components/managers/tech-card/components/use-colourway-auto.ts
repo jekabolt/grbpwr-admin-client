@@ -28,6 +28,7 @@ import {
   scalarNormRefusal,
   toBomUnit,
 } from './nesting/marker-io';
+import type { Proposal } from './colourway-material-match';
 import type { PieceRef } from './piece-picker';
 import { wireInt } from './schema';
 
@@ -418,8 +419,9 @@ export type AutoPlan = {
   n: number;
   pins: { key: string; patch: Partial<UsageDraft> }[];
   norms: { key: string; patch: Partial<UsageDraft> }[];
-  /** Слоты, где каталог дал несколько артикулов в цвет колорвея: решает человек. */
-  ambiguous: { key: string; count: number }[];
+  /** Слоты, где каталог дал несколько артикулов в цвет колорвея: решает человек. `candidates` —
+   *  materialId кандидатов, лучшие первыми (не больше 3): пикер ставит их первыми. */
+  ambiguous: { key: string; count: number; candidates?: number[] }[];
   /** ВСЕГДА пусто: авто детали не заводит (Codex #5). Поле живёт, пока его читает матрица. */
   pieceAdds: readonly UsageDraft[];
 };
@@ -436,6 +438,7 @@ export function planAuto({
   bomItems,
   pieces,
   colours,
+  proposals,
 }: {
   colorway: common_AdminColorwayRef;
   cardSlots: BomLine[];
@@ -451,6 +454,8 @@ export function planAuto({
   colours?: readonly common_Color[];
   /** Не используется: авто детали не заводит. Оставлено ради вызывающих. */
   derivedPieces?: ReadonlyMap<string, readonly string[]>;
+  /** Предложения матчера (colourway-material-match.ts `proposePins`) — ступень после нашей точной. */
+  proposals?: readonly Proposal[];
 }): AutoPlan {
   const colorwayId = colorway.colorwayId ?? 0;
   if (!colorwayId) return EMPTY_PLAN;
@@ -478,6 +483,7 @@ export function planAuto({
     //    кода, нет поставщика или названия) и колорвей без ключей цвета — не пинятся вовсе.
     const kgWithValue = bomUnitKind(slot.unit?.trim() || '') === 'kg' && hasValue(draft);
     const family = slot.material ? articleFamily(slot.material) : '';
+    let oursDecided = false;
     if (!isPinned(draft, slot) && family && !emptyKeys(cwTokens) && !kgWithValue) {
       const matches = materials.filter(
         (m) =>
@@ -487,12 +493,93 @@ export function planAuto({
           coloursMatch(materialTokens(m), cwTokens),
       );
       const defaultMatches = matches.some((m) => wireInt(m.id) === slot.materialId);
-      if (!defaultMatches && matches.length === 1) {
+      if (defaultMatches) {
+        oursDecided = true;
+      } else if (matches.length === 1) {
         const patch = pinPatch(draft, slot, wireInt(matches[0].id));
         pins.push({ key, patch });
         draft = { ...draft, ...patch };
-      } else if (!defaultMatches && matches.length > 1) {
-        ambiguous.push({ key, count: matches.length });
+        oursDecided = true;
+      } else if (matches.length > 1) {
+        // Кандидаты: свои точные + предложения матчера, только живые валидные (есть в каталоге,
+        // не в архиве, секция ЖИВОГО слота; предложение — ещё и того же семейства). Порядок — балл
+        // матчера по убыванию, равный балл или без балла — по имени. `count` — до среза.
+        const scoreOf = new Map<number, number>();
+        for (const p of proposals ?? []) {
+          if (p.lineKey !== key) continue;
+          scoreOf.set(p.materialId, Math.max(scoreOf.get(p.materialId) ?? -1, p.score));
+        }
+        const native = new Set(matches.map((m) => wireInt(m.id)));
+        const valid = [...new Set([...native, ...scoreOf.keys()])]
+          .map((id) => materials.find((m) => wireInt(m.id) === id))
+          .filter(
+            (m): m is common_Material =>
+              !!m &&
+              !m.archived &&
+              m.section === slot.section &&
+              (native.has(wireInt(m.id)) || articleFamily(m) === family),
+          );
+        valid.sort((a, b) => {
+          const sa = scoreOf.get(wireInt(a.id)) ?? -1;
+          const sb = scoreOf.get(wireInt(b.id)) ?? -1;
+          if (sa !== sb) return sb - sa;
+          return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
+        });
+        ambiguous.push({
+          key,
+          count: valid.length,
+          candidates: valid.slice(0, 3).map((m) => wireInt(m.id)),
+        });
+        oursDecided = true;
+      }
+    }
+
+    // 1b. МАТЧЕР: наша точная ничего не нашла. Его `exact` шире нашего (цвет + секция), поэтому
+    //     пин — только при том же непустом семействе, что у артикула слота. Остальное — человеку:
+    //     `pick one of N` с кандидатами в пикере. Не-exact не пинится никогда.
+    const slotProposals =
+      !oursDecided && !isPinned(draft, slot) && !kgWithValue && proposals
+        ? proposals.filter((p) => p.lineKey === key && p.materialId > 0)
+        : [];
+    if (slotProposals.length > 0) {
+      const exact = slotProposals.find((p) => p.exact);
+      const exactMaterial = exact
+        ? materials.find((m) => wireInt(m.id) === exact.materialId && !m.archived)
+        : undefined;
+      // Секция — ЖИВОГО слота формы: матчер читает сохранённый BOM, и после несохранённой смены
+      // секции артикул старой секции того же семейства иначе пинился бы.
+      if (
+        exact &&
+        exactMaterial &&
+        exactMaterial.section === slot.section &&
+        family &&
+        articleFamily(exactMaterial) === family
+      ) {
+        const patch = pinPatch(draft, slot, exact.materialId);
+        pins.push({ key, patch });
+        draft = { ...draft, ...patch };
+      } else {
+        // Подсказки пикеру, не пины: другое семейство в близкий цвет допустимо. Фильтр один —
+        // артикул жив и в секции ЖИВОГО слота. Балл по убыванию, затем имя; count — до среза.
+        const scoreOf = new Map<number, number>();
+        for (const p of slotProposals) {
+          scoreOf.set(p.materialId, Math.max(scoreOf.get(p.materialId) ?? -1, p.score));
+        }
+        const valid = [...scoreOf.keys()]
+          .map((id) => materials.find((m) => wireInt(m.id) === id))
+          .filter((m): m is common_Material => !!m && !m.archived && m.section === slot.section);
+        valid.sort((a, b) => {
+          const d = (scoreOf.get(wireInt(b.id)) ?? -1) - (scoreOf.get(wireInt(a.id)) ?? -1);
+          if (d !== 0) return d;
+          return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
+        });
+        if (valid.length > 0) {
+          ambiguous.push({
+            key,
+            count: valid.length,
+            candidates: valid.slice(0, 3).map((m) => wireInt(m.id)),
+          });
+        }
       }
     }
 
