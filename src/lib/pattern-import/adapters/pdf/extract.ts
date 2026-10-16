@@ -225,7 +225,7 @@ export async function extractPdfWith(
     const empty = pages.every((pg) => pg.paths.length === 0);
     if (big.length) {
       const msg = oversizedPdfImagesMessage(big);
-      if (empty) throw inputTooLarge(msg);
+      if (empty) throw oversizedScan(msg);
       warnings.push(msg);
     }
     // F14 R8 / S2: an image whose size cannot be read even with every plain integer object
@@ -250,6 +250,20 @@ export async function extractPdfWith(
     await doc.destroy();
   }
 }
+
+/**
+ * RASTER: the refusal of a file whose only content is images over the pixel limit — the session
+ * hands such a file to the raster adapter, which reads them in rows (raster/big-image.ts); a
+ * caller without that path keeps the refusal (`too-large`).
+ */
+function oversizedScan(message: string): Error {
+  const e = inputTooLarge(message) as Error & { oversizedScan?: true };
+  e.oversizedScan = true;
+  return e;
+}
+
+export const isOversizedScan = (e: unknown): boolean =>
+  !!e && typeof e === 'object' && (e as { oversizedScan?: unknown }).oversizedScan === true;
 
 /** The contract's ExtractFn: metadata-only rasters (no blob store). */
 export const extractPdf: ExtractFn = (file, opts, progress) => extractPdfWith(file, opts, progress);

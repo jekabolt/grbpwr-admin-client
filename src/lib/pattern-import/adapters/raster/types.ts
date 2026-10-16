@@ -20,7 +20,11 @@ export type RasterImage = {
   pxToPage: Affine;
   /** Drawing-op index on the page (PDF paint op / 0 for a bare image file) — provenance `op`. */
   op: number;
+  /** Set when these pixels are a window and/or a resampling of the source image (IRRaster.source). */
+  source?: RasterSourcePx;
 };
+
+export type RasterSourcePx = NonNullable<import('../../types').IRRaster['source']>;
 
 /** One page to trace. Images are traced one at a time and released by the caller afterwards. */
 export type RasterPageInput = {

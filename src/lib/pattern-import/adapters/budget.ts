@@ -291,17 +291,26 @@ type PdfVal =
   | { t: 'num'; n: number }
   | { t: 'ref'; v: string }
   | { t: 'other' };
-type PdfTok =
+type PdfTok = (
   | { t: 'name'; v: string }
   | { t: 'num'; n: number; raw: string }
   | { t: 'kw'; v: string }
-  | { t: '<<' | '>>' | '[' | ']' | 'str' };
+  | { t: '<<' | '>>' | '[' | ']' | 'str' }
+) & { at?: number; end?: number };
 
 /** Tokens of u[a, b) by the PDF lexer; null when a string or hex string runs past b. */
 function pdfTokens(u: Uint8Array, a: number, b: number): PdfTok[] | null {
   const out: PdfTok[] = [];
   let i = a;
+  let n = 0;
+  let s = a;
   while (i < b) {
+    // RASTER: every token keeps its byte span [at, end) (the placeholder rewrite needs it)
+    for (; n < out.length; n++) {
+      out[n].at = s;
+      out[n].end = i;
+    }
+    s = i;
     const c = u[i];
     if (isPdfWs(c)) i++;
     else if (c === 0x25) {
@@ -355,6 +364,10 @@ function pdfTokens(u: Uint8Array, a: number, b: number): PdfTok[] | null {
       if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(raw)) out.push({ t: 'num', n: Number(raw), raw });
       else out.push({ t: 'kw', v: raw });
     }
+  }
+  for (; n < out.length; n++) {
+    out[n].at = s;
+    out[n].end = i;
   }
   return out;
 }
@@ -432,4 +445,225 @@ export function unreadablePdfImagesMessage(n: number): string {
 export function oversizedPdfImagesMessage(imgs: { width: number; height: number }[]): string {
   const big = [...imgs].sort((a, b) => b.width * b.height - a.width * a.height)[0];
   return `${imgs.length === 1 ? 'an embedded image' : `${imgs.length} embedded images`} (${big.width} × ${big.height} px, ${megapixels(big.width * big.height)}) ${imgs.length === 1 ? 'exceeds' : 'exceed'} the ${megapixels(PATIMPORT.maxRasterPixels)} the importer traces and ${imgs.length === 1 ? 'is' : 'are'} not read. ${RASTER_HINT}`;
+}
+
+// ── RASTER: image streams as written (an oversized scan decoded by the raster adapter) ───────
+
+/**
+ * One image XObject as the file writes it — what the raster adapter needs to decode an image
+ * pdf.js drops for its size (`maxImageSize`) itself, in rows, and to stand a placeholder in its
+ * place so pdf.js still reports where the page paints it (adapters/raster/big-image.ts).
+ */
+export type PdfImageStream = {
+  /** "num gen" of the object, null when its header does not read. */
+  obj: string | null;
+  width: number | null;
+  height: number | null;
+  /** Byte spans [at, end) of the DIRECT /Width and /Height numbers (null when indirect). */
+  widthSpan: [number, number] | null;
+  heightSpan: [number, number] | null;
+  /** Filter names in order ([] = none); null when the entry is not a name or array of names. */
+  filters: string[] | null;
+  /** Byte spans of the whole /Filter and /DecodeParms entries (key + value). */
+  filterSpan: [number, number] | null;
+  parmsSpan: [number, number] | null;
+  /** Numeric entries of /DecodeParms (of the one filter); null = absent; 'other' = not readable. */
+  parms: Record<string, number> | null | 'other';
+  bpc: number | null;
+  /** A device colour space name, `icc:<num gen>` (ICCBased stream), or 'other'; null = absent. */
+  colorSpace: string | null;
+  imageMask: boolean;
+  /** /Decode, /SMask, /Mask present. */
+  decode: boolean;
+  smask: boolean;
+  mask: boolean;
+  /** The raw stream bytes [at, end). */
+  data: [number, number];
+};
+
+type PVal =
+  | { t: 'name'; v: string; at: number; end: number }
+  | { t: 'num'; n: number; at: number; end: number }
+  | { t: 'ref'; v: string; at: number; end: number }
+  | { t: 'kw'; v: string; at: number; end: number }
+  | { t: 'arr'; items: PVal[]; at: number; end: number }
+  | { t: 'dict'; map: Map<string, { key: number; val: PVal }>; at: number; end: number }
+  | { t: 'other'; at: number; end: number };
+
+/** One value at tk[k] (containers recursive); null when it does not read. */
+function pval(tk: PdfTok[], k: number, depth = 0): { v: PVal; next: number } | null {
+  const t = tk[k];
+  if (!t || depth > 16) return null;
+  const at = t.at ?? 0;
+  const end = t.end ?? 0;
+  if (t.t === 'name') return { v: { t: 'name', v: t.v, at, end }, next: k + 1 };
+  if (t.t === 'num') {
+    const g = tk[k + 1];
+    const r = tk[k + 2];
+    if (g?.t === 'num' && r?.t === 'kw' && r.v === 'R')
+      return { v: { t: 'ref', v: `${t.n} ${g.n}`, at, end: r.end ?? end }, next: k + 3 };
+    return { v: { t: 'num', n: t.n, at, end }, next: k + 1 };
+  }
+  if (t.t === 'kw') return { v: { t: 'kw', v: t.v, at, end }, next: k + 1 };
+  if (t.t === 'str') return { v: { t: 'other', at, end }, next: k + 1 };
+  if (t.t === '[') {
+    const items: PVal[] = [];
+    let j = k + 1;
+    while (j < tk.length && tk[j].t !== ']') {
+      const r = pval(tk, j, depth + 1);
+      if (!r) return null;
+      items.push(r.v);
+      j = r.next;
+    }
+    if (j >= tk.length) return null;
+    return { v: { t: 'arr', items, at, end: tk[j].end ?? end }, next: j + 1 };
+  }
+  if (t.t === '<<') {
+    const map = new Map<string, { key: number; val: PVal }>();
+    let j = k + 1;
+    while (j < tk.length && tk[j].t !== '>>') {
+      const key = tk[j];
+      if (key.t !== 'name') return null;
+      const r = pval(tk, j + 1, depth + 1);
+      if (!r) return null;
+      map.set(key.v, { key: key.at ?? 0, val: r.v });
+      j = r.next;
+    }
+    if (j >= tk.length) return null;
+    return { v: { t: 'dict', map, at, end: tk[j].end ?? end }, next: j + 1 };
+  }
+  return null;
+}
+
+/** "num gen" of the header whose `obj` keyword starts at `objAt`, or null. */
+function objHeader(u: Uint8Array, objAt: number): string | null {
+  let j = objAt - 1;
+  const nums: number[] = [];
+  for (let n = 0; n < 2; n++) {
+    let w = 0;
+    while (j >= 0 && isWs(u[j]) && w++ < 16) j--;
+    const e = j + 1;
+    while (j >= 0 && isDigit(u[j]) && e - j <= 10) j--;
+    if (j + 1 === e) return null;
+    let v = 0;
+    for (let q = j + 1; q < e; q++) v = v * 10 + (u[q] - 0x30);
+    nums.push(v);
+  }
+  return `${nums[1]} ${nums[0]}`;
+}
+
+const ENDSTREAM = Array.from('endstream', (c) => c.charCodeAt(0));
+const ENCRYPT = Array.from('/Encrypt', (c) => c.charCodeAt(0));
+
+/**
+ * Every image stream of a PDF with its dictionary read for decoding (see `PdfImageStream`), the
+ * /N of every stream that carries one (ICC profiles), and whether the file is encrypted (its
+ * stream bytes are then not the image's). Same lexer and bounds as `pdfImageScan`.
+ */
+export function pdfImageStreams(bytes: ArrayBuffer): {
+  images: PdfImageStream[];
+  iccN: Map<string, number>;
+  encrypted: boolean;
+} {
+  const u = new Uint8Array(bytes);
+  const images: PdfImageStream[] = [];
+  const iccN = new Map<string, number>();
+  let prev = 0;
+  for (let i = findBytes(u, STREAM, 0); i !== -1; i = findBytes(u, STREAM, i + STREAM.length)) {
+    const after = u[i + STREAM.length];
+    const isKw = (i === 0 || !isRegular(u[i - 1])) && !isRegular(after);
+    if (!isKw) continue;
+    const lo = Math.max(prev, i - STREAM_DICT_MAX);
+    prev = i + STREAM.length;
+    const head = lastObjKeyword(u, lo, i);
+    if (head < 0) continue;
+    const tk = pdfTokens(u, head, i);
+    if (!tk || !tk.length || tk[0].t !== '<<') continue;
+    const r = pval(tk, 0);
+    if (!r || r.v.t !== 'dict' || r.next !== tk.length) continue;
+    const m = r.v.map;
+    const obj = objHeader(u, head - 3);
+    const get = (k: string, short?: string) => (m.get(k) ?? (short ? m.get(short) : undefined))?.val;
+    const nv = get('N');
+    if (obj && nv?.t === 'num') iccN.set(obj, nv.n);
+    const sub = get('Subtype');
+    if (!(sub?.t === 'name' && sub.v === 'Image')) continue;
+    // the stream's bytes: after the EOL that follows `stream`, up to /Length (direct) or the
+    // `endstream` keyword (its EOL trimmed)
+    let at = i + STREAM.length;
+    if (u[at] === 0x0d && u[at + 1] === 0x0a) at += 2;
+    else if (u[at] === 0x0a || u[at] === 0x0d) at++;
+    let end = -1;
+    const len = get('Length');
+    if (len?.t === 'num' && len.n >= 0 && at + len.n <= u.length) {
+      let q = at + len.n;
+      let w = 0;
+      while (q < u.length && isPdfWs(u[q]) && w++ < 4) q++;
+      if (ENDSTREAM.every((c, k) => u[q + k] === c)) end = at + len.n;
+    }
+    if (end < 0) {
+      const es = findBytes(u, ENDSTREAM, at);
+      if (es < 0) continue;
+      end = es;
+      if (u[end - 1] === 0x0a) end--;
+      if (u[end - 1] === 0x0d) end--;
+    }
+    const num = (v: PVal | undefined) => (v?.t === 'num' ? v.n : null);
+    const span = (k: string, short?: string): [number, number] | null => {
+      const e = m.get(k) ?? (short ? m.get(short) : undefined);
+      return e ? [e.key, e.val.end] : null;
+    };
+    const f = get('Filter', 'F');
+    const filters =
+      f === undefined
+        ? []
+        : f.t === 'name'
+          ? [f.v]
+          : f.t === 'arr' && f.items.every((x) => x.t === 'name')
+            ? f.items.map((x) => (x as { v: string }).v)
+            : null;
+    let pv = get('DecodeParms', 'DP');
+    if (pv?.t === 'arr') pv = pv.items.length === 1 ? pv.items[0] : undefined;
+    let parms: PdfImageStream['parms'] = null;
+    if (pv?.t === 'dict') {
+      const o: Record<string, number> = {};
+      for (const [k, e] of pv.map) if (e.val.t === 'num') o[k] = e.val.n;
+      parms = o;
+    } else if (pv && !(pv.t === 'kw' && pv.v === 'null')) parms = 'other';
+    const cs = get('ColorSpace', 'CS');
+    const colorSpace =
+      cs === undefined
+        ? null
+        : cs.t === 'name'
+          ? cs.v
+          : cs.t === 'arr' &&
+              cs.items.length === 2 &&
+              cs.items[0].t === 'name' &&
+              cs.items[0].v === 'ICCBased' &&
+              cs.items[1].t === 'ref'
+            ? `icc:${cs.items[1].v}`
+            : 'other';
+    const w = get('Width', 'W');
+    const h = get('Height', 'H');
+    const im = get('ImageMask', 'IM');
+    images.push({
+      obj,
+      width: num(w),
+      height: num(h),
+      widthSpan: w?.t === 'num' ? [w.at, w.end] : null,
+      heightSpan: h?.t === 'num' ? [h.at, h.end] : null,
+      filters,
+      filterSpan: span('Filter', 'F'),
+      parmsSpan: span('DecodeParms', 'DP'),
+      parms,
+      bpc: num(get('BitsPerComponent', 'BPC')),
+      colorSpace,
+      imageMask: im?.t === 'kw' && im.v === 'true',
+      decode: !!get('Decode', 'D'),
+      smask: !!get('SMask'),
+      mask: !!get('Mask'),
+      data: [at, end],
+    });
+  }
+  return { images, iccN, encrypted: findBytes(u, ENCRYPT, 0) !== -1 };
 }

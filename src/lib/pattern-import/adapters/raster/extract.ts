@@ -2,6 +2,7 @@
 // bare image scans (PNG/JPG with a declared or given DPI).
 
 import type {
+  Affine,
   ExtractFn,
   ExtractOpts,
   IRPage,
@@ -14,11 +15,13 @@ import { PATIMPORT } from '../../types';
 import {
   assertRasterPagePixels,
   assertRasterPixels,
+  corruptInput,
   inputTooLarge,
-  oversizedPdfImagesMessage,
-  pdfImageScan,
   unreadablePdfImagesMessage,
 } from '../budget';
+import { type BigImage, bigImagesRefusal, planBigImages } from './big-image';
+import { AreaResampler, resampleInMemory, type Window, windowAffine } from './resample';
+import { RowsUnsupported } from './rows';
 import { applyCalibration, calibrate } from './calibrate';
 import {
   decodeWithBitmap,
@@ -28,10 +31,11 @@ import {
   type ImageDecoder,
   openRasterPdf,
   pixelsOf,
+  placementOf,
   rasterFromPdfjs,
   scanPlacement,
 } from './decode';
-import { compose } from './affine';
+import { apply, compose, invert } from './affine';
 import { tracePageSync } from './trace';
 import type { RasterImage, RasterPageInput, RasterRef, TraceOpts, TraceStats } from './types';
 
@@ -45,6 +49,8 @@ export type RasterExtractConfig = {
   /** Image files: decoder (default createImageBitmap + OffscreenCanvas) and DPI override. */
   decode?: ImageDecoder;
   dpi?: number;
+  /** Pixel limit of one traced page (default PATIMPORT.maxRasterPixels) — probes lower it. */
+  maxPixels?: number;
 };
 
 export type RasterExtractResult = {
@@ -221,19 +227,50 @@ async function finish(
   return { doc: { file: info, pages, warnings }, calibrations, stats, inkClasses: classes };
 }
 
+/**
+ * RASTER: a 0.5 mm line must keep ≥ 2 px after resampling — 4 px/mm (101.6 dpi). A page that
+ * would only fit the pixel limit below this is refused (the tracer could not hold its lines).
+ */
+export const MIN_RESAMPLED_PX_PER_MM = 4;
+
+/** The pixel window of an image the page shows ([0, w] × [0, h] mm), clamped to the image. */
+export function pageWindow(
+  pxToPage: Affine,
+  w: number,
+  h: number,
+  pageW: number,
+  pageH: number,
+): Window | null {
+  const inv = invert(pxToPage);
+  const pts = [
+    apply(inv, 0, 0),
+    apply(inv, pageW, 0),
+    apply(inv, 0, pageH),
+    apply(inv, pageW, pageH),
+  ];
+  const e = 1e-6;
+  const x0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.x)) + e));
+  const y0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.y)) + e));
+  const x1 = Math.min(w, Math.ceil(Math.max(...pts.map((p) => p.x)) - e));
+  const y1 = Math.min(h, Math.ceil(Math.max(...pts.map((p) => p.y)) - e));
+  return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+}
+
 /** Raster PDF, one page of pixels at a time. */
 export async function extractRasterPdfDetailed(
   file: { id: string; name: string; bytes: ArrayBuffer },
   opts: ExtractOpts,
   cfg: RasterExtractConfig = {},
 ): Promise<RasterExtractResult> {
-  // C5: a scan pdf.js would drop for its size (the guard's maxImageSize) is refused, not traced
-  // as an empty page
-  const scan = pdfImageScan(file.bytes);
-  if (scan.oversized.length) throw inputTooLarge(oversizedPdfImagesMessage(scan.oversized));
-  if (scan.unknown) throw inputTooLarge(unreadablePdfImagesMessage(scan.unknown));
+  // C5: pdf.js drops an image over the pixel limit (the guard's maxImageSize). One we can decode
+  // in rows stands in as a placeholder (big-image.ts) and is read below, window by window; any
+  // other is refused, never traced as an empty page
+  const max = cfg.maxPixels ?? PATIMPORT.maxRasterPixels;
+  const plan = planBigImages(file.bytes, max);
+  if (plan.refused.length) throw inputTooLarge(bigImagesRefusal(plan.refused));
+  if (plan.unknown) throw inputTooLarge(unreadablePdfImagesMessage(plan.unknown));
   const sha = await sha256Hex(file.bytes);
-  const pdf = await openRasterPdf(file.bytes);
+  const pdf = await openRasterPdf(plan.bytes);
   const warnings: string[] = [];
   const wanted = opts.pages ?? Array.from({ length: pdf.numPages }, (_, i) => i);
   const raw: IRPage[] = [];
@@ -252,29 +289,125 @@ export async function extractRasterPdfDetailed(
     const page = await pdf.getPage(pi + 1);
     const [vx0, vy0, vx1, vy1] = page.view;
     const k = PATIMPORT.ptToMm;
+    const widthMm = (vx1 - vx0) * k;
+    const heightMm = (vy1 - vy0) * k;
     const shift = { a: 1, b: 0, c: 0, d: 1, e: -vx0 * k, f: -vy0 * k };
     const paints = await imagePaintsOf(lib, page);
-    const images: RasterImage[] = [];
-    // C5: one page's images are traced together — their pixels together stay under the limit,
-    // checked from the operators' sizes, then from what pdf.js decoded, before any work buffer
     const where = `${file.name} page ${pi + 1}`;
+    // every paint: its full pixel size, placement, and the window of it the page shows
+    type Entry = {
+      p: (typeof paints)[number];
+      big: BigImage | null;
+      w: number;
+      h: number;
+      pxToPage: Affine;
+      win: Window;
+      outW: number;
+      outH: number;
+    };
+    const entries: Entry[] = [];
+    const inline = new Map<number, Awaited<ReturnType<typeof pixelsOf>>>();
+    for (const p of paints) {
+      const big = p.w === 1 ? plan.byDims.get(`1x${p.h}`) ?? null : null;
+      let w = big ? big.width : p.w;
+      let h = big ? big.height : p.h;
+      if (!(w > 0 && h > 0)) {
+        // an inline image: its size comes with its pixels (small by nature)
+        const px = await pixelsOf(page, p);
+        inline.set(p.op, px);
+        w = px?.width ?? 0;
+        h = px?.height ?? 0;
+        if (!(w > 0 && h > 0)) {
+          warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
+          continue;
+        }
+      }
+      const pxToPage = compose(shift, placementOf(p.ctm, w, h));
+      const win = pageWindow(pxToPage, w, h, widthMm, heightMm);
+      if (!win) {
+        warnings.push(`page ${pi + 1}: image op ${p.op} lies outside the page — not traced`);
+        continue;
+      }
+      entries.push({ p, big, w, h, pxToPage, win, outW: 0, outH: 0 });
+    }
+    // C5: one page's images are traced together — the pixels the page shows, together, stay
+    // under the limit; above it the page is read at 1/s of its pixels (area mean), the scale kept
+    // exact by composing the resampling into pxToPage
+    const area = entries.reduce((a, e) => a + (e.win.x1 - e.win.x0) * (e.win.y1 - e.win.y0), 0);
+    const s = area > max ? Math.sqrt(area / max) : 1;
+    for (const e of entries) {
+      const ww = e.win.x1 - e.win.x0;
+      const wh = e.win.y1 - e.win.y0;
+      e.outW = s > 1 ? Math.max(1, Math.floor(ww / s)) : ww;
+      e.outH = s > 1 ? Math.max(1, Math.floor(wh / s)) : wh;
+      if (s > 1) {
+        const m = e.pxToPage;
+        const mmPerPx = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d)) * s;
+        if (1 / mmPerPx < MIN_RESAMPLED_PX_PER_MM)
+          throw inputTooLarge(
+            `${where}: its scanned images hold ${Math.round(area / 1e6)} megapixels on the page; read within the ${Math.round(max / 1e6)} megapixels the importer traces they would keep ${(25.4 / mmPerPx).toFixed(0)} dpi — below the ${(MIN_RESAMPLED_PX_PER_MM * 25.4).toFixed(0)} dpi the tracer needs (a 0.5 mm line must keep 2 pixels). Split the sheet into smaller pages.`,
+          );
+      }
+    }
     assertRasterPagePixels(
-      paints.reduce((a, p) => a + (p.w > 0 && p.h > 0 ? p.w * p.h : 0), 0),
+      entries.reduce((a, e) => a + e.outW * e.outH, 0),
       where,
     );
-    let decoded = 0;
-    for (const p of paints) {
-      const px = await pixelsOf(page, p);
-      if (px) assertRasterPagePixels((decoded += px.width * px.height), where);
-      const r = px ? rasterFromPdfjs(px, p.ctm, p.op) : null;
-      if (r) images.push({ ...r, pxToPage: compose(shift, r.pxToPage) });
-      else warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
+    if (s > 1) {
+      const dpis = entries.map((e) => 25.4 / Math.hypot(e.pxToPage.a, e.pxToPage.b));
+      const hi = Math.max(...dpis);
+      warnings.push(
+        `page ${pi + 1}: the scan holds ${(area / 1e6).toFixed(0)} megapixels — read at 1/${s.toFixed(2)} of its resolution (${hi.toFixed(0)} → ${(hi / s).toFixed(0)} dpi) to stay within ${Math.round(max / 1e6)} megapixels; the scale is kept exact`,
+      );
     }
+    const images: RasterImage[] = [];
+    for (const e of entries) {
+      const { p, win, outW, outH } = e;
+      const full = win.x0 === 0 && win.y0 === 0 && win.x1 === e.w && win.y1 === e.h;
+      const source = {
+        widthPx: e.w,
+        heightPx: e.h,
+        window: [win.x0, win.y0, win.x1, win.y1] as [number, number, number, number],
+        scale: outW / (win.x1 - win.x0),
+      };
+      let img: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: 1 | 3 | 4 };
+      if (e.big) {
+        const src = e.big.source;
+        const rs = new AreaResampler(win.x1 - win.x0, win.y1 - win.y0, outW, outH, src.channels);
+        try {
+          await src.read(win.y0, win.y1, win.x0, win.x1, (_y, row) => rs.push(row));
+          img = rs.finish();
+        } catch (err) {
+          if (err instanceof RowsUnsupported)
+            throw corruptInput(`${where}: an embedded image (${e.w} × ${e.h} px) does not decode: ${err.message}`);
+          throw err;
+        }
+      } else {
+        const px = inline.get(p.op) ?? (await pixelsOf(page, p));
+        const r = px ? rasterFromPdfjs(px, p.ctm, p.op) : null;
+        if (!r) {
+          warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
+          continue;
+        }
+        if (r.width !== e.w || r.height !== e.h) {
+          warnings.push(`page ${pi + 1}: image op ${p.op} decoded at another size — not traced`);
+          continue;
+        }
+        img = full && outW === e.w && outH === e.h ? r : resampleInMemory(r, win, outW, outH);
+      }
+      images.push({
+        ...img,
+        pxToPage: full && outW === e.w && outH === e.h ? e.pxToPage : compose(e.pxToPage, windowAffine(win, outW, outH)),
+        op: p.op,
+        ...(full && outW === e.w && outH === e.h ? {} : { source }),
+      });
+    }
+    inline.clear();
     const input: RasterPageInput = {
       file: file.id,
       page: pi,
-      widthMm: (vx1 - vx0) * k,
-      heightMm: (vy1 - vy0) * k,
+      widthMm,
+      heightMm,
       images,
     };
     const t = tracePageSync(input, null, cfg.trace, rasterId);

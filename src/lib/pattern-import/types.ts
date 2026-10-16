@@ -142,6 +142,17 @@ export type IRRaster = {
   dpi: number;
   /** Share of the page area it covers — a 21 % watermark vs a 100 % scan. */
   pageCover: number;
+  /**
+   * RASTER: the traced pixels are not the source image as stored — only the window the page shows
+   * ([x0, y0, x1, y1] source px) and/or an area resampling (`scale` = traced px per source px, ≤ 1,
+   * read to stay within maxRasterPixels). The placement composes both, so mm stay exact.
+   */
+  source?: {
+    widthPx: number;
+    heightPx: number;
+    window: [number, number, number, number];
+    scale: number;
+  };
 };
 
 /** One page of one source file, in page frame. */

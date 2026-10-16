@@ -58,7 +58,7 @@ import {
   readPassport,
   type BindPiece,
 } from '../passport';
-import { applyScale, detectScale, detectScaleSet, extractPdfWith } from '../adapters/pdf';
+import { applyScale, detectScale, detectScaleSet, extractPdfWith, isOversizedScan } from '../adapters/pdf';
 import {
   dxfFastPath,
   dxfScaleCandidates,
@@ -559,10 +559,17 @@ export class Session {
       const reg: ExtractorRegistry = {
         // A PDF is read as vector first; when its pages are scans (an image over the whole page
         // and nothing drawn) it is re-read by the raster adapter (F11), which traces every page.
+        // RASTER: a PDF whose only content is images over the pixel limit (pdf.js drops them, the
+        // vector read refuses it) is a scan too — the raster adapter reads them in rows.
         pdf: async (f, o, p) => {
-          const doc = await extractPdfWith(f, o, p);
-          const scans = doc.pages.filter(isScanPage).length;
-          if (!scans || scans < Math.ceil(doc.pages.length / 2)) return doc;
+          let doc: SourceDoc | null = null;
+          try {
+            doc = await extractPdfWith(f, o, p);
+          } catch (e) {
+            if (!isOversizedScan(e)) throw e;
+          }
+          const scans = doc ? doc.pages.filter(isScanPage).length : 1;
+          if (doc && (!scans || scans < Math.ceil(doc.pages.length / 2))) return doc;
           ctx.checkCancel();
           const r = await extractRasterPdfDetailed(f, o, {
             progress: (d, t, note) => {
