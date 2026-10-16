@@ -15,6 +15,7 @@
 // pieces run, and reads its inputs through it everywhere an answer counts (semantics input, the
 // footer, the write gate), so an answer that was not settled away still cannot be used.
 import type {
+  ChainAssign,
   FabricAssignment,
   ImportSession,
   NameDecision,
@@ -77,6 +78,26 @@ export function pieceRev(f: PieceFamily): string {
  * sheet pass) and the operator's mask edits, as one 64-bit FNV-1a pair of hex words. An answer
  * given on one mask does not survive another (a line set aside or back changes the pieces).
  */
+/**
+ * The legend answers the lines were read with (rows and, LINEFIX, single lines): another legend is
+ * another reading. Undefined = none given (a run without line answers keeps its old print).
+ */
+export function legendRevOf(i: {
+  legend: readonly { classId: number; sig?: string; role: string; sizeLabel: string | null }[];
+  legendConfirmed: readonly string[];
+  chainAssign?: readonly ChainAssign[];
+}): string | undefined {
+  const lines = i.chainAssign ?? [];
+  if (!i.legend.length && !i.legendConfirmed.length && !lines.length) return undefined;
+  return maskRevOf(
+    [...i.legendConfirmed],
+    [
+      ...i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
+      ...lines.map((e) => ['line', e.sheet, [...e.keys].sort(), e.to]),
+    ],
+  );
+}
+
 export function maskRevOf(masked: readonly string[], edits: readonly unknown[]): string {
   const text = `${[...masked].sort().join(',')}|${JSON.stringify(edits)}`;
   let a = 0x811c9dc5;
@@ -326,6 +347,7 @@ export function answersNowOf(
     cleanEdits: readonly unknown[];
     legend: readonly { classId: number; sig?: string; role: string; sizeLabel: string | null }[];
     legendConfirmed: readonly string[];
+    chainAssign?: readonly ChainAssign[];
   },
 ): AnswerCtx {
   const ids = [
@@ -334,13 +356,7 @@ export function answersNowOf(
     ...(s.sheet?.clean?.items ?? []).filter((m) => m.applied).map((m) => m.id),
   ];
   const maskRev = ids.length || i.cleanEdits.length ? maskRevOf(ids, i.cleanEdits) : undefined;
-  const legendRev =
-    i.legend.length || i.legendConfirmed.length
-      ? maskRevOf(
-          [...i.legendConfirmed],
-          i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
-        )
-      : undefined;
+  const legendRev = legendRevOf(i);
   return answerCtxOf(
     {
       sheetIndex: i.sheetIndex,

@@ -15,6 +15,7 @@
 // past the same offer only.
 import type { CardContext } from '../client';
 import type {
+  ChainAssign,
   FileId,
   ImportSession,
   PageMaskEdit,
@@ -194,6 +195,64 @@ export function editChains(e: PieceEdit): number[] {
 export const nameString = (p: { code: string; mods: readonly string[]; displayName: string }) =>
   `${p.code}|${p.mods.join('_')}|${p.displayName}`;
 
+/** LINEFIX: a line answer is written with at most this many keys (≈ 50 chars each). */
+export const LINE_PART = 200;
+
+/**
+ * LINEFIX provenance: the operator's per-line answers as replay answers — the entry as given
+ * (`sheet`, `keys`, `to`), the flags the chains stage raised on its keys and its stale count; the
+ * subject says it for people ("operator put 2 lines in size 8 · 1 against its pen").
+ */
+export function lineAssignAnswers(
+  list: readonly ChainAssign[],
+  chains: ImportSession['chains'],
+): { subject: string; value: Record<string, unknown> }[] {
+  const rep = chains?.lineAssign;
+  const classes = chains?.classes ?? [];
+  const rowName = (to: ChainAssign['to']) => {
+    if ('cls' in to) return to.cls === 'common' ? 'common (every size)' : 'no size line';
+    const row =
+      'rank' in to
+        ? classes.find(
+            (c) =>
+              c.role === 'size' &&
+              c.evidence.some((e) => e.kind === 'nesting-order' && e.rank === to.rank),
+          )
+        : classes.find((c) => legendKeyOf(c) === to.row);
+    return row?.sizeLabel
+      ? `size ${row.sizeLabel}`
+      : 'rank' in to
+        ? `size rank ${to.rank}`
+        : `row ${to.row}`;
+  };
+  const out: { subject: string; value: Record<string, unknown> }[] = [];
+  list.forEach((e, entry) => {
+    for (let j = 0; j < e.keys.length; j += LINE_PART) {
+      const keys = e.keys.slice(j, j + LINE_PART);
+      const mine = new Set(keys);
+      const landed = (rep?.applied ?? []).filter((a) => a.entry === entry && mine.has(a.key));
+      const ids = new Set(landed.flatMap((a) => a.chains));
+      const lines = ids.size;
+      const stale = (rep?.stale ?? []).filter((a) => a.entry === entry && mine.has(a.key)).length;
+      const flags = (rep?.flags ?? [])
+        .filter((f) => ids.has(f.chain))
+        .map((f) => ({ k: f.key, f: f.kind, d: f.detail }));
+      const pen = flags.filter((f) => f.f === 'pen').length;
+      const two = flags.filter((f) => f.f === 'two-sizes').length;
+      out.push({
+        subject: [
+          `operator put ${lines} ${lines === 1 ? 'line' : 'lines'} in ${rowName(e.to)}`,
+          ...(pen ? [`${pen} against its pen`] : []),
+          ...(two ? [`${two} in two sizes`] : []),
+          ...(stale ? [`${stale} not found`] : []),
+        ].join(' · '),
+        value: { sheet: e.sheet, keys, to: e.to, flags, stale },
+      });
+    }
+  });
+  return out;
+}
+
 /** A piece edit's JSON is written in parts of this many characters (under REPLAY_VALUE_MAX). */
 export const EDIT_PART = 8000;
 
@@ -208,6 +267,8 @@ const AUTO_KINDS: Record<string, string[]> = {
   'sheet-passed': ['sheet-passed'],
   legend: ['legend-outline'],
   'legend-confirmed': ['legend-row'],
+  // LINEFIX: the operator's own answer — the autopilot never puts a line in a size
+  'line-assign': [],
   'drawn-sizes': ['drawn-sizes'],
   'sheet-legend': ['sheet-legend'],
   'size-map': ['size-guess', 'size-ordinal', 'size-dropped'],
@@ -387,6 +448,10 @@ export function answerRecordOf(
         asked,
       });
   }
+  // LINEFIX: "these lines are size N" — one answer per entry (≤ LINE_PART keys each), with what
+  // the run flagged on them (D3: two sizes, another size's pen) and how many keys were stale
+  for (const a of lineAssignAnswers(i.chainAssign, s.chains))
+    push('sizes', 'line-assign', a.subject, a.value);
   // D6: the tile sheets' different size rows, confirmed as read (bound to what each sheet drew)
   if (i.sheetLegendOk && s.sizes?.sheetLegend?.sig === i.sheetLegendOk)
     push('sizes', 'sheet-legend', 'the tile sheets share the legend as read', {

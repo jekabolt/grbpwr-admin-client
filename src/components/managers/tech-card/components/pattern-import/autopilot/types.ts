@@ -43,7 +43,9 @@ export type AssumptionKind =
   | 'sheet-passed'
   | 'piece-edits'
   | 'piece-override'
-  | 'name-typed';
+  | 'name-typed'
+  // LINEFIX: lines the operator put in a size by hand (never the autopilot's own answer)
+  | 'line-assign';
 
 /**
  * `seed` and `ref` are the machine handles of the subject (a piece, a page "file:page", a source

@@ -11,6 +11,7 @@ import type {
   ReplayRecord,
   CardSize,
   ImportErrorCode,
+  ChainAssign,
   ChainRole,
   ClassId,
   FabricAssignment,
@@ -82,6 +83,7 @@ import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, pinToScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
   answerCtxOf,
+  legendRevOf,
   maskRevOf,
   bindDrawnToModel,
   countWords,
@@ -151,6 +153,8 @@ export type Inputs = {
   legend: LegendEdit[];
   /** Low-confidence legend rows the operator has looked at and accepted (`legendKey`). */
   legendConfirmed: string[];
+  /** LINEFIX: the operator's per-line answers ("these lines are size N"), chains/assign.ts. */
+  chainAssign: ChainAssign[];
   sizeMap: SizeMapEntry[] | null;
   /** H1: the operator's "sizes drawn on this sheet" (null = not answered). */
   drawnSizes: number | null;
@@ -205,6 +209,7 @@ const EMPTY_INPUTS: Inputs = {
   sheetLegendOk: null,
   legend: [],
   legendConfirmed: [],
+  chainAssign: [],
   sizeMap: null,
   drawnSizes: null,
   drawnSizesAt: null,
@@ -571,13 +576,7 @@ export function useImportSession(deps: {
         gridOverride: i.gridOverride,
         variant: s.variant,
         maskRev: maskRevNow(s, i),
-        legendRev:
-          i.legend.length || i.legendConfirmed.length
-            ? maskRevOf(
-                [...i.legendConfirmed],
-                i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
-              )
-            : undefined,
+        legendRev: legendRevOf(i),
       },
       s.pieces?.families,
     );
@@ -740,6 +739,7 @@ export function useImportSession(deps: {
             opts: chainOpts(),
             legend: ev.edits,
             confirmed: iRef.current.legendConfirmed,
+            chainAssign: iRef.current.chainAssign,
           });
           const sizes = await run('sizes', {
             card: rc().sizes,
@@ -759,6 +759,25 @@ export function useImportSession(deps: {
             opts: chainOpts(),
             legend: iRef.current.legend,
             confirmed: legendConfirmed,
+            chainAssign: iRef.current.chainAssign,
+          });
+          const sizes = await run('sizes', {
+            card: rc().sizes,
+            operatorMap: iRef.current.sizeMap ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
+          });
+          patch({ chains, sizes });
+          return;
+        }
+        case 'line-assign': {
+          // LINEFIX: the lines move between rows, the rows stay (their labels, the operator's map)
+          iRef.current = { ...iRef.current, chainAssign: ev.assign };
+          patchInputs({ chainAssign: ev.assign });
+          const chains = await run('chains', {
+            opts: chainOpts(),
+            legend: iRef.current.legend,
+            confirmed: iRef.current.legendConfirmed,
+            chainAssign: ev.assign,
           });
           const sizes = await run('sizes', {
             card: rc().sizes,
@@ -1293,6 +1312,7 @@ export function useImportSession(deps: {
       opts: chainOpts(),
       legend: iRef.current.legend,
       confirmed: iRef.current.legendConfirmed,
+      chainAssign: iRef.current.chainAssign,
     });
     const sizes = await run('sizes', {
       card: rc().sizes,

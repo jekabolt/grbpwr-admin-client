@@ -356,7 +356,11 @@ export const ANSWERS: Record<
   files: { events: ['clean'], inputs: [] },
   scale: { events: [], inputs: ['scaleIndex', 'manualMeasuredMm', 'scaleConfirmed'] },
   sheet: { events: ['sheet', 'clean'], inputs: ['residualsAccepted'] },
-  sizes: { events: ['legend', 'size-map', 'drawn-sizes'], inputs: ['legendConfirmed'] },
+  // LINEFIX 'line-assign': the operator's per-line answer (only a replay of his gives it unasked)
+  sizes: {
+    events: ['legend', 'size-map', 'drawn-sizes', 'line-assign'],
+    inputs: ['legendConfirmed'],
+  },
   // A10: a click seed is the pieces step's own answer (`addSeed`: clickSeeds + the fill again)
   pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds'] },
   // A10: the details controls answer through these fields (the grain's two clicks, the fold edge,

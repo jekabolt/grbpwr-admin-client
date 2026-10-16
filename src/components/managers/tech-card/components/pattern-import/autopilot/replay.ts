@@ -20,6 +20,7 @@
 //     autopilot (autopilot mode) or stays for the operator. The gate stays the judge of the export.
 import type {
   CardSize,
+  ChainAssign,
   FileId,
   GridOverride,
   ImportSession,
@@ -77,6 +78,56 @@ import {
 } from 'lib/pattern-import/pieces/sheets';
 
 // ── which previous import ───────────────────────────────────────────────────────────────────────
+
+/** LINEFIX: a recorded line answer's value back as the session input (null = not one). */
+export function lineAssignOf(v: unknown): ChainAssign | null {
+  if (!v || typeof v !== 'object') return null;
+  const x = v as { sheet?: unknown; keys?: unknown; to?: unknown };
+  const to = (x.to ?? null) as { rank?: unknown; row?: unknown; cls?: unknown } | null;
+  if (typeof x.sheet !== 'number' || !Array.isArray(x.keys) || !to) return null;
+  const keys = x.keys.filter((k): k is string => typeof k === 'string');
+  const t: ChainAssign['to'] | null =
+    typeof to.rank === 'number'
+      ? { rank: to.rank }
+      : typeof to.row === 'string'
+        ? { row: to.row }
+        : to.cls === 'common' || to.cls === 'ignore'
+          ? { cls: to.cls }
+          : null;
+  return t && keys.length ? { sheet: x.sheet, keys, to: t } : null;
+}
+
+function lineAnswers(c: Ctx): Out | null {
+  const all = c.prior.answers.filter((a) => a.kind === 'line-assign');
+  if (!all.length || c.i.chainAssign.length || !c.fresh('line-assign', { ref: 'line-assign' }))
+    return null;
+  const drawn = new Set((c.s.chains?.chainLines ?? []).map((l) => `${l.sheet}|${l.key}`));
+  const assign: ChainAssign[] = [];
+  for (const a of all) {
+    const e = lineAssignOf(a.value);
+    if (!e) continue;
+    const keys = e.keys.filter((k) => drawn.has(`${e.sheet}|${k}`));
+    for (const k of e.keys)
+      if (!keys.includes(k))
+        c.miss(`line-assign|${e.sheet}|${k}`, 'a line put in a size last time is not drawn now');
+    if (keys.length) assign.push({ ...e, keys });
+  }
+  if (!assign.length) return null;
+  const n = assign.reduce((t, e) => t + e.keys.length, 0);
+  return {
+    events: [{ type: 'line-assign', assign }],
+    as: [
+      R(
+        c,
+        all[0],
+        'line-assign',
+        `${n} ${n === 1 ? 'line' : 'lines'} put in their sizes as before`,
+        [sameFiles(c), 'the same lines (line key)'],
+        { ref: 'line-assign', subject: 'lines put in a size by hand' },
+      ),
+    ],
+  };
+}
 
 /** The previous import a re-import replays. */
 export type Prior = {
@@ -947,6 +998,10 @@ function sizesStep(c: Ctx): Out | null {
         ],
       };
   }
+  // 2a · LINEFIX: the lines the operator put in a size (by line key) — only lines drawn now, only
+  // while this run has no line answers of its own (fill-only)
+  const la = lineAnswers(c);
+  if (la) return la;
   // 2b · D6: the tile sheets draw different size rows — confirmed last time for the SAME rows on
   // the same sheets (the signature), else asked again
   const sl = c.get('sheet-legend');
