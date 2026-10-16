@@ -7,7 +7,7 @@
 //     controls in the table still override it.
 //   · ConfirmStrip: quantities nobody printed, names read off construction notes, AI names below
 //     the threshold. One deliberate click confirms them all as shown; each row has its own.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { AllowanceDecision, SeedId } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -47,6 +47,8 @@ export function OutlineQuestion({
   const [mm, setMm] = useState(
     current.allowanceMm > 0 ? current.allowanceMm : PATIMPORT.defaultAllowanceMm,
   );
+  // the field commits on blur, which runs just before the seam answer's click reads it
+  const mmRef = useRef(mm);
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -68,6 +70,7 @@ export function OutlineQuestion({
   ]
     .filter(Boolean)
     .join(' · ');
+  // owner 16.10: two answers of ≤3 words; the allowance is edited inside the seam answer
   const answers = (
     <span className='flex flex-wrap items-center gap-1.5'>
       <Button
@@ -77,32 +80,41 @@ export function OutlineQuestion({
         size='xs'
         disabled={busy}
         className={prefill === 'cut' ? 'border-warning' : undefined}
-        title='the allowance is already in the drawing: the outline is cut as drawn'
+        title={`the allowance is already in the drawing: the outline is cut as drawn${prefill === 'cut' ? ' (the file says so)' : ''}`}
         onClick={() => void api.answerOutline('cut', mm)}
       >
-        cut line — as drawn{prefill === 'cut' ? ' (file says so)' : ''}
+        cut line
       </Button>
-      <Button
-        {...ask('details-outline')}
-        data-ask-hint='pick cut or seam line'
-        variant='secondary'
-        size='xs'
-        disabled={busy}
-        title='the outline is the sewing line: the cut line is built this far outside it'
-        onClick={() => void api.answerOutline('seam', mm)}
-      >
-        seam line — add {mm} mm
-      </Button>
-      <NumberField
-        value={mm}
-        min={0}
-        aria-label='allowance to add to a seam line, mm'
-        className='w-12'
-        onCommit={(v) => v != null && v >= 0 && setMm(v)}
-      />
-      <Text size='micro' variant='label' component='span'>
-        mm
-      </Text>
+      <span className='inline-flex items-center border border-borderColor'>
+        <Button
+          {...ask('details-outline')}
+          data-ask-hint='pick cut or seam line'
+          variant='secondary'
+          size='xs'
+          disabled={busy}
+          className='border-0'
+          title='the outline is the sewing line: the cut line is built this far outside it'
+          onClick={() => void api.answerOutline('seam', mmRef.current)}
+        >
+          seam line +
+        </Button>
+        <NumberField
+          value={mm}
+          min={0}
+          disabled={busy}
+          aria-label='allowance to add to a seam line, mm'
+          className='w-10 border-0 px-0.5 text-right'
+          onCommit={(v) => {
+            if (v != null && v >= 0) {
+              mmRef.current = v;
+              setMm(v);
+            }
+          }}
+        />
+        <Text size='micro' component='span' className='pr-1.5'>
+          mm
+        </Text>
+      </span>
     </span>
   );
   if (answersOnly)
@@ -122,7 +134,7 @@ export function OutlineQuestion({
       className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
     >
       <Text size='micro' component='p' className='min-w-0 flex-1' title={why}>
-        <b>! what is the drawn outline?</b>
+        <b>drawn outline: cut or seam?</b>
         {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
             the reason the question is asked at all — stays on screen */}
         {clash && ` ${clash}`}
