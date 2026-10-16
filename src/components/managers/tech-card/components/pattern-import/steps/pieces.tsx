@@ -447,7 +447,14 @@ export function PiecesStep({
     const same = (n: number) =>
       inputs.edits.length >= n && want.slice(0, n).every((e, i) => inputs.edits[i] === e);
     // another edit came in between (an undo, a drop, a gap): the transaction ends, nothing undone
-    if (!same(Math.min(inputs.edits.length, want.length)) || inputs.edits.length > want.length) {
+    // an undo that took a recorded cut off (fewer edits than the transaction holds, with nothing
+    // still in flight) ends it too — else stage 2 would wait for a cut that is no longer there
+    const shrunk = inputs.edits.length < want.length && !session.busy && out !== p.sent;
+    if (
+      shrunk ||
+      !same(Math.min(inputs.edits.length, want.length)) ||
+      inputs.edits.length > want.length
+    ) {
       splitRef.current = null;
       setHint('split stopped — answer again');
       return;
