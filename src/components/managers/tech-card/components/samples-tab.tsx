@@ -1,8 +1,9 @@
 import { common_Fitting, common_Sample, common_TechCard } from 'api/proto-http/admin';
 import { verdictLabel } from 'components/managers/fittings/components/utils';
 import { findInDictionary } from 'lib/features/findInDictionary';
+import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
@@ -18,6 +19,7 @@ import { fittingsNewestFirst, verdictTone } from './sample-panels';
 import { SampleQuiz } from './sample-quiz';
 import { SAMPLE_STAGING_PREFIX, SampleScreen } from './sample-screen';
 import { useAutoCreateSample } from './use-auto-create-sample';
+import { useDeleteUnfitted } from './use-delete-sample';
 import { useSampleFittings, useSamples } from './useSamples';
 import { useStagedChanges } from './useTechCardStaging';
 
@@ -65,6 +67,7 @@ export function SamplesTab({
       { replace: true },
     );
 
+  const { deleteUnfitted, deletingId } = useDeleteUnfitted(techCardId);
   const auto = useAutoCreateSample({
     techCardId,
     techCard,
@@ -124,6 +127,14 @@ export function SamplesTab({
               fittings={(s.id ? fittingsBySample.get(s.id) : undefined) ?? []}
               staged={!!s.id && stagedSampleIds.has(s.id)}
               onOpen={() => setExpanded(String(s.id))}
+              // Only a sample nobody fitted can go; one with fittings shows no ✕ at all.
+              onDelete={
+                canEdit && !(s.id && fittingsBySample.get(s.id)?.length)
+                  ? () => void deleteUnfitted(s.id ?? 0, 0, `#${s.number ?? s.id}`)
+                  : undefined
+              }
+              deleting={!!s.id && deletingId === s.id}
+              locked={!!deletingId}
             />
           ))}
           {canEdit && (
@@ -174,13 +185,23 @@ function SampleCard({
   fittings,
   staged,
   onOpen,
+  onDelete,
+  deleting,
+  locked,
 }: {
   sample: common_Sample;
   sizeName: string;
   fittings: common_Fitting[];
   staged: boolean;
   onOpen: () => void;
+  /** Present only when the sample may go (editable, no fittings). */
+  onDelete?: () => void;
+  deleting: boolean;
+  /** Another delete is running — every ✕ waits. */
+  locked: boolean;
 }) {
+  // Two clicks, in place: ✕ arms, the red word deletes; leaving the tile disarms.
+  const [armed, setArmed] = useState(false);
   const thumb =
     sampleThumbUrl(sample) ||
     fittingsNewestFirst(fittings)
@@ -190,34 +211,68 @@ function SampleCard({
   const latest = fittingsNewestFirst(fittings)[0]?.fitting;
 
   return (
-    <Tile
-      onClick={onOpen}
-      media={
-        thumb ? (
-          <span className='relative block aspect-[3/4] overflow-hidden border border-borderColor'>
-            <Media
-              src={thumb}
-              alt={`sample #${sample.number ?? '?'}`}
-              aspectRatio='auto'
-              fit='cover'
-            />
-          </span>
-        ) : (
-          <Placeholder aspect='3/4' label='no photo' />
-        )
-      }
-      name={`#${sample.number ?? '?'} ${sample.sample?.purpose ?? ''}${sizeName ? ` · ${sizeName}` : ''}`}
+    <div
+      className={cn('group/sample relative', deleting && 'pointer-events-none opacity-60')}
+      aria-busy={deleting || undefined}
+      onMouseLeave={() => setArmed(false)}
     >
-      <span className='mt-0.5 flex flex-wrap items-center gap-1'>
-        {latest?.verdict && latest.verdict !== 'FITTING_VERDICT_UNKNOWN' ? (
-          <Pill tone={verdictTone(latest.verdict)}>{verdictLabel(latest.verdict)}</Pill>
-        ) : (
-          <Text size='micro' variant='label' component='span' className='uppercase'>
-            {sampleStatusLabel(sample.sample?.status)}
-          </Text>
-        )}
-        {staged && <Pill tone='attention'>staged</Pill>}
-      </span>
-    </Tile>
+      <Tile
+        onClick={deleting ? undefined : onOpen}
+        media={
+          thumb ? (
+            <span className='relative block aspect-[3/4] overflow-hidden border border-borderColor'>
+              <Media
+                src={thumb}
+                alt={`sample #${sample.number ?? '?'}`}
+                aspectRatio='auto'
+                fit='cover'
+              />
+            </span>
+          ) : (
+            <Placeholder aspect='3/4' label='no photo' />
+          )
+        }
+        name={`#${sample.number ?? '?'} ${sample.sample?.purpose ?? ''}${sizeName ? ` · ${sizeName}` : ''}`}
+      >
+        <span className='mt-0.5 flex flex-wrap items-center gap-1'>
+          {latest?.verdict && latest.verdict !== 'FITTING_VERDICT_UNKNOWN' ? (
+            <Pill tone={verdictTone(latest.verdict)}>{verdictLabel(latest.verdict)}</Pill>
+          ) : (
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              {sampleStatusLabel(sample.sample?.status)}
+            </Text>
+          )}
+          {deleting ? (
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              deleting…
+            </Text>
+          ) : (
+            staged && <Pill tone='attention'>staged</Pill>
+          )}
+        </span>
+      </Tile>
+      {onDelete && !deleting && (
+        <button
+          type='button'
+          aria-label={armed ? `delete sample #${sample.number ?? ''}` : 'delete'}
+          disabled={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!armed) return setArmed(true);
+            setArmed(false);
+            onDelete();
+          }}
+          onBlur={() => setArmed(false)}
+          className={cn(
+            'absolute right-2 top-2 z-10 border border-borderColor bg-bgColor px-1 text-micro uppercase leading-none',
+            armed
+              ? 'block text-error'
+              : 'hidden text-labelColor hover:text-error focus-visible:block group-hover/sample:block',
+          )}
+        >
+          {armed ? 'delete' : '✕'}
+        </button>
+      )}
+    </div>
   );
 }

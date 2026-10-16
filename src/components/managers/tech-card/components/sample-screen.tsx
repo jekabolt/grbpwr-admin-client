@@ -36,7 +36,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } f
 import { colorwayLabel } from './design/colorway-picker';
 import { useAddDevExpense, useDeleteDevExpense, useDevExpenses } from './dev-expenses-field';
 import { MaterialSwatch, MaterialTile } from './material-tile';
-import { SampleDeleteControl } from './sample-delete';
+import { useDeleteUnfitted } from './use-delete-sample';
 import { samplePurposeLabel, sampleStatusLabel } from './sample-options';
 import {
   fittingsNewestFirst,
@@ -367,6 +367,8 @@ export function SampleScreen({
     setTouched(new Set());
     setDirty(false);
   };
+  const { deleteUnfitted, deletingId } = useDeleteUnfitted(techCardId);
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const afterDelete = () => {
     staging?.unstage(stagingKey);
     onClose();
@@ -507,17 +509,25 @@ export function SampleScreen({
                   >
                     {d.status === 'scrapped' ? 'unscrap' : 'scrap'}
                   </button>
-                  <SampleDeleteControl
-                    sampleId={sampleId}
-                    label={`#${sample.number ?? sampleId}`}
-                    techCardId={techCardId}
-                    onDeleted={afterDelete}
-                    renderTrigger={(open) => (
-                      <button type='button' className={cn(menuItem, 'text-error')} onClick={open}>
-                        delete
-                      </button>
-                    )}
-                  />
+                  {fittings.length === 0 && (
+                    <button
+                      type='button'
+                      className={cn(menuItem, 'text-error')}
+                      disabled={!!deletingId}
+                      onClick={() => {
+                        if (!deleteArmed) return setDeleteArmed(true);
+                        setDeleteArmed(false);
+                        void deleteUnfitted(
+                          sampleId,
+                          fittings.length,
+                          `#${sample.number ?? sampleId}`,
+                        ).then((ok) => ok && afterDelete());
+                      }}
+                      onBlur={() => setDeleteArmed(false)}
+                    >
+                      {deletingId ? 'deleting…' : deleteArmed ? 'delete — sure' : 'delete'}
+                    </button>
+                  )}
                 </div>
               </GenericPopover>
             )}
