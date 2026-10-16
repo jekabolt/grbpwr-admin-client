@@ -366,7 +366,8 @@ export function answerRecordOf(
           sheet: h.sheet,
           row: h.row,
           col: h.col,
-          ...(h.file != null ? { file: h.file } : {}),
+          // the file by its index in source.files (a re-import may number its files otherwise)
+          ...(h.file != null ? { f: fileIndex(h.file) } : {}),
           origin: h.origin,
         })),
       },

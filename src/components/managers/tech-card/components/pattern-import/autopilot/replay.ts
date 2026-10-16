@@ -773,7 +773,8 @@ function sheetStep(c: Ctx): Out | null {
       sheet: number;
       row: number;
       col: number;
-      file?: string;
+      /** The file by its index in the record's source.files (`c.fileOf`). */
+      f?: number;
       origin?: 'operator' | 'autopilot';
     };
     const was = (me?.value as { holes?: WasHole[] } | undefined)?.holes ?? [];
@@ -784,7 +785,8 @@ function sheetStep(c: Ctx): Out | null {
           w.sheet === (m.sheet ?? 0) &&
           w.row === m.row &&
           w.col === m.col &&
-          (w.file == null || w.file === m.file),
+          // a record without the file (one file per sheet) matches any file
+          (w.f == null || (c.fileOf(w.f) != null && c.fileOf(w.f) === m.file)),
       );
     const hit = missing.filter((m) => !!wasOf(m));
     if (me && hit.length && c.fresh('missing-accepted', { ref: 'holes' })) {

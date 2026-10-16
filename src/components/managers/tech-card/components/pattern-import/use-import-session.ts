@@ -1802,11 +1802,19 @@ export function useImportSession(deps: {
    * UXHOOKS: "the missing pages are blank" — the missing cells of the sheet step (all of them, or
    * `only`) added to what each tile sheet already accepted, one `sheet-accept-missing` per sheet.
    */
-  async function acceptMissing(only?: readonly { sheet?: number; row: number; col: number }[]) {
+  async function acceptMissing(
+    only?: readonly { sheet?: number; row: number; col: number; file?: string }[],
+  ) {
     const missing = sRef.current.sheet?.sheet.missing ?? [];
     const pick = only
       ? missing.filter((m) =>
-          only.some((o) => (o.sheet ?? 0) === (m.sheet ?? 0) && o.row === m.row && o.col === m.col),
+          only.some(
+            (o) =>
+              (o.sheet ?? 0) === (m.sheet ?? 0) &&
+              o.row === m.row &&
+              o.col === m.col &&
+              (o.file == null || o.file === m.file),
+          ),
         )
       : missing;
     for (const k of [...new Set(pick.map((m) => m.sheet ?? 0))]) {
