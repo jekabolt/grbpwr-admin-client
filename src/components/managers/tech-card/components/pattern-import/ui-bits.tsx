@@ -497,6 +497,12 @@ const COACH_CSS = `
 `;
 
 /** Is there under 3px between the zone and a sibling or the edge of a clipping parent? */
+function ancestors(el: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (let p = el.parentElement; p; p = p.parentElement) out.push(p);
+  return out;
+}
+
 function tightZone(zone: HTMLElement): boolean {
   const r = zone.getBoundingClientRect();
   const near = (o: DOMRect) =>
@@ -513,7 +519,7 @@ function tightZone(zone: HTMLElement): boolean {
       near(sib.getBoundingClientRect())
     )
       return true;
-  for (let p: HTMLElement | null = zone.parentElement; p; p = p.parentElement) {
+  for (const p of ancestors(zone)) {
     if (getComputedStyle(p).overflow === 'visible') continue;
     const q = p.getBoundingClientRect();
     return (
