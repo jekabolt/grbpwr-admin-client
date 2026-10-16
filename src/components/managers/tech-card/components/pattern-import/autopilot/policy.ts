@@ -14,6 +14,7 @@
 // the step is checked again on the new outputs — a fixpoint (no question → the step's next) or a
 // stop.
 import type {
+  HoleCell,
   AllowanceDecision,
   AutopilotValue,
   BackgroundKind,
@@ -65,7 +66,7 @@ import {
   type LegendEdit,
 } from '../use-import-session';
 import { PAGE_SURE, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
-import { holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
+import { heldCells, holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { bulkNames, codeBlocked } from '../bulk-names';
@@ -118,7 +119,7 @@ export type AutopilotAction =
    * UXHOOKS: missing cells of one tile sheet accepted as blank pages — `cells` the whole accepted
    * set of that sheet (D5: only on two evidences that the cell holds no pattern).
    */
-  | { kind: 'accept-missing'; sheet: number; cells: { row: number; col: number }[] }
+  | { kind: 'accept-missing'; sheet: number; cells: HoleCell[] }
   /** D6: a cross-sheet answer with the "not a piece" edits it stands for. */
   | { kind: 'sheet-answer'; key: string; answer: SheetAnswer; edits: PieceEdit[] }
   /** Go on past an offer the run leaves as it is (pages set aside to check). */
@@ -348,11 +349,8 @@ function toWizard(
     case 'sheet':
       return { events: [{ type: 'sheet', sheet: a.sheet, override: i.gridOverride }] };
     case 'accept-missing':
-      return {
-        events: [
-          { type: 'sheet-accept-missing', sheet: a.sheet, cells: a.cells, origin: 'autopilot' },
-        ],
-      };
+      // each cell carries who accepted it (the autopilot's new ones, the operator's kept)
+      return { events: [{ type: 'sheet-accept-missing', sheet: a.sheet, cells: a.cells }] };
     case 'sheet-answer':
       return {
         events: [
@@ -860,12 +858,18 @@ function sheetStep({ session: s, inputs: i }: Snap): AutopilotDecision {
       actions: sheets.map((k) => ({
         kind: 'accept-missing' as const,
         sheet: k,
-        // the event names the WHOLE accepted set of the sheet: what was accepted before stays
+        // the event names the WHOLE accepted set of the sheet: what is accepted NOW stays (each
+        // cell keeps who accepted it); a stored answer the worker dropped as stale is never re-sent
         cells: [
-          ...(i.sheetAcceptMissing.find((a) => a.sheet === k)?.cells ?? []),
+          ...heldCells(s.sheet?.sheet, k),
           ...sure
             .filter((x) => (x.m.sheet ?? 0) === k)
-            .map((x) => ({ row: x.m.row, col: x.m.col })),
+            .map((x) => ({
+              row: x.m.row,
+              col: x.m.col,
+              ...(x.m.file != null ? { file: x.m.file } : {}),
+              origin: 'autopilot' as const,
+            })),
         ],
       })),
       assumptions: [

@@ -17,6 +17,7 @@ import type {
   IRPath,
   MissingCell,
   PagePose,
+  HoleCell,
   Sheet,
   SheetAcceptMissing,
   SheetHole,
@@ -133,19 +134,40 @@ export function cellGeometry(
   return { box, open: open.minX < open.maxX && open.minY < open.maxY ? open : null };
 }
 
-/** The tile pages of sheet `k` as one key (a hole answer is bound to it). */
+/**
+ * The tile grid of sheet `k` as one key (a hole answer is bound to it): every tile page with the
+ * cell it sits on. Other pages, or the same pages on another grid (a scale, a mask edit, a hand
+ * grid that re-registers them), are another key — the answer is asked again.
+ */
 export function holePagesKey(
   sheet: Pick<Sheet, 'poses' | 'parts'> | null | undefined,
   k: number,
 ): string {
   if (!sheet) return '';
   const part = sheet.parts?.find((p) => p.sheet === k);
-  const pages = part ? part.pages : sheet.parts?.length ? [] : sheet.poses;
-  return pages
-    .map((p) => `${p.file}:${p.page}`)
+  const on = part ? new Set(part.pages.map((p) => `${p.file}:${p.page}`)) : null;
+  const poses = sheet.parts?.length && !part ? [] : sheet.poses;
+  return poses
+    .filter((p) => !on || on.has(`${p.file}:${p.page}`))
+    .map((p) => `${p.file}:${p.page}@${p.row ?? '-'},${p.col ?? '-'}`)
     .sort()
     .join(',');
 }
+
+/**
+ * The cells of sheet `k` accepted NOW (materialised `Sheet.holes`, each with its file and who
+ * accepted it) — what a new answer for that sheet keeps. Never the stored input: an answer the
+ * worker dropped as stale is not given again under a new stamp.
+ */
+export const heldCells = (sheet: Pick<Sheet, 'holes'> | null | undefined, k: number): HoleCell[] =>
+  (sheet?.holes ?? [])
+    .filter((h) => h.sheet === k)
+    .map((h) => ({
+      row: h.row,
+      col: h.col,
+      ...(h.file != null ? { file: h.file } : {}),
+      origin: h.origin,
+    }));
 
 const ends = (p: IRPath) =>
   p.closed || p.pts.length < 2 ? [] : [p.pts[0], p.pts[p.pts.length - 1]];
@@ -202,7 +224,8 @@ export function missingEvidence<C extends MissingCell>(
   });
 }
 
-const cellKey = (sheet: number, row: number, col: number) => `${sheet}:${row}:${col}`;
+const cellKey = (sheet: number, row: number, col: number, file?: string) =>
+  `${sheet}:${row}:${col}${file != null ? `:${file}` : ''}`;
 
 /**
  * The accepted cells moved from `missing` to `holes`. An answer whose sheet's pages changed since
@@ -217,13 +240,17 @@ export function acceptMissing(
   const ok = new Map<string, 'operator' | 'autopilot'>();
   for (const a of accepts) {
     if (a.pages != null && a.pages !== holePagesKey(sheet, a.sheet)) continue;
-    for (const c of a.cells) ok.set(cellKey(a.sheet, c.row, c.col), a.origin ?? 'operator');
+    for (const c of a.cells)
+      ok.set(cellKey(a.sheet, c.row, c.col, c.file), c.origin ?? a.origin ?? 'operator');
   }
   if (!ok.size) return sheet;
   const holes: SheetHole[] = [...(sheet.holes ?? [])];
   const missing: MissingCell[] = [];
   for (const m of sheet.missing) {
-    const origin = ok.get(cellKey(m.sheet ?? 0, m.row, m.col));
+    // a cell named with its file (file-per-size sets) is that file's only; without, any file's
+    const origin =
+      ok.get(cellKey(m.sheet ?? 0, m.row, m.col, m.file)) ??
+      ok.get(cellKey(m.sheet ?? 0, m.row, m.col));
     // a cell without geometry cannot be guarded — it stays missing (asked)
     if (!origin || !m.box) {
       missing.push(m);

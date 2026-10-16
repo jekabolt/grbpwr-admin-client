@@ -34,6 +34,31 @@ const grow = (b: BoxMm, m: number): BoxMm => ({
 const inBox = (b: BoxMm, p: PtMm) =>
   p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY;
 
+/** A point of segment ab inside box b (Liang–Barsky clip), or null. */
+function segInBox(a: PtMm, c: PtMm, b: BoxMm): PtMm | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = c.x - a.x;
+  const dy = c.y - a.y;
+  for (const [p, q] of [
+    [-dx, a.x - b.minX],
+    [dx, b.maxX - a.x],
+    [-dy, a.y - b.minY],
+    [dy, b.maxY - a.y],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return null;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) t0 = Math.max(t0, r);
+    else t1 = Math.min(t1, r);
+    if (t0 > t1) return null;
+  }
+  const t = (t0 + t1) / 2;
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 /** Per hole, the chains that end inside its paper (the lines it cuts), with the ends. */
 export function holeCuts(
   set: Pick<ChainSet, 'chains'>,
@@ -91,9 +116,16 @@ export function holeHit(
       return { hole, why: 'cut-line', at };
     }
     if (hole.open) {
+      // every outline edge (the closing one too), not only its vertices: a long straight edge
+      // may cross the uncovered part with both ends outside it
       const deep = grow(hole.open, -0.5);
-      const v = c.outer.find((p) => inBox(deep, p));
-      if (v) return { hole, why: 'through-hole', at: v };
+      if (deep.minX < deep.maxX && deep.minY < deep.maxY) {
+        const n = c.outer.length;
+        for (let k = 0; k < n; k++) {
+          const at = segInBox(c.outer[k], c.outer[(k + 1) % n], deep);
+          if (at) return { hole, why: 'through-hole', at };
+        }
+      }
     }
   }
   return null;

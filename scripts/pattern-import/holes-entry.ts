@@ -359,6 +359,40 @@ function units() {
     !!holeHit(fams[0].candidates[0], holeCuts(set, holes)),
   );
 
+  // Codex r1: an outline edge crossing the uncovered part with both ends outside it
+  const crossing = fam(5, [
+    cand({
+      seed: 5,
+      outer: [
+        { x: open!.minX - 30, y: mid.y },
+        { x: open!.maxX + 30, y: mid.y },
+        { x: open!.maxX + 30, y: mid.y - 400 },
+        { x: open!.minX - 30, y: mid.y - 400 },
+      ],
+      walls: [2],
+    }),
+  ]);
+  check(
+    'u22 guard: a straight edge across the uncovered part (ends outside) is a leak too',
+    holeGuard([crossing], set, holes)[0].candidates[0].hole?.why === 'through-hole',
+  );
+  // Codex r1: the answer is bound to the grid (pages AND their cells), not to the pages only
+  const moved = {
+    ...withEv,
+    poses: withEv.poses.map((p) => (p.page === 2 ? { ...p, col: 2 } : p)),
+  };
+  check(
+    'u23 the same pages on another grid are another key (the answer is asked again)',
+    holePagesKey(moved, 0) !== key &&
+      acceptMissing(moved, [{ sheet: 0, cells: [{ row: 1, col: 1 }], pages: key }]).missing
+        .length === 1,
+  );
+  check(
+    "u24 a cell named with another file is not this file's answer",
+    acceptMissing(withEv, [{ sheet: 0, cells: [{ row: 1, col: 1, file: '7' }], pages: key }])
+      .missing.length === 1,
+  );
+
   // the policy on the sheet step
   const sessionOf = (sh: Partial<Sheet>) =>
     ({
@@ -394,6 +428,30 @@ function units() {
       a2.cells.length === 1 &&
       d2.assumptions.some((a) => a.kind === 'missing-accepted' && a.evidence.length >= 2),
     { actions: d2.actions, as: d2.assumptions.map((a) => a.kind) },
+  );
+  // Codex r1: a stale stored answer (dropped by the worker) is never re-sent under a new stamp
+  const d2b = decide({
+    session: sessionOf({
+      missing: [{ ...ev[0], lineEnds: 0, outside: true }],
+      parts: sheet.parts,
+      holes: [],
+    }),
+    inputs: inputsOf({
+      sheetAcceptMissing: [
+        { sheet: 0, cells: [{ row: 7, col: 7 }], pages: 'stale', origin: 'operator' },
+      ],
+    }) as never,
+    card: { sizes: [] } as never,
+    question: 'q',
+  });
+  const a2b = d2b.actions[0];
+  check(
+    'u25 the autopilot sends only the cells accepted now + its own (never a stale stored cell)',
+    a2b?.kind === 'accept-missing' &&
+      a2b.cells.length === 1 &&
+      a2b.cells[0].row === 1 &&
+      a2b.cells[0].origin === 'autopilot',
+    a2b,
   );
   const d3 = decide({
     session: sessionOf({

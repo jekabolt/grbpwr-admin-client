@@ -362,7 +362,13 @@ export function answerRecordOf(
       'missing-accepted',
       `${holes.length} missing ${holes.length === 1 ? 'tile' : 'tiles'} taken as blank pages`,
       {
-        holes: holes.map((h) => ({ sheet: h.sheet, row: h.row, col: h.col, origin: h.origin })),
+        holes: holes.map((h) => ({
+          sheet: h.sheet,
+          row: h.row,
+          col: h.col,
+          ...(h.file != null ? { file: h.file } : {}),
+          origin: h.origin,
+        })),
       },
     );
   const sheetWaiting = (s.sheet?.clean?.items ?? []).filter(

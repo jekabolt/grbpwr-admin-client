@@ -33,7 +33,7 @@ import type {
   SheetAcceptMissing,
   SheetAnswer,
 } from 'lib/pattern-import/types';
-import { holePagesKey } from 'lib/pattern-import/assemble/holes';
+import { heldCells, holePagesKey } from 'lib/pattern-import/assemble/holes';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import {
   classifyFilePages,
@@ -772,7 +772,13 @@ export function useImportSession(deps: {
                 ...rest,
                 {
                   sheet: ev.sheet,
-                  cells: ev.cells.map((c) => ({ row: c.row, col: c.col })),
+                  // who accepted is kept per cell (a cell the operator accepted stays his)
+                  cells: ev.cells.map((c) => ({
+                    row: c.row,
+                    col: c.col,
+                    ...(c.file != null ? { file: c.file } : {}),
+                    origin: c.origin ?? ev.origin ?? 'operator',
+                  })),
                   pages,
                   origin: ev.origin ?? 'operator',
                 },
@@ -1804,13 +1810,19 @@ export function useImportSession(deps: {
         )
       : missing;
     for (const k of [...new Set(pick.map((m) => m.sheet ?? 0))]) {
-      const had = iRef.current.sheetAcceptMissing.find((a) => a.sheet === k)?.cells ?? [];
       await dispatch({
         type: 'sheet-accept-missing',
         sheet: k,
         cells: [
-          ...had,
-          ...pick.filter((m) => (m.sheet ?? 0) === k).map((m) => ({ row: m.row, col: m.col })),
+          ...heldCells(sRef.current.sheet?.sheet, k),
+          ...pick
+            .filter((m) => (m.sheet ?? 0) === k)
+            .map((m) => ({
+              row: m.row,
+              col: m.col,
+              ...(m.file != null ? { file: m.file } : {}),
+              origin: 'operator' as const,
+            })),
         ],
       });
     }

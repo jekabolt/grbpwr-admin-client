@@ -41,6 +41,7 @@ import type {
   FabricPurposeKey,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { heldCells } from 'lib/pattern-import/assemble/holes';
 import { cardSizeKindOf, sizeKindOf } from 'lib/pattern-import/sizes/map';
 import type { CardContext } from '../client';
 import type { Inputs, LegendEdit } from '../use-import-session';
@@ -768,12 +769,24 @@ function sheetStep(c: Ctx): Out | null {
   const missing = s.sheet?.sheet.missing ?? [];
   if (missing.length && !s.sheet?.sheet.refused?.length) {
     const me = c.get('missing-accepted');
-    const was =
-      (me?.value as { holes?: { sheet: number; row: number; col: number }[] } | undefined)?.holes ??
-      [];
-    const hit = missing.filter((m) =>
-      was.some((w) => w.sheet === (m.sheet ?? 0) && w.row === m.row && w.col === m.col),
-    );
+    type WasHole = {
+      sheet: number;
+      row: number;
+      col: number;
+      file?: string;
+      origin?: 'operator' | 'autopilot';
+    };
+    const was = (me?.value as { holes?: WasHole[] } | undefined)?.holes ?? [];
+    // the same cell (and the same file, when the record names one) missing again
+    const wasOf = (m: (typeof missing)[number]) =>
+      was.find(
+        (w) =>
+          w.sheet === (m.sheet ?? 0) &&
+          w.row === m.row &&
+          w.col === m.col &&
+          (w.file == null || w.file === m.file),
+      );
+    const hit = missing.filter((m) => !!wasOf(m));
     if (me && hit.length && c.fresh('missing-accepted', { ref: 'holes' })) {
       const sheets = [...new Set(hit.map((m) => m.sheet ?? 0))];
       return {
@@ -782,8 +795,15 @@ function sheetStep(c: Ctx): Out | null {
             type: 'sheet-accept-missing',
             sheet: k,
             cells: [
-              ...(i.sheetAcceptMissing.find((a) => a.sheet === k)?.cells ?? []),
-              ...hit.filter((m) => (m.sheet ?? 0) === k).map((m) => ({ row: m.row, col: m.col })),
+              ...heldCells(s.sheet?.sheet, k),
+              ...hit
+                .filter((m) => (m.sheet ?? 0) === k)
+                .map((m) => ({
+                  row: m.row,
+                  col: m.col,
+                  ...(m.file != null ? { file: m.file } : {}),
+                  origin: wasOf(m)?.origin ?? 'operator',
+                })),
             ],
           }),
         ),

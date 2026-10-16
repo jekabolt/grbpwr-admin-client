@@ -415,8 +415,17 @@ export type SheetHole = MissingCell & {
  */
 export type SheetAcceptMissing = {
   sheet: number;
-  cells: { row: number; col: number }[];
+  /** `file`: that file's cell only (file-per-size sets); `origin`: per cell, over the entry's. */
+  cells: HoleCell[];
   pages?: string;
+  origin?: 'operator' | 'autopilot';
+};
+
+/** UXHOOKS: one accepted cell (an answer, an event). */
+export type HoleCell = {
+  row: number;
+  col: number;
+  file?: FileId;
   origin?: 'operator' | 'autopilot';
 };
 
@@ -2625,7 +2634,7 @@ export type WizardEvent =
   | {
       type: 'sheet-accept-missing';
       sheet: number;
-      cells: { row: number; col: number }[];
+      cells: HoleCell[];
       origin?: 'operator' | 'autopilot';
     }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
