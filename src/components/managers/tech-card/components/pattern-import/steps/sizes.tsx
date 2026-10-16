@@ -8,7 +8,7 @@
 // guess, a drawn size off the card) is a `?` on the row that opens its yes / no under it.
 // Hovering a row lights its lines on the sheet, blue and thicker. Evidence lives in `?debug=1`.
 // Two size rows given one name are one size (a size drawn in two looks) — the worker merges them.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   BoxMm,
   ChainRole,
@@ -36,7 +36,16 @@ import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, LegendEdit } from '../use-import-session';
 import { legendKey } from '../use-import-session';
 import { guessedSizes } from '../use-import-session';
-import { DebugFold, Fold, NativeSelect, Panel, SplitStage, ask, fmtPct } from '../ui-bits';
+import {
+  DebugFold,
+  Fold,
+  NativeSelect,
+  Panel,
+  SplitStage,
+  ask,
+  fmtPct,
+  useQuizSlot,
+} from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
 
 const ROLES: { value: ChainRole; label: string }[] = [
@@ -109,6 +118,25 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const [qOverride, setQOverride] = useState<Record<string, boolean>>({});
   // the in-order quiz reopened over row answers (it then replaces them, and says so)
   const [reorder, setReorder] = useState(false);
+  // A rename re-reads the lines, and that read starts the size map over (use-import-session
+  // `legend`). The operator's answers are kept by size NAME across it: noted here before the
+  // rename, given back with one `size-map` once the new read has landed. The note lives in the
+  // wizard's slot, not in the step: the step unmounts while the read runs.
+  const kept = useQuizSlot<{ map: KeptMap | null }>('sizes-kept-map', () => ({ map: null }));
+  useEffect(() => {
+    const keepMap = kept.map;
+    if (!keepMap || !sizes || sizes === keepMap.at || session.busy) return;
+    kept.map = null;
+    if (inputs.sizeMap != null) return; // answered again meanwhile: theirs stands
+    const byName = new Map(keepMap.entries.map((k) => [k.name, k.card]));
+    const entries = sizes.map.entries.flatMap((e) => {
+      const name = norm(e.source.label);
+      return !e.notDrawn && byName.has(name)
+        ? [{ ...e, card: byName.get(name) ?? null, origin: 'operator' as const }]
+        : [];
+    });
+    if (entries.length) void api.dispatch({ type: 'size-map', entries });
+  }, [kept, sizes, session.busy, inputs.sizeMap, api]);
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -132,6 +160,21 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       type: 'legend',
       edits: [...inputs.legend.filter((e) => !mine(e)), { ...prev, ...p, classId }],
     });
+  };
+  /** Rename a size; the operator's mapping follows the names (the renamed row its new name). */
+  const rename = (c: LineClass, v: string) => {
+    const own = new Set((inputs.sizeMap ?? []).map((e) => e.source.rank));
+    const notes = sizes.map.entries
+      .filter((e) => own.has(e.source.rank) && !e.notDrawn)
+      // the renamed row last: on a name clash the size renamed onto keeps its card size
+      .sort((a, b) => +(a.source.classId === c.id) - +(b.source.classId === c.id))
+      .map((e) => ({
+        name: norm(e.source.classId === c.id ? v : e.source.label),
+        card: e.card,
+      }));
+    const entries = notes.filter((k, i) => notes.findIndex((o) => o.name === k.name) === i);
+    kept.map = entries.length ? { at: sizes, entries } : null;
+    edit(c.id, { sizeLabel: v || null });
   };
   const setCard = (e: SizeMapEntry, sizeId: string) =>
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
@@ -324,6 +367,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   // the legend row the step asks about first: a size row before the other lines
   const confirmAsk =
     asking === 'confirm' ? sizeRows.find(pending) ?? otherRows.find(pending) ?? null : null;
+  // the step's first question on a line that is not a size: shown first, above the list, not
+  // inside the folded «other lines» below it (owner: the blocker must be seen on first view)
+  const hoisted = confirmAsk && confirmAsk.role !== 'size' ? confirmAsk : null;
   // the row question open by the operator's click; the row the footer asks about opens by itself
   const qOpen = (key: string, active: boolean) => qOverride[key] ?? active;
   const toggleQ = (key: string, active: boolean) =>
@@ -484,7 +530,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               busy={!!session.busy}
               takenBy={(sizeId) => sourceOfCard(sizeId, e.source.rank)}
               onPick={(sizeId) => setCard(e, sizeId)}
-              onRename={c ? (v) => edit(c.id, { sizeLabel: v || null }) : undefined}
+              onRename={c ? (v) => rename(c, v) : undefined}
               renameFrom={c?.sizeLabel ?? ''}
               onMore={
                 c
@@ -501,6 +547,49 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         }
         q={q}
         open={open}
+        onToggleQ={() => q && toggleQ(key, q.askOn)}
+      />
+    );
+  };
+
+  /** A line that is not a size: its sample, what it is (a select), its question. */
+  const otherRow = (c: LineClass) => {
+    const key = `o${c.id}`;
+    const q = questionOf(c, undefined);
+    return (
+      <MapRow
+        key={key}
+        zone={!!q?.askOn}
+        hot={hover === c.id || picked === c.id}
+        title={rowTitle(c)}
+        {...hoverOf(c.id)}
+        onPick={() => {
+          setPicked(picked === c.id ? null : c.id);
+          setToKey(false);
+        }}
+        left={
+          <SwatchCell>
+            <LineSwatchView
+              swatch={chains.swatches?.[c.id]}
+              widthMm={ROW_SWATCH_MM}
+              minStrokeMm={0.35}
+              fallbackDash={motifOf(c.id)}
+              title={`${ROLE_WORD[c.role] ?? c.role} as drawn on the sheet`}
+            />
+          </SwatchCell>
+        }
+        linked={null}
+        right={
+          <NativeSelect
+            value={c.role}
+            onChange={(v) => setRole(c, v)}
+            options={ROLES}
+            aria-label={`what this line is (line ${c.id})`}
+            className='h-7 w-full max-w-[136px]'
+          />
+        }
+        q={q}
+        open={!!q && qOpen(key, q.askOn)}
         onToggleQ={() => q && toggleQ(key, q.askOn)}
       />
     );
@@ -640,6 +729,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               </div>
             )}
 
+            {hoisted && (
+              <div className='flex flex-col'>
+                <Text component='p' className='text-labelColor'>
+                  first, one line to check
+                </Text>
+                {otherRow(hoisted)}
+              </div>
+            )}
+
             {orderFolded && (
               <span>
                 <Act
@@ -756,52 +854,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             {otherRows.length > 0 && (
               <Fold
                 label={`${otherRows.length} other ${otherRows.length === 1 ? 'line' : 'lines'} · not sizes`}
-                open={otherOpen ?? otherPending > 0}
+                // the asked line is shown above the list; the fold opens only for the others
+
+                open={otherOpen ?? (otherPending > 0 && !hoisted)}
                 onOpenChange={setOtherOpen}
-                ask={asking === 'confirm' && otherPending > 0 ? 'sizes-confirm' : undefined}
+                ask={
+                  asking === 'confirm' && otherPending > 0 && !hoisted ? 'sizes-confirm' : undefined
+                }
               >
                 <div className='divide-y divide-hairline'>
-                  {otherRows.map((c) => {
-                    const key = `o${c.id}`;
-                    const q = questionOf(c, undefined);
-                    return (
-                      <MapRow
-                        key={key}
-                        zone={!!q?.askOn}
-                        hot={hover === c.id || picked === c.id}
-                        title={rowTitle(c)}
-                        {...hoverOf(c.id)}
-                        onPick={() => {
-                          setPicked(picked === c.id ? null : c.id);
-                          setToKey(false);
-                        }}
-                        left={
-                          <SwatchCell>
-                            <LineSwatchView
-                              swatch={chains.swatches?.[c.id]}
-                              widthMm={ROW_SWATCH_MM}
-                              minStrokeMm={0.35}
-                              fallbackDash={motifOf(c.id)}
-                              title={`${ROLE_WORD[c.role] ?? c.role} as drawn on the sheet`}
-                            />
-                          </SwatchCell>
-                        }
-                        linked={null}
-                        right={
-                          <NativeSelect
-                            value={c.role}
-                            onChange={(v) => setRole(c, v)}
-                            options={ROLES}
-                            aria-label={`what this line is (line ${c.id})`}
-                            className='h-7 w-full max-w-[136px]'
-                          />
-                        }
-                        q={q}
-                        open={!!q && qOpen(key, q.askOn)}
-                        onToggleQ={() => q && toggleQ(key, q.askOn)}
-                      />
-                    );
-                  })}
+                  {otherRows.filter((c) => c.id !== hoisted?.id).map(otherRow)}
                 </div>
               </Fold>
             )}
@@ -1179,6 +1241,10 @@ function RowDetail({
   );
 }
 
+/** The operator's size map noted before a rename: card size per size name, and the read it was on. */
+type KeptMap = { at: unknown; entries: { name: string; card: SizeMapEntry['card'] }[] };
+const norm = (label: string | null | undefined) => (label ?? '').trim().toLowerCase();
+
 // ═══ THE MAPPING ROW ══════════════════════════════════════════════════════════════════════════════
 
 /** A row's open question and its answers (the old `check` / `! confirm` markers, said in words). */
@@ -1469,6 +1535,7 @@ function CardSizeBox({
           <Input
             autoFocus
             defaultValue={renameFrom}
+            onFocus={(ev: React.FocusEvent<HTMLInputElement>) => ev.currentTarget.select()}
             aria-label='size name'
             className='h-7'
             onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
