@@ -71,6 +71,12 @@ const isClosed = (set: ChainSet, id: ChainId) => {
   return c.closed || (c.pts.length > 3 && dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.5);
 };
 
+/** Segments of a chain, the closing one of a ring that does not repeat its first point included. */
+const segCount = (set: ChainSet, id: ChainId) => {
+  const q = set.chains[id].pts;
+  return isClosed(set, id) && dist(q[0], q[q.length - 1]) > 1e-6 ? q.length : q.length - 1;
+};
+
 /** Texts that label a cutting line of `variant` ("Cutting line Style A …"), joined fragments too. */
 function cutTexts(sheet: Sheet, variant: string): IRText[] {
   const v = norm(variant).replace(/^style /, '');
@@ -104,13 +110,14 @@ function lineUnder(set: ChainSet, t: IRText): { id: ChainId; seg: number } | nul
   let bd = Infinity;
   for (const ch of set.chains) {
     if (ch.lengthMm < 60 || ch.pts.length < 2) continue;
-    for (let i = 0; i + 1 < ch.pts.length; i++) {
-      const r = segNearest(c, ch.pts[i], ch.pts[i + 1]);
+    const n = ch.pts.length;
+    for (let i = 0; i < segCount(set, ch.id); i++) {
+      const p0 = ch.pts[i];
+      const p1 = ch.pts[(i + 1) % n];
+      const r = segNearest(c, p0, p1);
       if (r.d > reach || r.d >= bd) continue;
-      const L = dist(ch.pts[i], ch.pts[i + 1]) || 1;
-      const cos = Math.abs(
-        ((ch.pts[i + 1].x - ch.pts[i].x) * dir.x + (ch.pts[i + 1].y - ch.pts[i].y) * dir.y) / L,
-      );
+      const L = dist(p0, p1) || 1;
+      const cos = Math.abs(((p1.x - p0.x) * dir.x + (p1.y - p0.y) * dir.y) / L);
       if (cos < 0.97) continue;
       bd = r.d;
       best = { id: ch.id, seg: i };
@@ -154,14 +161,15 @@ function touches(set: ChainSet, p: PtMm, self: ChainId, tolMm = 2): boolean {
 }
 
 /**
- * The edge under an EDGE label, in every size: each chain's maximal runs of consecutive segments
- * within 0.6 mm of the carrier through segment `seg` of chain `id`, ≥ 20 mm long, overlapping the
- * labelled chain's own run on that carrier (another piece's edge on the same line far away stays out).
+ * The edge under an EDGE label, in every size: each closed outline holding the labelled outline's
+ * inside at that edge (its copies in the other sizes) contributes its maximal runs of consecutive
+ * vertices within 0.6 mm of the carrier through segment `seg` of chain `id`, ≥ 20 mm long,
+ * overlapping the labelled chain's own run on that carrier.
  */
 function edgeRuns(set: ChainSet, id: ChainId, seg: number): VariantLine[] {
   const p = set.chains[id].pts;
   const a = p[seg];
-  const b = p[seg + 1];
+  const b = p[(seg + 1) % p.length];
   const L = dist(a, b);
   if (L < 1) return [];
   const t = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
@@ -193,9 +201,17 @@ function edgeRuns(set: ChainSet, id: ChainId, seg: number): VariantLine[] {
   const span = own.map(along);
   const lo = Math.min(...span);
   const hi = Math.max(...span);
+  // a point just inside the labelled outline at its edge: the other sizes' copies of the outline
+  // hold it too; a grid line, another piece or a label box on the same carrier does not
+  const mid = { x: a.x + t.x * ((lo + hi) / 2), y: a.y + t.y * ((lo + hi) / 2) };
+  const inner = [1, -1]
+    .map((k) => ({ x: mid.x - k * 2 * t.y, y: mid.y + k * 2 * t.x }))
+    .find((q) => pointInPoly(q, p));
+  if (!inner) return [];
   const out: VariantLine[] = [];
   for (const c of set.chains) {
-    if (c.pts.length < 2 || c.lengthMm < 20) continue;
+    if (c.pts.length < 4 || c.lengthMm < 20 || !isClosed(set, c.id)) continue;
+    if (!pointInPoly(inner, c.pts)) continue;
     for (const r of runsOf(c.id)) {
       const s = r.map(along);
       if (Math.max(...s) < lo || Math.min(...s) > hi) continue;
@@ -218,7 +234,22 @@ export function variantMarksOf(
   sheet: Sheet,
   set: ChainSet,
   labels: readonly string[] = variantLabels(sheet.texts.map((t) => t.text)),
-): VariantMarkGeom[] {
+): readonly VariantMarkGeom[] {
+  // fill, the size solver and the session ask the same sheet: one classification per label set
+  let bySheet = MARKS.get(set);
+  if (!bySheet) MARKS.set(set, (bySheet = new WeakMap()));
+  let byLabels = bySheet.get(sheet);
+  if (!byLabels) bySheet.set(sheet, (byLabels = new Map()));
+  const key = JSON.stringify([...labels].sort());
+  const hit = byLabels.get(key);
+  if (hit) return hit;
+  const res = classify(sheet, set, labels);
+  byLabels.set(key, res);
+  return res;
+}
+const MARKS = new WeakMap<ChainSet, WeakMap<Sheet, Map<string, VariantMarkGeom[]>>>();
+
+function classify(sheet: Sheet, set: ChainSet, labels: readonly string[]): VariantMarkGeom[] {
   const marks: (VariantMarkGeom & { outline?: ChainId })[] = [];
   for (const label of labels)
     for (const t of labelPlaces(sheet, label)) {
@@ -301,8 +332,12 @@ export type VariantKnife = WallItem & { edge: boolean };
 export function variantKnifeItems(sheet: Sheet, set: ChainSet, variant: string): VariantKnife[] {
   const seen = new Set<string>();
   const out: VariantKnife[] = [];
-  for (const m of variantMarksOf(sheet, set))
-    if (m.label === variant && !m.uncertain)
+  // the chosen spelling may come from the instruction pages or a stored answer ("MOD. 125")
+  const v = norm(variant);
+  const labels = variantLabels(sheet.texts.map((t) => t.text));
+  const all = labels.some((l) => norm(l) === v) ? labels : [...labels, variant];
+  for (const m of variantMarksOf(sheet, set, all))
+    if (norm(m.label) === v && !m.uncertain)
       for (const l of m.lines) {
         const k = `${l.chain}:${l.pts[0].x.toFixed(3)},${l.pts[0].y.toFixed(3)}`;
         if (seen.has(k)) continue;
@@ -349,6 +384,13 @@ function cutAlong(
   const sk = Math.sign(c.off(keep));
   if (!sk) return null;
   const side = (q: PtMm) => c.off(q) * sk;
+  // one straight cut takes ONE stretch of the outline (a U-shaped piece cut across both arms would
+  // fall apart into islands the half-plane clip joins along the line): count the removed runs
+  const gone = poly.map((q) => side(q) < -0.5);
+  let runs = 0;
+  for (let i = 0; i < gone.length; i++)
+    if (gone[i] && !gone[(i + gone.length - 1) % gone.length]) runs++;
+  if (runs > 1) return null;
   if (poly.some((q) => side(q) < -0.05 && (c.along(q) < c.lo - 2 || c.along(q) > c.hi + 2))) {
     return null;
   }
@@ -536,9 +578,13 @@ function pieceMarks(
     });
   }
   // one piece claimed by two models: neither claim holds
+  const contested = new Set(
+    out
+      .filter((o) => !o.why && out.some((x) => !x.why && x.seed === o.seed && x.label !== o.label))
+      .map((o) => o.seed),
+  );
   for (const o of out)
-    if (!o.why && out.some((x) => !x.why && x.seed === o.seed && x.label !== o.label))
-      o.why = 'another model claims the same piece';
+    if (!o.why && contested.has(o.seed)) o.why = 'another model claims the same piece';
   return out;
 }
 
