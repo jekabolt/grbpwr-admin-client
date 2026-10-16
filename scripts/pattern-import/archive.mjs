@@ -404,6 +404,11 @@ const runOne = (rel, extraEnv = {}) =>
       clearTimeout(timer);
       children.delete(ch);
       const line = out.split('\n').find((l) => l.startsWith('@@RESULT '));
+      // ARCHIVE_ECHO=<regex>: the child's own debug lines matching it, to the runner's stderr
+      if (process.env.ARCHIVE_ECHO) {
+        const re = new RegExp(process.env.ARCHIVE_ECHO);
+        for (const l of out.split('\n')) if (re.test(l)) console.error(l);
+      }
       const cat = rel.split('/')[0];
       const file = rel.slice(cat.length + 1);
       const r = line

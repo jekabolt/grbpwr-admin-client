@@ -677,6 +677,8 @@ export function rescuedIgnored(
   minLenMm = 15,
   module: number[] = [],
   never: ReadonlySet<ChainId> = new Set(),
+  /** hold back an ignored line lying wholly on one size's line (the faces' weak walls, below) */
+  holdSizeLine = false,
 ): ChainId[] {
   const ignore = set.classes.filter((c) => c.role === 'ignore').flatMap((c) => c.chains);
   if (!ignore.length) return [];
@@ -696,10 +698,49 @@ export function rescuedIgnored(
     });
     return hit;
   };
+  // LEAKS: an ignored line lying wholly ON one size's line (a piece recovery joined into that line —
+  // sizes/land bridgeSameRank — or a copy of it) is that size's stretch, not a weak wall of the
+  // faces: there it walled Mood's bead rows into blobs read as background (whole pieces' labels
+  // held). Only for the faces (`holdSizeLine`): the fill's continuity closures keep it as before
+  // (palto 25·80 closes through such a line; the merged-strip seam fixture is refused through it)
+  const ranked = new SegGrid(4);
+  for (const id of m.byRank.flat()) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  // ALL of it — every vertex and every 0.5 mm between, ends included — within 0.3 mm of ONE ranked
+  // line (Codex: a line that leaves the size's line anywhere, even for a short excursion, draws
+  // something of its own there and stays rescuable)
+  const onOneSizeLine = (c: { pts: PtMm[] }) => {
+    let live: Set<ChainId> | null = null;
+    const probe = (p: PtMm) => {
+      const here = new Set<ChainId>();
+      ranked.near(p, 0.3, (rid, i) => {
+        if (here.has(rid) || (live && !live.has(rid))) return;
+        const q = set.chains[rid].pts;
+        const q1 = i + 1 < q.length ? q[i + 1] : q[0];
+        if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
+      });
+      live = here;
+      return here.size > 0;
+    };
+    for (let i = 0; i < c.pts.length; i++) {
+      if (!probe(c.pts[i])) return false;
+      if (i + 1 >= c.pts.length) break;
+      const a = c.pts[i];
+      const b = c.pts[i + 1];
+      const k = Math.ceil(dist(a, b) / 0.5);
+      for (let j = 1; j < k; j++)
+        if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k }))
+          return false;
+    }
+    return true;
+  };
   const cand: ChainId[] = [];
   for (const id of ignore) {
     const c = set.chains[id];
     if (!c || c.closed || c.pts.length < 2 || c.lengthMm < minLenMm || never.has(id)) continue;
+    if (holdSizeLine && !probeOff('LEAKS_RESCUE_ON_LINE') && onOneSizeLine(c)) continue;
     // a page-module rule (Redcafe's 1116 mm = 6 × 186 tile pitch grid line) is furniture even
     // when both its ends happen to touch a garment edge
     if (module.length && frameLike(c.pts, 60, module)) continue;

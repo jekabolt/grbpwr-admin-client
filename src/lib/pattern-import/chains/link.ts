@@ -443,7 +443,11 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     chainOfMark.set(m, ch);
     markOfChain.set(ch, m);
   }
-  const rows = chainBeads(pool).filter((row) => {
+  // LEAKS: marks drawn one after another (a pattern brush emits its tiles in order along the
+  // line) are one row before any proximity linking: in a dense bundle of sizes the nearest mark is
+  // often the next size's (Mood 0 / 2 / 6, 1 mm apart), and proximity alone zigzags across them
+  const seq = opRows(pool, styles);
+  const rows = [...seq.rows, ...chainBeads(seq.rest, seq.runOf)].filter((row) => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
     let near = 0;
     for (const l of row.items) {
@@ -519,7 +523,153 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   return { chains: alive, items: nItems, freeBeads: free, ignoredPaths: ignored };
 }
 
-function chainBeads(beads: Item[]): WChain[] {
+/** Drawing-order rows: see `opRows`. */
+export const OPROW = {
+  /** Consecutive marks of one row are at most this many paint operations apart. */
+  maxOpStep: 12,
+  /** …and at most this far apart (centre to centre; a capsule by its nearer end), mm. */
+  maxGapMm: 5,
+  /** The row turns at most this much from one step to the next (a corner of the line). */
+  maxTurnDeg: 100,
+  /** A row is a line: at least this long (centre to centre), mm… */
+  minLenMm: 15,
+  /** …its marks on average at least this far apart, mm. */
+  minStepMm: 1,
+  /** Two opposite turns of at least this in a row are a lane change (another path), not a corner. */
+  laneTurnDeg: 35,
+  /** …and two same-way turns adding up to this are a U-turn (the next path painted back). */
+  uTurnDeg: 150,
+  /** A step back within this of the line the last step drew (mm) is along that line, not a turn. */
+  backStepLatMm: 0.3,
+};
+
+/** A mark's place in the run of marks drawn one after another that it belongs to. */
+type RunPos = { run: number; idx: number; len: number };
+
+/** The paint operation number of an item (`file|page|op`). */
+const opNo = (it: Item) => {
+  const k = it.op.lastIndexOf('|');
+  return { page: it.op.slice(0, k), n: Number(it.op.slice(k + 1)) };
+};
+
+/**
+ * Rows of marks in DRAWING ORDER (two evidences: the marks are painted one after another — op
+ * numbers a few apart, the same ink — AND each lies next to the previous one, ≤ 5 mm, the row
+ * turning ≤ 100° per step, never off and back parallel — a lane change is two paths). A row of ≥
+ * minDots marks, at least half of them beads, ≥ 15 mm with a line's spacing, is one line; what no
+ * such row takes is linked by proximity as before (`chainBeads`). A mark that ends a sequence (the
+ * next op is far away, another ink, another tile page) ends the row: nothing is bridged — a row cut
+ * at a tile seam is two chains, and the fill closes or leaks there as with any gap (stitching the
+ * seam by proximity measured worse on Marostica: 44 → 35 closed sizes).
+ */
+function opRows(
+  pool: Item[],
+  styles: Map<number, Style>,
+): { rows: WChain[]; rest: Item[]; runOf: Map<Item, RunPos> } {
+  const runOf = new Map<Item, RunPos>();
+  if (typeof process !== 'undefined' && process.env?.LEAKS_OPROWS_OFF)
+    return { rows: [], rest: pool, runOf };
+  const ink = (it: Item) => {
+    const st = styles.get(it.style);
+    return st?.strokeRgb ? st.strokeRgb.map((v) => Math.round(v / 24)).join(',') : '-';
+  };
+  const sorted = pool
+    .map((it) => ({ it, o: opNo(it) }))
+    .filter((x) => Number.isFinite(x.o.n) && x.it.c)
+    .sort((a, b) =>
+      a.o.page < b.o.page ? -1 : a.o.page > b.o.page ? 1 : a.o.n - b.o.n || a.it.sub - b.it.sub,
+    );
+  const cosTurn = Math.cos((OPROW.maxTurnDeg * Math.PI) / 180);
+  type M = (typeof sorted)[number];
+  const rows: M[][] = [];
+  let cur: M[] = [];
+  let runs = 0;
+  const flush = () => {
+    const run = runs++;
+    cur.forEach((x, idx) => runOf.set(x.it, { run, idx, len: cur.length }));
+    const beads = cur.filter((x) => x.it.kind === 'bead' && !x.it.extra?.length).length;
+    let L = 0;
+    for (let i = 1; i < cur.length; i++) L += dist(cur[i - 1].it.c!, cur[i].it.c!);
+    // a line of marks, not a glyph or a symbol drawn in short strokes (Camden's lettering: 32
+    // strokes in 12 mm): long enough, its marks spaced like a line's rhythm
+    if (
+      cur.length >= LINK.minDots &&
+      2 * beads >= cur.length &&
+      L >= OPROW.minLenMm &&
+      L >= OPROW.minStepMm * (cur.length - 1)
+    )
+      rows.push(cur);
+    cur = [];
+  };
+  /** signed turn at b on the way a → b → c, degrees: ±180 for a reversal onto another lane (atan2
+   *  keeps it — Codex), 0 for a step back ALONG the same line (a compound motif's sub-mark painted
+   *  behind the last one — the old acos-sign form read an exactly collinear one 0 by accident;
+   *  splitting there cut such rows apart: Lanai 10 → 5 families) and when a step is degenerate */
+  const turnAt = (a: PtMm, b: PtMm, c: PtMm) => {
+    const u = { x: b.x - a.x, y: b.y - a.y };
+    const v = { x: c.x - b.x, y: c.y - b.y };
+    const lu = Math.hypot(u.x, u.y);
+    const lv = Math.hypot(v.x, v.y);
+    if (lu < 1e-6 || lv < 1e-6) return 0;
+    const cross = u.x * v.y - u.y * v.x;
+    const dot = u.x * v.x + u.y * v.y;
+    if (dot < 0 && Math.abs(cross) / lu <= OPROW.backStepLatMm) return 0;
+    return (Math.atan2(cross, dot) * 180) / Math.PI;
+  };
+  let prevTurn = 0;
+  for (const x of sorted) {
+    const last = cur[cur.length - 1];
+    if (last) {
+      const ok =
+        last.o.page === x.o.page &&
+        x.o.n - last.o.n >= 1 &&
+        x.o.n - last.o.n <= OPROW.maxOpStep &&
+        ink(last.it) === ink(x.it) &&
+        dist(last.it.c!, x.it.c!) <= OPROW.maxGapMm &&
+        dist(last.it.c!, x.it.c!) > 0.05;
+      let turn = 0;
+      if (ok && cur.length >= 2) turn = turnAt(cur[cur.length - 2].it.c!, last.it.c!, x.it.c!);
+      if (!ok || Math.cos((turn * Math.PI) / 180) < cosTurn) {
+        flush();
+        prevTurn = 0;
+      } else if (
+        cur.length >= 3 &&
+        Math.abs(prevTurn) >= OPROW.laneTurnDeg &&
+        Math.abs(turn) >= OPROW.laneTurnDeg &&
+        (Math.sign(prevTurn) !== Math.sign(turn) || Math.abs(prevTurn + turn) >= OPROW.uTurnDeg)
+      ) {
+        // a lane change (Codex): turn off the line, then back parallel to it — or back the
+        // other way (a U-turn: the next path painted in the opposite direction) — the end of one
+        // path and the start of another (the next size's), not a corner: split before `last`
+        cur.pop();
+        flush();
+        cur = [last];
+        prevTurn = 0;
+      } else prevTurn = turn;
+    }
+    cur.push(x);
+  }
+  flush();
+  const taken = new Set<Item>();
+  for (const r of rows) for (const x of r) taken.add(x.it);
+  return {
+    rows: rows.map((r) => ({
+      items: r.map((x) => ({ it: x.it, rev: false })),
+      decor: [],
+      dead: false,
+    })),
+    rest: pool.filter((it) => !taken.has(it)),
+    runOf,
+  };
+}
+
+/**
+ * Marks to rows by proximity. With `runOf` (the runs of marks drawn one after another), a link
+ * across a tile seam (marks of two pages) is made only between run ends (or marks of no run of
+ * 3+) (Codex): leftover fragments of two sizes' lines meeting at a seam join end to end or not at
+ * all, never zigzag through each other's middles.
+ */
+function chainBeads(beads: Item[], runOf?: Map<Item, RunPos>): WChain[] {
   const n = beads.length;
   if (n < LINK.minDots) return [];
   const grid = new PtGrid(LINK.beadGapMm);
@@ -545,7 +695,10 @@ function chainBeads(beads: Item[]): WChain[] {
         break;
       }
     }
-    nb[i] = [n1, n2];
+    // the guard only REMOVES links of the plain nearest-neighbour graph — never promotes a
+    // farther mark to neighbour in place of a forbidden one (Codex: that would be a new edge)
+    const okLink = (j: number) => j < 0 || !runOf || runLinkOk(b, beads[j], runOf);
+    nb[i] = [okLink(n1) ? n1 : -1, okLink(n2) ? n2 : -1];
   });
   const mutual = (i: number, j: number) => j >= 0 && (nb[j][0] === i || nb[j][1] === i);
   const adj: number[][] = beads.map((_, i) => nb[i].filter((j) => mutual(i, j)));
@@ -572,6 +725,16 @@ function chainBeads(beads: Item[]): WChain[] {
       out.push({ items: path.map((k) => ({ it: beads[k], rev: false })), decor: [], dead: false });
   }
   return out;
+}
+
+/** May two marks be proximity-linked, given the drawn runs they sit in (see chainBeads)? */
+function runLinkOk(a: Item, b: Item, runOf: Map<Item, RunPos>): boolean {
+  // on one page proximity links as it always did; across a tile seam only run ends meet
+  if (opNo(a).page === opNo(b).page) return true;
+  const ra = runOf.get(a);
+  const rb = runOf.get(b);
+  const end = (p: RunPos | undefined) => !p || p.len < 3 || p.idx === 0 || p.idx === p.len - 1;
+  return end(ra) && end(rb);
 }
 
 /** Provenance of a working chain: one range per item (direction inside a range is not kept). */
