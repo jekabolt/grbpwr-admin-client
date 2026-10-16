@@ -259,22 +259,35 @@ export function OutlineTile({
   );
 }
 
-/** One garment's pieces on the whole sheet, as filled outlines. */
+/**
+ * One garment's pieces on the whole sheet, as filled outlines. When the file says how this garment
+ * differs (the engine's variant marks), the difference is drawn on it: its cutting lines in blue,
+ * the pieces it changes tinted, its own outlines dashed — every one optional.
+ */
 export function ModelThumb({
   sheet,
   outlines,
   hot = false,
+  tinted,
+  cutLines = [],
+  extra = [],
   className,
   style,
 }: {
   sheet: BoxMm;
   outlines: readonly (readonly PtMm[])[];
   hot?: boolean;
+  /** Per outline: a piece this garment changes (tinted blue). */
+  tinted?: readonly boolean[];
+  /** This garment's cutting lines (blue polylines). */
+  cutLines?: readonly (readonly PtMm[])[];
+  /** Outlines only this garment has (dashed blue). */
+  extra?: readonly (readonly PtMm[])[];
   className?: string;
   style?: React.CSSProperties;
 }) {
   // the pieces' own box, not the sheet's: a sheet is mostly empty paper round the pieces
-  const all = outlines.flat();
+  const all = [...outlines, ...cutLines, ...extra].flat();
   const v = pad(
     all.length
       ? {
@@ -295,15 +308,41 @@ export function ModelThumb({
       className={className}
       style={style}
     >
-      {outlines.map((o, i) =>
-        o.length > 2 ? (
+      {outlines.map((o, i) => {
+        if (o.length <= 2) return null;
+        const tint = !hot && !!tinted?.[i];
+        return (
           <polygon
             key={i}
             points={ptsAttr(o as PtMm[])}
-            fill={hot ? SHEET_INK.blue : SHEET_INK.fill}
-            fillOpacity={hot ? 0.12 : 1}
-            stroke={hot ? SHEET_INK.blue : SHEET_INK.ink}
+            fill={hot || tint ? SHEET_INK.blue : SHEET_INK.fill}
+            fillOpacity={hot || tint ? 0.12 : 1}
+            stroke={hot || tint ? SHEET_INK.blue : SHEET_INK.ink}
             strokeWidth={unit * 0.5}
+          />
+        );
+      })}
+      {extra.map((o, i) =>
+        o.length > 2 ? (
+          <polygon
+            key={`x${i}`}
+            points={ptsAttr(o as PtMm[])}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={unit * 0.6}
+            strokeDasharray={`${unit * 2} ${unit * 1.5}`}
+          />
+        ) : null,
+      )}
+      {cutLines.map((l, i) =>
+        l.length > 1 ? (
+          <polyline
+            key={`c${i}`}
+            points={ptsAttr(l as PtMm[])}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={unit * 0.9}
+            strokeLinecap='round'
           />
         ) : null,
       )}

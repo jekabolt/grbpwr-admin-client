@@ -227,6 +227,43 @@ type Problem =
   /** Optional, after the required ones: were the outlines left out on a guess left out right? */
   | { key: 'aside'; kind: 'aside' };
 
+/**
+ * How one garment differs on the sheet (the engine's optional `pieces.out.variantMarks`, not in
+ * the types yet): its label, where the label sits, its cutting lines, the pieces it changes (seed
+ * ids), its own outlines, and whether the engine is unsure. Every field is read guarded.
+ */
+type VariantMark = {
+  label: string | null;
+  cutLines: PtMm[][];
+  pieces: Set<number>;
+  outlines: PtMm[][];
+  uncertain: boolean;
+};
+const isPt = (p: unknown): p is PtMm =>
+  !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
+const polylines = (v: unknown, min: number): PtMm[][] =>
+  Array.isArray(v)
+    ? v.filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
+    : [];
+function variantMarksOf(out: unknown): VariantMark[] {
+  const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+    .map((m) => ({
+      label: typeof m.label === 'string' ? m.label : null,
+      cutLines: polylines(m.cutLines, 2),
+      pieces: new Set(
+        Array.isArray(m.pieces) ? m.pieces.filter((x): x is number => Number.isFinite(x)) : [],
+      ),
+      outlines: polylines(m.outlines, 3),
+      uncertain: m.uncertain === true,
+    }));
+}
+/** A mark the client can show: sure, and it draws something. */
+const markShows = (m: VariantMark) =>
+  !m.uncertain && (m.cutLines.length > 0 || m.pieces.size > 0 || m.outlines.length > 0);
+
 /** What the canvas shows lit (blue) because a tile or a garment picture is under the pointer. */
 type Hot =
   | { kind: 'piece'; seed: number }
@@ -293,6 +330,11 @@ export function PiecesStep({
     /** Outlines brought back from the set-aside check: aside id → the piece it became. */
     promoted: new Map<number, { aside: SetAside; seed: number }>(),
     split: null as SplitCheck | null,
+    /** The garment picked without asking (styles the client cannot tell apart); once per import. */
+    autoVariant: null as string | null,
+    autoTried: false,
+    /** «change» on the picked-for-you garment: ask from now on, never pick again. */
+    autoReopened: false,
   }));
   const splitRef = {
     get current() {
@@ -353,6 +395,47 @@ export function PiecesStep({
         )
       : null;
   const families = useMemo(() => out?.families ?? [], [out]);
+  // ── garments the client cannot tell apart are not asked (owner 16.10: «why do we need it if
+  // identical»): no sure variant mark draws a difference, and every garment gets the same pieces
+  // (a piece no label claims is in every garment) → the card's suggestion, else the first, is
+  // dispatched as the operator's answer once — recorded like any answer, said in the panel and the
+  // header (D5: never silent), «change» asks the question ──
+  const marks = variantMarksOf(out);
+  const marksDiffer = marks.some(markShows);
+  const pieceSetOf = (v: string) =>
+    families
+      .filter((f) => {
+        const sv = out?.seeds.find((x) => x.id === f.seed)?.variant;
+        return sv == null || sv === v;
+      })
+      .map((f) => f.seed)
+      .sort((a, b) => a - b)
+      .join(',');
+  const unclaimed = [...(api.baseSeeds ?? []), ...(out?.seeds ?? [])].every((x) => !x.variant);
+  const sets = variants.map(pieceSetOf);
+  const looksSame =
+    variants.length > 1 && !marksDiffer && (unclaimed || sets.every((k) => k === sets[0]));
+  const autoPick = named?.pick ?? variants[0] ?? null;
+  const autoGo =
+    looksSame &&
+    !session.variant &&
+    !seen.autoTried &&
+    !seen.autoReopened &&
+    !!autoPick &&
+    families.length > 0;
+  useEffect(() => {
+    if (!autoGo || session.busy || !autoPick) return;
+    seen.autoTried = true;
+    seen.autoVariant = autoPick;
+    void api.dispatch({ type: 'variant', variant: autoPick });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGo, session.busy]);
+  /** The garment on screen was picked for the operator (not asked). */
+  const autoShown = !!session.variant && session.variant === seen.autoVariant && !seen.autoReopened;
+  const reopenVariant = () => {
+    seen.autoReopened = true;
+    void api.dispatch({ type: 'variant', variant: null });
+  };
   const [hot, setHot] = useState<Hot>(null);
   const [asideAll, setAsideAll] = useState(false);
   const [, bump] = useState(0);
@@ -402,7 +485,9 @@ export function PiecesStep({
 
   // ── THE GUIDE: every open question in the footer's order; one is on the card at a time ──
   const openProblems: Problem[] = [
-    ...(variants.length > 1 && !session.variant ? [{ key: 'model', kind: 'model' } as const] : []),
+    ...(variants.length > 1 && !session.variant && !autoGo
+      ? [{ key: 'model', kind: 'model' } as const]
+      : []),
     ...families.filter(needsFix).map((f): Problem => {
       const c = problemOf(f);
       return { key: `r${f.seed}`, kind: 'region', seed: f.seed, rank: c.rank, outcome: c.outcome };
@@ -1582,7 +1667,19 @@ export function PiecesStep({
           title={headTitle}
           aside={
             /* the grade's open questions: notes behind the header door, not lines in the list */
-            <HeaderWarnings items={(out.grade?.ambiguities ?? []).map((a) => a.message)} />
+            <HeaderWarnings
+              items={[
+                autoShown && {
+                  text: `picked ${session.variant} — the file's styles look the same`,
+                  action: {
+                    label: 'change the garment',
+                    onClick: reopenVariant,
+                    disabled: !!session.busy,
+                  },
+                },
+                ...(out.grade?.ambiguities ?? []).map((a) => a.message),
+              ]}
+            />
           }
         >
           {focus && (
@@ -1665,8 +1762,25 @@ export function PiecesStep({
               </ChipRow>
             </CalloutBox>
           )}
+          {/* the garment picked for the operator: always said, with «change» */}
+          {autoShown && (
+            <div className='flex items-center gap-2 px-1 py-1' data-auto-variant={session.variant}>
+              <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
+                garment: {session.variant} · the styles look the same here
+              </Text>
+              <Button
+                variant='underline'
+                size='xs'
+                className='shrink-0 text-labelColor hover:text-textColor'
+                disabled={!!session.busy}
+                onClick={reopenVariant}
+              >
+                change
+              </Button>
+            </div>
+          )}
           {/* the garment, once picked: one quiet line */}
-          {variants.length > 1 && session.variant && !active && (
+          {variants.length > 1 && session.variant && !autoShown && !active && (
             <div className='flex items-center gap-2 px-1 py-1'>
               <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
                 garment: {session.variant} ✓
@@ -1784,6 +1898,9 @@ export function PiecesStep({
                   {answers.map((x, i) => {
                     const g = garments.find((y) => y.v === x.label);
                     const on = hot?.kind === 'garment' && hot.v === x.label;
+                    // how this garment differs, when the engine says (sure marks only)
+                    const mk = marks.filter((m) => m.label === x.label && markShows(m));
+                    const changed = new Set(mk.flatMap((m) => [...m.pieces]));
                     return (
                       <button
                         key={x.label}
@@ -1808,6 +1925,9 @@ export function PiecesStep({
                         <ModelThumb
                           sheet={sheetBox}
                           outlines={(g?.fams ?? []).map((f) => cand(f).outer)}
+                          tinted={(g?.fams ?? []).map((f) => changed.has(f.seed))}
+                          cutLines={mk.flatMap((m) => m.cutLines)}
+                          extra={mk.flatMap((m) => m.outlines)}
                           hot={on}
                           className='w-full'
                           style={{ height: 150 }}
