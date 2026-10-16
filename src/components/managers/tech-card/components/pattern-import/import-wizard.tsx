@@ -445,20 +445,21 @@ function WizardBody({
   // ── ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves on by itself ──
   const stepRef = useRef(session.step);
   stepRef.current = session.step;
-  const goPending = useRef<WizardStep | null>(null);
+  const goPending = useRef<{ step: WizardStep; pastOffer: boolean } | null>(null);
   const [goTick, setGoTick] = useState(0);
-  const answeredAndGo = useCallback((answer?: Promise<unknown>) => {
+  const answeredAndGo = useCallback((answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => {
     const step = stepRef.current;
     void Promise.resolve(answer).then(() => {
-      goPending.current = step;
+      goPending.current = { step, pastOffer: !!opts?.pastOffer };
       setGoTick((t) => t + 1);
     });
   }, []);
   useEffect(() => {
-    const step = goPending.current;
-    if (step == null || session.busy) return;
+    const go = goPending.current;
+    if (go == null || session.busy) return;
     goPending.current = null;
-    if (step !== session.step || session.error || blocker || api.offer || !nextStep) return;
+    if (go.step !== session.step || session.error || blocker || !nextStep) return;
+    if (api.offer && !go.pastOffer) return;
     void continueAnyway();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goTick, session.busy, session.step]);

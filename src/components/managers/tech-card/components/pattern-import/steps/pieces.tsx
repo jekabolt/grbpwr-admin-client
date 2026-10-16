@@ -1212,7 +1212,7 @@ export function PiecesStep({
     seen.asideOk = true;
     setHot(null);
     bump((n) => n + 1);
-    go(answer ?? Promise.resolve());
+    go(answer ?? Promise.resolve(), { pastOffer: true });
   };
   const quizAnswer = (piece: boolean) => {
     if (!quizNow) return;
