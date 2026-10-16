@@ -2125,10 +2125,13 @@ export const isKink = (r: KinkRun, k = KINK) => r.lengthMm > k.runMm && r.offMm 
  * be so". A kinked outline that passed every other check is the silent wrong export D3 forbids.
  */
 function kinksOfBlock(ctx: GateCtx, b: BlockInfo, g: IdentityGeometry, line: PtMm[]): KinkRun[] {
-  // an empty strict set where `own` is not (every own-pen line is another size's class line): no
-  // line of its own to lie on — measured as such (one run off it), never skipped (Codex)
+  // only a size the drawing's own KEY names (a printed size-line key sample): there the pen is the
+  // size's identity and its line is the line the outline must lie on (palto measures a rhythm per
+  // size with no key, and its sizes coincide along long edges)
+  if (!g.keyed) return [];
+  // an empty strict set (every line of the pen is another size's class line: S and L read as one
+  // row) is no line of its own to lie on — one run off it, held (Codex)
   const own = g.ownStrict ?? g.own;
-  if (!g.own.length) return [];
   const derived = (ctx.expect.derivedByBlock?.[b.block] ?? []).map((d) => d.pts);
   const runs = kinkRuns(line, own, [...g.excused, ...derived]);
   if (typeof process !== 'undefined' && process.env?.PATIMPORT_KINK_DEBUG)

@@ -1913,6 +1913,7 @@ export function buildPieceSpecsDetailed(
       ...(exact ? { exact: true } : {}),
       own: map(own),
       ...(strict.length !== own.length ? { ownStrict: map(strict) } : {}),
+      ...(cls?.evidence.some((e) => e.kind === 'legend-sample') ? { keyed: true } : {}),
       excused,
       ...(shared.length ? { shared: map(shared) } : {}),
       ...(foreign.length ? { foreign: map(foreign) } : {}),

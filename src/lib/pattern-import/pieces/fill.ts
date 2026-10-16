@@ -1069,9 +1069,7 @@ function fillOneSheet(
         out.set(seed.id, cand);
         continue;
       }
-      const kt = [...knivesOf(r), ...tickItems(r)];
-      const sn = snapOutline(raster, ctx.items.concat(kt), {
-        keep: new Set(kt.map((it) => it.chain)),
+      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r), tickItems(r)), {
         stepMm: 1,
         reachMm: 2.5,
         snapMm: opts.snapMm || PATIMPORT.snapMm,

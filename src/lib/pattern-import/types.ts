@@ -1880,6 +1880,8 @@ export type IdentityGeometry = {
    * Absent = `own`.
    */
   ownStrict?: PtMm[][];
+  /** KINKS (G25): the drawing's own size-line key names this size (a legend sample). */
+  keyed?: boolean;
   /**
    * The pen is declared (a dash pattern, a plain stroke) — not a rhythm measured off the drawing or
    * the class's own lines: the stricter share applies.
