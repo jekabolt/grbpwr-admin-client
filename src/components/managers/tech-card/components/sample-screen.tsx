@@ -37,7 +37,7 @@ import { colorwayLabel } from './design/colorway-picker';
 import { useAddDevExpense, useDeleteDevExpense, useDevExpenses } from './dev-expenses-field';
 import { MaterialSwatch, MaterialTile } from './material-tile';
 import { useDeleteUnfitted } from './use-delete-sample';
-import { samplePurposeLabel, sampleStatusLabel } from './sample-options';
+import { SAMPLE_STAGING_PREFIX, samplePurposeLabel, sampleStatusLabel } from './sample-options';
 import {
   fittingsNewestFirst,
   lineMaterialId,
@@ -71,9 +71,7 @@ import { wireInt } from './wire-int';
 // Every fact is a chip row, one click stages it into the card's one save (phase 19); the ledgers
 // (materials, R&D) and the automatic status stay instant writes.
 
-// One staged change per sample. The prefix is shared with the board so a tile can tell whether the
-// sample it draws has edits waiting.
-export const SAMPLE_STAGING_PREFIX = 'sample:';
+export { SAMPLE_STAGING_PREFIX };
 const stagingKeyFor = (sampleId: number) => `${SAMPLE_STAGING_PREFIX}${sampleId}`;
 
 type Draft = {
@@ -199,6 +197,7 @@ export function SampleScreen({
   const { dictionary } = useDictionary();
   const save = useSaveSample();
   const patch = usePatchSampleNow();
+  const { showMessage } = useSnackBarStore();
   const sampleId = sample.id ?? 0;
   const staging = useTechCardStaging();
   const stagedSnapshot = useStagedSnapshot();
@@ -415,6 +414,18 @@ export function SampleScreen({
 
   const issued = useSampleIssued(sampleId);
   const unscrapTo = fittings.length ? 'done' : issued.count > 0 ? 'in_sewing' : 'planned';
+  // Unscrap right now (MATERIALS needs an open sample to issue to). A staged status is not thrown
+  // away: it moves to the same value, so the card's save does not scrap it again.
+  const unscrapNow = async (): Promise<boolean> => {
+    try {
+      await patch.mutateAsync({ id: sampleId, patch: { status: unscrapTo } });
+      if (d.status !== base.status) set({ status: unscrapTo });
+      return true;
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "couldn't unscrap the sample", 'error');
+      return false;
+    }
+  };
 
   const sampleWarnings: Array<HeaderWarning | null | false> = [
     createFailure && createFailure.sampleId === sampleId
@@ -640,6 +651,7 @@ export function SampleScreen({
         canEdit={canEdit}
         canReadCosting={canReadCosting}
         scrapped={sample.sample?.status === 'scrapped'}
+        onUnscrap={unscrapNow}
       />
 
       {canReadCosting && <RndBlock techCardId={techCardId} sampleId={sampleId} />}
@@ -755,6 +767,7 @@ function MaterialsBlock({
   canEdit,
   canReadCosting,
   scrapped,
+  onUnscrap,
 }: {
   sampleId: number;
   techCard?: common_TechCard;
@@ -764,6 +777,7 @@ function MaterialsBlock({
   canEdit: boolean;
   canReadCosting: boolean;
   scrapped: boolean;
+  onUnscrap: () => Promise<boolean>;
 }) {
   const { showMessage } = useSnackBarStore();
   const [, setParams] = useSearchParams();
@@ -778,6 +792,18 @@ function MaterialsBlock({
   const [addQty, setAddQty] = useState('');
   const [pendingKey, setPendingKey] = useState('');
   const writable = canEdit && !scrapped;
+  // Scrapped: `+ material` asks once (`unscrap and add?`), the second click unscraps and picks.
+  const [unscrapArmed, setUnscrapArmed] = useState(false);
+  const [unscrapping, setUnscrapping] = useState(false);
+  const onAddTile = async () => {
+    if (!scrapped) return setPicking(true);
+    if (!unscrapArmed) return setUnscrapArmed(true);
+    setUnscrapArmed(false);
+    setUnscrapping(true);
+    const ok = await onUnscrap();
+    setUnscrapping(false);
+    if (ok) setPicking(true);
+  };
 
   const { rows, unlinked, noNorm } = useMemo(() => {
     const subByLine = new Map<number, number>();
@@ -923,6 +949,9 @@ function MaterialsBlock({
     setAddQty('');
   };
 
+  // Nothing issued and nobody can add: no block at all rather than an empty one.
+  if (!canEdit && rows.length === 0) return null;
+
   return (
     <Section
       title='materials'
@@ -965,7 +994,7 @@ function MaterialsBlock({
             />
           );
         })}
-        {writable &&
+        {canEdit &&
           (adding ? (
             <Tile selected media={<MaterialSwatch material={adding} />} name={adding.name ?? '—'}>
               <input
@@ -990,11 +1019,18 @@ function MaterialsBlock({
               />
             </Tile>
           ) : (
-            <Tile dashed onClick={() => setPicking(true)}>
-              <span className='flex min-h-[128px] items-center justify-center text-micro uppercase tracking-label'>
-                + material
-              </span>
-            </Tile>
+            <div onMouseLeave={() => setUnscrapArmed(false)}>
+              <Tile dashed onClick={unscrapping ? undefined : () => void onAddTile()}>
+                <span
+                  className={cn(
+                    'flex min-h-[128px] items-center justify-center text-center text-micro uppercase tracking-label',
+                    unscrapArmed && 'text-error',
+                  )}
+                >
+                  {unscrapping ? 'unscrapping…' : unscrapArmed ? 'unscrap and add?' : '+ material'}
+                </span>
+              </Tile>
+            </div>
           ))}
       </Tiles>
 

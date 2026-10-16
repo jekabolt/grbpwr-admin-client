@@ -2,6 +2,9 @@
 
 import { common_Sample } from 'api/proto-http/admin';
 
+// One staged change per sample (`sample:<id>`) — shared by the screen, the board and delete.
+export const SAMPLE_STAGING_PREFIX = 'sample:';
+
 export const samplePurposeOptions = [
   { value: 'proto', label: 'proto' },
   { value: 'fit', label: 'fit' },

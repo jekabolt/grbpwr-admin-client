@@ -5,18 +5,26 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { extractFieldViolations } from 'utils/field-errors';
+import { SAMPLE_STAGING_PREFIX } from './sample-options';
 import { todayISO } from './sample-panels';
 import { sampleKeys, useDeleteSample } from './useSamples';
+import { useTechCardStaging } from './useTechCardStaging';
 import { wireInt } from './wire-int';
 
 // Delete a sample nobody fitted (owner 16.10). The server refuses while any issued material is
 // still charged to the sample — and create writes the BOM off automatically, so that is almost
-// every sample. So the client first returns ALL outstanding stock in ONE batch, then deletes. A
+// every sample. So the client first returns ALL outstanding stock (lot by lot), then deletes. A
 // sample with a fitting is never sent to the server; a refusal is shown as the server words it.
 
-/** Net issued per material over the sample's WHOLE ledger (every page, not the 50-row window). */
-async function outstandingOf(sampleId: number): Promise<Map<number, number>> {
-  const net = new Map<number, number>();
+type Outstanding = { materialId: number; lotId: number; qty: number };
+
+/**
+ * Net issued per (material, lot) over the sample's WHOLE ledger (every page, not the 50-row
+ * window). Per lot, because a return goes back into the lot it came from — a return into «no lot»
+ * would leave lots A and B depleted for ever.
+ */
+async function outstandingOf(sampleId: number): Promise<Outstanding[]> {
+  const net = new Map<string, Outstanding>();
   const limit = 200;
   for (let offset = 0; ; offset += limit) {
     const res = await adminService.ListMaterialMovements({
@@ -30,17 +38,38 @@ async function outstandingOf(sampleId: number): Promise<Map<number, number>> {
       occurredTo: '',
     });
     for (const m of res.movements ?? []) {
-      const id = wireInt(m.materialId);
+      const materialId = wireInt(m.materialId);
+      const lotId = wireInt(m.lotId);
       const qty = parseDecimalNumber(m.quantity?.value ?? '0');
-      if (!id || !Number.isFinite(qty)) continue;
-      if (m.movementType === 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE')
-        net.set(id, (net.get(id) ?? 0) + Math.abs(qty));
-      else if (m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE')
-        net.set(id, (net.get(id) ?? 0) - Math.abs(qty));
+      if (!materialId || !Number.isFinite(qty)) continue;
+      const sign =
+        m.movementType === 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE'
+          ? 1
+          : m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE'
+            ? -1
+            : 0;
+      if (!sign) continue;
+      const key = `${materialId}:${lotId}`;
+      const seat = net.get(key) ?? { materialId, lotId, qty: 0 };
+      seat.qty += sign * Math.abs(qty);
+      net.set(key, seat);
     }
     if (offset + limit >= (res.total ?? 0) || !(res.movements ?? []).length) break;
   }
-  return net;
+  return [...net.values()]
+    .map((o) => ({ ...o, qty: Number(o.qty.toFixed(3)) }))
+    .filter((o) => o.qty > 0);
+}
+
+/** The batch takes one line per material — so lots of one material go in successive batches. */
+function batchesOf(lines: Outstanding[]): Outstanding[][] {
+  const out: Outstanding[][] = [];
+  for (const l of lines) {
+    const seat = out.find((b) => !b.some((x) => x.materialId === l.materialId));
+    if (seat) seat.push(l);
+    else out.push([l]);
+  }
+  return out;
 }
 
 export function useDeleteUnfitted(techCardId: number) {
@@ -48,6 +77,7 @@ export function useDeleteUnfitted(techCardId: number) {
   const { showMessage } = useSnackBarStore();
   const del = useDeleteSample(techCardId);
   const [deletingId, setDeletingId] = useState(0);
+  const staging = useTechCardStaging();
 
   const deleteUnfitted = async (
     sampleId: number,
@@ -71,29 +101,33 @@ export function useDeleteUnfitted(techCardId: number) {
         qc.invalidateQueries({ queryKey: sampleKeys.all });
         return false;
       }
-      const lines = [...(await outstandingOf(sampleId)).entries()]
-        .map(([materialId, qty]) => ({ materialId, qty: Number(qty.toFixed(3)) }))
-        .filter((l) => l.qty > 0);
-      if (lines.length) {
-        await adminService.BatchIssueMaterialStock({
-          lines: lines.map((l) => ({
-            materialId: l.materialId,
-            quantity: inputToDecimal(String(l.qty)),
-            lotId: 0,
-            comment: '',
-          })),
-          productionRunId: 0,
-          sampleId,
-          isReturn: true,
-          occurredAt: todayISO(),
-          comment: 'sample deleted',
-          productId: 0,
-        });
-        qc.invalidateQueries({ queryKey: warehouseKeys.all });
+      const batches = batchesOf(await outstandingOf(sampleId));
+      for (const batch of batches) {
+        // A later batch failing stops here: the sample is NOT deleted, the error names it.
+        try {
+          await adminService.BatchIssueMaterialStock({
+            lines: batch.map((l) => ({
+              materialId: l.materialId,
+              quantity: inputToDecimal(String(l.qty)),
+              lotId: l.lotId,
+              comment: '',
+            })),
+            productionRunId: 0,
+            sampleId,
+            isReturn: true,
+            occurredAt: todayISO(),
+            comment: 'sample deleted',
+            productId: 0,
+          });
+        } finally {
+          qc.invalidateQueries({ queryKey: warehouseKeys.all });
+        }
       }
       // useDeleteSample invalidates samples, warehouse, dev expenses, economics and the card's
       // fittings (they live under the card's detail key).
       await del.mutateAsync(sampleId);
+      // A staged edit of a deleted sample would 404 the card's next save.
+      staging?.unstage(`${SAMPLE_STAGING_PREFIX}${sampleId}`);
       showMessage(`sample ${label} deleted`, 'success');
       return true;
     } catch (e) {
