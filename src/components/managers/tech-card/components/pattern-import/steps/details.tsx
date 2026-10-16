@@ -21,7 +21,6 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
@@ -961,17 +960,30 @@ export function DetailsStep({
       )) ||
     problems[0] ||
     null;
-  // the side panel always shows the piece of the active question (a new question moves it there)
+  // the file-wide questions (outline, cutting list) have no piece of their own: the preview shows
+  // the largest piece — the one the outline's picture answers are drawn from
+  const bigSeed =
+    [...rows].sort(
+      (x, y) =>
+        (y.candidates[y.candidates.length - 1]?.areaMm2 ?? 0) -
+        (x.candidates[x.candidates.length - 1]?.areaMm2 ?? 0),
+    )[0]?.seed ?? null;
+  const pieceOf = (p: Problem): SeedId | null =>
+    p.seed ?? (p.kind === 'outline' ? bigSeed : sel ?? bigSeed);
+  // the canvas (left) always shows the piece of the active question (a new question moves it
+  // there) — never "select a row" while a question is open
   if (active && active.key !== synced) {
     setSynced(active.key);
     setOther(false);
-    if (active.seed != null && active.seed !== sel && !reviewing) {
-      setSel(active.seed);
+    const want = pieceOf(active);
+    if (want != null && want !== sel && !reviewing) {
+      setSel(want);
       setDrawing(false);
       setGrainA(null);
       setPickingFold(false);
     }
-  }
+  } else if (active && active.kind !== 'gate' && sel == null && bigSeed != null && !reviewing)
+    setSel(pieceOf(active) ?? bigSeed);
 
   // owner 16.10: while a question is open only "question k of n" and its one card are on screen
   // (the full list was information nobody acts on; the table's state cells still jump to any row)
@@ -1030,18 +1042,12 @@ export function DetailsStep({
     let answers: React.ReactNode = null;
     if (p.kind === 'outline') {
       why = 'the sheet does not say whether the seam allowance is in the drawing';
-      // the pictures are drawn from the largest piece: the outline reads best there
-      const big = [...rows].sort(
-        (x, y) =>
-          (y.candidates[y.candidates.length - 1]?.areaMm2 ?? 0) -
-          (x.candidates[x.candidates.length - 1]?.areaMm2 ?? 0),
-      )[0];
+      // the pictures are drawn from the largest piece (the one on the canvas): it reads best there
       answers = (
         <OutlineQuestion
           api={api}
           current={fileAllowance}
-          answersOnly
-          outer={big ? grainRing(big.seed) ?? outerOf(big.seed) : []}
+          outer={bigSeed != null ? grainRing(bigSeed) ?? outerOf(bigSeed) : []}
         />
       );
     } else if (p.kind === 'group' && p.seeds) {
@@ -1438,29 +1444,27 @@ export function DetailsStep({
     } else {
       why = 'open all pieces below: the field it names is marked';
     }
+    // owner 16.10: one plain question and its answers, beside the preview — no callout box, no
+    // bold, one font size; why it is asked is the hover. The piece is the canvas on the left
     return (
-      <CalloutBox tone='warning' className='mt-2 flex items-start gap-3 py-2'>
-        <span className='flex min-w-0 flex-1 flex-col gap-1.5'>
-          {/* owner 16.10: the question and its answers; why it is asked is the hover. The
-              piece itself is the big preview on the left — no thumbnail here */}
-          <Text size='micro' component='p' title={why ?? undefined}>
-            <b>{p.label}</b>
-            {p.kind === 'outline' && (
-              <Text size='micro' variant='label' component='span'>
-                {' '}
-                for all pieces
-              </Text>
-            )}
-          </Text>
-          {/* where the answer is not on the card itself, the why says where it is */}
-          {why && (p.kind === 'gate' || p.kind === 'cutlist') && (
-            <Text size='micro' variant='label' component='p'>
-              {why}
+      <div className='mt-2 flex min-w-0 flex-col gap-2'>
+        <Text size='micro' component='p' title={why ?? undefined}>
+          {p.label}
+          {p.kind === 'outline' && (
+            <Text size='micro' variant='label' component='span'>
+              {' '}
+              for all pieces
             </Text>
           )}
-          {answers}
-        </span>
-      </CalloutBox>
+        </Text>
+        {/* where the answer is not on the card itself, the why says where it is */}
+        {why && (p.kind === 'gate' || p.kind === 'cutlist') && (
+          <Text size='micro' variant='label' component='p'>
+            {why}
+          </Text>
+        )}
+        {answers}
+      </div>
     );
   };
 

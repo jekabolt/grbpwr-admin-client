@@ -12,7 +12,6 @@ import type { AllowanceDecision, PtMm, SeedId } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
@@ -39,15 +38,12 @@ export function outlineAsked(api: ImportSessionApi, current: AllowanceDecision):
 export function OutlineQuestion({
   api,
   current,
-  answersOnly = false,
   outer = [],
 }: {
   api: ImportSessionApi;
   current: AllowanceDecision;
   /** The piece the two pictures are drawn from (the file's own outline). */
   outer?: readonly PtMm[];
-  /** GUIDED: the step's question card says the question — render the answers (and why) only. */
-  answersOnly?: boolean;
 }) {
   const open = useOpenQuestions(api).allowance;
   const [mm, setMm] = useState(
@@ -177,31 +173,19 @@ export function OutlineQuestion({
       </span>
     </span>
   );
-  if (answersOnly)
-    return (
-      <span className='flex flex-col items-start gap-1' title={why}>
-        {(clash || word?.kind === 'stop') && (
-          <Text size='micro' variant='label' component='p'>
-            {clash ?? (word?.kind === 'stop' ? word.reason : '')}
-          </Text>
-        )}
-        {answers}
-      </span>
-    );
+  // owner 16.10: only the picture answers — the step's question card (right, beside the preview)
+  // says the question; the old full-width callout with a bold title and a number spinner is gone
   return (
-    <CalloutBox
-      tone='warning'
-      className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
-    >
-      <Text size='micro' component='p' className='min-w-0 flex-1' title={why}>
-        <b>drawn outline: cut or seam?</b>
-        {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
-            the reason the question is asked at all — stays on screen */}
-        {clash && ` ${clash}`}
-        {word?.kind === 'stop' && ` ${word.reason}`}
-      </Text>
+    <span className='flex flex-col items-start gap-1' title={why}>
+      {/* a clash between the layer word and the sheet, or why the layer word cannot answer:
+          the reason the question is asked at all — stays on screen */}
+      {(clash || word?.kind === 'stop') && (
+        <Text size='micro' variant='label' component='p'>
+          {clash ?? (word?.kind === 'stop' ? word.reason : '')}
+        </Text>
+      )}
       {answers}
-    </CalloutBox>
+    </span>
   );
 }
 
