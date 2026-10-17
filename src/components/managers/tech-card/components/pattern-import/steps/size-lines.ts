@@ -17,14 +17,16 @@ import type { ImportSessionApi } from '../use-import-session';
 type Chains = NonNullable<ImportSessionApi['session']['chains']>;
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
 
-/** A closed piece outline (ends within 2 mm, ≥ 200 mm round): its area (mm²) and bbox. */
-function outline(a: Float32Array | undefined): { area: number; bb: Box } | null {
+/** A closed piece outline (ends within 2 mm, ≥ 200 mm round): area (mm²), bbox, points. */
+type Outline = { id: number; area: number; bb: Box; pts: PtMm[] };
+function outline(id: number, a: Float32Array | undefined): Outline | null {
   if (!a || a.length < 8) return null;
   const n = a.length;
   if (Math.hypot(a[0] - a[n - 2], a[1] - a[n - 1]) > 2) return null;
   let len = 0;
   let sh = 0;
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const pts: PtMm[] = [];
   for (let k = 0; k < n; k += 2) {
     if (k + 3 < n) {
       len += Math.hypot(a[k + 2] - a[k], a[k + 3] - a[k + 1]);
@@ -34,8 +36,9 @@ function outline(a: Float32Array | undefined): { area: number; bb: Box } | null 
     bb.maxX = Math.max(bb.maxX, a[k]);
     bb.minY = Math.min(bb.minY, a[k + 1]);
     bb.maxY = Math.max(bb.maxY, a[k + 1]);
+    pts.push({ x: a[k], y: a[k + 1] });
   }
-  return len >= 200 ? { area: Math.abs(sh) / 2, bb } : null;
+  return len >= 200 ? { id, area: Math.abs(sh) / 2, bb, pts } : null;
 }
 
 const corners = (b: Box): [number, number][] => [
@@ -47,53 +50,125 @@ const corners = (b: Box): [number, number][] => [
 
 /** Corner tolerance of a nest, mm (the line keys quantise to 0.5 mm; previews are simplified). */
 const CORNER_MM = 1.5;
+/** A smaller size may touch the next one's outline by this much (the shared corner and edges). */
+const TOUCH_MM = 2;
 /** Two outlines this close in area are one size's (a line drawn twice), not two sizes. */
 const SAME_AREA = 0.005;
+/** One grading step changes the bbox aspect by at most this factor. */
+const ASPECT_STEP = 1.25;
+
+function distToPoly(p: PtMm, poly: readonly PtMm[]): number {
+  let best = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[j];
+    const b = poly[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    best = Math.min(best, Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy));
+  }
+  return best;
+}
+
+/** `a` lies inside `b` (every vertex inside, or on b's line within TOUCH_MM). */
+const within = (a: Outline, b: Outline) =>
+  a.pts.every((p) => inside(p, b.pts) || distToPoly(p, b.pts) <= TOUCH_MM);
+
+const aspect = (o: Outline) => (o.bb.maxX - o.bb.minX) / Math.max(1e-6, o.bb.maxY - o.bb.minY);
+
+/**
+ * One graded piece: each step's outline inside the next (≤ 2 mm touch), the bbox aspect and the
+ * vertex count changing little per step, the area growing. Any step failing rejects the whole
+ * group (a chain of partial nests of different pieces names nothing).
+ */
+function graded(levels: Outline[][]): boolean {
+  for (let i = 0; i + 1 < levels.length; i++) {
+    const a = levels[i][0];
+    const b = levels[i + 1][0];
+    if (!(b.area > a.area) || !within(a, b)) return false;
+    const r = aspect(a) / aspect(b);
+    if (r > ASPECT_STEP || r < 1 / ASPECT_STEP) return false;
+    const na = a.pts.length;
+    const nb = b.pts.length;
+    if (Math.abs(na - nb) > Math.max(4, 0.5 * Math.min(na, nb))) return false;
+  }
+  return true;
+}
 
 export type LineNests = {
-  /** chain → the size row its nest says it belongs to (every nest line, right or not). */
+  /** chain → the size row it belongs to (only when the size order is sure; see `sizeOrder`). */
   expected: Map<number, number>;
-  /** chain ids per nest. */
+  /** chain ids per nest (one answer covers a nest). */
   nests: number[][];
-  /** the nest lines NOT in the row their nest names (or in it and in another size row too). */
+  /** the lines that look like they sit in the wrong size. */
   suspects: Set<number>;
 };
 
 /**
- * The size rows in grading order: by the reader's nesting rank when every row has one, else by the
- * area of their biggest outline.
+ * The size rows in grading order — ONLY when every size row carries the reader's nesting rank and
+ * no two share one. Otherwise null: an order guessed from the rows' current outlines would follow
+ * the very misplacement it is meant to fix (S holding S and L sorts after M).
  */
-export function sizeOrder(chains: Chains): number[] {
+export function sizeOrder(chains: Chains): number[] | null {
   const rows = chains.classes.filter((c) => c.role === 'size');
-  const rank = (id: number) => {
-    const ev = rows.find((c) => c.id === id)?.evidence ?? [];
-    for (const e of ev) if (e.kind === 'nesting-order') return e.rank;
-    return null;
-  };
-  const big = (id: number) =>
-    Math.max(
-      0,
-      ...(rows.find((c) => c.id === id)?.chains ?? []).map(
-        (ch) => outline(chains.chainPreview[ch])?.area ?? 0,
-      ),
-    );
-  const ids = rows.map((c) => c.id);
-  const byRank = ids.every((id) => rank(id) != null);
-  return ids.sort((a, b) => (byRank ? rank(a)! - rank(b)! : big(a) - big(b)) || a - b);
+  const rank = new Map<number, number>();
+  for (const c of rows)
+    for (const e of c.evidence)
+      if (e.kind === 'nesting-order') {
+        rank.set(c.id, e.rank);
+        break;
+      }
+  if (rank.size !== rows.length || new Set(rank.values()).size !== rows.length) return null;
+  return rows.map((c) => c.id).sort((a, b) => rank.get(a)! - rank.get(b)!);
+}
+
+/**
+ * The engine's own suspects (lane pi/lineassign2), when it gives them. Shape assumed:
+ * `chains.suspects: { chain, suggest: ClassId | null, nest?: number }[]` — adapt here only.
+ */
+type EngineSuspect = { chain: number; suggest?: number | null; nest?: number };
+function engineSuspects(chains: Chains): LineNests | null {
+  const list = (chains as { suspects?: EngineSuspect[] }).suspects;
+  if (!Array.isArray(list)) return null;
+  const out: LineNests = { expected: new Map(), nests: [], suspects: new Set() };
+  const byNest = new Map<number, number[]>();
+  for (const s of list) {
+    out.suspects.add(s.chain);
+    if (s.suggest != null) out.expected.set(s.chain, s.suggest);
+    const k = s.nest ?? -1;
+    byNest.set(k, [...(byNest.get(k) ?? []), s.chain]);
+  }
+  out.nests = [...byNest.values()];
+  return out;
+}
+
+/** THE source of the step's suspect lines: the engine's list when present, else our geometry. */
+export function lineSuspects(chains: Chains): LineNests {
+  return engineSuspects(chains) ?? lineNests(chains);
+}
+
+/** Closed outlines a size row draws: the engine's count when present (`outlineCounts`), else ours. */
+export function outlineCount(chains: Chains, classId: number): number {
+  const eng = (chains as { outlineCounts?: Record<number, number> }).outlineCounts;
+  if (eng && eng[classId] != null) return eng[classId];
+  const c = chains.classes.find((x) => x.id === classId);
+  return (c?.chains ?? []).filter((id) => outline(id, chains.chainPreview[id])).length;
 }
 
 export function lineNests(chains: Chains): LineNests {
-  const order = sizeOrder(chains);
   const out: LineNests = { expected: new Map(), nests: [], suspects: new Set() };
-  if (order.length < 2) return out;
+  const rows = chains.classes.filter((c) => c.role === 'size');
+  if (rows.length < 2) return out;
+  const order = sizeOrder(chains);
   const lines = chains.chainLines;
-  const ol: { id: number; area: number; bb: Box }[] = [];
+  const ol: Outline[] = [];
   chains.chainPreview.forEach((a, id) => {
     if (lines && !lines[id]?.key) return;
-    const o = outline(a);
-    if (o) ol.push({ id, ...o });
+    const o = outline(id, a);
+    if (o) ol.push(o);
   });
-  // union of outlines sharing a bbox corner, alike in size (a graded step, not another piece)
+  // candidates: outlines sharing a bbox corner, alike in size; `graded` then proves the nest
   const parent = ol.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (let i = 0; i < ol.length; i++)
@@ -110,31 +185,45 @@ export function lineNests(chains: Chains): LineNests {
       )
         parent[find(i)] = find(j);
     }
-  const groups = new Map<number, typeof ol>();
+  const groups = new Map<number, Outline[]>();
   ol.forEach((o, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), o]));
   const sizeOf = new Map<number, number[]>();
-  for (const c of chains.classes)
-    if (c.role === 'size')
-      for (const ch of c.chains) sizeOf.set(ch, [...(sizeOf.get(ch) ?? []), c.id]);
+  for (const c of rows)
+    for (const ch of c.chains) sizeOf.set(ch, [...(sizeOf.get(ch) ?? []), c.id]);
   for (const g of groups.values()) {
     g.sort((a, b) => a.area - b.area);
-    const levels: number[][] = [];
+    const levels: Outline[][] = [];
     let last = -1;
     for (const o of g) {
-      if (last > 0 && (o.area - last) / last <= SAME_AREA) levels[levels.length - 1].push(o.id);
-      else levels.push([o.id]);
+      if (last > 0 && (o.area - last) / last <= SAME_AREA) levels[levels.length - 1].push(o);
+      else levels.push([o]);
       last = o.area;
     }
-    // only a nest that steps through every size names them
-    if (levels.length !== order.length) continue;
-    out.nests.push(g.map((o) => o.id));
-    levels.forEach((ids, i) =>
-      ids.forEach((id) => {
-        out.expected.set(id, order[i]);
-        const now = sizeOf.get(id) ?? [];
-        if (now.length !== 1 || now[0] !== order[i]) out.suspects.add(id);
-      }),
-    );
+    // only a proven nest that steps through every size names them
+    if (levels.length !== rows.length || !graded(levels)) continue;
+    const ids = levels.map((l) => l.map((o) => o.id));
+    if (order) {
+      ids.forEach((lv, i) =>
+        lv.forEach((id) => {
+          out.expected.set(id, order[i]);
+          const now = sizeOf.get(id) ?? [];
+          if (now.length !== 1 || now[0] !== order[i]) out.suspects.add(id);
+        }),
+      );
+    } else {
+      // no sure order: a step that shares its size row with another step, or sits in none (or in
+      // two), is suspect — the operator names its size (chips), nothing is proposed
+      const rowOf = ids.map((lv) => {
+        const r = lv.flatMap((id) => sizeOf.get(id) ?? []);
+        return r.length === lv.length && new Set(r).size === 1 ? r[0] : null;
+      });
+      ids.forEach((lv, i) => {
+        const r = rowOf[i];
+        if (r == null || rowOf.filter((x) => x === r).length > 1)
+          lv.forEach((id) => out.suspects.add(id));
+      });
+    }
+    if (ids.some((lv) => lv.some((id) => out.suspects.has(id)))) out.nests.push(ids.flat());
   }
   return out;
 }

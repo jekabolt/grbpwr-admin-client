@@ -58,7 +58,8 @@ import {
   boxOf,
   chainsIn,
   dropStale,
-  lineNests,
+  lineSuspects,
+  outlineCount,
   suspectsOf,
 } from './size-lines';
 
@@ -177,7 +178,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const [, bump] = useState(0);
   const touch = () => bump((x) => x + 1);
   const [hoverLine, setHoverLine] = useState<number | null>(null);
-  const nests = useMemo(() => (chains ? lineNests(chains) : null), [chains]);
+  const nests = useMemo(() => (chains ? lineSuspects(chains) : null), [chains]);
   // ANSWERED AND GO, once the warnings the answer was about are gone (the re-run has landed)
   const notesLeft = useRef(0);
   useEffect(() => {
@@ -498,19 +499,18 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   /** Append answers to the list and send the whole list (an empty add sends nothing). */
   const sendLines = (add: ChainAssign[], fix: boolean) => {
     if (!add.length) return;
-    lf.answers = [...lf.answers, inputs.chainAssign.length];
+    lf.answers = [...lf.answers, inputs.chainAssign];
     if (fix) lf.goAt = chains;
     closeLines();
     void api.dispatch({ type: 'line-assign', assign: [...inputs.chainAssign, ...add] });
   };
+  /** Undo = send back the whole list as it was before the last answer given here. */
   const undoLines = () => {
-    const n = Math.min(
-      lf.answers.at(-1) ?? inputs.chainAssign.length - 1,
-      inputs.chainAssign.length - 1,
-    );
+    const prev = lf.answers.at(-1);
+    if (!prev) return;
     lf.answers = lf.answers.slice(0, -1);
     touch();
-    void api.dispatch({ type: 'line-assign', assign: inputs.chainAssign.slice(0, Math.max(0, n)) });
+    void api.dispatch({ type: 'line-assign', assign: prev });
   };
   const picks = lineMode ? lf.sel : [];
   const eachKnown = !!nests && picks.length > 0 && picks.every((id) => nests.expected.has(id));
@@ -1303,12 +1303,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                     <Act
                       disabled={!!session.busy}
                       title={stale.map((x) => x.detail).join(' · ')}
-                      onClick={() =>
+                      onClick={() => {
+                        // the snapshots name keys that are now dropped: the undo history ends here
+                        lf.answers = [];
+                        touch();
                         void api.dispatch({
                           type: 'line-assign',
                           assign: dropStale(inputs.chainAssign, stale),
-                        })
-                      }
+                        });
+                      }}
                     >
                       drop them
                     </Act>
@@ -1329,13 +1332,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                       <Text component='span' className='text-labelColor'>
                         {answeredKeys} {answeredKeys === 1 ? 'line' : 'lines'} moved by you
                       </Text>
-                      <Act
-                        disabled={!!session.busy}
-                        title='take your last line answer back'
-                        onClick={undoLines}
-                      >
-                        undo
-                      </Act>
+                      {lf.answers.length > 0 && (
+                        <Act
+                          disabled={!!session.busy}
+                          title='take your last line answer back'
+                          onClick={undoLines}
+                        >
+                          undo
+                        </Act>
+                      )}
                     </>
                   )}
                 </span>
@@ -1752,22 +1757,6 @@ function RowDetail({
   );
 }
 
-/** How many piece outlines (closed, ≥ 200 mm round) a size's lines draw. */
-function outlineCount(chains: NonNullable<ImportSessionApi['session']['chains']>, classId: number) {
-  const c = chains.classes.find((x) => x.id === classId);
-  let n = 0;
-  for (const id of c?.chains ?? []) {
-    const a = chains.chainPreview[id];
-    if (!a || a.length < 8) continue;
-    const k = a.length;
-    if (Math.hypot(a[0] - a[k - 2], a[1] - a[k - 1]) > 2) continue;
-    let len = 0;
-    for (let i = 0; i + 3 < k; i += 2) len += Math.hypot(a[i + 2] - a[i], a[i + 3] - a[i + 1]);
-    if (len >= 200) n++;
-  }
-  return n;
-}
-
 /**
  * The biggest closed outline a size's lines draw, mm² (shoelace over the chain previews; a chain
  * is closed when its ends meet within 2 mm). 0 = none closed: the geometry cannot order it.
@@ -1795,8 +1784,8 @@ type LineFixSlot = {
   sel: number[];
   /** earlier picks (undo) */
   hist: number[][];
-  /** `chainAssign` length before each answer given here (undo of an answer) */
-  answers: number[];
+  /** the whole `chainAssign` list before each answer given here (undo sends it back) */
+  answers: ChainAssign[][];
   /** the chains the last fix answer was given on: go on once a re-run replaced them */
   goAt: unknown;
   /** size rows the operator said are right (legend keys): their warning is hidden */
