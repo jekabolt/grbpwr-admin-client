@@ -22,7 +22,7 @@ import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'const
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   useFieldArray,
@@ -32,11 +32,12 @@ import {
   type FieldErrors,
 } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
+import { Button } from 'ui/components/button';
+import { Drawer } from 'ui/components/drawer';
 import { HeaderWarnings } from 'ui/components/header-warnings';
 import { Placeholder } from 'ui/components/placeholder';
-import { HeaderNote } from 'ui/components/section-header';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import Tooltip from 'ui/components/tooltip';
 import ComboField from 'ui/form/fields/combo-field';
@@ -214,7 +215,7 @@ type BomIdentityField = {
 // article-borrowed role permanently uncorrectable. Section is editable on a linked line too: the
 // article keeps its own catalog section on the plate, and a deliberate divergence (a jersey
 // article serving a LINING slot) must be expressible.
-export function SlotIdentityFields({ index }: { index: number }) {
+export function SlotIdentityFields({ index, stacked }: { index: number; stacked?: boolean }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const rowPurpose = useWatch({ control, name: `bomItems.${index}.purpose` }) as string | undefined;
@@ -377,7 +378,7 @@ export function SlotIdentityFields({ index }: { index: number }) {
   // человека, а не автозаполненная личность слота.
   return (
     <div className='flex flex-col gap-3'>
-      <div className={BOX_GRID}>
+      <div className={stacked ? 'grid grid-cols-2 items-start gap-3' : BOX_GRID}>
         <ComboField
           name={`bomItems.${index}.name`}
           label='role'
@@ -469,58 +470,6 @@ export function SlotIdentityFields({ index }: { index: number }) {
 // Сетка равных коробок редактора: шесть в ряд на широком экране, ширина ячейки одна.
 const BOX_GRID = 'grid grid-cols-2 items-start gap-3 sm:grid-cols-3 lg:grid-cols-6';
 
-// Поля личности строки: дверь к любому из них раскрывает коробки вместо тихой строки.
-const IDENTITY_FIELDS = new Set([
-  'name',
-  'section',
-  'purpose',
-  'purposeNote',
-  'kind',
-  'kindNote',
-  'labelPart',
-]);
-
-/**
- * Личность слота одной тихой строкой: роль · секция · назначение (или вид) · часть составника.
- * Всё это заполняется само; правят по `edit`, который ставит на место строки равные коробки.
- */
-function IdentitySummary({ index }: { index: number }) {
-  const { control } = useFormContext<TechCardFormData>();
-  const line = (useWatch({ control, name: `bomItems.${index}` }) ?? {}) as {
-    name?: string;
-    section?: string;
-    purpose?: string;
-    purposeNote?: string;
-    kind?: string;
-    kindNote?: string;
-    labelPart?: string;
-  };
-  const roll = isRollGoodsSection(line.section);
-  const purposeSet = !!line.purpose && line.purpose !== UNSET_PURPOSE;
-  const kindSet = !!line.kind && line.kind !== UNSET_KIND;
-  const part =
-    line.labelPart && line.labelPart !== LABEL_PART_UNSPECIFIED
-      ? (() => {
-          const p = labelPartFromWire(line.labelPart);
-          return p ? LABEL_PART_NAME[p] : line.labelPart;
-        })()
-      : LABEL_PART_NAME[defaultLabelPart(line.section, line.purpose)];
-  const text = join(
-    line.name?.trim() || 'no role',
-    sectionShort(line.section) || 'other',
-    roll ? (purposeSet ? bomPurposeLabel(line.purpose) : 'no purpose') : undefined,
-    roll ? line.purposeNote : undefined,
-    !roll && kindSet ? kindLabel(line.kind) : undefined,
-    !roll ? line.kindNote : undefined,
-    part,
-  );
-  return (
-    <Text component='span' size='micro' variant='label' className='min-w-0 truncate'>
-      {text}
-    </Text>
-  );
-}
-
 // A colourway whose recipe still cuts the article the operator is trying to delete. The server
 // refuses that delete; this is what the refusal is turned into on the way in.
 type BlockingUser = { colorwayId: number; sku: string };
@@ -528,49 +477,6 @@ type BlockingUser = { colorwayId: number; sku: string };
 // Дверь-ссылка: подчёркнутое слово, а не кнопка в рамке (owner: «underline doors»).
 const DOOR =
   'text-micro text-labelColor underline underline-offset-2 hover:text-textColor disabled:no-underline disabled:text-textInactiveColor';
-
-/**
- * Дверь, которая только СМОТРИТ (открыть строку, рецепт, закрыть разворот): span role=button, а не
- * <button> — на выпущенной карточке всё лежит в <fieldset disabled>, а смотреть надо и там.
- * Двери, которые ПИШУТ (change, unlink, remove, + секция), остаются настоящими <button>: fieldset
- * гасит их сам — так замороженная карточка и устроена.
- */
-function ViewDoor({
-  onActivate,
-  className,
-  children,
-  label,
-  expanded,
-}: {
-  onActivate: () => void;
-  className?: string;
-  children?: ReactNode;
-  label?: string;
-  expanded?: boolean;
-}) {
-  return (
-    <span
-      role='button'
-      tabIndex={0}
-      aria-label={label}
-      aria-expanded={expanded}
-      onClick={(e) => {
-        e.stopPropagation();
-        onActivate();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onActivate();
-        }
-      }}
-      className={cn('cursor-pointer', className)}
-    >
-      {children}
-    </span>
-  );
-}
 
 // РЕДАКТОР СТРОКИ — РАЗВОРОТ ПОД ЕЁ СТРОКОЙ (BOM-LITE, владелец 16.10 «complicated af»). Только то,
 // что решает человек: артикул (`change` `unlink` `open`), направление ворса у полотна, комментарий
@@ -584,21 +490,12 @@ function BomLineEditor({
   index,
   highlight,
   blockedBy,
-  identityOpen,
-  onToggleIdentity,
-  onClose,
-  onRemove,
   onGoToColorway,
 }: {
   index: number;
   highlight?: boolean;
   /** Колорвеи, чьи рецепты держат эту строку: удаление отказано, список стоит прямо здесь. */
   blockedBy?: BlockingUser[];
-  /** Коробки личности вместо тихой строки (`edit`, или дверь пришла к полю личности). */
-  identityOpen: boolean;
-  onToggleIdentity: () => void;
-  onClose: () => void;
-  onRemove: () => void;
   onGoToColorway: (colorwayId: number) => void;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
@@ -613,14 +510,6 @@ function BomLineEditor({
   useWatch({ control, name: `bomItems.${index}` });
   const [createOpen, setCreateOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
-
-  // Отказ схемы по полю личности держит коробки открытыми: тихая строка спрятала бы его контрол.
-  const { errors } = useFormState({ control, name: `bomItems.${index}` });
-  const rowErrors = (errors.bomItems as FieldErrors[] | undefined)?.[index] as
-    | Record<string, unknown>
-    | undefined;
-  const identityError = !!rowErrors && Object.keys(rowErrors).some((f) => IDENTITY_FIELDS.has(f));
-  const showBoxes = identityOpen || identityError;
 
   const linked = materialId > 0;
   const rollGoods = isRollGoodsSection(rowSection);
@@ -663,7 +552,7 @@ function BomLineEditor({
     <span
       id={`bom-composition-${index}`}
       className={cn(
-        'min-w-0 truncate',
+        'min-w-0 break-words',
         highlight && 'animate-pulse ring-2 ring-warning motion-reduce:animate-none',
       )}
     >
@@ -688,107 +577,101 @@ function BomLineEditor({
         canReadCosting ? linePrice.label : '',
       );
 
-  return (
-    <div className='flex min-w-0 flex-col gap-3 py-3'>
-      {/* (личность) тихая строка ↔ равные коробки, на одном и том же месте */}
-      <div className='flex min-w-0 items-start gap-3'>
-        <div className='flex min-w-0 flex-1 items-center'>
-          {showBoxes ? <SlotIdentityFields index={index} /> : <IdentitySummary index={index} />}
-        </div>
-        {!identityError && (
-          <ViewDoor onActivate={onToggleIdentity} className={DOOR}>
-            {showBoxes ? 'done' : 'edit'}
-          </ViewDoor>
-        )}
-        <ViewDoor onActivate={onClose} label='close' className='px-1 text-micro text-textColor'>
-          ✕
-        </ViewDoor>
-      </div>
+  const articleName = material?.name?.trim() || '';
 
-      {/* (a) артикул */}
-      <div
-        data-field={`bomItems.${index}.materialId`}
-        className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-micro'
-      >
-        {linked ? (
-          <>
-            <Text component='span' size='micro' className='min-w-0 truncate'>
+  // ПАНЕЛЬ СЛОТА (владелец 17.10 «do full rework of bom»): справа, одна колонка. Сверху крупное
+  // фото и сам артикул (имя, код, состав, цена), под ним тихие двери; ниже равные коробки:
+  // направление ворса у полотна и вся личность слота сразу, без `details`.
+  return (
+    <div className='flex min-w-0 flex-col gap-4'>
+      <div className='flex min-w-0 gap-3' data-field={`bomItems.${index}.materialId`}>
+        <button
+          type='button'
+          onClick={() => setChangeOpen(true)}
+          aria-label={linked ? 'change article' : 'choose article'}
+          className={cn('shrink-0 hover:opacity-80', !linked && 'outline outline-1 outline-error')}
+        >
+          {linked ? (
+            <MaterialThumb material={material} size='lg' />
+          ) : (
+            <span className='flex size-28 items-center justify-center border border-dashed border-borderColor text-micro text-labelColor'>
+              choose
+            </span>
+          )}
+        </button>
+        <div className='flex min-w-0 flex-1 flex-col gap-1'>
+          <Text className={cn('break-words', !linked && 'text-labelColor')}>
+            {linked ? articleName || code : 'no article'}
+          </Text>
+          {linked && articleName && (
+            <Text size='micro' variant='label' className='break-words'>
               {code}
             </Text>
-            <Text component='span' size='micro' variant='label' className='flex min-w-0'>
+          )}
+          {linked ? (
+            <Text size='micro' variant='label' className='flex min-w-0 flex-col'>
               {composition}
+              {canReadCosting && linePrice.label ? (
+                <span>
+                  {linePrice.label} · {linePrice.source === 'line' ? 'card price' : 'catalog price'}
+                </span>
+              ) : null}
             </Text>
-            {canReadCosting && linePrice.label ? (
-              <Text component='span' size='micro' variant='label'>
-                {linePrice.source === 'line' ? 'card price' : 'catalog price'}
-              </Text>
-            ) : null}
-            <span className='flex items-center gap-3'>
+          ) : legacyLine ? (
+            <Text size='micro' variant='label' className='break-words'>
+              {legacyLine}
+            </Text>
+          ) : null}
+          <span className='mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-1'>
+            <button type='button' className={DOOR} onClick={() => setChangeOpen(true)}>
+              {linked ? 'change article' : 'choose article'}
+            </button>
+            {linked && (
               <Link to={`${ROUTES.materials}?tab=catalog&material=${materialId}`} className={DOOR}>
-                open
+                open article
               </Link>
-              <button type='button' className={DOOR} onClick={() => setChangeOpen(true)}>
-                change
-              </button>
+            )}
+            {linked && (
               <button type='button' className={DOOR} onClick={() => pick(0)}>
                 unlink
               </button>
-            </span>
-          </>
-        ) : (
-          <>
-            <button type='button' className={DOOR} onClick={() => setChangeOpen(true)}>
-              link article
-            </button>
-            {legacyLine ? (
-              <Text component='span' size='micro' variant='label' className='min-w-0 truncate'>
-                {legacyLine}
-              </Text>
-            ) : null}
-          </>
-        )}
+            )}
+          </span>
+        </div>
       </div>
 
-      {/* (b) направление ворса — только у полотна. Комментария строки здесь нет (владелец 16.10:
-          «no comment needed»): значение на строке не трогается, форма отправляет то, что лежало. */}
       {rollGoods && (
-        <div className={BOX_GRID}>
-          <SelectField
-            name={`bomItems.${index}.fabricDirection`}
-            label='fabric direction'
-            items={techCardFabricDirectionOptions}
-          />
+        <SelectField
+          name={`bomItems.${index}.fabricDirection`}
+          label='fabric direction'
+          items={techCardFabricDirectionOptions}
+        />
+      )}
+      <SlotIdentityFields index={index} stacked />
+
+      {/* Удаление отказано: рецепты колорвеев держат строку. Каждая строка — дверь в рецепт. */}
+      {blockedBy && blockedBy.length > 0 && (
+        <div className='flex max-w-[420px] flex-col'>
+          <Text size='micro' variant='error'>
+            used in colourway recipes
+          </Text>
+          {blockedBy.map((u) => (
+            <button
+              key={u.colorwayId}
+              type='button'
+              onClick={() => onGoToColorway(u.colorwayId)}
+              className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
+            >
+              <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                open {u.sku}
+              </Text>
+              <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
+                → colorways
+              </Text>
+            </button>
+          ))}
         </div>
       )}
-
-      <div className='flex flex-col gap-1'>
-        <button type='button' className={cn(DOOR, 'self-start')} onClick={onRemove}>
-          remove
-        </button>
-        {/* Удаление отказано: рецепты колорвеев держат строку. Каждая строка — дверь в рецепт. */}
-        {blockedBy && blockedBy.length > 0 && (
-          <div className='flex max-w-[420px] flex-col'>
-            <Text size='micro' variant='error'>
-              used in colourway recipes
-            </Text>
-            {blockedBy.map((u) => (
-              <button
-                key={u.colorwayId}
-                type='button'
-                onClick={() => onGoToColorway(u.colorwayId)}
-                className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
-              >
-                <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                  open {u.sku}
-                </Text>
-                <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
-                  → colorways
-                </Text>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
 
       {changeOpen && (
         <MaterialPickerDialog
@@ -843,6 +726,10 @@ type MatrixLine = {
 };
 
 // Порядок секций — порядок селекта секции, «other» и незнакомые — в хвосте.
+// Пикер каталога: новая строка в секции (`section`) или артикул для строки (`line`); `quiet` —
+// смена с фото строки, панель слота после неё не открывается.
+type PickTarget = { section: string; line?: number; quiet?: boolean };
+
 const SECTION_ORDER = techCardBomSectionOptions.map((o) => o.value as string);
 
 function groupBySection(lines: MatrixLine[]): Array<{ section: string; indices: number[] }> {
@@ -918,7 +805,7 @@ export function BomField({
   colorways?: common_AdminColorwayRef[];
   /** Карточные раскладки как READ — «норма не снята с раскладки» в шапке. */
   markers?: common_TechCardMarkerSummary[];
-  /** Слот в шапке секции: сюда порталятся HeaderNote и HeaderWarnings (как у PATTERNS). */
+  /** Слот в шапке секции: сюда порталятся HeaderWarnings (как у PATTERNS). */
   headerEl?: HTMLElement | null;
   /**
    * Не используется: дверь `+ colourway` ушла из BOM вместе со столбцами колорвеев. Проп оставлен,
@@ -947,12 +834,12 @@ export function BomField({
 
   // The line whose editor is open under its row. ONE editor for the whole list, keyed by index.
   const [selected, setSelected] = useState<number | null>(null);
-  // Строка, у которой личность раскрыта коробками (`edit` или дверь к полю личности).
-  const [identityFor, setIdentityFor] = useState<number | null>(null);
   const [highlightActive, setHighlightActive] = useState(false);
   const [blocked, setBlocked] = useState<{ index: number; users: BlockingUser[] } | null>(null);
+  // Удаление слота спрашивает подтверждение (владелец 17.10: «remove без единого предупреждения»).
+  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   // Пикер каталога: новая строка в секции (`section`) или артикул для пустой строки (`line`).
-  const [picking, setPicking] = useState<{ section: string; line?: number } | null>(null);
+  const [picking, setPicking] = useState<PickTarget | null>(null);
   // A door from another tab (patterns' empty block: «+ fabric slot») opens the picker on a section
   // once, then drops the param so a reload or back does not reopen it.
   const addSlot = params.get('addSlot');
@@ -965,7 +852,7 @@ export function BomField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addSlot]);
   const [createOpen, setCreateOpen] = useState(false);
-  const createTarget = useRef<{ section: string; line?: number } | null>(null);
+  const createTarget = useRef<PickTarget | null>(null);
   // Поле, которое надо сфокусировать, как только редактор строки смонтируется (дверь B7).
   const focusPath = useRef<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
@@ -975,7 +862,6 @@ export function BomField({
   const openLine = (index: number, field?: string) => {
     setSelected(index);
     if (!field) return;
-    if (IDENTITY_FIELDS.has(field)) setIdentityFor(index);
     const path = `bomItems.${index}.${field}`;
     focusPath.current = path;
     setFocusTick((t) => t + 1);
@@ -985,7 +871,6 @@ export function BomField({
   // Отказ удаления и раскрытая личность относятся к ОДНОЙ строке: уход с неё их снимает.
   useEffect(() => {
     setBlocked((b) => (b && b.index !== selected ? null : b));
-    setIdentityFor((f) => (f !== null && f !== selected ? null : f));
   }, [selected]);
 
   // ДВЕРЬ К ПОЛЮ СТРОКИ (B7). Поля строки живут только в развороте выбранной строки, так что
@@ -1002,7 +887,6 @@ export function BomField({
       e.preventDefault();
       focusPath.current = path;
       setSelected(index);
-      if (IDENTITY_FIELDS.has(m[2].split('.')[0])) setIdentityFor(index);
       setFocusTick((t) => t + 1);
     };
     document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
@@ -1113,6 +997,16 @@ export function BomField({
   // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so
   // removing an article NEVER renumbers anything. We only clear refs that pointed AT the removed
   // article (its key is gone); refs to other articles are untouched.
+  // Колорвеи держат строку — отказ показывается сразу в редакторе; иначе сперва подтверждение.
+  const askRemove = (bi: number) => {
+    const key = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
+    if (colorwayUsers(key, wireInt(getValues(`bomItems.${bi}.id`))).length > 0) {
+      removeArticle(bi);
+      return;
+    }
+    setConfirmRemove(bi);
+  };
+
   const removeArticle = (bi: number) => {
     const removedKey = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
     // Colourway recipes are the one referrer this form does not own, so they are the one thing
@@ -1181,12 +1075,13 @@ export function BomField({
   // отфильтрован по ней; выбор артикула сразу рождает строку и открывает её редактор. Роль и
   // назначение выводятся сами (первая ткань = основная, роль из назначения или секции, с номером
   // при совпадении) и правятся в редакторе; ни одного промежуточного окна.
-  const commitPick = (m: common_Material, target: { section: string; line?: number } | null) => {
+  const commitPick = (m: common_Material, target: PickTarget | null) => {
     const materialId = wireInt(m.id);
     if (!materialId) return;
     if (target?.line !== undefined) {
       linkLine(target.line, m);
-      setSelected(target.line);
+      // Смена артикула с фото строки панель не открывает: человек остался в списке.
+      if (!target.quiet) setSelected(target.line);
       return;
     }
     const section = m.section || target?.section || emptyBomItem.section;
@@ -1225,29 +1120,11 @@ export function BomField({
     onOpenColorways: () => openRecipe(),
   });
 
-  const presentSections = new Set(lines.map((l) => l.section));
-  const emptySections = techCardBomSectionOptions.filter((o) => !presentSections.has(o.value));
   const spanAll = { gridColumn: '1 / -1' };
 
   const header = (
     <>
-      {fields.length > 0 && <HeaderNote>articles {fields.length}</HeaderNote>}
       <HeaderWarnings items={warnings} />
-      {/* ГЛАВНАЯ ДВЕРЬ ДОБАВЛЕНИЯ (владелец 16.10: «forgot a button for creating a slot»). Пикер со
-          ВСЕМИ секциями, без пресета: строка рождается в секции артикула, роль и назначение — как у
-          `+ секция`. На пустом BOM — главная кнопка, на полном — вторичная. Выпущенная карточка и
-          нет права — кнопки нет. */}
-      {canEdit && (
-        <Button
-          type='button'
-          variant={fields.length === 0 ? 'main' : 'secondary'}
-          size='sm'
-          className='ml-auto shrink-0'
-          onClick={() => setPicking({ section: '' })}
-        >
-          + slot
-        </Button>
-      )}
     </>
   );
 
@@ -1316,11 +1193,30 @@ export function BomField({
             )}
             style={{ gridColumn: `span ${LEAD_COLS} / span ${LEAD_COLS}` }}
           >
-            {linked ? (
-              <MaterialThumb material={m} size='sm' />
-            ) : (
-              <span className='size-8 border border-hairline' />
-            )}
+            {/* ФОТО — СМЕНА АРТИКУЛА В ОДИН КЛИК, не открывая панели слота. */}
+            <span
+              role={canEdit ? 'button' : undefined}
+              tabIndex={canEdit ? 0 : undefined}
+              aria-label={canEdit ? (linked ? 'change article' : 'choose article') : undefined}
+              onClick={(e) => {
+                if (!canEdit) return;
+                e.stopPropagation();
+                setPicking({ section: l.section || '', line: i, quiet: true });
+              }}
+              onKeyDown={(e) => {
+                if (!canEdit || (e.key !== 'Enter' && e.key !== ' ')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setPicking({ section: l.section || '', line: i, quiet: true });
+              }}
+              className={cn('block', canEdit && 'hover:opacity-80')}
+            >
+              {linked ? (
+                <MaterialThumb material={m} />
+              ) : (
+                <span className='block size-12 border border-dashed border-borderColor' />
+              )}
+            </span>
             <Tooltip
               trigger={
                 <span className='block min-w-0 max-w-[220px]'>
@@ -1389,21 +1285,6 @@ export function BomField({
             )}
           </span>
         </div>
-        {isSelected && (
-          <div className='sticky left-0 border-t border-hairline' style={spanAll}>
-            <BomLineEditor
-              key={fields[i]?.id ?? i}
-              index={i}
-              highlight={highlightActive}
-              blockedBy={blocked?.index === i ? blocked.users : undefined}
-              identityOpen={identityFor === i}
-              onToggleIdentity={() => setIdentityFor((f) => (f === i ? null : i))}
-              onClose={() => setSelected(null)}
-              onRemove={() => removeArticle(i)}
-              onGoToColorway={goToColorway}
-            />
-          </div>
-        )}
       </div>
     );
   };
@@ -1424,7 +1305,7 @@ export function BomField({
             className='grid items-center gap-x-4'
             style={{
               gridTemplateColumns: [
-                '32px',
+                '48px',
                 'minmax(80px, max-content)',
                 'minmax(140px, 1fr)',
                 'max-content',
@@ -1442,44 +1323,74 @@ export function BomField({
                   <GroupLabel flush={gi === 0}>{sectionShort(g.section) || 'other'}</GroupLabel>
                 </div>
                 {g.indices.map((i, k) => slotRow(i, k === 0))}
-                {canEdit && (
-                  <div className='pb-1 pt-2' style={spanAll}>
-                    <button
-                      type='button'
-                      className={DOOR}
-                      onClick={() => setPicking({ section: g.section })}
-                    >
-                      + {sectionShort(g.section) || 'article'}
-                    </button>
-                  </div>
-                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Пустые секции — одна тихая строка ссылок; пустая вкладка — только она. */}
-      {canEdit && emptySections.length > 0 && (
-        <div className='flex flex-wrap items-center gap-x-1.5 gap-y-0.5'>
-          {emptySections.map((o, i) => (
-            <span key={o.value} className='flex items-center gap-1.5'>
-              {i > 0 && (
-                <Text component='span' size='micro' variant='label'>
-                  ·
-                </Text>
-              )}
-              <button
-                type='button'
-                onClick={() => setPicking({ section: o.value })}
-                className='text-micro text-labelColor underline-offset-2 hover:text-textColor hover:underline'
-              >
-                + {o.label}
-              </button>
-            </span>
-          ))}
-        </div>
+      {/* ПАНЕЛЬ СЛОТА справа: страница видна за ней, удаление — внизу панели и спрашивает. */}
+      <Drawer
+        open={selected !== null && selected < fields.length}
+        onOpenChange={(o) => {
+          if (!o) setSelected(null);
+        }}
+        title={selected !== null && lines[selected] ? roleLabel(lines[selected], selected) : 'slot'}
+        width={440}
+        footer={
+          canEdit && selected !== null ? (
+            <Button type='button' variant='secondary' onClick={() => askRemove(selected)}>
+              remove slot
+            </Button>
+          ) : undefined
+        }
+      >
+        {/* Панель уходит порталом из <fieldset disabled> выпущенной карточки — свой засов здесь. */}
+        {selected !== null && selected < fields.length && (
+          <fieldset disabled={!canEdit} className='contents'>
+            <BomLineEditor
+              key={fields[selected]?.id ?? selected}
+              index={selected}
+              highlight={highlightActive}
+              blockedBy={blocked?.index === selected ? blocked.users : undefined}
+              onGoToColorway={goToColorway}
+            />
+          </fieldset>
+        )}
+      </Drawer>
+
+      {/* ДОБАВИТЬ СЛОТ — одна пунктирная строка во всю ширину под списком (как `+ colourway` в
+          SIDES): пикер со всеми секциями, строка рождается в секции артикула. */}
+      {canEdit && (
+        <button
+          type='button'
+          onClick={() => setPicking({ section: '' })}
+          className='flex min-h-11 w-full items-center border border-dashed border-borderColor px-3 text-left text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor'
+        >
+          + slot
+        </button>
       )}
+      <ConfirmationModal
+        open={confirmRemove !== null}
+        onOpenChange={(o) => {
+          if (!o) setConfirmRemove(null);
+        }}
+        onConfirm={() => {
+          if (confirmRemove !== null) removeArticle(confirmRemove);
+          setConfirmRemove(null);
+        }}
+        title={
+          confirmRemove !== null
+            ? `remove slot ${lines[confirmRemove] ? roleLabel(lines[confirmRemove], confirmRemove) : ''}?`
+            : undefined
+        }
+        confirmLabel='remove slot'
+        hideCancel
+      >
+        <Text size='micro' variant='label'>
+          its links in operations, pieces and labels are cleared
+        </Text>
+      </ConfirmationModal>
       {fields.length === 0 && !canEdit && <Placeholder label='no articles' className='h-16' />}
 
       <MaterialPickerDialog
