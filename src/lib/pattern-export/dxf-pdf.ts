@@ -658,6 +658,21 @@ function mapPage(
     ...d.warnings.map((x) => `! ${x}`),
   ];
   marks.push(...textLines(M, M + 13, notes, 7.5));
+  // The machine line (PATTERN-IMPORT's TILESTEP contract): our importer takes the tile pitch from
+  // it when the file agrees (page size, pattern-page count = grid minus skip, labels where the grid
+  // puts them) — a sparse drawing has no line recurring across a seam to measure it from.
+  const mm = (v: number) => String(Math.round(v * 10) / 10);
+  const skip = g.cells.filter((c) => c.blank).map((c) => c.label);
+  marks.push({
+    k: 'text',
+    x: M,
+    y: ph - 4,
+    pt: 5,
+    s:
+      `GRBPWR-TILES v1 page=${mm(pw)}x${mm(ph)}mm step=${mm(g.sx)}x${mm(g.sy)}mm overlap=${TILE_OVERLAP_MM}mm` +
+      ` grid=${g.cols}x${g.rows} order=row origin=A1:top-left` +
+      (skip.length ? ` skip=${skip.join(',')}` : ''),
+  });
   const top = M + 13 + notes.length * 7.5 * PT_MM * 1.45 + 4;
 
   // Map box: what is left above the scale block (100 mm square + ruler ≈ 115 mm).
