@@ -64,6 +64,11 @@ export type RegPage = {
   ays: Float64Array;
   /** Long ops for recurrence, registration frame. */
   shapes: OpShape[];
+  /**
+   * TILESTEP: `shapes` plus the long ops of 4–5 vertices (a rectangle, a marker's simple piece) —
+   * used only to CHECK a step got elsewhere (group.ts latticeCheck), never to set one.
+   */
+  loose: OpShape[];
   src: IRPage;
 };
 
@@ -293,6 +298,7 @@ export function buildRegPage(
     else ops.set(p.src.op, [pts]);
   }
   const shapes: OpShape[] = [];
+  const loose: OpShape[] = [];
   for (const [op, subs] of ops) {
     let len = 0;
     let count = 0;
@@ -301,8 +307,10 @@ export function buildRegPage(
       for (let i = 1; i < s.length; i++)
         len += Math.hypot(s[i].x - s[i - 1].x, s[i].y - s[i - 1].y);
     }
-    if (count < 6 || len < minShapeMm) continue;
-    shapes.push({ op, pts: subs.flat(), lengthMm: len });
+    if (count < 4 || len < minShapeMm) continue;
+    const sh = { op, pts: subs.flat(), lengthMm: len };
+    loose.push(sh);
+    if (count >= 6) shapes.push(sh);
   }
   return {
     key: pageKey(src.file, src.page),
@@ -316,6 +324,7 @@ export function buildRegPage(
     axs,
     ays,
     shapes,
+    loose,
     src,
   };
 }

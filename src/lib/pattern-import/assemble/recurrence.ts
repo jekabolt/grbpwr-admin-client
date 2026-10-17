@@ -55,13 +55,20 @@ function sameShape(
 
 /**
  * Pairwise links from shapes that recur on several pages. A shape that occurs twice on one page
- * (two identical darts) or on more than `maxOcc` pages (a logo) is ambiguous and skipped.
+ * (two identical darts) or on more than `maxOcc` pages (a logo) is ambiguous and skipped. A link
+ * needs `minN` agreeing shapes (2: one shape may be a copy of a piece on another page); TILESTEP
+ * asks for 1 to CHECK a step it got elsewhere, never to set one.
  */
-export function recurrenceLinks(pages: RegPage[], maxOcc = 12): RawLink[] {
+export function recurrenceLinks(
+  pages: RegPage[],
+  maxOcc = 12,
+  minN = 2,
+  shapesOf: (p: RegPage) => RegPage['shapes'] = (p) => p.shapes,
+): RawLink[] {
   const q = PATIMPORT.registrationStepMm;
   const occ = new Map<string, { p: RegPage; s: RegPage['shapes'][number] }[]>();
   for (const p of pages)
-    for (const s of p.shapes) {
+    for (const s of shapesOf(p)) {
       const k = shapeHash(s.pts, q);
       const list = occ.get(k);
       if (list) list.push({ p, s });
@@ -91,7 +98,7 @@ export function recurrenceLinks(pages: RegPage[], maxOcc = 12): RawLink[] {
     if (!best) continue;
     const { n, n2, dx, dy, spread } = best;
     const total = e.ds.length;
-    if (n < 2 || n < 0.6 * total || n < PATIMPORT.registrationMinPeakRatio * n2) continue;
+    if (n < minN || n < 0.6 * total || n < PATIMPORT.registrationMinPeakRatio * n2) continue;
     links.push({ a: e.a, b: e.b, dx, dy, method: 'recurrence', n, n2, spreadMm: spread });
   }
   return links;

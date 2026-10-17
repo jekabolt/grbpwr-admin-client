@@ -56,6 +56,7 @@ import {
   type ManifestPiece,
   type ManifestSize,
   type ManifestSource,
+  type PitchSource,
   type ReadManifestFn,
   type TrustedSheet,
   type DerivedEdgeAudit,
@@ -264,6 +265,18 @@ const isBoundedStr = (x: unknown, max = MAX_STR): x is string => isStr(x) && x.l
 const SOURCE_KINDS = new Set(['pdf', 'dxf', 'raster', 'hpgl', 'svg', 'ai']);
 const SCALE_METHODS = new Set(['test-square', 'grid', 'declared', 'manual', 'none']);
 const SHEET_METHODS = new Set(['recurrence', 'edge-stitch', 'grid-label', 'manual', 'single']);
+/** TILESTEP: `source.sheet.pitch` — optional; an unknown value is dropped, never the manifest. */
+const PITCH_SOURCES = new Set<PitchSource>([
+  'recurrence',
+  'edge-votes',
+  'raster-frame',
+  'tiles-line',
+  'page-size',
+  'manual',
+  'single',
+]);
+const pitchOf = (v: unknown): { pitch?: PitchSource } =>
+  isStr(v) && PITCH_SOURCES.has(v as PitchSource) ? { pitch: v as PitchSource } : {};
 const SIZE_ENCODINGS = new Set([
   'ocg',
   'declared-dash',
@@ -394,18 +407,23 @@ function validateSource(x: unknown): ManifestSource {
   // D6: the tile sheets of the drawing — optional, shape-checked; one that does not validate is
   // left out (never the manifest)
   const sheets = Array.isArray(x.sheets)
-    ? x.sheets
-        .slice(0, 64)
-        .flatMap((y: unknown) =>
-          isObj(y) &&
-          isInt(y.sheet) &&
-          y.sheet >= 0 &&
-          isInt(y.pages) &&
-          y.pages >= 0 &&
-          isNum(y.maxResidualMm)
-            ? [{ sheet: y.sheet, pages: y.pages, maxResidualMm: y.maxResidualMm }]
-            : [],
-        )
+    ? x.sheets.slice(0, 64).flatMap((y: unknown) =>
+        isObj(y) &&
+        isInt(y.sheet) &&
+        y.sheet >= 0 &&
+        isInt(y.pages) &&
+        y.pages >= 0 &&
+        isNum(y.maxResidualMm)
+          ? [
+              {
+                sheet: y.sheet,
+                pages: y.pages,
+                maxResidualMm: y.maxResidualMm,
+                ...pitchOf(y.pitch),
+              },
+            ]
+          : [],
+      )
     : [];
   if (!isStr(x.sizeEncoding) || !SIZE_ENCODINGS.has(x.sizeEncoding))
     fail('source.sizeEncoding', 'unknown encoding');
@@ -423,6 +441,7 @@ function validateSource(x: unknown): ManifestSource {
       pages: sh.pages,
       method: sh.method as ManifestSource['sheet']['method'],
       maxResidualMm: sh.maxResidualMm,
+      ...pitchOf(sh.pitch),
     },
     ...(sheets.length ? { sheets } : {}),
     sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
