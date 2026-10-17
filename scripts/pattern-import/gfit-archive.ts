@@ -457,7 +457,7 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
       if (holds.length) sil.hold = holds;
       if (warns.length) sil.warn = warns;
       if (runP.length) sil.run = runP.map((p) => `${p.kind}:${p.keys.join('+')}`);
-      const vs = sr.grade?.verdicts.filter((v) => v.seed === f.seed) ?? [];
+      const vs = sr.grade()?.verdicts.filter((v) => v.seed === f.seed) ?? [];
       if (vs.length)
         sil.v = vs.map(
           (v) =>
@@ -589,8 +589,8 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
     labels: (run?.sizes ?? []).map((s) => s.label),
     ...(sr
       ? {
-          silentMs,
-          breaks: Object.fromEntries([...(sr.grade?.breaks ?? [])].map(([r, b]) => [r, r2(b)])),
+          silentMs: silentMs + (sr.grade()?.ms ?? 0),
+          breaks: Object.fromEntries([...(sr.grade()?.breaks ?? [])].map(([r, b]) => [r, r2(b)])),
         }
       : {}),
   };

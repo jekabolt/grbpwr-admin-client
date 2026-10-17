@@ -10,16 +10,23 @@ import type { WallModel } from '../walls';
 import { gradeVerdicts, silentOff, type GradeFamilyIn, type GradeResult } from './silent';
 
 /** A size draws its own line off its outline: ≥ minMm of its own lines, > offMm from the outline,
- * inside the family's box. */
-export const DRAWS_OWN = { offMm: 1.5, minMm: 20, sampleMm: 2, padMm: 2 };
+ * inside it or ≤ outsideMm out of it. */
+export const DRAWS_OWN = { offMm: 1.5, minMm: 20, sampleMm: 2, padMm: 40, outsideMm: 40 };
 
 export type SilentRead = {
-  grade: GradeResult | null;
+  /** The grade model over the sheet's families (fitted on first use). */
+  grade: () => GradeResult | null;
+  /** The size draws its own line beside its outline (undefined: no closed candidate). */
+  drawsOwn: (seed: number, rank: number) => boolean | undefined;
   /** The pieces-stage evidence of one size of one family (undefined: nothing to say). */
   evidence: (seed: number, rank: number) => GradeEvidence | undefined;
 };
 
-const NONE: SilentRead = { grade: null, evidence: () => undefined };
+const NONE: SilentRead = {
+  grade: () => null,
+  drawsOwn: () => undefined,
+  evidence: () => undefined,
+};
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
 const inBox = (pts: readonly PtMm[], b: Box, pad: number) => {
@@ -87,8 +94,15 @@ export function silentRead(
       },
     });
   }
-  const grade = gradeVerdicts(ins);
-  const byKey = new Map(grade.verdicts.map((v) => [`${v.seed}:${v.rank}`, v]));
+  let grade: GradeResult | null = null;
+  let byKey: Map<string, GradeResult['verdicts'][number]> | null = null;
+  const gradeNow = () => {
+    if (!grade) {
+      grade = gradeVerdicts(ins);
+      byKey = new Map(grade.verdicts.map((v) => [`${v.seed}:${v.rank}`, v]));
+    }
+    return grade;
+  };
   const famBy = new Map(families.map((f) => [f.seed, f]));
   const drawsMemo = new Map<string, boolean>();
   const drawsOwn = (seed: number, rank: number): boolean | undefined => {
@@ -123,15 +137,16 @@ export function silentRead(
           const p = { x: a.x + ((b.x - a.x) * (j + 0.5)) / k, y: a.y + ((b.y - a.y) * (j + 0.5)) / k };
           if (p.x < box.minX - P || p.x > box.maxX + P || p.y < box.minY - P || p.y > box.maxY + P)
             continue;
-          // beside the outline: inside it, or just outside (≤ 15 mm: the next size out)
+          // beside the outline: inside it, or outside within a few size steps (a run collapsed
+          // onto its SMALLEST outline has the larger sizes' lines out there — Codex)
           if (onRing(p)) continue;
           if (!pointInPoly(p, ring)) {
-            let near15 = false;
-            g.near(p, 15, (_o, s) => {
-              if (!near15 && segNearest(p, ring[s], ring[(s + 1) % ring.length]).d <= 15)
-                near15 = true;
+            let near = false;
+            g.near(p, DRAWS_OWN.outsideMm, (_o, s) => {
+              if (!near && segNearest(p, ring[s], ring[(s + 1) % ring.length]).d <= DRAWS_OWN.outsideMm)
+                near = true;
             });
-            if (!near15) continue;
+            if (!near) continue;
           }
           len += L / k;
         }
@@ -143,9 +158,11 @@ export function silentRead(
     return out;
   };
   return {
-    grade,
+    grade: gradeNow,
+    drawsOwn,
     evidence: (seed, rank) => {
-      const v = byKey.get(`${seed}:${rank}`);
+      gradeNow();
+      const v = byKey!.get(`${seed}:${rank}`);
       const own = drawsOwn(seed, rank);
       const e: GradeEvidence = {
         ...(v?.hold ? { hold: v.note } : {}),

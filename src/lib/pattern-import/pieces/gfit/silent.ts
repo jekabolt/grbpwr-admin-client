@@ -126,8 +126,8 @@ const median = (xs: number[]) => {
 };
 
 /**
- * The size-run sanity of one family's written (or closed) sizes, rows in any order. Perimeter
- * checks need ≥ 3 sizes (the band is the run's own median step); a collapse needs 2.
+ * The size-run sanity of one family's written (or closed) sizes, rows in any order. A drop and a
+ * collapse need 2 sizes; a spike needs 3 (each step is measured against the run's other steps).
  */
 export function sizeRunProblems(rows0: readonly SizeRunRow[], k = SIZE_RUN): SizeRunProblem[] {
   if (silentOff()) return [];
@@ -153,26 +153,27 @@ export function sizeRunProblems(rows0: readonly SizeRunRow[], k = SIZE_RUN): Siz
         keys: [rows[i - 1].key, rows[i].key],
         note: `sizes ${rows[i - 1].key} and ${rows[i].key} are written on one outline — a graded run whose sizes took one line`,
       });
-  if (rows.length < 3) return out;
+  if (rows.length < 2) return out;
   const P = rows.map((r) => perimeterOf(r.ring));
   const steps = rows.slice(1).map((r, i) => (P[i + 1] - P[i]) / Math.max(1, r.rank - rows[i].rank));
-  const m = median(steps);
-  // a run that does not grow in perimeter (collapsed / ungraded) has no band: the collapse names it
-  if (!(m > 0)) return out;
+  // each step against the run's OTHER steps (leave-one-out: a loop's own +256 mm must not set the
+  // band it is measured by — three sizes have two steps); drops are absolute, a collapsed run too
   for (let i = 1; i < rows.length; i++) {
     const gap = Math.max(1, rows[i].rank - rows[i - 1].rank);
     const d = P[i] - P[i - 1];
+    const others = steps.filter((_, j) => j !== i - 1);
+    const m = Math.max(0, median(others));
     if (d < -Math.max(k.dropMm, k.dropShare * P[i - 1]))
       out.push({
         kind: 'perimeter-drop',
         keys: [rows[i].key],
-        note: `${rows[i].key}'s outline is ${(-d).toFixed(0)} mm shorter than ${rows[i - 1].key}'s (the run grows ${m.toFixed(0)} mm per size)`,
+        note: `${rows[i].key}'s outline is ${(-d).toFixed(0)} mm shorter than ${rows[i - 1].key}'s (the other sizes grow ${m.toFixed(0)} mm per size)`,
       });
-    else if (d / gap > Math.max(k.spikeMul * m, m + k.spikeAddMm))
+    else if (others.length && d / gap > Math.max(k.spikeMul * m, m + k.spikeAddMm))
       out.push({
         kind: 'perimeter-spike',
         keys: [rows[i].key],
-        note: `${rows[i].key}'s outline is ${d.toFixed(0)} mm longer than ${rows[i - 1].key}'s (the run grows ${m.toFixed(0)} mm per size): a loop or a detour, not a grade step`,
+        note: `${rows[i].key}'s outline is ${d.toFixed(0)} mm longer than ${rows[i - 1].key}'s (the other sizes grow ${m.toFixed(0)} mm per size): a loop, a detour or a sliver, not a grade step`,
       });
   }
   return out;
@@ -188,6 +189,8 @@ export function silentOff(): boolean {
 export const GRADE_HOLD = {
   /** A neighbour verdict holds from this residual on, mm (the review's real ones: 19–40 mm). */
   holdMinMm: 2,
+  /** An edge other than the worst counts as on a neighbour's line from this off run, mm. */
+  neighbourRunMm: 3,
   /** Sheet break: the step-weighted median of residual / family step at a rank ≥ this … */
   breakMin: 0.15,
   /** … and ≥ this × the sheet's typical rank. */
@@ -369,7 +372,11 @@ export function gradeVerdicts(
     if (!fam?.model) continue;
     for (const v of fam.sizes) {
       if (v.status !== 'disagrees') continue;
-      const cause = v.cause ?? 'other';
+      // a stretch on another size's line on ANY disagreeing edge, not only the worst one (Codex)
+      const onNeighbourEdge = v.edges.some(
+        (e) => e.p95 > e.tol && e.offN > 0 && e.onN / e.offN >= 0.6 && e.run >= k.neighbourRunMm,
+      );
+      const cause = v.cause === 'neighbour' || onNeighbourEdge ? 'neighbour' : v.cause ?? 'other';
       const resid = residOf(v);
       const brk = breaks.get(v.rank);
       const excused =

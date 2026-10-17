@@ -607,6 +607,16 @@ export function buildPieceSpecsDetailed(
   ];
   const isSizeToken = sizeTokenTest(cardTokens);
   const multiSize = run.sizes.length > 1;
+  // SILENT: one grade reading of the sheet (every family: the sheet's grade breaks), on demand
+  let silent: SilentRead | null = null;
+  const silentOf = () =>
+    (silent ??= silentRead(
+      families,
+      set,
+      multiSize
+        ? wallModel(set, run, sheet.texts, new Map(sheet.styles.map((st) => [st.id, st])))
+        : null,
+    ));
 
   // ── pass 1: names + candidates per family ───────────────────────────────────────────────
   type Prep = {
@@ -787,6 +797,23 @@ export function buildPieceSpecsDetailed(
       } else if (one) {
         ungraded = false;
         if (one.kind === 'graded') name.notes.push(`one outline in every size, but ${one.why}`);
+      } else if (
+        ungraded &&
+        !traced &&
+        !mapped[0].c.dxf &&
+        !silentOff() &&
+        mapped.some((m) => silentOf().drawsOwn(seed, m.c.rank))
+      ) {
+        // SILENT: one outline in every size with no reading of the key (no identity run, or too few
+        // sizes) — but a size draws its own line beside it: the drawing grades the piece and the
+        // sizes took one line (Albuca, Belladonna). One evidence each way: the operator says
+        const own = mapped.find((m) => silentOf().drawsOwn(seed, m.c.rank))!;
+        block(
+          seed,
+          'one-size-question',
+          `every size closes on one outline, but size ${own.card.token} draws its own line beside it — one piece for all sizes?`,
+        );
+        continue;
       } else if (ungraded) name.notes.push('same outline in every size: ungraded');
     }
     const use = oneFromClosed?.use ?? mapped;
@@ -1878,7 +1905,8 @@ export function buildPieceSpecsDetailed(
       !silentOff() &&
       look.length > 0 &&
       look.every((l) => l.kind !== 'motif') &&
-      look.some((l) => allLooks.some((p, k) => k !== src.cand.rank && p.length && onPen(l, p)));
+      // every look of it another size's: no look left that is this size's alone (Codex)
+      look.every((l) => allLooks.some((p, k) => k !== src.cand.rank && p.length && onPen(l, p)));
     if (idLooks.absent[src.cand.rank] || penShared)
       return {
         pen: null,
@@ -1953,15 +1981,12 @@ export function buildPieceSpecsDetailed(
     );
     return onePiece.get(`${src.cand.seed}:${src.cand.rank}`);
   };
-  // SILENT: one grade reading of the sheet (every family: the sheet's grade breaks), on demand
-  let silent: SilentRead | null = null;
   const gradeOf = (identity: string, rank: number): GradeEvidence | undefined => {
     const src = sourceOf(identity, rank);
     if (!src || traced) return undefined;
     // a DXF's blocks are no drawing of nested size lines: nothing to read
     if ((src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
-    silent ??= silentRead(families, set, multiSize ? wallModel(set, run, sheet.texts, styles) : null);
-    return silent.evidence(src.cand.seed, src.cand.rank);
+    return silentOf().evidence(src.cand.seed, src.cand.rank);
   };
   const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {

@@ -922,9 +922,12 @@ export function g8(ctx: GateCtx): GateCheck {
       })
       .sort((x, y) => x.rank - y.rank);
     let bad = false;
+    let silent = false;
     for (let i = 1; i < rows.length; i++) {
       if (!(rows[i].area > rows[i - 1].area)) {
         bad = true;
+        // SILENT: a size under half its smaller neighbour is a sliver, whatever the run's length
+        if (rows[i].area < 0.5 * rows[i - 1].area) silent = true;
         notes.push(
           `${identity}: ${rows[i - 1].b.mb.sizeToken} ${(rows[i - 1].area / 100).toFixed(1)} cm² ≥ ${rows[i].b.mb.sizeToken} ${(rows[i].area / 100).toFixed(1)} cm²`,
         );
@@ -942,6 +945,7 @@ export function g8(ctx: GateCtx): GateCheck {
       // it): the run shares it by design — G8's area order says the rest
       if (p.kind === 'collapse' && ev && p.keys.every((k) => ev[k]?.drawsOwn === false)) continue;
       bad = true;
+      silent = true;
       const named = p.keys.map((k) => tokenOf.get(k) ?? k);
       notes.push(
         `${identity}: ${
@@ -953,7 +957,8 @@ export function g8(ctx: GateCtx): GateCheck {
     }
     if (bad) {
       failed.push(...rows.map((r) => r.b.block));
-      worstSizes = Math.max(worstSizes, rows.length);
+      // a two-size family's area order alone warns (as before); a SILENT problem holds at any length
+      worstSizes = Math.max(worstSizes, silent ? 3 : rows.length);
     }
   }
   // SILENT (G26): the grade model's other disagreements — shown here, never held
