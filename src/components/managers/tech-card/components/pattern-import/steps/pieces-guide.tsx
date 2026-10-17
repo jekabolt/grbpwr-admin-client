@@ -158,34 +158,208 @@ export function ownChains(box: BoxMm, previews: readonly Float32Array[]) {
   return { idx, small };
 }
 
+/** A box as its four corners (a set-aside face with no closed line of its own: its box). */
+const boxPts = (b: BoxMm): PtMm[] => [
+  { x: b.minX, y: b.minY },
+  { x: b.maxX, y: b.minY },
+  { x: b.maxX, y: b.maxY },
+  { x: b.minX, y: b.maxY },
+];
+
 /**
- * One outline alone, as a silhouette: only the lines inside its box (no page crop, no neighbours),
- * the closed ones lightly filled, biggest first so the inner ones stay on top.
+ * A set-aside face as a closed outline: its own closed line when one spans its box, else its box
+ * (a face closed by several lines — the ones it shares with a piece — has no line of its own).
+ */
+export function asideOutline(box: BoxMm, previews: readonly Float32Array[]): PtMm[] {
+  return faceOutline(box, previews) ?? boxPts(box);
+}
+
+/**
+ * The pieces of the sheet's lines that run inside a box (a hair past its border included): the
+ * lines a face is closed by, also those that go on past it (the edge it shares with a piece).
+ */
+function boxLines(box: BoxMm, previews: readonly Float32Array[], skip: ReadonlySet<number>) {
+  const bx = chainBoxes(previews);
+  const t = Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.01 + 0.2;
+  const x0 = box.minX - t;
+  const x1 = box.maxX + t;
+  const y0 = box.minY - t;
+  const y1 = box.maxY + t;
+  /** A segment cut to the box (Liang–Barsky), or null when it misses it. */
+  const clip = (ax: number, ay: number, bxx: number, byy: number): [PtMm, PtMm] | null => {
+    const dx = bxx - ax;
+    const dy = byy - ay;
+    let u0 = 0;
+    let u1 = 1;
+    for (const [p, q] of [
+      [-dx, ax - x0],
+      [dx, x1 - ax],
+      [-dy, ay - y0],
+      [dy, y1 - ay],
+    ]) {
+      if (p === 0) {
+        if (q < 0) return null;
+      } else {
+        const r = q / p;
+        if (p < 0) u0 = Math.max(u0, r);
+        else u1 = Math.min(u1, r);
+        if (u0 > u1) return null;
+      }
+    }
+    return [
+      { x: ax + u0 * dx, y: ay + u0 * dy },
+      { x: ax + u1 * dx, y: ay + u1 * dy },
+    ];
+  };
+  const runs: PtMm[][] = [];
+  previews.forEach((a, i) => {
+    if (skip.has(i) || a.length < 4) return;
+    if (bx[i * 4] > x1 || bx[i * 4 + 2] < x0 || bx[i * 4 + 1] > y1 || bx[i * 4 + 3] < y0) return;
+    let run: PtMm[] = [];
+    for (let k = 0; k + 3 < a.length; k += 2) {
+      const c = clip(a[k], a[k + 1], a[k + 2], a[k + 3]);
+      const last = run[run.length - 1];
+      if (c && last && Math.hypot(last.x - c[0].x, last.y - c[0].y) < 1e-6) run.push(c[1]);
+      else {
+        if (run.length >= 2) runs.push(run);
+        run = c ? [c[0], c[1]] : [];
+      }
+    }
+    if (run.length >= 2) runs.push(run);
+  });
+  return runs;
+}
+
+/** How a set-aside outline meets a piece: the edge they share, how much of it lies inside. */
+export type AsideTouch = {
+  /** Length of the outline's edge on the piece's edge, mm. */
+  sharedMm: number;
+  /** Length of the outline's edge inside the piece, mm. */
+  insideMm: number;
+  perimMm: number;
+  /** The longest shared run is (nearly) a whole side of the outline's box. */
+  full: boolean;
+  /** The shared edge, as runs of points (the picture draws it heavy). */
+  edge: PtMm[][];
+};
+
+/** Where a set-aside outline and a piece's outline meet (sampled along the outline's edge). */
+export function asideTouch(outline: readonly PtMm[], host: readonly PtMm[]): AsideTouch {
+  const xs = outline.map((p) => p.x);
+  const ys = outline.map((p) => p.y);
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+  // a hairline: two lines drawn on one another, and the face's box (cut from a raster of the
+  // sheet, ~1.5 mm in from its lines on a pattern sheet) — never a real gap between two pieces
+  const tol = Math.min(4, Math.max(3, Math.max(w, h) * 0.01));
+  let perim = 0;
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    perim += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const step = Math.max(0.5, perim / 600);
+  let sharedMm = 0;
+  let insideMm = 0;
+  const edge: PtMm[][] = [];
+  let run: PtMm[] = [];
+  const close = () => {
+    if (run.length >= 2) edge.push(run);
+    run = [];
+  };
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / step));
+    for (let k = 0; k < n; k++) {
+      const p = { x: a.x + ((b.x - a.x) * (k + 0.5)) / n, y: a.y + ((b.y - a.y) * (k + 0.5)) / n };
+      if (toEdge(p, host) <= tol) {
+        sharedMm += len / n;
+        run.push(p);
+      } else {
+        close();
+        if (insidePoly(p, host)) insideMm += len / n;
+      }
+    }
+  }
+  close();
+  // the first and last runs of a closed outline can be one run
+  if (edge.length > 1) {
+    const f = edge[0][0];
+    const l = edge[edge.length - 1][edge[edge.length - 1].length - 1];
+    if (Math.hypot(f.x - l.x, f.y - l.y) <= step * 1.5) edge[0] = [...edge.pop()!, ...edge[0]];
+  }
+  const full = edge.some((r) => {
+    const rx = Math.max(...r.map((p) => p.x)) - Math.min(...r.map((p) => p.x));
+    const ry = Math.max(...r.map((p) => p.y)) - Math.min(...r.map((p) => p.y));
+    return rx >= ry ? rx >= 0.85 * w : ry >= 0.85 * h;
+  });
+  return { sharedMm, insideMm, perimMm: perim, full, edge };
+}
+
+function insidePoly(p: PtMm, poly: readonly PtMm[]) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+/**
+ * One outline alone, as a silhouette: the outline itself (its own closed line, else the lines
+ * that close it — those on its box's border too) and the lines inside it, the closed ones lightly
+ * filled, biggest first so the inner ones stay on top. With `hosts`: the pieces it touches in
+ * light grey round it, the edge it shares with the first drawn heavy («this rectangle under 6»).
  */
 export function AsideSilhouette({
   box,
   previews,
+  outline,
+  hosts,
   title,
   className,
   style,
 }: {
   box: BoxMm;
   previews: readonly Float32Array[];
+  /** The outline itself (asideOutline): drawn filled under its lines. */
+  outline?: readonly PtMm[];
+  /** The pieces it touches: their outlines, and the edge it shares with each (first = likeliest). */
+  hosts?: readonly { outer: readonly PtMm[]; edge: readonly PtMm[][] }[];
   /** The tooltip (why it was left out); the words are never on the picture. */
   title?: string;
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const v = pad(box, 0.04);
+  // with pieces round it: as much of them as shows where it sits, never so much it gets lost
+  const ctx = (() => {
+    if (!hosts?.length) return box;
+    const w = Math.max(box.maxX - box.minX, 1);
+    const h = Math.max(box.maxY - box.minY, 1);
+    const r = Math.max(w, h) * 0.9;
+    const all = hosts.flatMap((x) => x.outer);
+    return {
+      minX: Math.max(Math.min(box.minX, ...all.map((p) => p.x)), box.minX - r),
+      minY: Math.max(Math.min(box.minY, ...all.map((p) => p.y)), box.minY - r),
+      maxX: Math.min(Math.max(box.maxX, ...all.map((p) => p.x)), box.maxX + r),
+      maxY: Math.min(Math.max(box.maxY, ...all.map((p) => p.y)), box.maxY + r),
+    };
+  })();
+  const v = pad(ctx, hosts?.length ? 0.06 : 0.04);
   const unit = Math.max(v.w, v.h) / 160;
   const bx = chainBoxes(previews);
   const { idx } = ownChains(box, previews);
+  const border = boxLines(box, previews, new Set(idx));
   const span = (i: number) => (bx[i * 4 + 2] - bx[i * 4]) * (bx[i * 4 + 3] - bx[i * 4 + 1]);
   const closed = (a: Float32Array) =>
     a.length >= 8 &&
     Math.hypot(a[0] - a[a.length - 2], a[1] - a[a.length - 1]) <=
       Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.01;
   const order = [...idx].sort((a, b) => span(b) - span(a));
+  const clip = `clip${useId().replace(/[^\w-]/g, '')}`;
   return (
     <svg
       viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
@@ -196,12 +370,47 @@ export function AsideSilhouette({
       style={style}
     >
       {title && <title>{title}</title>}
+      <defs>
+        <clipPath id={clip}>
+          <rect x={v.x} y={v.y} width={v.w} height={v.h} />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clip})`}>
+        {hosts?.map((x, k) => (
+          <polygon
+            key={`h${k}`}
+            points={ptsAttr(x.outer)}
+            fill={SHEET_INK.fill}
+            stroke={SHEET_INK.source}
+            strokeWidth={unit * 0.8}
+            data-aside-host={k}
+          />
+        ))}
+      </g>
+      {outline && outline.length >= 3 && (
+        <polygon
+          points={ptsAttr(outline)}
+          fill={hosts?.length ? SHEET_INK.pick : SHEET_INK.fill}
+          stroke={SHEET_INK.ink}
+          strokeWidth={unit * 0.8}
+          data-aside-outline
+        />
+      )}
+      {border.map((r, k) => (
+        <polyline
+          key={`b${k}`}
+          points={ptsAttr(r)}
+          fill='none'
+          stroke={SHEET_INK.ink}
+          strokeWidth={unit * 0.8}
+        />
+      ))}
       {order.map((i) =>
         closed(previews[i]) ? (
           <polygon
             key={i}
             points={f32Attr(previews[i])}
-            fill={SHEET_INK.fill}
+            fill={hosts?.length ? 'none' : SHEET_INK.fill}
             stroke={SHEET_INK.ink}
             strokeWidth={unit * 0.8}
           />
@@ -215,6 +424,29 @@ export function AsideSilhouette({
           />
         ),
       )}
+      {!border.length && !order.length && !(outline && outline.length >= 3) && (
+        <rect
+          x={box.minX}
+          y={vy(box.maxY)}
+          width={box.maxX - box.minX}
+          height={box.maxY - box.minY}
+          fill={SHEET_INK.fill}
+          stroke={SHEET_INK.blue}
+          strokeWidth={unit * 1.2}
+          data-aside-box
+        />
+      )}
+      {hosts?.[0]?.edge.map((r, k) => (
+        <polyline
+          key={`e${k}`}
+          points={ptsAttr(r)}
+          fill='none'
+          stroke={SHEET_INK.blue}
+          strokeWidth={unit * 2.4}
+          strokeLinecap='round'
+          data-aside-edge
+        />
+      ))}
     </svg>
   );
 }
