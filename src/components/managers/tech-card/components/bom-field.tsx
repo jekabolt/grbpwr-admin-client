@@ -953,6 +953,17 @@ export function BomField({
   const [blocked, setBlocked] = useState<{ index: number; users: BlockingUser[] } | null>(null);
   // Пикер каталога: новая строка в секции (`section`) или артикул для пустой строки (`line`).
   const [picking, setPicking] = useState<{ section: string; line?: number } | null>(null);
+  // A door from another tab (patterns' empty block: «+ fabric slot») opens the picker on a section
+  // once, then drops the param so a reload or back does not reopen it.
+  const addSlot = params.get('addSlot');
+  useEffect(() => {
+    if (addSlot == null) return;
+    const next = new URLSearchParams(params);
+    next.delete('addSlot');
+    setParams(next, { replace: true });
+    if (canEdit) setPicking({ section: addSlot });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSlot]);
   const [createOpen, setCreateOpen] = useState(false);
   const createTarget = useRef<{ section: string; line?: number } | null>(null);
   // Поле, которое надо сфокусировать, как только редактор строки смонтируется (дверь B7).
