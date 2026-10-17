@@ -941,9 +941,17 @@ export function g8(ctx: GateCtx): GateCheck {
   const ev = ctx.expect.gradeByBlock;
   for (const [identity, bs] of byId) {
     if (bs.length < 2) continue;
+    // SILENT-TAIL (17.10): the run is measured on the DRAWN line (layer 14 for a piece drawn on its
+    // seam, layer 1 for one drawn on its cut), never on the allowance offset: the offset's corner
+    // treatment is not a grade (palto SL: a 60 mm mitre spike at the underarm tip in 76–84 and a
+    // bevel in 88 read "88 is 28 mm shorter than 84" on the cut while the seams grow 1321 → 1333).
+    // The cut layer only when a size has no drawn line in the file (G1 names that block).
+    const drawn = bs.map((b) => linesFor(ctx, b).line);
+    const lineOf = (b: BlockInfo, i: number) =>
+      drawn.every((l) => l) ? drawn[i] : ctx.contours.get(b.block)?.get(LAYERS.cut);
     const rows = bs
-      .map((b) => {
-        const c = ctx.contours.get(b.block)?.get(LAYERS.cut);
+      .map((b, i) => {
+        const c = lineOf(b, i);
         return {
           b,
           c,
@@ -1007,7 +1015,7 @@ export function g8(ctx: GateCtx): GateCheck {
       'area and outline length grow with size rank for every identity, no two sizes on one outline') +
       grade,
     null,
-    `strictly increasing area (block when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
+    `on the drawn line: strictly increasing area (block when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
   );
 }
 
@@ -1944,7 +1952,9 @@ export function g22(ctx: GateCtx): GateCheck {
     const e = ctx.expect.gradeByBlock?.[b.block];
     if (!e?.hold) continue;
     gradeFailed.push(b.block);
-    gradeNotes.push(`${b.block}: off its own line onto another size's (grade model, G26) — ${e.hold}`);
+    gradeNotes.push(
+      `${b.block}: off its own line onto another size's (grade model, G26) — ${e.hold}`,
+    );
   }
   if (!by || f0Off())
     return gradeFailed.length
@@ -1954,7 +1964,7 @@ export function g22(ctx: GateCtx): GateCheck {
           'block',
           gradeNotes.join('; '),
           null,
-          'no size outline on another size\'s line where the grade puts its own (G26)',
+          "no size outline on another size's line where the grade puts its own (G26)",
         )
       : check('G22-identity', [], 'block', 'no identity-encoded size run — not evaluated');
   const failed: string[] = [...gradeFailed];

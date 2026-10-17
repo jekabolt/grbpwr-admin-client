@@ -1676,6 +1676,62 @@ export async function main(opts: { plans: string }): Promise<number> {
     );
   }
   {
+    // SILENT-TAIL: G8 measures the run on the DRAWN line (seam here), never on the allowance offset.
+    // A sleeve-like tip (≈ 152° turn), 15 mm allowance, seam drawn: S and M cut with a long mitre
+    // at the tip, L's cut bevelled there (palto SL 76–84 vs 88). The cut perimeters drop at L while
+    // the seams grow — G8 must stay green; a run whose drawn line itself shrinks at L stays red.
+    const tipSeam = (k: number) => {
+      const t = Math.tan((14 * Math.PI) / 180);
+      return ccw(
+        [
+          { x: 0, y: 0 },
+          { x: 300 * k * t, y: 300 * k },
+          { x: 0, y: 360 * k },
+          { x: -300 * k * t, y: 300 * k },
+        ].map((p) => ({ x: p.x + 2000, y: p.y })),
+      );
+    };
+    const perim = (p: PtMm[]) =>
+      p.reduce(
+        (a, q, i) => a + Math.hypot(p[(i + 1) % p.length].x - q.x, p[(i + 1) % p.length].y - q.y),
+        0,
+      );
+    const tipSpec = (ks: number[], bevelLast: boolean): PieceSpec =>
+      piece('TIP', 'TIP', [], {
+        allowance: { meaning: 'seam', allowanceMm: 15, origin: 'text', evidence: [] },
+        sizes: SIZES.map((sd, i) => {
+          const seam = tipSeam(ks[i]);
+          const last = i === SIZES.length - 1;
+          const cut = offsetContour(seam, 15, { miterLimit: bevelLast && last ? 1 : 4 }).pts;
+          return sizeSpec(sd, {
+            cut,
+            seam,
+            offset: offsetReport(cut),
+            grain: grainF({ x: 2000, y: 100 }, { x: 2000, y: 250 }),
+          });
+        }),
+      });
+    const good = tipSpec([0.98, 1.0, 1.02], true);
+    const cutP = good.sizes.map((z) => perim(z.cut));
+    const seamP = good.sizes.map((z) => perim(z.seam!));
+    const premise = cutP[2] < cutP[1] - 12 && seamP[2] > seamP[1] && seamP[1] > seamP[0];
+    const rg = (await writeAndGate(job(MAIN, [good]), gateCtx([good]))).report;
+    const g8g = rg.checks.find((c) => c.id === 'G8-monotone');
+    ck(
+      premise && !!g8g?.ok,
+      'SILENT-TAIL G8 on the drawn line: an acute tip mitred in S/M and bevelled in L (cut perimeter drops, seam grows) is not held',
+      `cut ${cutP.map((x) => x.toFixed(0)).join(' → ')} · seam ${seamP.map((x) => x.toFixed(0)).join(' → ')} · G8 ${g8g?.ok ? 'ok' : `red: ${g8g?.note}`}`,
+    );
+    const shrink = tipSpec([0.98, 1.0, 0.97], false);
+    const rs = (await writeAndGate(job(MAIN, [shrink]), gateCtx([shrink]))).report;
+    const g8s = rs.checks.find((c) => c.id === 'G8-monotone');
+    ck(
+      !rs.passed && !!g8s && !g8s.ok && g8s.severity === 'block' && /shorter than/.test(g8s.note),
+      'SILENT-TAIL G8 on the drawn line: a size whose drawn line shrinks is still held (perimeter drop named)',
+      g8s?.note ?? 'no G8',
+    );
+  }
+  {
     const graded = {
       ...bpSpec(),
       identity: 'PCK',
