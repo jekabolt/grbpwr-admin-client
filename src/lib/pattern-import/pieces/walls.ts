@@ -116,6 +116,21 @@ export function answeredLines(set: ChainSet): { all: Set<ChainId>; ignored: Set<
   return { all, ignored };
 }
 
+/** LINEFIX: per answered line, the run ranks of its rows (none: a common / ignore row). */
+function pinnedRanksOf(set: ChainSet, run: SizeRun): Map<ChainId, Set<number>> {
+  const rankOfClass = new Map<number, number>();
+  run.sizes.forEach((z, r) => {
+    if (z.classId != null) rankOfClass.set(z.classId, r);
+  });
+  const out = new Map<ChainId, Set<number>>();
+  for (const a of set.assigned ?? [])
+    out.set(
+      a.chain,
+      new Set(a.classes.flatMap((k) => (rankOfClass.has(k) ? [rankOfClass.get(k)!] : []))),
+    );
+  return out;
+}
+
 export function cornerSources(m: WallModel): Set<ChainId> {
   return new Set((m.corners ?? []).flatMap((k) => k.chains));
 }
@@ -313,6 +328,9 @@ export function wallModel(
       band.ticks.delete(id);
       band.edges.delete(id);
     }
+    // nor a rung carried across the band (a derived wall of the tick's rank)
+    const keep = band.cuts.filter((c) => !c.ticks.some((id) => answered.has(id)));
+    band.cuts.splice(0, band.cuts.length, ...keep);
   }
   const bands = band.ticks;
   for (const [id, r] of bands) {
@@ -328,10 +346,21 @@ export function wallModel(
     mode === 'graded' && !probeOff('F4_NOFOLDS') ? sharedFolds(set, ranks, new Set(kept)) : [];
   // MOOD Ф2: a stub or ramp read as rank r's corner is r's alone — never a common wall nor
   // another rank's line (Codex r2: another size closing on r's stub)
-  const cw = mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {};
+  const cw0 = mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {};
+  // LINEFIX: a corner drawn through a line the operator put elsewhere (another size, no size line)
+  // is no corner of this rank — its derived wall goes with it
+  const pins = answered.size ? pinnedRanksOf(set, run) : null;
+  const cw =
+    pins && cw0.corners
+      ? {
+          ...cw0,
+          corners: cw0.corners.filter((k) =>
+            k.chains.every((id) => !pins.has(id) || pins.get(id)!.has(k.rank)),
+          ),
+        }
+      : cw0;
   const owner = new Map<ChainId, number>();
-  for (const k of cw.corners ?? [])
-    for (const id of k.chains) if (!answered.has(id)) owner.set(id, k.rank);
+  for (const k of cw.corners ?? []) for (const id of k.chains) owner.set(id, k.rank);
   const commonF = [...kept, ...folds].filter((id) => !owner.has(id));
   const ranks0 = owner.size
     ? ranks.map((ids, r) => ids.filter((id) => (owner.get(id) ?? r) === r))
