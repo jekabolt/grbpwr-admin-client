@@ -22,6 +22,8 @@ await esbuild({
   absWorkingDir: REPO,
   external: ['pdfjs-dist', 'pdfjs-dist/*'],
   alias: {
+    // RULHOOK (section H) mounts the real wizard hook: React is the one-component shim
+    react: resolve(HERE, 'react-hook-shim.ts'),
     lib: resolve(REPO, 'src/lib'),
     components: resolve(REPO, 'src/components'),
     utils: resolve(REPO, 'src/utils'),
