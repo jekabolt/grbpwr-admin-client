@@ -722,6 +722,18 @@ function nestsCrafted() {
     'mutation: two size rows of one rank → no order, no nest, no suspect',
     !lineNests(sameRank).nests.length && !lineSuspects(sameRank, ST2).length,
   );
+  check(
+    'mutation: whole spread 0.5 (areas 100/130/200 per 60 mm: steps 30/70) → no nest',
+    !lineNests(nestSet([0, 1, 2, 3], [0, 0, 2, 3], [400, 520, 650, 800])).nests.length,
+  );
+  const r8x = assignChains(sameRank, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(sameRank, ST2, undefined, 0)[1].key], to: { row: '6#0' } },
+  ]).report;
+  check(
+    "mutation: no rank order → a line in size 8's pen put in 6 is still flagged",
+    r8x.flags.some((f) => f.kind === 'pen' && f.chain === 1),
+    JSON.stringify(r8x.flags),
+  );
   const pile: ChainSet = {
     ...mis,
     chains: [

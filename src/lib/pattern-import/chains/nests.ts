@@ -5,7 +5,7 @@
 // closed outlines from one corner, each a step longer. Such a nest — closed outlines (ends within
 // 2 mm, ≥ 200 mm round) sharing a bounding-box corner within 1.5 mm, alike in area (ratio ≥ 0.6),
 // the group whole holding together (one corner kind every member shares within 1.5 mm of the
-// smallest's, smallest ≥ ½ largest area; a pile of > 4·N outlines on one corner is no nest) —
+// smallest's, smallest ≥ 0.6 × largest area; a pile of > 4·N outlines on one corner is no nest) —
 // whose areas step through EXACTLY as many levels as the run has size rows (N ≥ 3: two outlines
 // sharing a corner are no grading evidence), every step growing and the steps even (largest
 // ≤ 3 × smallest), names each outline's size by its place: the smallest is the first size row
@@ -115,9 +115,6 @@ export type Nests = {
   place: Map<ChainId, { nest: number; level: number }>;
 };
 
-/** Whole-group area spread of one nest (smallest / largest). */
-const SPREAD = 0.5;
-
 const corner = (b: Box, k: number): [number, number] => [
   k & 1 ? b.maxX : b.minX,
   k & 2 ? b.maxY : b.minY,
@@ -126,7 +123,7 @@ const corner = (b: Box, k: number): [number, number] => [
 /**
  * Candidate groups of a chain list for runs of `n` sizes: outlines linked by a shared corner and
  * alike area, then each group checked WHOLE (a chain of pairwise matches is no nest): one corner
- * kind every member shares within CORNER_MM of the smallest's, areas within SPREAD. A corner cell
+ * kind every member shares within CORNER_MM of the smallest's, areas within ALIKE. A corner cell
  * holding more than 4·n outlines (a stack of coincident paths) is dense: its outlines are in no
  * group — bounded work, no nest read off a pile. Cached per chain list and n.
  */
@@ -179,7 +176,7 @@ function groupsOf(chains: readonly Chain[], n: number): Outline[][] {
   for (const g of byRoot.values()) {
     if (g.length < MIN_SIZES || g.length > limit) continue;
     g.sort((a, b) => a.area - b.area || a.id - b.id);
-    if (g[0].area < SPREAD * g[g.length - 1].area) continue;
+    if (g[0].area < ALIKE * g[g.length - 1].area) continue;
     const shared = [0, 1, 2, 3].some((k) => {
       const [x0, y0] = corner(g[0].bb, k);
       return g.every((o) => {
@@ -271,7 +268,8 @@ export function penVerdict(
   const own = pens.get(to) ?? [];
   if (!look || !own.length) return { pen: 'unknown' };
   if (onPen(look, own)) return { pen: 'agrees' };
-  const says = n.order.find((o) => o !== to && onPen(look, pens.get(o) ?? []));
+  // the pen's size from every size row's pen (no nest order needed to flag a pen)
+  const says = [...pens.keys()].find((o) => o !== to && onPen(look, pens.get(o) ?? []));
   if (says == null) return { pen: 'unknown' };
   const at = n.place.get(id);
   if (!at) return { pen: 'against', says };
