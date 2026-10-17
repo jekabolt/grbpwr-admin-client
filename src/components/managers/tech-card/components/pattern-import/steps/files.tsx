@@ -22,7 +22,21 @@ import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Panel, ask, fmtBytes, fmtPct } from '../ui-bits';
 import { CleanBlock, PageRoles, pageRoleWarnings } from './files-clean';
 
-const ACCEPT = '.pdf,.dxf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff';
+const ACCEPT = '.pdf,.dxf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff,.rul,.zip';
+const extOf = (name: string) => name.split('.').pop()?.toLowerCase() ?? '';
+/**
+ * RUL-SPEC §6: a .rul is a grade rule table read WITH its base DXF (one DXF + one RUL, or a ZIP of
+ * the two); the worker decides by content (text pairs, binary is refused). By name: a .rul next to
+ * one DXF is "grade rules"; a .rul without one is refused as `rul-alone` — said before reading.
+ */
+const rulAloneOf = (files: readonly File[]) => {
+  const ruls = files.filter((f) => extOf(f.name) === 'rul');
+  const dxfs = files.filter((f) => extOf(f.name) === 'dxf');
+  return ruls.length > 0 && (ruls.length > 1 || dxfs.length !== 1 || files.length !== 2);
+};
+/** F17 by name — but a .rul / .zip is the worker's call (by content), never refused by name. */
+const byNameRefused = (name: string) =>
+  kindOfName(name) || ['rul', 'zip'].includes(extOf(name)) ? null : refusalForName(name);
 const KIND_LABEL: Record<string, string> = {
   pdf: 'vector PDF',
   dxf: 'DXF',
@@ -61,6 +75,7 @@ export function FilesStep({
   const dirty =
     staged.length !== inputs.fileList.length || staged.some((f, i) => f !== inputs.fileList[i]);
   const eps = staged.some((f) => f.name.toLowerCase().endsWith('.eps'));
+  const rulAlone = rulAloneOf(staged);
 
   // reading the staged files IS the stage's primary; once read, the shell's "use N pages" is
   useWizardPrimary(
@@ -68,8 +83,12 @@ export function FilesStep({
       ? {
           label: `${read ? 're-read' : 'read'} ${plural(staged.length, 'file')}`,
           onClick: () => void api.dispatch({ type: 'files', files: staged }),
-          disabled: !!session.busy || eps,
-          title: eps ? 'EPS is not read — export the pattern as PDF or AI' : undefined,
+          disabled: !!session.busy || eps || rulAlone,
+          title: eps
+            ? 'EPS is not read — export the pattern as PDF or AI'
+            : rulAlone
+              ? 'a .rul is read with its one base DXF'
+              : undefined,
         }
       : null,
   );
@@ -171,13 +190,25 @@ export function FilesStep({
               </thead>
               <tbody>
                 {staged.map((f) => {
-                  const ext = f.name.split('.').pop()?.toLowerCase();
+                  const ext = extOf(f.name);
                   const kind = kindOfName(f.name);
                   return (
                     <tr key={f.name}>
                       <td className='max-w-0 truncate'>{f.name}</td>
                       <td data-align='left'>
-                        {ext === 'eps' ? (
+                        {ext === 'rul' ? (
+                          rulAlone ? (
+                            <Pill tone='warn' title={refusalMessage('rul-alone')}>
+                              add its DXF
+                            </Pill>
+                          ) : (
+                            'grade rules'
+                          )
+                        ) : ext === 'zip' ? (
+                          <span title='read when it holds one DXF and its .rul'>
+                            DXF + grade rules
+                          </span>
+                        ) : ext === 'eps' ? (
                           <Pill
                             tone='warn'
                             title='EPS is not read — export the pattern as PDF or AI'
@@ -200,11 +231,13 @@ export function FilesStep({
                           className='text-labelColor hover:text-textColor'
                           onClick={() => setStaged((p) => p.filter((x) => x !== f))}
                           aria-label={`remove ${f.name}`}
-                          {...ask(
-                            'files-eps',
-                            ext === 'eps',
-                            'remove it, export the pattern as pdf',
-                          )}
+                          {...(ext === 'rul' && rulAlone
+                            ? ask('files-rul', true, 'add the DXF it grades, or remove it')
+                            : ask(
+                                'files-eps',
+                                ext === 'eps',
+                                'remove it, export the pattern as pdf',
+                              ))}
                         >
                           ✕
                         </Button>
@@ -217,10 +250,15 @@ export function FilesStep({
           )}
           {/* F17: a native CAD / office / archive file is named by its extension before reading,
               with the export that makes it importable (the worker says the same after sniffing). */}
-          {staged.some((f) => !kindOfName(f.name) && refusalForName(f.name)) && (
+          {rulAlone && (
+            <Text size='micro' component='p' className='text-warning'>
+              a .rul holds only the grading — add the DXF it grades
+            </Text>
+          )}
+          {staged.some((f) => byNameRefused(f.name)) && (
             <CalloutBox tone='warning' className='py-1'>
               {staged.map((f) => {
-                const code = kindOfName(f.name) ? null : refusalForName(f.name);
+                const code = byNameRefused(f.name);
                 return code ? (
                   <Text key={f.name} size='micro' component='p'>
                     <b>{f.name}:</b> {refusalMessage(code)}
