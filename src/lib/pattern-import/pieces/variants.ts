@@ -27,6 +27,8 @@ import type {
   SeedId,
   Sheet,
   SizeRun,
+  SourceSize,
+  VariantCutLine,
   VariantMark,
 } from 'lib/pattern-import/types';
 
@@ -505,6 +507,20 @@ export function variantMarksOut(
   if (!marks.length)
     return owned.length ? owned : sameGarment(sheet, models, seeds, families) ? [] : undefined;
   const rings = set.chains.filter((c) => c.lengthMm >= 200 && isClosed(set, c.id));
+  const sizeRow = sizeRowOf(sheet, set, run);
+  /** The farther end of `l` from size `rank`'s closed outline, the nearest of `ids`; null: none. */
+  const offOwn = (l: readonly PtMm[], rank: number, ids: readonly SeedId[]): number | null => {
+    let best: number | null = null;
+    for (const id of ids) {
+      const c = famOf
+        .get(id)
+        ?.candidates.find((x) => x.rank === rank && x.outcome === 'closed' && x.outer.length > 2);
+      if (!c) continue;
+      const d = Math.max(ringDist(l[0], c.outer), ringDist(l[l.length - 1], c.outer));
+      if (best == null || d < best) best = d;
+    }
+    return best == null ? null : Math.round(best * 10) / 10;
+  };
   const cutMarks = marks.map((m) => {
     const base = { label: m.label, at: m.at, text: m.text, kind: m.kind };
     if (m.uncertain || !m.lines.length)
@@ -538,7 +554,11 @@ export function variantMarksOut(
       if (inside.length === 1) pieces.add(inside[0].id);
     }
     const ids = [...pieces].sort((x, y) => x - y);
-    const out: VariantMark = { ...base, cutLines: m.lines.map((l) => l.pts), pieces: ids };
+    const cutLines = m.lines.map((l): VariantCutLine => {
+      const z = sizeRow.get(l.chain) ?? null;
+      return { size: z?.label ?? null, poly: l.pts, offMm: z ? offOwn(l.pts, z.rank, ids) : null };
+    });
+    const out: VariantMark = { ...base, cutLines, pieces: ids };
     if (uncut) {
       const c = carrierOf(m.lines);
       const outlines: NonNullable<VariantMark['outlines']> = [];
@@ -559,6 +579,67 @@ export function variantMarksOut(
     return out;
   });
   return [...cutMarks, ...owned];
+}
+
+/** Distance from `p` to the closed outline `ring` (its edges). */
+function ringDist(p: PtMm, ring: readonly PtMm[]): number {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++)
+    best = Math.min(best, segNearest(p, ring[i], ring[(i + 1) % ring.length]).d);
+  return best;
+}
+
+/**
+ * Per chain, the size of the ONE size row (legend class, role 'size') it is drawn in, as the size
+ * run maps rows to sizes. A chain the legend put in a size row takes that row. A line the legend
+ * left out of the rows (kombinezon's cutting lines: open lines on the size layers, classed common
+ * / ignore) takes the row its own drawing names: its OCG layer when exactly one size row is that
+ * OCG (the row's `ocg` evidence), else its pen (stroke, width, dash, layer — not the tile's clip)
+ * when exactly one size row draws with it. A chain in two rows, or whose layer / pen several rows
+ * share (one pen for every size) or none does, has no size.
+ */
+function sizeRowOf(
+  sheet: Sheet,
+  set: ChainSet,
+  run: SizeRun | null,
+): Map<ChainId, SourceSize | null> {
+  const out = new Map<ChainId, SourceSize | null>();
+  if (!run) return out;
+  const style = new Map(sheet.styles.map((st) => [st.id, st]));
+  const pen = (id: ChainId) => {
+    const st = style.get(set.chains[id].style);
+    return st
+      ? JSON.stringify([st.strokeRgb, +st.widthMm.toFixed(2), st.dash, st.layer, st.fill])
+      : null;
+  };
+  const byId = new Map(set.classes.map((c) => [c.id, c]));
+  const byOcg = new Map<string, Set<SourceSize>>();
+  const byPen = new Map<string, Set<SourceSize>>();
+  const add = (m: Map<string, Set<SourceSize>>, k: string | null, z: SourceSize) => {
+    if (k == null) return;
+    if (!m.has(k)) m.set(k, new Set());
+    m.get(k)!.add(z);
+  };
+  for (const z of run.sizes) {
+    const c = z.classId != null ? byId.get(z.classId) : undefined;
+    if (!c || c.role !== 'size') continue;
+    for (const e of c.evidence) if (e.kind === 'ocg') add(byOcg, e.name, z);
+    for (const id of c.chains) {
+      out.set(id, out.has(id) && out.get(id) !== z ? null : z);
+      add(byPen, pen(id), z);
+    }
+  }
+  const one = (rows: Set<SourceSize> | undefined) => (rows?.size === 1 ? [...rows][0] : null);
+  for (const c of set.chains) {
+    if (out.has(c.id)) continue;
+    const layer = style.get(c.style)?.layer;
+    const z =
+      (layer != null ? one(byOcg.get(layer)) : null) ??
+      one(byPen.get(pen(c.id) ?? '')) ??
+      (run.sizes.length === 1 ? run.sizes[0] : null); // a one-size run: every line is its
+    if (z) out.set(c.id, z);
+  }
+  return out;
 }
 
 const SEP = String.raw`\s*(?:,|&|\/|\+|\band\b|\bund\b|\bet\b|\bи\b)\s*`;
