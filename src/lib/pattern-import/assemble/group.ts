@@ -379,7 +379,7 @@ export function assembleGroup(
     cellOf: (idx: number) => { row: number; col: number } | null,
   ) => {
     const agree = { x: 0, y: 0 };
-    const jumps: { axis: 'x' | 'y'; step: number; pair: string }[] = [];
+    const jumps: { axis: 'x' | 'y'; step: number; pair: string; crossing: boolean }[] = [];
     for (const l of recLoose) {
       if (l.a.rot !== 0 || l.b.rot !== 0) continue;
       const ca = cellOf(l.a.idx);
@@ -399,19 +399,21 @@ export function assembleGroup(
         Math.abs(step - want) > 1 && Math.abs(step - want) < 0.25 * Math.abs(want);
       const pair = `${l.a.key}|${l.b.key}`;
       if (!dr && Math.abs(l.dy - dc * R.dy) <= 1 && near(l.dx / dc, R.dx))
-        jumps.push({ axis: 'x', step: l.dx / dc, pair });
+        jumps.push({ axis: 'x', step: l.dx / dc, pair, crossing: !!l.crossing });
       if (!dc && Math.abs(l.dx - dr * B.dx) <= 1 && near(l.dy / dr, B.dy))
-        jumps.push({ axis: 'y', step: -l.dy / dr, pair });
+        jumps.push({ axis: 'y', step: -l.dy / dr, pair, crossing: !!l.crossing });
     }
     /**
      * The drawing contradicts the step along `axis`: it jumps there and never agrees. To REFUSE a
-     * sheet (`corroborated`) one shape is not enough — a copy of a piece on the next page fakes
-     * a jump: two page pairs must jump by the same step (± 1 mm).
+     * sheet (`corroborated`) a copy of a piece on the next page must not be able to fake it: a
+     * shape that runs past the page edge (it crosses the seam: drawn whole on both pages) is
+     * enough, otherwise two page pairs must jump by the same step (± 1 mm).
      */
     const against = (axis: 'x' | 'y', corroborated = false) => {
       if (agree[axis]) return false;
       const js = jumps.filter((j) => j.axis === axis);
       if (!corroborated) return js.length > 0;
+      if (js.some((j) => j.crossing)) return true;
       return js.some(
         (j) =>
           new Set(js.filter((k) => Math.abs(k.step - j.step) <= 1).map((k) => k.pair)).size >= 2,
@@ -429,18 +431,34 @@ export function assembleGroup(
     v: Vec,
     cells: readonly ({ row: number; col: number } | null | undefined)[],
   ) => {
-    const at = new Map<string, number>();
-    cells.forEach((c, i) => c && at.set(`${c.row},${c.col}`, i));
+    // `used`: the step places pages at all — more than one column (row) is occupied. A sparse
+    // grid's pages need not be adjacent: each page is held to the NEXT occupied cell of its row
+    // (column), at that many steps.
+    const idx = cells.flatMap((c, i) => (c ? [i] : []));
+    const lines = new Set(idx.map((i) => (rel === 'right' ? cells[i]!.col : cells[i]!.row)));
     let n = 0;
     let pairs = 0;
-    cells.forEach((c, i) => {
-      if (!c) return;
-      const j = at.get(rel === 'right' ? `${c.row},${c.col + 1}` : `${c.row + 1},${c.col}`);
-      if (j === undefined) return;
+    for (const i of idx) {
+      const c = cells[i]!;
+      let best: number | null = null;
+      let gap = Infinity;
+      for (const j of idx) {
+        const d = cells[j]!;
+        const k =
+          rel === 'right'
+            ? d.row === c.row
+              ? d.col - c.col
+              : 0
+            : d.col === c.col
+              ? d.row - c.row
+              : 0;
+        if (k > 0 && k < gap) [best, gap] = [j, k];
+      }
+      if (best === null) continue;
       pairs++;
-      n += refine(regs[i], regs[j], v, fineTol, 'all').n;
-    });
-    return { n, pairs };
+      n += refine(regs[i], regs[best], { dx: gap * v.dx, dy: gap * v.dy }, fineTol, 'all').n;
+    }
+    return { n, pairs, used: lines.size > 1 };
   };
   const jumpText = (jumps: { axis: 'x' | 'y'; step: number }[]) =>
     (['x', 'y'] as const)
@@ -472,8 +490,8 @@ export function assembleGroup(
       // the declared step confirmed by the drawing: a shape recurring across that axis's seams,
       // or all vertices (the printed marks) meeting at it on the neighbouring pages — or no
       // neighbours along the axis at all (the step is never used)
-      const meet = held.ok ? meetsAt(rel, decl, held.cells) : { n: 0, pairs: 1 };
-      const confirmed = !!lc?.agree[rel === 'right' ? 'x' : 'y'] || meet.n >= 4 || !meet.pairs;
+      const meet = held.ok ? meetsAt(rel, decl, held.cells) : { n: 0, pairs: 0, used: true };
+      const confirmed = !!lc?.agree[rel === 'right' ? 'x' : 'y'] || meet.n >= 4 || !meet.used;
       const agrees = off(got, decl) <= TILES_AGREE_MM;
       const len = Math.hypot(got.dx, got.dy).toFixed(1);
       const word = rel === 'right' ? 'across' : 'down';
@@ -501,7 +519,13 @@ export function assembleGroup(
     const ax = { right: axis('right'), below: axis('below') };
     const clash = [ax.right.clash, ax.below.clash].filter(Boolean);
     if (!held.ok) warnings.push(`tiles line not used — ${held.why} ("${tiles.text}")`);
-    else if (lc && (lc.against('x') || lc.against('y')))
+    // a line the printed marks confirm on an axis is vetoed there only by a corroborated jump
+    else if (
+      lc &&
+      held.ok &&
+      (lc.against('x', meetsAt('right', declR, held.cells).n >= 4) ||
+        lc.against('y', meetsAt('below', declB, held.cells).n >= 4))
+    )
       warnings.push(
         `tiles line not used — it says step ${tiles.stepX} x ${tiles.stepY} mm, the drawing ` +
           `recurs across its seams ${jumpText(lc.jumps)} ("${tiles.text}")`,
@@ -673,7 +697,7 @@ export function assembleGroup(
       const len = `${rel === 'right' ? 'across' : 'down'} ${Math.hypot(v.dx, v.dy).toFixed(1)} mm`;
       if (pitch.axes[rel] === 'page-size') {
         const meet = meetsAt(rel, v, layout.cells);
-        if (meet.pairs && !lc.agree[ax] && meet.n < 4)
+        if (meet.used && !lc.agree[ax] && meet.n < 4)
           bad.push(
             `${len} (nothing measured it: the page size, and nothing drawn meets across the seams there)`,
           );

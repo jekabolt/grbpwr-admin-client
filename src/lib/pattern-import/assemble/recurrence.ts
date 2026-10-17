@@ -21,7 +21,15 @@ export type RawLink = {
   n2: number;
   /** Max deviation of the individual measurements from the mean, mm. */
   spreadMm: number;
+  /**
+   * TILESTEP: a shape of the link runs past a page's edge (drawn whole, the page a window onto
+   * it) — it crosses a seam, so it cannot be a copy of a piece that sits inside another page.
+   */
+  crossing?: boolean;
 };
+
+const runsOff = (pts: { x: number; y: number }[], r: RegPage['rect']) =>
+  pts.some((v) => v.x < r.minX - 1 || v.y < r.minY - 1 || v.x > r.maxX + 1 || v.y > r.maxY + 1);
 
 function shapeHash(pts: { x: number; y: number }[], q: number): string {
   // FNV-1a over the quantised relative vertices, plus the count — collisions are re-checked.
@@ -74,7 +82,7 @@ export function recurrenceLinks(
       if (list) list.push({ p, s });
       else occ.set(k, [{ p, s }]);
     }
-  type Acc = { a: RegPage; b: RegPage; ds: { dx: number; dy: number }[] };
+  type Acc = { a: RegPage; b: RegPage; ds: { dx: number; dy: number }[]; crossing: boolean };
   const acc = new Map<string, Acc>();
   for (const list of occ.values()) {
     if (list.length < 2 || list.length > maxOcc) continue;
@@ -86,7 +94,9 @@ export function recurrenceLinks(
         if (A.p.idx > B.p.idx) [A, B] = [B, A];
         if (!sameShape(A.s.pts, B.s.pts, 2 * q)) continue;
         const key = `${A.p.key}|${B.p.key}`;
-        const e = acc.get(key) ?? { a: A.p, b: B.p, ds: [] };
+        const e = acc.get(key) ?? { a: A.p, b: B.p, ds: [], crossing: false };
+        if (!e.crossing && (runsOff(A.s.pts, A.p.rect) || runsOff(B.s.pts, B.p.rect)))
+          e.crossing = true;
         // Same point: a + t_a = b + t_b → t_b = t_a + (a − b).
         e.ds.push({ dx: A.s.pts[0].x - B.s.pts[0].x, dy: A.s.pts[0].y - B.s.pts[0].y });
         acc.set(key, e);
@@ -99,7 +109,17 @@ export function recurrenceLinks(
     const { n, n2, dx, dy, spread } = best;
     const total = e.ds.length;
     if (n < minN || n < 0.6 * total || n < PATIMPORT.registrationMinPeakRatio * n2) continue;
-    links.push({ a: e.a, b: e.b, dx, dy, method: 'recurrence', n, n2, spreadMm: spread });
+    links.push({
+      a: e.a,
+      b: e.b,
+      dx,
+      dy,
+      method: 'recurrence',
+      n,
+      n2,
+      spreadMm: spread,
+      ...(e.crossing ? { crossing: true } : {}),
+    });
   }
   return links;
 }
