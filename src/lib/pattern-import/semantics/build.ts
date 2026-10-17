@@ -122,7 +122,7 @@ import {
   reflection,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
-import { cleanTracedOutline, offsetContour } from './offset';
+import { cleanTracedOutline, familyCornerKinds, offsetContour } from './offset';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
 type DxfExtra = {
@@ -1122,6 +1122,8 @@ export function buildPieceSpecsDetailed(
     const saysPair = p.texts.some((t) => PAIR_WORDS.test(t) && parseQuantity(t) != null);
 
     const sizes: PieceSizeSpec[] = [];
+    /** SILENT-TAIL: the drawn line each derived line was offset from, and by how much (±mm). */
+    const derivedFrom = new Map<PieceSizeSpec, { base: PtMm[]; mm: number }>();
     const wallMaps: WallMap[] = [];
     let blockedHere: { reason: BlockReason; detail: string } | null = null;
     /** 'fold-unresolved': where the answered fold fails (the details step asks again from it). */
@@ -1344,11 +1346,13 @@ export function buildPieceSpecsDetailed(
       let cut: PtMm[];
       let seam: PtMm[] | null;
       let offset: OffsetReport | null = null;
+      let derived: { base: PtMm[]; mm: number } | null = null;
       if (meaning === 'seam') {
         seam = outer;
         const r = offsetContour(seam, allowMm);
         cut = r.pts;
         offset = r.report;
+        derived = { base: seam, mm: allowMm };
         pieceNotes.push(
           `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})`,
         );
@@ -1366,6 +1370,7 @@ export function buildPieceSpecsDetailed(
           const r = offsetContour(cut, -allowMm);
           seam = r.pts;
           offset = r.report;
+          derived = { base: cut, mm: -allowMm };
           pieceNotes.push(
             `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm`,
           );
@@ -1459,7 +1464,7 @@ export function buildPieceSpecsDetailed(
             confidence: foldFeat ? foldFeat.confidence : 0.6,
           } satisfies FoldFeature)
         : null;
-      sizes.push({
+      const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
         sizeToken: card.token,
@@ -1476,7 +1481,9 @@ export function buildPieceSpecsDetailed(
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
-      });
+      };
+      sizes.push(spec);
+      if (derived) derivedFrom.set(spec, derived);
       wallMaps.push({
         seed,
         rank: c.rank,
@@ -1548,6 +1555,38 @@ export function buildPieceSpecsDetailed(
           ),
         );
       continue;
+    }
+    // SILENT-TAIL: one corner, one treatment in every size — the derived lines are cut again with
+    // the family's most conservative treatment of each matched corner (offset.ts
+    // familyCornerKinds; demotion only, inside each size's own mitre). Not on a piece with a fold
+    // (its fold line is laid on the cut) or one whose sizes were not all derived the same way.
+    if (
+      sizes.length > 1 &&
+      sizes.every(
+        (s) =>
+          !s.fold && derivedFrom.has(s) && derivedFrom.get(s)!.mm === derivedFrom.get(sizes[0])!.mm,
+      )
+    ) {
+      const from = sizes.map((s) => derivedFrom.get(s)!);
+      const kinds = familyCornerKinds(
+        from.map((f) => f.base),
+        from[0].mm,
+      );
+      sizes.forEach((s, i) => {
+        const kindOf = kinds[i];
+        if (!kindOf) return;
+        const r = offsetContour(from[i].base, from[i].mm, { cornerKinds: kindOf });
+        if (!r.report.ok) return; // keep the size's own cut (G6 reads that one)
+        if (from[i].mm > 0) {
+          s.cut = r.pts;
+          s.bbox = bboxOf(r.pts);
+          s.areaMm2 = areaOf(r.pts);
+        } else s.seam = r.pts;
+        s.offset = r.report;
+        pieceNotes.push(
+          `${s.sizeToken}: allowance corners cut as in the other sizes (one corner, one treatment)`,
+        );
+      });
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     if (!p.ungraded && sizes.length > 1) {

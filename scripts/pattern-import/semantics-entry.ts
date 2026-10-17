@@ -13,6 +13,7 @@ import * as blockCode from 'components/managers/tech-card/components/nesting/blo
 import { readDxf, segmentDxf, dxfFastPath } from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 import { extractPdf, DEFAULT_EXTRACT_OPTS, setPdfjsLoader } from 'lib/pattern-import/adapters/pdf';
+import { cornersOf, familyCornerKinds } from 'lib/pattern-import/semantics/offset';
 import type { PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { type CardBlockRules, writeAndGate } from 'lib/pattern-import/gate';
 import {
@@ -471,8 +472,8 @@ export async function main(): Promise<number> {
       'W2 L-shape ±10: reflex corner mitred inward, convex corners outward (11900 / 3900 mm², 6 vertices)',
       `${areaOf(lo.pts).toFixed(2)} (${lo.pts.length}) / ${areaOf(li.pts).toFixed(2)} (${li.pts.length})`,
     );
-    // W2: a 20° tip — the mitre would reach 10 / sin 10° = 57.6 mm: square-cut at 4 × 10 mm,
-    // perpendicular to the bisector
+    // W2: a 20° tip — the mitre would reach 10 / sin 10° = 57.6 mm: square-cut at 2 × 10 mm
+    // (MITER_LIMIT, SILENT-TAIL: real CAD never reaches further), perpendicular to the bisector
     const tip = [
       { x: 0, y: -200 * Math.tan((10 * Math.PI) / 180) },
       { x: 200, y: 0 },
@@ -480,15 +481,146 @@ export async function main(): Promise<number> {
     ];
     const rt = offsetContour(tip, 10);
     const reachX = Math.max(...rt.pts.map((p) => p.x));
-    const atCut = rt.pts.filter((p) => Math.abs(p.x - 240) < 1e-6);
+    const atCut = rt.pts.filter((p) => Math.abs(p.x - 220) < 1e-6);
     ck(
       rt.report.ok &&
-        Math.abs(reachX - 240) < 1e-6 &&
+        Math.abs(reachX - 220) < 1e-6 &&
         atCut.length === 2 &&
         rt.report.maxDeviationMm <= 0.01,
-      'W2 20° tip +10: square cut at 4 × allowance (x = 240), perpendicular to the bisector',
+      'W2 20° tip +10: square cut at 2 × allowance (x = 220), perpendicular to the bisector',
       `reach ${reachX.toFixed(3)}, ${atCut.length} points on the cut, dev ${rt.report.maxDeviationMm.toFixed(4)}`,
     );
+    // SILENT-TAIL: one corner, one treatment in every size. A sleeve-like tip (≈ 152° turn, 15 mm
+    // allowance) drawn sharp in two sizes and with a 0.9 mm flat across its point in the third
+    // (palto SL 88: 87.8° + 63.5°): the flat size's cut is the same square cut at 2 × 15 mm from
+    // the point where its sides meet, and the cut perimeters grow with the seams (the old per-vertex
+    // mitres gave a 60 mm spike in the sharp sizes and a bevel in the flat one: 88 "28 mm shorter").
+    {
+      const tipRun = (k: number, flat: boolean) => {
+        // apex at (0, 0) pointing down (−y), each side 14° off the vertical → a 152° turn
+        const L = 300 * k;
+        const t = Math.tan((14 * Math.PI) / 180);
+        const at = (y: number, side: -1 | 1) => ({ x: side * y * t, y });
+        // a 0.9 mm flat across the point, its ends 0.1 mm apart in height (a fill artefact)
+        const h = 0.45 / t;
+        const tip = flat ? [at(h + 0.1, 1), at(h - 0.1, -1)] : [{ x: 0, y: 0 }];
+        return [at(L, 1), ...tip, at(L, -1), { x: 0, y: L * 1.2 }].reverse();
+      };
+      const per = (p: PtMm[]) =>
+        p.reduce(
+          (s0, q, i) =>
+            s0 + Math.hypot(p[(i + 1) % p.length].x - q.x, p[(i + 1) % p.length].y - q.y),
+          0,
+        );
+      const sizes = [
+        { k: 0.98, flat: false },
+        { k: 1.0, flat: false },
+        { k: 1.02, flat: true },
+      ].map((z) => {
+        const seam = tipRun(z.k, z.flat);
+        const r = offsetContour(seam, 15);
+        return {
+          seam,
+          r,
+          reach: -Math.min(...r.pts.map((q) => q.y)),
+          per: per(r.pts),
+          seamPer: per(seam),
+        };
+      });
+      const ok =
+        sizes.every((z) => z.r.report.ok && z.r.report.maxDeviationMm <= 0.01) &&
+        sizes.every((z) => Math.abs(z.reach - sizes[0].reach) < 0.2) &&
+        sizes[1].per > sizes[0].per &&
+        sizes[2].per > sizes[1].per &&
+        sizes[2].seamPer > sizes[1].seamPer;
+      ck(
+        ok,
+        'SILENT-TAIL 152° tip, 15 mm: sharp sizes and a 0.9 mm-flat size get one corner (same square cut at 2 × allowance), cut perimeters grow with the seams',
+        sizes
+          .map(
+            (z) =>
+              `reach ${z.reach.toFixed(2)} cut ${z.per.toFixed(1)} seam ${z.seamPer.toFixed(1)} dev ${z.r.report.maxDeviationMm.toFixed(3)}`,
+          )
+          .join(' · '),
+      );
+      // a real drawn bevel (4 mm across the point) is two corners, each mitred on its own: the cut
+      // keeps the bevel (reach stays near the flat, well short of the merged tip's square cut)
+      const bev = (() => {
+        const t = Math.tan((14 * Math.PI) / 180);
+        const h = 2 / t;
+        return [
+          { x: 300 * t, y: 300 },
+          { x: 2, y: h },
+          { x: -2, y: h },
+          { x: -300 * t, y: 300 },
+          { x: 0, y: 360 },
+        ].reverse();
+      })();
+      const rb = offsetContour(bev, 15);
+      // how far the cut reaches below the drawn bevel (merged into one tip: 30 mm below the
+      // point its sides meet, 8 mm further)
+      const reachB = 2 / Math.tan((14 * Math.PI) / 180) - Math.min(...rb.pts.map((q) => q.y));
+      ck(
+        rb.report.ok && reachB < 30,
+        'SILENT-TAIL a drawn 4 mm bevel across a tip stays two corners (not merged into one square cut)',
+        `reach from the bevel ${reachB.toFixed(2)} mm, dev ${rb.report.maxDeviationMm.toFixed(3)}`,
+      );
+      // SILENT-TAIL family pass: a hem corner with a step beside it that grades 9 → 13.8 → 16.9 mm
+      // against a 15 mm allowance (palto SL 80/84/88): round, round, mitred size by size; the
+      // family cuts it round in every size
+      const stepRun = [9, 13.8, 16.9].map((w) => [
+        { x: 0, y: 0 },
+        { x: 200, y: 0 },
+        { x: 200, y: 400 },
+        { x: 200 - w, y: 400 },
+        { x: 200 - w, y: 402 },
+        { x: 0, y: 402 },
+      ]);
+      const ownS = stepRun.map((l) =>
+        cornersOf(l, 15)
+          .filter((c) => c.at.y > 390 && c.at.x > 150 && c.turnDeg > 0)
+          .map((c) => c.kind)
+          .join('+'),
+      );
+      const famS = familyCornerKinds(stepRun, 15);
+      const cutsS = stepRun.map((l, i) =>
+        offsetContour(l, 15, { cornerKinds: famS[i] ?? undefined }),
+      );
+      const reachS = cutsS.map((r) => Math.max(...r.pts.map((q) => q.x + q.y)) - 602);
+      ck(
+        ownS[0].startsWith('step') &&
+          ownS[2].includes('mitre') &&
+          cutsS.every((r) => r.report.ok) &&
+          reachS.every((x) => Math.abs(x - reachS[0]) < 0.5),
+        'SILENT-TAIL family: a corner round in two sizes (step rule) and mitred in the third is cut round in all three',
+        `own ${ownS.join(' | ')} · reach past x+y=602: ${reachS.map((x) => x.toFixed(2)).join(' / ')}`,
+      );
+      // …and a tip whose mitre straddles the limit (1.93 / 2.07 × allowance) is square-cut in both
+      const tipAt = (deg: number) => {
+        const t = Math.tan((deg * Math.PI) / 180);
+        return [
+          { x: 0, y: 0 },
+          { x: 300 * t, y: 300 },
+          { x: 0, y: 360 },
+          { x: -300 * t, y: 300 },
+        ];
+      };
+      const straddle = [tipAt(31.2), tipAt(28.9)];
+      const ownT = straddle.map((l) => cornersOf(l, 10).find((c) => c.at.y < 1)?.kind);
+      const famT = familyCornerKinds(straddle, 10);
+      const cutT = straddle.map((l, i) =>
+        offsetContour(l, 10, { cornerKinds: famT[i] ?? undefined }),
+      );
+      const tipPts = cutT.map((r) => r.pts.filter((q) => q.y < -5).length);
+      ck(
+        ownT[0] === 'mitre' &&
+          ownT[1] === 'square' &&
+          cutT.every((r) => r.report.ok) &&
+          tipPts.every((k) => k === 2),
+        'SILENT-TAIL family: a tip mitred in one size and square-cut in the next is square-cut (two points) in both',
+        `own ${ownT.join(' / ')} · points at the tip ${tipPts.join(' / ')}`,
+      );
+    }
     // W2: a 1.3 mm jog of the seam line (< allowance) is not a corner: no mitre spike, the cut line
     // climbs the 1.3 mm once and never overshoots it
     const jog = [
