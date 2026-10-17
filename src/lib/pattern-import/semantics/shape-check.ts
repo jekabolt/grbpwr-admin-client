@@ -186,6 +186,103 @@ export function turnMismatch(
   return null;
 }
 
+/** Sizes i and j share one turn structure: neither has a strong event the other lacks (hysteresis). */
+function sameTurns(a: SizeShape, b: SizeShape): boolean {
+  for (let k = 0; k < a.events.length; k++) {
+    const x = a.events[k];
+    const y = b.events[k];
+    if (!y) continue;
+    if (x.strong > y.weak || y.strong > x.weak) return false;
+  }
+  return true;
+}
+
+/** Every maximum set of sizes that pairwise share one turn structure (Bron–Kerbosch, n is small). */
+function largestAgreeing(sh: readonly SizeShape[]): number[][] {
+  const n = sh.length;
+  const nb = sh.map(
+    (a, i) => new Set(sh.flatMap((b, j) => (i !== j && sameTurns(a, b) ? [j] : []))),
+  );
+  let best: number[][] = [];
+  const grow = (R: number[], P: number[], X: number[]) => {
+    if (!P.length && !X.length) {
+      if (!best.length || R.length > best[0].length) best = [R];
+      else if (R.length === best[0].length) best.push(R);
+      return;
+    }
+    if (R.length + P.length < (best[0]?.length ?? 0)) return;
+    const pivot = [...P, ...X].reduce((u, v) => (nb[v].size > nb[u].size ? v : u));
+    for (const v of P.filter((v) => !nb[pivot].has(v))) {
+      grow(
+        [...R, v],
+        P.filter((u) => nb[v].has(u)),
+        X.filter((u) => nb[v].has(u)),
+      );
+      P = P.filter((u) => u !== v);
+      X = [...X, v];
+    }
+  };
+  grow(
+    [],
+    Array.from({ length: n }, (_, i) => i),
+    [],
+  );
+  return best.map((c) => [...c].sort((a, b) => a - b));
+}
+
+/**
+ * SHAPE-MAJ (coordinator 17.10): which sizes a turn-structure difference holds.
+ *   · ≥3 sizes and ONE largest group of sizes sharing one turn structure that is a strict majority
+ *     (> half, ≥2): that group is the canonical shape — independent sizes agreeing on it are the
+ *     evidence (D3) — and only the sizes outside it are held, provided each of them differs by
+ *     carrying an EXTRA turn (a bump, dip, step, kink, notch cut in). A dissenter that LACKS a turn
+ *     the canonical sizes have is held with the whole family: the majority may then carry the
+ *     defect (card 49: a notch circle merged into the outline as a bump in some sizes) and the
+ *     minority be right — no majority can tell which.
+ *   · otherwise (2 sizes, 2 vs 2, a tie of largest groups, no majority): every size is held.
+ * null when the sizes share one structure.
+ */
+export function turnHold(sh: readonly SizeShape[]): {
+  /** indices held (every index when canonical is null) */
+  held: number[];
+  /** the canonical majority's indices, or null (the whole family is held) */
+  canonical: number[] | null;
+  /** the first difference: canonical vs a dissenter when there is a majority, else turnMismatch */
+  first: { what: string; a: number; b: number; at?: PtMm[] };
+} | null {
+  const t = turnMismatch(sh);
+  if (!t) return null;
+  const all = sh.map((_, i) => i);
+  const whole = { held: all, canonical: null, first: t };
+  if (sh.length < 3) return whole;
+  const groups = largestAgreeing(sh);
+  if (groups.length !== 1) return whole;
+  const canon = groups[0];
+  if (canon.length < 2 || 2 * canon.length <= sh.length) return whole;
+  const inCanon = new Set(canon);
+  const odd = all.filter((i) => !inCanon.has(i));
+  // only EXTRA turns in the dissenters: no canonical size has a strong event a dissenter lacks
+  for (const d of odd)
+    for (const c of canon)
+      for (let k = 0; k < sh[c].events.length; k++) {
+        const e = sh[d].events[k];
+        if (e && sh[c].events[k].strong > e.weak) return whole;
+      }
+  // the first extra turn of a dissenter over a canonical size (the note's example)
+  let first: { what: string; a: number; b: number; at?: PtMm[] } = t;
+  find: for (const d of odd)
+    for (const c of canon)
+      for (let k = 0; k < sh[d].events.length; k++) {
+        const a = sh[d].events[k];
+        const b = sh[c].events[k];
+        if (b && a.strong > b.weak) {
+          first = { what: `corners ${a.key} ${a.strong}>${b.weak}`, a: d, b: c, at: a.at };
+          break find;
+        }
+      }
+  return { held: odd, canonical: canon, first };
+}
+
 /** Either difference, counts first (the probe's single summary). */
 export function shapeMismatch(
   sh: readonly SizeShape[],

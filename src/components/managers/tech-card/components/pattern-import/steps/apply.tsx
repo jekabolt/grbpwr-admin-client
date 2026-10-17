@@ -163,6 +163,7 @@ export function ApplyStep({
           }
         />
       ))}
+      <RulPackage scopes={draft.scopes} />
       {leftWords.length > 0 && (
         // FLY-final M2: what the files leave out is seen before the click
         <Row
@@ -537,6 +538,7 @@ function DownloadOnly({ api, onClose }: { api: ImportSessionApi; onClose: () => 
             value={`${plural(s.manifest.blocks.length, 'block')} · ${fmtBytes(new Blob([s.dxfText]).size)}`}
           />
         ))}
+        <RulPackage scopes={draft.scopes} />
         {leftWords.length > 0 && (
           <Row
             label={<span className='text-warning'>! left out</span>}
@@ -558,5 +560,76 @@ function DownloadOnly({ api, onClose }: { api: ImportSessionApi; onClose: () => 
         )}
       </Panel>
     </div>
+  );
+}
+
+function saveText(filename: string, text: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * RUL-SPEC §6 (write `storage: 'rul'`): a scope packed as base-size DXF + grade rule table offers
+ * the two files as downloads (rules, base and the worst expansion error in the tooltip). When it
+ * cannot be packed, the first reason in one quiet line; the per-size DXF stays the file either
+ * way. A scope written without the option (`rul` absent) shows nothing.
+ */
+function RulPackage({ scopes }: { scopes: readonly DraftScope[] }) {
+  const withRul = scopes.filter((s) => s.rul);
+  if (!withRul.length) return null;
+  const many = scopes.length > 1;
+  return (
+    <>
+      {withRul.map((s) => {
+        const r = s.rul!;
+        const label = many ? `${s.target.label} · base + .rul` : 'base + .rul';
+        if (!r.ok)
+          return (
+            <Text
+              key={s.target.scopeKey}
+              size='micro'
+              variant='label'
+              component='p'
+              className='truncate py-1'
+              title={r.reasons.slice(0, 3).join('\n')}
+            >
+              no .rul{many ? ` for ${s.target.label}` : ''}: {r.reasons[0] ?? 'not gradable'}
+            </Text>
+          );
+        const info = `${plural(r.rules, 'rule')} · base ${r.base} · ${r.sizes.join(' ')} · max error ${r.maxErrMm.toFixed(3)} mm`;
+        return (
+          <Row
+            key={s.target.scopeKey}
+            label={<span title={info}>{label}</span>}
+            value={
+              <span className='inline-flex items-center gap-2' title={info}>
+                <button
+                  type='button'
+                  className='text-micro underline hover:text-labelColor'
+                  data-testid='pattern-import-rul-dxf'
+                  onClick={() => saveText(r.dxfFilename, r.dxfText, 'application/dxf')}
+                >
+                  {r.dxfFilename}
+                </button>
+                <button
+                  type='button'
+                  className='text-micro underline hover:text-labelColor'
+                  data-testid='pattern-import-rul-rul'
+                  onClick={() => saveText(r.rulFilename, r.rulText, 'text/plain')}
+                >
+                  {r.rulFilename}
+                </button>
+              </span>
+            }
+          />
+        );
+      })}
+    </>
   );
 }

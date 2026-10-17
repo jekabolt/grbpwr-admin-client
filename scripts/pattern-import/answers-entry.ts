@@ -37,6 +37,8 @@ import {
   fixtureSemantics,
   fixtureSizes,
   fixtureWrite,
+  ROWS,
+  COLS,
   SOURCE_SIZES,
 } from 'components/managers/tech-card/components/pattern-import/fixture';
 import {
@@ -119,6 +121,34 @@ function twoSheetClient() {
         switch (stage) {
           case 'extract':
             return fixtureExtract(s.files);
+          case 'clean': {
+            // A8: the fixture's pages are clean — nothing masked, nothing set aside beyond the
+            // extract's own non-tile pages, the extract's scale as is (mirrors stub-client.ts)
+            const ex = fixtureExtract(s.files);
+            return {
+              pages: ex.pages.map((p) => ({ file: p.file, page: p.page, role: p.cls, items: [] })),
+              dropped: ex.pages
+                .filter((p) => p.cls !== 'tile')
+                .map((p) => ({
+                  file: p.file,
+                  page: p.page,
+                  cls: p.cls,
+                  why: p.why,
+                  status: 'auto' as const,
+                })),
+              classes: ex.pages,
+              summary: {},
+              offered: {},
+              scaleHints: [],
+              scale: ex.scale,
+              curveTexts: [],
+              previews: [],
+              notes: [],
+            };
+          }
+          // A9: no pages to draw for the AI page-role call
+          case 'render-pages':
+            return { pages: [] };
           case 'scale':
             s.scale = (input as StageIO['scale']['in']).decision;
             return fixtureScale(s.scale);
@@ -243,8 +273,15 @@ async function mount() {
 type W = Awaited<ReturnType<typeof mount>>;
 
 /** sheet step → details for `model`, the regions that do not close dropped as "not a piece". */
-async function sheetToDetails(w: W, model: string, drawn?: number) {
+async function sheetToDetails(
+  w: W,
+  model: string,
+  drawn?: number,
+  /** Looks at the sizes step before the count is answered (a hand grid asks it afresh). */
+  atSizes?: (w: W) => void,
+) {
   await w.step((a) => a.next()); // sheet → sizes
+  atSizes?.(w);
   if (drawn != null) await w.step((a) => a.setDrawnSizes(drawn)); // H1: "sizes drawn: n"
   await w.step((a) => a.next()); // sizes → pieces (first run: every model)
   await w.step((a) => a.dispatch({ type: 'variant', variant: model }));
@@ -369,8 +406,32 @@ async function scenario() {
 
   // ── sheet B ──
   await w.step((x) => x.dispatch({ type: 'back', to: 'sheet' }));
-  await w.step((x) => x.dispatch({ type: 'sheet', sheet: 1 }));
-  await sheetToDetails(w, 'MOD. 125');
+  // D6 (5dac8211): every tile sheet is in the drawing, so a bare `sheet` event no longer changes
+  // the scope — only a hand grid on that sheet does (`sheetIndex = ev.override ? ev.sheet : 0`).
+  // The "other sheet" of this scenario is therefore the same fixture grid set by hand on sheet 1.
+  await w.step((x) =>
+    x.dispatch({
+      type: 'sheet',
+      sheet: 1,
+      override: {
+        rows: ROWS,
+        cols: COLS,
+        stepXMm: 200,
+        stepYMm: 287,
+        order: 'row-major',
+        originPage: { file: '0', page: 3 },
+      },
+    }),
+  );
+  // the drawn-size answer was given on sheet A's scope (no grid): the hand grid of sheet B is
+  // another scope, so the sizes step asks the count again and the operator answers it there
+  await sheetToDetails(w, 'MOD. 125', 5, (x) =>
+    check(
+      liveDrawnSizes(x.get().inputs, x.get().inputs) === null,
+      'sheet B: sheet A\'s drawn-size answer is not live on the new scope (the count is asked again)',
+      { drawn: x.get().inputs.drawnSizes, at: x.get().inputs.drawnSizesAt },
+    ),
+  );
   const b = w.get();
   check(b.session.step === 'meaning', 'sheet B: on details', b.session.step);
   const seedsA = new Set(Object.keys(answersA.answerCtx?.revs ?? {}).map(Number));
@@ -384,15 +445,13 @@ async function scenario() {
     b.inputs.confirmedNames.length === 0 &&
       Object.keys(b.inputs.confirmedQuantities).length === 0 &&
       b.inputs.fileAllowance === null &&
-      b.inputs.foldListChecked.length === 0 &&
-      b.inputs.drawnSizes === null,
+      b.inputs.foldListChecked.length === 0,
     'sheet B: sheet A answers were dropped when the pieces settled',
     {
       names: b.inputs.confirmedNames,
       qty: b.inputs.confirmedQuantities,
       allowance: b.inputs.fileAllowance?.origin ?? null,
       list: b.inputs.foldListChecked,
-      drawn: b.inputs.drawnSizes,
     },
   );
   const openB = openOf(b);

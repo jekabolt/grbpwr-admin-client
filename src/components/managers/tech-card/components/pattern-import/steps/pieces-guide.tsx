@@ -353,6 +353,7 @@ export function ModelThumb({
   hot = false,
   tinted,
   cutLines = [],
+  cutOff = [],
   extra = [],
   className,
   style,
@@ -362,8 +363,10 @@ export function ModelThumb({
   hot?: boolean;
   /** Per outline: a piece this garment changes (tinted blue). */
   tinted?: readonly boolean[];
-  /** This garment's cutting lines (blue polylines). */
+  /** This garment's cutting lines (thick blue polylines, over the outlines). */
   cutLines?: readonly (readonly PtMm[])[];
+  /** Per cut line: the PDF drew it off its outline (dashed, with a tooltip). */
+  cutOff?: readonly boolean[];
   /** Outlines only this garment has (dashed blue). */
   extra?: readonly (readonly PtMm[])[];
   className?: string;
@@ -424,9 +427,12 @@ export function ModelThumb({
             points={ptsAttr(l as PtMm[])}
             fill='none'
             stroke={SHEET_INK.blue}
-            strokeWidth={unit * 0.9}
+            strokeWidth={unit * 1.6}
             strokeLinecap='round'
-          />
+            strokeDasharray={cutOff[i] ? `${unit * 4} ${unit * 3}` : undefined}
+          >
+            {cutOff[i] && <title>drawn off its outline in the PDF</title>}
+          </polyline>
         ) : null,
       )}
     </svg>

@@ -104,6 +104,7 @@ import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { assignChains, lineKeys } from '../chains/assign';
+import { lineSuspects, sizeOutlines } from '../chains/nests';
 import { detectSizeRun } from '../sizes';
 import {
   blobShapes,
@@ -1230,6 +1231,7 @@ export class Session {
         lineAssign = {
           applied: [],
           flags: [],
+          notes: [],
           stale: input.chainAssign.flatMap((e, entry) =>
             e.keys.map((key) => ({
               entry,
@@ -1255,6 +1257,9 @@ export class Session {
       ambiguities: set.ambiguities ?? [],
       ...(this.fast ? {} : legendSwatches(sheet, set)),
       ...(this.fast ? {} : { chainLines: lineKeys(set, sheet.styles, sheet.parts, sheet.id) }),
+      ...(this.fast
+        ? {}
+        : { suspects: lineSuspects(set, sheet.styles), outlines: sizeOutlines(set) }),
       ...(lineAssign ? { lineAssign } : {}),
     };
   }

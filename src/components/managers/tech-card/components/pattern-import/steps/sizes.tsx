@@ -8,16 +8,18 @@
 // guess, a drawn size off the card) is a `?` on the row that opens its yes / no under it.
 // Hovering a row lights its lines on the sheet, blue and thicker. Evidence lives in `?debug=1`.
 // Two size rows given one name are one size (a size drawn in two looks) — the worker merges them.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   BoxMm,
   CardSize,
+  ChainAssign,
   ChainRole,
   ChainAmbiguity,
   ClassEvidence,
   ExpectedSizes,
   LineClass,
   LineSwatch,
+  PtMm,
   SizeCountAsk,
   SizeMapEntry,
 } from 'lib/pattern-import/types';
@@ -50,6 +52,16 @@ import {
   useQuizSlot,
 } from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
+import {
+  assignEach,
+  assignTo,
+  boxOf,
+  chainsIn,
+  dropStale,
+  lineSuspects,
+  outlineCount,
+  suspectsOf,
+} from './size-lines';
 
 const ROLES: { value: ChainRole; label: string }[] = [
   { value: 'size', label: 'a size' },
@@ -153,6 +165,27 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const autoAnswer = useAutoAnswer(api);
   useEffect(() => autoMap.current?.());
   const go = useAnsweredAndGo();
+  // LINEFIX: the operator's own line picks (a size's warning opened, or «mark lines not needed»).
+  // Kept in the wizard's slot: the step remounts while the answer's re-run works.
+  const lf = useQuizSlot<LineFixSlot>('sizes-lines', () => ({
+    mode: null,
+    sel: [],
+    hist: [],
+    answers: [],
+    goAt: null,
+    right: [],
+  }));
+  const [, bump] = useState(0);
+  const touch = () => bump((x) => x + 1);
+  const [hoverLine, setHoverLine] = useState<number | null>(null);
+  const nests = useMemo(() => (chains ? lineSuspects(chains) : null), [chains]);
+  // ANSWERED AND GO, once the warnings the answer was about are gone (the re-run has landed)
+  const notesLeft = useRef(0);
+  useEffect(() => {
+    if (lf.goAt == null || session.busy || lf.goAt === chains) return;
+    lf.goAt = null;
+    if (notesLeft.current === 0) go();
+  });
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -403,6 +436,94 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       };
     return null;
   };
+
+  // ── LINEFIX: a size's «N pieces missing / extra» opens its lines; «mark lines not needed» boxes
+  // lines off. Both send `line-assign` (the whole list, LINE-ASSIGN.md); the step re-runs.
+  const lines = chains.chainLines;
+  const rowNote = (c: LineClass) => (lf.right.includes(legendKey(c)) ? null : outlineNote(c.id));
+  notesLeft.current = sizeRows.filter(rowNote).length;
+  const fixRow =
+    lf.mode?.kind === 'fix'
+      ? sizeRows.find((c) => legendKey(c) === (lf.mode as { row: string }).row) ?? null
+      : null;
+  const lineMode = lines && (fixRow || lf.mode?.kind === 'mark') ? lf.mode : null;
+  const sel = new Set(lineMode ? lf.sel : []);
+  const ownLines = new Set(fixRow?.chains ?? []);
+  const setSel = (ids: number[]) => {
+    lf.hist = [...lf.hist, lf.sel];
+    lf.sel = ids;
+    touch();
+  };
+  const closeLines = () => {
+    lf.mode = null;
+    lf.sel = [];
+    lf.hist = [];
+    setHoverLine(null);
+    touch();
+  };
+  const openFix = (c: LineClass) => {
+    const sus = nests ? suspectsOf(chains, nests, c.id) : [];
+    setFlag(null);
+    setPicked(null);
+    lf.mode = {
+      kind: 'fix',
+      row: legendKey(c),
+      // the suspects when there are any (the size's own lines are drawn grey around them)
+      focus: boxOf(chains, sus.length ? sus : c.chains),
+    };
+    lf.sel = sus;
+    lf.hist = [];
+    touch();
+  };
+  const openMark = () => {
+    setFlag(null);
+    setPicked(null);
+    lf.mode = { kind: 'mark', focus: null };
+    lf.sel = [];
+    lf.hist = [];
+    touch();
+  };
+  const toggleLine = (key: string) => {
+    if (!key.startsWith('l')) return;
+    const id = Number(key.slice(1));
+    setSel(sel.has(id) ? lf.sel.filter((x) => x !== id) : [...lf.sel, id]);
+  };
+  const lassoLines = (poly: PtMm[]) => {
+    const add = chainsIn(chains, poly).filter((id) => !sel.has(id));
+    if (add.length) setSel([...lf.sel, ...add]);
+  };
+  const rowKeyOf = (classId: number) => {
+    const c = chains.classes.find((x) => x.id === classId);
+    return c ? legendKey(c) : null;
+  };
+  /** Append answers to the list and send the whole list (an empty add sends nothing). */
+  const sendLines = (add: ChainAssign[], fix: boolean) => {
+    if (!add.length) return;
+    lf.answers = [...lf.answers, inputs.chainAssign];
+    if (fix) lf.goAt = chains;
+    closeLines();
+    void api.dispatch({ type: 'line-assign', assign: [...inputs.chainAssign, ...add] });
+  };
+  /** Undo = send back the whole list as it was before the last answer given here. */
+  const undoLines = () => {
+    const prev = lf.answers.at(-1);
+    if (!prev) return;
+    lf.answers = lf.answers.slice(0, -1);
+    touch();
+    void api.dispatch({ type: 'line-assign', assign: prev });
+  };
+  const picks = lineMode ? lf.sel : [];
+  const eachKnown = !!nests && picks.length > 0 && picks.every((id) => nests.expected.has(id));
+  // the pick is still the step's own proposal (nothing clicked since the warning opened it)
+  const suggested = eachKnown && lf.hist.length === 0 && lf.mode?.kind === 'fix';
+  const answeredKeys = inputs.chainAssign.reduce((n, e) => n + e.keys.length, 0);
+  const stale = chains.lineAssign?.stale ?? [];
+  const sizeChips = [...sizeRows].sort(
+    (a, b) =>
+      (drawn.findIndex((e) => e.source.classId === a.id) + 1 || 99) -
+      (drawn.findIndex((e) => e.source.classId === b.id) + 1 || 99),
+  );
+
   const assumedOf = (e: SizeMapEntry | undefined) => {
     const i = e && assumed ? drawn.indexOf(e) : -1;
     return i >= 0 ? assumed![i] : null;
@@ -481,6 +602,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     // The reader's own notes (a refused split, «split … name it») answer an operator action, so
     // they stay visible; only the run/encoding statistics live in the debug fold.
     ...chains.warnings,
+    // the operator's line answers that were taken but disagree with the drawing (D3)
+    ...(chains.lineAssign?.flags ?? []).map((f) => `your line answer: ${f.detail}`),
   ];
 
   /**
@@ -613,8 +736,22 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               <span className='min-w-0 truncate'>{name}</span>
               {c &&
                 (() => {
-                  const note = outlineNote(c.id);
-                  return note ? (
+                  const note = rowNote(c);
+                  // the warning is the door to its fix: the size's lines open on the sheet
+                  return note && lines ? (
+                    <button
+                      type='button'
+                      title={`${note.title}. click to show the lines`}
+                      disabled={!!session.busy}
+                      onClick={() => openFix(c)}
+                      className={cn(
+                        'min-w-0 truncate text-left text-warning underline decoration-dotted underline-offset-2 hover:decoration-solid',
+                        FOCUS,
+                      )}
+                    >
+                      {note.text}
+                    </button>
+                  ) : note ? (
                     <span className='min-w-0 truncate text-warning' title={note.title}>
                       {note.text}
                     </span>
@@ -715,76 +852,138 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           }
           bodyClassName='p-0'
         >
-          <SheetViewport bbox={session.sheet.sheet.bbox} focus={focusBox}>
-            {({ unit }) => (
-              <>
-                <g fill='none' pointerEvents='none'>
-                  {chains.chainPreview.map((a, i) =>
-                    a.length < 4 || lit?.has(i) ? null : (
-                      <polyline
-                        key={i}
-                        points={f32Attr(a)}
-                        stroke={lit ? '#dddddd' : SHEET_INK.mut}
-                        strokeWidth={unit * 0.8}
-                      />
-                    ),
-                  )}
-                  {/* the lit size on top: blue and thicker for a row, ink for a flag */}
-                  {lit &&
-                    chains.chainPreview.map((a, i) =>
-                      a.length < 4 || !lit.has(i) ? null : (
+          <SheetViewport
+            bbox={session.sheet.sheet.bbox}
+            focus={lineMode ? lineMode.focus : focusBox}
+            tool={lineMode?.kind === 'mark' ? 'lasso' : 'pan'}
+            onPick={lineMode?.kind === 'fix' ? toggleLine : undefined}
+            onLasso={lineMode?.kind === 'mark' ? lassoLines : undefined}
+          >
+            {({ unit }) =>
+              lineMode ? (
+                <>
+                  {/* the operator's pick: the size's own lines grey, the picked lines blue */}
+                  <g fill='none' pointerEvents='none'>
+                    {chains.chainPreview.map((a, i) =>
+                      a.length < 4 || sel.has(i) ? null : (
                         <polyline
-                          key={`hot-${i}`}
+                          key={i}
                           points={f32Attr(a)}
-                          stroke={hotRow != null ? SHEET_INK.blue : SHEET_INK.ink}
-                          strokeWidth={unit * (hotRow != null ? 2.4 : 1.6)}
+                          stroke={ownLines.has(i) ? SHEET_INK.mut : '#dddddd'}
+                          strokeWidth={unit * 0.8}
                         />
                       ),
                     )}
-                </g>
-                {flagged?.at && (
-                  <circle
-                    cx={flagged.at.x}
-                    cy={vy(flagged.at.y)}
-                    r={unit * 12}
-                    fill='none'
-                    stroke={SHEET_INK.blue}
-                    strokeWidth={unit * 1.6}
-                    pointerEvents='none'
-                  />
-                )}
-                {sample && (
-                  // the key's sample of the picked row and the leader to its label
-                  <g pointerEvents='none'>
-                    {(chains.chainPreview[sample.chain]?.length ?? 0) >= 4 && (
+                    {chains.chainPreview.map((a, i) =>
+                      a.length < 4 || !sel.has(i) ? null : (
+                        <polyline
+                          key={`sel-${i}`}
+                          points={f32Attr(a)}
+                          stroke={SHEET_INK.blue}
+                          strokeWidth={unit * 2.4}
+                        />
+                      ),
+                    )}
+                    {hoverLine != null && (chains.chainPreview[hoverLine]?.length ?? 0) >= 4 && (
                       <polyline
-                        points={f32Attr(chains.chainPreview[sample.chain])}
-                        fill='none'
-                        stroke={SHEET_INK.blue}
+                        points={f32Attr(chains.chainPreview[hoverLine])}
+                        stroke={SHEET_INK.ink}
                         strokeWidth={unit * 2.4}
                       />
                     )}
-                    <line
-                      x1={sample.at.x}
-                      y1={vy(sample.at.y)}
-                      x2={sample.textAt.x}
-                      y2={vy(sample.textAt.y)}
-                      stroke={SHEET_INK.blue}
-                      strokeWidth={unit}
-                      strokeDasharray={`${unit * 4} ${unit * 3}`}
-                    />
+                  </g>
+                  {lineMode.kind === 'fix' && (
+                    // a click on a line picks it (or puts it back); hover lights the whole line
+                    <g fill='none'>
+                      {chains.chainPreview.map((a, i) =>
+                        a.length < 4 || !lines?.[i]?.key ? null : (
+                          <polyline
+                            key={`hit-${i}`}
+                            data-key={`l${i}`}
+                            data-testid='size-line'
+                            points={f32Attr(a)}
+                            stroke='transparent'
+                            strokeWidth={unit * 8}
+                            pointerEvents='stroke'
+                            className='cursor-pointer'
+                            onMouseEnter={() => setHoverLine(i)}
+                            onMouseLeave={() => setHoverLine((h) => (h === i ? null : h))}
+                          />
+                        ),
+                      )}
+                    </g>
+                  )}
+                </>
+              ) : (
+                <>
+                  <g fill='none' pointerEvents='none'>
+                    {chains.chainPreview.map((a, i) =>
+                      a.length < 4 || lit?.has(i) ? null : (
+                        <polyline
+                          key={i}
+                          points={f32Attr(a)}
+                          stroke={lit ? '#dddddd' : SHEET_INK.mut}
+                          strokeWidth={unit * 0.8}
+                        />
+                      ),
+                    )}
+                    {/* the lit size on top: blue and thicker for a row, ink for a flag */}
+                    {lit &&
+                      chains.chainPreview.map((a, i) =>
+                        a.length < 4 || !lit.has(i) ? null : (
+                          <polyline
+                            key={`hot-${i}`}
+                            points={f32Attr(a)}
+                            stroke={hotRow != null ? SHEET_INK.blue : SHEET_INK.ink}
+                            strokeWidth={unit * (hotRow != null ? 2.4 : 1.6)}
+                          />
+                        ),
+                      )}
+                  </g>
+                  {flagged?.at && (
                     <circle
-                      cx={sample.at.x}
-                      cy={vy(sample.at.y)}
-                      r={unit * 14}
+                      cx={flagged.at.x}
+                      cy={vy(flagged.at.y)}
+                      r={unit * 12}
                       fill='none'
                       stroke={SHEET_INK.blue}
                       strokeWidth={unit * 1.6}
+                      pointerEvents='none'
                     />
-                  </g>
-                )}
-              </>
-            )}
+                  )}
+                  {sample && (
+                    // the key's sample of the picked row and the leader to its label
+                    <g pointerEvents='none'>
+                      {(chains.chainPreview[sample.chain]?.length ?? 0) >= 4 && (
+                        <polyline
+                          points={f32Attr(chains.chainPreview[sample.chain])}
+                          fill='none'
+                          stroke={SHEET_INK.blue}
+                          strokeWidth={unit * 2.4}
+                        />
+                      )}
+                      <line
+                        x1={sample.at.x}
+                        y1={vy(sample.at.y)}
+                        x2={sample.textAt.x}
+                        y2={vy(sample.textAt.y)}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit}
+                        strokeDasharray={`${unit * 4} ${unit * 3}`}
+                      />
+                      <circle
+                        cx={sample.at.x}
+                        cy={vy(sample.at.y)}
+                        r={unit * 14}
+                        fill='none'
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 1.6}
+                      />
+                    </g>
+                  )}
+                </>
+              )
+            }
           </SheetViewport>
         </Panel>
       }
@@ -803,6 +1002,119 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               <Text component='p' className='text-error'>
                 ! the card has no sizes yet. set them on the card first
               </Text>
+            )}
+            {lineMode && (
+              <div data-testid='size-lines-card' className='flex flex-col gap-2'>
+                <Text component='p'>
+                  {lineMode.kind === 'mark'
+                    ? picks.length
+                      ? `${picks.length} ${picks.length === 1 ? 'line' : 'lines'} picked. not needed?`
+                      : 'draw around the lines that are not needed'
+                    : suggested
+                      ? 'the blue lines are drawn in the wrong size. move each to its own size?'
+                      : picks.length
+                        ? `${picks.length} ${picks.length === 1 ? 'line' : 'lines'} picked. whose are they?`
+                        : `click the lines that are not size ${fixRow?.sizeLabel ?? ''}`}
+                </Text>
+                <span className='flex flex-wrap items-center gap-2'>
+                  {lineMode.kind === 'fix' && eachKnown && (
+                    <Act
+                      primary
+                      disabled={!!session.busy}
+                      title='each blue line goes to the size its nest of outlines names'
+                      onClick={() =>
+                        sendLines(assignEach(chains, picks, nests!.expected, rowKeyOf), true)
+                      }
+                    >
+                      {suggested ? 'yes' : 'each its own'}
+                    </Act>
+                  )}
+                  {lineMode.kind === 'fix' &&
+                    !suggested &&
+                    picks.length > 0 &&
+                    sizeChips.map((c) => (
+                      <button
+                        key={c.id}
+                        type='button'
+                        disabled={!!session.busy}
+                        title={`the picked lines are size ${c.sizeLabel}`}
+                        onClick={() =>
+                          sendLines(assignTo(chains, picks, { row: legendKey(c) }), true)
+                        }
+                        className={cn(
+                          'flex h-7 items-center gap-2 border border-borderColor bg-bgColor px-2 transition-colors hover:border-textColor',
+                          FOCUS,
+                          'disabled:cursor-not-allowed disabled:text-labelColor',
+                        )}
+                      >
+                        <LineSwatchView
+                          swatch={chains.swatches?.[c.id]}
+                          widthMm={QUIZ_SWATCH_MM}
+                          minStrokeMm={0.35}
+                          fallbackDash={motifOf(c.id)}
+                        />
+                        <span>{c.sizeLabel || '(no name)'}</span>
+                      </button>
+                    ))}
+                  {picks.length > 0 && (
+                    <Act
+                      primary={lineMode.kind === 'mark'}
+                      disabled={!!session.busy}
+                      title='the picked lines are no size line: they leave the sizes'
+                      onClick={() =>
+                        sendLines(
+                          assignTo(chains, picks, { cls: 'ignore' }),
+                          lineMode.kind === 'fix',
+                        )
+                      }
+                    >
+                      not needed
+                    </Act>
+                  )}
+                  {lineMode.kind === 'fix' && fixRow && (
+                    <Act
+                      title='the lines of this size are right: hide its warning'
+                      onClick={() => {
+                        lf.right = [...lf.right, legendKey(fixRow)];
+                        closeLines();
+                      }}
+                    >
+                      they're right
+                    </Act>
+                  )}
+                </span>
+                <span className='flex flex-wrap items-center gap-3 text-labelColor'>
+                  {lf.hist.length > 0 && (
+                    <button
+                      type='button'
+                      className={cn('hover:text-textColor', FOCUS)}
+                      onClick={() => {
+                        lf.sel = lf.hist.at(-1) ?? [];
+                        lf.hist = lf.hist.slice(0, -1);
+                        touch();
+                      }}
+                    >
+                      undo
+                    </button>
+                  )}
+                  {picks.length > 0 && (
+                    <button
+                      type='button'
+                      className={cn('hover:text-textColor', FOCUS)}
+                      onClick={() => setSel([])}
+                    >
+                      clear
+                    </button>
+                  )}
+                  <button
+                    type='button'
+                    className={cn('hover:text-textColor', FOCUS)}
+                    onClick={closeLines}
+                  >
+                    close
+                  </button>
+                </span>
+              </div>
             )}
             {sizes.countAsk && (
               <DrawnSizes
@@ -980,6 +1292,60 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                   ))}
               </div>
             </div>
+
+            {lines && (
+              <div className='flex flex-col gap-2'>
+                {stale.length > 0 && (
+                  <span className='flex flex-wrap items-center gap-2'>
+                    <Text component='span' className='text-warning'>
+                      {stale.length} of your line answers no longer find their line
+                    </Text>
+                    <Act
+                      disabled={!!session.busy}
+                      title={stale.map((x) => x.detail).join(' · ')}
+                      onClick={() => {
+                        // the snapshots name keys that are now dropped: the undo history ends here
+                        lf.answers = [];
+                        touch();
+                        void api.dispatch({
+                          type: 'line-assign',
+                          assign: dropStale(inputs.chainAssign, stale),
+                        });
+                      }}
+                    >
+                      drop them
+                    </Act>
+                  </span>
+                )}
+                <span className='flex flex-wrap items-center gap-2'>
+                  {!lineMode && (
+                    <Act
+                      disabled={!!session.busy}
+                      title='draw around lines on the sheet: they leave the sizes'
+                      onClick={openMark}
+                    >
+                      mark lines not needed
+                    </Act>
+                  )}
+                  {answeredKeys > 0 && (
+                    <>
+                      <Text component='span' className='text-labelColor'>
+                        {answeredKeys} {answeredKeys === 1 ? 'line' : 'lines'} moved by you
+                      </Text>
+                      {lf.answers.length > 0 && (
+                        <Act
+                          disabled={!!session.busy}
+                          title='take your last line answer back'
+                          onClick={undoLines}
+                        >
+                          undo
+                        </Act>
+                      )}
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
 
             {pickedRow && (
               <RowDetail
@@ -1391,22 +1757,6 @@ function RowDetail({
   );
 }
 
-/** How many piece outlines (closed, ≥ 200 mm round) a size's lines draw. */
-function outlineCount(chains: NonNullable<ImportSessionApi['session']['chains']>, classId: number) {
-  const c = chains.classes.find((x) => x.id === classId);
-  let n = 0;
-  for (const id of c?.chains ?? []) {
-    const a = chains.chainPreview[id];
-    if (!a || a.length < 8) continue;
-    const k = a.length;
-    if (Math.hypot(a[0] - a[k - 2], a[1] - a[k - 1]) > 2) continue;
-    let len = 0;
-    for (let i = 0; i + 3 < k; i += 2) len += Math.hypot(a[i + 2] - a[i], a[i + 3] - a[i + 1]);
-    if (len >= 200) n++;
-  }
-  return n;
-}
-
 /**
  * The biggest closed outline a size's lines draw, mm² (shoelace over the chain previews; a chain
  * is closed when its ends meet within 2 mm). 0 = none closed: the geometry cannot order it.
@@ -1425,6 +1775,22 @@ function outlineArea(chains: NonNullable<ImportSessionApi['session']['chains']>,
   }
   return best;
 }
+
+/** LINEFIX state of the step, in the wizard's slot (the step remounts while a re-run works). */
+type LineFixSlot = {
+  /** fix: a size's warning opened (its legend key, the view box at open) */
+  mode: { kind: 'fix'; row: string; focus: BoxMm | null } | { kind: 'mark'; focus: null } | null;
+  /** the picked chain ids */
+  sel: number[];
+  /** earlier picks (undo) */
+  hist: number[][];
+  /** the whole `chainAssign` list before each answer given here (undo sends it back) */
+  answers: ChainAssign[][];
+  /** the chains the last fix answer was given on: go on once a re-run replaced them */
+  goAt: unknown;
+  /** size rows the operator said are right (legend keys): their warning is hidden */
+  right: string[];
+};
 
 /** The operator's size map noted before a rename: card size per size name, and the read it was on. */
 type KeptMap = { at: unknown; entries: { name: string; card: SizeMapEntry['card'] }[] };
