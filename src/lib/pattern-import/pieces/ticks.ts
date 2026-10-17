@@ -145,6 +145,9 @@ export function endTicks(
   ranks.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
   const roleOf = new Map<ChainId, string>();
   for (const k of set.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  const opIgnored = new Set(
+    (set.assigned ?? []).map((a) => a.chain).filter((id) => roleOf.get(id) === 'ignore'),
+  );
   // ranked chain ends, for the sides evidence
   type End = { r: number; id: ChainId; p: PtMm; q: PtMm };
   const ends: End[] = [];
@@ -193,6 +196,8 @@ export function endTicks(
     const ranked = rankOfChain.get(c.id);
     const role = roleOf.get(c.id);
     if (role === 'internal' || role === 'grain' || role === 'seam') continue;
+    // LINEFIX: a line the operator called no size line ends no size
+    if (opIgnored.has(c.id)) continue;
     const a = c.pts[0];
     const b = c.pts[c.pts.length - 1];
     const L = dist(a, b);

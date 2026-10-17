@@ -220,9 +220,19 @@ export function rankGuard(
   run: SizeRun,
   styles: ReadonlyMap<number, Style> | undefined,
 ): RankGuard | null {
-  if (!styles || f0Off()) return null;
+  // LINEFIX: a line the operator put in a row moves into no other rank (his answer outranks
+  // continuity and the pen) — a guard of that alone where the run has no pen identity
+  const pin = pinnedRanks(set, run);
+  // a line in two sizes moves nowhere (connectRanks holds one rank per line: a move would take it
+  // out of the other)
+  const pinned = (p: Set<number>, r: number) => p.size === 1 && p.has(r);
+  const pinOk = (id: ChainId, r: number) => {
+    const p = pin?.get(id);
+    return p ? pinned(p, r) : true;
+  };
+  if (!styles || f0Off()) return pin ? { ok: pinOk } : null;
   const { identity, looks } = rankLooks(set, run, styles);
-  if (!identity) return null;
+  if (!identity) return pin ? { ok: pinOk } : null;
   const memo = new Map<ChainId, Look | null>();
   const lookOf = (id: ChainId) => {
     if (!memo.has(id)) {
@@ -233,12 +243,30 @@ export function rankGuard(
   };
   return {
     ok: (id, r) => {
+      const p = pin?.get(id);
+      if (p) return pinned(p, r);
       const rl = looks[r];
       const cl = lookOf(id);
       return !rl?.length || !cl || onPen(cl, rl);
     },
     lookless: (id) => !lookOf(id),
   };
+}
+
+/** LINEFIX: per operator-answered line, the ranks its rows are (none: a common / ignore row). */
+function pinnedRanks(set: ChainSet, run: SizeRun): Map<ChainId, Set<number>> | null {
+  if (!set.assigned?.length) return null;
+  const rankOfClass = new Map<number, number>();
+  run.sizes.forEach((z, r) => {
+    if (z.classId != null) rankOfClass.set(z.classId, r);
+  });
+  const out = new Map<ChainId, Set<number>>();
+  for (const a of set.assigned)
+    out.set(
+      a.chain,
+      new Set(a.classes.flatMap((c) => (rankOfClass.has(c) ? [rankOfClass.get(c)!] : []))),
+    );
+  return out;
 }
 
 // ── G22 evidence: the rank's own pen lines near an outline ──────────────────────────────────
@@ -274,6 +302,9 @@ export function penLines(
     );
   };
   const orphans = new Set(set.orphans);
+  // LINEFIX: a line the operator put in this size's row is its own line whatever its pen — that
+  // line only (the rank's pen stays what it is for every other line)
+  const answered = new Set((set.assigned ?? []).map((a) => a.chain));
   const own: Chain[] = [];
   const stubs: Chain[] = [];
   const foreign: Chain[] = [];
@@ -284,7 +315,7 @@ export function penLines(
     // the rank's own class line counts unless its look is EXACT (a declared dash, a plain stroke)
     // and another pen's — a recovered rhythm is measured, not declared, and may read off
     const exactOther = !!cl && look.length > 0 && cl.kind !== 'motif' && !same;
-    if (same || (classChains.has(c.id) && !exactOther)) {
+    if (same || (classChains.has(c.id) && (!exactOther || answered.has(c.id)))) {
       own.push(c);
       continue;
     }

@@ -446,7 +446,11 @@ export const ANSWERS: Record<
   scale: { events: [], inputs: ['scaleIndex', 'manualMeasuredMm', 'scaleConfirmed'] },
   // UXHOOKS: "the missing pages are blank" is the sheet step's answer to its missing-pages stop
   sheet: { events: ['sheet', 'clean', 'sheet-accept-missing'], inputs: ['residualsAccepted'] },
-  sizes: { events: ['legend', 'size-map', 'drawn-sizes'], inputs: ['legendConfirmed'] },
+  // LINEFIX 'line-assign': the operator's per-line answer (only a replay of theirs gives it unasked)
+  sizes: {
+    events: ['legend', 'size-map', 'drawn-sizes', 'line-assign'],
+    inputs: ['legendConfirmed'],
+  },
   // A10: a click seed is the pieces step's own answer (`addSeed`: clickSeeds + the fill again)
   // UXHOOKS: `asideReviewed` — the operator's "looked at the outlines set aside" (a replay of it)
   pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds', 'asideReviewed'] },

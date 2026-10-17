@@ -148,6 +148,7 @@
     "patimport:tilestep": "node scripts/pattern-import/tilestep.mjs",
     "patimport:legend": "node --max-old-space-size=8192 scripts/pattern-import/legend.mjs",
     "patimport:mood": "node scripts/pattern-import/mood.mjs",
+    "patimport:lineassign": "node scripts/pattern-import/lineassign.mjs",
     "patimport:archive": "node scripts/pattern-import/archive.mjs",
     "patimport:variants": "node scripts/pattern-import/variants.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
