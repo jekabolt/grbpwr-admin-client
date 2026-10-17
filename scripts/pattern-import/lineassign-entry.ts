@@ -732,11 +732,28 @@ async function kombinezon() {
       if (rowOf(set0, c.id) !== sizeRow(k)?.sizeLabel) wrong.push({ id: c.id, k });
     }
   });
+  // SIZESOCG (sizes/ocg-ladder.ts + the end-to-end OCG duplicate test): the read now puts every
+  // strip outline in its own size — the owner's report is fixed without an answer. The answers
+  // below still run, on the 6 / 8 outlines as their own rows (an answer that agrees with the read),
+  // after the old misread is put back by an answer and taken out again.
   check(
-    "the owner's report reproduced: strip outlines of 6 / 8 read in another row",
-    wrong.length > 0,
-    wrong.map((w) => `#${w.id}→${CARD[w.k].token}`).join(' '),
+    'SIZESOCG: every strip outline of 6 / 8 in its own row without an answer',
+    wrong.length === 0,
+    wrong.map((w) => `#${w.id}:${rowOf(set0, w.id)}→${CARD[w.k].token}`).join(' '),
   );
+  if (!wrong.length) {
+    const c8 = nests[nests.length - 1][1];
+    const misread = await run('chains', {
+      opts: OPTS,
+      chainAssign: [{ sheet: lines0[c8.id].sheet, keys: [lines0[c8.id].key], to: { rank: 0 } }],
+    });
+    check(
+      "the old misread put back by an answer: 8's strip outline in row 6",
+      misread.lineAssign?.applied.length === 1 && rowOf(setOf(), c8.id) === sizeRow(0)?.sizeLabel,
+      `#${c8.id}:${rowOf(setOf(), c8.id)}`,
+    );
+    for (const nest of nests) for (const k of [0, 1]) wrong.push({ id: nest[k].id, k });
+  }
   for (const k of [0, 1]) {
     const ids = wrong.filter((w) => w.k === k).map((w) => w.id);
     if (ids.length)
