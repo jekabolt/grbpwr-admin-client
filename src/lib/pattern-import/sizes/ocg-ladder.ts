@@ -189,9 +189,15 @@ export function ocgLookMoves(
     if (provenForeign < LADDER_MIN || proven.size < 0.6 * k) continue;
     const rankAt = new Map<number, number>();
     for (const a of proven) rankAt.set(a, lookRank[a]);
-    // elimination: one outline per size, the rest proven, exactly one free rank between neighbours
-    if (k === nRanks && proven.size === k - 1) {
-      const a = [...Array(k).keys()].find((x) => !proven.has(x))!;
+    // a full nest whose proven members sit exactly at their place (member a = rank a): the
+    // member at the layer's own place is the layer's own outline (layer + nesting) — also when
+    // the layer has no look of its own left outside the nest
+    const aligned = k === nRanks && [...proven].every((a) => lookRank[a] === a);
+    const at = unitRank[u];
+    if (aligned && !rankAt.has(at) && ![...rankAt.values()].includes(at)) rankAt.set(at, at);
+    // elimination: one outline per size, the rest placed, exactly one free rank between neighbours
+    if (k === nRanks && rankAt.size === k - 1) {
+      const a = [...Array(k).keys()].find((x) => !rankAt.has(x))!;
       const taken = new Set(rankAt.values());
       const free = [...Array(nRanks).keys()].filter((r) => !taken.has(r));
       const lo = a > 0 ? rankAt.get(a - 1) ?? -1 : -1;

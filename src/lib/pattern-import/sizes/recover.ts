@@ -886,6 +886,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         }
       };
       apply(lk.moves);
+      // a ladder member neither look + nesting nor elimination placed stays on its layer, whose
+      // read the ladder disproved: said, never silent (the sizes step shows it as a flag)
+      for (const l of lk.ladders) {
+        const left = l.members.filter((_, a) => l.ranks[a] < 0);
+        if (left.length)
+          ambiguities.push({
+            kind: 'class-split',
+            message: `${left.length} of ${l.members.length} nested outlines on layer "${unitNames[l.unit]}" (a layer drawn in other sizes' looks) could not be placed by look and nesting: left in ${unitNames[l.unit]} — confirm`,
+            classes: [],
+            chains: left,
+            at: chains[left[0]].pts[0],
+          });
+      }
       const marks = ladderMarkMoves(chains, cand, unit, rankOf, lk.ladders, moved);
       apply(marks);
       if (lk.ladders.length)
