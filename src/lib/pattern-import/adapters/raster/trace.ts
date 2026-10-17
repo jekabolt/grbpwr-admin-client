@@ -520,6 +520,7 @@ export function tracePageSync(
       heightPx: img.height,
       dpi: bw > 0 ? img.width / (bw / 25.4) : 0,
       pageCover: pageArea > 0 ? (bw * (box.maxY - box.minY)) / pageArea : 0,
+      ...(img.source ? { source: img.source } : {}),
     });
     // Median width per (label, fill) for the style.
     const widths = new Map<string, number[]>();

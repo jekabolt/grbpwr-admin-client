@@ -57,7 +57,7 @@ export async function openRasterPdf(bytes: ArrayBuffer): Promise<Pdfjs.PDFDocume
   }).promise;
 }
 
-type M6 = [number, number, number, number, number, number];
+export type M6 = [number, number, number, number, number, number];
 const mul = (a: M6, b: M6): M6 => [
   a[0] * b[0] + a[2] * b[1],
   a[1] * b[0] + a[3] * b[1],
@@ -116,6 +116,32 @@ export async function imagePaintsOf(pdfjs: PdfjsModule, page: PdfPage): Promise<
       case OPS.paintInlineImageXObject:
         out.push({ op: i, ctm, objId: null, inline: a[0], w: 0, h: 0 });
         break;
+      case OPS.paintImageXObjectRepeat: {
+        // pdf.js folds ≥ 3 paints of one image into [objId, scaleX, scaleY, positions]; the size
+        // comes with the pixels (w = h = 0)
+        const pos = (a[3] as ArrayLike<number>) ?? [];
+        for (let k = 0; k + 1 < pos.length; k += 2)
+          out.push({
+            op: i,
+            ctm: mul(ctm, [Number(a[1]), 0, 0, Number(a[2]), pos[k], pos[k + 1]]),
+            objId: String(a[0]),
+            inline: null,
+            w: 0,
+            h: 0,
+          });
+        break;
+      }
+      case OPS.beginAnnotation: {
+        // [id, rect, transform, matrix, …]: an appearance starts from the page's default frame
+        stack.push(ctm);
+        ctm = [1, 0, 0, 1, 0, 0];
+        if (Array.isArray(a[2])) ctm = mul(ctm, a[2] as M6);
+        if (Array.isArray(a[3])) ctm = mul(ctm, a[3] as M6);
+        break;
+      }
+      case OPS.endAnnotation:
+        ctm = stack.pop() ?? ctm;
+        break;
       default:
         break;
     }
@@ -170,19 +196,16 @@ export function rasterFromPdfjs(img: PdfjsImage, ctm: M6, op: number): RasterIma
   } else if (img.kind === 3 || data.length === w * h * 4) channels = 4;
   else if (img.kind === 2 || data.length === w * h * 3) channels = 3;
   else return null;
-  // Pixel corner (u, v) → unit square (u/w, 1 − v/h) → user space pt → mm.
+  return { data: px, width: w, height: h, channels, pxToPage: placementOf(ctm, w, h), op };
+}
+
+/** Pixel corner (u, v) of a w × h image → unit square (u/w, 1 − v/h) → user space pt → mm. */
+export function placementOf(ctm: M6, w: number, h: number): Affine {
   const toUnit: Affine = { a: 1 / w, b: 0, c: 0, d: -1 / h, e: 0, f: 1 };
   const user: Affine = { a: ctm[0], b: ctm[1], c: ctm[2], d: ctm[3], e: ctm[4], f: ctm[5] };
   const k = PATIMPORT.ptToMm;
   const toMm: Affine = { a: k, b: 0, c: 0, d: k, e: 0, f: 0 };
-  return {
-    data: px,
-    width: w,
-    height: h,
-    channels,
-    pxToPage: compose(toMm, compose(user, toUnit)),
-    op,
-  };
+  return compose(toMm, compose(user, toUnit));
 }
 
 /** Pixel frame → page mm for a bare scan at `dpi`, y flipped so the page is y-up. */

@@ -5,6 +5,7 @@
 // memory (RSS / heap after each stage; docs dropped after assembly).
 //   node scripts/pattern-import/worker.mjs            (bundled by worker.mjs, like the other probes)
 import { readFileSync, writeFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -15,6 +16,7 @@ import {
   type PdfjsModule,
 } from 'lib/pattern-import/adapters/pdf';
 import {
+  extractRasterPdfDetailed,
   extractRasterImageDetailed,
   setRasterPdfjsLoader,
 } from 'lib/pattern-import/adapters/raster';
@@ -95,10 +97,14 @@ function pdfWithImage(
   dims: 'direct' | 'indirect' | 'hidden' = 'direct',
   /** F14 T1: rewrites the image dictionary (PDF-lexer-legal spellings of the same keys). */
   spell: (dict: string) => string = (d) => d,
+  /** RASTER: real (Flate) samples instead of a placeholder byte. */
+  body?: { data: string; filter: string },
 ): ArrayBuffer {
   const content = `${vectors ? '10 10 m 500 500 l S\n' : ''}q 595 0 0 842 0 0 cm /Im1 Do Q\n`;
-  const size = dims === 'direct' ? `/Width ${w} /Height ${h}` : '/Width 6 0 R /Height 7 0 R';
-  const data = w * h <= 1e6 ? '\x80'.repeat(w * h) : '\x00';
+  const size =
+    (dims === 'direct' ? `/Width ${w} /Height ${h}` : '/Width 6 0 R /Height 7 0 R') +
+    (body ? ` /Filter ${body.filter}` : '');
+  const data = body ? body.data : w * h <= 1e6 ? '\x80'.repeat(w * h) : '\x00';
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -1392,9 +1398,42 @@ async function guardsCase() {
     'warnings' in mixedOut ? mixedOut.warnings.find((w) => /6000 × 6000/.test(w)) : undefined;
   check(
     C,
-    'C5: raster PDF whose 36 MP image pdf.js would drop → too-large; with vectors → kept + visible note',
-    scanOnly === 'too-large' && !!note,
+    'C5: raster PDF whose 36 MP image pdf.js would drop, its data cut short → refused (never an empty page); with vectors → kept + visible note',
+    (scanOnly === 'too-large' || scanOnly === 'corrupt') && !!note,
     `${scanOnly} · ${note ?? JSON.stringify(mixedOut).slice(0, 120)}`,
+  );
+  // RASTER: the same 36 MP scan with real (Flate) samples — a black line 4000 px long — is read in
+  // rows (raster/big-image.ts), area-resampled to the 18 MP page limit, and the line keeps its
+  // length in mm (pxToPage carries the factor): 4000 px × 210 mm / 6000 px = 140.0 mm (595 pt)
+  const raw36 = Buffer.alloc(6000 * 6000, 255);
+  for (let y = 2997; y < 3003; y++) raw36.fill(0, y * 6000 + 1000, y * 6000 + 5000);
+  const flate36 = pdfWithImage(6000, 6000, false, 'direct', (d) => d, {
+    data: deflateSync(raw36).toString('latin1'),
+    filter: '/FlateDecode',
+  });
+  const flateOut = await new Session(8, [{ name: 'flate36.pdf', bytes: flate36.slice(0) }])
+    .runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx())
+    .catch((e: unknown) => toWireError(e));
+  const flateNote =
+    'warnings' in flateOut ? flateOut.warnings.find((w) => /read at 1\/1\.41/.test(w)) : undefined;
+  const flateDoc = await extractRasterPdfDetailed(
+    { id: '0', name: 'flate36.pdf', bytes: flate36.slice(0) },
+    { sagittaMm: 0.05, keepFills: true },
+  ).catch((e: unknown) => toWireError(e));
+  const longest =
+    'doc' in flateDoc
+      ? Math.max(
+          ...flateDoc.doc.pages[0].paths.map((p) => {
+            const xs = p.pts.map((q) => q.x);
+            return Math.max(...xs) - Math.min(...xs);
+          }),
+        )
+      : NaN;
+  check(
+    C,
+    'RASTER: 36 MP Flate scan alone → read at 1/1.41 (note), the 140 mm line traced 140 ± 0.3 mm',
+    !!flateNote && Math.abs(longest - (4000 * 595 * 25.4) / 72 / 6000) <= 0.3,
+    `${flateNote ?? ('code' in flateOut ? `${flateOut.code}: ${flateOut.message.slice(0, 100)}` : 'no note')} · ${longest.toFixed(2)} mm`,
   );
   // F14 R8: the same images with an INDIRECT size (`/Width 6 0 R`) — the raw scan resolves the
   // integer objects; with a size the scan cannot read (a comment inside the object) the backstop
@@ -1497,10 +1536,10 @@ async function guardsCase() {
     'warnings' in r && r.warnings.some((w) => /6000 × 6000/.test(w));
   check(
     C,
-    'T1: `/Subtype % comment\\n/Image` (and NUL / form feed / #xx spellings) + vectors → the 6000 × 6000 image is named; alone → too-large; 64 × 64 → read, no note',
+    'T1: `/Subtype % comment\\n/Image` (and NUL / form feed / #xx spellings) + vectors → the 6000 × 6000 image is named; alone (data cut short) → refused; 64 × 64 → read, no note',
     noted(cMixed) &&
       'code' in cOnly &&
-      cOnly.code === 'too-large' &&
+      (cOnly.code === 'too-large' || cOnly.code === 'corrupt') &&
       /6000 × 6000/.test(cOnly.message) &&
       noted(lMixed) &&
       'warnings' in cSmall &&
