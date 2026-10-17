@@ -13,7 +13,11 @@ import * as blockCode from 'components/managers/tech-card/components/nesting/blo
 import { readDxf, segmentDxf, dxfFastPath } from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 import { extractPdf, DEFAULT_EXTRACT_OPTS, setPdfjsLoader } from 'lib/pattern-import/adapters/pdf';
-import { cornersOf, familyCornerKinds } from 'lib/pattern-import/semantics/offset';
+import {
+  cornersOf,
+  familyCornerKinds,
+  familySharedSquares,
+} from 'lib/pattern-import/semantics/offset';
 import type { PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { type CardBlockRules, writeAndGate } from 'lib/pattern-import/gate';
 import {
@@ -619,6 +623,37 @@ export async function main(): Promise<number> {
           tipPts.every((k) => k === 2),
         'SILENT-TAIL family: a tip mitred in one size and square-cut in the next is square-cut (two points) in both',
         `own ${ownT.join(' / ')} · points at the tip ${tipPts.join(' / ')}`,
+      );
+    }
+    // SILENT-TAIL (Codex r2): SHAPE reads a square-cut corner as its mitre point only when every
+    // size square-cuts it; an extra sharp corner one size alone has stays cut (a shape difference)
+    {
+      const house = (theta: number, k: number) => {
+        const half = (((180 - theta) / 2) * Math.PI) / 180;
+        const w = 100 * k;
+        return [
+          { x: -w, y: 0 },
+          { x: w, y: 0 },
+          { x: w, y: 150 * k },
+          { x: 0, y: 150 * k + w / Math.tan(half) },
+          { x: -w, y: 150 * k },
+        ];
+      };
+      const shared = (ths: number[]) => {
+        const seams = ths.map((t, i) => house(t, 1 + 0.03 * i));
+        const f = familySharedSquares(seams, 10);
+        return seams.map((l, i) =>
+          cornersOf(l, 10)
+            .filter((c) => c.kind === 'square')
+            .map((c) => f[i](c)),
+        );
+      };
+      const all = shared([124, 128, 132]);
+      const one = shared([30, 30, 130]);
+      ck(
+        all.every((x) => x.length === 1 && x[0]) && one[2].length === 1 && !one[2][0],
+        'SILENT-TAIL SHAPE: a tip square-cut in every size is shared (read as its mitre point); one only the largest size has is not',
+        `${JSON.stringify(all)} · ${JSON.stringify(one)}`,
       );
     }
     // W2: a 1.3 mm jog of the seam line (< allowance) is not a corner: no mitre spike, the cut line

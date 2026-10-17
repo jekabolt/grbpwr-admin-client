@@ -11,8 +11,8 @@ import type { ChainSet, PieceCandidate, PieceSpec, PtMm, StageIO } from 'lib/pat
 import {
   countMismatch,
   countsHold,
+  constructionFreeShapes,
   shapeOf,
-  shapeOfCut,
   turnMismatch,
 } from 'lib/pattern-import/semantics/shape-check';
 import { readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
@@ -33,8 +33,8 @@ type FamRec = {
   diff: string;
   /** the turn-structure difference ('' = none) — holds the export */
   turn: string;
-  /** SILENT-TAIL: a cut-line turn difference the drawn (seam) lines do not have — the allowance
-   * offset's corner construction, not held ('' = none) */
+  /** SILENT-TAIL: a cut-line turn difference that is only the allowance offset's corner
+   * construction (shared square-cut flats), not held ('' = none) */
   construction?: string;
   /** the notch / drill count difference ('' = none) — a warning (holds with SHAPE_COUNTS_HOLD) */
   count: string;
@@ -164,13 +164,19 @@ function analyse(
         ? `${d.what} [${p.sizes[d.a].sizeToken} vs ${p.sizes[d.b].sizeToken}${d.at ? ` at ${d.at.map((q) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`).join(' ')}` : ''}]`
         : '';
     // the gate's rule (gate/shape.ts): on a seam-drawn piece a cut-line turn difference holds
-    // only when the seam lines differ too
+    // unless it is gone once the corners square-cut in every size are read as their mitre point
     const tCut = turnMismatch(sh);
-    const drawn =
-      p.allowance.meaning === 'seam' && p.sizes.every((z) => (z.seam?.length ?? 0) >= 3)
-        ? p.sizes.map((z, i) => shapeOfCut(z.seam!, sh[i].notches, sh[i].drills))
+    const free =
+      tCut &&
+      p.allowance.meaning === 'seam' &&
+      p.allowance.allowanceMm > 0 &&
+      p.sizes.every((z) => (z.seam?.length ?? 0) >= 3)
+        ? constructionFreeShapes(
+            p.sizes.map((z) => z.seam!),
+            p.allowance.allowanceMm,
+          )
         : null;
-    const tShape = tCut && drawn && !turnMismatch(drawn) ? null : tCut;
+    const tShape = tCut && free && !turnMismatch(free) ? null : tCut;
     const turn = fmt(tShape);
     const construction = tCut && !tShape ? fmt(tCut) : '';
     const count = fmt(countMismatch(sh));

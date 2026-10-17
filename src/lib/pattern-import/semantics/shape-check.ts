@@ -10,6 +10,7 @@
 // the line, a step.
 
 import { simplify } from '../write/geom';
+import { familyCornerKinds, familySharedSquares, offsetContour } from './offset';
 import type { PieceSizeSpec, PtMm } from '../types';
 
 export const CORNER_STRONG_DEG = 60;
@@ -243,6 +244,32 @@ export function countNotes(
     }
     if (parts.length)
       out.push({ identity: p.identity, note: `${parts.join('; ')} — one piece, one shape` });
+  }
+  return out;
+}
+
+/**
+ * SILENT-TAIL: the family's cut lines as the one-shape comparison reads a seam-drawn piece — each
+ * size's seam offset by the allowance with the family's corner treatment (offset.ts), the corners
+ * square-cut in EVERY size read as their mitre point. A square-cut flat's length grows along the
+ * run with the corner's angle (honeysuckle: 0.6 → 5.2 mm), one turn at the 1.5 mm scale in the
+ * small sizes and two in the large: construction, not shape. A square corner only some sizes have
+ * stays cut, so an extra corner still shows (Codex r2). `null` when an offset fails.
+ */
+export function constructionFreeShapes(
+  seams: readonly (readonly PtMm[])[],
+  mm: number,
+): SizeShape[] | null {
+  const kinds = familyCornerKinds(seams, mm);
+  const full = familySharedSquares(seams, mm);
+  const out: SizeShape[] = [];
+  for (let i = 0; i < seams.length; i++) {
+    const r = offsetContour(seams[i], mm, {
+      cornerKinds: kinds[i] ?? undefined,
+      fullMitre: full[i],
+    });
+    if (r.report.loops !== 1 || r.pts.length < 3) return null;
+    out.push(shapeOfCut(r.pts, 0, 0));
   }
   return out;
 }

@@ -9,6 +9,7 @@
 import type { GateCheck, PtMm } from '../types';
 import {
   countMismatch,
+  constructionFreeShapes,
   countsHold,
   shapeOfCut,
   turnMismatch,
@@ -57,19 +58,20 @@ export function shapeFamilies(ctx: GateCtx): {
       token: string;
       rank: number;
       sh: SizeShape;
-      drawn: SizeShape | null;
+      seam: PtMm[] | null;
     }[] = [];
     let unreadable = false;
-    // SILENT-TAIL (17.10): the cut of a seam-drawn piece is the allowance offset of its seam, so a
-    // turn the cut lines differ in while the seams (the drawn lines) do not is the offset's corner
-    // construction, not the shape (honeysuckle LIN_FP: 122–135° corners square-cut at 2 ×
-    // allowance give 0.6 → 5.2 mm flats along the run — one turn at 1.5 mm in the small sizes, two
-    // in the large; palto SL on batch2: spike vs bevel). Such a difference is not held. The cut
-    // stays the line compared (the drawn line alone held traced outlines on their trace jitter:
-    // e2e scan:synth 8/8 → 0/8): a hold needs the difference on the cut AND on the drawn line.
+    // SILENT-TAIL (17.10): the cut of a seam-drawn piece is the allowance offset of its seam; a
+    // corner square-cut in every size leaves a flat whose length grows along the run with the
+    // corner's angle (honeysuckle LIN_FP: 0.6 → 5.2 mm) — one turn at 1.5 mm in the small sizes,
+    // two in the large. A cut-line difference holds unless it is gone once those shared square
+    // corners are read as their mitre point (shape-check.ts constructionFreeShapes; a square
+    // corner only some sizes have stays cut, Codex r2). The cut stays the compared line (the
+    // drawn line alone held traced outlines on their trace jitter: e2e scan:synth 8/8 → 0/8).
     const seamDrawn = bs.every(
       (b) =>
         b.spec?.allowance.meaning === 'seam' &&
+        (b.spec?.allowance.allowanceMm ?? 0) > 0 &&
         (ctx.contours.get(b.block)?.get(LAYERS.seam)?.length ?? 0) >= 3,
     );
     for (const b of bs) {
@@ -83,13 +85,13 @@ export function shapeFamilies(ctx: GateCtx): {
       const drills = ents.filter(
         (e) => e.layer === LAYERS.internal && isPoly(e.type) && isDrillSquare(e),
       ).length;
-      const seam = seamDrawn ? ctx.contours.get(b.block)?.get(LAYERS.seam) : null;
+      const seam = seamDrawn ? ctx.contours.get(b.block)?.get(LAYERS.seam) ?? null : null;
       rows.push({
         block: b.block,
         token: b.mb.sizeToken,
         rank: rankOf.get(b.mb.sizeToken) ?? b.size?.rank ?? 0,
         sh: shapeOfCut(cut, notches, drills),
-        drawn: seam ? shapeOfCut(seam, notches, drills) : null,
+        seam,
       });
     }
     // an unreadable block is G1 / G5's finding, not a shape difference
@@ -97,7 +99,14 @@ export function shapeFamilies(ctx: GateCtx): {
     rows.sort((a, b) => a.rank - b.rank);
     const sh = rows.map((r) => r.sh);
     const t = turnMismatch(sh);
-    const construction = !!t && seamDrawn && !turnMismatch(rows.map((r) => r.drawn!));
+    const free =
+      t && seamDrawn
+        ? constructionFreeShapes(
+            rows.map((r) => r.seam!),
+            bs[0].spec!.allowance.allowanceMm,
+          )
+        : null;
+    const construction = !!free && !turnMismatch(free);
     if (t && !construction) {
       failed.push(...rows.map((r) => r.block));
       notes.push(

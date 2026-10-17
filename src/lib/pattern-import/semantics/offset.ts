@@ -299,6 +299,8 @@ function cornerJoins(
   limit: number,
   anyConvex = false,
   kindOf?: (c: CornerInfo) => CornerKind | null,
+  /** SHAPE comparison only (never written): read these square corners as their mitre point. */
+  fullMitre?: (c: CornerInfo) => boolean,
 ): Map<number, CornerJoin> {
   const n = src.length;
   const nrm = edgeNormals(src);
@@ -308,7 +310,12 @@ function cornerJoins(
     const want = kindOf?.(r) ?? null;
     const kind = want && rank[want] > rank[r.kind] ? want : r.kind;
     if (kind === 'step') continue;
-    const lim = kind === 'square' && r.kind === 'mitre' ? Math.min(limit, 0.97 * r.ratio) : limit;
+    const lim =
+      kind === 'square' && fullMitre?.(r)
+        ? Infinity
+        : kind === 'square' && r.kind === 'mitre'
+          ? Math.min(limit, 0.97 * r.ratio)
+          : limit;
     const m = miterJoin(r.at, nrm[(r.first - 1 + n) % n], nrm[r.last], d, lim);
     if (m) out.set(r.first, { first: r.first, last: r.last, pts: m });
   }
@@ -334,13 +341,16 @@ function rawOffset(
   join: OffsetJoin = 'round',
   limit = MITER_LIMIT,
   kindOf?: (c: CornerInfo) => CornerKind | null,
+  fullMitre?: (c: CornerInfo) => boolean,
 ): PtMm[] {
   const n = src.length;
   const nrm = edgeNormals(src);
   const ad = Math.abs(d);
   const stepAng = 2 * Math.acos(Math.max(-1, 1 - Math.min(arcTol, ad) / ad));
   const corners =
-    join === 'miter' ? cornerJoins(src, d, limit, false, kindOf) : new Map<number, CornerJoin>();
+    join === 'miter'
+      ? cornerJoins(src, d, limit, false, kindOf, fullMitre)
+      : new Map<number, CornerJoin>();
   const skip = coveredBy(corners, n);
   const out: PtMm[] = [];
   for (let j = 0; j < n; j++) {
@@ -588,6 +598,62 @@ export function familyCornerKinds(
 }
 
 /**
+ * SILENT-TAIL (SHAPE): per size, the corners the family square-cuts in EVERY size — one matched
+ * corner present in all of them (`familyCornerKinds`' groups), square in all after the family's
+ * treatment. Their flats are construction (their length grows along the run with the corner's
+ * angle), so the one-shape comparison may read them as the mitre point they cut off; a square
+ * corner that only some sizes have is a shape difference and is never read so.
+ */
+export function familySharedSquares(
+  lines: readonly (readonly PtMm[])[],
+  mm: number,
+  limit = MITER_LIMIT,
+): ((c: CornerInfo) => boolean)[] {
+  const kinds = familyCornerKinds(lines, mm, limit);
+  const per = lines.map((l) => cornersOf(l, mm, limit));
+  const eff = per.map((list, i) => list.map((c) => kinds[i]?.(c) ?? c.kind));
+  const W = lines.map((l) => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const q of l) {
+      minX = Math.min(minX, q.x);
+      minY = Math.min(minY, q.y);
+      maxX = Math.max(maxX, q.x);
+      maxY = Math.max(maxY, q.y);
+    }
+    return { minX, minY, w: Math.max(1e-6, maxX - minX), h: Math.max(1e-6, maxY - minY) };
+  });
+  const uv = (i: number, c: CornerInfo) => ({
+    u: (c.at.x - W[i].minX) / W[i].w,
+    v: (c.at.y - W[i].minY) / W[i].h,
+  });
+  // a square corner of size i is shared when every other size has a square corner at its place
+  // (the same match as the family pass: box position and turn)
+  return per.map((list, i) => {
+    const shared = list.filter((c, k) => {
+      if (eff[i][k] !== 'square') return false;
+      const a = uv(i, c);
+      return per.every(
+        (other, j) =>
+          j === i ||
+          other.some((o, m) => {
+            if (eff[j][m] !== 'square') return false;
+            const b = uv(j, o);
+            return (
+              Math.hypot(a.u - b.u, a.v - b.v) <= FAMILY_CORNER_MATCH &&
+              Math.abs(c.turnDeg - o.turnDeg) <= FAMILY_CORNER_TURN_DEG
+            );
+          }),
+      );
+    });
+    return (c: CornerInfo) =>
+      shared.some((x) => Math.hypot(x.at.x - c.at.x, x.at.y - c.at.y) < 1e-6);
+  });
+}
+
+/**
  * Parallel curve of a closed outline: `mm > 0` outward (seam → cut), `mm < 0` inward (cut → seam).
  * The report is what gate G6 reads; `report.ok === false` must BLOCK the piece (Codex C4).
  */
@@ -600,6 +666,8 @@ export function offsetContour(
     miterLimit?: number;
     /** SILENT-TAIL: the family's treatment of a corner (`familyCornerKinds`); may only demote. */
     cornerKinds?: (c: CornerInfo) => CornerKind | null;
+    /** SHAPE comparison only: these square corners as their full mitre (not a cut line). */
+    fullMitre?: (c: CornerInfo) => boolean;
   } = {},
 ): OffsetResult {
   const join = opts.join ?? 'miter';
@@ -633,7 +701,15 @@ export function offsetContour(
       },
     };
   }
-  const raw = rawOffset(src, mm, opts.arcTolMm ?? ARC_TOL_MM, join, limit, opts.cornerKinds);
+  const raw = rawOffset(
+    src,
+    mm,
+    opts.arcTolMm ?? ARC_TOL_MM,
+    join,
+    limit,
+    opts.cornerKinds,
+    opts.fullMitre,
+  );
   const solution: Paths64 = Clipper.Union([toPath(raw)], undefined, FillRule.Positive);
   const loops: PtMm[][] = [];
   let holes = 0;
