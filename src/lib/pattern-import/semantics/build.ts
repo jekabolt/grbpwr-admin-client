@@ -1014,11 +1014,18 @@ export function buildPieceSpecsDetailed(
     const measured = !ov.allowance ? measuredAllowance(largest, set) : null;
     const dxfSeamOuter = !!largest.dxf?.outerIsSeam;
     let A: AllowanceDecision = ov.allowance ?? fileAllowance;
-    if (!ov.allowance && dxfSeamOuter && A.meaning !== 'seam')
+    // the geometry below derives the cut from a DXF layer-14 outline whatever meaning was given:
+    // the record says so too (SILENT-TAIL, Codex: G3/G4/G8 read the drawn line by this meaning)
+    if (dxfSeamOuter && A.meaning !== 'seam')
       A = {
         ...A,
         meaning: 'seam',
-        evidence: [...A.evidence, 'the drawn outline is the graded seam line (DXF layer 14)'],
+        evidence: [
+          ...A.evidence,
+          ov.allowance
+            ? `the drawn outline is the graded seam line (DXF layer 14) — read as the seam over the given "${ov.allowance.meaning}"`
+            : 'the drawn outline is the graded seam line (DXF layer 14)',
+        ],
       };
     if (!ov.allowance && measured && !dxfSeamOuter) {
       A = {
@@ -1572,21 +1579,30 @@ export function buildPieceSpecsDetailed(
         from.map((f) => f.base),
         from[0].mm,
       );
-      sizes.forEach((s, i) => {
+      // all sizes or none (Codex): a size whose re-cut fails would keep a corner its neighbours cut
+      // another way — then every size keeps its own cut, as before the family pass
+      const redo = sizes.map((_, i) => {
         const kindOf = kinds[i];
-        if (!kindOf) return;
-        const r = offsetContour(from[i].base, from[i].mm, { cornerKinds: kindOf });
-        if (!r.report.ok) return; // keep the size's own cut (G6 reads that one)
-        if (from[i].mm > 0) {
-          s.cut = r.pts;
-          s.bbox = bboxOf(r.pts);
-          s.areaMm2 = areaOf(r.pts);
-        } else s.seam = r.pts;
-        s.offset = r.report;
-        pieceNotes.push(
-          `${s.sizeToken}: allowance corners cut as in the other sizes (one corner, one treatment)`,
-        );
+        return kindOf ? offsetContour(from[i].base, from[i].mm, { cornerKinds: kindOf }) : null;
       });
+      if (redo.every((r) => !r || r.report.ok))
+        sizes.forEach((s, i) => {
+          const r = redo[i];
+          if (!r) return;
+          if (from[i].mm > 0) {
+            s.cut = r.pts;
+            s.bbox = bboxOf(r.pts);
+            s.areaMm2 = areaOf(r.pts);
+          } else s.seam = r.pts;
+          s.offset = r.report;
+          pieceNotes.push(
+            `${s.sizeToken}: allowance corners cut as in the other sizes (one corner, one treatment)`,
+          );
+        });
+      else
+        pieceNotes.push(
+          'allowance corners: the family treatment did not offset cleanly in every size — each size keeps its own',
+        );
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     if (!p.ungraded && sizes.length > 1) {
