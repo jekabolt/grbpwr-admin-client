@@ -554,7 +554,7 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
     // the predictions of the disagreeing sizes, and the line work around the family (raw + wall chains
     // with their pen look, the printed key rows each pen matches, and the wall model's size classes).
     const rvDir = process.env.GFIT_REVIEW_DIR;
-    if (rvDir && fam && rec.dis && box && ctx.png) {
+    if (rvDir && fam && (rec.dis || rec.silent) && box && ctx.png) {
       try {
         const R = (x: number) => Math.round(x * 100) / 100;
         const P = (ps: readonly PtMm[]) => ps.map((p) => [R(p.x), R(p.y)]);
