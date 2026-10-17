@@ -824,7 +824,12 @@ export function PiecesStep({
       n: 1,
       at: inputs.edits.length + 1,
     };
-    void api.editPieces({ kind: 'merge', seeds: autoNext.seeds });
+    // an automatic answer, not the operator's: through the shell's autoAnswer (the whole edit list,
+    // as editPieces would send it), so a running autopilot is resumed, never disarmed
+    void autoAnswer({
+      type: 'piece-edits',
+      edits: [...inputs.edits, { kind: 'merge', seeds: autoNext.seeds }],
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoNext?.key, session.busy]);
   // the card follows the active question: a resolved region hands over to the next one by itself
