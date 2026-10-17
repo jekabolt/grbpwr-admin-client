@@ -691,6 +691,48 @@ function nestsCrafted() {
     !lineSuspects(ans, ST2).length,
   );
 
+  // Codex r1: a group must hold together WHOLE, ranks must order, piles are no nest
+  const chainLink = nestSet([0, 1, 2, 3], [0, 0, 2, 3], [400, 600, 900, 1350]);
+  check(
+    'mutation: areas linked only pairwise (ratio 0.6 each, whole 0.3) → no nest',
+    !lineNests(chainLink).nests.length,
+  );
+  const drift: ChainSet = {
+    ...mis,
+    chains: mis.chains.map((c, k) =>
+      k < 4 ? { ...c, pts: c.pts.map((p) => ({ x: p.x + k * 1.2, y: p.y + k * 1.2 })) } : c,
+    ),
+  };
+  check(
+    'mutation: corners drifting 1.2 mm per size (3.6 mm overall) → no nest',
+    !lineNests(drift).nests.length,
+  );
+  const sameRank: ChainSet = {
+    ...mis,
+    classes: mis.classes.map((c) =>
+      c.id === 2
+        ? {
+            ...c,
+            evidence: c.evidence.map((e) => (e.kind === 'nesting-order' ? { ...e, rank: 1 } : e)),
+          }
+        : c,
+    ),
+  };
+  check(
+    'mutation: two size rows of one rank → no order, no nest, no suspect',
+    !lineNests(sameRank).nests.length && !lineSuspects(sameRank, ST2).length,
+  );
+  const pile: ChainSet = {
+    ...mis,
+    chains: [
+      ...mis.chains,
+      ...Array.from({ length: 40 }, (_, k) => ch(5 + k, rect(0, 0, 60, 400), 0, true)),
+    ],
+  };
+  check(
+    'mutation: 40 copies piled on the nest corner → no nest read off the pile',
+    !lineNests(pile).nests.length,
+  );
   // the slip: size 12's outline drawn with size 8's pen (kombinezon #448), the reader put it in 8
   const slip = nestSet([0, 1, 2, 1], [0, 1, 2, 1]);
   const ss = lineSuspects(slip, ST2);

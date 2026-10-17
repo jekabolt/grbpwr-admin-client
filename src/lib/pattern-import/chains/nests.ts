@@ -3,12 +3,15 @@
 //
 // A piece drawn in every size often shares one corner across its sizes: kombinezon's strips are 8
 // closed outlines from one corner, each a step longer. Such a nest — closed outlines (ends within
-// 2 mm, ≥ 200 mm round) sharing a bounding-box corner within 1.5 mm, alike in area (ratio ≥ 0.6) —
-// whose areas step through EXACTLY as many levels as the run has size rows (≥ 3: two outlines
+// 2 mm, ≥ 200 mm round) sharing a bounding-box corner within 1.5 mm, alike in area (ratio ≥ 0.6),
+// the group whole holding together (one corner kind every member shares within 1.5 mm of the
+// smallest's, smallest ≥ ½ largest area; a pile of > 4·N outlines on one corner is no nest) —
+// whose areas step through EXACTLY as many levels as the run has size rows (N ≥ 3: two outlines
 // sharing a corner are no grading evidence), every step growing and the steps even (largest
-// ≤ 3 × smallest), names each outline's size by its place: the smallest is
-// the first size row (nesting rank 0), and so on. Two outlines within 0.5 % of area are one level
-// (the same line drawn twice). A nest is geometry only: no pen, no layer, no row is read.
+// ≤ 3 × smallest), names each outline's size by its place: the smallest is the first size row
+// (nesting rank 0), and so on — only when the size rows' ranks are 0…N−1 once each. Outlines within
+// 0.5 % of their level's smallest are one level (the same line drawn twice). A nest is geometry
+// only: no pen, no layer, no row is read.
 //
 // The PEN of a nest outline, against the size its place names (`penVerdict`):
 //   agrees   drawn in that size row's pen;
@@ -80,16 +83,19 @@ const rankOf = (c: LineClass) => {
 };
 
 /**
- * The size rows in grading order: by the reader's nesting rank when every row has one, else by the
- * area of their biggest outline.
+ * The size rows in grading order — by the reader's nesting rank, only when the ranks are exactly
+ * 0…N−1 once each (a split row inherits its rank: two rows of one rank order nothing). null = no
+ * order the nests may name sizes by.
  */
-export function sizeOrder(set: ChainSet): ClassId[] {
+export function sizeOrder(set: ChainSet): ClassId[] | null {
   const rows = set.classes.filter((c) => c.role === 'size');
-  const byRank = rows.every((c) => rankOf(c) != null);
-  const big = (c: LineClass) =>
-    Math.max(0, ...c.chains.map((id) => outlineOf(set.chains[id])?.area ?? 0));
-  const key = new Map(rows.map((c) => [c.id, byRank ? rankOf(c)! : big(c)]));
-  return rows.map((c) => c.id).sort((a, b) => key.get(a)! - key.get(b)! || a - b);
+  const at: (ClassId | undefined)[] = rows.map(() => undefined);
+  for (const c of rows) {
+    const r = rankOf(c);
+    if (r == null || r < 0 || r >= rows.length || at[r] != null) return null;
+    at[r] = c.id;
+  }
+  return at as ClassId[];
 }
 
 export type Nest = {
@@ -102,37 +108,44 @@ export type Nest = {
 };
 
 export type Nests = {
-  /** The size rows in grading order (`sizeOrder`). */
+  /** The size rows in grading order (`sizeOrder`; [] = no order, no nests). */
   order: ClassId[];
   nests: Nest[];
   /** Per nest chain: its nest (index into `nests`) and level. */
   place: Map<ChainId, { nest: number; level: number }>;
 };
 
-const memo = new WeakMap<ChainSet, Nests>();
+/** Whole-group area spread of one nest (smallest / largest). */
+const SPREAD = 0.5;
 
-/** The graded nests of a chain set (see the header). Pure; memoised per set. */
-export function lineNests(set: ChainSet): Nests {
-  const m = memo.get(set);
-  if (m) return m;
-  const order = sizeOrder(set);
-  const out: Nests = { order, nests: [], place: new Map() };
-  memo.set(set, out);
-  if (order.length < MIN_SIZES) return out;
+const corner = (b: Box, k: number): [number, number] => [
+  k & 1 ? b.maxX : b.minX,
+  k & 2 ? b.maxY : b.minY,
+];
+
+/**
+ * Candidate groups of a chain list for runs of `n` sizes: outlines linked by a shared corner and
+ * alike area, then each group checked WHOLE (a chain of pairwise matches is no nest): one corner
+ * kind every member shares within CORNER_MM of the smallest's, areas within SPREAD. A corner cell
+ * holding more than 4·n outlines (a stack of coincident paths) is dense: its outlines are in no
+ * group — bounded work, no nest read off a pile. Cached per chain list and n.
+ */
+const groupMemo = new WeakMap<readonly Chain[], Map<number, Outline[][]>>();
+function groupsOf(chains: readonly Chain[], n: number): Outline[][] {
+  let byN = groupMemo.get(chains);
+  const hit = byN?.get(n);
+  if (hit) return hit;
   const ol: Outline[] = [];
-  set.chains.forEach((c, id) => {
+  chains.forEach((c, id) => {
     const o = outlineOf(c);
     if (o) ol.push({ id, ...o });
   });
   const parent = ol.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  // corners hashed per corner kind (min-min, max-min, min-max, max-max) on a CORNER_MM grid
-  const corner = (b: Box, k: number): [number, number] => [
-    k & 1 ? b.maxX : b.minX,
-    k & 2 ? b.maxY : b.minY,
-  ];
   const cell = (v: number) => Math.floor(v / CORNER_MM);
+  const limit = Math.max(32, 4 * n);
   const grid = new Map<string, number[]>();
+  const dense = new Set<number>();
   ol.forEach((o, i) => {
     for (let k = 0; k < 4; k++) {
       const [x, y] = corner(o.bb, k);
@@ -147,20 +160,58 @@ export function lineNests(set: ChainSet): Nests {
             if (r >= ALIKE) parent[find(i)] = find(j);
           }
       const key = `${k}|${cx}|${cy}`;
-      grid.set(key, [...(grid.get(key) ?? []), i]);
+      const b = grid.get(key);
+      if (!b) grid.set(key, [i]);
+      else if (b.length < limit) b.push(i);
+      else dense.add(i).add(b[0]);
     }
   });
-  const groups = new Map<number, Outline[]>();
-  ol.forEach((o, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), o]));
-  for (const g of groups.values()) {
-    if (g.length < order.length) continue;
+  const byRoot = new Map<number, Outline[]>();
+  const bad = new Set([...dense].map(find));
+  ol.forEach((o, i) => {
+    const r = find(i);
+    if (bad.has(r)) return;
+    const g = byRoot.get(r);
+    if (g) g.push(o);
+    else byRoot.set(r, [o]);
+  });
+  const out: Outline[][] = [];
+  for (const g of byRoot.values()) {
+    if (g.length < MIN_SIZES || g.length > limit) continue;
     g.sort((a, b) => a.area - b.area || a.id - b.id);
+    if (g[0].area < SPREAD * g[g.length - 1].area) continue;
+    const shared = [0, 1, 2, 3].some((k) => {
+      const [x0, y0] = corner(g[0].bb, k);
+      return g.every((o) => {
+        const [x, y] = corner(o.bb, k);
+        return Math.abs(x - x0) <= CORNER_MM && Math.abs(y - y0) <= CORNER_MM;
+      });
+    });
+    if (shared) out.push(g);
+  }
+  if (!byN) groupMemo.set(chains, (byN = new Map()));
+  byN.set(n, out);
+  return out;
+}
+
+const memo = new WeakMap<ChainSet, Nests>();
+
+/** The graded nests of a chain set (see the header). Pure; memoised per set. */
+export function lineNests(set: ChainSet): Nests {
+  const m = memo.get(set);
+  if (m) return m;
+  const order = sizeOrder(set) ?? [];
+  const out: Nests = { order, nests: [], place: new Map() };
+  memo.set(set, out);
+  if (order.length < MIN_SIZES) return out;
+  for (const g of groupsOf(set.chains, order.length)) {
+    if (g.length < order.length) continue;
+    // levels: an outline within SAME_AREA of its level's FIRST (smallest) outline is that level
     const levels: Outline[][] = [];
-    let last = -1;
     for (const o of g) {
-      if (last > 0 && (o.area - last) / last <= SAME_AREA) levels[levels.length - 1].push(o);
+      const lv = levels[levels.length - 1];
+      if (lv && (o.area - lv[0].area) / lv[0].area <= SAME_AREA) lv.push(o);
       else levels.push([o]);
-      last = o.area;
     }
     // only a nest that steps through every size names them, in even steps
     if (levels.length !== order.length) continue;
