@@ -243,9 +243,12 @@ type VariantMark = {
 };
 const isPt = (p: unknown): p is PtMm =>
   !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
+// a line is a bare polyline or `{ size, poly }` (VARIANTS-2: cut lines and outlines per size)
+const polyOf = (l: unknown): unknown =>
+  l && typeof l === 'object' && !Array.isArray(l) ? (l as { poly?: unknown }).poly : l;
 const polylines = (v: unknown, min: number): PtMm[][] =>
   Array.isArray(v)
-    ? v.filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
+    ? v.map(polyOf).filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
     : [];
 function variantMarksOf(out: unknown): VariantMark[] {
   const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;

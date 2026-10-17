@@ -4,12 +4,16 @@
 //   2. every model has certain cut/edge marks, and the union of a model's cutLines is exactly its
 //      knives (variantKnifeItems) — the polylines the fill cuts with;
 //   3. the uncut run carries each touched piece's outline per model; the chosen run carries none;
-//   4. Pieces 6, 7, 8 are claimed by Style A (kind 'piece'), nothing by Style B.
+//   4. Pieces 6, 7, 8 are claimed by Style A (kind 'piece'), nothing by Style B;
+//   5. VARIANTS-2: every cut/edge line carries its size (the size row its chain is in), one line per
+//      size per mark, and `offMm` (its ends from that size's outline): ≤ 1.5 everywhere except the
+//      source's own slip — Style A's Piece 4 line, sizes 8–20 drawn off their outlines (size 10:
+//      5.3 mm short). Renders that piece's line end per size (`<id>-piece4-sizes.png`).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { variantKnifeItems } from 'lib/pattern-import/pieces';
-import type { ChainSet, PtMm, Sheet, StageIO } from 'lib/pattern-import/types';
+import type { ChainSet, PtMm, Sheet, SizeRun, StageIO } from 'lib/pattern-import/types';
 import { Session } from 'lib/pattern-import/worker/session';
 
 import { CASES, runCase } from './e2e-entry';
@@ -46,12 +50,18 @@ export async function main(args: string[]): Promise<boolean> {
     if (!c) throw new Error(`no case ${id}`);
     uncut = null;
     let chosen: Out | null = null;
-    const got: { sheet?: Sheet; set?: ChainSet } = {};
+    const got: { sheet?: Sheet; set?: ChainSet; run?: SizeRun | null } = {};
     let model: string | null = null;
     await runCase(c, {
       onAutoPieces: (s, o) => {
-        const S = s as unknown as { sheet: Sheet; chains: ChainSet; wallSet: ChainSet | null };
+        const S = s as unknown as {
+          sheet: Sheet;
+          chains: ChainSet;
+          wallSet: ChainSet | null;
+          pieceSession: { run: SizeRun | null } | null;
+        };
         chosen = o;
+        got.run = S.pieceSession?.run ?? null;
         got.sheet = S.sheet;
         got.set = S.wallSet ?? S.chains;
         model = (o.variants ?? []).find((v) => c.variant?.test(v)) ?? null;
@@ -71,7 +81,7 @@ export async function main(args: string[]): Promise<boolean> {
     for (const v of u.variants ?? []) {
       const own = marks.filter((m) => m.label === v && !m.uncertain && m.kind !== 'piece');
       check(own.length > 0, `${id}: ${v} has certain cut/edge marks (${own.length})`);
-      const lines = new Set(own.flatMap((m) => m.cutLines.map(key)));
+      const lines = new Set(own.flatMap((m) => m.cutLines.map((l) => key(l.poly))));
       const knives = new Set(variantKnifeItems(sheet, set, v).map((k) => key(k.pts)));
       const same = lines.size === knives.size && [...lines].every((l) => knives.has(l));
       check(same, `${id}: ${v} cutLines = its knives (${lines.size} / ${knives.size} polylines)`);
@@ -116,6 +126,125 @@ export async function main(args: string[]): Promise<boolean> {
       }),
       `${id}: Pieces 6, 7, 8 carry variant 'Style A' (from the claim) in pieces.out.seeds`,
     );
+    // 5. per-size cut lines: each line in its size row; the source's slip on Piece 4 flagged
+    const runSizes = (got.run?.sizes ?? []).map((z) => z.label);
+    const p4 = u.seeds.find((s) => s.text?.text === 'Piece 4')?.id;
+    for (const m of marks) {
+      if (m.uncertain || m.kind === 'piece') continue;
+      const where = `${m.label} ${m.kind} → ${m.pieces.map(label).join(', ')}`;
+      const sizes = m.cutLines.map((l) => l.size);
+      check(
+        sizes.every((z) => z != null && runSizes.includes(z)) &&
+          new Set(sizes).size === sizes.length,
+        `${id}: ${where}: one line per size, each with its size (${sizes.join(' ')})`,
+      );
+      const slip = m.label === 'Style A' && m.kind === 'cut' && p4 != null && m.pieces.includes(p4);
+      const off = m.cutLines.map((l) => `${l.size}:${l.offMm}`).join(' ');
+      if (!slip) {
+        check(
+          m.cutLines.every((l) => l.offMm != null && l.offMm <= 1.5),
+          `${id}: ${where}: every line on its own size's outline (${off})`,
+        );
+        continue;
+      }
+      const of = (z: string) => m.cutLines.find((l) => l.size === z)?.offMm ?? null;
+      const s10 = of('10');
+      check(
+        (of('6') ?? 99) <= 1.5 &&
+          m.cutLines.filter((l) => l.size !== '6').every((l) => (l.offMm ?? 0) > 1.5) &&
+          s10 != null &&
+          s10 > 4.5 &&
+          s10 < 6.5,
+        `${id}: ${where}: the source's slip — size 6 on its outline, 8–20 off, size 10 ${s10} mm (${off})`,
+      );
+      // the picture: Piece 4's right end, each size's outline, the line of each size labelled
+      const fam = u.families.find((f) => f.seed === p4);
+      if (fam && id === 'kombinezon-A') {
+        const ends = m.cutLines.map((l) => l.poly[l.poly.length - 1]);
+        const xs = ends.map((q) => q.x);
+        const y0 = ends[0].y;
+        const box = {
+          minX: Math.min(...xs) - 25,
+          maxX: Math.max(...xs) + 25,
+          minY: y0 - 30,
+          maxY: y0 + 30,
+        };
+        const st: Stroke[] = set.chains.map((x) => ({ pts: x.pts, color: '#e4e4e4', width: 0.6 }));
+        const lb: Label[] = [];
+        // the renderer keeps a stroke only by a vertex in the box: densify the long side seams
+        const dense = (q: readonly PtMm[]) =>
+          q.flatMap((a, k) => {
+            const b = q[(k + 1) % q.length];
+            const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4));
+            return Array.from({ length: n }, (_, t) => ({
+              x: a.x + ((b.x - a.x) * t) / n,
+              y: a.y + ((b.y - a.y) * t) / n,
+            }));
+          });
+        for (const cnd of fam.candidates) {
+          const z = got.run?.sizes.find((x) => x.rank === cnd.rank)?.label ?? '';
+          const ten = z === '10';
+          st.push({
+            pts: dense(cnd.outer),
+            color: ten ? '#000' : '#9a9a9a',
+            width: ten ? 2.5 : 1,
+            closed: true,
+          });
+          // the size's name where its side seam crosses below the line
+          const yl = y0 - 22;
+          const xs2 = cnd.outer.flatMap((a, k) => {
+            const b = cnd.outer[(k + 1) % cnd.outer.length];
+            return (a.y - yl) * (b.y - yl) <= 0 && a.y !== b.y
+              ? [a.x + ((yl - a.y) / (b.y - a.y)) * (b.x - a.x)]
+              : [];
+          });
+          if (xs2.length)
+            lb.push({
+              at: { x: Math.max(...xs2) + 0.6, y: yl },
+              text: z,
+              color: ten ? '#000' : '#777',
+              size: 12,
+            });
+        }
+        m.cutLines.forEach((l, i) => {
+          const ten = l.size === '10';
+          const col = (l.offMm ?? 0) <= 1.5 ? '#2a9d3a' : '#d62728';
+          const dy = (i - (m.cutLines.length - 1) / 2) * 3.2;
+          // each size's copy drawn 3.2 mm apart (they lie on one carrier) so the ends read apart
+          st.push({
+            pts: l.poly.map((q) => ({ x: q.x, y: q.y + dy })),
+            color: col,
+            width: ten ? 4 : 2,
+          });
+          const e = l.poly[l.poly.length - 1];
+          lb.push({
+            at: { x: e.x + 1, y: e.y + dy },
+            text: `${l.size} ${l.offMm} mm`,
+            color: col,
+            size: ten ? 13 : 10,
+          });
+        });
+        renderPng(resolve(out, `${id}-piece4-sizes.png`), box, st, lb, 12, [
+          { color: '#000', text: 'Piece 4, size 10 outline (uncut fill)' },
+          { color: '#9a9a9a', text: 'Piece 4, other sizes (label = size)' },
+          { color: '#2a9d3a', text: 'Style A cutting line of that size, ends on its outline' },
+          {
+            color: '#d62728',
+            text: 'Style A cutting line of that size (OCG layer), off its outline: offMm',
+          },
+          {
+            color: '#555',
+            text: 'lines on one carrier y=976.1, drawn spread 3.2 mm apart to read',
+          },
+        ]);
+      }
+    }
+    check(
+      (ch.variantMarks ?? []).every(
+        (m) => m.kind === 'piece' || m.uncertain || m.cutLines.every((l) => l.size != null),
+      ),
+      `${id}: the chosen run's lines carry their sizes too`,
+    );
     // the picture: uncut middle-size outlines grey, each model's cut lines thick, its outlines
     const strokes: Stroke[] = set.chains.map((x) => ({ pts: x.pts, color: '#d8d8d8', width: 0.7 }));
     const labels: Label[] = [];
@@ -129,7 +258,7 @@ export async function main(args: string[]): Promise<boolean> {
       const dash = m.label === 'Style B' ? '10 5' : undefined;
       for (const o of m.outlines ?? [])
         strokes.push({ pts: o.poly, color: col, width: 2, closed: true, dash });
-      for (const l of m.cutLines) strokes.push({ pts: l, color: col, width: 4 });
+      for (const l of m.cutLines) strokes.push({ pts: l.poly, color: col, width: 4 });
       const to = m.pieces.map(label).join(', ');
       labels.push({
         at: m.at,

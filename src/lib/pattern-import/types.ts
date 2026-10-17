@@ -1247,6 +1247,20 @@ export type DerivedEdge = {
  * cut). `uncertain` (D3): the label's line has no second evidence — `cutLines`, `pieces` and
  * `outlines` are empty, `why` says what is missing; nothing is cut by it.
  */
+/**
+ * One drawn copy of a model's cutting line (or of the labelled edge), sheet mm, and the size it is
+ * drawn in. `size`: the source size label (as `outlines[].size` and `SizeRun.sizes[].label` spell
+ * it) of the ONE size row the line's chain is in (its OCG layer / pen / dash — the legend's rows);
+ * null when the line is in no single size row (a line shared by every size, a line in two rows, a
+ * sheet without a size run). `offMm`: the second evidence — how far the line's farther end lies
+ * from that size's outline of the mark's piece (the nearest piece when several), 0.1 mm; ≤ 1.5 =
+ * the line sits on its own size's outline. Larger = the drawing's own line misses its size's
+ * outline (kombinezon Style A Piece 4: sizes 8–20 are drawn short / long in the source, 5.3 mm in
+ * size 10) — `size` stays the row the drawing puts it in, never the nearest outline's size. null =
+ * not checked (no size, or the piece has no closed outline in that size).
+ */
+export type VariantCutLine = { size: string | null; poly: PtMm[]; offMm: number | null };
+
 export type VariantMark = {
   /** The model ("Style A"), spelled as `variants` spells it. */
   label: string;
@@ -1255,7 +1269,8 @@ export type VariantMark = {
   /** The printed text ("Cutting line Style A - High Waisted"). */
   text: string;
   kind: 'cut' | 'edge' | 'piece';
-  cutLines: PtMm[][];
+  /** One polyline per size the line is drawn in, with that size (see VariantCutLine). */
+  cutLines: VariantCutLine[];
   pieces: SeedId[];
   outlines?: { seed: SeedId; size: string; poly: PtMm[] }[];
   uncertain?: boolean;
