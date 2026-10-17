@@ -133,7 +133,7 @@ function mount(tokens: string[]) {
     }
     return `tick budget spent on ${api.session.step}`;
   };
-  return { get, dispatch, drive, writes, close: () => s?.close() };
+  return { get, dispatch, drive, settle, writes, close: () => s?.close() };
 }
 
 const rulOf = (w: { out: WriteOut } | undefined) => w?.out.scopes[0]?.rul;
@@ -287,7 +287,19 @@ export async function sectionH(o: {
       r42.base === '42',
     say(r42),
   );
-  await b.dispatch({ type: 'write-storage', storage: 'rul', rulBase: 'XXL' });
+  // while the re-write runs, the draft of the old choice cannot be taken for an apply; the new one can
+  const pending = b.get().dispatch({ type: 'write-storage', storage: 'rul', rulBase: 'XXL' });
+  const oldLocked = b.get().lockApply() === null;
+  await pending;
+  await b.settle();
+  const tok = b.get().lockApply();
+  if (tok != null) b.get().unlockApply(tok);
+  check(
+    'H',
+    'the re-write locks the old draft before its first await; the new draft is free',
+    oldLocked && tok != null,
+    { oldLocked, newLock: tok },
+  );
   const wX = b.writes.at(-1);
   check(
     'H',

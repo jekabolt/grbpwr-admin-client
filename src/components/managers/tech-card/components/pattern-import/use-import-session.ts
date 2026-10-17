@@ -969,11 +969,15 @@ export function useImportSession(deps: {
           if (!writeStorage) return;
           iRef.current = { ...iRef.current, writeStorage };
           patchInputs({ writeStorage });
-          // on the check step the draft is written again with it — unless an apply holds that draft
+          // on the check step the draft is written again with it — unless an apply holds that draft.
+          // Codex: the old draft (the old choice) is locked first, before any await — no apply
+          // takes it while the write runs, nor after a write that failed; the new draft is free
           const s = sRef.current;
           const held = applyLock.current;
-          if (s.step === 'check' && s.draft && !(held && held.draft === s.draft))
+          if (s.step === 'check' && s.draft && !(held && held.draft === s.draft)) {
+            applyLock.current = { draft: s.draft, token: -2, used: true };
             await dispatchRaw({ type: 'write' });
+          }
           return;
         }
         case 'write': {
