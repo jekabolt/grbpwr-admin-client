@@ -1350,7 +1350,12 @@ export type NotchFeature = FeatureBase & {
    */
   chord?: true;
 };
-export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
+export type DrillFeature = FeatureBase & {
+  kind: 'drill';
+  at: PtMm;
+  /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
+  graded?: { from: string[]; answered?: boolean };
+};
 /**
  * What made a grainline (G18, A8): `class` a grain-classed line, `arrowheads` short chains at an
  * end, `word` a grain word beside it, `dxf-layer` the source DXF's own grain layer, `operator` two
@@ -1401,6 +1406,8 @@ export type InternalFeature = FeatureBase & {
   pts: PtMm[];
   closed: boolean;
   label?: string; // "dart", "pocket placement"
+  /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
+  graded?: { from: string[]; answered?: boolean };
 };
 export type SeamLineFeature = FeatureBase & { kind: 'seam'; pts: PtMm[] };
 export type CutLineFeature = FeatureBase & { kind: 'cut'; pts: PtMm[] };
@@ -1500,6 +1507,11 @@ export type PieceSizeSpec = {
   areaMm2: Mm2;
   /** P1: this size closed through continuity walls — what, and the D3 verdict (gate G21). */
   continuity?: ContinuityRecord;
+  /**
+   * GRADE P1: marks drawn in this size that the operator's "in no size" removed (count question
+   * answered `none`), per kind — recorded (D5), counted in the manifest. Absent = none.
+   */
+  removedByOperator?: Partial<Record<GradeCountFeature, number>>;
 };
 
 /**
@@ -1704,7 +1716,10 @@ export type GradeAsk =
       feature: GradeCountFeature;
       perSize: { size: string; n: number; at: PtMm[] }[];
       question: string;
-      answer?: 'intended';
+      /** the operator's answer as applied; absent while open (and while refused) */
+      answer?: 'intended' | 'all' | 'none';
+      /** the operator answered `all` / `none` but it could not be applied — why (the ask stays open) */
+      refused?: string;
     };
 export type GradeCountFeature = 'notches' | 'drills' | 'internal';
 /** GRADE P1: the operator's answer to a `GradeAsk` (by its key). */
@@ -1714,6 +1729,11 @@ export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** GRADE P1: questions of one shape across sizes (absent = none). Never blocking. */
   gradeAsks?: GradeAsk[];
+  /**
+   * GRADE P1: answers that could not be applied, by question key → why ("its graded place falls
+   * past the corner of its edge in size 10"). The question stays open. Absent = none.
+   */
+  gradeRefusals?: Record<string, string>;
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
   blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
@@ -2087,6 +2107,13 @@ export type ManifestBlock = {
   notchesGraded?: number;
   /** GRADE P1: of `notches`, how many were drawn as the outline and are crossed by the chord. */
   notchesChorded?: number;
+  /** GRADE P1: drills / internal lines not drawn in this size, placed by the operator's "in every size" */
+  drillsGraded?: number;
+  internalGraded?: number;
+  /** GRADE P1: marks drawn in this size that the operator's "in no size" removed (D5) */
+  notchesRemoved?: number;
+  drillsRemoved?: number;
+  internalRemoved?: number;
   drills: number;
   internal: number;
   hasSeam: boolean;

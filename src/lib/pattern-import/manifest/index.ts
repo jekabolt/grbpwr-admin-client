@@ -815,6 +815,22 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.notchesChorded`, 'not an integer 1…notches');
+    // GRADE P1: the operator's all / none on a count question (graded ≤ the kind's count; removed ≥ 1)
+    for (const [k, of] of [
+      ['drillsGraded', 'drills'],
+      ['internalGraded', 'internal'],
+    ] as const)
+      if (
+        b[k] !== undefined &&
+        !(isInt(b[k]) && (b[k] as number) >= 1 && (b[k] as number) <= (b[of] as number))
+      )
+        fail(`${p}.${k}`, `not an integer 1…${of}`);
+    for (const k of ['notchesRemoved', 'drillsRemoved', 'internalRemoved'] as const)
+      if (
+        b[k] !== undefined &&
+        !(isInt(b[k]) && (b[k] as number) >= 1 && (b[k] as number) <= 10000)
+      )
+        fail(`${p}.${k}`, 'not a positive integer');
     if (!isBool(b.hasSeam)) fail(`${p}.hasSeam`, 'not a boolean');
     // F14f: optional (a pre-F14f manifest has none and is then not trusted by the card), but
     // when present it is checked strictly and bounded — it is read on the card's parse path.
@@ -863,6 +879,11 @@ export function validateManifest(x: unknown): ConversionManifest {
       notches: b.notches as number,
       ...(b.notchesGraded !== undefined ? { notchesGraded: b.notchesGraded as number } : {}),
       ...(b.notchesChorded !== undefined ? { notchesChorded: b.notchesChorded as number } : {}),
+      ...(b.drillsGraded !== undefined ? { drillsGraded: b.drillsGraded as number } : {}),
+      ...(b.internalGraded !== undefined ? { internalGraded: b.internalGraded as number } : {}),
+      ...(b.notchesRemoved !== undefined ? { notchesRemoved: b.notchesRemoved as number } : {}),
+      ...(b.drillsRemoved !== undefined ? { drillsRemoved: b.drillsRemoved as number } : {}),
+      ...(b.internalRemoved !== undefined ? { internalRemoved: b.internalRemoved as number } : {}),
       drills: b.drills as number,
       internal: b.internal as number,
       hasSeam: b.hasSeam,
