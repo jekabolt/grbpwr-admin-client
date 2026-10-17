@@ -42,6 +42,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cardSizeKindOf, sizeKindOf } from 'lib/pattern-import/sizes/map';
+import { grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
 import type { CardContext } from '../client';
 import type { Inputs, LegendEdit } from '../use-import-session';
 import { PAGE_SURE, sizeFlags, weakAsides, type AutoResolver } from '../auto-advance';
@@ -1446,11 +1447,23 @@ function piecesNow(c: Ctx) {
     const rings = f.candidates
       .filter((k) => k.outcome === 'closed' && k.outer.length > 2)
       .map((k) => k.outer);
-    return pc && ring ? [{ seed: f.seed, pc, ring, rings }] : [];
+    // GRAIN lane: the sizes a grain answer is applied to (as drawn, to every one of them)
+    const exported = f.candidates
+      .filter(
+        (k) => k.outcome === 'closed' && k.outer.length > 2 && (!mapped || mapped.has(k.rank)),
+      )
+      .map((k) => k.outer);
+    return pc && ring ? [{ seed: f.seed, pc, ring, rings, exported }] : [];
   });
   const taken = new Set<SeedId>();
-  const matches: { rec: ReplayAnswer; v: PieceRec; seed: SeedId; ring: PtMm[]; rings: PtMm[][] }[] =
-    [];
+  const matches: {
+    rec: ReplayAnswer;
+    v: PieceRec;
+    seed: SeedId;
+    ring: PtMm[];
+    rings: PtMm[][];
+    exported: PtMm[][];
+  }[] = [];
   for (const rec of c.prior.answers.filter((a) => a.kind === 'piece')) {
     const v = rec.value as unknown as PieceRec;
     const hits = now
@@ -1468,7 +1481,14 @@ function piecesNow(c: Ctx) {
       continue;
     }
     taken.add(hits[0].seed);
-    matches.push({ rec, v, seed: hits[0].seed, ring: hits[0].ring, rings: hits[0].rings });
+    matches.push({
+      rec,
+      v,
+      seed: hits[0].seed,
+      ring: hits[0].ring,
+      rings: hits[0].rings,
+      exported: hits[0].exported,
+    });
   }
   return matches;
 }
@@ -1493,7 +1513,7 @@ function meaningStep(c: Ctx): Out | null {
   let fileAllowance = i.fileAllowance;
   let foldListChecked = i.foldListChecked;
   for (const m of piecesNow(c)) {
-    const { rec, v, seed: sd, rings } = m;
+    const { rec, v, seed: sd, rings, exported } = m;
     /** On the piece: inside one of its sizes' outlines, or within the anchor tolerance of one. */
     const onPiece = (p: PtMm) => rings.some((r) => inside(p, r) || ringDist(p, r) <= ANCHOR_MM);
     const onEdge = (p: PtMm) => rings.some((r) => ringDist(p, r) <= ANCHOR_MM);
@@ -1613,7 +1633,14 @@ function meaningStep(c: Ctx): Out | null {
           !!pr &&
           ((near(pr.a, g0.a, 0.5) && near(pr.b, g0.b, 0.5)) ||
             (near(pr.a, g0.b, 0.5) && near(pr.b, g0.a, 0.5)));
-        if (proposed || (onPiece(g0.a) && onPiece(g0.b))) {
+        // GRAIN lane: a stored line lands only where it lies on every size it is applied to
+        // (G5 refuses one off its piece); the run's own proposal is vetted already
+        if (
+          proposed ||
+          (onPiece(g0.a) &&
+            onPiece(g0.b) &&
+            grainOutsideMm(g0.a, g0.b, exported.length ? exported : rings, ANCHOR_MM) === 0)
+        ) {
           operatorGrain[sd] = {
             a: v.grain.a,
             b: v.grain.b,

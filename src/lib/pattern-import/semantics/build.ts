@@ -81,6 +81,7 @@ import { classifyFeatures } from './features';
 import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
+import { vetProposal } from './grain-inside';
 import {
   FOLD_TEXT_MAX_MM,
   FOLD_TOL_MM,
@@ -743,8 +744,17 @@ export function buildPieceSpecsDetailed(
           region: famBox,
         }).find((f): f is GrainFeature => f.kind === 'grain');
         if (!g || g.origin === 'proposed') {
-          const pr = g ? drawnProposal(g) : proposeGrain(c0.outer);
-          if (pr) grainProposals.push({ seed, ...pr });
+          const raw = g ? drawnProposal(g) : proposeGrain(c0.outer);
+          // GRAIN: on every size's outline it will be applied to, or not offered
+          const v = raw
+            ? vetProposal(
+                raw,
+                ms.map(({ c }) => c.outer),
+                !g,
+              )
+            : null;
+          if (v && 'ok' in v) grainProposals.push({ seed, ...v.ok });
+          else if (v) warnings.push(`seed ${seed}: ${v.dropped}`);
         }
       }
       continue;
@@ -1350,15 +1360,25 @@ export function buildPieceSpecsDetailed(
           evidence: [...new Set([...(borrowed.evidence ?? []), 'borrowed' as const])],
         };
       if (!grain) {
-        const pr = proposedLine
+        const raw = proposedLine
           ? drawnProposal(proposedLine)
           : proposeGrain(outer, { fold: foldEdge });
+        // GRAIN: proposed in this size's cut frame (an unfolded piece's runs past the drawn half),
+        // applied as drawn to every size — so fitted onto every size's drawn outline, or not offered
+        const v = raw
+          ? vetProposal(
+              raw,
+              p.cands.map(({ c: x }) => x.outer),
+              !proposedLine,
+            )
+          : null;
+        const pr = v && 'ok' in v ? v.ok : null;
         if (pr) grainProposals.push({ seed, ...pr });
         blockedHere = {
           reason: 'no-grain',
           detail: pr
             ? `${card.token}: grainline proposed (${pr.why}) — accept it or click two points`
-            : `${card.token}: no grainline found — click two points on the piece`,
+            : `${card.token}: no grainline found${v && 'dropped' in v ? ` (${v.dropped})` : ''} — click two points on the piece`,
         };
         break;
       }
@@ -1420,17 +1440,20 @@ export function buildPieceSpecsDetailed(
                 (x, y) => (y.grain!.evidence?.length ?? 0) - (x.grain!.evidence?.length ?? 0),
               )[0].grain!
             : null;
-        if (top)
-          grainProposals.push({
-            seed,
-            a: top.a,
-            b: top.b,
-            why: 'most sizes agree',
-            evidence: [...(top.evidence ?? [])],
-          });
+        // GRAIN: one size's line applied to every size — on all of them, or not offered
+        const v = top
+          ? vetProposal(
+              { a: top.a, b: top.b, why: 'most sizes agree' },
+              p.cands.map(({ c: x }) => x.outer),
+              false,
+            )
+          : null;
+        const offered = v && 'ok' in v ? v.ok : null;
+        if (offered)
+          grainProposals.push({ seed, ...offered, evidence: [...(top!.evidence ?? [])] });
         blockedHere = {
           reason: 'no-grain',
-          detail: `grainlines found per size disagree (${found.map((s) => `${s.sizeToken} ${s.grain!.angleDeg.toFixed(0)}°`).join(', ')})${top ? ' — the majority is proposed' : ''}`,
+          detail: `grainlines found per size disagree (${found.map((s) => `${s.sizeToken} ${s.grain!.angleDeg.toFixed(0)}°`).join(', ')})${offered ? ' — the majority is proposed' : v && 'dropped' in v ? ` — ${v.dropped}` : ''}`,
         };
       }
     }

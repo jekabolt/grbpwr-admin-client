@@ -15,6 +15,7 @@ import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { readPieceText } from 'lib/pattern-import/dictionary';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
+import { fitGrainInside, grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
@@ -1279,13 +1280,35 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     const codeBulk: { seed: number; pass: number; label: string; code: string; mods: string[] }[] =
       [];
     const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
+    const grainSeen: {
+      piece: string;
+      why: string;
+      lenMm: number;
+      outsideMm: number;
+      sizes: number;
+    }[] = [];
     for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
       for (const b of sem.blocked)
         byReason.set(b.reason, [...(byReason.get(b.reason) ?? []), b.seed]);
       const noGrain = byReason.get('no-grain') ?? [];
       for (const g of sem.grainProposals ?? [])
-        if (!firstProposal.has(g.seed)) firstProposal.set(g.seed, g);
+        if (!firstProposal.has(g.seed)) {
+          firstProposal.set(g.seed, g);
+          // GRAIN lane: every proposal offered lies on its piece in every exported size that
+          // closed (the grain probe sums these over the corpus)
+          const rings = (fams.find((x) => x.seed === g.seed)?.candidates ?? [])
+            .filter((x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank))
+            .map((x) => x.outer);
+          grainSeen.push({
+            piece: labelOf(seedsNow)(g.seed),
+            why: g.why,
+            lenMm: +Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y).toFixed(1),
+            outsideMm: +grainOutsideMm(g.a, g.b, rings).toFixed(1),
+            sizes: rings.length,
+          });
+        }
+      rec.grainProposals = grainSeen;
       // A1: the proposals first — one click accepts them all; the rest are drawn by hand. N3: the
       // review sheet lists every proposal not taken yet, an unnamed piece's too (details.tsx)
       const unnamed = byReason.get('grammar') ?? [];
@@ -1302,9 +1325,23 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       for (const sd of drawn) {
         const f = fams.find((x) => x.seed === sd);
         if (!f) continue;
-        const bb = f.candidates[0].bbox;
+        // the operator clicks both ends ON the piece (G5 refuses a grain off it): the vertical
+        // through the box of a size that closed (a leaking size has no outline — scan:synth drew
+        // its grain at the origin), kept to the stretch inside every exported size
+        const on = f.candidates.filter(
+          (x) => x.outcome === 'closed' && x.outer.length > 2 && exported.has(x.rank),
+        );
+        const bb = (on[0] ?? f.candidates[0]).bbox;
         const cx = (bb.minX + bb.maxX) / 2;
-        grain[sd] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
+        const a = { x: cx, y: bb.minY + 30 };
+        const b = { x: cx, y: bb.maxY - 30 };
+        const fit = fitGrainInside(
+          a,
+          b,
+          on.map((x) => x.outer),
+          { minMm: 5 },
+        );
+        grain[sd] = fit ? { a: fit[0], b: fit[1] } : { a, b };
       }
       if (drawn.length)
         op('grain', `draw grain on ${drawn.length} pieces (row + 2 ends each)`, drawn.length);
@@ -1518,7 +1555,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         const c0 = f.candidates[0];
         if (!c0 || c0.outer.length < 3) continue;
         const b = c0.bbox;
-        const box = { minX: b.minX - 15, minY: b.minY - 15, maxX: b.maxX + 15, maxY: b.maxY + 15 };
+        // GRAIN: the frame holds the proposal too (one off the piece shows where it runs)
+        const pr0 = firstProposal.get(f.seed);
+        const xs = [b.minX, b.maxX, ...(pr0 ? [pr0.a.x, pr0.b.x] : [])];
+        const ys = [b.minY, b.maxY, ...(pr0 ? [pr0.a.y, pr0.b.y] : [])];
+        const box = {
+          minX: Math.min(...xs) - 40,
+          minY: Math.min(...ys) - 40,
+          maxX: Math.max(...xs) + 40,
+          maxY: Math.max(...ys) + 40,
+        };
         const strokes: Stroke[] = [...grey];
         for (const c of f.candidates)
           if (c.outer.length > 2)
