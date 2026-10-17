@@ -130,7 +130,6 @@ import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { cleanNotchMarks } from '../pieces/notch-marks';
-import { countNotes } from '../semantics/shape-check';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
@@ -1874,9 +1873,7 @@ export class Session {
           generator: input.generator,
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
-          ...(this.passportBound
-            ? { passport: passportDigest(this.passportBound, countNotes(sp.specs)) }
-            : {}),
+          ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
           ...(input.replay ? { replay: input.replay } : {}),
         },
         {

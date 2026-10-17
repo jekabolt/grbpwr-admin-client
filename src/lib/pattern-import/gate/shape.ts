@@ -85,8 +85,11 @@ export function shapeFamilies(ctx: GateCtx): {
     }
     const c = countMismatch(sh);
     if (c) {
-      const k = c.what.startsWith('notches') ? 'notches' : 'drills';
-      const line = `${identity}: ${k}: ${rows.map((r) => `${r.token} ${r.sh[k]}`).join(', ')} — one piece, one shape across sizes`;
+      // every kind that differs (notches and drills alike), each size's count
+      const parts = (['notches', 'drills'] as const)
+        .filter((k) => rows.some((r) => r.sh[k] !== rows[0].sh[k]))
+        .map((k) => `${k}: ${rows.map((r) => `${r.token} ${r.sh[k]}`).join(', ')}`);
+      const line = `${identity}: ${parts.join('; ')} — one piece, one shape across sizes`;
       if (countsHold()) {
         failed.push(...rows.map((r) => r.block));
         notes.push(line);

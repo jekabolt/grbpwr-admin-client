@@ -146,7 +146,10 @@ export function shapeOf(z: Pick<PieceSizeSpec, 'cut' | 'notches' | 'drills'>): S
  * manifest passport digest) unless this switch is on (GRADE P1's notch transfer will turn it on).
  */
 export function countsHold(): boolean {
-  return typeof process !== 'undefined' && !!process.env?.SHAPE_COUNTS_HOLD;
+  // node probes: SHAPE_COUNTS_HOLD=1; the browser worker: the build flag VITE_SHAPE_COUNTS_HOLD=1
+  if (typeof process !== 'undefined' && process.env?.SHAPE_COUNTS_HOLD) return true;
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+  return env?.VITE_SHAPE_COUNTS_HOLD === '1';
 }
 
 /** The first notch / drill count difference between the sizes, or null. */
@@ -187,6 +190,31 @@ export function shapeMismatch(
   sh: readonly SizeShape[],
 ): { what: string; a: number; b: number; at?: PtMm[] } | null {
   return countMismatch(sh) ?? turnMismatch(sh);
+}
+
+/**
+ * The same notes from what the file holds: the manifest's blocks (identity, size token, notch and
+ * drill counts as written). UNI blocks are one geometry for every size and are skipped.
+ */
+export function countNotesOfBlocks(
+  blocks: readonly { identity: string; sizeToken: string; notches: number; drills: number }[],
+  uniToken = 'UNI',
+): { identity: string; note: string }[] {
+  const by = new Map<string, { sizeToken: string; notches: number; drills: number }[]>();
+  for (const b of blocks) {
+    if (b.sizeToken === uniToken) continue;
+    by.set(b.identity, [...(by.get(b.identity) ?? []), b]);
+  }
+  const out: { identity: string; note: string }[] = [];
+  for (const [identity, bs] of by) {
+    if (bs.length < 2) continue;
+    const parts: string[] = [];
+    for (const k of ['notches', 'drills'] as const)
+      if (bs.some((b) => b[k] !== bs[0][k]))
+        parts.push(`${k}: ${bs.map((b) => `${b.sizeToken} ${b[k]}`).join(', ')}`);
+    if (parts.length) out.push({ identity, note: `${parts.join('; ')} — one piece, one shape` });
+  }
+  return out;
 }
 
 /**

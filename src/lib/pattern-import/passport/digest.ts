@@ -35,10 +35,7 @@ const MEANINGS: readonly OutlineMeaning[] = ['cut', 'seam', 'both'];
 const LIST_MAX = 60;
 
 /** The digest of a passport, cut to fit `PASSPORT_DIGEST_MAX` bytes of JSON. */
-export function passportDigest(
-  p: GarmentPassport,
-  shape: readonly { identity: string; note: string }[] = [],
-): PassportDigest {
+export function passportDigest(p: GarmentPassport): PassportDigest {
   const identityOf = new Map(
     p.pieces.flatMap((e) => (e.binding?.identity ? [[e.key, e.binding.identity] as const] : [])),
   );
@@ -78,20 +75,12 @@ export function passportDigest(
     })),
     missing: (p.missing ?? []).slice(0, LIST_MAX).map((k) => clip(k, 8)),
     extra: (p.extra ?? []).slice(0, LIST_MAX).map((k) => clip(k, 32)),
-    ...(shape.length
-      ? {
-          shape: shape
-            .slice(0, LIST_MAX)
-            .map((x) => ({ identity: clip(x.identity, 32), note: clip(x.note, 160) })),
-        }
-      : {}),
   };
   // the budget: drop the tail of the lists (expected last-in first) until the JSON fits
   const size = () => JSON.stringify(d).length;
   while (size() > PASSPORT_DIGEST_MAX) {
     d.truncated = true;
     if (d.extra.length) d.extra.pop();
-    else if (d.shape && d.shape.length > 1) d.shape.pop();
     else if (d.expected.length) {
       const e = d.expected.pop()!;
       d.bound = d.bound.filter((b) => b.key !== e.key);
@@ -101,6 +90,32 @@ export function passportDigest(
     else break;
   }
   return d;
+}
+
+/**
+ * SHAPE soft rule: the digest with the pieces whose written sizes carry different notch / drill
+ * counts (from the manifest's blocks — what the file holds). Kept within the budget: the list is
+ * cut from its tail (`truncated`), and dropped only when even one entry does not fit.
+ */
+export function withShapeNotes(
+  d: PassportDigest,
+  notes: readonly { identity: string; note: string }[],
+): PassportDigest {
+  const rest: PassportDigest = { ...d };
+  delete rest.shape;
+  if (!notes.length) return rest;
+  const out: PassportDigest = {
+    ...rest,
+    shape: notes
+      .slice(0, LIST_MAX)
+      .map((x) => ({ identity: clip(x.identity, 32), note: clip(x.note, 160) })),
+  };
+  while (out.shape!.length && JSON.stringify(out).length > PASSPORT_DIGEST_MAX) {
+    out.shape!.pop();
+    out.truncated = true;
+  }
+  if (!out.shape!.length) delete out.shape;
+  return out;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> =>
