@@ -240,10 +240,37 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
         maxY: hoverPose.toSheet.f + hoverPose.heightMm,
       }
     : hoverHole?.box ?? null;
-  // pages the files step set aside: one of them may be a missing page (the role edit brings it)
+  // pages the classifier set aside although they hold line work (`status: 'suggest'`; a page the
+  // operator set aside himself is never 'suggest'): one of them may be a missing page. A reduced
+  // copy of the tiles (an overview) is not one.
   const asideTiles = (session.clean?.dropped ?? []).filter(
-    (d) => d.status === 'suggest' && !removed.some((r) => keyOf(r) === keyOf(d)),
+    (d) =>
+      d.status === 'suggest' &&
+      !(d.reducedCopy && d.reducedCopy.matches > 0) &&
+      !removed.some((r) => keyOf(r) === keyOf(d)),
   );
+  /** Every set-aside page with line work back as a tile page, in one answer. */
+  const useAside = () =>
+    go(
+      api.dispatch({
+        type: 'clean',
+        edits: asideTiles.reduce((e, d) => roleEdit(e, d.file, d.page, 'tile'), inputs.cleanEdits),
+      }),
+    );
+  /**
+   * Bringing the set-aside pages back is THE one-click fix (ui-bits ONE-CLICK FIX) when there are
+   * at least as many of them as missing cells: it deletes nothing and re-runs the assembly with
+   * them. "they're blank" stays the fix only on the engine's evidence; otherwise the coach.
+   */
+  const asideFix = asideTiles.length > 0 && asideTiles.length >= missing;
+  /** The question, plain: which answer leads decides its words. */
+  const missingAsk = `${missing} ${missing === 1 ? 'page' : 'pages'} missing — ${asideTiles.length ? 'set aside?' : 'blank?'}`;
+  const pagesWord =
+    asideTiles.length > 3
+      ? `${asideTiles.length} pages set aside`
+      : asideTiles.length === 1
+        ? pageWord(asideTiles[0])
+        : `pages ${asideTiles.map((d) => d.page + 1).join(', ')}`;
 
   return (
     <SplitStage
@@ -500,13 +527,9 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                 blank pages (UX-HOOKS sheetAcceptMissing, exactly the cells shown) or a page set
                 aside brought back. The hand grid stays the fold below. */}
             {missing > 0 && (
-              <div
-                data-ask-zone=''
-                data-ask-label={`${missing} ${missing === 1 ? 'page' : 'pages'} missing — blank?`}
-                className='flex flex-col gap-2'
-              >
+              <div data-ask-zone='' data-ask-label={missingAsk} className='flex flex-col gap-2'>
                 <Text size='micro' component='p' className='text-warning'>
-                  {missing} {missing === 1 ? 'page' : 'pages'} missing — blank?
+                  {missingAsk}
                 </Text>
                 <CellMap
                   poses={sheet.poses}
@@ -517,8 +540,26 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   onHover={setHover}
                 />
                 <div className='flex flex-wrap items-center gap-1'>
+                  {asideTiles.length > 0 && (
+                    <Chip
+                      tone={asideFix ? 'attention' : undefined}
+                      disabled={busy}
+                      onClick={useAside}
+                      title={`read as pattern pages again — set aside with line work: ${asideTiles
+                        .map((d) => `${pageWord(d)} (${d.why})`)
+                        .join(' · ')}`}
+                      {...ask(
+                        'sheet-missing',
+                        true,
+                        asideFix ? 'they hold line work' : 'look at the dashed cells, then answer',
+                      )}
+                      {...(asideFix ? { 'data-ask-fix': 'sheet-missing' } : {})}
+                    >
+                      use {pagesWord}
+                    </Chip>
+                  )}
                   <Chip
-                    tone='attention'
+                    tone={asideFix ? undefined : 'attention'}
                     disabled={busy}
                     onClick={acceptBlank}
                     title={
@@ -533,27 +574,10 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                         ? 'nothing is drawn there'
                         : 'look at the dashed cells, then answer',
                     )}
-                    {...(blankSure ? { 'data-ask-fix': 'sheet-missing' } : {})}
+                    {...(blankSure && !asideFix ? { 'data-ask-fix': 'sheet-missing' } : {})}
                   >
                     {missing === 1 ? "it's blank — go on" : "they're blank — go on"}
                   </Chip>
-                  {asideTiles.slice(0, 2).map((d) => (
-                    <Chip
-                      key={keyOf(d)}
-                      disabled={busy}
-                      onClick={() =>
-                        go(
-                          api.dispatch({
-                            type: 'clean',
-                            edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
-                          }),
-                        )
-                      }
-                      title={`bring ${pageWord(d)} back as a pattern page (set aside: ${d.why})`}
-                    >
-                      use {pageWord(d)}
-                    </Chip>
-                  ))}
                 </div>
               </div>
             )}
@@ -621,7 +645,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
             data-ask-hint={GRID_HINT}
             {...(missing > 0
               ? {
-                  'data-ask-label': `${missing} ${missing === 1 ? 'page' : 'pages'} missing — blank?`,
+                  'data-ask-label': missingAsk,
                 }
               : {})}
           >
