@@ -1,6 +1,6 @@
 // SHAPE gate (owner 16.10, card 49 — part of G5-features, no check id of its own): one piece is ONE
 // shape graded across sizes. Within one identity, every written size block must carry the same
-// cut-line turn structure (semantics/shape-check.ts: no extra bump, dip, step or kink in one size) —
+// drawn-line turn structure (semantics/shape-check.ts: no extra bump, dip, step or kink in one size) —
 // a difference holds every block of the identity (D3: a question, never a silent pass). A notch /
 // drill COUNT difference (layer 4, layer 8 squares) is a recorded warning (a G5 warn check in the
 // report the manifest carries) — it holds only with SHAPE_COUNTS_HOLD=1 (soft rule, 17.10).
@@ -54,9 +54,21 @@ export function shapeFamilies(ctx: GateCtx): {
     if (bs.length < 2) continue;
     const rows: { block: string; token: string; rank: number; sh: SizeShape }[] = [];
     let unreadable = false;
+    // SILENT-TAIL (17.10): the shape is read on the DRAWN line (layer 14 for a piece drawn on its
+    // seam), not the allowance offset — the offset's corner treatment is construction, not shape
+    // (honeysuckle LIN_FP: 122–135° corners square-cut at 2 × allowance give 0.6 → 5.2 mm flats
+    // along the run, one turn at 1.5 mm in the small sizes and two in the large). The cut layer
+    // when a size of the family has no drawn line in the file.
+    const layer = bs.every(
+      (b) =>
+        b.spec?.allowance.meaning === 'seam' &&
+        (ctx.contours.get(b.block)?.get(LAYERS.seam)?.length ?? 0) >= 3,
+    )
+      ? LAYERS.seam
+      : LAYERS.cut;
     for (const b of bs) {
       const ents = ctx.raw.blocks.get(b.block) ?? [];
-      const cut = ctx.contours.get(b.block)?.get(LAYERS.cut);
+      const cut = ctx.contours.get(b.block)?.get(layer);
       if (!cut || cut.length < 3) {
         unreadable = true;
         break;
@@ -80,7 +92,7 @@ export function shapeFamilies(ctx: GateCtx): {
     if (t) {
       failed.push(...rows.map((r) => r.block));
       notes.push(
-        `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s cut line turns where ${rows[t.b].token}'s does not (${t.what.slice(8)}: a bump, dip, step or kink in one size only)`,
+        `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s ${layer === LAYERS.seam ? 'seam' : 'cut'} line turns where ${rows[t.b].token}'s does not (${t.what.slice(8)}: a bump, dip, step or kink in one size only)`,
       );
     }
     const c = countMismatch(sh);
