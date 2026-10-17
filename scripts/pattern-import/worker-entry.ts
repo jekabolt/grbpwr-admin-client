@@ -914,10 +914,12 @@ async function operatorBridgeGateCase() {
   // tmp/plans/pdf-to-dxf/auto/fixfix/palto-SL.png, palto-SL-bottom.png). SILENT's G26 neighbour
   // rule (in G22) holds SL_76 for it. SILENT-TAIL 17.10: G8 measures the run on the drawn (seam)
   // line now — the seams grow 1312 → 1321 → 1333 and the cut's corner treatment (a 60 mm mitre
-  // spike at the underarm tip in 76–84, a bevel in 88) no longer reads as "88 under 84"; G8 may
-  // still name the SL run. The one-shape rule (SHAPE, G5) may hold pieces whose sizes' cut lines
-  // turn differently (SL 76's W; a kink in one size's seam) — reported, as in writeCase. The
-  // bridge itself is not what blocks: the rest of the export must stay clean.
+  // spike at the underarm tip in 76–84, a bevel in 88) no longer reads as "88 under 84"; with one
+  // corner treatment per family the SL cut lines no longer differ in turns either (SHAPE held SL
+  // 76/80 for that artefact on batch2). What SHAPE (G5 one-shape) still holds is FP: the drawn
+  // armhole of 76/80/84 ends in a horizontal step onto the common side line (≈ 10 / 8 / 4 mm, 80
+  // with a small loop), 88 runs straight — a real outline difference, not the allowance
+  // (auto/silent-tail/palto-FP_L-armhole-step.png). The bridge itself must not block.
   const w = await writeCase(name, run, sem, sz.map, { mustPass: false });
   const g = w.gate[MAIN.scopeKey];
   const holds = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
@@ -931,8 +933,13 @@ async function operatorBridgeGateCase() {
       .every((x) => x.includes('one piece, one shape across sizes'));
   check(
     name,
-    "held by G22 (G26 neighbour: SL 76 on size 72's cap), G8 (SL run) and the one-shape rule only",
-    holds.every((c) => c.id === 'G22-identity' || c.id === 'G8-monotone' || shapeOnlyHold(c)) &&
+    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and the one-shape rule on FP only",
+    holds.every(
+      (c) =>
+        c.id === 'G22-identity' ||
+        c.id === 'G8-monotone' ||
+        (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
+    ) &&
       !!g22 &&
       g22.blocks.length > 0 &&
       g22.blocks.every((b) => /^SL_[LR]_76$/.test(b)) &&
