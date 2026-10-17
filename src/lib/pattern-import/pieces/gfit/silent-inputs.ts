@@ -11,7 +11,7 @@ import { gradeVerdicts, silentOff, type GradeFamilyIn, type GradeResult } from '
 
 /** A size draws its own line off its outline: ≥ minMm of its own lines, > offMm from the outline,
  * inside it or ≤ outsideMm out of it. */
-export const DRAWS_OWN = { offMm: 1.5, minMm: 20, sampleMm: 2, padMm: 40, outsideMm: 40 };
+export const DRAWS_OWN = { offMm: 1.5, minMm: 20, sampleMm: 2, padMm: 15, outsideMm: 15 };
 
 export type SilentRead = {
   /** The grade model over the sheet's families (fitted on first use). */
@@ -48,7 +48,7 @@ export function silentRead(
   set: ChainSet,
   wm: Pick<WallModel, 'mode' | 'byRank' | 'common'> | null,
 ): SilentRead {
-  if (silentOff() || !wm || wm.mode === 'single' || wm.byRank.length < 3) return NONE;
+  if (silentOff() || !wm || wm.mode === 'single' || wm.byRank.length < 2) return NONE;
   const chainById = new Map(set.chains.map((c) => [c.id, c]));
   const common = new Set(wm.common);
   const rankOf = new Map<ChainId, number[]>();
@@ -140,8 +140,9 @@ export function silentRead(
           const p = { x: a.x + ((b.x - a.x) * (j + 0.5)) / k, y: a.y + ((b.y - a.y) * (j + 0.5)) / k };
           if (p.x < box.minX - P || p.x > box.maxX + P || p.y < box.minY - P || p.y > box.maxY + P)
             continue;
-          // beside the outline: inside it, or outside within a few size steps (a run collapsed
-          // onto its SMALLEST outline has the larger sizes' lines out there — Codex)
+          // beside the outline: inside it, or outside within ~a size step (a run collapsed onto its
+          // SMALLEST outline has the next size's line just out there; farther out a neighbouring
+          // piece's lines of the same size would read as this piece's — Codex r2)
           if (onRing(p)) continue;
           if (!pointInPoly(p, ring)) {
             let near = false;

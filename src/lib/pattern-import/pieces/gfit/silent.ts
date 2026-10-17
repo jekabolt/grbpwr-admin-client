@@ -32,6 +32,8 @@ export const SIZE_RUN = {
   /** A perimeter step past max(spikeMul × median step, median + spikeAddMm) is not a grade step. */
   spikeMul: 3,
   spikeAddMm: 80,
+  /** Two sizes (no other step to compare): a step past this share of the outline is no grade. */
+  spikeShareAlone: 0.15,
   /** Two sizes within this symmetric Hausdorff distance are one outline, mm … */
   collapseMm: 1,
   /** …or of one area (± this share) with this share of each outline on the other (within
@@ -119,6 +121,12 @@ export function oneOutline(a: readonly PtMm[], b: readonly PtMm[], tol = SIZE_RU
   return within(a, b, tol, SIZE_RUN.sampleMm) && within(b, a, tol, SIZE_RUN.sampleMm);
 }
 
+const quantile25 = (xs: number[]) => {
+  if (!xs.length) return 0;
+  const s = xs.slice().sort((x, y) => x - y);
+  return s[Math.floor(0.25 * (s.length - 1))];
+};
+
 const median = (xs: number[]) => {
   if (!xs.length) return 0;
   const s = xs.slice().sort((x, y) => x - y);
@@ -162,14 +170,22 @@ export function sizeRunProblems(rows0: readonly SizeRunRow[], k = SIZE_RUN): Siz
     const gap = Math.max(1, rows[i].rank - rows[i - 1].rank);
     const d = P[i] - P[i - 1];
     const others = steps.filter((_, j) => j !== i - 1);
-    const m = Math.max(0, median(others));
+    // the band's base: the other steps' median, at most twice their lower quartile (two loops side
+    // by side must not set each other's band — Codex r2; Mood's G0 steps grow ×4–5 along the run, so
+    // the quartile alone holds a progressive grade); one step alone (two sizes): a jump past a share
+    // of the outline
+    const m = Math.max(0, Math.min(median(others), 2 * quantile25(others)));
     if (d < -Math.max(k.dropMm, k.dropShare * P[i - 1]))
       out.push({
         kind: 'perimeter-drop',
         keys: [rows[i].key],
         note: `${rows[i].key}'s outline is ${(-d).toFixed(0)} mm shorter than ${rows[i - 1].key}'s (the other sizes grow ${m.toFixed(0)} mm per size)`,
       });
-    else if (others.length && d / gap > Math.max(k.spikeMul * m, m + k.spikeAddMm))
+    else if (
+      others.length
+        ? d / gap > Math.max(k.spikeMul * m, m + k.spikeAddMm)
+        : d / gap > Math.max(k.spikeAddMm, k.spikeShareAlone * P[i - 1])
+    )
       out.push({
         kind: 'perimeter-spike',
         keys: [rows[i].key],
@@ -406,7 +422,12 @@ export function gradeVerdicts(
     const fam = families.get(f.seed);
     if (!fam?.model) continue;
     for (const v of fam.sizes) {
-      if (v.status !== 'disagrees') continue;
+      // a short stretch on a neighbour's line can hide under an edge's p95 (Codex r2): an 'ok'
+      // size whose worst edge sample is a hold's distance off is read on the drawing too
+      const floorMm = Math.max(k.holdMinMm, k.holdMinStep * fam.stepMm);
+      const shortJog =
+        v.status === 'ok' && v.edges.some((e) => e.max >= floorMm && e.run >= k.farMinMm);
+      if (v.status !== 'disagrees' && !shortJog) continue;
       const resid = residOf(v);
       const brk = breaks.get(v.rank);
       const excused =
@@ -420,12 +441,13 @@ export function gradeVerdicts(
         : undefined;
       const onNeighbour = !!off && off.lenMm >= k.farMinMm && off.neighbour >= k.offOnNeighbour;
       const cause = onNeighbour ? 'neighbour' : v.cause === 'neighbour' ? 'other' : v.cause ?? 'other';
+      if (shortJog && cause !== 'neighbour') continue;
       let own: number | undefined;
       let hold = false;
       if (cause === 'neighbour') {
         own = outer ? ownAtPrediction(fam, v, outer, f.lines.own(v.rank), k) : undefined;
         hold =
-          resid >= Math.max(k.holdMinMm, k.holdMinStep * fam.stepMm) &&
+          (shortJog || resid >= floorMm) &&
           (!excused || (own ?? 0) >= k.ownAtPrediction);
       }
       verdicts.push({
