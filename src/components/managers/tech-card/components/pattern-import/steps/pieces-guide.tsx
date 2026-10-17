@@ -362,7 +362,7 @@ export function ModelThumb({
   hot?: boolean;
   /** Per outline: a piece this garment changes (tinted blue). */
   tinted?: readonly boolean[];
-  /** This garment's cutting lines (blue polylines). */
+  /** This garment's cutting lines (thick blue polylines, over the outlines). */
   cutLines?: readonly (readonly PtMm[])[];
   /** Outlines only this garment has (dashed blue). */
   extra?: readonly (readonly PtMm[])[];
@@ -424,7 +424,7 @@ export function ModelThumb({
             points={ptsAttr(l as PtMm[])}
             fill='none'
             stroke={SHEET_INK.blue}
-            strokeWidth={unit * 0.9}
+            strokeWidth={unit * 1.6}
             strokeLinecap='round'
           />
         ) : null,
