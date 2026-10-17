@@ -2,7 +2,8 @@
 // graded piece the per-size feature counts (notches, drills, internal lines) and the outline's
 // corner structure, from the semantics output the writer turns into blocks; and whether the
 // written file's gate let a mismatched family pass.
-//   node scripts/pattern-import/shape.mjs [case|mood:<id>…]   (default: every e2e case + MOOD)
+//   node scripts/pattern-import/shape.mjs [unit|case|mood:<id>…]   (default: unit + every e2e case + MOOD;
+//   unit = SHAPE-MAJ synthetic turnHold / gate cases)
 //   env SHAPE_PNG=<dir>: per-size PNGs of every graded piece (outline, seam, notches, drills)
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,8 +13,13 @@ import {
   countMismatch,
   countsHold,
   shapeOf,
+  turnHold,
   turnMismatch,
+  type SizeShape,
 } from 'lib/pattern-import/semantics/shape-check';
+import { shapeFamilies } from 'lib/pattern-import/gate/shape';
+import type { GateCtx } from 'lib/pattern-import/gate/checks';
+import { LAYERS } from 'lib/pattern-import/write/manifest-build';
 import { readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
 import type { Session } from 'lib/pattern-import/worker/session';
 
@@ -36,7 +42,69 @@ type FamRec = {
   count: string;
   /** the family is written and every one of its blocks passes the gate */
   passing: boolean;
+  /** SHAPE-MAJ: the sizes the turn rule must hold (all when no strict majority shares a shape) */
+  mustHold?: string[];
+  /** SHAPE-MAJ: the canonical majority's sizes ([] = no majority, the whole family is held) */
+  canonical?: string[];
+  /** sizes of the family whose block(s) the gate holds (any check) */
+  heldSizes?: string[];
+  /** sizes of the family with a written block */
+  writtenSizes?: string[];
+  /** per size, strong/weak per event kind (scale × convex / concave), from the semantics */
+  turns?: string[];
+  /** SHAPE-MAJ: why the sizes the gate let pass are not a safe release ('' = none / safe) */
+  release?: string;
 };
+
+/** Neither size has a strong turn event the other lacks (the probe's own copy of the hysteresis). */
+const agrees = (a: SizeShape, b: SizeShape) =>
+  a.events.every(
+    (e, k) => !b.events[k] || (e.strong <= b.events[k].weak && b.events[k].strong <= e.weak),
+  );
+
+/**
+ * SHAPE-MAJ, judged from the semantics' shapes against what the gate did to the written blocks:
+ * the sizes it let pass of a family whose turns differ must (1) agree pairwise, (2) belong to a
+ * strict majority of the family's sizes that agrees with every one of them, and (3) carry no
+ * strong turn a held size lacks (the dissenters differ only by EXTRA turns). The gate decides on the
+ * written file, so a borderline (hysteresis) family may split differently there — what is checked
+ * is that the release is safe, not that it is the same split.
+ */
+function releaseProblem(
+  sh: readonly SizeShape[],
+  tokens: readonly string[],
+  writtenSizes: readonly string[],
+  heldSizes: readonly string[],
+): string {
+  const ix = (t: string) => tokens.indexOf(t);
+  const passed = writtenSizes.filter((t) => !heldSizes.includes(t)).map(ix);
+  const held = heldSizes.map(ix);
+  if (!passed.length) return '';
+  for (const a of passed)
+    for (const b of passed)
+      if (a < b && !agrees(sh[a], sh[b]))
+        return `released ${tokens[a]} and ${tokens[b]} differ in their turns`;
+  // the largest pairwise-agreeing group that contains every released size (simple search: the
+  // candidates are the other sizes agreeing with all of them)
+  const cand = sh
+    .map((_, i) => i)
+    .filter((i) => !passed.includes(i) && passed.every((p) => agrees(sh[i], sh[p])));
+  const most = (pool: number[]): number =>
+    pool.length
+      ? Math.max(
+          most(pool.slice(1)),
+          1 + most(pool.slice(1).filter((j) => agrees(sh[pool[0]], sh[j]))),
+        )
+      : 0;
+  const agree = passed.length + most(cand);
+  if (2 * agree <= sh.length)
+    return `released ${passed.map((i) => tokens[i]).join(', ')} without a strict majority (${agree} of ${sh.length} agree)`;
+  for (const d of held)
+    for (const p of passed)
+      if (sh[p].events.some((e, k) => sh[d].events[k] && e.strong > sh[d].events[k].weak))
+        return `released ${tokens[p]} has a turn held ${tokens[d]} lacks`;
+  return '';
+}
 
 function analyse(
   s: Session,
@@ -48,17 +116,24 @@ function analyse(
   const specs = S.semantics?.pieces ?? [];
   // blocks that a block-severity check names (per scope); a check naming no block holds all
   const bad = new Set<string>();
+  const badBlock = new Set<string>();
+  const writtenBlock = new Set<string>();
   const written = new Set<string>();
   for (const sc of out.scopes) {
     const g = out.gate[sc.target.scopeKey];
     const blocks = sc.manifest.blocks.map((b) => b.block);
-    for (const b of sc.manifest.blocks) written.add(b.identity.replace(/^LIN_/, ''));
+    for (const b of sc.manifest.blocks) {
+      written.add(b.identity.replace(/^LIN_/, ''));
+      writtenBlock.add(b.block.replace(/^LIN_/, ''));
+    }
     for (const k of g?.checks ?? []) {
       if (k.ok || k.severity !== 'block') continue;
       const all = !k.blocks.length || k.blocks.includes('*');
       for (const x of blocks)
-        if (all || k.blocks.some((b) => x === b || x.startsWith(`${b}_`)))
+        if (all || k.blocks.some((b) => x === b || x.startsWith(`${b}_`))) {
           bad.add(x.replace(/^LIN_/, '').replace(/_[^_]+$/, ''));
+          badBlock.add(x.replace(/^LIN_/, ''));
+        }
     }
   }
   // debug (SHAPE_BOX="x0,y0,x1,y1" + SHAPE_MARKS=<file>): every chain in the box, its look and class
@@ -161,6 +236,11 @@ function analyse(
         : '';
     const turn = fmt(turnMismatch(sh));
     const count = fmt(countMismatch(sh));
+    const h = turnHold(sh);
+    const tokens = p.sizes.map((z) => z.sizeToken);
+    const heldSizes = tokens.filter((t) => badBlock.has(`${p.identity}_${t}`));
+    const writtenSizes = tokens.filter((t) => writtenBlock.has(`${p.identity}_${t}`));
+    const release = turn ? releaseProblem(sh, tokens, writtenSizes, heldSizes) : '';
     recs.push({
       identity: p.identity,
       sizes: p.sizes.map((z) => z.sizeToken),
@@ -172,6 +252,14 @@ function analyse(
       turn,
       count,
       passing: written.has(p.identity) && !bad.has(p.identity),
+      mustHold: h ? h.held.map((i) => tokens[i]) : [],
+      canonical: h?.canonical ? h.canonical.map((i) => tokens[i]) : [],
+      heldSizes,
+      writtenSizes,
+      release,
+      turns: h
+        ? sh.map((x, i) => `${tokens[i]} ${x.events.map((e) => `${e.strong}/${e.weak}`).join(' ')}`)
+        : [],
     });
     if (process.env.SHAPE_MARKS) marksOn(p, s);
     if (png) renderFamily(png, caseId, p);
@@ -392,11 +480,206 @@ type CaseRes = {
   error?: string;
 };
 
+/**
+ * SHAPE-MAJ unit case (`shape.mjs unit`): turnHold on synthetic shapes, and the gate's
+ * shapeFamilies on synthetic written blocks (a 100 mm square per size, a 6 mm tooth in the odd
+ * one). Every expectation that fails is a row with `turn` set and `passing` true (exit 1).
+ */
+function unitCase(): CaseRes {
+  const ev = (cs: number, cw: number, ks = 0, kw = 0): SizeShape => ({
+    notches: 0,
+    drills: 0,
+    corners: [],
+    weak: 0,
+    events: [
+      { key: '1.5mm convex', strong: cs, weak: cw, at: [] },
+      { key: '1.5mm concave', strong: ks, weak: kw, at: [] },
+    ],
+  });
+  const clean = () => ev(4, 4);
+  const extra = () => ev(5, 5, 1, 1);
+  const lacking = () => ev(3, 3);
+  const rows: FamRec[] = [];
+  const expect = (name: string, ok: boolean, got: string) =>
+    rows.push({
+      identity: name,
+      sizes: [],
+      notches: [],
+      drills: [],
+      internal: [],
+      corners: [],
+      diff: ok ? '' : `UNIT ${name}: ${got}`,
+      turn: ok ? '' : `UNIT ${name}: ${got}`,
+      count: '',
+      passing: !ok,
+    });
+  const show = (h: ReturnType<typeof turnHold>) =>
+    h ? `held [${h.held}] canonical ${h.canonical ? `[${h.canonical}]` : 'none'}` : 'no mismatch';
+  const same = (a: readonly number[] | null | undefined, b: readonly number[] | null) =>
+    a == null || b == null ? a == null && b == null : a.join() === b.join();
+  const cases: { name: string; sh: SizeShape[]; held: number[] | null; canon: number[] | null }[] =
+    [
+      { name: 'one-shape', sh: [clean(), clean(), clean()], held: null, canon: null },
+      {
+        name: 'majority 4 of 5: only the odd size',
+        sh: [clean(), clean(), extra(), clean(), clean()],
+        held: [2],
+        canon: [0, 1, 3, 4],
+      },
+      {
+        name: 'majority 2 of 3: only the odd size',
+        sh: [clean(), extra(), clean()],
+        held: [1],
+        canon: [0, 2],
+      },
+      {
+        name: 'majority 3 of 5, two odd sizes',
+        sh: [extra(), clean(), clean(), ev(4, 4, 2, 2), clean()],
+        held: [0, 3],
+        canon: [1, 2, 4],
+      },
+      {
+        name: '2 vs 2: the whole family',
+        sh: [clean(), clean(), extra(), extra()],
+        held: [0, 1, 2, 3],
+        canon: null,
+      },
+      { name: '2 sizes: the whole family', sh: [clean(), extra()], held: [0, 1], canon: null },
+      {
+        name: 'half (3 of 6): the whole family',
+        sh: [clean(), clean(), clean(), extra(), extra(), ev(6, 6)],
+        held: [0, 1, 2, 3, 4, 5],
+        canon: null,
+      },
+      {
+        name: 'the odd size LACKS a turn: the whole family (the majority may carry the defect)',
+        sh: [clean(), clean(), lacking(), clean()],
+        held: [0, 1, 2, 3],
+        canon: null,
+      },
+      {
+        // hysteresis: 2 agrees with both sides — {0,1,2} and {2,3,4} tie as largest groups
+        name: 'two largest groups tie: the whole family',
+        sh: [ev(1, 1), ev(1, 1), ev(0, 1), ev(0, 0), ev(0, 0)],
+        held: [0, 1, 2, 3, 4],
+        canon: null,
+      },
+      {
+        // the same tie with the EXTRA turns on the other side (one of the two groups would pass
+        // the extra-only test): still the whole family
+        name: 'two largest groups tie, mirrored: the whole family',
+        sh: [ev(0, 0), ev(0, 0), ev(0, 1), ev(1, 1), ev(1, 1)],
+        held: [0, 1, 2, 3, 4],
+        canon: null,
+      },
+    ];
+  for (const c of cases) {
+    const h = turnHold(c.sh);
+    const ok = c.held == null ? !h : !!h && same(h.held, c.held) && same(h.canonical, c.canon);
+    expect(`turnHold ${c.name}`, ok, show(h));
+  }
+  // the probe's own criterion (Codex): agreeing with every released size is not a majority —
+  // released 0/3 agrees with 0/0 … 3/3 one by one, but those four do not agree with each other
+  {
+    const one = (st: number, wk: number): SizeShape => ({
+      notches: 0,
+      drills: 0,
+      corners: [],
+      weak: 0,
+      events: [{ key: '1.5mm convex', strong: st, weak: wk, at: [] }],
+    });
+    const fam = [one(0, 3), one(0, 0), one(1, 1), one(2, 2), one(3, 3)];
+    const toks = ['A', 'B', 'C', 'D', 'E'];
+    const why = releaseProblem(fam, toks, toks, ['B', 'C', 'D', 'E']);
+    expect('releaseProblem: no pairwise majority behind the released size', !!why, why || 'safe');
+    const ok = releaseProblem(
+      [clean(), clean(), extra(), clean()],
+      ['A', 'B', 'C', 'D'],
+      ['A', 'B', 'C', 'D'],
+      ['C'],
+    );
+    expect('releaseProblem: majority released, the odd size held', !ok, ok || 'safe');
+  }
+  // the gate: shapeFamilies over synthetic blocks (square 100 mm, size 3 of 5 with a tooth)
+  const sq = (k: number, tooth: boolean): PtMm[] => {
+    const w = 100 + 4 * k;
+    const top = tooth
+      ? [
+          { x: w, y: w },
+          { x: 60, y: w },
+          { x: 60, y: w + 6 },
+          { x: 54, y: w + 6 },
+          { x: 54, y: w },
+        ]
+      : [{ x: w, y: w }];
+    return [{ x: 0, y: 0 }, { x: w, y: 0 }, ...top, { x: 0, y: w }];
+  };
+  const gateOf = (teeth: boolean[]) => {
+    const toks = teeth.map((_, k) => `S${k}`);
+    const blocks = toks.map((t) => ({ block: `FP_${t}`, mb: { identity: 'FP', sizeToken: t } }));
+    const contours = new Map(
+      toks.map((t, k) => [`FP_${t}`, new Map([[LAYERS.cut, sq(k, teeth[k])]])]),
+    );
+    const ctx = {
+      raw: { blocks: new Map(toks.map((t) => [`FP_${t}`, []])) },
+      m: { sizes: toks.map((t, k) => ({ token: t, rank: k })) },
+      blocks,
+      contours,
+    } as unknown as GateCtx;
+    return shapeFamilies(ctx);
+  };
+  {
+    const f = gateOf([false, false, true, false, false]);
+    expect(
+      'gate majority: only FP_S2 held, the note names the canonical sizes',
+      f.failed.join() === 'FP_S2' &&
+        f.notes.length === 1 &&
+        f.notes[0].includes('one piece, one shape across sizes') &&
+        f.notes[0].includes('S0, S1, S3, S4') &&
+        !f.notes[0].includes('; '),
+      `failed [${f.failed}] notes ${JSON.stringify(f.notes)}`,
+    );
+  }
+  {
+    const f = gateOf([false, false, true, true]);
+    expect(
+      'gate 2 vs 2: the whole family held',
+      f.failed.slice().sort().join() === 'FP_S0,FP_S1,FP_S2,FP_S3',
+      `failed [${f.failed}] notes ${JSON.stringify(f.notes)}`,
+    );
+  }
+  {
+    const f = gateOf([false, true, false, false, false].map((x) => !x));
+    expect(
+      'gate the odd size lacks the tooth: the whole family held',
+      f.failed.length === 5,
+      `failed [${f.failed}] notes ${JSON.stringify(f.notes)}`,
+    );
+  }
+  {
+    const f = gateOf([false, false, false]);
+    expect('gate one shape: nothing held', !f.failed.length, `failed [${f.failed}]`);
+  }
+  const bad = rows.filter((r) => r.turn);
+  return {
+    id: 'unit',
+    verdict: bad.length ? 'FAIL' : 'ok',
+    families: rows.length,
+    mismatched: bad.length,
+    mismatchedPassing: bad.length,
+    turnPassing: bad.length,
+    countPassing: 0,
+    holdingPassing: bad.length,
+    rows,
+  };
+}
+
 async function one(id: string): Promise<CaseRes> {
   const png = process.env.SHAPE_PNG ?? null;
   let rows: FamRec[] = [];
   let err: string | undefined;
   let c: Parameters<typeof runCase>[0] | undefined;
+  if (id === 'unit') return unitCase();
   if (id.startsWith('mood:')) {
     const sm = SAMPLE.find((x) => `mood:${x.id}` === id);
     if (sm)
@@ -429,7 +712,9 @@ async function one(id: string): Promise<CaseRes> {
   });
   const mism = rows.filter((r) => r.diff);
   // what must never pass: a turn difference (always), a count difference (with SHAPE_COUNTS_HOLD)
-  const holds = (r: FamRec) => !!r.turn || (countsHold() && !!r.count);
+  // SHAPE-MAJ: a turn difference may release a strict majority of agreeing sizes, never a size
+  // off it (releaseProblem)
+  const holds = (r: FamRec) => !!r.release || (countsHold() && !!r.count && r.passing);
   return {
     id,
     verdict: rec.verdict as string | undefined,
@@ -439,7 +724,7 @@ async function one(id: string): Promise<CaseRes> {
     mismatchedPassing: mism.filter((r) => r.passing).length,
     turnPassing: rows.filter((r) => r.turn && r.passing).length,
     countPassing: rows.filter((r) => r.count && r.passing).length,
-    holdingPassing: rows.filter((r) => holds(r) && r.passing).length,
+    holdingPassing: rows.filter((r) => holds(r)).length,
     rows,
     ...(err ? { error: err } : {}),
   };
@@ -447,7 +732,9 @@ async function one(id: string): Promise<CaseRes> {
 
 export async function main(args: string[]): Promise<number> {
   if (args[0] === 'list') {
-    console.log(JSON.stringify([...CASES.map((c) => c.id), ...SAMPLE.map((s) => `mood:${s.id}`)]));
+    console.log(
+      JSON.stringify(['unit', ...CASES.map((c) => c.id), ...SAMPLE.map((s) => `mood:${s.id}`)]),
+    );
     return 0;
   }
   for (const id of args) console.log(`@@RESULT ${JSON.stringify(await one(id))}`);

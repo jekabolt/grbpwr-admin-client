@@ -1,7 +1,9 @@
 // SHAPE gate (owner 16.10, card 49 — part of G5-features, no check id of its own): one piece is ONE
 // shape graded across sizes. Within one identity, every written size block must carry the same
 // cut-line turn structure (semantics/shape-check.ts: no extra bump, dip, step or kink in one size) —
-// a difference holds every block of the identity (D3: a question, never a silent pass). A notch /
+// a difference holds every block of the identity (D3: a question, never a silent pass), except
+// (SHAPE-MAJ, 17.10) when ≥3 sizes and a strict majority of them share one shape and the others
+// differ only by EXTRA turns: then only those others are held (semantics/shape-check.ts turnHold). A notch /
 // drill COUNT difference (layer 4, layer 8 squares) is a recorded warning (a G5 warn check in the
 // report the manifest carries) — it holds only with SHAPE_COUNTS_HOLD=1 (soft rule, 17.10).
 //   probe switch (node only): SHAPE_GATE_OFF=1 — not evaluated (the "before" column)
@@ -11,7 +13,7 @@ import {
   countMismatch,
   countsHold,
   shapeOfCut,
-  turnMismatch,
+  turnHold,
   type SizeShape,
 } from '../semantics/shape-check';
 import { bboxOf } from '../write/geom';
@@ -76,12 +78,22 @@ export function shapeFamilies(ctx: GateCtx): {
     if (unreadable) continue;
     rows.sort((a, b) => a.rank - b.rank);
     const sh = rows.map((r) => r.sh);
-    const t = turnMismatch(sh);
-    if (t) {
-      failed.push(...rows.map((r) => r.block));
-      notes.push(
-        `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s cut line turns where ${rows[t.b].token}'s does not (${t.what.slice(8)}: a bump, dip, step or kink in one size only)`,
-      );
+    const h = turnHold(sh);
+    if (h) {
+      const t = h.first;
+      failed.push(...h.held.map((i) => rows[i].block));
+      const why = `(${t.what.slice(8)}: a bump, dip, step or kink in one size only)`;
+      if (!h.canonical)
+        notes.push(
+          `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s cut line turns where ${rows[t.b].token}'s does not ${why}`,
+        );
+      else {
+        // SHAPE-MAJ: a strict majority shares one shape — only the sizes off it are held
+        const tok = (ix: number[]) => ix.map((i) => rows[i].token).join(', ');
+        notes.push(
+          `${identity}: one piece, one shape across sizes — ${tok(h.held)}'s cut line turns where the shape ${tok(h.canonical)} share does not (${rows[t.a].token} against ${rows[t.b].token}: ${t.what.slice(8)}) — only ${tok(h.held)} held, the other sizes agree`,
+        );
+      }
     }
     const c = countMismatch(sh);
     if (c) {
