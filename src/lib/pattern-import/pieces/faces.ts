@@ -1036,11 +1036,14 @@ export function judgeBlobs(
           // front's size lines) — its own name and one size's lines closing it alone (D3: both).
           // Only across size lines: a face split off by a common / inner line ('joined', or a strip
           // told by its width) may be half of the piece — that stays a question (Codex r1)
+          // DARTS (class C): or drawn against it with no line between them at all — it meets the
+          // group only through the slivers between its sizes' lines — and each side printing a
+          // piece name of its own (namedApart)
           const named =
             !off.has(why) &&
             !off.has('own-name') &&
             !!o.graded &&
-            why === 'size-copy' &&
+            (why === 'size-copy' || (why === 'joined' && namedApart(f, grp))) &&
             namedOneSize(f) != null &&
             acrossSizeLines(f, grp);
           if (off.has(why) || named) {
@@ -1419,6 +1422,49 @@ export function judgeBlobs(
         if (a >= 0 && b >= 0 && a !== b) return [a, b];
       }
       return null;
+    }
+
+    /**
+     * DARTS · class C: face f, joined to its group (joinedWhy 'joined'), is drawn apart from the
+     * group's head — not a half of it split off by a line inside it:
+     *   no line between them  no line lies mostly between f and the group's other faces (sep): f
+     *                         meets the group only through the grading slivers between its sizes'
+     *                         lines (Delta's side back beside the back, Cherry's patch pocket on
+     *                         the sleeve) — a half split off by an inner / common line has one;
+     *   two names             f and the head each print a piece name (a garment-part word, not a
+     *                         bare "CUT 2"), and no name of one is the other's;
+     *   no text seed          no text seed stands in f (a text seed already seeds the piece it
+     *                         stands in: a second seed in its region would merge — Atlas's sleeve).
+     * The caller still asks namedOneSize (one size's lines close it alone) and acrossSizeLines
+     * (every wall between f and the group is a ranked size line).
+     */
+    function namedApart(f: number, grp: readonly number[]): boolean {
+      if (
+        sep(
+          f,
+          grp.filter((x) => x !== f),
+        ).length
+      )
+        return false;
+      if (textSeeds.some((t) => inFace(pixelOf(t.at), f))) return false;
+      const norm = (x: string) => x.trim().replace(/\s+/g, ' ').toUpperCase();
+      const namesIn = (q: number) =>
+        new Set(
+          textAt
+            .filter(
+              ({ t, k }) =>
+                !t.background &&
+                inFace(k, q) &&
+                pieceLabelText(t.text) &&
+                PIECE_NAME.test(t.text) &&
+                !MARK_TEXT.test(t.text) &&
+                !/^\s*cut\s*\d/i.test(t.text),
+            )
+            .map(({ t }) => norm(t.text)),
+        );
+      const mine = namesIn(f);
+      const head = namesIn(grp[0]);
+      return mine.size > 0 && head.size > 0 && ![...mine].some((x) => head.has(x));
     }
 
     /**
