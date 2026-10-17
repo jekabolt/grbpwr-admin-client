@@ -84,6 +84,9 @@ export function silentRead(
       if (!v) memo.set(key, (v = near.filter(ok).map((x) => x.pts)));
       return v;
     };
+    // the grade model for a family that can be written: every size closed (a leaking size blocks
+    // the family before the gate — fitting it costs the worker time for nothing)
+    if (closed.length < f.candidates.length) continue;
     ins.push({
       seed: f.seed,
       sizes: closed.map((c) => ({ rank: c.rank, outer: c.outer, anchor: isAnchor(c) })),
