@@ -15,6 +15,7 @@ import type {
   ChainRole,
   ClassId,
   FabricAssignment,
+  GradeAnswer,
   GridOverride,
   ImportSession,
   NameDecision,
@@ -209,6 +210,13 @@ export type Inputs = {
    * answer, another sheet or outline) is a new question.
    */
   confirmedQuantities: Partial<Record<SeedId, string>>;
+  /**
+   * GRADE P1: the operator's answers to semantics' `gradeAsks` by question key — a lone notch
+   * ("in every size / in none / only in this one"), a per-size count difference ("intended"). The
+   * key is the question's content, so a question that changes simply asks again. The operator's
+   * only: the autopilot never sets it (D3/D5). Absent = none.
+   */
+  gradeAnswers?: Record<string, GradeAnswer>;
   assignment: FabricAssignment | null;
   /**
    * S3: the fingerprint (sheet, grid, model, each piece's outline) the answers above were given
@@ -639,6 +647,10 @@ export function useImportSession(deps: {
     aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
     operatorFold: i.operatorFold,
     foldListChecked: i.foldListChecked,
+    // GRADE P1: the operator's answers to the one-shape questions (never the autopilot's)
+    ...(i.gradeAnswers && Object.keys(i.gradeAnswers).length
+      ? { gradeAnswers: i.gradeAnswers }
+      : {}),
     // the AI read "on fold" off the drawing (the sheet's words may be curves): asked, not unfolded
     foldHints: sRef.current.names.filter((n) => n.suggestion?.onFold).map((n) => n.seed),
   });
@@ -954,6 +966,9 @@ export function useImportSession(deps: {
             foldListChecked: Array.isArray(ev.input.foldListChecked)
               ? ev.input.foldListChecked
               : iRef.current.foldListChecked,
+            gradeAnswers: ev.input.gradeAnswers
+              ? { ...ev.input.gradeAnswers }
+              : iRef.current.gradeAnswers,
           });
           const out = await run('semantics', ev.input);
           patch({ semantics: out });

@@ -31,6 +31,7 @@ import { plural } from '../stages';
 import { DebugFold, Fold, Panel, SplitStage, ask, fmtBytes } from '../ui-bits';
 import { focusFromGate, type PieceFocus } from '../piece-focus';
 import { DroppedLabels, leftOut } from './not-in-file';
+import { openGradeAsks } from './details-grade';
 
 const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G1-roundtrip': { what: 'reads back through the card parser', fix: null },
@@ -215,6 +216,7 @@ export function CheckStep({
   };
 
   const activeFix = active ? CHECK[active.id].fix : null;
+  const gradeOpen = session.semantics ? openGradeAsks(session.semantics).length : 0;
   const question = active ? `${active.id.split('-')[0]} fails: ${CHECK[active.id].what}` : null;
 
   return (
@@ -287,6 +289,22 @@ export function CheckStep({
                 })}
               </ChipRow>
             </span>
+          )}
+          {/* GRADE P1: per-size questions never block — said once, quietly, with the way back to
+              the first open one on DETAILS (it is the step's first question once nothing blocks) */}
+          {gradeOpen > 0 && (
+            <button
+              type='button'
+              data-testid='check-grade-open'
+              className='self-start text-left'
+              title='the sizes differ in notches / drill holes / internal lines; open the first question'
+              onClick={() => void api.dispatch({ type: 'back', to: 'meaning' })}
+            >
+              <Text size='micro' variant='label' component='span' className='underline'>
+                {gradeOpen} grade {gradeOpen === 1 ? 'question' : 'questions'} not answered —
+                exported as drawn
+              </Text>
+            </button>
           )}
           {scope && report && (
             <>

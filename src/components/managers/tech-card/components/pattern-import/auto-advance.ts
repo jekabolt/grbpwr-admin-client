@@ -409,6 +409,8 @@ export const ANSWERS: Record<
       'operatorFold',
       'fileAllowance',
       'foldListChecked',
+      // GRADE P1: `gradeAnswers` (a lone notch, a count difference) is deliberately NOT here — the
+      // operator's answer only; no resolver (autopilot, replay) may give it (D3/D5, Codex r1)
     ],
   },
   fabrics: { events: ['fabrics'], inputs: [] },
@@ -421,6 +423,15 @@ export function answerProblem<I>(step: WizardStep, a: AutoAnswer<I>): string | n
   const ok = ANSWERS[step];
   const bad = [
     ...(a.events ?? []).filter((e) => !ok.events.includes(e.type)).map((e) => `event ${e.type}`),
+    // GRADE P1: the one-shape answers are the operator's only — not inside a semantics event either
+    ...(a.events ?? [])
+      .filter(
+        (e) =>
+          e.type === 'semantics' &&
+          !!e.input.gradeAnswers &&
+          Object.keys(e.input.gradeAnswers).length > 0,
+      )
+      .map(() => 'gradeAnswers (operator only)'),
     ...Object.keys(a.patch ?? {})
       // A10: the autopilot's record of what it assumed rides with any answer (it answers nothing)
       .filter((k) => k !== 'autopilot' && !ok.inputs.includes(k))

@@ -579,16 +579,22 @@ export function PatternsField({
   // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
   // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
   // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
+  // A part that repeats the one before it is said once (owner 17.10: «main material · main
+  // material» — a line named after its own purpose).
+  const once = (parts: (string | undefined)[]) =>
+    parts
+      .map((x) => x?.trim() ?? '')
+      .filter((x, i, a) => x && a.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i);
   const scopeLabel = (s: FabricScope<FabricLine>): string => {
     if (!s.byPurpose) {
       const l = s.lines[0];
-      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'unnamed';
+      return once([l?.role, l?.name]).join(' · ') || 'unnamed';
     }
-    const names = s.lines
-      .map((l) => l.name.trim())
-      .filter(Boolean)
-      .join(', ');
-    return [bomPurposeLabel(s.key), names].filter(Boolean).join(' · ');
+    const purpose = bomPurposeLabel(s.key);
+    const names = once(s.lines.map((l) => l.name)).filter(
+      (n) => n.toLowerCase() !== purpose.trim().toLowerCase(),
+    );
+    return once([purpose, names.join(', ')]).join(' · ');
   };
   const uploadScopes = useMemo(
     () => scopes.map((s) => ({ key: s.key, label: scopeLabel(s) })),
@@ -1754,7 +1760,8 @@ export function PatternsField({
             </div>
           }
         >
-          {label}
+          {/* the tile above already names the material (it is the selected one): the files */}
+          files
         </GroupLabel>
         {sheetList(g.entries)}
       </div>
@@ -1900,8 +1907,7 @@ export function PatternsField({
         autoRun:
           deepAuto &&
           !(
-            deepColorway &&
-            (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
+            deepColorway && (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
           ),
         colorwayId: deepColorway || undefined,
       });
@@ -2139,7 +2145,11 @@ export function PatternsField({
             + fabric slot
           </button>
         ) : (
-          <Placeholder dashed label='add fabric lines in the BOM first' className='h-[84px] w-full' />
+          <Placeholder
+            dashed
+            label='add fabric lines in the BOM first'
+            className='h-[84px] w-full'
+          />
         )}
       </>
     );

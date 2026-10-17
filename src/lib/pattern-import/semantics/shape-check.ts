@@ -295,10 +295,25 @@ export function shapeMismatch(
  * drill counts as written). UNI blocks are one geometry for every size and are skipped.
  */
 export function countNotesOfBlocks(
-  blocks: readonly { identity: string; sizeToken: string; notches: number; drills: number }[],
+  blocks: readonly {
+    identity: string;
+    sizeToken: string;
+    notches: number;
+    drills: number;
+    internal?: number;
+    notchesGraded?: number;
+    notchesChorded?: number;
+    drillsGraded?: number;
+    internalGraded?: number;
+    notchesRemoved?: number;
+    drillsRemoved?: number;
+    internalRemoved?: number;
+  }[],
   uniToken = 'UNI',
+  /** GRADE P1: per identity, the count kinds the operator answered "intended" */
+  intendedOf: (identity: string) => readonly string[] | undefined = () => undefined,
 ): { identity: string; note: string }[] {
-  const by = new Map<string, { sizeToken: string; notches: number; drills: number }[]>();
+  const by = new Map<string, (typeof blocks)[number][]>();
   for (const b of blocks) {
     if (b.sizeToken === uniToken) continue;
     by.set(b.identity, [...(by.get(b.identity) ?? []), b]);
@@ -306,11 +321,48 @@ export function countNotesOfBlocks(
   const out: { identity: string; note: string }[] = [];
   for (const [identity, bs] of by) {
     if (bs.length < 2) continue;
+    const intended = new Set(intendedOf(identity) ?? []);
     const parts: string[] = [];
-    for (const k of ['notches', 'drills'] as const)
-      if (bs.some((b) => b[k] !== bs[0][k]))
-        parts.push(`${k}: ${bs.map((b) => `${b.sizeToken} ${b[k]}`).join(', ')}`);
+    const yes: string[] = [];
+    for (const k of ['notches', 'drills', 'internal'] as const) {
+      const v = (b: (typeof bs)[number]) => b[k] ?? 0;
+      if (!bs.some((b) => v(b) !== v(bs[0]))) continue;
+      const line = `${k}: ${bs.map((b) => `${b.sizeToken} ${v(b)}`).join(', ')}`;
+      if (intended.has(k)) yes.push(line);
+      // internal lines: the gate counts notches / drills; an internal-line difference is recorded
+      // while the lines are few enough to be the piece's marks (buttonholes) — not reader fragments
+      else if (k !== 'internal' || bs.every((b) => v(b) <= 12)) parts.push(line);
+    }
     if (parts.length) out.push({ identity, note: `${parts.join('; ')} — one piece, one shape` });
+    if (yes.length) out.push({ identity, note: `${yes.join('; ')} — intended (operator)` });
+    // GRADE P1 (D5): notches placed from the sizes that draw them
+    // GRADE P1: the operator's all / none on a count question (D5)
+    for (const [k, word] of [
+      ['drillsGraded', 'drill holes placed (operator: in every size, graded, not drawn)'],
+      ['internalGraded', 'internal lines placed (operator: in every size, graded, not drawn)'],
+      ['notchesRemoved', 'notches removed (operator: in no size)'],
+      ['drillsRemoved', 'drill holes removed (operator: in no size)'],
+      ['internalRemoved', 'internal lines removed (operator: in no size)'],
+    ] as const) {
+      const xs = bs.filter((b) => (b[k] ?? 0) > 0);
+      if (xs.length)
+        out.push({
+          identity,
+          note: `${word}: ${xs.map((b) => `${b.sizeToken} ${b[k]}`).join(', ')}`,
+        });
+    }
+    const ch = bs.filter((b) => (b.notchesChorded ?? 0) > 0);
+    if (ch.length)
+      out.push({
+        identity,
+        note: `notches drawn as the outline, cut line by the chord: ${ch.map((b) => `${b.sizeToken} ${b.notchesChorded}`).join(', ')}`,
+      });
+    const g = bs.filter((b) => (b.notchesGraded ?? 0) > 0);
+    if (g.length)
+      out.push({
+        identity,
+        note: `notches graded (not drawn): ${g.map((b) => `${b.sizeToken} ${b.notchesGraded}`).join(', ')}`,
+      });
   }
   return out;
 }

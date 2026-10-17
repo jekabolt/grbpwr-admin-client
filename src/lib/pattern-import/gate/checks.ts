@@ -294,6 +294,21 @@ export function g3g4(
       continue;
     }
     const lineIdx = new SegmentIndex([{ pts: line, closed: true }], 5);
+    // GRADE P1: a notch drawn as the outline is crossed by its chord — the bump's walls are the
+    // notch (layer 4), not the line: G3 does not count them, G4 does not hold the chord to them
+    const nch = ctx.expect.notchChordsByBlock?.[b.block] ?? [];
+    const bumpIdx = nch.length
+      ? new SegmentIndex(
+          nch.map((c) => ({ pts: c.bump, closed: false })),
+          5,
+        )
+      : null;
+    const chordIdx = nch.length
+      ? new SegmentIndex(
+          nch.map((c) => ({ pts: [...c.chord], closed: false })),
+          5,
+        )
+      : null;
     let total = 0;
     let near = 0;
     // Longest contiguous stretch of wall off the written line (M7): a skipped corner or bump is
@@ -305,8 +320,14 @@ export function g3g4(
       let offLen = 0;
       let prev: PtMm | null = null;
       for (const p of s) {
+        const on0 = lineIdx.nearest(p, snap) <= snap;
+        if (!on0 && bumpIdx && bumpIdx.nearest(p, snap) <= snap) {
+          off = null;
+          prev = p;
+          continue;
+        }
         total++;
-        const on = lineIdx.nearest(p, snap) <= snap;
+        const on = on0;
         if (on) near++;
         if (!on) {
           if (off && prev) offLen += Math.hypot(p.x - prev.x, p.y - prev.y);
@@ -347,6 +368,10 @@ export function g3g4(
     let excused = 0;
     for (const p of sampleAlong(line, true, 0.5)) {
       let dw = wallIdx.nearest(p, 20);
+      if (dw > snap && chordIdx && chordIdx.nearest(p, snap) <= snap) {
+        excused++;
+        continue;
+      }
       if (dw > snap) {
         const here = ok.filter((e) => e.on.nearest(p, snap) <= snap);
         if (here.length) {
@@ -2235,7 +2260,9 @@ function kinksOfBlock(ctx: GateCtx, b: BlockInfo, g: IdentityGeometry, line: PtM
   // row) is no line of its own to lie on — one run off it, held (Codex)
   const own = g.ownStrict ?? g.own;
   const derived = (ctx.expect.derivedByBlock?.[b.block] ?? []).map((d) => d.pts);
-  const runs = kinkRuns(line, own, [...g.excused, ...derived]);
+  // GRADE P1: the chord across a notch drawn as the outline is no bend (the notch is on layer 4)
+  const chords = (ctx.expect.notchChordsByBlock?.[b.block] ?? []).map((c) => [...c.chord]);
+  const runs = kinkRuns(line, own, [...g.excused, ...derived, ...chords]);
   if (typeof process !== 'undefined' && process.env?.PATIMPORT_KINK_DEBUG)
     console.log(
       `@@KINK ${JSON.stringify({ block: b.block, runs: runs.map((r) => ({ ...r, kink: isKink(r) })) })}`,

@@ -40,6 +40,12 @@ export const QuizHistoryContext = createContext<QuizHistory | null>(null);
 export type AnsweredAndGo = (answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => void;
 export const AnsweredAndGoContext = createContext<AnsweredAndGo>(() => {});
 export const useAnsweredAndGo = () => useContext(AnsweredAndGoContext);
+/**
+ * Is the autopilot on (the shell's toggle)? A step that holds its own answered-and-go for a
+ * NON-blocking question (DETAILS' per-size grade questions) must not hold it then: the shell's go
+ * is what resumes the drive, and the autopilot never waits for a question it does not answer.
+ */
+export const AutopilotOnContext = createContext(false);
 
 // ═══ AUTOMATIC ANSWERS ═════════════════════════════════════════════════════════════════════════
 //

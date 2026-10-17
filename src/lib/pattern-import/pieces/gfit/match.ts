@@ -4,7 +4,7 @@
 // different mapping ≥ 1.5× dearer), else there is no correspondence.
 import type { PtMm } from 'lib/pattern-import/types';
 
-import type { GfitCorner, GfitOutline } from './outline';
+import { gfitP1Silent, type GfitCorner, type GfitOutline } from './outline';
 
 export const MATCH_MARGIN = 1.5;
 const SKIP_STRONG = 4;
@@ -30,6 +30,8 @@ export type MatchOpts = {
   offB?: PtMm;
   /** Use displacement in the cost (false: shape-only). */
   usePos?: boolean;
+  /** GRADE P1: the farthest pair follows the outlines' grade step too (see below). */
+  stepPair?: boolean;
 };
 
 const circ = (x: number) => {
@@ -74,6 +76,31 @@ export function matchCorners(a: GfitOutline, b: GfitOutline, o: MatchOpts = {}):
   }
   near.sort((x, y) => x - y);
   const sigma = Math.max(1, near.length ? near[near.length >> 1] : 1);
+  // GRADE P1 (P23 to-do): the farthest pair allowed follows the grade STEP between the two outlines,
+  // not only the median corner shift — on a piece whose corners mostly stay put (shared lines) a
+  // corner that moves 12 mm per size was never paired between sizes two apart. The step = how far
+  // the outlines' boxes move (registered: after the gauge offsets). The P1 path asks for it
+  // (`stepPair`); the SILENT G26 model keeps the median rule unless GFIT_P1_SILENT=1.
+  const bx = (o: GfitOutline, off: PtMm) => {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const p of o.pts) {
+      x0 = Math.min(x0, p.x - off.x);
+      y0 = Math.min(y0, p.y - off.y);
+      x1 = Math.max(x1, p.x - off.x);
+      y1 = Math.max(y1, p.y - off.y);
+    }
+    return [x0, y0, x1, y1];
+  };
+  const ba = bx(a, oa);
+  const bb = bx(b, ob);
+  const boxStep = Math.max(...ba.map((v, i) => Math.abs(v - bb[i])));
+  const pairMax =
+    o.stepPair || gfitP1Silent()
+      ? Math.max(15, 5 * sigma, 1.5 * boxStep + 3)
+      : Math.max(15, 5 * sigma);
   const skipA = A.map((c) => (c.strong ? SKIP_STRONG : SKIP_WEAK));
   const skipB = B.map((c) => (c.strong ? SKIP_STRONG : SKIP_WEAK));
   const pairCost = (i: number, j: number, phi: number) => {
@@ -84,7 +111,7 @@ export function matchCorners(a: GfitOutline, b: GfitOutline, o: MatchOpts = {}):
     if (usePos) {
       const d = Math.hypot(pa[i].x - pb[j].x, pa[i].y - pb[j].y);
       // a pair far beyond the typical step is no pair (cheaper than two skips otherwise)
-      if (d > Math.max(15, 5 * sigma)) return Infinity;
+      if (d > pairMax) return Infinity;
       c += d / (3 * sigma);
     }
     return c;
