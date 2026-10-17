@@ -297,10 +297,12 @@ function useLabDipDraft(
   // ONE TRANSITION PER SAVE. The staging slot holds only the latest snapshot, so a second step taken
   // before the first is saved would collapse both into one write: `swatch arrived` + approve would
   // send APPROVED alone and the server would never stamp submittedAt. While the draft's status or
-  // round differs from the server's, the row waits for the refetch.
+  // round differs from the server's, the row waits for the refetch. The photo counts too: `new round`
+  // clears swatchMediaId, and taken inside the debounce it would wipe a photo not yet saved.
   const saving =
     draft.labDipStatus !== stored.labDipStatus ||
-    (parseInt(draft.labDipRound, 10) || 0) !== (parseInt(stored.labDipRound, 10) || 0);
+    (parseInt(draft.labDipRound, 10) || 0) !== (parseInt(stored.labDipRound, 10) || 0) ||
+    (draft.swatchMediaId || 0) !== (stored.swatchMediaId || 0);
   return {
     draft,
     recorded,
@@ -311,6 +313,8 @@ function useLabDipDraft(
       set({ labDipRound: '1', labDipStatus: PENDING, labDipRejectReason: '', swatchMediaId: 0 }),
     arrived: () => set({ labDipRound: String(shownRound || 1), labDipStatus: SUBMITTED }),
     approve: () => set({ labDipStatus: APPROVED, labDipRejectReason: '' }),
+    // A decided round goes back to the decision (same round, swatch kept).
+    reopen: () => set({ labDipStatus: SUBMITTED, labDipRejectReason: '' }),
     reject: (reason: string) => set({ labDipStatus: REJECTED, labDipRejectReason: reason.trim() }),
     // The round after the highest known one: asked again, no swatch yet.
     nextRound: () =>
@@ -320,7 +324,8 @@ function useLabDipDraft(
         labDipRejectReason: '',
         swatchMediaId: 0,
       }),
-    // A photo of the swatch means the swatch is here: a waiting round opens the decision.
+    // A photo of the swatch means the swatch is here: a waiting round opens the decision. On a
+    // submitted or decided round it only replaces the photo.
     setSwatch: (id: number) =>
       set(
         status === PENDING
@@ -368,17 +373,23 @@ function Square({
   caption,
   children,
   dashed,
+  title,
+  interactive,
 }: {
   hex?: string;
   url?: string;
   caption?: string;
   children?: React.ReactNode;
   dashed?: boolean;
+  title?: string;
+  interactive?: boolean;
 }) {
   return (
     <span
+      title={title}
       className={cn(
         'relative block border border-borderColor',
+        interactive && 'group-hover:border-textColor group-focus-visible:border-textColor',
         dashed &&
           'flex flex-col items-center justify-center border-dashed text-micro uppercase tracking-label text-labelColor',
       )}
@@ -432,20 +443,18 @@ function LabDipRow({
     phase === 'decide' || phase === 'rejected' || phase === 'approved'
       ? [`round ${round || 1}`, swatchDay ? fmtDay(swatchDay) : ''].filter(Boolean).join(' · ')
       : undefined;
-  const canAttach = canEdit && !lab.saving && (phase === 'swatch' || phase === 'decide');
+  // The square is always a door while the card is editable. Only a photo on a WAITING round is a
+  // transition (swatch arrived), so only that one waits for the previous save.
+  const canAttach = canEdit && !(lab.saving && draft.labDipStatus === PENDING);
 
   const swatch = swatchUrl ? (
-    <Square url={swatchUrl} caption={swatchCaption} />
+    <Square url={swatchUrl} caption={swatchCaption} interactive={canAttach} />
   ) : canAttach ? (
-    <Square dashed caption={swatchCaption}>
-      <span className='text-[18px] leading-none text-textColor'>+</span>
-      swatch photo
+    <Square dashed caption={swatchCaption} interactive>
+      + photo
     </Square>
   ) : (
-    <Square dashed caption={swatchCaption}>
-      <span className='text-[18px] leading-none text-textColor'>·</span>
-      no swatch
-    </Square>
+    <Square dashed caption={swatchCaption} />
   );
 
   const stateLine =
@@ -460,6 +469,7 @@ function LabDipRow({
   const approvedLine =
     phase === 'approved'
       ? [
+          'approved ✓',
           `round ${round || 1}`,
           draft.labDipDecidedAt ? fmtDay(draft.labDipDecidedAt) : '',
           draft.labDipDecidedBy ? `by ${draft.labDipDecidedBy}` : '',
@@ -469,6 +479,18 @@ function LabDipRow({
       : '';
   const historyLine = earlier.map((r) => `round ${r.round} ${roundWord(r)}`).join(' / ');
 
+  const link = (label: string, onClick: () => void) => (
+    <button
+      type='button'
+      disabled={!canEdit}
+      onClick={onClick}
+      className='cursor-pointer text-micro uppercase tracking-label text-labelColor underline-offset-2 hover:text-textColor hover:underline focus-visible:underline disabled:cursor-default disabled:no-underline disabled:opacity-50'
+    >
+      {label}
+    </button>
+  );
+  const targetTitle = [colorway.pantone?.trim(), hex].filter(Boolean).join(' · ') || undefined;
+
   const main = (label: string, onClick: () => void) => (
     <Button type='button' variant='main' size='sm' disabled={!canEdit} onClick={onClick}>
       {label}
@@ -477,6 +499,7 @@ function LabDipRow({
 
   return (
     <div
+      data-lab-dip-row={colorway.colorwayId ?? 0}
       className='grid items-center gap-4 border-t border-hairline py-3.5 first:border-t-0'
       style={{ gridTemplateColumns: `150px ${SQ}px 24px ${SQ}px 1fr` }}
     >
@@ -488,7 +511,7 @@ function LabDipRow({
           <span className='truncate text-micro text-labelColor'>{colorway.pantone.trim()}</span>
         )}
       </span>
-      <Square hex={hex} caption='target' />
+      <Square hex={hex} caption='target' title={targetTitle} />
       <span className='text-center text-labelColor'>
         {phase === 'approved' ? '=' : phase === 'decide' ? 'vs' : '→'}
       </span>
@@ -506,7 +529,11 @@ function LabDipRow({
             lab.setSwatch(m.id);
           }}
           trigger={
-            <button type='button' aria-label='swatch photo' className='block cursor-pointer'>
+            <button
+              type='button'
+              aria-label='swatch photo'
+              className='group block cursor-pointer focus-visible:outline-none'
+            >
               {swatch}
             </button>
           }
@@ -516,7 +543,21 @@ function LabDipRow({
       )}
       <div className='flex min-w-0 flex-col items-start gap-1.5'>
         {phase === 'approved' ? (
-          <span className='text-control uppercase tracking-label text-success'>approved ✓</span>
+          <>
+            <span className='text-control uppercase tracking-label text-success'>
+              {approvedLine}
+            </span>
+            {lab.saving ? (
+              <span className='text-micro uppercase tracking-label text-labelColor'>saving…</span>
+            ) : (
+              canEdit && (
+                <div className='flex items-center gap-3'>
+                  {link('reopen', lab.reopen)}
+                  {link('new round', lab.nextRound)}
+                </div>
+              )
+            )}
+          </>
         ) : (
           <>
             <Steps phase={phase} />
@@ -541,18 +582,25 @@ function LabDipRow({
                     </Button>
                   </>
                 )}
-                {phase === 'rejected' && main(`ask round ${lab.round + 1}`, lab.nextRound)}
+                {phase === 'rejected' && (
+                  <>
+                    {main(`ask round ${lab.round + 1}`, lab.nextRound)}
+                    {canEdit && link('reopen', lab.reopen)}
+                  </>
+                )}
               </div>
             )}
             {phase === 'decide' && rejecting && canEdit && !lab.saving && (
               <div className='flex flex-wrap items-center gap-1'>
                 {REJECT_REASONS.map((r) => (
-                  <Chip key={r} onClick={() => lab.reject(r)}>
+                  <Chip key={r} className='hover:border-textColor' onClick={() => lab.reject(r)}>
                     {r}
                   </Chip>
                 ))}
                 {other === null ? (
-                  <Chip onClick={() => setOther('')}>other…</Chip>
+                  <Chip className='hover:border-textColor' onClick={() => setOther('')}>
+                    other…
+                  </Chip>
                 ) : (
                   <input
                     autoFocus
@@ -577,11 +625,7 @@ function LabDipRow({
             )}
           </>
         )}
-        {(approvedLine || historyLine) && (
-          <span className='text-micro text-labelColor'>
-            {[approvedLine, historyLine].filter(Boolean).join(' / ')}
-          </span>
-        )}
+        {historyLine && <span className='text-micro text-labelColor'>{historyLine}</span>}
       </div>
     </div>
   );
