@@ -362,6 +362,16 @@ async function one(id: string): Promise<CaseRes> {
         files: [resolve(MOOD_DIR, sm.path)],
         card: sm.key,
       } as Parameters<typeof runCase>[0];
+  } else if (id === 'card49') {
+    // the owner's card 49: kombinezon Style A on a card XS–XL, source 8…16 mapped, 6/18/20 left out
+    const a = CASES.find((x) => x.id === 'kombinezon-A');
+    if (a)
+      c = {
+        ...a,
+        id,
+        card: ['XS', 'S', 'M', 'L', 'XL'],
+        mapTo: ['', 'XS', 'S', 'M', 'L', 'XL'],
+      } as Parameters<typeof runCase>[0];
   } else c = CASES.find((x) => x.id === id);
   if (!c) return { id, families: 0, mismatched: 0, mismatchedPassing: 0, rows, error: 'no case' };
   const rec = await runCase(c, {

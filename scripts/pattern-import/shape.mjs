@@ -3,8 +3,9 @@
 // sample in its own node process (SHAPE_PAR at a time, SHAPE_CAP_S seconds each), writes
 // $PATIMPORT_REPORTS/SHAPE-<date>.json + a table: per case the graded families whose sizes differ
 // in features (notches, drills) or outline structure, and how many of those the gate let pass.
-// Exit 1 when a mismatched family passes the gate, or a case could not be judged.
-//   node scripts/pattern-import/shape.mjs [case|mood:<id>…]
+// Exit 1 when a mismatched family passes the gate (timeouts are listed as unjudged).
+//   node scripts/pattern-import/shape.mjs [case|mood:<id>|card49…]   (card49 = kombinezon A on a
+//   card XS–XL with 8…16 mapped, the owner's tech card 49)
 //   env SHAPE_PNG=<dir> (per-size PNGs), PATIMPORT_REPORTS, SHAPE_PAR (3), SHAPE_CAP_S (900)
 import { build as esbuild } from 'esbuild';
 import { spawn, spawnSync } from 'node:child_process';
