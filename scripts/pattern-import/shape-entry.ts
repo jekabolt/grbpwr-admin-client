@@ -94,6 +94,33 @@ function analyse(
         `chain #${ch.id} ${ch.closed ? 'closed' : 'open'} len ${ch.lengthMm.toFixed(1)} box ${b.minX.toFixed(1)},${b.minY.toFixed(1)}-${b.maxX.toFixed(1)},${b.maxY.toFixed(1)} motif ${JSON.stringify(ch.motif)} style ${ch.style} ${JSON.stringify(st.get(ch.style) ?? null).slice(0, 160)} → ${cls.get(ch.id) ?? 'NO CLASS'}\n`,
       );
     }
+    // SIZESOCG: what hovering each row of the sizes step lights inside the box (the chains
+    // stage's own set — the hover set, not the pieces' wall set)
+    const hov = (s as unknown as { chains: ChainSet }).chains;
+    const inBox = (id: number) =>
+      hov.chains[id]?.pts.every((q) => q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1);
+    for (const k of hov.classes) {
+      const ids = k.chains.filter(inBox);
+      if (!ids.length) continue;
+      appendFileSync(
+        process.env.SHAPE_MARKS,
+        `HOVER ${k.role}${k.sizeLabel ? `:${k.sizeLabel}` : ''}#${k.id} → ${ids
+          .map((id) => {
+            const c = hov.chains[id];
+            const b = c.pts.reduce(
+              (a, q) => ({
+                minX: Math.min(a.minX, q.x),
+                minY: Math.min(a.minY, q.y),
+                maxX: Math.max(a.maxX, q.x),
+                maxY: Math.max(a.maxY, q.y),
+              }),
+              { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+            );
+            return `#${id}${c.closed ? 'c' : ''}(${c.lengthMm.toFixed(0)}mm y${b.minY.toFixed(0)}-${b.maxY.toFixed(0)})`;
+          })
+          .join(' ')}\n`,
+      );
+    }
   }
   // debug (SHAPE_LOOKS=<file>): per source layer × declared dash, the length drawn and the classes
   if (process.env.SHAPE_LOOKS) {
