@@ -394,6 +394,7 @@ function units() {
       R.map((r) =>
         sizeSpec(r, [], {
           areaMm2: area + r,
+          cut: ring(r).map((q) => ({ x: q.x + area / 100, y: q.y })),
           drills: Array.from({ length: r < 3 ? 5 : 7 }, (_, i) =>
             drill({ x: 50 + 10 * i, y: 100 }),
           ),

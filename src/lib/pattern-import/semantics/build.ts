@@ -1219,15 +1219,16 @@ export function buildPieceSpecsDetailed(
             PATIMPORT.notchMaxMm,
             Math.max(PATIMPORT.notchMinMm, Math.abs(b.depth)),
           );
-          // a tick drawn across the same place is the same notch
-          if (
-            feats.some(
-              (f) =>
-                f.kind === 'notch' &&
-                Math.hypot(f.at.x - b.at.x, f.at.y - b.at.y) <= Math.abs(b.depth) + 2,
-            )
-          )
+          // a tick drawn across the same place is the same notch — marked as crossed by the chord
+          const same = feats.find(
+            (f): f is NotchFeature =>
+              f.kind === 'notch' &&
+              Math.hypot(f.at.x - b.at.x, f.at.y - b.at.y) <= Math.abs(b.depth) + 2,
+          );
+          if (same) {
+            same.chord = true;
             continue;
+          }
           feats.push({
             kind: 'notch',
             origin: 'detected',

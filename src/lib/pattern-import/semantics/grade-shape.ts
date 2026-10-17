@@ -80,7 +80,16 @@ export function gradeShape(
   // ── 1 · notches across sizes (only when the sizes' counts differ: equal counts are one shape)
   const nc = sizes.map((s) => s.notches.length);
   // every question carries the piece's geometry: a changed outline asks again (Codex r1)
-  const geo = `|g${fnv(sizes.map((s) => `${s.sizeToken}:${Math.round(s.areaMm2 / 10)}`).join(','))}`;
+  // the piece's geometry: every size's cut line (1 mm) and its feature places (1 mm)
+  const r1 = (p: PtMm) => `${Math.round(p.x)},${Math.round(p.y)}`;
+  const geo = `|g${fnv(
+    sizes
+      .map(
+        (s) =>
+          `${s.sizeToken}:${s.cut.map(r1).join(';')}/${s.notches.map((n) => r1(n.at)).join(';')}/${s.drills.map((d) => r1(d.at)).join(';')}/${s.internal.map((l) => l.pts.map(r1).join(';')).join('|')}`,
+      )
+      .join(','),
+  )}`;
   const differ = nc.some((n) => n !== nc[0]);
   // a cut line that turns differently in one size is not one shape (G5 holds it): no notch is
   // carried between outlines that are not the same piece
@@ -141,6 +150,25 @@ export function gradeShape(
         );
       if (g.remove.length)
         notes.push(`${g.remove.length} notch(es) removed — the operator: in no size`);
+      // equal counts at places that do not grade (S:A, M:A, L:B): asked, nothing moved (Codex r2)
+      if (g.inconsistent && !differ) {
+        const key = `places|${seed}|notches${geo}`;
+        const yes = answers[key] === 'intended';
+        asks.push({
+          kind: 'counts',
+          seed,
+          identity: null,
+          key,
+          feature: 'notches',
+          perSize: sizes.map((s) => ({
+            size: s.sizeToken,
+            n: s.notches.length,
+            at: s.notches.map((n) => n.at),
+          })),
+          question: `the notches sit at places that do not grade from size to size (${g.inconsistent} of them) — intended?`,
+          ...(yes ? { answer: 'intended' as const } : {}),
+        });
+      }
       if (g.inconsistent)
         notes.push(
           `${g.inconsistent} notch(es) drawn in several sizes at places that do not grade — not transferred`,
