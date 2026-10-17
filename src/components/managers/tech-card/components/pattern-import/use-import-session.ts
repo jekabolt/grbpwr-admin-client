@@ -31,6 +31,7 @@ import type {
   StageName,
   WizardEvent,
   WizardStep,
+  WriteStorage,
   SheetAcceptMissing,
   SheetAnswer,
 } from 'lib/pattern-import/types';
@@ -74,6 +75,12 @@ import {
   type AutoResolver,
 } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
+import {
+  normWriteStorage,
+  writeStorageFor,
+  writeStorageInput,
+  writtenTokens,
+} from './write-storage';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
@@ -214,6 +221,12 @@ export type Inputs = {
    * into every manifest of the run (`autopilotRecordOf`); empty = the operator answered.
    */
   autopilot: Assumption[];
+  /**
+   * RULHOOK: how the write stores the sizes (event `write-storage`; RUL-SPEC.md §6). Absent =
+   * 'blocks' (per-size DXF only). Not an answer: the autopilot never sets it, every write of the
+   * run carries it. Not in EMPTY_INPUTS on purpose — a new file drop keeps it; `reset` clears it.
+   */
+  writeStorage?: WriteStorage;
 };
 
 const EMPTY_INPUTS: Inputs = {
@@ -950,6 +963,19 @@ export function useImportSession(deps: {
           patchInputs({ assignment: ev.assignment });
           patch({ fabrics: ev.assignment });
           return;
+        case 'write-storage': {
+          // RULHOOK: the operator's storage choice; an unknown storage changes nothing
+          const writeStorage = normWriteStorage(ev);
+          if (!writeStorage) return;
+          iRef.current = { ...iRef.current, writeStorage };
+          patchInputs({ writeStorage });
+          // on the check step the draft is written again with it — unless an apply holds that draft
+          const s = sRef.current;
+          const held = applyLock.current;
+          if (s.step === 'check' && s.draft && !(held && held.draft === s.draft))
+            await dispatchRaw({ type: 'write' });
+          return;
+        }
         case 'write': {
           const a = sRef.current.fabrics;
           const sizes = sRef.current.sizes;
@@ -991,6 +1017,9 @@ export function useImportSession(deps: {
                 : [],
             ),
             dialect: 'r12',
+            // RULHOOK: 'rul' also packs base DXF + .rul (an unknown base is dropped, its reason
+            // on `writeStorage.ignored`); absent / 'blocks' = today's write
+            ...writeStorageInput(writeStorageFor(iRef.current.writeStorage, writtenTokens(sizes))),
             generator: `grbpwr-admin pattern-import (${client.kind})`,
             techCardId: rc().techCardId,
             // A10: an autopilot run's assumptions ride in every written manifest (A9: with the
@@ -2104,6 +2133,11 @@ export function useImportSession(deps: {
     lockApply,
     unlockApply,
     sheetModes,
+    /**
+     * RULHOOK: the storage the next write uses, judged against this run's sizes — `ignored` says
+     * why an asked base is not used. Set it with `dispatch({ type: 'write-storage', … })`.
+     */
+    writeStorage: writeStorageFor(inputs.writeStorage, writtenTokens(session.sizes)),
     setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
       operatorActs();
       setSheetModes((m) => ({ ...m, [scopeKey]: mode }));

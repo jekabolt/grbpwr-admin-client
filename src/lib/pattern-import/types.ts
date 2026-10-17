@@ -2791,6 +2791,13 @@ export type StageIO = {
 };
 
 /**
+ * RULHOOK: the operator's storage choice for the write (`Inputs.writeStorage`, event
+ * `write-storage`). Absent = 'blocks' (per-size DXF only). `rulBase` is checked against the sizes
+ * the run writes (an unknown one is ignored, with a reason) — see `writeStorageFor`.
+ */
+export type WriteStorage = { storage: 'blocks' | 'rul'; rulBase?: string };
+
+/**
  * Why a worker request failed, so the wizard can say what to do (the message is for the operator):
  * `stage-unavailable` — that stage's module has not landed yet (honest placeholder, no fake data);
  * `unsupported-format` / `corrupt` — the file itself; `cancelled` — the operator stopped it;
@@ -2902,6 +2909,12 @@ export type WizardEvent =
   | { type: 'fabrics'; assignment: FabricAssignment }
   /** A10: an autopilot run hands its assumptions to the written manifests. */
   | { type: 'write'; autopilot?: AutopilotRecord }
+  /**
+   * RULHOOK: how the write stores the sizes (`Inputs.writeStorage`, RUL-SPEC.md §6) — 'rul' also
+   * packs base DXF + .rul. The operator's choice only (never an autopilot answer); on the check
+   * step it writes again.
+   */
+  | ({ type: 'write-storage' } & WriteStorage)
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
   | { type: 'apply'; token?: number }
   | { type: 'download' }
