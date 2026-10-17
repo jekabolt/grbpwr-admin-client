@@ -2662,9 +2662,14 @@ function duplicatesAcrossRanks(
       .map(([j]) => j);
     const ranks = new Set([rankOf.get(i)!, ...dups.map((j) => rankOf.get(j)!)]);
     if (ranks.size >= Math.max(2, Math.ceil(n / 2))) {
-      for (const j of dups) groupOf.set(j, i);
+      // LINEASSIGN-2: a line already in an earlier group (a copy of two kept lines, or an earlier
+      // group's kept line) stays where that group put it — dropped twice it sat twice in the
+      // ignore row (kombinezon #598/#602; #110 before SIZESOCG), a kept line dropped too sat in
+      // common and in ignore
+      const fresh = dups.filter((j) => !groupOf.has(j));
+      for (const j of fresh) groupOf.set(j, i);
       groupOf.set(i, i);
-      out.push([i, dups]);
+      out.push([i, fresh]);
     }
   }
   return out;
