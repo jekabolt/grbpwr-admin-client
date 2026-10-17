@@ -411,6 +411,21 @@ function validateSource(x: unknown): ManifestSource {
     fail('source.sizeEncoding', 'unknown encoding');
   if (!(x.variant === null || isBoundedStr(x.variant, 1024)))
     fail('source.variant', 'neither null nor a string');
+  // VARIANTS: the pieces tied to one model — optional, shape-checked; an entry that does not
+  // validate is left out (never the manifest)
+  const models = Array.isArray(x.models)
+    ? x.models
+        .slice(0, 64)
+        .flatMap((y: unknown) =>
+          isObj(y) &&
+          isBoundedStr(y.piece, 128) &&
+          isBoundedStr(y.model, 128) &&
+          isBool(y.kept) &&
+          isBoundedStr(y.evidence, 512)
+            ? [{ piece: y.piece, model: y.model, kept: y.kept, evidence: y.evidence }]
+            : [],
+        )
+    : [];
   return {
     files,
     scale: {
@@ -427,6 +442,7 @@ function validateSource(x: unknown): ManifestSource {
     ...(sheets.length ? { sheets } : {}),
     sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
     variant: x.variant,
+    ...(models.length ? { models } : {}),
   };
 }
 

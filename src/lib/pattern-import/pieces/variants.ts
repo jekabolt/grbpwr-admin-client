@@ -456,6 +456,8 @@ export function variantMarksOut(
   families: readonly PieceFamily[],
   run: SizeRun | null,
   uncut: boolean,
+  /** The fill the piece marks are read on (the uncut run's: a model run lacks the other's pieces). */
+  claimFamilies: readonly PieceFamily[] = families,
 ): VariantMark[] | undefined {
   const models = labels;
   labels = markLabels(sheet, labels);
@@ -468,7 +470,7 @@ export function variantMarksOut(
     return cands[Math.floor(cands.length / 2)];
   };
   const sizeOf = (rank: number) => run?.sizes.find((z) => z.rank === rank)?.label ?? String(rank);
-  const owned = pieceMarks(sheet, labels, families).map((pm): VariantMark => {
+  const owned = pieceMarks(sheet, labels, claimFamilies).map((pm): VariantMark => {
     const base = {
       label: pm.label,
       at: pm.at,
@@ -587,6 +589,25 @@ function sameGarment(
     const rep = cs[Math.floor(cs.length / 2)];
     return !!rep && joint.some((p) => pointInPoly(p, rep.outer));
   });
+}
+
+/** A piece the drawing ties to one model, as the manifest records it (D5). */
+export type PieceClaim = { seed: SeedId; label: string; evidence: string };
+
+/**
+ * The certain `piece` marks as claims: the seed belongs to that model alone (the session sets the
+ * seed's variant, so another model's run leaves it out). Uncertain marks claim nothing.
+ */
+export function pieceClaims(
+  sheet: Sheet,
+  labels: readonly string[],
+  families: readonly PieceFamily[],
+): PieceClaim[] {
+  return pieceMarks(sheet, labels, families).flatMap((m) =>
+    m.why
+      ? []
+      : [{ seed: m.seed, label: m.label, evidence: `the label «${m.text}» in its label block` }],
+  );
 }
 
 const BARE = /^(?:style|view|version|variante?)\s+([A-Z0-9]{1,3})$/i;

@@ -122,6 +122,8 @@ import {
   startSession,
   variantLabels,
   variantMarksOut,
+  pieceClaims,
+  markLabels,
   wallEditsInto,
   type PieceSession,
   type WallPieceEdit,
@@ -199,6 +201,9 @@ export type StageCtx = {
 };
 
 type Calib = { file: FileId; page: PageIndex; calibration: RasterCalibration };
+
+/** A seed's place, as the model claims are kept across pieces runs (seed ids are per run). */
+const claimKey = (p: PtMm) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
 
 const DEFAULT_OPTS: ExtractOpts = { sagittaMm: PATIMPORT.sagittaMm, keepFills: true };
 
@@ -384,6 +389,14 @@ export class Session {
   private sizeFaces: FacesEntry | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
+  /**
+   * VARIANTS: seeds a certain 'piece' mark tied to one model, by position (read on the run without
+   * a model; a model run then fills without the other model's pieces) — and that uncut fill.
+   */
+  private modelClaims = new Map<string, { label: string; piece: string; evidence: string }>();
+  private uncutFamilies: PieceFamily[] | null = null;
+  /** The model the last pieces run was filled for (null = none chosen). */
+  private pieceVariant: string | null = null;
   private semantics: SemanticsOutput | null = null;
   /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
   private passport: GarmentPassport | null = null;
@@ -482,6 +495,9 @@ export class Session {
       this.sheetRead = null;
       this.sheetAnswers = {};
       this.pieceKey = '';
+      this.modelClaims = new Map();
+      this.uncutFamilies = null;
+      this.pieceVariant = null;
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
@@ -1337,7 +1353,14 @@ export class Session {
     const superseded = new Set(
       given.filter((x) => x.origin === 'face' && clicked.has(blobOf(fm, x.at))).map((x) => x.id),
     );
-    const seeds = given.filter((x) => !superseded.has(x.id));
+    // VARIANTS: a seed the drawing ties to one model (a certain 'piece' mark, read earlier on this
+    // sheet) carries it — the fill leaves it out of another model's run
+    const seeds = given
+      .filter((x) => !superseded.has(x.id))
+      .map((x) => {
+        const c = x.variant == null ? this.modelClaims.get(claimKey(x.at)) : undefined;
+        return c ? { ...x, variant: c.label } : x;
+      });
     // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or
     // shared another seed's region), or it sits inside another piece's outline — takes it out of
     // the FILL, not only out of the result: such a seed makes its neighbour "merged", drops
@@ -1424,7 +1447,36 @@ export class Session {
     // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
     // own piece: its lines are not the host's internal lines.
     families = exceptNested(families);
-    const shown = seeds;
+    // VARIANTS: the pieces a model's own label block claims (D3: inside exactly one piece AND
+    // beside its texts) — read on the run without a model (or the first run there is); a claimed
+    // piece filled in another model's run (no earlier read) is left out of it here
+    const models = variantLabels(sheet.texts.map((t) => t.text));
+    if (!opts.variant || !this.uncutFamilies) {
+      if (!opts.variant) this.uncutFamilies = families;
+      this.modelClaims = new Map();
+      for (const c of pieceClaims(sheet, markLabels(sheet, models), families)) {
+        const sd = seeds.find((x) => x.id === c.seed);
+        if (sd)
+          this.modelClaims.set(claimKey(sd.at), {
+            label: c.label,
+            piece: sd.text?.text.trim() || `seed ${sd.id}`,
+            evidence: c.evidence,
+          });
+      }
+    }
+    const claimOf = (sd: Seed) => this.modelClaims.get(claimKey(sd.at));
+    if (opts.variant) {
+      const v = opts.variant.toLowerCase();
+      const other = new Set(
+        seeds.filter((sd) => (claimOf(sd)?.label.toLowerCase() ?? v) !== v).map((sd) => sd.id),
+      );
+      if (other.size) families = families.filter((f) => !other.has(f.seed));
+    }
+    this.pieceVariant = opts.variant ?? null;
+    const shown = seeds.map((sd) => {
+      const c = sd.variant == null ? claimOf(sd) : undefined;
+      return c ? { ...sd, variant: c.label } : sd;
+    });
     // what was set aside and is not a piece now
     const taken = new Set<number>();
     for (const x of given) {
@@ -1440,12 +1492,21 @@ export class Session {
     this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
     // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
     // of an instruction or overview page naming every model of the magazine
-    const variants = variantLabels(sheet.texts.map((t) => t.text));
+    const variants = models;
     // what tells those models apart on the drawing: each printed cutting line, its pieces, and —
     // before a model is chosen (the fill uncut) — those pieces as each model cuts them
     // (`[]` only when the models are proven one garment; absent = unknown, the wizard asks)
     const variantMarks = variants.length
-      ? variantMarksOut(sheet, set, variants, shown, families, run, !opts.variant)
+      ? variantMarksOut(
+          sheet,
+          set,
+          variants,
+          shown,
+          families,
+          run,
+          !opts.variant,
+          this.uncutFamilies ?? families,
+        )
       : undefined;
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
@@ -1790,7 +1851,20 @@ export class Session {
           }
         : {}),
       sizeEncoding: this.run?.encoding ?? 'single',
-      variant: sem.pieces.find((p) => p.variant)?.variant ?? null,
+      variant: this.pieceVariant ?? sem.pieces.find((p) => p.variant)?.variant ?? null,
+      // VARIANTS (D5): the pieces the drawing ties to one model, kept or left out, and why
+      ...(this.modelClaims.size
+        ? {
+            models: [...this.modelClaims.values()].map((c) => ({
+              piece: c.piece,
+              model: c.label,
+              kept:
+                this.pieceVariant == null ||
+                c.label.toLowerCase() === this.pieceVariant.toLowerCase(),
+              evidence: `${c.label} only — ${c.evidence}`,
+            })),
+          }
+        : {}),
     };
     // One file per fabric scope (F7 `planScopes`): lining copies renamed LIN_…, `fabrics` = the
     // scope. Walls come from F5's own map (unfolded halves mirrored, a derived `_R` mirrored) — the

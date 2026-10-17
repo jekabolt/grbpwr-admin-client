@@ -1829,6 +1829,12 @@ export type ManifestSource = {
   sheets?: { sheet: number; pages: number; maxResidualMm: Mm }[];
   sizeEncoding: SizeEncoding;
   variant: string | null;
+  /**
+   * VARIANTS (D5): the pieces the drawing ties to ONE model (a bare "Style A" in the piece's label
+   * block), with what it rests on — `kept` = written in this file (it is the chosen model's, or no
+   * model was chosen), else left out. Optional, shape-tolerant on read; absent = none tied.
+   */
+  models?: { piece: string; model: string; kept: boolean; evidence: string }[];
 };
 
 export type GateCheckId =
