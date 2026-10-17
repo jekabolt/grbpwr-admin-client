@@ -20,11 +20,11 @@ export function MaterialThumb({
   className,
 }: {
   material?: common_Material;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
   className?: string;
 }) {
   const url = materialImageUrl(material);
-  const dim = size === 'sm' ? 'h-8 w-8' : 'h-12 w-12';
+  const dim = size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-28 w-28' : 'h-12 w-12';
   return (
     <div
       className={cn(

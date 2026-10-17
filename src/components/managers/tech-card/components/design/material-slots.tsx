@@ -9,6 +9,7 @@ import { compositionToValue } from 'components/managers/product/components/compo
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -38,7 +39,7 @@ import {
   UNSET_PURPOSE,
 } from '../bom-purpose';
 import { defaultRoleFor, roleCollision } from '../bom-roles';
-import { bornBomLine } from '../form-writers';
+import { bornBomLine, releaseBomLineRefs } from '../form-writers';
 import { unitOptions } from '../tech-card-options';
 import { wireInt, type TechCardFormData } from '../schema';
 
@@ -221,9 +222,24 @@ export function MaterialSlots({
     setValue('bomItems', [...cur, line] as never, { shouldDirty: true });
   };
 
-  const removeSlot = (index: number) => {
-    const cur = (getValues('bomItems') ?? []) as unknown[];
-    setValue('bomItems', cur.filter((_, j) => j !== index) as never, { shouldDirty: true });
+  // ✕ СПРАШИВАЕТ, А НЕ СНОСИТ (владелец: «why can we remove a material slot without a single
+  // warning»). Подтверждение держит КЛЮЧ строки, а не индекс: пока окно открыто, массив может
+  // сдвинуться (черновик дописал строку), и индекс указал бы на соседа. Чистка ссылок — та же,
+  // что у вкладки BOM (`releaseBomLineRefs`): операции, детали, лейблы.
+  // Строка без ключа (старая, ни разу не пересохранённая) адресуется индексом — как раньше.
+  const [confirm, setConfirm] = useState<{ index: number; key: string } | null>(null);
+  const slotIndex = (c: { index: number; key: string }, list: Line[]) =>
+    c.key ? list.findIndex((l) => l.lineKey?.trim() === c.key) : c.index;
+  const confirmLine = confirm ? lines[slotIndex(confirm, lines)] : undefined;
+  const askRemove = (index: number) =>
+    setConfirm({ index, key: lines[index]?.lineKey?.trim() ?? '' });
+  const removeSlot = (c: { index: number; key: string }) => {
+    const cur = (getValues('bomItems') ?? []) as Line[];
+    const at = slotIndex(c, cur);
+    const line = cur[at];
+    if (!line || blockersOf(line).length > 0) return;
+    releaseBomLineRefs(getValues, setValue, line);
+    setValue('bomItems', cur.filter((_, j) => j !== at) as never, { shouldDirty: true });
   };
 
   const goToLine = (line: Line) =>
@@ -353,14 +369,10 @@ export function MaterialSlots({
                 {/* ОДНА КОЛОНКА НА ДВЕ ВЗАИМОИСКЛЮЧАЮЩИЕ ОСИ: назначение бывает только у
                     рулонного товара, вид — только вне его (и не у лейблов), поэтому в ячейке
                     всегда ровно один контрол или прочерк, и двух тут не бывает по построению. */}
-                <th data-align='left'>
-                  purpose / kind
-                </th>
+                <th data-align='left'>purpose / kind</th>
                 <th data-align='left'>composition</th>
                 <th>est usage</th>
-                <th data-align='left'>
-                  from
-                </th>
+                <th data-align='left'>from</th>
                 <th>
                   <span className='sr-only'>row actions</span>
                 </th>
@@ -382,7 +394,7 @@ export function MaterialSlots({
                     lines={lines}
                     readOnly={!!readOnly}
                     onGo={onGoTab ? goToLine : undefined}
-                    onRemove={removeSlot}
+                    onRemove={askRemove}
                     blockersOf={blockersOf}
                   />
                 )),
@@ -404,6 +416,24 @@ export function MaterialSlots({
           </div>
         )}
       </div>
+      <ConfirmationModal
+        open={!!confirmLine}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+        }}
+        onConfirm={() => {
+          if (confirm) removeSlot(confirm);
+          setConfirm(null);
+        }}
+        title={`remove slot ${confirmLine?.name?.trim() || 'unnamed'}?`}
+        confirmLabel='remove slot'
+        width='sm'
+        hideCancel
+      >
+        <Text size='micro' variant='label'>
+          its links in operations, pieces and labels are cleared
+        </Text>
+      </ConfirmationModal>
     </Section>
   );
 }
@@ -450,9 +480,7 @@ function SlotRow({
   const foreignPurpose =
     purposeSet && rollGoods && !purposeEditorOptions.some((o) => o.value === line.purpose);
   const foreignKind = kindSet && kindEligible && !kindItems.some((i) => i.value === line.kind);
-  const kindHome = kindSet
-    ? KIND_HOME_SECTION[line.kind as common_TechCardBomKind]
-    : undefined;
+  const kindHome = kindSet ? KIND_HOME_SECTION[line.kind as common_TechCardBomKind] : undefined;
 
   // Роль по умолчанию как ПОДСКАЗКА в пустом поле, а не как значение: назначение уже сказано, и
   // повторять его руками незачем — но и присваивать за человека нечего.
@@ -608,7 +636,13 @@ function SlotRow({
       >
         {rollGoods &&
           (readOnly ? (
-            <Text size='micro' variant='label' component='p' className='truncate' data-b16-axis={index}>
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='truncate'
+              data-b16-axis={index}
+            >
               {bomPurposeLabel(line.purpose)}
             </Text>
           ) : (
@@ -637,7 +671,13 @@ function SlotRow({
           ))}
         {kindEligible &&
           (readOnly ? (
-            <Text size='micro' variant='label' component='p' className='truncate' data-b16-axis={index}>
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='truncate'
+              data-b16-axis={index}
+            >
               {kindLabel(line.kind) ?? sectionShort(section)}
             </Text>
           ) : (
@@ -794,7 +834,9 @@ function SlotRow({
               size='xs'
               disabled={blocked}
               data-b16-remove={index}
-              data-inert={blocked ? `used by colourway ${blockers.map((b) => b.sku).join(', ')}` : undefined}
+              data-inert={
+                blocked ? `used by colourway ${blockers.map((b) => b.sku).join(', ')}` : undefined
+              }
               title={
                 blocked
                   ? `cut by colourway ${blockers.map((b) => b.sku).join(', ')} — remove it on the BOM tab`
@@ -829,15 +871,7 @@ function SlotRow({
  * Плита НЕ кнопка: ✕ и дверь — настоящие кнопки, и класть их внутрь третьей было бы невалидной
  * разметкой, которую браузер чинит на свой вкус.
  */
-function FibreField({
-  index,
-  raw,
-  readable,
-}: {
-  index: number;
-  raw: string;
-  readable: string;
-}) {
+function FibreField({ index, raw, readable }: { index: number; raw: string; readable: string }) {
   const { setValue } = useFormContext<TechCardFormData>();
   const [open, setOpen] = useState(false);
   const name = `bomItems.${index}.composition`;
