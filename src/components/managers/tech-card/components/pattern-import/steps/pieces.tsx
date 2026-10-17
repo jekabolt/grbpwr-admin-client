@@ -14,6 +14,7 @@ import type {
   PtMm,
   Seed,
   SetAside,
+  VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -230,44 +231,119 @@ type Problem =
   | { key: 'aside'; kind: 'aside' };
 
 /**
- * How one garment differs on the sheet (the engine's optional `pieces.out.variantMarks`, not in
- * the types yet): its label, where the label sits, its cutting lines, the pieces it changes (seed
- * ids), its own outlines, and whether the engine is unsure. Every field is read guarded.
+ * How one garment differs on the sheet: the engine's `pieces.out.variantMarks` (VARIANT-MARKS.md).
+ * A mark the client can show is sure and says something: a cutting line (`cut` — the garment cuts
+ * the piece there; `edge` — it keeps the piece's drawn edge where another garment cuts) or a piece
+ * of that garment alone (`piece`). Uncertain marks change nothing, so they draw nothing.
  */
-type VariantMark = {
-  label: string | null;
-  cutLines: PtMm[][];
-  pieces: Set<number>;
-  outlines: PtMm[][];
-  uncertain: boolean;
-};
-const isPt = (p: unknown): p is PtMm =>
-  !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
-// a line is a bare polyline or `{ size, poly }` (VARIANTS-2: cut lines and outlines per size)
-const polyOf = (l: unknown): unknown =>
-  l && typeof l === 'object' && !Array.isArray(l) ? (l as { poly?: unknown }).poly : l;
-const polylines = (v: unknown, min: number): PtMm[][] =>
-  Array.isArray(v)
-    ? v.map(polyOf).filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
-    : [];
-function variantMarksOf(out: unknown): VariantMark[] {
-  const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
-    .map((m) => ({
-      label: typeof m.label === 'string' ? m.label : null,
-      cutLines: polylines(m.cutLines, 2),
-      pieces: new Set(
-        Array.isArray(m.pieces) ? m.pieces.filter((x): x is number => Number.isFinite(x)) : [],
-      ),
-      outlines: polylines(m.outlines, 3),
-      uncertain: m.uncertain === true,
-    }));
-}
-/** A mark the client can show: sure, and it draws something. */
 const markShows = (m: VariantMark) =>
-  !m.uncertain && (m.cutLines.length > 0 || m.pieces.size > 0 || m.outlines.length > 0);
+  !m.uncertain && (m.cutLines.length > 0 || m.pieces.length > 0);
+/** Squared distance from `p` to the closed outline `poly` (its edges). */
+const distToOutline2 = (p: PtMm, poly: readonly PtMm[]) => {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    const ex = a.x + t * dx - p.x;
+    const ey = a.y + t * dy - p.y;
+    best = Math.min(best, ex * ex + ey * ey);
+  }
+  return best;
+};
+const polyLen = (l: readonly PtMm[]) => {
+  let n = 0;
+  for (let i = 1; i < l.length; i++) n += Math.hypot(l[i].x - l[i - 1].x, l[i].y - l[i - 1].y);
+  return n;
+};
+/** How far (mm) a cutting line's end may lie from an outline and still be ON it. */
+const ON_OUTLINE_MM = 1.5;
+/**
+ * A cutting line that may be drawn in the size `poly` is drawn in: both its ends lie on that
+ * outline (an `edge` line runs along it, a `cut` line ends on its sides / is its new cut edge).
+ * The engine gives one line per size and no size label; a bigger or other size's line ends a
+ * whole grade step (≈ 12 mm on kombinezon) off and is left out — no nearest fallback: a wrong
+ * size's line is worse than none. Smaller sizes' lines sharing the fold end still pass; the caller
+ * keeps the longest.
+ */
+/** VARIANTS-2: a cut line this far off its outline was drawn so in the PDF (`offMm`). */
+const CUT_OFF_MM = 1.5;
+const lineOn = (l: readonly PtMm[], poly: readonly PtMm[]) =>
+  l.length > 1 &&
+  poly.length > 2 &&
+  distToOutline2(l[0], poly) <= ON_OUTLINE_MM ** 2 &&
+  distToOutline2(l[l.length - 1], poly) <= ON_OUTLINE_MM ** 2;
+/**
+ * One garment's picture, every piece in ONE size: its pieces (a piece another garment owns is
+ * already left out by the caller), each in this garment's own outline where the engine cut one
+ * (`outlines` — given in one representative size, so the picture uses that size's rank for every
+ * piece), else as drawn in that rank; the pieces its marks touch tinted; its cutting lines — only
+ * per piece the one line drawn in the size shown (`lineOn`, the longest), none when no line is.
+ * `at.own: false` (the sheet under the pointer): the size on screen, the drawn outlines as given.
+ */
+function garmentPicture(
+  v: string,
+  fams: readonly PieceFamily[],
+  marks: readonly VariantMark[],
+  at: { rank: number; rankOfSize: (size: string) => number | null; own: boolean },
+) {
+  const mine = marks.filter((m) => m.label === v && markShows(m));
+  const given = at.own
+    ? mine
+        .flatMap((m) => m.outlines ?? [])
+        .map((o) => at.rankOfSize(o.size))
+        .find((r): r is number => r != null)
+    : undefined;
+  const rank = given ?? at.rank;
+  const own = new Map<number, PtMm[]>();
+  if (at.own)
+    for (const m of mine)
+      for (const o of m.outlines ?? [])
+        if (o.poly.length > 2 && at.rankOfSize(o.size) === rank) own.set(o.seed, o.poly);
+  const touched = new Set(mine.flatMap((m) => m.pieces));
+  const drawn = (f: PieceFamily) =>
+    (
+      f.candidates.find((c) => c.rank === rank) ??
+      f.candidates[Math.min(rank, f.candidates.length - 1)]
+    )?.outer ?? [];
+  const shapes = fams.map((f) => own.get(f.seed) ?? drawn(f));
+  const cutLines: PtMm[][] = [];
+  const cutOff: boolean[] = [];
+  for (const m of mine) {
+    if (m.kind === 'piece') continue;
+    // VARIANTS-2: a line carries its size (legend row / PDF layer / pen — never the nearest
+    // outline): the size shown takes exactly its own lines. `offMm > 1.5`: the PDF itself drew
+    // that line off its outline — drawn, but dashed and said so.
+    const sized = m.cutLines.filter((l) => l.size != null && at.rankOfSize(l.size) === rank);
+    for (const l of sized) {
+      cutLines.push(l.poly);
+      cutOff.push((l.offMm ?? 0) > CUT_OFF_MM);
+    }
+    // an unsized line (no evidence of its size): only by its ends on this size's outline, the
+    // longest per piece — no nearest fallback, a wrong size's line is worse than none
+    const bare = m.cutLines.filter((l) => l.size == null);
+    if (!bare.length) continue;
+    for (const sd of m.pieces) {
+      const i = fams.findIndex((f) => f.seed === sd);
+      if (i < 0) continue;
+      const on = bare.filter((l) => lineOn(l.poly, shapes[i]));
+      if (on.length) {
+        cutLines.push(on.reduce((x, y) => (polyLen(y.poly) > polyLen(x.poly) ? y : x)).poly);
+        cutOff.push(false);
+      }
+    }
+  }
+  return {
+    rank,
+    outlines: shapes,
+    tinted: fams.map((f) => touched.has(f.seed)),
+    cutLines,
+    cutOff,
+  };
+}
 
 /** What the canvas shows lit (blue) because a tile or a garment picture is under the pointer. */
 type Hot =
@@ -427,13 +503,13 @@ export function PiecesStep({
   // the same pieces. Without that report the client cannot know: the engine cuts a model along its
   // own cutting lines (pieces/variants.ts `variantKnives`) even when no seed carries the model,
   // so styles sharing every seed may still differ (kombinezon: A and B cut the waist and the
-  // bodice at different heights) → asked, each garment's picture with its cutting lines in blue
-  // once the engine draws them. The automatic pick goes through the shell's `autoAnswer` (a
+  // bodice at different heights) → asked, each garment's picture drawn from its marks
+  // (`garmentPicture`: its own outlines, its cutting lines in blue). The automatic pick goes through the shell's `autoAnswer` (a
   // running autopilot is resumed, not disarmed), once per run; said in the panel and the header
   // (D5: never silent), «change» asks the question ──
-  const marks = variantMarksOf(out);
-  const rawMarks = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  const marksSayNone = Array.isArray(rawMarks) && rawMarks.length === 0;
+  const marks: VariantMark[] = out?.variantMarks ?? [];
+  // `[]` (present, empty) = the engine proved the models identical; absent = unknown → ask
+  const marksSayNone = Array.isArray(out?.variantMarks) && out.variantMarks.length === 0;
   const pieceSetOf = (v: string) =>
     families
       .filter((f) => {
@@ -652,6 +728,8 @@ export function PiecesStep({
   for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
   const focusSeeds = new Set(focus?.items.map((x) => x.seed) ?? []);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
+  /** The rank of a size named by its source label (the engine's `outlines[].size`). */
+  const rankOfSize = (size: string) => runSizes.find((z) => z.label === size)?.rank ?? null;
   const pickTool = (t: Tool) => {
     setGapA(null);
     setTool(t);
@@ -1170,6 +1248,11 @@ export function PiecesStep({
     }),
   }));
   const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
+  /** The garment under the pointer: its cutting lines on the sheet, in the size on screen. */
+  const hotGarmentPic = hotGarment
+    ? garmentPicture(hotGarment.v, hotGarment.fams, marks, { rank, rankOfSize, own: false })
+    : null;
+  const hotGarmentLines = hotGarmentPic?.cutLines ?? [];
   const hotSeeds =
     hot?.kind === 'piece'
       ? new Set([hot.seed])
@@ -1221,12 +1304,17 @@ export function PiecesStep({
   );
   const quizLeft = quiz.filter((it) => !seen.asideDone.includes(it.a.id));
   const quizNow = active?.kind === 'aside' ? quizLeft[0] ?? null : null;
-  /** The quiz is over: everything left keeps its current guess; the shell moves on if nothing else is asked. */
+  /**
+   * The quiz is over: everything left keeps its current guess, and the operator has looked at the
+   * outlines set aside — said to the engine (UXHOOKS `inputs.asideReviewed`: per tile sheet, the
+   * digest of the set as it is AFTER the last answer's re-run, so the answer itself is not a
+   * "changed set"), which drops the step's offer. The shell then moves on if nothing else is asked.
+   */
   const quizEnd = (answer?: Promise<unknown>) => {
     seen.asideOk = true;
     setHot(null);
     bump((n) => n + 1);
-    go(answer ?? Promise.resolve(), { pastOffer: true });
+    go(Promise.resolve(answer).then(() => api.reviewAsides()));
   };
   const quizAnswer = (piece: boolean) => {
     if (!quizNow) return;
@@ -1555,6 +1643,29 @@ export function PiecesStep({
                         />
                       );
                     })}
+                  {hotGarmentLines.length > 0 && (
+                    <g
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={unit * 3}
+                      strokeLinecap='round'
+                      pointerEvents='none'
+                    >
+                      {hotGarmentLines.map((l, i) => (
+                        <polyline
+                          key={`gl${i}`}
+                          points={ptsAttr(l)}
+                          strokeDasharray={
+                            hotGarmentPic?.cutOff[i] ? `${unit * 6} ${unit * 4}` : undefined
+                          }
+                        >
+                          {hotGarmentPic?.cutOff[i] && (
+                            <title>drawn off its outline in the PDF</title>
+                          )}
+                        </polyline>
+                      ))}
+                    </g>
+                  )}
                   {families.map((f) => {
                     const c = cand(f);
                     if (!c.leakAt) return null;
@@ -1957,9 +2068,15 @@ export function PiecesStep({
                   {answers.map((x, i) => {
                     const g = garments.find((y) => y.v === x.label);
                     const on = hot?.kind === 'garment' && hot.v === x.label;
-                    // how this garment differs, when the engine says (sure marks only)
-                    const mk = marks.filter((m) => m.label === x.label && markShows(m));
-                    const changed = new Set(mk.flatMap((m) => [...m.pieces]));
+                    // how this garment differs, when the engine says (sure marks only): its own
+                    // outlines, its cutting lines in blue, the pieces it changes tinted
+                    const pic = garmentPicture(x.label, g?.fams ?? [], marks, {
+                      rank,
+                      rankOfSize,
+                      own: true,
+                    });
+                    // the card's own suggestion (first in the list) is shown picked in advance
+                    const suggested = x.label === named?.pick;
                     return (
                       <button
                         key={x.label}
@@ -1983,23 +2100,30 @@ export function PiecesStep({
                         onPointerLeave={() => setHot(null)}
                         onFocus={() => setHot({ kind: 'garment', v: x.label })}
                         onBlur={() => setHot(null)}
-                        className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+                        className={`flex flex-col gap-2 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default ${suggested ? 'border-2 border-textColor' : 'border border-borderColor'}`}
+                        data-suggested={suggested || undefined}
                         style={on ? { borderColor: SHEET_INK.blue } : undefined}
                       >
                         <ModelThumb
                           sheet={sheetBox}
-                          outlines={(g?.fams ?? []).map((f) => cand(f).outer)}
-                          tinted={(g?.fams ?? []).map((f) => changed.has(f.seed))}
-                          cutLines={mk.flatMap((m) => m.cutLines)}
-                          extra={mk.flatMap((m) => m.outlines)}
+                          outlines={pic.outlines}
+                          tinted={pic.tinted}
+                          cutLines={pic.cutLines}
+                          cutOff={pic.cutOff}
                           hot={on}
                           className='w-full'
-                          style={{ height: 150 }}
+                          style={{ height: 240 }}
                         />
                         <Text size='micro' component='span'>
                           {doing === x.label && session.busy ? 'opening… · ' : ''}
-                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')}
-                          {x.title ? ' · named on the card' : ''}
+                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')} · size{' '}
+                          {labelOf(pic.rank)}
+                          {pic.cutLines.length ? ' · its cutting line in blue' : ''}
+                          {suggested && named
+                            ? named.strong
+                              ? ' · the card names it'
+                              : ' · suggested by the card'
+                            : ''}
                         </Text>
                       </button>
                     );

@@ -40,7 +40,7 @@ import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { patternNameOfFile, uploadPatternFile } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
+import { Placeholder, PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 import {
@@ -2119,7 +2119,28 @@ export function PatternsField({
     return (
       <>
         {headerPortal}
-        <Placeholder dashed label='add fabric lines in the BOM first' className='h-[84px] w-full' />
+        {/* owner 17.10: the empty block is the door that creates the fabric slot — the BOM tab
+            opens with the catalog picker already on the fabric section (bom-field reads addSlot) */}
+        {canEdit ? (
+          <button
+            type='button'
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.set('tab', 'bom');
+              next.set('addSlot', 'TECH_CARD_BOM_SECTION_FABRIC');
+              setParams(next, { replace: true });
+            }}
+            style={PLACEHOLDER_SURFACE}
+            className={cn(
+              placeholderClass({ dashed: true }),
+              'h-[84px] w-full cursor-pointer hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+            )}
+          >
+            + fabric slot
+          </button>
+        ) : (
+          <Placeholder dashed label='add fabric lines in the BOM first' className='h-[84px] w-full' />
+        )}
       </>
     );
   }
