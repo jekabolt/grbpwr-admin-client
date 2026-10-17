@@ -12,6 +12,7 @@ import {
   countMismatch,
   countsHold,
   shapeOf,
+  shapeOfCut,
   turnMismatch,
 } from 'lib/pattern-import/semantics/shape-check';
 import { readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
@@ -32,6 +33,9 @@ type FamRec = {
   diff: string;
   /** the turn-structure difference ('' = none) — holds the export */
   turn: string;
+  /** SILENT-TAIL: a cut-line turn difference the drawn (seam) lines do not have — the allowance
+   * offset's corner construction, not held ('' = none) */
+  construction?: string;
   /** the notch / drill count difference ('' = none) — a warning (holds with SHAPE_COUNTS_HOLD) */
   count: string;
   /** the family is written and every one of its blocks passes the gate */
@@ -159,7 +163,16 @@ function analyse(
       d
         ? `${d.what} [${p.sizes[d.a].sizeToken} vs ${p.sizes[d.b].sizeToken}${d.at ? ` at ${d.at.map((q) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`).join(' ')}` : ''}]`
         : '';
-    const turn = fmt(turnMismatch(sh));
+    // the gate's rule (gate/shape.ts): on a seam-drawn piece a cut-line turn difference holds
+    // only when the seam lines differ too
+    const tCut = turnMismatch(sh);
+    const drawn =
+      p.allowance.meaning === 'seam' && p.sizes.every((z) => (z.seam?.length ?? 0) >= 3)
+        ? p.sizes.map((z, i) => shapeOfCut(z.seam!, sh[i].notches, sh[i].drills))
+        : null;
+    const tShape = tCut && drawn && !turnMismatch(drawn) ? null : tCut;
+    const turn = fmt(tShape);
+    const construction = tCut && !tShape ? fmt(tCut) : '';
     const count = fmt(countMismatch(sh));
     recs.push({
       identity: p.identity,
@@ -170,6 +183,7 @@ function analyse(
       corners: sh.map((x) => x.corners.length),
       diff: count || turn,
       turn,
+      ...(construction ? { construction } : {}),
       count,
       passing: written.has(p.identity) && !bad.has(p.identity),
     });
