@@ -192,6 +192,11 @@ export function gradeNotches(
   sizes: readonly NgSize[],
   seed: number,
   answers: Readonly<Record<string, LoneAnswer>> = {},
+  /** place graded notches automatically (false: only read the tracks and ask — every size already
+   * draws as many notches as the others, so a missing one is not proven) */
+  transfer = true,
+  /** appended to every question key: the piece's geometry (a changed outline asks again) */
+  keyTag = '',
 ): NgResult {
   const res: NgResult = { ok: false, add: [], remove: [], lone: [], tracks: [], inconsistent: 0 };
   if (sizes.length < 2) return { ...res, why: 'one size' };
@@ -272,8 +277,11 @@ export function gradeNotches(
     // order (a graded notch may slide far along its edge; the fit below judges the places)
     const c0 = byK.get(ref)!.length;
     if ([...byK.values()].every((qs) => qs.length === c0)) {
-      for (const k of rest) byK.get(k)!.forEach((q, i) => mine[i].m.push(q));
-      tracks.push(...mine);
+      const zip: Track[] = byK.get(ref)!.map((q) => ({ e, m: [q] }));
+      for (const k of rest) byK.get(k)!.forEach((q, i) => zip[i].m.push(q));
+      // by order; a track whose places do not grade (S:A, M:A, L:B) is judged inconsistent below
+      // and nothing moves on it (pairing it apart would turn A and B into two "graded" notches)
+      tracks.push(...zip);
       continue;
     }
     for (const k of rest) {
@@ -381,7 +389,7 @@ export function gradeNotches(
     let answer: LoneAnswer | undefined;
     if (ms.length === 1 && sizes.length >= 3) {
       const q = ms[0];
-      const key = loneKey(seed, sizes[q.k].token, tr.e, q.t);
+      const key = `${loneKey(seed, sizes[q.k].token, tr.e, q.t)}${keyTag}`;
       answer = answers[key];
       res.lone.push({
         k: q.k,
@@ -394,7 +402,7 @@ export function gradeNotches(
       });
       if (answer === 'none') res.remove.push({ k: q.k, n: q.n });
       if (answer !== 'all') continue;
-    } else if (!consistent) continue;
+    } else if (!consistent || !transfer) continue;
     const pts = ms.map((q) => ({ rank: rankOf(q.k), t: q.t }));
     const depth = [...ms.map((q) => q.depth)].sort((a, b) => a - b)[ms.length >> 1];
     const from = [...ms].sort((a, b) => rankOf(a.k) - rankOf(b.k)).map((q) => sizes[q.k].token);
@@ -404,7 +412,8 @@ export function gradeNotches(
       if (ms.some((q) => q.k === k)) continue;
       const r = rankOf(k);
       // past the outermost drawn copy by more than two steps: not graded that far
-      if (r < lo - EXTRAP_MAX_RANKS || r > hi + EXTRAP_MAX_RANKS) continue;
+      // (the operator's "in every size" has no such limit)
+      if (answer !== 'all' && (r < lo - EXTRAP_MAX_RANKS || r > hi + EXTRAP_MAX_RANKS)) continue;
       const t = tAtRank(pts, r);
       // the place runs off its edge (past a grade point): the notch's place in this size is not
       // known on the canonical topology — no guess

@@ -204,6 +204,7 @@ export function countNotesOfBlocks(
     drills: number;
     internal?: number;
     notchesGraded?: number;
+    notchesChorded?: number;
   }[],
   uniToken = 'UNI',
   /** GRADE P1: per identity, the count kinds the operator answered "intended" */
@@ -225,12 +226,19 @@ export function countNotesOfBlocks(
       if (!bs.some((b) => v(b) !== v(bs[0]))) continue;
       const line = `${k}: ${bs.map((b) => `${b.sizeToken} ${v(b)}`).join(', ')}`;
       if (intended.has(k)) yes.push(line);
-      // internal lines: recorded only when the operator answered (the gate counts notches / drills)
-      else if (k !== 'internal') parts.push(line);
+      // internal lines: the gate counts notches / drills; an internal-line difference is recorded
+      // while the lines are few enough to be the piece's marks (buttonholes) — not reader fragments
+      else if (k !== 'internal' || bs.every((b) => v(b) <= 12)) parts.push(line);
     }
     if (parts.length) out.push({ identity, note: `${parts.join('; ')} — one piece, one shape` });
     if (yes.length) out.push({ identity, note: `${yes.join('; ')} — intended (operator)` });
     // GRADE P1 (D5): notches placed from the sizes that draw them
+    const ch = bs.filter((b) => (b.notchesChorded ?? 0) > 0);
+    if (ch.length)
+      out.push({
+        identity,
+        note: `notches drawn as the outline, cut line by the chord: ${ch.map((b) => `${b.sizeToken} ${b.notchesChorded}`).join(', ')}`,
+      });
     const g = bs.filter((b) => (b.notchesGraded ?? 0) > 0);
     if (g.length)
       out.push({

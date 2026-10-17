@@ -409,9 +409,8 @@ export const ANSWERS: Record<
       'operatorFold',
       'fileAllowance',
       'foldListChecked',
-      // GRADE P1: the one-shape questions (a lone notch, a count difference) — the operator's
-      // answers only (a replay of theirs); the autopilot never gives one (D3/D5)
-      'gradeAnswers',
+      // GRADE P1: `gradeAnswers` (a lone notch, a count difference) is deliberately NOT here — the
+      // operator's answer only; no resolver (autopilot, replay) may give it (D3/D5, Codex r1)
     ],
   },
   fabrics: { events: ['fabrics'], inputs: [] },

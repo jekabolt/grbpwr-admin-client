@@ -1236,6 +1236,7 @@ export function buildPieceSpecsDetailed(
             at: b.at,
             seg: [b.at, { x: b.at.x + b.inward.x * d, y: b.at.y + b.inward.y * d }],
             depthMm: d,
+            chord: true,
           });
         }
         notchChords.set(

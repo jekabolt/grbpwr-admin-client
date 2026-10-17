@@ -361,6 +361,51 @@ function units() {
     }));
     ok('u11 a dip in ONE size → not a notch (stays as drawn)', notchBumpSeries(lone).size === 0);
   }
+  // u12 (Codex r1): "in every size" reaches every size, however far from the drawn one
+  {
+    const sizes = R.map((r) => sizeSpec(r, r === 0 ? [notch(rightAt(r, 0.5))] : []));
+    const lone = gradeShape(7, sizes, 'cut').asks.find((a) => a.kind === 'notch-lone');
+    const all = lone ? gradeShape(7, sizes, 'cut', { [lone.key]: 'all' }) : null;
+    ok(
+      'u12 answer all from XS → XL (4 ranks away) has it too',
+      !!all && all.sizes.every((x) => x.notches.length === 1),
+    );
+  }
+  // u13 (Codex r1): equal counts at places that do not grade (S:A, M:A, L:B) → nothing placed
+  {
+    const sizes = R.map((r) => sizeSpec(r, [notch(bottomAt(r, r < 3 ? 0.2 : 0.7))]));
+    const g = gradeShape(7, sizes, 'cut');
+    ok(
+      'u13 equal counts, places apart → nothing placed, said in the notes',
+      g.sizes.every((x) => x.notches.length === 1) && g.notes.some((n) => /do not grade/.test(n)),
+      g.notes.join(' | '),
+    );
+  }
+  // u14 (Codex r1): a changed outline (same counts) asks again — the old answer does nothing
+  {
+    const drill = (at: PtMm) => ({
+      kind: 'drill' as const,
+      origin: 'detected' as const,
+      ranges: [],
+      confidence: 1,
+      at,
+    });
+    const mk = (area: number) =>
+      R.map((r) =>
+        sizeSpec(r, [], {
+          areaMm2: area + r,
+          drills: Array.from({ length: r < 3 ? 5 : 7 }, (_, i) =>
+            drill({ x: 50 + 10 * i, y: 100 }),
+          ),
+        }),
+      );
+    const a = gradeShape(7, mk(1000), 'cut').asks.find((x) => x.kind === 'counts');
+    const z = a ? gradeShape(7, mk(5000), 'cut', { [a.key]: 'intended' }) : null;
+    ok(
+      'u14 answer bound to the outline: another outline → not intended',
+      !!z && z.intended.length === 0,
+    );
+  }
   return fails;
 }
 

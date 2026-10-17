@@ -1344,6 +1344,11 @@ export type NotchFeature = FeatureBase & {
    * presented as drawn. Absent = drawn (or derived by an unfold).
    */
   graded?: { from: string[]; answered?: boolean };
+  /**
+   * GRADE P1: drawn AS the outline (a notch-shaped bump / dip, the same in ≥ 2 sizes) — the line
+   * crosses it by the chord, counted in ManifestBlock.notchesChorded (the outline there is not as drawn).
+   */
+  chord?: true;
 };
 export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
 /**
@@ -2080,6 +2085,8 @@ export type ManifestBlock = {
   notches: number;
   /** GRADE P1: of `notches`, how many are not drawn in this size but graded from the others. */
   notchesGraded?: number;
+  /** GRADE P1: of `notches`, how many were drawn as the outline and are crossed by the chord. */
+  notchesChorded?: number;
   drills: number;
   internal: number;
   hasSeam: boolean;

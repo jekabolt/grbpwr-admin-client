@@ -79,14 +79,19 @@ export function gradeShape(
   if (gradeP1Off() || sizes.length < 2) return { sizes, notes, asks, intended: [] };
   // ── 1 · notches across sizes (only when the sizes' counts differ: equal counts are one shape)
   const nc = sizes.map((s) => s.notches.length);
+  // every question carries the piece's geometry: a changed outline asks again (Codex r1)
+  const geo = `|g${fnv(sizes.map((s) => `${s.sizeToken}:${Math.round(s.areaMm2 / 10)}`).join(','))}`;
+  const differ = nc.some((n) => n !== nc[0]);
   // a cut line that turns differently in one size is not one shape (G5 holds it): no notch is
   // carried between outlines that are not the same piece
-  const turns = nc.some((n) => n !== nc[0]) ? turnMismatch(sizes.map((s) => shapeOf(s))) : null;
+  const turns = nc.some((n) => n > 0) ? turnMismatch(sizes.map((s) => shapeOf(s))) : null;
   if (turns)
     notes.push(
       `notches across sizes not compared: ${sizes[turns.a].sizeToken}'s outline turns where ${sizes[turns.b].sizeToken}'s does not`,
     );
-  if (nc.some((n) => n !== nc[0]) && !turns) {
+  // equal counts: the tracks are still read — a notch at another place in one size is asked, but
+  // nothing is placed (no size lacks a notch the others draw)
+  if (nc.some((n) => n > 0) && !turns) {
     const ringOf = (s: PieceSizeSpec) => (meaning === 'seam' && s.seam ? s.seam : s.cut);
     const loneAns: Record<string, LoneAnswer> = {};
     for (const [k, v] of Object.entries(answers))
@@ -100,6 +105,8 @@ export function gradeShape(
       })),
       seed,
       loneAns,
+      differ,
+      geo,
     );
     if (!g.ok) notes.push(`notches across sizes not compared: ${g.why}`);
     if (g.ok) {
@@ -162,7 +169,7 @@ export function gradeShape(
     // (buttonholes, a pocket line); dozens of line pieces per size are the reader's fragments, not a
     // count the operator can confirm
     if (f === 'internal' && per.some((x) => x.n > INTERNAL_ASK_MAX)) continue;
-    const key = `counts|${seed}|${f}|${per.map((x) => `${x.size}:${x.n}`).join(',')}`;
+    const key = `counts|${seed}|${f}|${per.map((x) => `${x.size}:${x.n}`).join(',')}${geo}`;
     const yes = answers[key] === 'intended';
     if (yes) intended.push(f);
     asks.push({
@@ -180,4 +187,14 @@ export function gradeShape(
     });
   }
   return { sizes, notes, asks, intended };
+}
+
+/** FNV-1a 32 of a string, hex (the question key's geometry tag). */
+function fnv(t: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) {
+    h ^= t.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
 }

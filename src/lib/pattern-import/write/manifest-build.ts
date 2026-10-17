@@ -71,6 +71,10 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     ...(b.size.notches.some((n) => n.graded)
       ? { notchesGraded: b.size.notches.filter((n) => n.graded).length }
       : {}),
+    // GRADE P1: notches drawn as the outline, the line crossing them by the chord (not as drawn)
+    ...(b.size.notches.some((n) => n.chord)
+      ? { notchesChorded: b.size.notches.filter((n) => n.chord).length }
+      : {}),
     drills: b.drills.length,
     internal: b.internal.length,
     hasSeam: !!b.seam,

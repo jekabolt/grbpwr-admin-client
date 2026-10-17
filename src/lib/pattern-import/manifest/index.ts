@@ -806,6 +806,15 @@ export function validateManifest(x: unknown): ConversionManifest {
       !(isInt(b.notchesGraded) && b.notchesGraded >= 1 && b.notchesGraded <= (b.notches as number))
     )
       fail(`${p}.notchesGraded`, 'not an integer 1…notches');
+    if (
+      b.notchesChorded !== undefined &&
+      !(
+        isInt(b.notchesChorded) &&
+        b.notchesChorded >= 1 &&
+        b.notchesChorded <= (b.notches as number)
+      )
+    )
+      fail(`${p}.notchesChorded`, 'not an integer 1…notches');
     if (!isBool(b.hasSeam)) fail(`${p}.hasSeam`, 'not a boolean');
     // F14f: optional (a pre-F14f manifest has none and is then not trusted by the card), but
     // when present it is checked strictly and bounded — it is read on the card's parse path.
@@ -853,6 +862,7 @@ export function validateManifest(x: unknown): ConversionManifest {
       hasGrain: b.hasGrain,
       notches: b.notches as number,
       ...(b.notchesGraded !== undefined ? { notchesGraded: b.notchesGraded as number } : {}),
+      ...(b.notchesChorded !== undefined ? { notchesChorded: b.notchesChorded as number } : {}),
       drills: b.drills as number,
       internal: b.internal as number,
       hasSeam: b.hasSeam,
