@@ -254,61 +254,77 @@ const distToOutline2 = (p: PtMm, poly: readonly PtMm[]) => {
   }
   return best;
 };
+const polyLen = (l: readonly PtMm[]) => {
+  let n = 0;
+  for (let i = 1; i < l.length; i++) n += Math.hypot(l[i].x - l[i - 1].x, l[i].y - l[i - 1].y);
+  return n;
+};
+/** How far (mm) a cutting line's end may lie from an outline and still be ON it. */
+const ON_OUTLINE_MM = 1.5;
 /**
- * One garment's picture: its pieces (a piece another garment owns is already left out by the
- * caller), each in this garment's own outline where the engine cut one (`outlines`, one
- * representative size), else as drawn; the pieces its marks touch tinted; and its cutting lines —
- * per piece the one size's line that runs along the outline shown (the engine gives one line per
- * size: drawn all, they blur into a band), every line where there is no outline to match.
+ * A cutting line that may be drawn in the size `poly` is drawn in: both its ends lie on that
+ * outline (an `edge` line runs along it, a `cut` line ends on its sides / is its new cut edge).
+ * The engine gives one line per size and no size label; a bigger or other size's line ends a
+ * whole grade step (≈ 12 mm on kombinezon) off and is left out — no nearest fallback: a wrong
+ * size's line is worse than none. Smaller sizes' lines sharing the fold end still pass; the caller
+ * keeps the longest.
+ */
+const lineOn = (l: readonly PtMm[], poly: readonly PtMm[]) =>
+  l.length > 1 &&
+  poly.length > 2 &&
+  distToOutline2(l[0], poly) <= ON_OUTLINE_MM ** 2 &&
+  distToOutline2(l[l.length - 1], poly) <= ON_OUTLINE_MM ** 2;
+/**
+ * One garment's picture, every piece in ONE size: its pieces (a piece another garment owns is
+ * already left out by the caller), each in this garment's own outline where the engine cut one
+ * (`outlines` — given in one representative size, so the picture uses that size's rank for every
+ * piece), else as drawn in that rank; the pieces its marks touch tinted; its cutting lines — only
+ * per piece the one line drawn in the size shown (`lineOn`, the longest), none when no line is.
+ * `at.own: false` (the sheet under the pointer): the size on screen, the drawn outlines as given.
  */
 function garmentPicture(
   v: string,
-  fams: readonly { seed: number; outer: PtMm[] }[],
+  fams: readonly PieceFamily[],
   marks: readonly VariantMark[],
-  /** false: keep the outlines as given (the sheet's size on screen), match the lines to them. */
-  ownShapes = true,
+  at: { rank: number; rankOfSize: (size: string) => number | null; own: boolean },
 ) {
   const mine = marks.filter((m) => m.label === v && markShows(m));
+  const given = at.own
+    ? mine
+        .flatMap((m) => m.outlines ?? [])
+        .map((o) => at.rankOfSize(o.size))
+        .find((r): r is number => r != null)
+    : undefined;
+  const rank = given ?? at.rank;
   const own = new Map<number, PtMm[]>();
-  for (const m of mine)
-    for (const o of m.outlines ?? []) if (o.poly.length > 2) own.set(o.seed, o.poly);
+  if (at.own)
+    for (const m of mine)
+      for (const o of m.outlines ?? [])
+        if (o.poly.length > 2 && at.rankOfSize(o.size) === rank) own.set(o.seed, o.poly);
   const touched = new Set(mine.flatMap((m) => m.pieces));
-  const shapes = fams.map((f) => (ownShapes ? own.get(f.seed) : undefined) ?? f.outer);
+  const drawn = (f: PieceFamily) =>
+    (
+      f.candidates.find((c) => c.rank === rank) ??
+      f.candidates[Math.min(rank, f.candidates.length - 1)]
+    )?.outer ?? [];
+  const shapes = fams.map((f) => own.get(f.seed) ?? drawn(f));
   const cutLines: PtMm[][] = [];
   for (const m of mine) {
     if (m.kind === 'piece') continue;
-    const lines = m.cutLines.filter((l) => l.length > 1);
-    const shown = m.pieces.flatMap((sd) => {
+    for (const sd of m.pieces) {
       const i = fams.findIndex((f) => f.seed === sd);
-      return i >= 0 ? [shapes[i]] : [];
-    });
-    if (!shown.length || !lines.length) {
-      cutLines.push(...lines);
-      continue;
-    }
-    for (const poly of shown) {
-      if (poly.length < 3) continue;
-      // the line that lies ON this outline: both ends and the middle closest to its edges
-      let best: PtMm[] | null = null;
-      let bestD = Infinity;
-      for (const l of lines) {
-        const d =
-          distToOutline2(l[0], poly) +
-          distToOutline2(l[l.length - 1], poly) +
-          distToOutline2(l[Math.floor(l.length / 2)], poly);
-        if (d < bestD) {
-          bestD = d;
-          best = l;
-        }
-      }
-      if (best) cutLines.push(best);
+      if (i < 0) continue;
+      // the size's own line spans the whole edge; a smaller size's line (same fold / CF end)
+      // lies on this outline too, as a part of it — so: the LONGEST line on the outline, one
+      const on = m.cutLines.filter((l) => lineOn(l, shapes[i]));
+      if (on.length) cutLines.push(on.reduce((x, y) => (polyLen(y) > polyLen(x) ? y : x)));
     }
   }
   return {
+    rank,
     outlines: shapes,
     tinted: fams.map((f) => touched.has(f.seed)),
     cutLines,
-    changes: touched.size,
   };
 }
 
@@ -695,6 +711,8 @@ export function PiecesStep({
   for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
   const focusSeeds = new Set(focus?.items.map((x) => x.seed) ?? []);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
+  /** The rank of a size named by its source label (the engine's `outlines[].size`). */
+  const rankOfSize = (size: string) => runSizes.find((z) => z.label === size)?.rank ?? null;
   const pickTool = (t: Tool) => {
     setGapA(null);
     setTool(t);
@@ -1215,12 +1233,8 @@ export function PiecesStep({
   const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
   /** The garment under the pointer: its cutting lines on the sheet, in the size on screen. */
   const hotGarmentLines = hotGarment
-    ? garmentPicture(
-        hotGarment.v,
-        hotGarment.fams.map((f) => ({ seed: f.seed, outer: cand(f).outer })),
-        marks,
-        false,
-      ).cutLines
+    ? garmentPicture(hotGarment.v, hotGarment.fams, marks, { rank, rankOfSize, own: false })
+        .cutLines
     : [];
   const hotSeeds =
     hot?.kind === 'piece'
@@ -2029,11 +2043,11 @@ export function PiecesStep({
                     const on = hot?.kind === 'garment' && hot.v === x.label;
                     // how this garment differs, when the engine says (sure marks only): its own
                     // outlines, its cutting lines in blue, the pieces it changes tinted
-                    const pic = garmentPicture(
-                      x.label,
-                      (g?.fams ?? []).map((f) => ({ seed: f.seed, outer: cand(f).outer })),
-                      marks,
-                    );
+                    const pic = garmentPicture(x.label, g?.fams ?? [], marks, {
+                      rank,
+                      rankOfSize,
+                      own: true,
+                    });
                     // the card's own suggestion (first in the list) is shown picked in advance
                     const suggested = x.label === named?.pick;
                     return (
@@ -2074,7 +2088,8 @@ export function PiecesStep({
                         />
                         <Text size='micro' component='span'>
                           {doing === x.label && session.busy ? 'opening… · ' : ''}
-                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')}
+                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')} · size{' '}
+                          {labelOf(pic.rank)}
                           {pic.cutLines.length ? ' · its cutting line in blue' : ''}
                           {suggested && named
                             ? named.strong
