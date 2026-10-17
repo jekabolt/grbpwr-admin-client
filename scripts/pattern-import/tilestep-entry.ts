@@ -123,8 +123,10 @@ async function cases(): Promise<Case[]> {
 
 // ── variants of the line ─────────────────────────────────────────────────────────────────────
 
-type Variant = 'line' | 'noline' | 'wrongstep' | 'badgrid' | 'v2';
-const VARIANTS: Variant[] = ['line', 'noline', 'wrongstep', 'badgrid', 'v2'];
+type Variant = 'line' | 'noline' | 'wrongstep' | 'farstep' | 'badgrid' | 'v2';
+// farstep: a step far off (−80 mm across and down, > 25 % — not a «jump»): only the drawing
+// meeting at the declared step can catch it (Codex review 17.10 #1)
+const VARIANTS: Variant[] = ['line', 'noline', 'wrongstep', 'farstep', 'badgrid', 'v2'];
 
 function withVariant(plan: PdfPlan, v: Variant): PdfPlan {
   const pages = plan.pages.map((p, i) => {
@@ -135,6 +137,8 @@ function withVariant(plan: PdfPlan, v: Variant): PdfPlan {
       let s = m.s;
       if (v === 'wrongstep')
         s = s.replace(/step=([\d.]+)x([\d.]+)mm/, (_, a, b) => `step=${+a + 10}x${+b}mm`);
+      if (v === 'farstep')
+        s = s.replace(/step=([\d.]+)x([\d.]+)mm/, (_, a, b) => `step=${+a - 80}x${+b - 80}mm`);
       if (v === 'badgrid') s = s.replace(/grid=(\d+)x/, (_, a) => `grid=${+a + 1}x`);
       if (v === 'v2') s = s.replace('GRBPWR-TILES v1', 'GRBPWR-TILES v2');
       return [{ ...m, s }];
@@ -307,7 +311,7 @@ async function survey(files: string[]) {
           pitchFrom: g?.pitch.from ?? sheet.pitchFrom ?? null,
           layoutFrom: g?.layoutFrom ?? null,
           refused: (sheet.refused ?? []).length,
-          tilestepStop: (sheet.refused ?? []).some((r) => /is contradicted by the drawing/.test(r)),
+          tilestepStop: (sheet.refused ?? []).some((r) => /no reliable tile step/.test(r)),
           tilesLine: sheet.warnings.filter((w) => /tiles line/.test(w)).length,
           ms: Date.now() - t0,
         };

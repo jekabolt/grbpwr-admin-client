@@ -379,7 +379,7 @@ export function assembleGroup(
     cellOf: (idx: number) => { row: number; col: number } | null,
   ) => {
     const agree = { x: 0, y: 0 };
-    const jumps: { axis: 'x' | 'y'; step: number }[] = [];
+    const jumps: { axis: 'x' | 'y'; step: number; pair: string }[] = [];
     for (const l of recLoose) {
       if (l.a.rot !== 0 || l.b.rot !== 0) continue;
       const ca = cellOf(l.a.idx);
@@ -397,14 +397,50 @@ export function assembleGroup(
       }
       const near = (step: number, want: number) =>
         Math.abs(step - want) > 1 && Math.abs(step - want) < 0.25 * Math.abs(want);
+      const pair = `${l.a.key}|${l.b.key}`;
       if (!dr && Math.abs(l.dy - dc * R.dy) <= 1 && near(l.dx / dc, R.dx))
-        jumps.push({ axis: 'x', step: l.dx / dc });
+        jumps.push({ axis: 'x', step: l.dx / dc, pair });
       if (!dc && Math.abs(l.dx - dr * B.dx) <= 1 && near(l.dy / dr, B.dy))
-        jumps.push({ axis: 'y', step: -l.dy / dr });
+        jumps.push({ axis: 'y', step: -l.dy / dr, pair });
     }
-    /** The drawing contradicts the step along `axis`: it jumps there and never agrees. */
-    const against = (axis: 'x' | 'y') => !agree[axis] && jumps.some((j) => j.axis === axis);
+    /**
+     * The drawing contradicts the step along `axis`: it jumps there and never agrees. To REFUSE a
+     * sheet (`corroborated`) one shape is not enough — a copy of a piece on the next page fakes
+     * a jump: two page pairs must jump by the same step (± 1 mm).
+     */
+    const against = (axis: 'x' | 'y', corroborated = false) => {
+      if (agree[axis]) return false;
+      const js = jumps.filter((j) => j.axis === axis);
+      if (!corroborated) return js.length > 0;
+      return js.some(
+        (j) =>
+          new Set(js.filter((k) => Math.abs(k.step - j.step) <= 1).map((k) => k.pair)).size >= 2,
+      );
+    };
     return { agree, jumps, against };
+  };
+  /**
+   * TILESTEP: does the drawing MEET at step `v` along `rel` — all vertices (printed marks
+   * included: our export's corner crosses are its alignment marks) coinciding between the pages
+   * the cells put side by side? `pairs` 0 = no such neighbours (the step is never used).
+   */
+  const meetsAt = (
+    rel: 'right' | 'below',
+    v: Vec,
+    cells: readonly ({ row: number; col: number } | null | undefined)[],
+  ) => {
+    const at = new Map<string, number>();
+    cells.forEach((c, i) => c && at.set(`${c.row},${c.col}`, i));
+    let n = 0;
+    let pairs = 0;
+    cells.forEach((c, i) => {
+      if (!c) return;
+      const j = at.get(rel === 'right' ? `${c.row},${c.col + 1}` : `${c.row + 1},${c.col}`);
+      if (j === undefined) return;
+      pairs++;
+      n += refine(regs[i], regs[j], v, fineTol, 'all').n;
+    });
+    return { n, pairs };
   };
   const jumpText = (jumps: { axis: 'x' | 'y'; step: number }[]) =>
     (['x', 'y'] as const)
@@ -434,18 +470,10 @@ export function assembleGroup(
       const got = rel === 'right' ? pitch.right : pitch.below;
       const decl = rel === 'right' ? declR : declB;
       // the declared step confirmed by the drawing: a shape recurring across that axis's seams,
-      // or the printed alignment marks (all vertices) meeting at it on the neighbouring pages
-      const marks = () => {
-        if (!held.ok) return 0;
-        const at = new Map(held.cells.map((c, i) => [`${c.row},${c.col}`, i]));
-        let n = 0;
-        held.cells.forEach((c, i) => {
-          const j = at.get(rel === 'right' ? `${c.row},${c.col + 1}` : `${c.row + 1},${c.col}`);
-          if (j !== undefined) n += refine(regs[i], regs[j], decl, fineTol, 'all').n;
-        });
-        return n;
-      };
-      const confirmed = !!lc?.agree[rel === 'right' ? 'x' : 'y'] || marks() >= 4;
+      // or all vertices (the printed marks) meeting at it on the neighbouring pages — or no
+      // neighbours along the axis at all (the step is never used)
+      const meet = held.ok ? meetsAt(rel, decl, held.cells) : { n: 0, pairs: 1 };
+      const confirmed = !!lc?.agree[rel === 'right' ? 'x' : 'y'] || meet.n >= 4 || !meet.pairs;
       const agrees = off(got, decl) <= TILES_AGREE_MM;
       const len = Math.hypot(got.dx, got.dy).toFixed(1);
       const word = rel === 'right' ? 'across' : 'down';
@@ -454,14 +482,21 @@ export function assembleGroup(
         overrides,
         clash,
       });
-      if (from === 'page-size') return r(true);
+      if (from === 'page-size')
+        return confirmed
+          ? r(true)
+          : r(
+              false,
+              null,
+              `nothing drawn meets ${word} at the line's step ${Math.hypot(decl.dx, decl.dy)} mm`,
+            );
       if (agrees) return r(false);
       if (from === 'edge-votes' && confirmed)
         return r(
           true,
           `edge votes ${word} ${len} mm overruled: the drawing meets at the line's step`,
         );
-      return r(false, null, `${word} ${len} mm (${from})`);
+      return r(false, null, `the drawing measures ${word} ${len} mm (${from})`);
     };
     const ax = { right: axis('right'), below: axis('below') };
     const clash = [ax.right.clash, ax.below.clash].filter(Boolean);
@@ -473,8 +508,7 @@ export function assembleGroup(
       );
     else if (clash.length)
       warnings.push(
-        `tiles line not used — it says step ${tiles.stepX} x ${tiles.stepY} mm, the drawing ` +
-          `measures ${clash.join(', ')} ("${tiles.text}")`,
+        `tiles line not used — it says step ${tiles.stepX} x ${tiles.stepY} mm; ${clash.join('; ')} ("${tiles.text}")`,
       );
     else {
       tilesCells = held.cells;
@@ -514,9 +548,22 @@ export function assembleGroup(
   };
   const rec: RawLink[] = [];
   let offLattice = 0;
+  // TILESTEP: with the tiles line's cells known every link is held to its exact cell delta
+  // (diagonals included) — a repeated piece pairs different instances.
+  const offCells = (l: RawLink) => {
+    if (!tilesCells || l.a.rot !== 0 || l.b.rot !== 0) return false;
+    const ca = tilesCells[l.a.idx];
+    const cb = tilesCells[l.b.idx];
+    if (!ca || !cb) return true;
+    const dc = cb.col - ca.col;
+    const dr = cb.row - ca.row;
+    const ex = dc * pitch.right.dx + dr * pitch.below.dx;
+    const ey = dc * pitch.right.dy + dr * pitch.below.dy;
+    return Math.hypot(l.dx - ex, l.dy - ey) > 1.0;
+  };
   for (const l of recAll) {
     if (!keepTurned(l.a) || !keepTurned(l.b)) continue;
-    if (pitch.from === 'recurrence' && !onLattice(l)) offLattice++;
+    if ((pitch.from === 'recurrence' && !onLattice(l)) || offCells(l)) offLattice++;
     else rec.push(l);
   }
   if (offLattice)
@@ -610,28 +657,36 @@ export function assembleGroup(
     layout = cands.sort((a, b) => b.score - a.score)[0];
     layoutFrom = 'votes';
   }
-  // TILESTEP (D3): a step the page size or edge votes gave (no recurrence, no tiles line) that the
-  // drawing contradicts — a shape printed whole on neighbouring pages lands page − step off the
-  // grid (our sparse exports came out ~10 % wide; edge votes lock onto their crop ticks) — makes
-  // the sheet a question, never placed. No such shape, or one that agrees: as before.
+  // TILESTEP (D3): never a silently assumed page size. A step nothing measured (page size) stands
+  // only when the drawing meets at it (a shape recurring across those seams on it, or all
+  // vertices coinciding there); otherwise the sheet is a question — measured on 85 real tile
+  // sheets (corpus + 60 archive files) the page-size path never occurs, so this adds no stop to
+  // a file that works. An EDGE-VOTE step is refused only when the drawing contradicts it on two
+  // page pairs (a shape printed whole on neighbouring pages lands page − step off: our sparse
+  // exports came out ~10 % wide, edge votes lock onto their crop ticks).
   if (pitch.axes && !traced) {
     const lc = latticeCheck(pitch.right, pitch.below, (i) => layout.cells[i] ?? null);
-    const weak = (a: AxisFrom) => a === 'page-size' || a === 'edge-votes';
-    const bad = (['right', 'below'] as const).filter(
-      (rel) => weak(pitch.axes![rel]) && lc.against(rel === 'right' ? 'x' : 'y'),
-    );
+    const bad: string[] = [];
+    for (const rel of ['right', 'below'] as const) {
+      const ax = rel === 'right' ? 'x' : 'y';
+      const v = rel === 'right' ? pitch.right : pitch.below;
+      const len = `${rel === 'right' ? 'across' : 'down'} ${Math.hypot(v.dx, v.dy).toFixed(1)} mm`;
+      if (pitch.axes[rel] === 'page-size') {
+        const meet = meetsAt(rel, v, layout.cells);
+        if (meet.pairs && !lc.agree[ax] && meet.n < 4)
+          bad.push(
+            `${len} (nothing measured it: the page size, and nothing drawn meets across the seams there)`,
+          );
+      } else if (pitch.axes[rel] === 'edge-votes' && lc.against(ax, true))
+        bad.push(`${len} (edge votes)`);
+    }
     if (bad.length)
       refused.push(
-        `the tile step ${bad
-          .map(
-            (rel) =>
-              `${rel === 'right' ? 'across' : 'down'} ${Math.abs(rel === 'right' ? pitch.right.dx : pitch.below.dy).toFixed(1)} mm ` +
-              `(${pitch.axes![rel] === 'page-size' ? 'nothing measured it: the page size' : 'edge votes'})`,
-          )
-          .join(
-            ', ',
-          )} is contradicted by the drawing: shapes printed on neighbouring pages recur ` +
-          `${jumpText(lc.jumps)} apart — set the tile step by hand (grid by hand)`,
+        `no reliable tile step: ${bad.join(', ')}` +
+          (lc.jumps.length
+            ? ` — shapes printed on neighbouring pages recur ${jumpText(lc.jumps)} apart`
+            : '') +
+          ` — set the tile step by hand (grid by hand)`,
       );
   }
   // 5. Pairs: recurrence links + one measured pair per layout seam without one.
