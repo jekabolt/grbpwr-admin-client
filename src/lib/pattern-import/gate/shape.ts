@@ -83,12 +83,16 @@ export function shapeFamilies(ctx: GateCtx): {
         `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s cut line turns where ${rows[t.b].token}'s does not (${t.what.slice(8)}: a bump, dip, step or kink in one size only)`,
       );
     }
+    // GRADE P1: a count difference the operator answered "intended" is the piece's own (no warning,
+    // no hold); the passport records the answer
+    const intended = new Set(ctx.m.pieces.find((p) => p.identity === identity)?.gradeIntended);
     const c = countMismatch(sh);
-    if (c) {
+    const open = (['notches', 'drills'] as const).filter(
+      (k) => !intended.has(k) && rows.some((r) => r.sh[k] !== rows[0].sh[k]),
+    );
+    if (c && open.length) {
       // every kind that differs (notches and drills alike), each size's count
-      const parts = (['notches', 'drills'] as const)
-        .filter((k) => rows.some((r) => r.sh[k] !== rows[0].sh[k]))
-        .map((k) => `${k}: ${rows.map((r) => `${r.token} ${r.sh[k]}`).join(', ')}`);
+      const parts = open.map((k) => `${k}: ${rows.map((r) => `${r.token} ${r.sh[k]}`).join(', ')}`);
       const line = `${identity}: ${parts.join('; ')} — one piece, one shape across sizes`;
       if (countsHold()) {
         failed.push(...rows.map((r) => r.block));

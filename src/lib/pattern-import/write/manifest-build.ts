@@ -41,6 +41,8 @@ export function manifestPiece(p: PieceSpec): ManifestPiece {
   // Optional key only when present: an `undefined` value would not survive the JSON round trip
   // and G9's deep-equal would read that as a difference.
   if (p.aiConfidence != null) m.aiConfidence = p.aiConfidence;
+  // GRADE P1: count differences the operator answered "intended"
+  if (p.gradeIntended?.length) m.gradeIntended = [...p.gradeIntended];
   return m;
 }
 
@@ -65,6 +67,10 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     areaMm2: r0(b.size.areaMm2),
     hasGrain: !!b.grain,
     notches: b.notches.length,
+    // GRADE P1: notches not drawn in this size, graded from the sizes that draw them (D5)
+    ...(b.size.notches.some((n) => n.graded)
+      ? { notchesGraded: b.size.notches.filter((n) => n.graded).length }
+      : {}),
     drills: b.drills.length,
     internal: b.internal.length,
     hasSeam: !!b.seam,

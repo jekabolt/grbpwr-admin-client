@@ -59,7 +59,13 @@ import {
   readPassport,
   type BindPiece,
 } from '../passport';
-import { applyScale, detectScale, detectScaleSet, extractPdfWith, isOversizedScan } from '../adapters/pdf';
+import {
+  applyScale,
+  detectScale,
+  detectScaleSet,
+  extractPdfWith,
+  isOversizedScan,
+} from '../adapters/pdf';
 import {
   dxfFastPath,
   dxfScaleCandidates,
@@ -420,6 +426,7 @@ export class Session {
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
+  private notchChordsOf: SemanticsDetail['notchChordsOf'] | null = null;
   private continuityOf: SemanticsDetail['continuityOf'] | null = null;
   private identityOf: SemanticsDetail['identityOf'] | null = null;
   private onePieceOf: SemanticsDetail['onePieceOf'] | null = null;
@@ -560,6 +567,7 @@ export class Session {
       this.semantics = null;
       this.wallsOf = null;
       this.derivedOf = null;
+      this.notchChordsOf = null;
       this.continuityOf = null;
       this.identityOf = null;
       this.onePieceOf = null;
@@ -1832,6 +1840,7 @@ export class Session {
     this.semantics = output;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
+    this.notchChordsOf = detail.notchChordsOf;
     this.continuityOf = detail.continuityOf;
     this.identityOf = detail.identityOf;
     this.onePieceOf = detail.onePieceOf;
@@ -2074,6 +2083,7 @@ export class Session {
     // own blocks.
     const rawWalls = this.wallsOf;
     const derived = this.derivedOf;
+    const chords = this.notchChordsOf;
     const continuity = this.continuityOf;
     const identity = this.identityOf;
     // G24's face evidence (another piece's header in the face, two outlines of one size overlapping)
@@ -2157,6 +2167,7 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          notchChordsOf: chords ? (id, rank) => chords(sp.sourceOf[id] ?? id, rank) : undefined,
           continuityOf: continuity
             ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
             : undefined,

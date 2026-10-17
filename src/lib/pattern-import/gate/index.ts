@@ -276,6 +276,27 @@ export function derivedByBlockFor(
   return out;
 }
 
+/** GRADE P1: the notch bumps crossed by their chord (source frame) → written frame (G3/G4). */
+export function notchChordsByBlockFor(
+  detail: WriteDetail,
+  chordsOf: (
+    sourceIdentity: string,
+    rank: number,
+  ) => { chord: [PtMm, PtMm]; bump: PtMm[] }[] | undefined,
+): Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]> {
+  const out: Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]> = {};
+  for (const b of detail.plan.blocks) {
+    const cs = chordsOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!cs?.length) continue;
+    const T = detail.transforms[b.name];
+    out[b.name] = cs.map((c) => ({
+      chord: [applyAffine(T, c.chord[0]), applyAffine(T, c.chord[1])],
+      bump: c.bump.map((p) => applyAffine(T, p)),
+    }));
+  }
+  return out;
+}
+
 /** P1: the continuity stretches (source frame) → `continuityByBlock` in the written frame (G21). */
 export function continuityByBlockFor(
   detail: WriteDetail,
@@ -392,6 +413,11 @@ export type WriteAndGateCtx = {
    * `wallsOf` — G15 checks them; G3/G4 never use them as walls (F14b, Codex C1).
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
+  /** GRADE P1: the notch bumps a size's line crosses by the chord (same frame as `wallsOf`). */
+  notchChordsOf?: (
+    sourceIdentity: string,
+    rank: number,
+  ) => { chord: [PtMm, PtMm]; bump: PtMm[] }[] | undefined;
   /** P1 (G21): the continuity stretches of a size closed through them (same frame). */
   continuityOf?: (sourceIdentity: string, rank: number) => ContinuityGeometry | undefined;
   /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
@@ -438,7 +464,11 @@ export async function writeAndGate(
           ...detail0.manifest,
           passport: withShapeNotes(
             detail0.manifest.passport,
-            countNotesOfBlocks(detail0.manifest.blocks, UNI_TOKEN),
+            countNotesOfBlocks(
+              detail0.manifest.blocks,
+              UNI_TOKEN,
+              (id) => detail0.manifest.pieces.find((p) => p.identity === id)?.gradeIntended,
+            ),
           ),
         },
       }
@@ -452,6 +482,9 @@ export async function writeAndGate(
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
     coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
     derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
+    ...(ctx.notchChordsOf
+      ? { notchChordsByBlock: notchChordsByBlockFor(detail, ctx.notchChordsOf) }
+      : {}),
     continuityByBlock: ctx.continuityOf
       ? continuityByBlockFor(detail, ctx.continuityOf)
       : undefined,

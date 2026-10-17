@@ -49,6 +49,7 @@ import {
   type GateCheck,
   type GrainEvidenceKind,
   type GrainFeature,
+  type GradeCountFeature,
   type GateReport,
   type ManifestBlock,
   type ManifestContinuity,
@@ -733,6 +734,16 @@ export function validateManifest(x: unknown): ConversionManifest {
       fail(`${p}.nameOrigin`, 'unknown origin');
     if (pc.aiConfidence !== undefined && !isNum(pc.aiConfidence))
       fail(`${p}.aiConfidence`, 'not a number');
+    // GRADE P1: optional, the count kinds the operator answered "intended"
+    if (
+      pc.gradeIntended !== undefined &&
+      !(
+        Array.isArray(pc.gradeIntended) &&
+        pc.gradeIntended.length <= 3 &&
+        pc.gradeIntended.every((k) => k === 'notches' || k === 'drills' || k === 'internal')
+      )
+    )
+      fail(`${p}.gradeIntended`, 'not a list of notches | drills | internal');
     const ci = pc.identity.trim().toLowerCase();
     if (pieceByIdentity.has(ci)) fail(`${p}.identity`, `duplicate "${pc.identity}"`);
     pieceByIdentity.set(ci, pc);
@@ -752,6 +763,8 @@ export function validateManifest(x: unknown): ConversionManifest {
       nameOrigin: pc.nameOrigin as ManifestPiece['nameOrigin'],
     };
     if (pc.aiConfidence !== undefined) out.aiConfidence = pc.aiConfidence as number;
+    if (Array.isArray(pc.gradeIntended) && pc.gradeIntended.length)
+      out.gradeIntended = [...(pc.gradeIntended as GradeCountFeature[])];
     return out;
   });
   // A pair is two identities naming each other, one per hand. Anything else is not a pair the card
@@ -787,6 +800,12 @@ export function validateManifest(x: unknown): ConversionManifest {
     for (const k of ['notches', 'drills', 'internal'] as const) {
       if (!isInt(b[k]) || (b[k] as number) < 0) fail(`${p}.${k}`, 'not a non-negative integer');
     }
+    // GRADE P1: optional, how many of the notches are graded (not drawn in this size)
+    if (
+      b.notchesGraded !== undefined &&
+      !(isInt(b.notchesGraded) && b.notchesGraded >= 1 && b.notchesGraded <= (b.notches as number))
+    )
+      fail(`${p}.notchesGraded`, 'not an integer 1…notches');
     if (!isBool(b.hasSeam)) fail(`${p}.hasSeam`, 'not a boolean');
     // F14f: optional (a pre-F14f manifest has none and is then not trusted by the card), but
     // when present it is checked strictly and bounded — it is read on the card's parse path.
@@ -833,6 +852,7 @@ export function validateManifest(x: unknown): ConversionManifest {
       areaMm2: b.areaMm2,
       hasGrain: b.hasGrain,
       notches: b.notches as number,
+      ...(b.notchesGraded !== undefined ? { notchesGraded: b.notchesGraded as number } : {}),
       drills: b.drills as number,
       internal: b.internal as number,
       hasSeam: b.hasSeam,

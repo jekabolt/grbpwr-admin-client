@@ -1337,6 +1337,13 @@ export type NotchFeature = FeatureBase & {
   at: PtMm;
   seg: [PtMm, PtMm];
   depthMm: Mm;
+  /**
+   * GRADE P1: not drawn in this size — placed from the sizes that draw it (pieces/gfit/notch-grade:
+   * ≥ 2 drawn copies at a grade-consistent place on the piece's canonical topology, or the
+   * operator's "in every size"). D5: recorded and counted (ManifestBlock.notchesGraded), never
+   * presented as drawn. Absent = drawn (or derived by an unfold).
+   */
+  graded?: { from: string[]; answered?: boolean };
 };
 export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
 /**
@@ -1463,6 +1470,11 @@ export type PieceSpec = {
   ungraded: boolean;
   /** One entry per exported size rank. */
   sizes: PieceSizeSpec[];
+  /**
+   * GRADE P1: count differences between sizes the operator answered "intended" (GradeAsk counts):
+   * the G5 count warning / SHAPE_COUNTS_HOLD hold lifts for these, the passport records the answer.
+   */
+  gradeIntended?: GradeCountFeature[];
 };
 
 export type PieceSizeSpec = {
@@ -1576,6 +1588,11 @@ export type SemanticsInput = {
    * (`FoldListCheck.entries`, as printed); a new unbound entry asks again. `true` = all (legacy).
    */
   foldListChecked?: boolean | string[];
+  /**
+   * GRADE P1: the operator's answers to `SemanticsOutput.gradeAsks`, by key (a key whose question
+   * is no longer asked does nothing). Never given by the autopilot.
+   */
+  gradeAnswers?: Readonly<Record<string, GradeAnswer>>;
   /** The text label of each text-seeded piece ("22", "Piece 7"), for binding the cutting list. */
   seedLabels?: Partial<Record<SeedId, string>>;
   /** MOOD Ф0 (G24): the text (TextId) each text-seeded piece was seeded from — its header. */
@@ -1654,8 +1671,44 @@ export type FoldMiss = {
   edges: FoldAsk['edges'];
 };
 
+/**
+ * GRADE P1: one piece, one shape across sizes — the questions only the operator answers (the
+ * autopilot never does, D3/D5). Non-blocking: the export goes on as drawn (the G5 count warning
+ * and the passport record it); an answer is given back as `SemanticsInput.gradeAnswers[key]`.
+ *   notch-lone — a notch drawn in ONE size of ≥ 3: "in every size / in none / only in this one";
+ *   counts     — the sizes carry different numbers of notches / drills / internal lines (buttonholes
+ *                among them): "in size S 5, in XL 7 — intended?" with every size's places to light.
+ * `key` is the question's content (piece, sizes, counts / place): a changed drawing asks again.
+ */
+export type GradeAsk =
+  | {
+      kind: 'notch-lone';
+      seed: SeedId;
+      identity: PieceKey | null;
+      key: string;
+      size: string;
+      at: PtMm;
+      question: string;
+      answer?: 'all' | 'none' | 'only';
+    }
+  | {
+      kind: 'counts';
+      seed: SeedId;
+      identity: PieceKey | null;
+      key: string;
+      feature: GradeCountFeature;
+      perSize: { size: string; n: number; at: PtMm[] }[];
+      question: string;
+      answer?: 'intended';
+    };
+export type GradeCountFeature = 'notches' | 'drills' | 'internal';
+/** GRADE P1: the operator's answer to a `GradeAsk` (by its key). */
+export type GradeAnswer = 'all' | 'none' | 'only' | 'intended';
+
 export type SemanticsOutput = {
   pieces: PieceSpec[];
+  /** GRADE P1: questions of one shape across sizes (absent = none). Never blocking. */
+  gradeAsks?: GradeAsk[];
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
   blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
@@ -2012,6 +2065,8 @@ export type ManifestPiece = {
   allowanceMm: Mm;
   nameOrigin: PieceSpec['nameOrigin'];
   aiConfidence?: number;
+  /** GRADE P1: per-size count differences the operator answered "intended" (absent = none). */
+  gradeIntended?: GradeCountFeature[];
 };
 
 export type ManifestBlock = {
@@ -2023,6 +2078,8 @@ export type ManifestBlock = {
   areaMm2: Mm2;
   hasGrain: boolean;
   notches: number;
+  /** GRADE P1: of `notches`, how many are not drawn in this size but graded from the others. */
+  notchesGraded?: number;
   drills: number;
   internal: number;
   hasSeam: boolean;
@@ -2368,6 +2425,12 @@ export type GateExpectation = {
    * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
    */
   derivedByBlock?: Record<string, DerivedEdge[]>;
+  /**
+   * GRADE P1: per block, the notches drawn AS the outline that its line crosses by the chord, with
+   * the drawn bump, written frame — G3 does not count the bump's walls as off the line, G4 does not
+   * measure the chord against them (the notch is on layer 4). Absent = none.
+   */
+  notchChordsByBlock?: Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]>;
   /** P1 (G21): per block closed through continuity walls, the used stretches and their chains. */
   continuityByBlock?: Record<string, ContinuityGeometry>;
   /**

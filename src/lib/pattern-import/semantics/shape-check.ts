@@ -197,10 +197,19 @@ export function shapeMismatch(
  * drill counts as written). UNI blocks are one geometry for every size and are skipped.
  */
 export function countNotesOfBlocks(
-  blocks: readonly { identity: string; sizeToken: string; notches: number; drills: number }[],
+  blocks: readonly {
+    identity: string;
+    sizeToken: string;
+    notches: number;
+    drills: number;
+    internal?: number;
+    notchesGraded?: number;
+  }[],
   uniToken = 'UNI',
+  /** GRADE P1: per identity, the count kinds the operator answered "intended" */
+  intendedOf: (identity: string) => readonly string[] | undefined = () => undefined,
 ): { identity: string; note: string }[] {
-  const by = new Map<string, { sizeToken: string; notches: number; drills: number }[]>();
+  const by = new Map<string, (typeof blocks)[number][]>();
   for (const b of blocks) {
     if (b.sizeToken === uniToken) continue;
     by.set(b.identity, [...(by.get(b.identity) ?? []), b]);
@@ -208,11 +217,26 @@ export function countNotesOfBlocks(
   const out: { identity: string; note: string }[] = [];
   for (const [identity, bs] of by) {
     if (bs.length < 2) continue;
+    const intended = new Set(intendedOf(identity) ?? []);
     const parts: string[] = [];
-    for (const k of ['notches', 'drills'] as const)
-      if (bs.some((b) => b[k] !== bs[0][k]))
-        parts.push(`${k}: ${bs.map((b) => `${b.sizeToken} ${b[k]}`).join(', ')}`);
+    const yes: string[] = [];
+    for (const k of ['notches', 'drills', 'internal'] as const) {
+      const v = (b: (typeof bs)[number]) => b[k] ?? 0;
+      if (!bs.some((b) => v(b) !== v(bs[0]))) continue;
+      const line = `${k}: ${bs.map((b) => `${b.sizeToken} ${v(b)}`).join(', ')}`;
+      if (intended.has(k)) yes.push(line);
+      // internal lines: recorded only when the operator answered (the gate counts notches / drills)
+      else if (k !== 'internal') parts.push(line);
+    }
     if (parts.length) out.push({ identity, note: `${parts.join('; ')} — one piece, one shape` });
+    if (yes.length) out.push({ identity, note: `${yes.join('; ')} — intended (operator)` });
+    // GRADE P1 (D5): notches placed from the sizes that draw them
+    const g = bs.filter((b) => (b.notchesGraded ?? 0) > 0);
+    if (g.length)
+      out.push({
+        identity,
+        note: `notches graded (not drawn): ${g.map((b) => `${b.sizeToken} ${b.notchesGraded}`).join(', ')}`,
+      });
   }
   return out;
 }

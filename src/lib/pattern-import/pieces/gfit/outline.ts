@@ -200,12 +200,22 @@ export function cornersOf(p: readonly PtMm[], step = GFIT_STEP_MM): GfitCorner[]
   return out.sort((x, y) => x.i - y.i);
 }
 
-export function analyseOutline(outer: readonly PtMm[], step = GFIT_STEP_MM): GfitOutline | null {
+export function analyseOutline(
+  outer: readonly PtMm[],
+  step = GFIT_STEP_MM,
+  /** GRADE P1: also chord the notch-like bumps excursionsOf misses (semicircles, slits) */
+  chord = false,
+): GfitOutline | null {
   if (outer.length < 3) return null;
   const raw = ringOf(outer, step);
   if (raw.length < 20) return null;
   const excursions = excursionsOf(raw, step);
-  const pts = excursions.length ? chordOff(raw, excursions) : raw;
+  // GRADE P1 (P23 to-do, `chord`): notches are marks, never shape — after the reader's excursions,
+  // every notch-like bump it misses (a semicircle read on one side, a slit: mouth < 0.8 mm) is
+  // chorded too, indices kept. The P1 path (checks.ts outlineOf) reads with it; the SILENT G26 model
+  // (fit.ts) keeps the P0 read unless GFIT_P1_SILENT=1 (measured: it moves G26 holds, GRADE-P1.md).
+  const pts0 = excursions.length ? chordOff(raw, excursions) : raw;
+  const pts = chord || gfitP1Silent() ? chordBumps(pts0) : pts0;
   let L = 0;
   for (let i = 0; i < pts.length; i++) L += dist(pts[i], pts[(i + 1) % pts.length]);
   return {
@@ -216,4 +226,72 @@ export function analyseOutline(outer: readonly PtMm[], step = GFIT_STEP_MM): Gfi
     corners: cornersOf(pts, step),
     excursions,
   };
+}
+
+/** Probe switch (node only): the SILENT G26 model reads outlines and pairs corners the P1 way. */
+export function gfitP1Silent(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.GFIT_P1_SILENT;
+}
+
+/**
+ * Notch-like bumps left in a 0.5 mm ring (looser than the reader's excursionsOf, which misses some
+ * semicircles and every slit): a stretch of 3–40 mm path whose ends are ≤ 15 mm apart with path ≥
+ * 1.5 × mouth (a semicircle is 1.57×, a right-angle corner 1.41×) and whose legs before / after
+ * run along the chord (≤ 15°; a slit — mouth < 0.5 mm — has no chord to check). Spans [i, i + k],
+ * non-overlapping, the widest-ratio window per start.
+ */
+export function bumpSpans(ring: readonly PtMm[], maxPathMm = 40): [number, number][] {
+  const n = ring.length;
+  const at = (i: number) => ring[((i % n) + n) % n];
+  const ang = (a: PtMm, b: PtMm) => Math.atan2(b.y - a.y, b.x - a.x);
+  const wrap = (x: number) => Math.atan2(Math.sin(x), Math.cos(x));
+  const out: [number, number][] = [];
+  const kMax = Math.round(maxPathMm / 0.5);
+  for (let i = 0; i < n; ) {
+    let best = -1;
+    let bestRatio = 0;
+    for (let k = 6; k <= kMax && k < n / 3; k++) {
+      const a = at(i);
+      const b = at(i + k);
+      const mouth = Math.hypot(b.x - a.x, b.y - a.y);
+      const path = k * 0.5;
+      if (mouth > 15 || path < 1.5 * mouth) continue;
+      if (mouth >= 0.5) {
+        const ch = ang(a, b);
+        if (Math.abs(wrap(ang(at(i - 6), a) - ch)) > 0.26) continue;
+        if (Math.abs(wrap(ang(b, at(i + k + 6)) - ch)) > 0.26) continue;
+      } else if (path < 3) continue;
+      const ratio = path / Math.max(mouth, 0.25);
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        best = k;
+      }
+    }
+    if (best > 0) {
+      out.push([i, i + best]);
+      i += best;
+    } else i++;
+  }
+  return out;
+}
+
+/** Centres of the notch-like bumps (bumpSpans). */
+export function notchBumps(ring: readonly PtMm[]): PtMm[] {
+  const n = ring.length;
+  return bumpSpans(ring).map(([a, b]) => ring[((a + b) >> 1) % n]);
+}
+
+/** The ring with every notch-like bump replaced by its chord (indices kept). */
+export function chordBumps(ring: readonly PtMm[]): PtMm[] {
+  const n = ring.length;
+  const out = ring.slice();
+  for (const [a, b] of bumpSpans(ring)) {
+    const p = ring[a % n];
+    const q = ring[b % n];
+    for (let j = a + 1; j < b; j++) {
+      const t = (j - a) / (b - a);
+      out[j % n] = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
+    }
+  }
+  return out;
 }
