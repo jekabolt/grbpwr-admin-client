@@ -873,7 +873,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     // SIZESOCG (sizes/ocg-ladder.ts): a layer holding a nest of outlines drawn in other sizes' own
     // looks is no size evidence there — each outline goes where its look AND its nesting place
     // name (or nesting + elimination), its marks with it; the class reads the look's layer
-    if (!debugFlag('SIZESOCG_OFF') && !debugFlag('SIZESOCG_LOOK_OFF')) {
+    if (encoding === 'ocg' && !debugFlag('SIZESOCG_OFF') && !debugFlag('SIZESOCG_LOOK_OFF')) {
       const lk = ocgLookMoves(chains, cand, unit, unitRank, styles);
       const unitOfRank = new Map<number, number>();
       unitRank.forEach((r, u) => r >= 0 && unitOfRank.set(r, u));
