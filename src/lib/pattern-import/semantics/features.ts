@@ -176,7 +176,7 @@ const DART_MOUTH_GAP_MM = 16;
  * (≤ 2 mm) at a point inside it (≥ 5 mm from the outline). Of those Vs, the one whose point is
  * nearest the proven dart's point, within max(30 mm, its length), opening along the dart's axis
  * (each leg within 35° of point → mouth, its two mouths on either side of the axis), each leg
- * ×0.4…×2.5 the dart's length, no leg shared by two darts. A V drawn as one
+ * ×0.4…×2.5 the dart's length; a V two darts both pick is neither's. A V drawn as one
  * polyline (mouth – point – mouth) is split at its point. The legs' chains, per dart.
  */
 export function dartVs(
@@ -241,8 +241,7 @@ export function dartVs(
     if (d > Math.PI) d = 2 * Math.PI - d;
     return d;
   };
-  const out: ({ legs: Chain[]; pts: PtMm[][] } | null)[] = [];
-  const used = new Set<Leg>();
+  const picks: ({ a: Leg; b: Leg } | null)[] = [];
   for (const d of darts) {
     const mid = { x: (d.base[0].x + d.base[1].x) / 2, y: (d.base[0].y + d.base[1].y) / 2 };
     const ax = angle(d.apex, mid);
@@ -262,19 +261,25 @@ export function dartVs(
       for (let j = i + 1; j < legs.length; j++) {
         const a = legs[i];
         const b = legs[j];
-        if (used.has(a) || used.has(b) || dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
+        if (dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
         if (side(a.tip, a.mouth) * side(a.tip, b.mouth) >= 0) continue;
         const r = dist(a.tip, d.apex);
         if (r > Math.max(30, d.lenMm)) continue;
         if (!best || r < best.r) best = { a, b, r };
       }
-    if (best) {
-      used.add(best.a);
-      used.add(best.b);
-    }
-    out.push(best ? { legs: [best.a.ch, best.b.ch], pts: [best.a.pts, best.b.pts] } : null);
+    picks.push(best ? { a: best.a, b: best.b } : null);
   }
-  return out;
+  // each dart its nearest V; a leg two darts both pick belongs to neither (Codex r2: the answer
+  // must not hang on the order or on which of the darts are passed — the pieces step counts with
+  // every possible dart of the piece, the semantics with the proven ones)
+  const pickedBy = new Map<Leg, number>();
+  for (const p of picks)
+    if (p) for (const l of [p.a, p.b]) pickedBy.set(l, (pickedBy.get(l) ?? 0) + 1);
+  return picks.map((p) =>
+    p && pickedBy.get(p.a) === 1 && pickedBy.get(p.b) === 1
+      ? { legs: [p.a.ch, p.b.ch], pts: [p.a.pts, p.b.pts] }
+      : null,
+  );
 }
 
 /**

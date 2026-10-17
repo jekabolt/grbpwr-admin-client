@@ -161,26 +161,49 @@ export function provenDart(
 }
 
 /**
- * How many of the host's closed sizes draw their own V at a possible dart (semantics/features
- * dartVs: the legs each size writes on layer 8), of how many — on the face pass's own account of
- * the wedge, before it is proven (the session sets SetAsideDart.legs with it).
+ * Per possible dart (an aside carrying SetAsideDart), how many of its host's closed sizes draw
+ * their own V there (semantics/features dartVs: the legs each size writes on layer 8), of how many.
+ * Every possible dart of one host is matched together, so a V two of them would both take is
+ * neither's (Codex r2). On the face pass's account of the wedge, before it is proven; the session
+ * sets SetAsideDart.legs with it.
  */
 export function dartLegsDrawn(
-  a: SetAside,
+  asides: readonly SetAside[],
   families: readonly PieceFamily[],
   seeds: readonly DartSeedAt[],
   set: ChainSet,
   run: SizeRun | null,
-): { sizes: number; drawn: number } {
-  const d = a.dart;
-  const fam = d?.host ? hostFamily(d.host, families, seeds) : null;
-  if (!d || !fam) return { sizes: 0, drawn: 0 };
-  const sizes = closedSizes(fam);
-  const dart = { seed: fam.seed, label: d.label, apex: d.apex, base: d.base, lenMm: d.lenMm };
-  const drawn = sizes.filter(
-    (c) => dartVs(c, set, [dart], run?.sizes[c.rank]?.classId ?? null)[0] != null,
-  ).length;
-  return { sizes: sizes.length, drawn };
+): Map<number, { sizes: number; drawn: number }> {
+  const out = new Map<number, { sizes: number; drawn: number }>();
+  const byHost = new Map<DartFam, SetAside[]>();
+  for (const a of asides) {
+    const fam = a.dart?.host ? hostFamily(a.dart.host, families, seeds) : null;
+    if (!a.dart) continue;
+    if (!fam) {
+      out.set(a.id, { sizes: 0, drawn: 0 });
+      continue;
+    }
+    byHost.set(fam, [...(byHost.get(fam) ?? []), a]);
+  }
+  for (const [fam, list] of byHost) {
+    const sizes = closedSizes(fam);
+    const darts = list.map((a) => ({
+      seed: fam.seed,
+      label: a.dart!.label,
+      apex: a.dart!.apex,
+      base: a.dart!.base,
+      lenMm: a.dart!.lenMm,
+    }));
+    const drawn = list.map(() => 0);
+    for (const c of sizes) {
+      const vs = dartVs(c, set, darts, run?.sizes[c.rank]?.classId ?? null);
+      vs.forEach((v, i) => {
+        if (v) drawn[i]++;
+      });
+    }
+    list.forEach((a, i) => out.set(a.id, { sizes: sizes.length, drawn: drawn[i] }));
+  }
+  return out;
 }
 
 /** provenDart's evidence in words, or null. */

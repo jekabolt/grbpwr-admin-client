@@ -1437,13 +1437,11 @@ export class Session {
     }
     // DARTS: a possible dart is a dart of its piece only where every closed size of that piece
     // draws its own V there (pieces/darts provenDart reads `legs`)
-    const setAside = faces.asides
-      .filter((a) => !taken.has(a.id))
-      .map((a) =>
-        a.dart
-          ? { ...a, dart: { ...a.dart, legs: dartLegsDrawn(a, families, shown, set, run) } }
-          : a,
-      );
+    const kept = faces.asides.filter((a) => !taken.has(a.id));
+    const legs = dartLegsDrawn(kept, families, shown, set, run);
+    const setAside = kept.map((a) =>
+      a.dart ? { ...a, dart: { ...a.dart, legs: legs.get(a.id) ?? { sizes: 0, drawn: 0 } } } : a,
+    );
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
