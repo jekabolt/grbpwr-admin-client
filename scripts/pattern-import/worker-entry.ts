@@ -895,8 +895,29 @@ async function operatorBridgeGateCase() {
     sem.blocked.length === 0 && new Set(sem.pieces.map((p) => p.seed)).size === pc.families.length,
     `${open0.length} open before, ${drop.length} dropped, ${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
   );
-  const w = await writeCase(name, run, sem, sz.map, { mustPass: true });
+  // fixfix 17.10: NOT a clean pass. The sleeve's size 76 closes on size 72's cap curve (72 is
+  // not exported) — its seam runs the 72 cap, the 72 underarm tip and ~20 mm of the 72 underarm
+  // line before crossing to its own, while its own cap line is drawn and unused (a W at the tip;
+  // tmp/plans/pdf-to-dxf/auto/fixfix/palto-SL.png, palto-SL-bottom.png). SILENT's G26 neighbour
+  // rule (in G22) holds SL_76 for it, and G8's perimeter band holds the SL run (80 under 76 is
+  // that same defect; 88 under 84 is the 60 mm mitre spike at the acute cap/underarm tip in
+  // 76–84 against a bevelled tip in 88 — the seam lines grow 1312 → 1321 → 1333). The bridge
+  // itself is not what blocks: the rest of the export must stay clean.
+  const w = await writeCase(name, run, sem, sz.map, { mustPass: false });
   const g = w.gate[MAIN.scopeKey];
+  const holds = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
+  const g22 = holds.find((c) => c.id === 'G22-identity');
+  const g8h = holds.find((c) => c.id === 'G8-monotone');
+  check(
+    name,
+    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and G8 (SL run) only",
+    holds.every((c) => c.id === 'G22-identity' || c.id === 'G8-monotone') &&
+      !!g22 &&
+      g22.blocks.length > 0 &&
+      g22.blocks.every((b) => /^SL_[LR]_76$/.test(b)) &&
+      (!g8h || g8h.blocks.every((b) => b.startsWith('SL_'))),
+    holds.map((c) => `${c.id}[${c.blocks.join(',')}]`).join(' | ') || 'no hold',
+  );
   const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
   const g15 = g?.checks.find((c) => c.id === 'G15-derived');
   const audited = (g?.derived ?? []).filter((d) => d.kind === 'operator-bridge');
@@ -1138,14 +1159,29 @@ async function pipelineCase(
     sem.pieces.length > 0 || allProposed,
     `${sem.pieces.length} specs, ${sem.blocked.length} blocked (${reasons.join(', ')}), ${sem.grainProposals?.length ?? 0} grain proposals`,
   );
-  // grain by two clicks for the pieces without one
+  // grain by two clicks for the pieces without one. The operator clicks ON the piece: along the
+  // line semantics proposes for it (a symmetry / long / strip axis, a line by a grain word — robe
+  // has a proposal on every blocked piece), else across candidate 0's bbox. The old fixture
+  // clicked the centre of candidate 0's bbox, which lands in robe BP_3's C-shaped hollow (21.7–23.2
+  // mm outside every size) and past BP_4's top in 36/38 (operatorGrain is applied to every size
+  // as clicked) — G5 (GRAIN lane, grain-inside) rightly held that export (fixfix 17.10, evidence
+  // tmp/plans/pdf-to-dxf/auto/fixfix/robe-BP3.png, robe-BP4.png).
   const grain: StageIO['semantics']['in']['operatorGrain'] = {};
+  const clicked: string[] = [];
   for (const b of sem.blocked.filter((x) => x.reason === 'no-grain')) {
+    const pr = sem.grainProposals?.find((g) => g.seed === b.seed);
+    if (pr) {
+      grain[b.seed] = { a: pr.a, b: pr.b };
+      clicked.push(`${b.seed}:on «${pr.why}»`);
+      continue;
+    }
     const ff = fin.families.find((x) => x.seed === b.seed)!;
     const bb = ff.candidates[0].bbox;
     const cx = (bb.minX + bb.maxX) / 2;
     grain[b.seed] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
+    clicked.push(`${b.seed}:bbox centre`);
   }
+  if (clicked.length) console.log(`      ${name}: grain clicks ${clicked.join(' · ')}`);
   const sem2a = await run('semantics', {
     ...SEM_DEFAULT,
     pieceOverrides: names,
