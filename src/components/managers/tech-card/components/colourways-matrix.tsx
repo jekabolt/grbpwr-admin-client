@@ -1,15 +1,9 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
   common_Color,
-  common_ColorwayDevelopmentInsert,
-  common_ColorwayLabDipRound,
   common_Material,
   common_TechCard,
-  common_TechCardLabDipStatus,
   common_TechCardMarkerSummary,
-  UpdateColorwayRequest,
 } from 'api/proto-http/admin';
 import {
   MaterialHoverCard,
@@ -20,8 +14,6 @@ import {
 } from 'components/managers/materials/components/material-picker';
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { techCardLabDipStatusOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -48,7 +40,6 @@ import { paletteValueFromRead } from './colourway-palette';
 import { proposePins } from './colourway-material-match';
 import { ColourwayCreatePopover } from './design/colourway-create';
 import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
-import { Swatch } from './design/render/field-row';
 import { DxfApplyHint } from './dxf-apply';
 import { KitMarkerHint } from './kit-marker';
 import { MarkerApplyHint } from './marker-apply';
@@ -89,11 +80,8 @@ import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 const TILE = 140;
 
-const PENDING = 'TECH_CARD_LAB_DIP_STATUS_PENDING';
-const SUBMITTED = 'TECH_CARD_LAB_DIP_STATUS_SUBMITTED';
-const REJECTED = 'TECH_CARD_LAB_DIP_STATUS_REJECTED';
-const APPROVED = 'TECH_CARD_LAB_DIP_STATUS_APPROVED';
-const UNKNOWN_LAB_DIP = 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN';
+// Id вкладки LAB DIP в рейле тех-карты (index.tsx TABS).
+const LAB_DIP_TAB = 'lab-dip';
 
 // Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>.
 const cell =
@@ -106,14 +94,14 @@ const gridInput =
 // 10px uppercase grey: ряд-подпись, цвет под плиткой, подпись поля.
 const LABEL = 'text-micro uppercase tracking-label text-labelColor';
 
-type Focus = { cwId: number; kind: 'picker' | 'norm' | 'labDip'; key: string } | null;
+type Focus = { cwId: number; kind: 'picker' | 'norm'; key: string } | null;
 type RecipeSnapshot = { usages: UsageDraft[] };
 type GradingCache = { scalar: string; perSize: { sizeId: number; consumption: string }[] };
 
 // ── ИМЯ И ЦВЕТ КОЛОРВЕЯ ────────────────────────────────────────────────────────────────────────
 
 // The operator's word for a colourway — never its numeric id.
-function colorwayTitle(cw: common_AdminColorwayRef): string {
+export function colorwayTitle(cw: common_AdminColorwayRef): string {
   return cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId}`;
 }
 
@@ -125,7 +113,10 @@ export function colourwayName(cw: common_AdminColorwayRef): string {
 
 // ЦВЕТ КОЛОРВЕЯ: ПАНТОН ПЕРВЫЙ, СЛОВАРЬ — ФОЛБЭК. Формат `dev_hex` не гарантирован (`#RRGGBB` или
 // голые шесть цифр). Пустая строка нормализуется в undefined, чтобы рисовался плейсхолдер.
-function colourwaySwatchHex(cw: common_AdminColorwayRef, dictHex?: string): string | undefined {
+export function colourwaySwatchHex(
+  cw: common_AdminColorwayRef,
+  dictHex?: string,
+): string | undefined {
   const dev = (cw.devHex ?? '').trim();
   if (/^#?[0-9a-f]{6}$/i.test(dev)) return dev.startsWith('#') ? dev : `#${dev}`;
   return dictHex || undefined;
@@ -181,267 +172,6 @@ function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
   }
   for (const [k, prev] of before) if (!after.has(k)) n += prev.length;
   return n;
-}
-
-// ═══ ЛАБДИП ═══════════════════════════════════════════════════════════════════════════════════
-//
-// UpdateColorway is a field-masked write. This mask lists ONLY the three WRITABLE lab-dip leaves
-// INSIDE `development`, so a save touches exactly those columns. The paths are camelCase on
-// purpose: that is the form the server matches. submitted/decided stamps are the SERVER's.
-const LAB_DIP_UPDATE_MASK = [
-  'development.labDipStatus',
-  'development.labDipRound',
-  'development.labDipRejectReason',
-].join(',');
-
-type LabDipDraft = {
-  labDipStatus: string;
-  labDipRound: string;
-  labDipSubmittedAt: string;
-  labDipDecidedAt: string;
-  labDipDecidedBy: string;
-  labDipRejectReason: string;
-};
-// The subset this client may actually change — the compiler is the guard, not a comment.
-type LabDipWritable = Pick<LabDipDraft, 'labDipStatus' | 'labDipRound' | 'labDipRejectReason'>;
-
-type TimelineRound = {
-  key: string;
-  round: number;
-  status: string;
-  submittedAt: string;
-  decidedAt: string;
-  decidedBy: string;
-  rejectReason: string;
-  comment: string;
-};
-
-// protobuf Timestamp (RFC 3339) -> YYYY-MM-DD, for display only. 0001-01-01 is "unset".
-function tsToDateInput(ts?: string): string {
-  if (!ts || ts.startsWith('0001-01-01')) return '';
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(ts);
-  return m ? m[1] : '';
-}
-
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-// "2026-07-08" -> "08 jul".
-function fmtDay(v: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (!m) return v;
-  return `${m[3]} ${MONTHS[Number(m[2]) - 1] ?? m[2]}`;
-}
-
-function fromRefLabDip(cw: common_AdminColorwayRef): LabDipDraft {
-  const status = cw.labDipStatus;
-  return {
-    labDipStatus: status && status !== UNKNOWN_LAB_DIP ? status : PENDING,
-    labDipRound: cw.labDipRound ? String(cw.labDipRound) : '',
-    labDipSubmittedAt: tsToDateInput(cw.labDipSubmittedAt),
-    labDipDecidedAt: tsToDateInput(cw.labDipDecidedAt),
-    labDipDecidedBy: cw.labDipDecidedBy ?? '',
-    labDipRejectReason: cw.labDipRejectReason ?? '',
-  };
-}
-
-// Has a round actually been submitted? The read path collapses "never submitted" and "round 1
-// pending" onto the same PENDING baseline, so anything only a real submission produces decides.
-function hasLabDipRound(d: LabDipDraft): boolean {
-  return (
-    (parseInt(d.labDipRound, 10) || 0) > 0 ||
-    !!d.labDipSubmittedAt ||
-    !!d.labDipDecidedAt ||
-    d.labDipStatus === SUBMITTED ||
-    d.labDipStatus === APPROVED ||
-    d.labDipStatus === REJECTED
-  );
-}
-
-function fromRecordedRound(r: common_ColorwayLabDipRound, i: number): TimelineRound {
-  const status = r.status;
-  return {
-    key: `round-${r.roundNumber ?? i}`,
-    round: r.roundNumber ?? 0,
-    status: status && status !== UNKNOWN_LAB_DIP ? status : PENDING,
-    submittedAt: tsToDateInput(r.submittedAt),
-    decidedAt: tsToDateInput(r.decidedAt),
-    decidedBy: r.decidedBy ?? '',
-    rejectReason: r.rejectReason ?? '',
-    comment: r.comment ?? '',
-  };
-}
-
-// The substance of a round's verdict: why it was rejected, who approved it and when.
-function roundOutcome(r: TimelineRound): string {
-  if (r.status === REJECTED) return r.rejectReason.trim() || r.comment.trim();
-  if (r.status === APPROVED)
-    return [r.decidedBy, fmtDay(r.decidedAt)].filter(Boolean).join(' · ') || r.comment.trim();
-  return r.comment.trim() || 'awaiting decision';
-}
-
-// Field-masked UpdateColorway carrying ONLY this colourway's lab-dip state. expected_colorway_version
-// is read fresh by the caller (readColorwayVersion) right before the write.
-function buildLabDipRequest(
-  cw: common_AdminColorwayRef,
-  draft: LabDipDraft,
-  expectedColorwayVersion: number,
-): UpdateColorwayRequest {
-  const development: common_ColorwayDevelopmentInsert = {
-    devCode: undefined,
-    name: undefined,
-    labDipStatus: draft.labDipStatus as common_TechCardLabDipStatus,
-    comment: undefined,
-    pantone: undefined,
-    pantoneSystem: undefined,
-    devHex: undefined,
-    swatchMediaId: undefined,
-    labDipRound: parseInt(draft.labDipRound, 10) || 0,
-    labDipSubmittedAt: undefined,
-    labDipDecidedAt: undefined,
-    labDipDecidedBy: undefined,
-    // Only meaningful when rejected; cleared otherwise so a stale reason never lingers.
-    labDipRejectReason: draft.labDipStatus === REJECTED ? draft.labDipRejectReason.trim() : '',
-    usages: undefined, // recipe is owned by UpdateColorwayRecipe — never write it through here.
-    displayOrder: undefined,
-    colours: undefined,
-    nameI18n: undefined,
-  };
-  return {
-    colorwayId: cw.colorwayId ?? 0,
-    expectedColorwayVersion,
-    merchandising: undefined,
-    development,
-    mediaIds: undefined,
-    tags: undefined,
-    prices: undefined,
-    updateMask: LAB_DIP_UPDATE_MASK,
-    thumbnailMediaId: undefined,
-    secondaryThumbnailMediaId: undefined,
-    costPrice: undefined,
-    countryCode: undefined,
-    translations: undefined,
-  };
-}
-
-// EXACTLY what buildLabDipRequest would put on the wire, as one comparable string.
-function labDipWire(d: LabDipDraft): string {
-  return JSON.stringify([
-    d.labDipStatus,
-    String(parseInt(d.labDipRound, 10) || 0),
-    d.labDipStatus === REJECTED ? d.labDipRejectReason.trim() : '',
-  ]);
-}
-
-const labDipStatusLabel = new Map<common_TechCardLabDipStatus, string>(
-  techCardLabDipStatusOptions.map((o) => [o.value, o.label]),
-);
-
-function labDipSaveErrorMessage(e: unknown): string {
-  const status = (e as { status?: number } | undefined)?.status;
-  if (status === 409)
-    return 'someone else changed this colourway while you were saving: reload and re-apply the lab dip change';
-  return e instanceof Error ? e.message : 'failed to save lab dip';
-}
-
-function useUpdateColorwayLabDip(techCardId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (req: UpdateColorwayRequest) => adminService.UpdateColorway(req),
-    onSuccess: () => qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
-  });
-}
-
-// Lab-dip draft of one colourway, staged into the card's one save under `labDip:<id>`.
-function useLabDipDraft(
-  colorway: common_AdminColorwayRef,
-  techCardId: number,
-  lockVersion: number,
-  canEdit: boolean,
-) {
-  const save = useUpdateColorwayLabDip(techCardId);
-  const staging = useTechCardStaging();
-  const colorwayId = colorway.colorwayId ?? 0;
-  const stagingKey = `labDip:${colorwayId}`;
-  const [dirty, setDirty] = useState(false);
-  const stored = useMemo(() => fromRefLabDip(colorway), [colorway]);
-  const [draft, setDraft] = useState<LabDipDraft>(stored);
-  // Re-sync after a save's refetch, unless there are unsaved edits.
-  useEffect(() => {
-    if (dirty) return;
-    setDraft(stored);
-  }, [stored, dirty]);
-
-  // STAGED = the write would actually change something, compared on the WIRE form.
-  const changed = useMemo(() => labDipWire(draft) !== labDipWire(stored), [draft, stored]);
-  const staged = dirty && changed;
-
-  const set = (patch: Partial<LabDipWritable>) => {
-    setDirty(true);
-    setDraft((d) => ({ ...d, ...patch }));
-  };
-
-  const recorded = useMemo<TimelineRound[]>(
-    () => (colorway.labDipRounds ?? []).map(fromRecordedRound),
-    [colorway.labDipRounds],
-  );
-  const round = parseInt(draft.labDipRound, 10) || 0;
-  const started = hasLabDipRound(draft) || recorded.length > 0;
-
-  async function commitLabDip() {
-    if (!colorwayId) return;
-    try {
-      const expected = await readColorwayVersion(techCardId, colorwayId, lockVersion);
-      await save.mutateAsync(buildLabDipRequest(colorway, draft, expected));
-    } catch (e) {
-      throw new Error(labDipSaveErrorMessage(e), { cause: e });
-    }
-  }
-
-  // Re-staged on EVERY edit because `commit` closes over this render's draft.
-  useEffect(() => {
-    if (!staging || !colorwayId || !canEdit) return;
-    if (!staged) {
-      staging.unstage(stagingKey);
-      return;
-    }
-    staging.stage({
-      key: stagingKey,
-      label: `colourway ${colorwayTitle(colorway)} · lab-dip R${round || 1}`,
-      order: COMMIT_ORDER.labDip,
-      commit: commitLabDip,
-      settle: () => setDirty(false),
-      snapshot: draft,
-    });
-    // commitLabDip is redefined every render by design (it reads current state).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, stagingKey, colorwayId, canEdit, staged, draft, round, colorway, lockVersion, techCardId]);
-
-  useEffect(
-    () => () => {
-      if (colorwayId) staging?.unstage(stagingKey);
-    },
-    [staging, stagingKey, colorwayId],
-  );
-
-  const highestRound = recorded.reduce(
-    (m, r) => Math.max(m, r.round),
-    Math.max(round, hasLabDipRound(draft) ? 1 : 0),
-  );
-  return {
-    draft,
-    stored,
-    started,
-    recorded,
-    set,
-    approve: () => set({ labDipStatus: APPROVED, labDipRejectReason: '' }),
-    reject: (reason: string) => set({ labDipStatus: REJECTED, labDipRejectReason: reason.trim() }),
-    // Opens the round after the highest known one, with no verdict yet.
-    newRound: () =>
-      set({
-        labDipRound: String(highestRound + 1),
-        labDipStatus: SUBMITTED,
-        labDipRejectReason: '',
-      }),
-  };
 }
 
 // ═══ ЧЕРНОВИК РЕЦЕПТА ОДНОГО КОЛОРВЕЯ ═════════════════════════════════════════════════════════
@@ -531,7 +261,9 @@ function useColourwayRecipeDraft({
       const slot = slotByKey.get(key);
       if (!GARMENT_SECTIONS.has(slot?.section ?? '')) continue;
       // считаются только строки, которые РЕАЛЬНО уедут на сервер (канон + savableUsage)
-      const count = e.garment.filter(({ draft: g }) => savableUsage(canonicalUsage(g, slot))).length;
+      const count = e.garment.filter(({ draft: g }) =>
+        savableUsage(canonicalUsage(g, slot)),
+      ).length;
       if (count > 1) out.push({ key, count });
     }
     return out;
@@ -545,7 +277,9 @@ function useColourwayRecipeDraft({
       const slot = slotByKey.get(key);
       const mine = (u: UsageDraft) => !u.pieceLineKey && u.bomLineKey === key;
       const keep = prev.findIndex((u) => mine(u) && savableUsage(canonicalUsage(u, slot)));
-      return prev.filter((u, i) => !mine(u) || i === keep || (keep < 0 && i === prev.findIndex(mine)));
+      return prev.filter(
+        (u, i) => !mine(u) || i === keep || (keep < 0 && i === prev.findIndex(mine)),
+      );
     });
   };
   // ЗАПАС РЕЖИМОВ НОРМЫ по слоту: прежний скаляр и прежние числа по размерам. Живёт в черновике
@@ -653,7 +387,19 @@ function useColourwayRecipeDraft({
     });
     // commitRecipe is redefined every render by design (it reads current state).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, stagingKey, colorwayId, canEdit, staged, lines, usages, snapshot, title, lockVersion, techCardId]);
+  }, [
+    staging,
+    stagingKey,
+    colorwayId,
+    canEdit,
+    staged,
+    lines,
+    usages,
+    snapshot,
+    title,
+    lockVersion,
+    techCardId,
+  ]);
 
   // Колонка ушла насовсем (удаление, архив, смена карточки): ничего не должно остаться застейдженным
   // против колорвея, которого здесь больше нет (как samples-tab afterDelete).
@@ -791,7 +537,9 @@ function UsagePerSizeLocal({
                   placeholder='0.000'
                   aria-label={`per-unit consumption${unit ? ` (${unit})` : ''}`}
                   value={draft.consumption}
-                  onChange={(e) => onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))}
+                  onChange={(e) =>
+                    onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))
+                  }
                 />
               </td>
             ) : (
@@ -1152,179 +900,6 @@ function MaterialCell({
   );
 }
 
-// ═══ ЛАБДИП — СВОЙ БЛОК ПОД МАТРИЦЕЙ (R1) ══════════════════════════════════════════════════════
-//
-// Строка на живой колорвей: квадрат цвета + имя, статус раунда, `approve` (раунд идёт) / `approved`
-// серым / `+ round` (раундов нет). Отказ, номер раунда и статус — за `reject…`. Черновик и стейджинг
-// (`labDip:<id>`) живут здесь; статус черновика уходит колонке — на нём держится предупреждение.
-function LabDipLine({
-  colorway,
-  techCardId,
-  lockVersion,
-  hex,
-  canEdit,
-  open,
-  onOpenChange,
-  onStatus,
-}: {
-  colorway: common_AdminColorwayRef;
-  techCardId: number;
-  lockVersion: number;
-  hex?: string;
-  canEdit: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onStatus: (colorwayId: number, status: string) => void;
-}) {
-  const lab = useLabDipDraft(colorway, techCardId, lockVersion, canEdit);
-  const colorwayId = colorway.colorwayId ?? 0;
-  const [reason, setReason] = useState('');
-  const status = lab.draft.labDipStatus;
-  const approved = status === APPROVED;
-  const last = lab.recorded[lab.recorded.length - 1];
-  const word = cn('text-micro uppercase tracking-label');
-  const round = parseInt(lab.draft.labDipRound, 10) || 0;
-  const statusText =
-    lab.started && !approved
-      ? [
-          round ? `R${round}` : '',
-          labDipStatusLabel.get(status as common_TechCardLabDipStatus) ?? '',
-        ]
-          .filter(Boolean)
-          .join(' · ')
-      : '';
-  useEffect(() => {
-    onStatus(colorwayId, status);
-  }, [colorwayId, status, onStatus]);
-  // Дверь из шапки («lab dip waiting») открывает строку — блок ниже матрицы, его надо показать.
-  const rowRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (open) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [open]);
-  return (
-    <div
-      ref={rowRef}
-      className='flex items-center gap-3 border-t border-hairline py-1.5 first:border-t-0'
-    >
-      <span className='flex min-w-0 items-center gap-1.5' style={{ width: TILE + 40 }}>
-        <Swatch hex={hex ?? ''} size={11} />
-        <span className='min-w-0 truncate text-control uppercase tracking-label'>
-          {colourwayName(colorway)}
-        </span>
-      </span>
-      {statusText && <span className={cn(word, 'text-labelColor')}>{statusText}</span>}
-      {approved ? (
-        <span className={cn(word, 'text-labelColor')}>approved</span>
-      ) : (
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className='px-0'
-          disabled={!canEdit}
-          onClick={lab.started ? lab.approve : lab.newRound}
-        >
-          {lab.started ? 'approve' : '+ round'}
-        </Button>
-      )}
-      <GenericPopover
-        open={open}
-        onOpenChange={(o) => {
-          if (o) setReason(lab.draft.labDipRejectReason);
-          onOpenChange(o);
-        }}
-        noTail
-        title='lab dip'
-        className='w-64'
-        triggerProps={{
-          'aria-label': 'lab dip rounds',
-          className: cn(word, 'text-labelColor hover:text-textColor cursor-pointer'),
-        }}
-        openElement='reject…'
-      >
-        <div className='flex flex-col gap-1.5'>
-          {last ? (
-            <Text size='micro' variant='label' component='p'>
-              {`R${last.round || lab.recorded.length}`}
-              {last.submittedAt ? ` · submitted ${fmtDay(last.submittedAt)}` : ''}
-              {` · ${labDipStatusLabel.get(last.status as common_TechCardLabDipStatus) ?? last.status}`}
-              {roundOutcome(last) ? ` · ${roundOutcome(last)}` : ''}
-            </Text>
-          ) : (
-            <Text size='micro' variant='label' component='p'>
-              no rounds yet
-            </Text>
-          )}
-          {canEdit && (
-            <>
-              <label className='flex flex-col gap-1'>
-                <span className={LABEL}>reject reason</span>
-                <textarea
-                  className={cell}
-                  rows={2}
-                  maxLength={1000}
-                  aria-label='reject reason'
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              </label>
-              <div className='flex flex-wrap gap-1.5'>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  disabled={!lab.started}
-                  onClick={() => {
-                    lab.reject(reason);
-                    onOpenChange(false);
-                  }}
-                >
-                  reject
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  onClick={() => {
-                    lab.newRound();
-                    onOpenChange(false);
-                  }}
-                >
-                  + new round
-                </Button>
-              </div>
-              <label className='flex flex-col gap-1'>
-                <span className={LABEL}>status</span>
-                <select
-                  className={cell}
-                  value={status}
-                  onChange={(e) => lab.set({ labDipStatus: e.target.value })}
-                >
-                  {techCardLabDipStatusOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className='flex flex-col gap-1'>
-                <span className={LABEL}>round</span>
-                <input
-                  className={cell}
-                  type='number'
-                  min='0'
-                  value={lab.draft.labDipRound}
-                  onChange={(e) => lab.set({ labDipRound: e.target.value })}
-                />
-              </label>
-            </>
-          )}
-        </div>
-      </GenericPopover>
-    </div>
-  );
-}
-
 // ═══ КОЛОНКА КОЛОРВЕЯ ═════════════════════════════════════════════════════════════════════════
 
 type ColumnProps = {
@@ -1356,8 +931,10 @@ type ColumnProps = {
   onHighlightDone: () => void;
   focus: Focus;
   setFocus: (f: Focus) => void;
-  /** Статус лабдипа из черновика строки блока `lab dip` (предупреждение шапки). */
+  /** Сохранённый статус лабдипа (предупреждение шапки). */
   labDipStatus: string;
+  /** Вкладка LAB DIP. */
+  onGoToLabDip: () => void;
   /** PATTERNS → раскладка слота, авто-режим. */
   onGoToMarker: (bomLineKey: string, colorwayId?: number) => void;
   seed?: UsageDraft[];
@@ -1396,6 +973,7 @@ function ColourwayColumn({
   focus,
   setFocus,
   labDipStatus,
+  onGoToLabDip,
   onGoToMarker,
   seed,
   onSeedUsed,
@@ -1524,7 +1102,7 @@ function ColourwayColumn({
           if (missing) onGoToMarker(key, colorwayId);
           else setFocus({ cwId: colorwayId, kind: 'norm', key });
         },
-        openLabDip: () => setFocus({ cwId: colorwayId, kind: 'labDip', key: '' }),
+        openLabDip: onGoToLabDip,
         cleanUp: (what) => cleanUpRef.current(what),
         clearPieceNorms: () => clearPieceNormsRef.current(),
         canEdit,
@@ -1553,6 +1131,7 @@ function ColourwayColumn({
       cwMarkers,
       plan,
       labDipStatus,
+      onGoToLabDip,
       onGoToMarker,
       draft.strayCount,
       draft.orphanCount,
@@ -1578,7 +1157,9 @@ function ColourwayColumn({
 
   const pickerKey = focus?.cwId === colorwayId && focus.kind === 'picker' ? focus.key : '';
   const pickerSlot = pickerKey ? cardSlots.find((s) => s.lineKey === pickerKey) : undefined;
-  const pickerDraft = pickerSlot ? slotDraft(draft.rowsBySlot.get(pickerKey), pickerKey) : undefined;
+  const pickerDraft = pickerSlot
+    ? slotDraft(draft.rowsBySlot.get(pickerKey), pickerKey)
+    : undefined;
   const pickerPreferred = pickerKey
     ? plan.ambiguous.find((a) => a.key === pickerKey)?.candidates
     : undefined;
@@ -1765,11 +1346,6 @@ export function ColourwaysMatrix({
   const [focus, setFocus] = useState<Focus>(null);
   const [creating, setCreating] = useState(false);
   const stockFacts = useMaterialStockFacts();
-  // Статус лабдипа из ЧЕРНОВИКА строки блока `lab dip` — колонке, для предупреждения шапки.
-  const [labStatusById, setLabStatusById] = useState<Record<number, string>>({});
-  const onLabStatus = useCallback((id: number, status: string) => {
-    setLabStatusById((prev) => (prev[id] === status ? prev : { ...prev, [id]: status }));
-  }, []);
   // `no norm` → PATTERNS, раскладка этого слота, авто-режим. Остальные параметры URL сохраняются.
   const [, setSearchParams] = useSearchParams();
   const goToMarker = useCallback(
@@ -1785,13 +1361,22 @@ export function ColourwaysMatrix({
       }),
     [setSearchParams],
   );
+  // `lab dip waiting` → вкладка LAB DIP. Остальные параметры URL сохраняются.
+  const goToLabDip = useCallback(
+    () =>
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', LAB_DIP_TAB);
+        return next;
+      }),
+    [setSearchParams],
+  );
   const [seed, setSeed] = useState<{ colorwayId: number; usages: UsageDraft[] } | null>(null);
 
   // Остальные колорвеи для ступени «соседний колорвей» — стабильной ссылкой, иначе план каждой
   // колонки пересчитывался бы на каждый рендер матрицы.
   const othersById = useMemo(
-    () =>
-      new Map(colorways.map((cw) => [cw.colorwayId ?? 0, colorways.filter((c) => c !== cw)])),
+    () => new Map(colorways.map((cw) => [cw.colorwayId ?? 0, colorways.filter((c) => c !== cw)])),
     [colorways],
   );
   const [warningsById, setWarningsById] = useState<Record<number, HeaderWarning[]>>({});
@@ -1858,7 +1443,13 @@ export function ColourwaysMatrix({
       const before = u.materialId || slot?.materialId || 0;
       const after = slot?.materialId || 0;
       if (bomUnitKind(slot?.unit?.trim() || '') === 'kg' && before !== after) {
-        return { ...next, consumption: '', sizeConsumptions: [], normMarkerId: 0, ...MANUAL_PROVENANCE };
+        return {
+          ...next,
+          consumption: '',
+          sizeConsumptions: [],
+          normMarkerId: 0,
+          ...MANUAL_PROVENANCE,
+        };
       }
       return next;
     });
@@ -1934,7 +1525,8 @@ export function ColourwaysMatrix({
                   onHighlightDone={onHighlightDone}
                   focus={focus}
                   setFocus={setFocus}
-                  labDipStatus={labStatusById[id] ?? fromRefLabDip(cw).labDipStatus}
+                  labDipStatus={cw.labDipStatus ?? ''}
+                  onGoToLabDip={goToLabDip}
                   onGoToMarker={goToMarker}
                   seed={seed?.colorwayId === id ? seed.usages : undefined}
                   onSeedUsed={onSeedUsed}
@@ -1980,28 +1572,6 @@ export function ColourwaysMatrix({
           </div>
         </div>
       </Section>
-      {colorways.length > 0 && (
-        <Section title='lab dip'>
-          <div className='flex flex-col'>
-            {colorways.map((cw) => {
-              const id = cw.colorwayId ?? 0;
-              return (
-                <LabDipLine
-                  key={id}
-                  colorway={cw}
-                  techCardId={techCardId}
-                  lockVersion={lockVersion}
-                  hex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
-                  canEdit={canEdit}
-                  open={focus?.cwId === id && focus.kind === 'labDip'}
-                  onOpenChange={(o) => setFocus(o ? { cwId: id, kind: 'labDip', key: '' } : null)}
-                  onStatus={onLabStatus}
-                />
-              );
-            })}
-          </div>
-        </Section>
-      )}
     </>
   );
 }

@@ -362,7 +362,7 @@ export function ModelThumb({
   hot?: boolean;
   /** Per outline: a piece this garment changes (tinted blue). */
   tinted?: readonly boolean[];
-  /** This garment's cutting lines (blue polylines). */
+  /** This garment's cutting lines (thick blue polylines, over the outlines). */
   cutLines?: readonly (readonly PtMm[])[];
   /** Outlines only this garment has (dashed blue). */
   extra?: readonly (readonly PtMm[])[];
@@ -424,11 +424,255 @@ export function ModelThumb({
             points={ptsAttr(l as PtMm[])}
             fill='none'
             stroke={SHEET_INK.blue}
-            strokeWidth={unit * 0.9}
+            strokeWidth={unit * 1.6}
             strokeLinecap='round'
           />
         ) : null,
       )}
+    </svg>
+  );
+}
+
+/**
+ * The closed outline a box was drawn round (a face seed's or a set-aside outline's own line): the
+ * biggest closed line wholly inside the box that spans most of it; null when the box holds none.
+ */
+export function faceOutline(box: BoxMm, previews: readonly Float32Array[]): PtMm[] | null {
+  const bx = chainBoxes(previews);
+  const w = Math.max(box.maxX - box.minX, 1);
+  const h = Math.max(box.maxY - box.minY, 1);
+  let best = -1;
+  let bestSpan = 0;
+  for (const i of ownChains(box, previews).idx) {
+    const a = previews[i];
+    if (
+      a.length < 8 ||
+      Math.hypot(a[0] - a[a.length - 2], a[1] - a[a.length - 1]) > 0.01 * Math.max(w, h)
+    )
+      continue;
+    const sw = bx[i * 4 + 2] - bx[i * 4];
+    const sh = bx[i * 4 + 3] - bx[i * 4 + 1];
+    if (sw < 0.8 * w || sh < 0.8 * h || sw * sh <= bestSpan) continue;
+    best = i;
+    bestSpan = sw * sh;
+  }
+  if (best < 0) return null;
+  const a = previews[best];
+  const pts: PtMm[] = [];
+  for (let k = 0; k + 1 < a.length; k += 2) pts.push({ x: a[k], y: a[k + 1] });
+  return pts;
+}
+
+/** Distance from p to the closed outline's edge. */
+function toEdge(p: PtMm, poly: readonly PtMm[]) {
+  let b = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const c = poly[(i + 1) % poly.length];
+    const dx = c.x - a.x;
+    const dy = c.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    b = Math.min(b, Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y));
+  }
+  return b;
+}
+
+/** One part of a region where two pieces touch: its number, its own outline when known. */
+export type TouchPart = {
+  n: string;
+  at: PtMm | null;
+  /** The part's own outline (null: the part is the rest of the region). */
+  outer: readonly PtMm[] | null;
+};
+
+const polyPath = (pts: readonly PtMm[], dx = 0, dy = 0) =>
+  `M${pts.map((p) => `${p.x + dx},${vy(p.y + dy)}`).join('L')}Z`;
+
+/**
+ * Where two pieces touch, alone (no neighbour lines): the region's first part filled blue, the
+ * other part (its own outline, when known) hatched in ink, the edge they share drawn heavy, a
+ * number on each. `one` = the region as one piece (blue, no inner edge); `two` = the two parts
+ * drawn apart.
+ */
+export function TouchCrop({
+  region,
+  parts,
+  mode = 'ask',
+  className,
+  style,
+}: {
+  region: readonly PtMm[];
+  parts: readonly TouchPart[];
+  mode?: 'ask' | 'one' | 'two';
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const hatch = `hatch${useId().replace(/[^\w-]/g, '')}`;
+  const box = {
+    minX: Math.min(...region.map((p) => p.x)),
+    minY: Math.min(...region.map((p) => p.y)),
+    maxX: Math.max(...region.map((p) => p.x)),
+    maxY: Math.max(...region.map((p) => p.y)),
+  };
+  const size = Math.max(box.maxX - box.minX, box.maxY - box.minY, 1);
+  // two pieces apart: the known parts move off the region's middle by a tenth of its size
+  const gap = mode === 'two' ? size * 0.1 : 0;
+  const known = mode === 'one' ? [] : parts.filter((p) => p.outer && p.outer.length > 2);
+  const spanOf = (o: readonly PtMm[]) => {
+    const xs = o.map((p) => p.x);
+    const ys = o.map((p) => p.y);
+    return {
+      c: { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 },
+      r: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 2,
+    };
+  };
+  // a part too small to see under its own number (a label, a mark): ringed, its number beside
+  const small = new Set(known.filter((p) => spanOf(p.outer!).r < size * 0.08));
+  const side = small.size ? size * 0.2 : 0;
+  const v = pad(
+    {
+      minX: box.minX - gap,
+      minY: box.minY - gap,
+      maxX: box.maxX + gap + side,
+      maxY: box.maxY + gap,
+    },
+    0.06,
+  );
+  const unit = Math.max(v.w, v.h) / 120;
+  const mid = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+  const shift = (o: readonly PtMm[]) => {
+    if (!gap) return { dx: 0, dy: 0 };
+    const c = o.reduce((s, p) => ({ x: s.x + p.x / o.length, y: s.y + p.y / o.length }), {
+      x: 0,
+      y: 0,
+    });
+    const d = Math.hypot(c.x - mid.x, c.y - mid.y) || 1;
+    return { dx: ((c.x - mid.x) / d) * gap, dy: ((c.y - mid.y) / d) * gap };
+  };
+  // the edge two parts share: a known part's sides that run inside the region, not along its rim
+  const tol = size * 0.015;
+  const shared = known.flatMap((p) => {
+    const o = p.outer!;
+    const segs: string[] = [];
+    for (let i = 0; i < o.length; i++) {
+      const a = o[i];
+      const b = o[(i + 1) % o.length];
+      if (toEdge({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, region) > tol)
+        segs.push(`M${a.x},${vy(a.y)}L${b.x},${vy(b.y)}`);
+    }
+    return segs;
+  });
+  // the rest of the region (the part with no outline of its own): the region minus the known ones
+  const rest = polyPath(region) + known.map((p) => polyPath(p.outer!)).join('');
+  const badge = (p: TouchPart, blue: boolean, dx = 0, dy = 0) =>
+    p.at ? (
+      <g key={`b${p.n}`}>
+        <rect
+          x={p.at.x + dx - unit * 6}
+          y={vy(p.at.y + dy) - unit * 6}
+          width={unit * 12}
+          height={unit * 12}
+          fill={blue ? SHEET_INK.blue : SHEET_INK.ink}
+        />
+        <text
+          x={p.at.x + dx}
+          y={vy(p.at.y + dy)}
+          fontSize={unit * 8}
+          fill='#ffffff'
+          textAnchor='middle'
+          dominantBaseline='central'
+        >
+          {p.n}
+        </text>
+      </g>
+    ) : null;
+  return (
+    <svg
+      viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
+      preserveAspectRatio='xMidYMid meet'
+      aria-hidden
+      className={className}
+      style={style}
+    >
+      <defs>
+        <pattern
+          id={hatch}
+          patternUnits='userSpaceOnUse'
+          width={unit * 3}
+          height={unit * 3}
+          patternTransform='rotate(45)'
+        >
+          <rect width={unit * 3} height={unit * 3} fill='#ffffff' />
+          <line
+            x1={0}
+            y1={0}
+            x2={0}
+            y2={unit * 3}
+            stroke={SHEET_INK.ink}
+            strokeWidth={unit * 0.9}
+          />
+        </pattern>
+      </defs>
+      <path
+        d={rest}
+        fillRule='evenodd'
+        fill={SHEET_INK.blue}
+        fillOpacity={0.22}
+        stroke={SHEET_INK.blue}
+        strokeWidth={unit * 1.2}
+      />
+      {known.map((p) => {
+        const { dx, dy } = shift(p.outer!);
+        return (
+          <path
+            key={`k${p.n}`}
+            d={polyPath(p.outer!, dx, dy)}
+            fill={`url(#${hatch})`}
+            stroke={SHEET_INK.ink}
+            strokeWidth={unit * 1.2}
+          />
+        );
+      })}
+      {mode === 'ask' && shared.length > 0 && (
+        <path
+          d={shared.join('')}
+          fill='none'
+          stroke={SHEET_INK.ink}
+          strokeWidth={unit * 3}
+          strokeLinecap='round'
+        />
+      )}
+      {mode !== 'one' &&
+        parts.map((p) => {
+          const own = known.includes(p);
+          const { dx, dy } = own ? shift(p.outer!) : { dx: 0, dy: 0 };
+          if (!small.has(p)) return badge(p, !own, dx, dy);
+          const { c, r } = spanOf(p.outer!);
+          const ring = Math.max(r + unit * 2.5, unit * 5);
+          const tag = { ...p, at: { x: box.maxX + gap + side * 0.55, y: c.y + dy } };
+          return (
+            <g key={`s${p.n}`}>
+              <circle
+                cx={c.x + dx}
+                cy={vy(c.y + dy)}
+                r={ring}
+                fill='none'
+                stroke={SHEET_INK.ink}
+                strokeWidth={unit * 1.2}
+              />
+              <line
+                x1={c.x + dx + ring}
+                y1={vy(c.y + dy)}
+                x2={tag.at.x - unit * 6}
+                y2={vy(tag.at.y)}
+                stroke={SHEET_INK.ink}
+                strokeWidth={unit * 0.8}
+              />
+              {badge(tag, false)}
+            </g>
+          );
+        })}
     </svg>
   );
 }

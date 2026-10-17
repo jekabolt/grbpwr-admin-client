@@ -30,8 +30,11 @@ export const QuizHistoryContext = createContext<QuizHistory | null>(null);
 // runs exactly what its primary would (`continueAnyway`: next, and with the autopilot on, resumes
 // the drive). Anything still asked: nothing happens, the step shows its next question. Only for
 // answers given by hand in a quiz — never for an automatic map, a row edit or a fold toggle.
-// `{ pastOffer: true }`: the quiz just answered exactly what the step's OFFER is about (the pieces
-// step's "N outlines set aside on a guess"), so that offer no longer holds the step back.
+// `{ pastOffer: true }`: the quiz just answered exactly what the step's OFFER is about, and the
+// engine has no input that records that answer, so the offer would still hold the step back (the
+// fabrics step's "keep every piece on the main fabric"). Where the engine records the answer the
+// offer drops by itself and the flag is not needed: the pieces step's set-aside quiz sends
+// `inputs.asideReviewed` (api.reviewAsides) and goes on without it.
 
 /** See ANSWERED AND GO above. Outside a wizard: a no-op. */
 export type AnsweredAndGo = (answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => void;

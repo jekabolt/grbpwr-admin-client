@@ -117,7 +117,7 @@ export const NEXT_LABEL: Record<string, string> = {
 const NEXT_TAB: Record<string, string> = {
   costing_computes: 'colorways',
   construction_graph: 'construction',
-  lab_dip: 'colorways',
+  lab_dip: 'lab-dip',
   signoffs: 'signoff',
 };
 // The one row whose wording depends on WHICH half failed (the server's detail names it).

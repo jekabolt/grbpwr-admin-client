@@ -40,7 +40,7 @@ import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { patternNameOfFile, uploadPatternFile } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
+import { Placeholder, PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 import {
@@ -579,16 +579,22 @@ export function PatternsField({
   // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
   // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
   // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
+  // A part that repeats the one before it is said once (owner 17.10: «main material · main
+  // material» — a line named after its own purpose).
+  const once = (parts: (string | undefined)[]) =>
+    parts
+      .map((x) => x?.trim() ?? '')
+      .filter((x, i, a) => x && a.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i);
   const scopeLabel = (s: FabricScope<FabricLine>): string => {
     if (!s.byPurpose) {
       const l = s.lines[0];
-      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'unnamed';
+      return once([l?.role, l?.name]).join(' · ') || 'unnamed';
     }
-    const names = s.lines
-      .map((l) => l.name.trim())
-      .filter(Boolean)
-      .join(', ');
-    return [bomPurposeLabel(s.key), names].filter(Boolean).join(' · ');
+    const purpose = bomPurposeLabel(s.key);
+    const names = once(s.lines.map((l) => l.name)).filter(
+      (n) => n.toLowerCase() !== purpose.trim().toLowerCase(),
+    );
+    return once([purpose, names.join(', ')]).join(' · ');
   };
   const uploadScopes = useMemo(
     () => scopes.map((s) => ({ key: s.key, label: scopeLabel(s) })),
@@ -1754,7 +1760,8 @@ export function PatternsField({
             </div>
           }
         >
-          {label}
+          {/* the tile above already names the material (it is the selected one): the files */}
+          files
         </GroupLabel>
         {sheetList(g.entries)}
       </div>
@@ -1900,8 +1907,7 @@ export function PatternsField({
         autoRun:
           deepAuto &&
           !(
-            deepColorway &&
-            (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
+            deepColorway && (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
           ),
         colorwayId: deepColorway || undefined,
       });
@@ -2119,7 +2125,32 @@ export function PatternsField({
     return (
       <>
         {headerPortal}
-        <Placeholder dashed label='add fabric lines in the BOM first' className='h-[84px] w-full' />
+        {/* owner 17.10: the empty block is the door that creates the fabric slot — the BOM tab
+            opens with the catalog picker already on the fabric section (bom-field reads addSlot) */}
+        {canEdit ? (
+          <button
+            type='button'
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.set('tab', 'bom');
+              next.set('addSlot', 'TECH_CARD_BOM_SECTION_FABRIC');
+              setParams(next, { replace: true });
+            }}
+            style={PLACEHOLDER_SURFACE}
+            className={cn(
+              placeholderClass({ dashed: true }),
+              'h-[84px] w-full cursor-pointer hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+            )}
+          >
+            + fabric slot
+          </button>
+        ) : (
+          <Placeholder
+            dashed
+            label='add fabric lines in the BOM first'
+            className='h-[84px] w-full'
+          />
+        )}
       </>
     );
   }

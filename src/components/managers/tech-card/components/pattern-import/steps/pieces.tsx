@@ -14,6 +14,7 @@ import type {
   PtMm,
   Seed,
   SetAside,
+  VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -47,7 +48,16 @@ import { modelFromCard } from '../autopilot/card-match';
 import { provenCopy, weakAsides } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
-import { AsideSilhouette, ModelThumb, OutlineTile, RegionCrop, ownChains } from './pieces-guide';
+import {
+  AsideSilhouette,
+  ModelThumb,
+  OutlineTile,
+  RegionCrop,
+  TouchCrop,
+  faceOutline,
+  ownChains,
+} from './pieces-guide';
+import type { TouchPart } from './pieces-guide';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
@@ -224,47 +234,139 @@ const centre = (pts: PtMm[]) => {
  */
 type Problem =
   | { key: 'model'; kind: 'model' }
-  | { key: string; kind: 'region'; seed: number; rank: number; outcome: FillOutcome }
+  | {
+      key: string;
+      kind: 'region';
+      seed: number;
+      rank: number;
+      outcome: FillOutcome;
+      /** 'two pieces touch': the whole region (every number in it), asked once. */
+      group?: TouchGroup;
+    }
+  /** Several regions where pieces touch, all with the same likely answer: one question for all. */
+  | { key: 'touch'; kind: 'touch'; groups: TouchGroup[] }
   | { key: 'sheet'; kind: 'sheet' }
   /** Optional, after the required ones: were the outlines left out on a guess left out right? */
   | { key: 'aside'; kind: 'aside' };
 
 /**
- * How one garment differs on the sheet (the engine's optional `pieces.out.variantMarks`, not in
- * the types yet): its label, where the label sits, its cutting lines, the pieces it changes (seed
- * ids), its own outlines, and whether the engine is unsure. Every field is read guarded.
+ * One region where pieces touch, asked ONCE for every number in it (owner 17.10: «quiz too long»
+ * — it was one question per number, so a pair was asked twice). The answer is a seed edit, so it
+ * covers every size of those numbers at once.
  */
-type VariantMark = {
-  label: string | null;
-  cutLines: PtMm[][];
-  pieces: Set<number>;
-  outlines: PtMm[][];
-  uncertain: boolean;
+type TouchGroup = {
+  key: string;
+  /** The numbers (seeds) in the region, the asked one first. */
+  seeds: number[];
+  /** The size the region is shown in. */
+  rank: number;
+  outer: PtMm[];
+  areaMm2: number;
+  /** The engine's own proof: exactly two numbers, each the other's only partner. */
+  proven: boolean;
+  /** The likely answer: one piece, or this part (a label, a mark: tiny) is not a piece. */
+  likely: { kind: 'join' } | { kind: 'drop'; seed: number };
+  /** Proven, likely one piece, and not two printed piece numbers: joined without asking. */
+  auto: boolean;
 };
-const isPt = (p: unknown): p is PtMm =>
-  !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
-const polylines = (v: unknown, min: number): PtMm[][] =>
-  Array.isArray(v)
-    ? v.filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
-    : [];
-function variantMarksOf(out: unknown): VariantMark[] {
-  const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
-    .map((m) => ({
-      label: typeof m.label === 'string' ? m.label : null,
-      cutLines: polylines(m.cutLines, 2),
-      pieces: new Set(
-        Array.isArray(m.pieces) ? m.pieces.filter((x): x is number => Number.isFinite(x)) : [],
-      ),
-      outlines: polylines(m.outlines, 3),
-      uncertain: m.uncertain === true,
-    }));
-}
-/** A mark the client can show: sure, and it draws something. */
+
+/**
+ * How one garment differs on the sheet: the engine's `pieces.out.variantMarks` (VARIANT-MARKS.md).
+ * A mark the client can show is sure and says something: a cutting line (`cut` — the garment cuts
+ * the piece there; `edge` — it keeps the piece's drawn edge where another garment cuts) or a piece
+ * of that garment alone (`piece`). Uncertain marks change nothing, so they draw nothing.
+ */
 const markShows = (m: VariantMark) =>
-  !m.uncertain && (m.cutLines.length > 0 || m.pieces.size > 0 || m.outlines.length > 0);
+  !m.uncertain && (m.cutLines.length > 0 || m.pieces.length > 0);
+/** Squared distance from `p` to the closed outline `poly` (its edges). */
+const distToOutline2 = (p: PtMm, poly: readonly PtMm[]) => {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    const ex = a.x + t * dx - p.x;
+    const ey = a.y + t * dy - p.y;
+    best = Math.min(best, ex * ex + ey * ey);
+  }
+  return best;
+};
+const polyLen = (l: readonly PtMm[]) => {
+  let n = 0;
+  for (let i = 1; i < l.length; i++) n += Math.hypot(l[i].x - l[i - 1].x, l[i].y - l[i - 1].y);
+  return n;
+};
+/** How far (mm) a cutting line's end may lie from an outline and still be ON it. */
+const ON_OUTLINE_MM = 1.5;
+/**
+ * A cutting line that may be drawn in the size `poly` is drawn in: both its ends lie on that
+ * outline (an `edge` line runs along it, a `cut` line ends on its sides / is its new cut edge).
+ * The engine gives one line per size and no size label; a bigger or other size's line ends a
+ * whole grade step (≈ 12 mm on kombinezon) off and is left out — no nearest fallback: a wrong
+ * size's line is worse than none. Smaller sizes' lines sharing the fold end still pass; the caller
+ * keeps the longest.
+ */
+const lineOn = (l: readonly PtMm[], poly: readonly PtMm[]) =>
+  l.length > 1 &&
+  poly.length > 2 &&
+  distToOutline2(l[0], poly) <= ON_OUTLINE_MM ** 2 &&
+  distToOutline2(l[l.length - 1], poly) <= ON_OUTLINE_MM ** 2;
+/**
+ * One garment's picture, every piece in ONE size: its pieces (a piece another garment owns is
+ * already left out by the caller), each in this garment's own outline where the engine cut one
+ * (`outlines` — given in one representative size, so the picture uses that size's rank for every
+ * piece), else as drawn in that rank; the pieces its marks touch tinted; its cutting lines — only
+ * per piece the one line drawn in the size shown (`lineOn`, the longest), none when no line is.
+ * `at.own: false` (the sheet under the pointer): the size on screen, the drawn outlines as given.
+ */
+function garmentPicture(
+  v: string,
+  fams: readonly PieceFamily[],
+  marks: readonly VariantMark[],
+  at: { rank: number; rankOfSize: (size: string) => number | null; own: boolean },
+) {
+  const mine = marks.filter((m) => m.label === v && markShows(m));
+  const given = at.own
+    ? mine
+        .flatMap((m) => m.outlines ?? [])
+        .map((o) => at.rankOfSize(o.size))
+        .find((r): r is number => r != null)
+    : undefined;
+  const rank = given ?? at.rank;
+  const own = new Map<number, PtMm[]>();
+  if (at.own)
+    for (const m of mine)
+      for (const o of m.outlines ?? [])
+        if (o.poly.length > 2 && at.rankOfSize(o.size) === rank) own.set(o.seed, o.poly);
+  const touched = new Set(mine.flatMap((m) => m.pieces));
+  const drawn = (f: PieceFamily) =>
+    (
+      f.candidates.find((c) => c.rank === rank) ??
+      f.candidates[Math.min(rank, f.candidates.length - 1)]
+    )?.outer ?? [];
+  const shapes = fams.map((f) => own.get(f.seed) ?? drawn(f));
+  const cutLines: PtMm[][] = [];
+  for (const m of mine) {
+    if (m.kind === 'piece') continue;
+    for (const sd of m.pieces) {
+      const i = fams.findIndex((f) => f.seed === sd);
+      if (i < 0) continue;
+      // the size's own line spans the whole edge; a smaller size's line (same fold / CF end)
+      // lies on this outline too, as a part of it — so: the LONGEST line on the outline, one
+      const on = m.cutLines.filter((l) => lineOn(l, shapes[i]));
+      if (on.length) cutLines.push(on.reduce((x, y) => (polyLen(y) > polyLen(x) ? y : x)));
+    }
+  }
+  return {
+    rank,
+    outlines: shapes,
+    tinted: fams.map((f) => touched.has(f.seed)),
+    cutLines,
+  };
+}
 
 /** What the canvas shows lit (blue) because a tile or a garment picture is under the pointer. */
 type Hot =
@@ -358,6 +460,17 @@ export function PiecesStep({
     autoTried: null as number | null,
     /** «change» on the picked-for-you garment: ask from now on, never pick again. */
     autoReopened: false,
+    /**
+     * Each number's own outline per size, the last time it closed alone: when it then touches
+     * another piece, the picture draws the two parts apart (the engine gives one outline only).
+     */
+    own: new Map<number, Map<number, { outer: PtMm[]; areaMm2: number }>>(),
+    /** Touch regions joined without asking: never again (undone = asked). */
+    autoDone: new Set<string>(),
+    /** Regions clicked off the one-question-for-all: asked one by one. */
+    touchOff: new Set<string>(),
+    /** The last answer that covered several edits: its words, how many, and the edits after it. */
+    applied: null as { text: string; n: number; at: number } | null,
   }));
   const splitRef = {
     get current() {
@@ -424,13 +537,13 @@ export function PiecesStep({
   // the same pieces. Without that report the client cannot know: the engine cuts a model along its
   // own cutting lines (pieces/variants.ts `variantKnives`) even when no seed carries the model,
   // so styles sharing every seed may still differ (kombinezon: A and B cut the waist and the
-  // bodice at different heights) → asked, each garment's picture with its cutting lines in blue
-  // once the engine draws them. The automatic pick goes through the shell's `autoAnswer` (a
+  // bodice at different heights) → asked, each garment's picture drawn from its marks
+  // (`garmentPicture`: its own outlines, its cutting lines in blue). The automatic pick goes through the shell's `autoAnswer` (a
   // running autopilot is resumed, not disarmed), once per run; said in the panel and the header
   // (D5: never silent), «change» asks the question ──
-  const marks = variantMarksOf(out);
-  const rawMarks = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  const marksSayNone = Array.isArray(rawMarks) && rawMarks.length === 0;
+  const marks: VariantMark[] = out?.variantMarks ?? [];
+  // `[]` (present, empty) = the engine proved the models identical; absent = unknown → ask
+  const marksSayNone = Array.isArray(out?.variantMarks) && out.variantMarks.length === 0;
   const pieceSetOf = (v: string) =>
     families
       .filter((f) => {
@@ -515,14 +628,167 @@ export function PiecesStep({
   // D6: a piece (or a whole tile sheet) drawn twice, or one cut between two sheets — asked here
   const sheetQ = out ? sheetQuestion(out.sheets, api.inputs.sheetAnswers) : null;
 
+  // A reseed moves the seed: draw its marker where the operator clicked, not where the text put
+  // it (FLY-final M2: the marker stayed at the old point). Undo drops the edit and moves it back.
+  const movedTo = new Map<number, PtMm>();
+  for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
+  const seedAt = (id: number) => out?.seeds.find((s) => s.id === id);
+  const pointOf = (id: number) => movedTo.get(id) ?? seedAt(id)?.at;
+  /** A part's word: its number on the sheet, else plainly that it has none. */
+  const nameOf = (seed: number) => String(markOf.get(seed) ?? 'unnamed part');
+  const sizeLabel = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
+  // every number's own outline per size while it closes alone (the touch picture's two parts)
+  for (const f of families)
+    for (const c of f.candidates)
+      if (c.outcome === 'closed' && c.outer.length > 2) {
+        const m = seen.own.get(f.seed) ?? new Map<number, { outer: PtMm[]; areaMm2: number }>();
+        m.set(c.rank, { outer: c.outer, areaMm2: c.areaMm2 });
+        seen.own.set(f.seed, m);
+      }
+
+  /**
+   * Two numbers in one outline: the region's own other number is the one whose fill, at the same
+   * size, is ALSO 'two pieces touch' and gives the same region (same area within 3 %, its number
+   * inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
+   * closes on its own — 'closed', another area — so it is never taken for a part of this one.
+   */
+  const rawPartners = (f: PieceFamily, c: PieceCandidate): PieceFamily[] =>
+    c.outcome !== 'merged' || c.outer.length < 3
+      ? []
+      : families.filter((g) => {
+          if (g.seed === f.seed) return false;
+          const gc = g.candidates.find((x) => x.rank === c.rank);
+          if (!gc || gc.outcome !== 'merged') return false;
+          if (Math.abs(gc.areaMm2 - c.areaMm2) > 0.03 * c.areaMm2) return false;
+          const at = pointOf(g.seed);
+          return !!at && inside(at, c.outer);
+        });
+  /** Proven only when reciprocal and unique: each of the two lists exactly the other. */
+  const partnersOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] => {
+    const raw = rawPartners(f, c);
+    if (raw.length !== 1) return [];
+    const gc = raw[0].candidates.find((x) => x.rank === c.rank);
+    const back = gc ? rawPartners(raw[0], gc) : [];
+    return back.length === 1 && back[0].seed === f.seed ? raw : [];
+  };
+  const broughtBack = new Set([...seen.promoted.values()].map((x) => x.seed));
+  /**
+   * Every number of a region where pieces touch: the pair rule's, the part already cut mid-split
+   * (its outline no longer overlaps), and a brought-back outline whose number sits in it (after a
+   * cut it no longer reads as the same region, so the pair rule alone would miss it).
+   */
+  const partsOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] => {
+    if (c.outcome !== 'merged') return [f];
+    const cut =
+      seen.split?.stage === 2 && seen.split.other === f.seed
+        ? families.find((g) => g.seed === seen.split!.first)
+        : undefined;
+    const back =
+      c.outer.length > 2
+        ? families.filter((g) => {
+            if (g.seed === f.seed || !broughtBack.has(g.seed)) return false;
+            const at = pointOf(g.seed);
+            return !!at && inside(at, c.outer);
+          })
+        : [];
+    return [...new Set([f, ...rawPartners(f, c), ...(cut ? [cut] : []), ...back])];
+  };
+  /** A part's own area: its outline when it closed alone, its outline seed's, the one brought back. */
+  const partArea = (seed: number, r: number, whole: number) => {
+    const ok = (a?: number) => (a != null && a > 0 && a < 0.97 * whole ? a : null);
+    const back = [...seen.promoted.values()].find((x) => x.seed === seed)?.aside;
+    return (
+      ok(seen.own.get(seed)?.get(r)?.areaMm2) ??
+      ok(seedAt(seed)?.face?.areaMm2) ??
+      ok(back?.areaMm2) ??
+      null
+    );
+  };
+  const merges = (seeds: number[]) =>
+    inputs.edits.some(
+      (e) =>
+        e.kind === 'merge' &&
+        e.seeds.length === seeds.length &&
+        seeds.every((s) => e.seeds.includes(s)),
+    );
+  // ── two pieces touch: ONE question per region (every number in it), its likely answer known ──
+  const touchGroups: TouchGroup[] = [];
+  const grouped = new Set<number>();
+  for (const f of families) {
+    if (!needsFix(f) || grouped.has(f.seed)) continue;
+    const c = problemOf(f);
+    if (c.outcome !== 'merged') continue;
+    const seeds = partsOf(f, c)
+      .map((g) => g.seed)
+      .filter((s) => s === f.seed || !grouped.has(s));
+    for (const s of seeds) grouped.add(s);
+    const key = `t${[...seeds].sort((a, b) => a - b).join('-')}`;
+    // a part under a twentieth of the rest (a label, a mark) is most likely not a piece
+    const tiny = seeds.filter((s) => {
+      const a = partArea(s, c.rank, c.areaMm2);
+      return a != null && a < 0.05 * (c.areaMm2 - a);
+    });
+    const likely: TouchGroup['likely'] =
+      seeds.length >= 2 && tiny.length === 1 ? { kind: 'drop', seed: tiny[0] } : { kind: 'join' };
+    const proven = seeds.length === 2 && partnersOf(f, c).length === 1;
+    // two printed piece numbers can be two real pieces drawn touching: those are always asked
+    const printed = seeds.filter((s) => seedAt(s)?.origin === 'text' && !broughtBack.has(s));
+    touchGroups.push({
+      key,
+      seeds,
+      rank: c.rank,
+      outer: c.outer,
+      areaMm2: c.areaMm2,
+      proven,
+      likely,
+      // joined once without asking; undone → asked (the merge edit gone from the inputs)
+      auto:
+        proven &&
+        likely.kind === 'join' &&
+        printed.length < 2 &&
+        (!seen.autoDone.has(key) || merges(seeds)),
+    });
+  }
+  /** The exported sizes a region touches in («8, 10, 12»): one answer covers them all. */
+  const touchSizes = (g: TouchGroup) => {
+    const f = families.find((x) => x.seed === g.seeds[0]);
+    return (f?.candidates ?? [])
+      .filter((c) => isExp(c.rank) && c.outcome === 'merged')
+      .map((c) => sizeLabel(c.rank));
+  };
+  const touchWords = (g: TouchGroup) => {
+    const z = touchSizes(g);
+    return z.length > 1 ? ` · applied to sizes ${z.join(', ')}` : '';
+  };
+  const askTouch = touchGroups.filter((g) => !g.auto);
+  const bulk = askTouch.filter((g) => !seen.touchOff.has(g.key));
+  /** Every region still asked has the same likely answer: one question for them all. */
+  const together =
+    bulk.length >= 2 && bulk.every((g) => g.likely.kind === bulk[0].likely.kind) ? bulk : [];
+
   // ── THE GUIDE: every open question in the footer's order; one is on the card at a time ──
   const openProblems: Problem[] = [
     ...(variants.length > 1 && !session.variant && !autoGo
       ? [{ key: 'model', kind: 'model' } as const]
       : []),
-    ...families.filter(needsFix).map((f): Problem => {
+    ...families.filter(needsFix).flatMap((f): Problem[] => {
+      const g = touchGroups.find((x) => x.seeds[0] === f.seed);
+      // another number of a region asked under its first number
+      if (!g && grouped.has(f.seed)) return [];
+      if (g?.auto) return [];
+      if (g && together.includes(g))
+        return g === together[0] ? [{ key: 'touch', kind: 'touch', groups: together }] : [];
       const c = problemOf(f);
-      return { key: `r${f.seed}`, kind: 'region', seed: f.seed, rank: c.rank, outcome: c.outcome };
+      return [
+        {
+          key: g ? g.key : `r${f.seed}`,
+          kind: 'region',
+          seed: f.seed,
+          rank: c.rank,
+          outcome: c.outcome,
+          group: g,
+        },
+      ];
     }),
     ...(sheetQ ? [{ key: 'sheet', kind: 'sheet' } as const] : []),
     ...((weakList.length || seen.promoted.size) && !seen.asideOk
@@ -543,20 +809,48 @@ export function PiecesStep({
     seen.asideDone = [];
     seen.promoted.clear();
     seen.split = null;
+    seen.own.clear();
+    seen.autoDone.clear();
+    seen.touchOff.clear();
+    seen.applied = null;
   }
+  // the engine proves two numbers name one outline: joined without asking, said on a quiet line
+  const autoNext = touchGroups.find((g) => g.auto && !seen.autoDone.has(g.key));
+  useEffect(() => {
+    if (!autoNext || session.busy || seen.autoDone.has(autoNext.key)) return;
+    seen.autoDone.add(autoNext.key);
+    seen.applied = {
+      text: `${autoNext.seeds.map(nameOf).join(' and ')} are one outline: joined${touchWords(autoNext)}`,
+      n: 1,
+      at: inputs.edits.length + 1,
+    };
+    // an automatic answer, not the operator's: through the shell's autoAnswer (the whole edit list,
+    // as editPieces would send it), so a running autopilot is resumed, never disarmed
+    void autoAnswer({
+      type: 'piece-edits',
+      edits: [...inputs.edits, { kind: 'merge', seeds: autoNext.seeds }],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNext?.key, session.busy]);
   // the card follows the active question: a resolved region hands over to the next one by itself
   const guided = useRef(false);
   const activeRegion = active?.kind === 'region' ? active : null;
+  // the question for several regions: the sheet goes to the first of them
+  const viewAt =
+    activeRegion ??
+    (active?.kind === 'touch'
+      ? { seed: active.groups[0].seeds[0], rank: active.groups[0].rank, outcome: 'merged' }
+      : null);
   useEffect(() => {
     // the step opened from check / details: the piece it was sent to keeps the view
     const keep = !guided.current && !!focus;
     guided.current = true;
-    if (keep || !activeRegion) return;
-    jump({ seed: activeRegion.seed, rank: activeRegion.rank });
+    if (keep || !viewAt) return;
+    jump({ seed: viewAt.seed, rank: viewAt.rank });
     setGapA(null);
     setTool('pan');
     // the same region asked again after an answer (two pieces → a gap) is a new question too
-  }, [active?.key, activeRegion?.outcome, activeRegion?.rank]);
+  }, [active?.key, viewAt?.outcome, viewAt?.rank]);
   // a loop has applied: did it split? Two identified parts, both closed, adding up to the region
   useEffect(() => {
     const p = splitRef.current;
@@ -643,12 +937,10 @@ export function PiecesStep({
     }
   }
   const bridges = inputs.edits.filter((e): e is Bridge => e.kind === 'bridge');
-  // A reseed moves the seed: draw its marker where the operator clicked, not where the text put
-  // it (FLY-final M2: the marker stayed at the old point). Undo drops the edit and moves it back.
-  const movedTo = new Map<number, PtMm>();
-  for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
   const focusSeeds = new Set(focus?.items.map((x) => x.seed) ?? []);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
+  /** The rank of a size named by its source label (the engine's `outlines[].size`). */
+  const rankOfSize = (size: string) => runSizes.find((z) => z.label === size)?.rank ?? null;
   const pickTool = (t: Tool) => {
     setGapA(null);
     setTool(t);
@@ -656,7 +948,6 @@ export function PiecesStep({
     setLassoSplit(false);
   };
 
-  const seedAt = (id: number) => out.seeds.find((s) => s.id === id);
   const outcomeOf = (f: PieceFamily): FillOutcome =>
     f.candidates.find((c) => c.outcome !== 'closed')?.outcome ?? 'closed';
   const selected = families.find((f) => f.seed === sel) ?? null;
@@ -742,8 +1033,9 @@ export function PiecesStep({
       f.seed,
       `region ${markOf.get(f.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
     );
-    void api.editPieces({ kind: 'not-a-piece', seed: f.seed });
+    const p = api.editPieces({ kind: 'not-a-piece', seed: f.seed });
     setSel(null);
+    return p;
   };
   // at rest the toolbar is pan (and the tool in hand): the card arms what its answer needs; the
   // rest is behind "more tools". A sheet with no pieces at all asks for a seed, so that one shows.
@@ -758,32 +1050,6 @@ export function PiecesStep({
   ]
     .filter(Boolean)
     .join(' · ');
-
-  /**
-   * Two numbers in one outline: the region's own other number is the one whose fill, at the same
-   * size, is ALSO 'two pieces touch' and gives the same region (same area within 3 %, its number
-   * inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
-   * closes on its own — 'closed', another area — so it is never taken for a part of this one.
-   */
-  const rawPartners = (f: PieceFamily, c: PieceCandidate): PieceFamily[] =>
-    c.outcome !== 'merged' || c.outer.length < 3
-      ? []
-      : families.filter((g) => {
-          if (g.seed === f.seed) return false;
-          const gc = g.candidates.find((x) => x.rank === c.rank);
-          if (!gc || gc.outcome !== 'merged') return false;
-          if (Math.abs(gc.areaMm2 - c.areaMm2) > 0.03 * c.areaMm2) return false;
-          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
-          return !!at && inside(at, c.outer);
-        });
-  /** Proven only when reciprocal and unique: each of the two lists exactly the other. */
-  const partnersOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] => {
-    const raw = rawPartners(f, c);
-    if (raw.length !== 1) return [];
-    const gc = raw[0].candidates.find((x) => x.rank === c.rank);
-    const back = gc ? rawPartners(raw[0], gc) : [];
-    return back.length === 1 && back[0].seed === f.seed ? raw : [];
-  };
 
   const onLasso = (poly: PtMm[]) => {
     const ins = families.filter((f) => {
@@ -863,6 +1129,13 @@ export function PiecesStep({
         label: whyOf(f, problemOf(f)).short,
         seed: p.seed,
       });
+    } else if (p.kind === 'touch') {
+      // the regions it asks together are one question now
+      for (const g of p.groups) seen.rows.delete(g.key);
+      seen.rows.set(p.key, {
+        order: 1 + Math.min(...p.groups.map((g) => markOf.get(g.seeds[0]) ?? 0)),
+        label: 'pieces touch',
+      });
     } else if (p.kind === 'sheet')
       seen.rows.set(p.key, { order: 1e6, label: 'pieces across sheets' });
     else if (p.kind === 'aside')
@@ -889,16 +1162,20 @@ export function PiecesStep({
   const badRanks = expRanks.filter((c) => c.outcome !== 'closed');
   /** The problem is in some sizes only: the card says which ('in 44 46'). */
   const partly = badRanks.length > 0 && badRanks.length < expRanks.length;
-  // two numbers in one outline: the region's own other number is the one whose fill, at the same
-  // size, is ALSO 'two pieces touch' and gives the same region (same area within 3 %, its number
-  // inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
-  // closes on its own — 'closed', another area — so it is never taken for a part of this one.
-  const partners = activeFam && activeCand ? partnersOf(activeFam, activeCand) : [];
   /** The other numbers inside this outline (shown large even when not proven a pair). */
   const others = activeFam && activeCand ? rawPartners(activeFam, activeCand) : [];
+  /** The region where pieces touch that the card asks about (one question for every number). */
+  const activeTouch = activeRegion?.group ?? null;
   /** The pieces the active question is about: lit on the canvas, their numbers drawn large. */
-  const asked = activeFam ? new Set([activeFam.seed, ...others.map((g) => g.seed)]) : null;
-  const markWord = (seed: number) => markOf.get(seed) ?? '?';
+  const asked =
+    active?.kind === 'touch'
+      ? new Set(active.groups.flatMap((g) => g.seeds))
+      : activeTouch
+        ? new Set(activeTouch.seeds)
+        : activeFam
+          ? new Set([activeFam.seed, ...others.map((g) => g.seed)])
+          : null;
+  const markWord = nameOf;
   /**
    * The card's picture: the region's own outline, or around the gap. A 4-point outline is the
    * fill's placeholder box for an open region, not a shape — never shown as one.
@@ -943,32 +1220,75 @@ export function PiecesStep({
         onClick: () => notAPiece(activeFam),
       }
     : null;
-  // mid-split, the part already cut is still one of the two (its outline no longer overlaps)
-  const cutPart =
-    activeFam && seen.split?.stage === 2 && seen.split.other === activeFam.seed
-      ? families.find((g) => g.seed === seen.split!.first)
-      : undefined;
-  const broughtBack = new Set([...seen.promoted.values()].map((x) => x.seed));
-  // a brought-back outline whose number sits in this region is one of its parts too (after a cut
-  // it no longer reads as the same region, so the pair rule alone would miss it)
-  const backInside =
-    activeFam && activeCand && activeCand.outcome === 'merged' && activeCand.outer.length > 2
-      ? families.filter((g) => {
-          if (g.seed === activeFam.seed || !broughtBack.has(g.seed)) return false;
-          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
-          return !!at && inside(at, activeCand.outer);
-        })
-      : [];
-  const parts = activeFam
-    ? [...new Set([activeFam, ...others, ...(cutPart ? [cutPart] : []), ...backInside])]
-    : [];
-  const backParts = parts.filter((g) => broughtBack.has(g.seed));
-  const dropAnswers: Answer[] = (backParts.length === 1 ? backParts : parts).map((g) => ({
-    label: `drop ${markWord(g.seed)}`,
-    how: 'one piece, or two parts',
-    title: `part ${markWord(g.seed)} is not a piece`,
-    onClick: () => notAPiece(g),
-  }));
+  /** A region's parts as its picture draws them: number, where, its own outline when known. */
+  const touchParts = (g: TouchGroup): TouchPart[] => {
+    const area = (o: readonly PtMm[]) =>
+      Math.abs(
+        o.reduce((n, p, i) => n + p.x * o[(i + 1) % o.length].y - o[(i + 1) % o.length].x * p.y, 0),
+      ) / 2;
+    const parts = g.seeds.map((s) => {
+      const own = seen.own.get(s)?.get(g.rank);
+      const box =
+        seedAt(s)?.face?.box ?? [...seen.promoted.values()].find((x) => x.seed === s)?.aside.box;
+      let outer: PtMm[] | null = own ? own.outer : null;
+      if (!outer && box) {
+        outer = faceOutline(box, previews) ?? [
+          { x: box.minX, y: box.minY },
+          { x: box.maxX, y: box.minY },
+          { x: box.maxX, y: box.maxY },
+          { x: box.minX, y: box.maxY },
+        ];
+      }
+      // an outline as big as the region is the region itself, not a part of it
+      if (outer && area(outer) >= 0.97 * g.areaMm2) outer = null;
+      return { n: nameOf(s), at: pointOf(s) ?? null, outer, a: outer ? area(outer) : Infinity };
+    });
+    // every part known: the biggest is the rest of the region (blue), the others drawn on it
+    if (parts.every((x) => x.outer)) {
+      const big = parts.reduce((x, y) => (y.a > x.a ? y : x));
+      big.outer = null;
+    }
+    return parts.map(({ n, at, outer }) => ({ n, at, outer }));
+  };
+  const sizesOfAll = (gs: TouchGroup[]) => {
+    const z = [...new Set(gs.flatMap(touchSizes))];
+    return z.length > 1 ? ` · applied to sizes ${z.join(', ')}` : '';
+  };
+  /** The answer for a region where pieces touch: one edit, said on the quiet line with undo. */
+  const touchEdit = (g: TouchGroup, how: 'join' | number) => {
+    if (how === 'join') return api.editPieces({ kind: 'merge', seeds: g.seeds });
+    const f = families.find((x) => x.seed === how);
+    return f ? notAPiece(f) : Promise.resolve();
+  };
+  const answerTouch = (gs: TouchGroup[], how: (g: TouchGroup) => 'join' | number) => {
+    pickTool('pan');
+    setHint(null);
+    const hows = gs.map(how);
+    seen.applied = {
+      text:
+        (hows.every((h) => h === 'join')
+          ? `${gs.map((g) => g.seeds.map(nameOf).join(' + ')).join(', ')} joined`
+          : hows.every((h) => h !== 'join')
+            ? `${hows.map((h) => nameOf(h as number)).join(', ')} ${hows.length > 1 ? 'are' : 'is'} not ${hows.length > 1 ? 'pieces' : 'a piece'}`
+            : 'answered') + sizesOfAll(gs),
+      n: gs.length,
+      at: inputs.edits.length + gs.length,
+    };
+    // one edit after the other: each re-runs the pieces; the shell moves on when nothing is asked
+    go(
+      (async () => {
+        for (let k = 0; k < gs.length; k++) await touchEdit(gs[k], hows[k]);
+      })(),
+    );
+  };
+  /** The quiet line's undo: every edit of the last answer, newest first. */
+  const undoApplied = () => {
+    const a = seen.applied;
+    seen.applied = null;
+    void (async () => {
+      for (let k = 0; k < (a?.n ?? 1); k++) await api.editPieces('undo');
+    })();
+  };
   const answers: Answer[] = (() => {
     if (active?.kind === 'model') {
       const order = named?.pick
@@ -1032,57 +1352,8 @@ export function PiecesStep({
           notThis,
         ];
       case 'merged':
-        return [
-          // one click: the two numbers become one piece (the merge edit, these numbers exactly)
-          ...(partners.length === 1
-            ? [
-                {
-                  label: 'one piece',
-                  how: 'one piece, or two parts',
-                  title: `numbers ${[activeFam, ...partners].map((g) => markWord(g.seed)).join(' and ')} name one piece`,
-                  onClick: () => {
-                    pickTool('pan');
-                    void api.editPieces({
-                      kind: 'merge',
-                      seeds: [activeFam.seed, ...partners.map((g) => g.seed)],
-                    });
-                    setHint(
-                      `${markWord(activeFam.seed)} and ${partners.map((g) => markWord(g.seed)).join(', ')} joined into one piece`,
-                    );
-                  },
-                },
-              ]
-            : [
-                // not proven a pair: the loop round the parts to join (the banner says so)
-                {
-                  label: 'one piece',
-                  how: 'one piece, or two parts',
-                  title: 'draw a loop around the parts that are one piece',
-                  pressed: tool === 'lasso' && lassoJoin && sel === activeFam.seed,
-                  onClick: () => {
-                    arm('lasso');
-                    setLassoJoin(true);
-                    setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
-                  },
-                },
-              ]),
-          // a split needs the line between the parts: the sheet is already on the region, the
-          // numbers are large, and the hint says which loop to draw
-          {
-            label: 'two parts',
-            how: 'one piece, or two parts',
-            title: `draw a loop around the part with number ${markWord(activeFam.seed)}`,
-            pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
-            onClick: () => {
-              arm('lasso');
-              setLassoSplit(true);
-              setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
-            },
-          },
-          // which part is not a piece: the brought-back outline when it is one of them, else
-          // one answer per part with its number (never an ambiguous «not a piece»)
-          ...dropAnswers,
-        ];
+        // the touch card draws its own answers (pictures + «isn't a piece» chips)
+        return [];
       case 'tiny':
         return [
           notThis,
@@ -1142,20 +1413,28 @@ export function PiecesStep({
   /** The card asks a question: what the parser is stuck on, in the operator's words. */
   const question = !active
     ? null
-    : active.kind === 'model'
-      ? 'which garment is this card?'
-      : active.kind === 'aside'
-        ? 'is this a pattern piece?'
-        : active.kind === 'sheet'
-          ? sheetQ?.text ?? 'how do these sheets relate?'
-          : activeCand?.outcome === 'leak'
-            ? 'outline with a gap?'
-            : activeCand?.outcome === 'merged'
-              ? 'one piece or two parts?'
-              : activeCand?.outcome === 'tiny'
-                ? 'is this a piece?'
-                : 'sizes unclear — try elsewhere?';
+    : active.kind === 'touch'
+      ? active.groups[0].likely.kind === 'drop'
+        ? `${active.groups.length} small parts: not pieces?`
+        : `${active.groups.length} places where pieces touch: one piece each?`
+      : activeTouch
+        ? `${activeTouch.seeds.map(nameOf).join(' and ')} touch: one piece?`
+        : active.kind === 'model'
+          ? 'which garment is this card?'
+          : active.kind === 'aside'
+            ? 'is this a pattern piece?'
+            : active.kind === 'sheet'
+              ? sheetQ?.text ?? 'how do these sheets relate?'
+              : activeCand?.outcome === 'leak'
+                ? 'outline with a gap?'
+                : activeCand?.outcome === 'merged'
+                  ? 'one piece or two parts?'
+                  : activeCand?.outcome === 'tiny'
+                    ? 'is this a piece?'
+                    : 'sizes unclear — try elsewhere?';
   const qIndex = active ? checklist.findIndex(([k]) => k === active.key) : -1;
+  /** A quiet «2 of 4» beside the question, only when there are several. */
+  const counter = listed && qIndex >= 0 ? `${qIndex + 1} of ${checklist.length}` : null;
 
   // ── the garments, the tiles, what the canvas lights ──
   const garments = variants.map((v) => ({
@@ -1167,6 +1446,11 @@ export function PiecesStep({
     }),
   }));
   const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
+  /** The garment under the pointer: its cutting lines on the sheet, in the size on screen. */
+  const hotGarmentLines = hotGarment
+    ? garmentPicture(hotGarment.v, hotGarment.fams, marks, { rank, rankOfSize, own: false })
+        .cutLines
+    : [];
   const hotSeeds =
     hot?.kind === 'piece'
       ? new Set([hot.seed])
@@ -1218,12 +1502,17 @@ export function PiecesStep({
   );
   const quizLeft = quiz.filter((it) => !seen.asideDone.includes(it.a.id));
   const quizNow = active?.kind === 'aside' ? quizLeft[0] ?? null : null;
-  /** The quiz is over: everything left keeps its current guess; the shell moves on if nothing else is asked. */
+  /**
+   * The quiz is over: everything left keeps its current guess, and the operator has looked at the
+   * outlines set aside — said to the engine (UXHOOKS `inputs.asideReviewed`: per tile sheet, the
+   * digest of the set as it is AFTER the last answer's re-run, so the answer itself is not a
+   * "changed set"), which drops the step's offer. The shell then moves on if nothing else is asked.
+   */
   const quizEnd = (answer?: Promise<unknown>) => {
     seen.asideOk = true;
     setHot(null);
     bump((n) => n + 1);
-    go(answer ?? Promise.resolve(), { pastOffer: true });
+    go(Promise.resolve(answer).then(() => api.reviewAsides()));
   };
   const quizAnswer = (piece: boolean) => {
     if (!quizNow) return;
@@ -1261,21 +1550,195 @@ export function PiecesStep({
   /** The canvas pans to what a tile under the pointer shows, when it is off-screen. */
   const reveal = hotAside?.box ?? (hotFam ? cand(hotFam).bbox : null);
   /** The header: the count only when there is a list of questions. */
-  const headTitle =
-    active && listed && qIndex >= 0
-      ? `question ${qIndex + 1} of ${checklist.length}`
-      : required.length
-        ? 'pieces'
-        : active?.kind === 'aside'
-          ? 'pieces ✓ · 1 optional check'
-          : families.length
-            ? 'pieces ✓'
-            : 'no pieces yet';
+  const headTitle = required.length
+    ? 'pieces'
+    : active?.kind === 'aside'
+      ? 'pieces ✓ · 1 optional check'
+      : families.length
+        ? 'pieces ✓'
+        : 'no pieces yet';
   const ASK_KEY: Record<Problem['kind'], string> = {
     model: 'pieces-model',
     region: 'pieces-region',
+    touch: 'pieces-touch',
     sheet: 'pieces-sheet',
     aside: 'pieces-aside',
+  };
+  /** The quiet line of the last answer that covered several edits (or was given for you). */
+  const appliedNow = seen.applied && inputs.edits.length === seen.applied.at ? seen.applied : null;
+  /**
+   * Two pieces touch, one region: its picture (each part its own fill, the edge they share heavy),
+   * the two answers as pictures, and «N isn't a piece» for every part — the likely one marked.
+   */
+  const renderTouch = (g: TouchGroup) => {
+    const parts = touchParts(g);
+    const dropSeed = g.likely.kind === 'drop' ? g.likely.seed : null;
+    const lead = g.seeds[0];
+    const pics = [
+      {
+        label: 'one piece',
+        mode: 'one' as const,
+        suggested: g.likely.kind === 'join',
+        pressed: tool === 'lasso' && lassoJoin && sel === lead,
+        title: `${g.seeds.map(nameOf).join(' and ')} are one piece`,
+        onClick: () => {
+          if (g.seeds.length >= 2) return answerTouch([g], () => 'join');
+          // one number only: the loop round the parts to join (the banner says so)
+          arm('lasso');
+          setLassoJoin(true);
+          setZoomTo({ seed: lead, rank: g.rank });
+        },
+      },
+      {
+        label: 'two pieces',
+        mode: 'two' as const,
+        suggested: false,
+        pressed: tool === 'lasso' && !lassoJoin && sel === lead,
+        title: `draw a loop around part ${nameOf(lead)}`,
+        onClick: () => {
+          arm('lasso');
+          setLassoSplit(true);
+          setZoomTo({ seed: lead, rank: g.rank });
+        },
+      },
+    ];
+    return (
+      <div
+        className='flex flex-col gap-3'
+        data-touch={g.key}
+        data-touch-likely={dropSeed != null ? `drop ${nameOf(dropSeed)}` : 'join'}
+        data-touch-sizes={touchSizes(g).join(',')}
+      >
+        <TouchCrop
+          region={g.outer}
+          parts={parts}
+          className='w-full border border-hairline bg-bgColor'
+          style={{ height: 200 }}
+        />
+        <div className='grid grid-cols-2 gap-2'>
+          {pics.map((x, i) => (
+            <button
+              key={x.label}
+              type='button'
+              {...ask(ASK_KEY.region, i === 0)}
+              data-ask-hint={i === 0 ? 'one piece, or two pieces' : undefined}
+              {...(x.suggested ? { 'data-ask-fix': ASK_KEY.region, 'data-suggested': 'true' } : {})}
+              aria-label={x.label}
+              aria-pressed={x.pressed}
+              aria-busy={doing === x.label && !!session.busy}
+              title={x.title}
+              disabled={!!session.busy}
+              onClick={() => {
+                setDoing(x.label);
+                x.onClick();
+              }}
+              className={cn(
+                'flex flex-col gap-1 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
+                x.suggested ? 'border-2 border-textColor' : 'border border-borderColor',
+                x.pressed && 'bg-bgZebra',
+              )}
+            >
+              <TouchCrop
+                region={g.outer}
+                parts={parts}
+                mode={x.mode}
+                className='w-full'
+                style={{ height: 96 }}
+              />
+              <Text size='micro' component='span'>
+                {doing === x.label && session.busy ? `${x.label}…` : x.label}
+              </Text>
+            </button>
+          ))}
+        </div>
+        <ChipRow>
+          {g.seeds.map((s) => (
+            <Chip
+              key={s}
+              selected={s === dropSeed}
+              data-suggested={s === dropSeed ? 'true' : undefined}
+              aria-label={`${nameOf(s)} isn't a piece`}
+              title={`part ${nameOf(s)} is a label or a mark: drop it`}
+              disabled={!!session.busy}
+              onClick={() => answerTouch([g], () => s)}
+            >
+              {nameOf(s)} isn't a piece
+            </Chip>
+          ))}
+        </ChipRow>
+      </div>
+    );
+  };
+  /**
+   * Several regions, the same likely answer: one question, the regions small side by side. A
+   * region clicked is taken off (asked apart afterwards); one click answers the rest.
+   */
+  const renderTouchAll = (gs: TouchGroup[]) => {
+    const drop = gs[0].likely.kind === 'drop';
+    return (
+      <div className='flex flex-col gap-3' data-touch-all={gs.length}>
+        <div className='grid grid-cols-3 gap-2'>
+          {gs.map((g) => (
+            <button
+              key={g.key}
+              type='button'
+              aria-label={`${g.seeds.map(nameOf).join(' + ')}: ask apart`}
+              title='ask this one apart'
+              disabled={!!session.busy}
+              onClick={() => {
+                seen.touchOff.add(g.key);
+                setHot(null);
+                bump((n) => n + 1);
+              }}
+              onPointerEnter={() => setHot({ kind: 'piece', seed: g.seeds[0] })}
+              onPointerLeave={() => setHot(null)}
+              className='flex flex-col gap-1 border border-borderColor bg-bgColor p-1 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+            >
+              <TouchCrop
+                region={g.outer}
+                parts={touchParts(g)}
+                className='w-full'
+                style={{ height: 90 }}
+              />
+              <Text size='micro' component='span'>
+                {g.likely.kind === 'drop'
+                  ? `${nameOf(g.likely.seed)} isn't a piece`
+                  : g.seeds.map(nameOf).join(' + ')}
+              </Text>
+            </button>
+          ))}
+        </div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Button
+            {...ask(ASK_KEY.touch)}
+            data-ask-hint='one click answers them all'
+            {...(drop ? {} : { 'data-ask-fix': ASK_KEY.touch })}
+            data-suggested='true'
+            variant='secondary'
+            size='sm'
+            className='border-2 border-textColor'
+            disabled={!!session.busy}
+            onClick={() =>
+              answerTouch(gs, (g) => (g.likely.kind === 'drop' ? g.likely.seed : 'join'))
+            }
+          >
+            {`yes, all ${gs.length}`}
+          </Button>
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            disabled={!!session.busy}
+            onClick={() => {
+              for (const g of gs) seen.touchOff.add(g.key);
+              bump((n) => n + 1);
+            }}
+          >
+            one by one
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1407,7 +1870,16 @@ export function PiecesStep({
               onPick={(k) => {
                 setSel(k ? Number(k) : null);
                 // a region with a question picked on the sheet becomes the card's question
-                if (k && openProblems.some((p) => p.key === `r${k}`)) setActiveKey(`r${k}`);
+                const n = k ? Number(k) : null;
+                const pk =
+                  n == null
+                    ? undefined
+                    : openProblems.find((p) =>
+                        p.kind === 'region'
+                          ? p.seed === n || !!p.group?.seeds.includes(n)
+                          : p.kind === 'touch' && p.groups.some((g) => g.seeds.includes(n)),
+                      );
+                if (pk) setActiveKey(pk.key);
               }}
               onPoint={(pt) => {
                 if (tool === 'bridge') {
@@ -1552,6 +2024,19 @@ export function PiecesStep({
                         />
                       );
                     })}
+                  {hotGarmentLines.length > 0 && (
+                    <g
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={unit * 3}
+                      strokeLinecap='round'
+                      pointerEvents='none'
+                    >
+                      {hotGarmentLines.map((l, i) => (
+                        <polyline key={`gl${i}`} points={ptsAttr(l)} />
+                      ))}
+                    </g>
+                  )}
                   {families.map((f) => {
                     const c = cand(f);
                     if (!c.leakAt) return null;
@@ -1852,51 +2337,6 @@ export function PiecesStep({
               </Button>
             </div>
           )}
-          {/* THE GUIDE: with two questions or more, every one as a plain row; the card answers one */}
-          {listed && (
-            <ol className='flex flex-col gap-0.5'>
-              {checklist.map(([key, row]) => {
-                const open = openProblems.find((p) => p.key === key);
-                const on = !!open && active?.key === key;
-                const fam =
-                  row.seed != null ? families.find((f) => f.seed === row.seed) : undefined;
-                return (
-                  <li key={key}>
-                    <button
-                      type='button'
-                      aria-current={on ? 'step' : undefined}
-                      disabled={!open && !fam}
-                      title={
-                        open?.kind === 'region' && fam ? whyOf(fam, problemOf(fam)).full : undefined
-                      }
-                      onClick={() => {
-                        if (open) {
-                          setActiveKey(key);
-                          if (open.kind === 'region') jump({ seed: open.seed, rank: open.rank });
-                        } else if (fam) jump({ seed: fam.seed, rank: null });
-                      }}
-                      className={cn(
-                        'flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
-                        on ? 'bg-bgZebra' : open ? 'hover:bg-bgZebra' : 'text-labelColor',
-                      )}
-                    >
-                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        {fam && markOf.get(fam.seed)
-                          ? `${markOf.get(fam.seed)} · ${row.label}`
-                          : row.label}
-                      </Text>
-                      {!open && (
-                        <Text size='micro' variant='label' component='span' aria-label='fixed'>
-                          ✓
-                        </Text>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-
           {/* the active question: its title, its picture, and only its own answers */}
           {active && (
             <div
@@ -1904,10 +2344,15 @@ export function PiecesStep({
               data-ask-label={
                 active.kind === 'aside'
                   ? `is this a pattern piece? · ${quiz.length - quizLeft.length + 1} of ${quiz.length}`
-                  : `${active.kind === 'region' && markOf.get(active.seed) ? `${markOf.get(active.seed)} · ` : ''}${question}`
+                  : `${active.kind === 'region' && !activeTouch && markOf.get(active.seed) ? `${markOf.get(active.seed)} · ` : ''}${question}`
               }
-              className={cn('flex flex-col gap-3', listed && 'mt-3 border-t border-hairline pt-3')}
+              className='flex flex-col gap-3'
             >
+              {counter && active.kind !== 'aside' && (
+                <Text size='micro' variant='label' component='span' className='-mb-2 self-end'>
+                  {counter}
+                </Text>
+              )}
               <Text
                 size='micro'
                 component='p'
@@ -1924,12 +2369,14 @@ export function PiecesStep({
                       : undefined
                 }
               >
-                {active.kind === 'region' && markOf.get(active.seed)
+                {active.kind === 'region' && !activeTouch && markOf.get(active.seed)
                   ? `${markOf.get(active.seed)} · `
                   : ''}
                 {question}
               </Text>
-              {active.kind === 'region' && activeCand && cropBox && (
+              {activeTouch && activeCand && renderTouch(activeTouch)}
+              {active.kind === 'touch' && renderTouchAll(active.groups)}
+              {active.kind === 'region' && !activeTouch && activeCand && cropBox && (
                 <RegionCrop
                   box={cropBox}
                   outer={activeCand.outer.length > 4 ? activeCand.outer : []}
@@ -1954,9 +2401,15 @@ export function PiecesStep({
                   {answers.map((x, i) => {
                     const g = garments.find((y) => y.v === x.label);
                     const on = hot?.kind === 'garment' && hot.v === x.label;
-                    // how this garment differs, when the engine says (sure marks only)
-                    const mk = marks.filter((m) => m.label === x.label && markShows(m));
-                    const changed = new Set(mk.flatMap((m) => [...m.pieces]));
+                    // how this garment differs, when the engine says (sure marks only): its own
+                    // outlines, its cutting lines in blue, the pieces it changes tinted
+                    const pic = garmentPicture(x.label, g?.fams ?? [], marks, {
+                      rank,
+                      rankOfSize,
+                      own: true,
+                    });
+                    // the card's own suggestion (first in the list) is shown picked in advance
+                    const suggested = x.label === named?.pick;
                     return (
                       <button
                         key={x.label}
@@ -1980,23 +2433,29 @@ export function PiecesStep({
                         onPointerLeave={() => setHot(null)}
                         onFocus={() => setHot({ kind: 'garment', v: x.label })}
                         onBlur={() => setHot(null)}
-                        className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+                        className={`flex flex-col gap-2 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default ${suggested ? 'border-2 border-textColor' : 'border border-borderColor'}`}
+                        data-suggested={suggested || undefined}
                         style={on ? { borderColor: SHEET_INK.blue } : undefined}
                       >
                         <ModelThumb
                           sheet={sheetBox}
-                          outlines={(g?.fams ?? []).map((f) => cand(f).outer)}
-                          tinted={(g?.fams ?? []).map((f) => changed.has(f.seed))}
-                          cutLines={mk.flatMap((m) => m.cutLines)}
-                          extra={mk.flatMap((m) => m.outlines)}
+                          outlines={pic.outlines}
+                          tinted={pic.tinted}
+                          cutLines={pic.cutLines}
                           hot={on}
                           className='w-full'
-                          style={{ height: 150 }}
+                          style={{ height: 240 }}
                         />
                         <Text size='micro' component='span'>
                           {doing === x.label && session.busy ? 'opening… · ' : ''}
-                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')}
-                          {x.title ? ' · named on the card' : ''}
+                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')} · size{' '}
+                          {labelOf(pic.rank)}
+                          {pic.cutLines.length ? ' · its cutting line in blue' : ''}
+                          {suggested && named
+                            ? named.strong
+                              ? ' · the card names it'
+                              : ' · suggested by the card'
+                            : ''}
                         </Text>
                       </button>
                     );
@@ -2089,30 +2548,33 @@ export function PiecesStep({
                   ))}
                 </div>
               )}
-              {active.kind !== 'model' && active.kind !== 'aside' && (
-                <div className='flex flex-wrap items-center gap-2'>
-                  {answers.map((x, i) => (
-                    <Button
-                      {...ask(ASK_KEY[active.kind], i === 0)}
-                      data-ask-hint={i === 0 ? x.how : undefined}
-                      key={x.label}
-                      variant='secondary'
-                      size='sm'
-                      disabled={!!session.busy || x.disabled}
-                      aria-pressed={x.pressed}
-                      title={x.title}
-                      aria-busy={doing === x.label && !!session.busy}
-                      onClick={() => {
-                        setDoing(x.label);
-                        x.onClick();
-                      }}
-                      className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
-                    >
-                      {doing === x.label && session.busy ? `${x.label}…` : x.label}
-                    </Button>
-                  ))}
-                </div>
-              )}
+              {active.kind !== 'model' &&
+                active.kind !== 'aside' &&
+                active.kind !== 'touch' &&
+                !activeTouch && (
+                  <div className='flex flex-wrap items-center gap-2'>
+                    {answers.map((x, i) => (
+                      <Button
+                        {...ask(ASK_KEY[active.kind], i === 0)}
+                        data-ask-hint={i === 0 ? x.how : undefined}
+                        key={x.label}
+                        variant='secondary'
+                        size='sm'
+                        disabled={!!session.busy || x.disabled}
+                        aria-pressed={x.pressed}
+                        title={x.title}
+                        aria-busy={doing === x.label && !!session.busy}
+                        onClick={() => {
+                          setDoing(x.label);
+                          x.onClick();
+                        }}
+                        className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
+                      >
+                        {doing === x.label && session.busy ? `${x.label}…` : x.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
             </div>
           )}
 
@@ -2201,6 +2663,11 @@ export function PiecesStep({
 
           {(inputs.edits.length > 0 || hint) && (
             <div className='mt-2 flex flex-wrap items-center gap-2'>
+              {appliedNow && (
+                <Text size='micro' variant='label' component='span' data-touch-applied>
+                  {appliedNow.text} ·
+                </Text>
+              )}
               {inputs.edits.length > 0 && (
                 <Button
                   variant='underline'
@@ -2208,7 +2675,7 @@ export function PiecesStep({
                   className='text-labelColor hover:text-textColor'
                   disabled={!!session.busy}
                   title={editsLine}
-                  onClick={() => void api.editPieces('undo')}
+                  onClick={() => (appliedNow ? undoApplied() : void api.editPieces('undo'))}
                 >
                   undo
                 </Button>
