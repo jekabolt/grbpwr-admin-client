@@ -19,15 +19,19 @@ import {
   type PageRoleDeps,
 } from 'lib/pattern-import/ai/pages';
 import { AI_PAGES, aiAsides, exclusionOf } from 'lib/pattern-import/clean/page-roles';
-import { reducedCopy } from 'lib/pattern-import/clean/reduced-copy';
+import { reducedCopy, shapesOf } from 'lib/pattern-import/clean/reduced-copy';
+import { PAGE_INK, pageInk, tilePensOf } from 'lib/pattern-import/clean/page-ink';
+import { pageChains } from 'lib/pattern-import/clean/page-chains';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { mediaLeftovers } from 'lib/pattern-import/ai/discard';
 import type {
   AiPageHint,
   IRPage,
   PageClassification,
+  PtMm,
   SourceDoc,
   StageIO,
+  Style,
 } from 'lib/pattern-import/types';
 import { applyMasks, cleanPages } from 'lib/pattern-import/clean';
 // the e2e entry installs pdf.js' legacy build (setPdfjsLoader)
@@ -137,6 +141,7 @@ async function oneFile(f: string) {
       base.dropped.filter((d) => d.aiAside).map((d) => d.page + 1),
     );
     if (!asked.length) return { file: f, called: false };
+    inkChecks(name, s, base);
     // Codex #2: "does not register" only against a connected reference covering the page's sheet —
     // a page of no sheet in a file of two (polupalto's instructions before Bogen A / B), or tiles
     // that do not register by recurrence (r4454, stitched at their edges), give no such evidence
@@ -486,6 +491,117 @@ async function discardSection() {
   }
 }
 
+// ── STOPS: the page-ink reading (clean/page-ink.ts) on the pages set aside that hold line work ──
+
+/**
+ * On every corpus file with a page set aside "to check": (1) truth — no ground-truth pattern page
+ * is ink-explained; (2) MUTATION "a real piece on an instruction page" — every page the reading
+ * explains, with the file's largest tile piece copied onto it at 1:1 in its own pen, is no longer
+ * explained; and with that piece in a foreign hairline pen, neither, when it is larger than a
+ * drawing.
+ */
+function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
+  const docs = (s as unknown as { docs: SourceDoc[] }).docs;
+  const doc = docs[0];
+  const asked = base.dropped.filter((d) => d.status === 'suggest');
+  const explained = asked.filter((d) => d.ink?.explained);
+  INK_ROWS.push({
+    file: name,
+    asked: asked.length,
+    explained: explained.map((d) => `p${d.page + 1}`),
+    unexplained: asked
+      .filter((d) => !d.ink?.explained)
+      .map((d) => `p${d.page + 1}: ${d.ink?.unexplained ?? '(no tiles)'}`),
+  });
+  check(
+    name,
+    'truth: no ground-truth pattern page is ink-explained',
+    explained.every((d) => truthOf(name, d.page + 1) !== 'pattern'),
+    explained.filter((d) => truthOf(name, d.page + 1) === 'pattern').map((d) => d.page + 1),
+  );
+  if (!explained.length) return;
+  const tilePages = base.classes.filter((c) => c.cls === 'tile').map((c) => c.page);
+  const tilePcs = doc.pages.filter((p) => tilePages.includes(p.page)).map((p) => pageChains(p));
+  const pens = tilePensOf(tilePcs);
+  const shapes = tilePcs.flatMap((pc) => shapesOf(pc.chains, PATIMPORT.minPieceAreaMm2));
+  // a real piece at 1:1: the largest closed non-rectangular outline closing on one tile, else (no
+  // piece closes on one tile) the longest curved line of the tiles — a piece's edge
+  type Cut = { pts: PtMm[]; closed: boolean; style: Style; ext: number; size: number };
+  let closed: Cut | null = null;
+  let open: Cut | null = null;
+  for (const pc of tilePcs)
+    pc.chains.forEach((c, i) => {
+      const b = pc.box[i];
+      const ext = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+      const st = pc.page.styles.find((x) => x.id === c.style);
+      // on the page (a path drawn far off the page, clipped away on paper, is no piece edge)
+      const onPage =
+        b.minX >= -1 &&
+        b.minY >= -1 &&
+        b.maxX <= pc.page.widthMm + 1 &&
+        b.maxY <= pc.page.heightMm + 1;
+      if (!st || !(st.widthMm > 0) || ext < 30 || !onPage) return;
+      if (!c.closed) {
+        const curved = Math.min(b.maxX - b.minX, b.maxY - b.minY) > 5;
+        if (curved && c.lengthMm >= 100 && (!open || c.lengthMm > open.size))
+          open = { pts: c.pts, closed: false, style: st, ext, size: c.lengthMm };
+        return;
+      }
+      let a = 0;
+      for (let k = 0, j = c.pts.length - 1; k < c.pts.length; j = k++)
+        a += (c.pts[j].x + c.pts[k].x) * (c.pts[j].y - c.pts[k].y);
+      a = Math.abs(a) / 2;
+      if (a < PATIMPORT.minPieceAreaMm2 || a >= 0.93 * (b.maxX - b.minX) * (b.maxY - b.minY))
+        return;
+      if (!closed || a > closed.size)
+        closed = { pts: c.pts, closed: true, style: st, ext, size: a };
+    });
+  const cut = (closed ?? open) as Cut | null;
+  check(name, 'MUTATION: the tile sheet has a piece or a piece edge to copy', !!cut, '');
+  if (!cut) return;
+  const p: Cut = cut;
+  for (const d of explained) {
+    const pg = doc.pages.find((x) => x.page === d.page)!;
+    const inject = (style: Style) => {
+      const sid = Math.max(0, ...pg.styles.map((x) => x.id)) + 1;
+      const pid = Math.max(0, ...pg.paths.map((x) => x.id)) + 1;
+      const mut: IRPage = {
+        ...pg,
+        styles: [...pg.styles, { ...style, id: sid }],
+        paths: [
+          ...pg.paths,
+          {
+            id: pid,
+            pts: p.pts.map((q) => ({ ...q })),
+            closed: p.closed,
+            style: sid,
+            src: { file: pg.file, page: pg.page, op: 990000, sub: 0 },
+          },
+        ],
+      };
+      return pageInk(pageChains(mut), pens, shapes, mut);
+    };
+    const own = inject(p.style);
+    check(
+      name,
+      `MUTATION p${d.page + 1}: a tile ${p.closed ? 'piece' : 'piece edge'} at 1:1 in its own pen on it → not explained`,
+      !own.explained && !!own.unexplained,
+      own.unexplained ?? own.explained,
+    );
+    const drawMax = PAGE_INK.hairlineMaxShare * Math.max(pg.widthMm, pg.heightMm);
+    if (p.ext > drawMax) {
+      const foreign = inject({ ...p.style, widthMm: 0.05, strokeRgb: [200, 30, 30], dash: null });
+      check(
+        name,
+        `MUTATION p${d.page + 1}: the same piece (${Math.round(p.ext)} mm) in a foreign hairline → not explained`,
+        !foreign.explained,
+        foreign.unexplained ?? foreign.explained,
+      );
+    }
+  }
+}
+const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained: string[] }[] = [];
+
 // ── Codex #6: independent page truth (fixtures/page-truth.json) ──────────────────────────────
 
 type Truth = { pattern: string[]; not: Record<string, string> };
@@ -562,6 +678,13 @@ async function mutationsSection() {
       aiHints: { pages: [{ ...target, role, confidence: 0.99, evidence: ['MUTATION'] }] },
     });
     const d = out.dropped.find((x) => x.file === target.file && x.page === target.page);
+    // STOPS: the page-ink reading (no AI) never explains a real pattern page's line work
+    check(
+      'mutation',
+      `${label}: the page-ink reading does not explain its line work`,
+      !!d && !d.ink?.explained,
+      d?.ink ?? 'not dropped',
+    );
     check(
       'mutation',
       `${label}: AI ${role} 0.99 on a real pattern page → still a question`,
@@ -823,6 +946,10 @@ export async function main(args: string[]): Promise<number> {
       check(f, 'runs', false, String((e as Error)?.stack ?? e).slice(0, 300));
     }
   }
+  for (const r of INK_ROWS)
+    console.log(
+      `ink ${r.file.padEnd(28)} asked ${r.asked} · explained ${r.explained.join(',') || '—'}${r.unexplained.length ? ` · still a question: ${r.unexplained.map((u) => u.slice(0, 140)).join(' | ')}` : ''}`,
+    );
   const bad = checks.filter((c) => !c.ok);
   for (const c of bad) console.log(`FAIL ${c.file} · ${c.check} · ${c.got.slice(0, 400)}`);
   console.log(`\n${checks.length - bad.length}/${checks.length} checks pass`);

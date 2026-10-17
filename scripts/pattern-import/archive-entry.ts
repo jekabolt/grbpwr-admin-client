@@ -392,6 +392,9 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
   else {
     const stop: Stop = done && !done.ok ? done.stop : { step: s.step, reason: 'tick budget spent' };
     rec.stop = stop;
+    // what the session held when it stopped (an error or a notice the stop's words may not carry)
+    if (s.error) rec.sessionError = String(s.error).slice(0, 300);
+    if (api.notice) rec.notice = String(api.notice).slice(0, 300);
     rec.verdict = stop.step === 'files' && stop.why === 'error' ? 'refused' : 'stopped';
   }
   // strict = without the page-role pass: the first page-role question is where it stops

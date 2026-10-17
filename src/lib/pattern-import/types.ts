@@ -3133,6 +3133,15 @@ export type CleanOutput = {
      * holds line work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
      */
     aiAside?: boolean;
+    /**
+     * STOPS (clean/page-ink.ts): the page's line work read WITHOUT the AI, on a file with a tile
+     * sheet. `explained` = every long / piece-sized line is a table rule, a frame, a test square,
+     * one of the file's tile pieces reduced, or a small drawing in a pen the tiles do not use — in
+     * words ("12 table rules / separators, 3 frames, 1 test square"); the autopilot takes it as the
+     * second evidence beside the classifier's text-led role. `unexplained` = the first line nothing
+     * explains (the page stays the question, and says what that line is).
+     */
+    ink?: { explained?: string; unexplained?: string };
   }[];
   /** A9: per file, the tile chrome the page stats test a page against (`PageStats.hasTileMarks`). */
   tileMarks?: { file: FileId; tile: { widthMm: Mm; heightMm: Mm }; sigs: TileMarkSig[] }[];
