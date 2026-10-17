@@ -6,20 +6,17 @@ import {
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import {
-  composeArticleFromMaterial,
-  materialCompositionCode,
-  materialCompositionText,
-} from 'components/managers/materials/components/material-code';
+import { materialCompositionCode } from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
+  MaterialHoverCard,
   MaterialPickerDialog,
+  materialSwatchColour,
   useMaterialStockFacts,
 } from 'components/managers/materials/components/material-picker';
-import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
+import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
-import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -31,10 +28,8 @@ import {
   useWatch,
   type FieldErrors,
 } from 'react-hook-form';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { GroupLabel } from 'ui/components/group-label';
-import { Button } from 'ui/components/button';
-import { Drawer } from 'ui/components/drawer';
 import { HeaderWarnings } from 'ui/components/header-warnings';
 import { Placeholder } from 'ui/components/placeholder';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -46,6 +41,7 @@ import SelectField from 'ui/form/fields/select-field';
 import { carriesGarmentComposition } from 'utils/care-label';
 import { FIELD_REVEAL_EVENT, revealField, type FieldRevealDetail } from 'utils/field-errors';
 import { sectionShort } from './bom-line-picker';
+import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
 import {
   KIND_HOME_SECTION,
   UNSET_KIND,
@@ -187,10 +183,6 @@ function useNoPriceWarning() {
     showMessage(`${m.name || 'this material'}: no purchase price, costing counts 0`, 'error');
   };
 }
-
-const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
-const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
-const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
 
 // ЧЕТЫРЕ ПОЛЯ ЛИЧНОСТИ СТРОКИ — ОДНА ТАБЛИЦА СОСТОЯНИЙ, ДВА ЧИТАТЕЛЯ.
 //
@@ -474,172 +466,32 @@ const BOX_GRID = 'grid grid-cols-2 items-start gap-3 sm:grid-cols-3 lg:grid-cols
 // refuses that delete; this is what the refusal is turned into on the way in.
 type BlockingUser = { colorwayId: number; sku: string };
 
-// Дверь-ссылка: подчёркнутое слово, а не кнопка в рамке (owner: «underline doors»).
-const DOOR =
-  'text-micro text-labelColor underline underline-offset-2 hover:text-textColor disabled:no-underline disabled:text-textInactiveColor';
-
-// РЕДАКТОР СТРОКИ — РАЗВОРОТ ПОД ЕЁ СТРОКОЙ (BOM-LITE, владелец 16.10 «complicated af»). Только то,
-// что решает человек: артикул (`change` `unlink` `open`), направление ворса у полотна, комментарий
-// одной растущей строкой. Автозаполненная личность слота — одна тихая строка с `edit`. Ни модалки,
-// ни вложенных коробок; поля пишут прямо в форму карточки, сохраняет её общая кнопка.
+// ПОЛЯ СЛОТА — тело модалки «роль слота» (владелец 17.10: старые примитивы, без ссылок и абзацев).
+// Артикул меняется щелчком по плитке, подробности артикула — наведением на неё; здесь только
+// равные коробки: направление ворса у полотна и личность слота. Состав артикула — одна тихая
+// строка (якорь `#bom-composition-{index}`: вкладка labels ведёт сюда за пустым составом).
 //
-// Надбавки раскроя здесь НЕТ (владелец: она своя у каждого кроя и задаётся в раскладке). Значение
-// на строке не трогается: форма отправляет то, что лежало, просто без контрола. Так же и флаг
-// семпла: семплы — колорвеи-семплы, строка BOM его не показывает и не пишет.
-function BomLineEditor({
-  index,
-  highlight,
-  blockedBy,
-  onGoToColorway,
-}: {
-  index: number;
-  highlight?: boolean;
-  /** Колорвеи, чьи рецепты держат эту строку: удаление отказано, список стоит прямо здесь. */
-  blockedBy?: BlockingUser[];
-  onGoToColorway: (colorwayId: number) => void;
-}) {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const warnNoPrice = useNoPriceWarning();
-  const { canReadCosting } = usePermissions();
+// Надбавки раскроя здесь НЕТ (она своя у каждого кроя и задаётся в раскладке), флага семпла тоже.
+function BomLineEditor({ index, highlight }: { index: number; highlight?: boolean }) {
+  const { control } = useFormContext<TechCardFormData>();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
-  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
-    | common_TechCardBomSection
-    | undefined;
-  // Подписка на всю строку: строка артикула читает её поля через getValues.
-  useWatch({ control, name: `bomItems.${index}` });
-  const [createOpen, setCreateOpen] = useState(false);
-  const [changeOpen, setChangeOpen] = useState(false);
-
-  const linked = materialId > 0;
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const rollGoods = isRollGoodsSection(rowSection);
-  // ВКЛЮЧАЯ АРХИВНЫЕ — по списку ищут УЖЕ привязанный артикул (иначе архивный терял цену).
-  const { data } = useMaterials('', true);
-  const material = linked
-    ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
-    : undefined;
-
-  // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained).
-  const snapshotFrom = (m: common_Material) => {
-    // Material.id is int64 -> arrives as a STRING from grpc-gateway; z.number() would refuse it.
-    setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
-    Object.entries(materialLineFields(m)).forEach(([field, val]) => {
-      // Only non-empty values are written: linking never CLEARS what the line already holds.
-      if (!val) return;
-      setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
-    });
-    fillAutoFields(getValues as never, setValue as never, index, m);
-  };
-  const pick = (id: number, m?: common_Material) => {
-    setValue(`bomItems.${index}.materialId`, wireInt(id), { shouldDirty: true });
-    if (id && m) {
-      snapshotFrom(m);
-      warnNoPrice(m);
-    }
-  };
-
-  const rowValue = (field: string): string =>
-    (getValues(`bomItems.${index}.${field}` as never) as string) ?? '';
-
-  // Цена — та ступень лестницы (bom-price.ts), по которой строка реально считается, и её источник.
-  const linePrice = resolveBomPrice(
-    { unitPrice: rowValue('unitPrice'), currency: rowValue('currency'), unit: rowValue('unit') },
-    material,
-  );
-
-  // Якорь `#bom-composition-{index}`: вкладка labels ведёт сюда за пустым составом.
-  const composition = (
-    <span
-      id={`bom-composition-${index}`}
-      className={cn(
-        'min-w-0 break-words',
-        highlight && 'animate-pulse ring-2 ring-warning motion-reduce:animate-none',
-      )}
-    >
-      {(material ? materialCompositionText(material) : '') || 'composition not set'}
-    </span>
-  );
-
-  // Имя, плотность, ширина и склад уже стоят в строке над разворотом — здесь только то, чего там
-  // нет: код артикула, состав и откуда взята цена.
-  const code = material ? composeArticleFromMaterial(material, true) : `article #${materialId}`;
-  // Непривязанная строка старого образца: то, что на ней набрали руками, одной серой строкой (B5).
-  const legacyLine = linked
-    ? ''
-    : join(
-        rowValue('supplier'),
-        rowValue('supplierRef'),
-        rowValue('color'),
-        rowValue('spec'),
-        widthLabel(rowValue('fabricWidth')),
-        weightLabel(rowValue('fabricWeightGsm')),
-        rowValue('unit'),
-        canReadCosting ? linePrice.label : '',
-      );
-
-  const articleName = material?.name?.trim() || '';
-
-  // ПАНЕЛЬ СЛОТА (владелец 17.10 «do full rework of bom»): справа, одна колонка. Сверху крупное
-  // фото и сам артикул (имя, код, состав, цена), под ним тихие двери; ниже равные коробки:
-  // направление ворса у полотна и вся личность слота сразу, без `details`.
+  const composition = useWatch({ control, name: `bomItems.${index}.composition` }) as
+    | string
+    | undefined;
   return (
-    <div className='flex min-w-0 flex-col gap-4'>
-      <div className='flex min-w-0 gap-3' data-field={`bomItems.${index}.materialId`}>
-        <button
-          type='button'
-          onClick={() => setChangeOpen(true)}
-          aria-label={linked ? 'change article' : 'choose article'}
-          className={cn('shrink-0 hover:opacity-80', !linked && 'outline outline-1 outline-error')}
-        >
-          {linked ? (
-            <MaterialThumb material={material} size='lg' />
-          ) : (
-            <span className='flex size-28 items-center justify-center border border-dashed border-borderColor text-micro text-labelColor'>
-              choose
-            </span>
-          )}
-        </button>
-        <div className='flex min-w-0 flex-1 flex-col gap-1'>
-          <Text className={cn('break-words', !linked && 'text-labelColor')}>
-            {linked ? articleName || code : 'no article'}
-          </Text>
-          {linked && articleName && (
-            <Text size='micro' variant='label' className='break-words'>
-              {code}
-            </Text>
-          )}
-          {linked ? (
-            <Text size='micro' variant='label' className='flex min-w-0 flex-col'>
-              {composition}
-              {canReadCosting && linePrice.label ? (
-                <span>
-                  {linePrice.label} · {linePrice.source === 'line' ? 'card price' : 'catalog price'}
-                </span>
-              ) : null}
-            </Text>
-          ) : legacyLine ? (
-            <Text size='micro' variant='label' className='break-words'>
-              {legacyLine}
-            </Text>
-          ) : null}
-          <span className='mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-1'>
-            <button type='button' className={DOOR} onClick={() => setChangeOpen(true)}>
-              {linked ? 'change article' : 'choose article'}
-            </button>
-            {linked && (
-              <Link to={`${ROUTES.materials}?tab=catalog&material=${materialId}`} className={DOOR}>
-                open article
-              </Link>
-            )}
-            {linked && (
-              <button type='button' className={DOOR} onClick={() => pick(0)}>
-                unlink
-              </button>
-            )}
-          </span>
-        </div>
-      </div>
-
+    <div className='flex min-w-0 flex-col gap-3'>
+      {/* Состав СТРОКИ (снимок, который читает вкладка labels), всегда: якорь её двери. */}
+      <Text
+        size='micro'
+        variant='label'
+        id={`bom-composition-${index}`}
+        className={cn(highlight && 'animate-pulse ring-2 ring-warning motion-reduce:animate-none')}
+      >
+        {composition?.trim() || (materialId > 0 ? 'composition not set' : 'no article')}
+      </Text>
       {rollGoods && (
         <SelectField
           name={`bomItems.${index}.fabricDirection`}
@@ -648,57 +500,6 @@ function BomLineEditor({
         />
       )}
       <SlotIdentityFields index={index} stacked />
-
-      {/* Удаление отказано: рецепты колорвеев держат строку. Каждая строка — дверь в рецепт. */}
-      {blockedBy && blockedBy.length > 0 && (
-        <div className='flex max-w-[420px] flex-col'>
-          <Text size='micro' variant='error'>
-            used in colourway recipes
-          </Text>
-          {blockedBy.map((u) => (
-            <button
-              key={u.colorwayId}
-              type='button'
-              onClick={() => onGoToColorway(u.colorwayId)}
-              className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
-            >
-              <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                open {u.sku}
-              </Text>
-              <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
-                → colorways
-              </Text>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {changeOpen && (
-        <MaterialPickerDialog
-          open
-          initialSection={rowSection ?? ''}
-          value={materialId}
-          clearable={false}
-          title={linked ? 'change article' : 'link article'}
-          confirmLabel='link'
-          onPick={(m) => {
-            if (m && wireInt(m.id)) pick(wireInt(m.id), m);
-            setChangeOpen(false);
-          }}
-          onClose={() => setChangeOpen(false)}
-          onCreate={() => {
-            setChangeOpen(false);
-            setCreateOpen(true);
-          }}
-        />
-      )}
-      {/* Inline create — prefill the section from this line; auto-link on create (Q9a). */}
-      <MaterialModal
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        defaultSection={rowSection}
-        onCreated={(_id, m) => snapshotFrom(m)}
-      />
     </div>
   );
 }
@@ -706,8 +507,19 @@ function BomLineEditor({
 // ── СПИСОК: одна строка на слот, группы по секциям. Колорвеев здесь нет (владелец 16.10: у них
 // своя вкладка); рецепты колорвеев видны только там, где они держат удаление строки. ──────────
 
-// Столбцы строки: свотч · роль · артикул · плотность · ширина · цена · склад.
-const LEAD_COLS = 7;
+// Плитка слота — тот же квадрат, что ячейка матрицы COLOURWAYS.
+const TILE = 140;
+
+// Пиктограмма пустой плитки: рулонные секции рисуются тканью, остальное — фурнитурой по словам
+// строки (назначение, секция, имя) — тот же выбор, что у матрицы COLOURWAYS.
+function slotPictogram(l: { section?: string; purpose?: string; name?: string }) {
+  return trimPictogramKind({
+    family: isRollGoodsSection(l.section) ? 'fabric' : 'hardware',
+    kind: l.purpose ?? '',
+    section: l.section ?? '',
+    name: l.name ?? '',
+  });
+}
 
 type MatrixLine = {
   id?: number | string;
@@ -835,7 +647,6 @@ export function BomField({
   // The line whose editor is open under its row. ONE editor for the whole list, keyed by index.
   const [selected, setSelected] = useState<number | null>(null);
   const [highlightActive, setHighlightActive] = useState(false);
-  const [blocked, setBlocked] = useState<{ index: number; users: BlockingUser[] } | null>(null);
   // Удаление слота спрашивает подтверждение (владелец 17.10: «remove без единого предупреждения»).
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   // Пикер каталога: новая строка в секции (`section`) или артикул для пустой строки (`line`).
@@ -859,7 +670,19 @@ export function BomField({
   const fieldCount = useRef(fields.length);
   fieldCount.current = fields.length;
 
+  // Артикул слота меняется на плитке, не в модалке полей: дверь к `materialId` открывает пикер.
+  const openArticle = (index: number) =>
+    setPicking({
+      section: (getValues(`bomItems.${index}.section`) as string) || '',
+      line: index,
+      quiet: true,
+    });
+
   const openLine = (index: number, field?: string) => {
+    if (field === 'materialId') {
+      openArticle(index);
+      return;
+    }
     setSelected(index);
     if (!field) return;
     const path = `bomItems.${index}.${field}`;
@@ -867,11 +690,6 @@ export function BomField({
     setFocusTick((t) => t + 1);
     requestAnimationFrame(() => revealField(path));
   };
-
-  // Отказ удаления и раскрытая личность относятся к ОДНОЙ строке: уход с неё их снимает.
-  useEffect(() => {
-    setBlocked((b) => (b && b.index !== selected ? null : b));
-  }, [selected]);
 
   // ДВЕРЬ К ПОЛЮ СТРОКИ (B7). Поля строки живут только в развороте выбранной строки, так что
   // `revealField('bomItems.N.x')` без этого слушателя не находил ничего. Просьбу забираем
@@ -885,6 +703,10 @@ export function BomField({
       const index = Number(m[1]);
       if (index >= fieldCount.current) return;
       e.preventDefault();
+      if (m[2] === 'materialId') {
+        openArticle(index);
+        return;
+      }
       focusPath.current = path;
       setSelected(index);
       setFocusTick((t) => t + 1);
@@ -989,7 +811,6 @@ export function BomField({
   };
 
   const goToColorway = (colorwayId: number) => {
-    setBlocked(null);
     openRecipe(colorwayId);
     showMessage('remove this article from the colourway recipe and save it', 'success');
   };
@@ -999,11 +820,6 @@ export function BomField({
   // article (its key is gone); refs to other articles are untouched.
   // Колорвеи держат строку — отказ показывается сразу в редакторе; иначе сперва подтверждение.
   const askRemove = (bi: number) => {
-    const key = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
-    if (colorwayUsers(key, wireInt(getValues(`bomItems.${bi}.id`))).length > 0) {
-      removeArticle(bi);
-      return;
-    }
     setConfirmRemove(bi);
   };
 
@@ -1012,10 +828,8 @@ export function BomField({
     // Colourway recipes are the one referrer this form does not own, so they are the one thing
     // that can block — refused here, shown inline in the editor, not as a server wall of text.
     const users = colorwayUsers(removedKey, wireInt(getValues(`bomItems.${bi}.id`)));
-    if (users.length > 0) {
-      setBlocked({ index: bi, users });
-      return;
-    }
+    // Модалка удаления уже назвала эти колорвеи и не дала подтвердить; здесь — последний засов.
+    if (users.length > 0) return;
     if (removedKey) {
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
@@ -1056,7 +870,6 @@ export function BomField({
     // Indices shift under an open editor once a row above it is gone; close it rather than let it
     // repoint at whatever slid into that slot.
     setSelected(null);
-    setBlocked(null);
     remove(bi);
   };
 
@@ -1120,8 +933,6 @@ export function BomField({
     onOpenColorways: () => openRecipe(),
   });
 
-  const spanAll = { gridColumn: '1 / -1' };
-
   const header = (
     <>
       <HeaderWarnings items={warnings} />
@@ -1142,152 +953,150 @@ export function BomField({
     return extraOfRole(role, kindLabel(l.kind) ?? '');
   };
 
-  const toggle = (i: number) => setSelected(selected === i ? null : i);
-
-  const factText = (v: string) => (
-    <Text component='span' size='micro' variant='label' className='whitespace-nowrap tabular-nums'>
-      {v}
-    </Text>
-  );
-
-  const slotRow = (i: number, first: boolean) => {
+  // ПЛИТКА СЛОТА — ТА ЖЕ ЯЧЕЙКА, ЧТО В МАТРИЦЕ COLOURWAYS (владелец 17.10: «не новые примитивы»):
+  // квадрат 140, щелчок — пикер артикула, наведение — карточка артикула, `✕` в углу на наведении —
+  // удаление с подтверждением. Под плиткой роль (дверь к полям слота) и одна строка: артикул · цена.
+  const slotCell = (i: number) => {
     const l = lines[i];
     const materialId = wireInt(l.materialId);
-    const linked = materialId > 0;
     const m = materialById(materialId);
-    const isSelected = selected === i;
+    const empty = !materialId;
     const error = tones.get(i) === 'error';
     const role = roleLabel(l, i);
     const extra = roleExtra(l, role);
-    const roll = isRollGoodsSection(l.section);
-    const articleName = m?.name?.trim() || `article #${materialId}`;
+    const url = m ? materialImageUrl(m) : '';
+    const fill = m ? materialSwatchColour(m) : '';
+    const facts = materialId ? stockFacts.get(materialId) : undefined;
+    const onHand = facts ? Number(facts.onHand) : NaN;
     const price = resolveBomPrice(l, m);
-    const stock = stockFacts.get(materialId);
-    const gsm = roll ? weightLabel(materialFabricWeight(m) || l.fabricWeightGsm) : '';
-    const width = roll ? widthLabel(materialFabricWidth(m) || l.fabricWidth) : '';
+    const tile = (
+      <button
+        type='button'
+        disabled={!canEdit}
+        onClick={() => setPicking({ section: l.section || '', line: i, quiet: true })}
+        aria-label={empty ? `pick an article for ${role}` : `change the article of ${role}`}
+        className={cn(
+          'relative block shrink-0 overflow-hidden border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor enabled:cursor-pointer',
+          empty
+            ? 'flex flex-col items-center justify-center gap-1 border-dashed text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor'
+            : 'border-borderColor bg-bgZebra enabled:hover:border-textColor',
+          empty && (error ? 'border-error' : 'border-borderColor'),
+        )}
+        style={{
+          width: TILE,
+          height: TILE,
+          backgroundColor: !empty && !url && fill ? fill : undefined,
+        }}
+      >
+        {empty ? (
+          <>
+            <TrimPictogram kind={slotPictogram(l)} className='size-16 text-textColor opacity-20' />
+            <span className='text-micro uppercase tracking-label'>+ material</span>
+          </>
+        ) : url ? (
+          <img src={url} alt={m?.name || role} className='size-full object-cover' />
+        ) : !m ? (
+          <span className='text-micro uppercase tracking-label text-labelColor'>
+            article #{materialId}
+          </span>
+        ) : null}
+      </button>
+    );
     return (
-      <div key={fields[i]?.id ?? i} className='grid grid-cols-subgrid' style={spanAll}>
-        <div
-          className={cn(
-            'relative grid grid-cols-subgrid items-center',
-            !first && 'border-t border-hairline',
+      <div
+        key={fields[i]?.id ?? i}
+        className='group/slot flex flex-col gap-1'
+        style={{ width: TILE }}
+        data-field={`bomItems.${i}.materialId`}
+      >
+        <div className='relative w-fit'>
+          {empty || !m ? (
+            tile
+          ) : (
+            // Обёртка, а не сама кнопка: у выключенной кнопки нет событий наведения.
+            <Tooltip
+              side='right'
+              align='start'
+              delayDuration={450}
+              className='w-[260px] p-0'
+              trigger={<div className='w-fit'>{tile}</div>}
+            >
+              <MaterialHoverCard
+                m={m}
+                url={url}
+                colour={fill}
+                stock={Number.isFinite(onHand) ? onHand : undefined}
+                facts={facts}
+              />
+            </Tooltip>
           )}
-          style={spanAll}
-        >
-          {/* Ошибка строки — тонкая красная черта слева и `!` у роли; СЛОВА — в шапке блока. */}
-          {error && <span aria-hidden className='absolute inset-y-0 -left-2 w-px bg-error' />}
+          {canEdit && (
+            <button
+              type='button'
+              aria-label={`remove slot ${role}`}
+              onClick={() => askRemove(i)}
+              className='absolute right-1 top-1 flex size-[18px] cursor-pointer items-center justify-center border border-borderColor bg-bgColor text-[11px] leading-none text-labelColor opacity-0 hover:border-error hover:text-error focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 [@media(hover:none)]:size-6 [@media(hover:none)]:opacity-100'
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <span className='flex min-w-0 flex-col uppercase tracking-label'>
           <span
             role='button'
             tabIndex={0}
-            aria-expanded={isSelected}
-            onClick={() => toggle(i)}
+            onClick={() => setSelected(i)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                toggle(i);
+                setSelected(i);
               }
             }}
             className={cn(
-              'grid min-h-11 cursor-pointer grid-cols-subgrid items-center py-1.5 hover:bg-bgZebra',
-              isSelected && 'bg-bgZebra',
+              'line-clamp-2 min-h-[1.5em] cursor-pointer text-control hover:underline',
+              error && 'text-error',
             )}
-            style={{ gridColumn: `span ${LEAD_COLS} / span ${LEAD_COLS}` }}
           >
-            {/* ФОТО — СМЕНА АРТИКУЛА В ОДИН КЛИК, не открывая панели слота. */}
-            <span
-              role={canEdit ? 'button' : undefined}
-              tabIndex={canEdit ? 0 : undefined}
-              aria-label={canEdit ? (linked ? 'change article' : 'choose article') : undefined}
-              onClick={(e) => {
-                if (!canEdit) return;
-                e.stopPropagation();
-                setPicking({ section: l.section || '', line: i, quiet: true });
-              }}
-              onKeyDown={(e) => {
-                if (!canEdit || (e.key !== 'Enter' && e.key !== ' ')) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setPicking({ section: l.section || '', line: i, quiet: true });
-              }}
-              className={cn('block', canEdit && 'hover:opacity-80')}
-            >
-              {linked ? (
-                <MaterialThumb material={m} />
-              ) : (
-                <span className='block size-12 border border-dashed border-borderColor' />
-              )}
-            </span>
-            <Tooltip
-              trigger={
-                <span className='block min-w-0 max-w-[220px]'>
-                  <Text
-                    component='span'
-                    size='micro'
-                    className={cn(
-                      'block truncate',
-                      isSelected && 'underline underline-offset-2',
-                      error && 'text-error',
-                    )}
-                  >
-                    {error ? '! ' : ''}
-                    {role}
-                    {l.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN' ? (
-                      <span className='font-bold'> *</span>
-                    ) : null}
-                    {extra ? <span className='text-labelColor'> · {extra}</span> : null}
-                  </Text>
-                </span>
-              }
-            >
-              {join(role, extra || undefined, sectionShort(l.section))}
-            </Tooltip>
-            {linked ? (
+            {role}
+            {l.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN' ? ' *' : ''}
+            {extra ? <span className='text-labelColor'> · {extra}</span> : null}
+          </span>
+          <span className='mt-0.5 flex items-baseline justify-between gap-2 border-t border-hairline pt-0.5 text-micro'>
+            {empty ? (
+              <span className='text-error'>no article</span>
+            ) : (
               <>
-                <Tooltip
-                  trigger={
-                    <span className='block min-w-0'>
-                      <Text component='span' size='micro' className='block truncate'>
-                        {articleName}
-                      </Text>
-                    </span>
-                  }
-                >
-                  {join(
-                    articleName,
-                    m ? composeArticleFromMaterial(m, true) : undefined,
-                    m ? materialCompositionText(m) : undefined,
-                  )}
-                </Tooltip>
-                {factText(gsm)}
-                {factText(width)}
-                {factText(canReadCosting ? price.label || 'no price' : '')}
-                {factText(
-                  stock?.onHand ? `stock ${stock.onHand}${stock.unit ? ` ${stock.unit}` : ''}` : '',
+                <span className='min-w-0 truncate text-labelColor' title={m?.name || undefined}>
+                  {m?.name?.trim() || `article #${materialId}`}
+                </span>
+                {canReadCosting && (
+                  <span className='shrink-0 tabular-nums'>{price.label || 'no price'}</span>
                 )}
               </>
-            ) : (
-              <span className='min-w-0' style={{ gridColumn: 'span 5 / span 5' }}>
-                {canEdit ? (
-                  <button
-                    type='button'
-                    className={cn(DOOR, error && 'text-error hover:text-error')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPicking({ section: l.section || '', line: i });
-                    }}
-                  >
-                    link article
-                  </button>
-                ) : (
-                  factText('no article')
-                )}
-              </span>
             )}
           </span>
-        </div>
+        </span>
       </div>
     );
   };
+
+  const removeUsers =
+    confirmRemove !== null && lines[confirmRemove]
+      ? colorwayUsers(
+          (lines[confirmRemove].lineKey as string) || '',
+          wireInt(lines[confirmRemove].id),
+        )
+      : [];
+  const addTile = (
+    <button
+      type='button'
+      onClick={() => setPicking({ section: '' })}
+      className='flex shrink-0 flex-col items-center justify-center gap-1 border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      style={{ width: TILE, height: TILE }}
+    >
+      <span className='text-micro uppercase tracking-label'>+ slot</span>
+    </button>
+  );
 
   return (
     <div className='flex flex-col gap-3'>
@@ -1297,79 +1106,44 @@ export function BomField({
         <div className='flex flex-wrap items-center gap-1.5'>{header}</div>
       )}
 
-      {/* ⚠ СПИСОК СКРОЛЛИТСЯ ВНУТРИ СВОЕЙ КОРОБКИ, А НЕ УВОЗИТ СТРАНИЦУ ВБОК (DESIGN.md). Отступ
-          слева — место под красную черту строки с ошибкой. */}
-      {fields.length > 0 && (
-        <div className='overflow-x-auto pl-2'>
-          <div
-            className='grid items-center gap-x-4'
-            style={{
-              gridTemplateColumns: [
-                '48px',
-                'minmax(80px, max-content)',
-                'minmax(140px, 1fr)',
-                'max-content',
-                'max-content',
-                'max-content',
-                'max-content',
-              ].join(' '),
-            }}
-          >
-            {groups.map((g, gi) => (
-              <div key={g.section} className='grid grid-cols-subgrid' style={spanAll}>
-                {/* ОДНА черта под подписью секции — своя у GroupLabel; первая строка группы своей
-                    верхней черты не рисует (владелец: «double underline»). */}
-                <div style={spanAll}>
-                  <GroupLabel flush={gi === 0}>{sectionShort(g.section) || 'other'}</GroupLabel>
-                </div>
-                {g.indices.map((i, k) => slotRow(i, k === 0))}
-              </div>
-            ))}
+      {/* ГРУППЫ СЕКЦИЙ: подпись + ряд плиток (ряд ячеек матрицы COLOURWAYS). Добавление — пунктирная
+          плитка того же размера в конце последнего ряда, на одной линии с остальными. */}
+      <div className='flex flex-col'>
+        {groups.map((g, gi) => (
+          <div key={g.section} className='flex flex-col'>
+            <GroupLabel flush={gi === 0}>{sectionShort(g.section) || 'other'}</GroupLabel>
+            <div className='flex flex-wrap gap-3 py-2'>
+              {g.indices.map((i) => slotCell(i))}
+              {canEdit && gi === groups.length - 1 && addTile}
+            </div>
           </div>
-        </div>
-      )}
+        ))}
+        {canEdit && groups.length === 0 && <div className='flex py-2'>{addTile}</div>}
+      </div>
 
-      {/* ПАНЕЛЬ СЛОТА справа: страница видна за ней, удаление — внизу панели и спрашивает. */}
-      <Drawer
+      {/* ПОЛЯ СЛОТА — обычная модалка карточки: равные коробки, без ссылок и абзацев. */}
+      <ConfirmationModal
         open={selected !== null && selected < fields.length}
         onOpenChange={(o) => {
           if (!o) setSelected(null);
         }}
+        onConfirm={() => setSelected(null)}
         title={selected !== null && lines[selected] ? roleLabel(lines[selected], selected) : 'slot'}
-        width={440}
-        footer={
-          canEdit && selected !== null ? (
-            <Button type='button' variant='secondary' onClick={() => askRemove(selected)}>
-              remove slot
-            </Button>
-          ) : undefined
-        }
+        confirmLabel='done'
+        hideCancel
       >
-        {/* Панель уходит порталом из <fieldset disabled> выпущенной карточки — свой засов здесь. */}
         {selected !== null && selected < fields.length && (
+          // Модалка уходит порталом из <fieldset disabled> выпущенной карточки — свой засов здесь.
           <fieldset disabled={!canEdit} className='contents'>
             <BomLineEditor
               key={fields[selected]?.id ?? selected}
               index={selected}
               highlight={highlightActive}
-              blockedBy={blocked?.index === selected ? blocked.users : undefined}
-              onGoToColorway={goToColorway}
             />
           </fieldset>
         )}
-      </Drawer>
+      </ConfirmationModal>
 
-      {/* ДОБАВИТЬ СЛОТ — одна пунктирная строка во всю ширину под списком (как `+ colourway` в
-          SIDES): пикер со всеми секциями, строка рождается в секции артикула. */}
-      {canEdit && (
-        <button
-          type='button'
-          onClick={() => setPicking({ section: '' })}
-          className='flex min-h-11 w-full items-center border border-dashed border-borderColor px-3 text-left text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor'
-        >
-          + slot
-        </button>
-      )}
       <ConfirmationModal
         open={confirmRemove !== null}
         onOpenChange={(o) => {
@@ -1385,11 +1159,33 @@ export function BomField({
             : undefined
         }
         confirmLabel='remove slot'
+        confirmDisabled={removeUsers.length > 0}
         hideCancel
       >
-        <Text size='micro' variant='label'>
-          its links in operations, pieces and labels are cleared
-        </Text>
+        {removeUsers.length > 0 ? (
+          <div className='flex flex-col'>
+            <Text size='micro' variant='error'>
+              used in colourway recipes
+            </Text>
+            {removeUsers.map((u) => (
+              <button
+                key={u.colorwayId}
+                type='button'
+                onClick={() => {
+                  setConfirmRemove(null);
+                  goToColorway(u.colorwayId);
+                }}
+                className='border-b border-hairline py-1 text-left text-micro underline-offset-2 last:border-b-0 hover:underline'
+              >
+                open {u.sku}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <Text size='micro' variant='label'>
+            its links in operations, pieces and labels are cleared
+          </Text>
+        )}
       </ConfirmationModal>
       {fields.length === 0 && !canEdit && <Placeholder label='no articles' className='h-16' />}
 
