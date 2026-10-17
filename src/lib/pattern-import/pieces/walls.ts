@@ -98,6 +98,24 @@ function cornerWalls(
 }
 
 /** MOOD Ф2: the stub / ramp chains a validated corner wall stands for — no rescue, no foreign line. */
+/**
+ * LINEFIX: the operator's per-line answers (`ChainSet.assigned`, chains/assign.ts) — `all` every
+ * answered line, `ignored` the lines he called no size line (a row of role 'ignore'). No heuristic
+ * here re-reads an answered line: never rescued, never a fold / lone / band / corner wall of other
+ * sizes, an ignored one never a continuity wall.
+ */
+export function answeredLines(set: ChainSet): { all: Set<ChainId>; ignored: Set<ChainId> } {
+  const all = new Set<ChainId>();
+  const ignored = new Set<ChainId>();
+  if (!set.assigned?.length) return { all, ignored };
+  const role = new Map(set.classes.map((c) => [c.id, c.role]));
+  for (const a of set.assigned) {
+    all.add(a.chain);
+    if (a.classes.length && a.classes.every((k) => role.get(k) === 'ignore')) ignored.add(a.chain);
+  }
+  return { all, ignored };
+}
+
 export function cornerSources(m: WallModel): Set<ChainId> {
   return new Set((m.corners ?? []).flatMap((k) => k.chains));
 }
@@ -116,9 +134,12 @@ export function sharedFolds(
 ): ChainId[] {
   const rankOfChain = new Map<ChainId, number>();
   byRank.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
+  const answered = answeredLines(set).all;
   const cand: ChainId[] = [];
   for (const c of set.chains) {
     if (common.has(c.id) || c.closed || c.pts.length < 2 || c.lengthMm < 40) continue;
+    // LINEFIX: a line the operator put in a row is that row's, never every size's fold
+    if (answered.has(c.id)) continue;
     const a = c.pts[0];
     const b = c.pts[c.pts.length - 1];
     const L = dist(a, b);
@@ -284,6 +305,15 @@ export function wallModel(
           new Map(ranks.flatMap((ids, r) => ids.map((id) => [id, r] as [ChainId, number]))),
         )
       : { ticks: new Map<ChainId, number>(), edges: new Set<ChainId>(), cuts: [] };
+  // LINEFIX: a line the operator put in a row keeps it — never a band tick of another rank, nor a
+  // band edge every size shares
+  const answered = answeredLines(set).all;
+  if (answered.size) {
+    for (const id of answered) {
+      band.ticks.delete(id);
+      band.edges.delete(id);
+    }
+  }
   const bands = band.ticks;
   for (const [id, r] of bands) {
     ranks.forEach((ids, k) => {
@@ -300,7 +330,8 @@ export function wallModel(
   // another rank's line (Codex r2: another size closing on r's stub)
   const cw = mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {};
   const owner = new Map<ChainId, number>();
-  for (const k of cw.corners ?? []) for (const id of k.chains) owner.set(id, k.rank);
+  for (const k of cw.corners ?? [])
+    for (const id of k.chains) if (!answered.has(id)) owner.set(id, k.rank);
   const commonF = [...kept, ...folds].filter((id) => !owner.has(id));
   const ranks0 = owner.size
     ? ranks.map((ids, r) => ids.filter((id) => (owner.get(id) ?? r) === r))
@@ -440,6 +471,7 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const ids = m.graded.filter((id) => set.chains[id] && set.chains[id].pts.length >= 2);
   const grid = new SegGrid(8);
   for (const id of ids) grid.addPolyline(id, set.chains[id].pts);
+  const answered = answeredLines(set).all;
   const out: WallItem[] = [];
   const step = 2;
   for (const id of ids) {
@@ -455,6 +487,8 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
     // shared (a band drawn once per size: its end tick is 25 mm from the next size's, not
     // "beside" it, yet it is no other size's wall)
     if (m.loopFamily?.has(id)) continue;
+    // LINEFIX: a line the operator put in a size is that size's — no stretch of it is every size's
+    if (answered.has(id)) continue;
     const lone: boolean[] = [];
     const at: number[] = [];
     let seg = 0;
@@ -680,7 +714,12 @@ export function rescuedIgnored(
   /** hold back an ignored line lying wholly on one size's line (the faces' weak walls, below) */
   holdSizeLine = false,
 ): ChainId[] {
-  const ignore = set.classes.filter((c) => c.role === 'ignore').flatMap((c) => c.chains);
+  // LINEFIX: a line the operator answered is never rescued (his "not a size line" stands)
+  const answered = answeredLines(set).all;
+  const ignore = set.classes
+    .filter((c) => c.role === 'ignore')
+    .flatMap((c) => c.chains)
+    .filter((id) => !answered.has(id));
   if (!ignore.length) return [];
   const walls = new Set<ChainId>([...m.common, ...m.graded, ...m.byRank.flat()]);
   const grid = new SegGrid(4);
@@ -914,6 +953,8 @@ export function continuityWalls(
   const maxPathMm = o.maxPathMm ?? 600;
   const roleOf = new Map<ChainId, string>();
   for (const k of set.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  // LINEFIX: a line the operator called no size line closes no size
+  const opIgnored = answeredLines(set).ignored;
   const wg = new SegGrid(4);
   const cums: number[][] = [];
   items.forEach((it, i) => {
@@ -980,7 +1021,8 @@ export function continuityWalls(
   const fg = new SegGrid(4);
   const foreign: ChainId[] = [];
   for (const c of set.chains) {
-    if (!c || c.pts.length < 2 || whole.has(c.id) || skip.has(c.id)) continue;
+    if (!c || c.pts.length < 2 || whole.has(c.id) || skip.has(c.id) || opIgnored.has(c.id))
+      continue;
     foreign.push(c.id);
     fg.addPolyline(c.id, c.pts, c.closed);
   }

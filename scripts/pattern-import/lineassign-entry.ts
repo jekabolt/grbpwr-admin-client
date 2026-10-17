@@ -15,6 +15,14 @@ import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pd
 import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { assignChains, lineKeys, parseLineKey } from 'lib/pattern-import/chains/assign';
 import { penLines, rankGuard } from 'lib/pattern-import/pieces/identity';
+import {
+  continuityWalls,
+  itemsOf,
+  lonePortions,
+  rescuedIgnored,
+  sharedFolds,
+  type WallModel,
+} from 'lib/pattern-import/pieces/walls';
 import type {
   CardSize,
   Chain,
@@ -460,6 +468,144 @@ function crafted() {
   check('record → replay input round trip', JSON.stringify(back) === JSON.stringify(list));
 }
 
+// ── 1b · the walls: an answer is authoritative ──────────────────────────────────────────────────
+// Every heuristic of pieces/walls.ts that re-reads lines by geometry, each with its mutation (the
+// same drawing without the answer): an operator/ignore line is never a wall (rescue, continuity),
+// a size-pinned line is never every size's wall (lone stretch, shared fold).
+
+const sizeRow = (id: number, label: string, rank: number, chains: number[]): LineClass => ({
+  ...row(id, label, rank, chains),
+});
+const ign = (id: number, chains: number[], sig = 'stray'): LineClass => ({
+  id,
+  role: 'ignore',
+  sizeLabel: null,
+  chains,
+  totalLengthMm: 0,
+  evidence: [],
+  confidence: 0.8,
+  sig,
+});
+const model = (byRank: number[][], common: number[] = []): WallModel => ({
+  mode: 'graded',
+  n: byRank.length,
+  common,
+  byRank,
+  emptyRanks: [],
+  graded: byRank.flat(),
+  fileOfRank: byRank.map(() => null),
+});
+const L = (id: number, a: PtMm, b: PtMm, style = 3): Chain => ch(id, [a, b], style);
+
+function walls() {
+  console.log('── walls: the answer stands ──');
+  // rescue: an ignored rung whose both ends sit on size 6's two sides
+  const rs: ChainSet = {
+    chains: [
+      L(0, { x: 0, y: 0 }, { x: 0, y: 200 }, 0),
+      L(1, { x: 100, y: 0 }, { x: 100, y: 200 }, 0),
+      L(2, { x: 0, y: 80 }, { x: 100, y: 80 }),
+    ],
+    classes: [sizeRow(0, '6', 0, [0, 1]), sizeRow(1, '8', 1, []), ign(2, [2])],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const rk = lineKeys(rs, ST, undefined, 0);
+  check(
+    'mutation: an ignored line touching size walls at both ends is rescued (a wall)',
+    rescuedIgnored(rs, model([[0, 1], []])).includes(2),
+  );
+  const ra = assignChains(rs, ST, undefined, 0, [
+    { sheet: 0, keys: [rk[2].key], to: { cls: 'ignore' } },
+  ]).set;
+  check(
+    'operator/ignore: never rescued',
+    !rescuedIgnored(ra, model([[0, 1], []])).includes(2) &&
+      !rescuedIgnored(ra, model([[0, 1], []]), 1.5, 15, [], new Set(), true).includes(2),
+  );
+
+  // continuity: rank 0's line broken by an ignored 10 mm stretch on the same line
+  const cs: ChainSet = {
+    chains: [
+      L(0, { x: 0, y: 0 }, { x: 0, y: 100 }, 0),
+      L(1, { x: 0, y: 110 }, { x: 0, y: 200 }, 0),
+      L(2, { x: 0, y: 100 }, { x: 0, y: 110 }),
+      L(3, { x: 300, y: 0 }, { x: 300, y: 200 }, 1),
+    ],
+    classes: [sizeRow(0, '6', 0, [0, 1]), sizeRow(1, '8', 1, [3]), ign(2, [2])],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const cm = model([[0, 1], [3]]);
+  const via2 = (s: ChainSet) =>
+    continuityWalls(s, cm, 0, itemsOf(s, [0, 1])).some((w) => w.chains.includes(2));
+  check('mutation: rank 6 closes its gap through the ignored stretch (continuity R0)', via2(cs));
+  const ck = lineKeys(cs, ST, undefined, 0);
+  const ca = assignChains(cs, ST, undefined, 0, [
+    { sheet: 0, keys: [ck[2].key], to: { cls: 'ignore' } },
+  ]).set;
+  check('operator/ignore: never a continuity wall', !via2(ca));
+
+  // lone: size 6's line with no other size beside it — a wall of every size, unless pinned
+  const ls: ChainSet = {
+    chains: [
+      L(0, { x: 0, y: 0 }, { x: 0, y: 200 }, 0),
+      L(1, { x: 500, y: 0 }, { x: 500, y: 200 }, 1),
+    ],
+    classes: [sizeRow(0, '6', 0, [0]), sizeRow(1, '8', 1, [1])],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const lm = model([[0], [1]]);
+  check(
+    "mutation: an unanswered size line drawn alone is a lone stretch (every size's wall)",
+    lonePortions(ls, lm).some((w) => w.chain === 0),
+  );
+  const lk = lineKeys(ls, ST, undefined, 0);
+  const la = assignChains(ls, ST, undefined, 0, [
+    { sheet: 0, keys: [lk[0].key], to: { rank: 0 } },
+  ]).set;
+  check(
+    'size-pinned: never a lone stretch of every size',
+    !lonePortions(la, lm).some((w) => w.chain === 0),
+  );
+
+  // fold: a straight line three other sizes' lines end on (T) — every size's fold, unless pinned
+  const fs: ChainSet = {
+    chains: [
+      L(0, { x: 0, y: 0 }, { x: 200, y: 0 }, 1),
+      L(1, { x: 50, y: 0 }, { x: 50, y: 100 }, 0),
+      L(2, { x: 100, y: 0 }, { x: 100, y: 100 }, 3),
+      L(3, { x: 150, y: 0 }, { x: 150, y: 100 }, 3),
+    ],
+    classes: [
+      sizeRow(0, '6', 0, [1]),
+      sizeRow(1, '8', 1, [0]),
+      sizeRow(2, '10', 2, [2]),
+      sizeRow(3, '12', 3, [3]),
+    ],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const fr = [[1], [0], [2], [3]];
+  check(
+    'mutation: an unanswered straight edge three sizes end on is a shared fold',
+    sharedFolds(fs, fr, new Set()).includes(0),
+  );
+  const fk = lineKeys(fs, ST, undefined, 0);
+  const fa = assignChains(fs, ST, undefined, 0, [
+    { sheet: 0, keys: [fk[0].key], to: { rank: 1 } },
+  ]).set;
+  check(
+    'size-pinned: never a shared fold of every size',
+    !sharedFolds(fa, fr, new Set()).includes(0),
+  );
+}
+
 // ── 2 · kombinezon ──────────────────────────────────────────────────────────────────────────────
 
 const ctx = (): StageCtx => ({ checkCancel: () => {}, progress: () => {} });
@@ -719,6 +865,7 @@ async function kombinezon() {
 
 export async function main(): Promise<boolean> {
   crafted();
+  walls();
   if (!process.env.LA_CRAFTED_ONLY) await kombinezon();
   console.log(fails ? `\n${fails} FAIL` : '\nall PASS');
   return fails > 0;
