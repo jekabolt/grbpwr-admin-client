@@ -812,6 +812,11 @@ export type SetAsideDart = {
   host: PtMm | null;
   /** The face raster's cell, mm (how near a line its corners can be read). */
   cellMm: number;
+  /**
+   * The host's closed sizes, and how many of them draw their own V there (semantics/features
+   * dartVs) — set by the session once the fill closed them; a dart only when every size does.
+   */
+  legs?: { sizes: number; drawn: number };
 };
 
 /**

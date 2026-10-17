@@ -9,7 +9,8 @@
 // and the proven darts travel to the semantics (SemanticsInput.darts): each size of the piece
 // writes its own dart legs as internal lines, labelled «dart» (layer 8, semantics/features).
 // The helpers the copy proof shares (auto-advance provenCopy) live here too.
-import type { BoxMm, PieceFamily, PtMm, Seed, SeedId, SetAside } from '../types';
+import type { BoxMm, ChainSet, PieceFamily, PtMm, Seed, SeedId, SetAside, SizeRun } from '../types';
+import { dartVs } from '../semantics/features';
 import { pointInPoly } from './geom';
 
 export type DartFam = Pick<PieceFamily, 'candidates' | 'seed'>;
@@ -112,7 +113,9 @@ export function onOutlines(
  *          on the piece's edge;
  *   sides  the samples of its sides (0.15…0.7) lie on none of the piece's size outlines — its
  *          sides are lines inside the piece, not a strip between two of its sizes;
- *   point  inside every closed size, at least a quarter of its length from each outline.
+ *   point  inside every closed size, at least a quarter of its length from each outline;
+ *   legs   every closed size draws its own V there (SetAsideDart.legs, dartLegsDrawn) — the legs
+ *          the semantics write on layer 8 for each size; a size without them leaves the question.
  * The evidence in words and the host's seed, or null (a wedge that is not a dart of its piece
  * stays a question, D3).
  */
@@ -123,6 +126,8 @@ export function provenDart(
 ): { ev: string; seed: SeedId } | null {
   const d = a.dart;
   if (!d?.host || !d.rim.length) return null;
+  // every closed size of the piece draws its own V there (the session counts them: dartLegsDrawn)
+  if (!d.legs || !d.legs.sizes || d.legs.drawn < d.legs.sizes) return null;
   const fam = hostFamily(d.host, families, seeds);
   if (!fam) return null;
   const sizes = closedSizes(fam);
@@ -153,6 +158,29 @@ export function provenDart(
     seed: fam.seed,
     ev: `a dart of the piece («${d.label}»): a wedge ${d.lenMm} mm long opening ${d.openMm} mm on the piece's outline, its sides inside the piece, its point inside every size`,
   };
+}
+
+/**
+ * How many of the host's closed sizes draw their own V at a possible dart (semantics/features
+ * dartVs: the legs each size writes on layer 8), of how many — on the face pass's own account of
+ * the wedge, before it is proven (the session sets SetAsideDart.legs with it).
+ */
+export function dartLegsDrawn(
+  a: SetAside,
+  families: readonly PieceFamily[],
+  seeds: readonly DartSeedAt[],
+  set: ChainSet,
+  run: SizeRun | null,
+): { sizes: number; drawn: number } {
+  const d = a.dart;
+  const fam = d?.host ? hostFamily(d.host, families, seeds) : null;
+  if (!d || !fam) return { sizes: 0, drawn: 0 };
+  const sizes = closedSizes(fam);
+  const dart = { seed: fam.seed, label: d.label, apex: d.apex, base: d.base, lenMm: d.lenMm };
+  const drawn = sizes.filter(
+    (c) => dartVs(c, set, [dart], run?.sizes[c.rank]?.classId ?? null)[0] != null,
+  ).length;
+  return { sizes: sizes.length, drawn };
 }
 
 /** provenDart's evidence in words, or null. */

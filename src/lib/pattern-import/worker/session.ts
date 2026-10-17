@@ -127,7 +127,7 @@ import {
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
-import { provenDarts } from '../pieces/darts';
+import { dartLegsDrawn, provenDarts } from '../pieces/darts';
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
@@ -1435,7 +1435,15 @@ export class Session {
       if (x.aside != null) taken.add(x.aside);
       if (held.has(x.id)) taken.add(-1 - x.id);
     }
-    const setAside = faces.asides.filter((a) => !taken.has(a.id));
+    // DARTS: a possible dart is a dart of its piece only where every closed size of that piece
+    // draws its own V there (pieces/darts provenDart reads `legs`)
+    const setAside = faces.asides
+      .filter((a) => !taken.has(a.id))
+      .map((a) =>
+        a.dart
+          ? { ...a, dart: { ...a.dart, legs: dartLegsDrawn(a, families, shown, set, run) } }
+          : a,
+      );
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;

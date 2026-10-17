@@ -97,6 +97,8 @@ export type FeatureOpts = {
   folds?: readonly FoldChord[];
   /** DARTS: the darts proven of this piece (SemanticsInput.darts) — their legs go to layer 8. */
   darts?: SemanticsInput['darts'];
+  /** DARTS: this size's own size class (SizeRun) — its dart legs are drawn in it. */
+  ownClass?: number | null;
 };
 
 const GRAIN_WORDS =
@@ -173,14 +175,30 @@ const DART_MOUTH_GAP_MM = 16;
  * short of it: ≤ DART_MOUTH_GAP_MM) into the piece, meeting
  * (≤ 2 mm) at a point inside it (≥ 5 mm from the outline). Of those Vs, the one whose point is
  * nearest the proven dart's point, within max(30 mm, its length), opening along the dart's axis
- * (each leg within 35° of point → mouth), each leg ×0.4…×2.5 the dart's length. A V drawn as one
+ * (each leg within 35° of point → mouth, its two mouths on either side of the axis), each leg
+ * ×0.4…×2.5 the dart's length, no leg shared by two darts. A V drawn as one
  * polyline (mouth – point – mouth) is split at its point. The legs' chains, per dart.
  */
-function dartLegs(
+export function dartVs(
   cand: PieceCandidate,
-  own: readonly Chain[],
+  set: ChainSet,
   darts: NonNullable<FeatureOpts['darts']>,
-): { legs: Chain[]; pts: PtMm[][] }[] {
+  ownClass?: number | null,
+): ({ legs: Chain[]; pts: PtMm[][] } | null)[] {
+  const clsOf = new Map<number, (typeof set.classes)[number]>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
+  const walls = new Set(cand.walls);
+  const wallCls = new Set(cand.walls.map((w) => clsOf.get(w)?.id));
+  const bb = bboxOf(cand.outer);
+  // this size's own lines: its own size class when the run names it (an outline that borrowed a
+  // neighbour size's stretch carries that class among its walls too), else its walls' size classes
+  const own = set.chains.filter((ch) => {
+    const k = clsOf.get(ch.id);
+    if (k?.role !== 'size' || walls.has(ch.id)) return false;
+    if (ownClass != null ? k.id !== ownClass : !wallCls.has(k.id)) return false;
+    const q = bboxOf(ch.pts);
+    return q.minX <= bb.maxX && q.maxX >= bb.minX && q.minY <= bb.maxY && q.maxY >= bb.minY;
+  });
   const gap = (p: PtMm) => closestOnPolyline(p, cand.outer, true).d;
   const onOutline = (p: PtMm) => gap(p) <= DART_MOUTH_GAP_MM;
   const inside = (p: PtMm) => pointInPolygon(p, cand.outer) && gap(p) >= 5;
@@ -223,10 +241,14 @@ function dartLegs(
     if (d > Math.PI) d = 2 * Math.PI - d;
     return d;
   };
-  const out: { legs: Chain[]; pts: PtMm[][] }[] = [];
+  const out: ({ legs: Chain[]; pts: PtMm[][] } | null)[] = [];
+  const used = new Set<Leg>();
   for (const d of darts) {
     const mid = { x: (d.base[0].x + d.base[1].x) / 2, y: (d.base[0].y + d.base[1].y) / 2 };
     const ax = angle(d.apex, mid);
+    // which side of the V's axis a mouth lies on (its two mouths on either side)
+    const side = (tip: PtMm, p: PtMm) =>
+      Math.sign(Math.cos(ax) * (p.y - tip.y) - Math.sin(ax) * (p.x - tip.x));
     const fits = (l: Leg) => {
       const len = dist(l.tip, l.mouth);
       return (
@@ -240,12 +262,17 @@ function dartLegs(
       for (let j = i + 1; j < legs.length; j++) {
         const a = legs[i];
         const b = legs[j];
-        if (dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
+        if (used.has(a) || used.has(b) || dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
+        if (side(a.tip, a.mouth) * side(a.tip, b.mouth) >= 0) continue;
         const r = dist(a.tip, d.apex);
         if (r > Math.max(30, d.lenMm)) continue;
         if (!best || r < best.r) best = { a, b, r };
       }
-    if (best) out.push({ legs: [best.a.ch, best.b.ch], pts: [best.a.pts, best.b.pts] });
+    if (best) {
+      used.add(best.a);
+      used.add(best.b);
+    }
+    out.push(best ? { legs: [best.a.ch, best.b.ch], pts: [best.a.pts, best.b.pts] } : null);
   }
   return out;
 }
@@ -307,21 +334,14 @@ export function classifyFeatures(
   }
   // DARTS: this size's own legs of each dart proven of the piece — internal lines, «dart»
   if (opts.darts?.length) {
-    const b = bboxOf(cand.outer);
-    const own = set.chains.filter((ch) => {
-      const k = clsOf.get(ch.id);
-      if (k?.role !== 'size' || !wallCls.has(k.id) || walls.has(ch.id)) return false;
-      const q = bboxOf(ch.pts);
-      return q.minX <= b.maxX && q.maxX >= b.minX && q.minY <= b.maxY && q.maxY >= b.minY;
-    });
-    for (const v of dartLegs(cand, own, opts.darts))
-      for (let i = 0; i < v.legs.length; i++)
+    for (const v of dartVs(cand, set, opts.darts, opts.ownClass))
+      for (let i = 0; i < (v?.legs.length ?? 0); i++)
         out.push({
           kind: 'internal',
-          pts: v.pts[i],
+          pts: v!.pts[i],
           closed: false,
           origin: 'detected',
-          ranges: v.legs[i].ranges,
+          ranges: v!.legs[i].ranges,
           confidence: 0.9,
           label: 'dart',
         } satisfies InternalFeature);

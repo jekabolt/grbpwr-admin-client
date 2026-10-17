@@ -1098,7 +1098,11 @@ export function buildPieceSpecsDetailed(
     };
 
     for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });
+      const feats = classifyFeatures(c, set, sheet, {
+        ...featOpts,
+        folds: facingOf.get(c),
+        ownClass: run.sizes[c.rank]?.classId ?? null,
+      });
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;

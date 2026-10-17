@@ -1432,7 +1432,8 @@ export function judgeBlobs(
      *                         lines (Delta's side back beside the back, Cherry's patch pocket on
      *                         the sleeve) — a half split off by an inner / common line has one;
      *   two names             f and the head each print a piece name (a garment-part word, not a
-     *                         bare "CUT 2"), and no name of one is the other's;
+     *                         bare "CUT 2") and a cutting instruction («CUT 2») of its own — two
+     *                         label blocks — and no name of one is the other's;
      *   no text seed          no text seed stands in f (a text seed already seeds the piece it
      *                         stands in: a second seed in its region would merge — Atlas's sleeve).
      * The caller still asks namedOneSize (one size's lines close it alone) and acrossSizeLines
@@ -1462,6 +1463,11 @@ export function judgeBlobs(
             )
             .map(({ t }) => norm(t.text)),
         );
+      // each its own label block: a cutting instruction of its own beside the name (a name split
+      // into two text items — «FRONT» | «FACING» — across a size line is one label, Codex r1)
+      const cutIn = (q: number) =>
+        textAt.some(({ t, k }) => !t.background && inFace(k, q) && /\bcut\s*\d+\b/i.test(t.text));
+      if (!cutIn(f) || !cutIn(grp[0])) return false;
       const mine = namesIn(f);
       const head = namesIn(grp[0]);
       return mine.size > 0 && head.size > 0 && ![...mine].some((x) => head.has(x));
