@@ -60,15 +60,17 @@ export function HeaderWarnings({
       onOpenChange={setOpen}
       triggerProps={{ 'aria-label': label }}
       openElement={
+        // Чернилами, без подчёркивания в покое (владелец 17.10: «warnings look so ugly»): цвет несёт
+        // только знак `!` — красный у ошибок, жёлто-синий у предупреждений; слово — обычный текст.
         <span
           className={cn(
             HEADER_TEXT,
-            'underline underline-offset-2',
-            errors > 0 ? 'text-error' : 'text-warning',
+            'text-textColor underline-offset-2 hover:underline focus-visible:underline',
             className,
           )}
         >
-          {label}
+          <span className={errors > 0 ? 'text-error' : 'text-warning'}>!</span>
+          {label.replace(/^!/, '')}
         </span>
       }
     >

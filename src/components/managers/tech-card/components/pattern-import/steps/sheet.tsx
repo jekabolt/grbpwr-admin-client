@@ -6,7 +6,8 @@
 // (click it → [remove page]: the files step's own page-role edit, undone from the panel). Seams,
 // votes and loop numbers are diagnostics.
 import { useMemo, useState } from 'react';
-import type { GridOverride, PagePose, BoxMm } from 'lib/pattern-import/types';
+import { holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
+import type { GridOverride, MissingCell, PagePose, BoxMm } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
@@ -29,6 +30,7 @@ import {
   SplitStage,
   ask,
   fmtMm,
+  useAnsweredAndGo,
 } from '../ui-bits';
 import { SheetCleanRows, roleEdit } from './files-clean';
 
@@ -70,6 +72,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
   const { session, inputs, patchInputs } = api;
   const out = session.sheet;
   const busy = !!session.busy;
+  const go = useAnsweredAndGo();
   const [picked, setPicked] = useState<string | null>(null);
   /** A page under the pointer, on the canvas or on the map of cells (outlined on both). */
   const [hover, setHover] = useState<string | null>(null);
@@ -198,19 +201,46 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
   const pageWord = (r: { file: string; page: number }) =>
     `page ${r.page + 1}${session.files.length > 1 ? ` of ${fileName(r.file)}` : ''}`;
 
-  // empty cells (missing pages) placed where their row and column are on the sheet
+  // empty cells placed on the sheet: the engine's paper box (UX-HOOKS), else where their row and
+  // column are. `gaps` = missing pages (asked), `blanks` = cells accepted as blank pages.
   const step = { w: first?.widthMm ?? 0, h: first?.heightMm ?? 0 };
-  const holes = sheet.missing.flatMap((m) => {
+  const placeCell = <C extends MissingCell>(m: C): (C & { box: BoxMm })[] => {
+    if (m.box) return [{ ...m, box: m.box }];
     const same = (p: PagePose) => (partOf(p)?.sheet ?? 0) === (m.sheet ?? 0);
     const inCol = sheet.poses.find((p) => same(p) && p.col === m.col);
     const inRow = sheet.poses.find((p) => same(p) && p.row === m.row);
     if (!inCol || !inRow) return [];
     const x = inCol.toSheet.e;
     const y = inRow.toSheet.f;
-    return [{ ...m, box: { minX: x, minY: y, maxX: x + step.w, maxY: y + step.h } as BoxMm }];
-  });
+    return [{ ...m, box: { minX: x, minY: y, maxX: x + step.w, maxY: y + step.h } }];
+  };
+  const gaps = sheet.missing.flatMap(placeCell);
+  const blanks = (sheet.holes ?? []).flatMap(placeCell);
+  /**
+   * "they're blank — go on" is a one-click fix (ui-bits ONE-CLICK FIX) only when the engine holds
+   * every shown cell blank on its own evidence (UX-HOOKS D5 `holeAutoEvidence`: no drawn line ends
+   * in it, AND it lies outside the line work or the printed numbers run without a gap). Otherwise
+   * it stays the operator's answer: the ask line coaches to it.
+   */
+  const blankSure = missing > 0 && sheet.missing.every((m) => !!holeAutoEvidence(m));
+  const cutLines = sheet.missing.reduce((a, m) => a + (m.lineEnds ?? 0), 0);
+  // the map of cells: one grid per tile sheet, per FILE when the sheet's cells name one (a file
+  // per size: the same row/col is a different cell in each file) — nothing collapses
+  const groups = cellGroups(
+    sheet.poses,
+    sheet.missing,
+    sheet.holes ?? [],
+    (p) => partOf(p)?.sheet ?? 0,
+  );
+  /** Exactly the missing cells the map shows: what "they're blank" accepts. */
+  const shownMissing = groups.flatMap((g) => g.hs);
+  const acceptBlank = () => go(api.acceptMissing(shownMissing));
+  /** Undo per tile sheet: `cells: []` for THAT sheet only (other sheets keep their answers). */
+  const blankSheets = [...new Set(blanks.map((h) => h.sheet))].sort((a, b) => a - b);
+  const takeBackBlanks = (k: number) =>
+    void api.dispatch({ type: 'sheet-accept-missing', sheet: k, cells: [] });
   const hoverPose = hover ? sheet.poses.find((p) => keyOf(p) === hover) : undefined;
-  const hoverHole = hover?.startsWith('?') ? holes.find((h) => holeKey(h) === hover) : undefined;
+  const hoverHole = hover?.startsWith('?') ? gaps.find((h) => holeKey(h) === hover) : undefined;
   const reveal: BoxMm | null = hoverPose
     ? {
         minX: hoverPose.toSheet.e,
@@ -219,10 +249,37 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
         maxY: hoverPose.toSheet.f + hoverPose.heightMm,
       }
     : hoverHole?.box ?? null;
-  // pages the files step set aside: one of them may be a missing page (the role edit brings it)
+  // pages the classifier set aside although they hold line work (`status: 'suggest'`; a page the
+  // operator set aside himself is never 'suggest'): one of them may be a missing page. A reduced
+  // copy of the tiles (an overview) is not one.
   const asideTiles = (session.clean?.dropped ?? []).filter(
-    (d) => d.status === 'suggest' && !removed.some((r) => keyOf(r) === keyOf(d)),
+    (d) =>
+      d.status === 'suggest' &&
+      !(d.reducedCopy && d.reducedCopy.matches > 0) &&
+      !removed.some((r) => keyOf(r) === keyOf(d)),
   );
+  /** Every set-aside page with line work back as a tile page, in one answer. */
+  const useAside = () =>
+    go(
+      api.dispatch({
+        type: 'clean',
+        edits: asideTiles.reduce((e, d) => roleEdit(e, d.file, d.page, 'tile'), inputs.cleanEdits),
+      }),
+    );
+  /**
+   * Bringing the set-aside pages back is THE one-click fix (ui-bits ONE-CLICK FIX) when there are
+   * at least as many of them as missing cells: it deletes nothing and re-runs the assembly with
+   * them. "they're blank" stays the fix only on the engine's evidence; otherwise the coach.
+   */
+  const asideFix = asideTiles.length > 0 && asideTiles.length >= missing;
+  /** The question, plain: which answer leads decides its words. */
+  const missingAsk = `${missing} ${missing === 1 ? 'page' : 'pages'} missing — ${asideTiles.length ? 'set aside?' : 'blank?'}`;
+  const pagesWord =
+    asideTiles.length > 3
+      ? `${asideTiles.length} pages set aside`
+      : asideTiles.length === 1
+        ? pageWord(asideTiles[0])
+        : `pages ${asideTiles.map((d) => d.page + 1).join(', ')}`;
 
   return (
     <SplitStage
@@ -295,26 +352,41 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                       </g>
                     );
                   })}
-                  {holes.map((m) => {
+                  {blanks.map((m) => (
+                    <rect
+                      key={`b${holeKey(m)}`}
+                      pointerEvents='none'
+                      x={m.box.minX}
+                      y={vy(m.box.maxY)}
+                      width={m.box.maxX - m.box.minX}
+                      height={m.box.maxY - m.box.minY}
+                      fill='none'
+                      stroke='#d5d5d5'
+                      strokeWidth={1}
+                      strokeDasharray='6 4'
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  ))}
+                  {gaps.map((m) => {
                     const hot = hover === holeKey(m);
                     return (
                       <g key={holeKey(m)} pointerEvents='none'>
                         <rect
                           x={m.box.minX}
                           y={vy(m.box.maxY)}
-                          width={step.w}
-                          height={step.h}
+                          width={m.box.maxX - m.box.minX}
+                          height={m.box.maxY - m.box.minY}
                           fill={SHEET_INK.blue}
-                          fillOpacity={hot ? 0.12 : 0.04}
+                          fillOpacity={hot ? 0.16 : 0.08}
                           stroke={SHEET_INK.blue}
-                          strokeWidth={hot ? 2 : 1}
+                          strokeWidth={hot ? 3 : 2}
                           strokeDasharray='6 4'
                           vectorEffect='non-scaling-stroke'
                         />
                         <text
-                          x={m.box.minX + step.w / 2}
-                          y={vy(m.box.minY + step.h / 2)}
-                          fontSize={Math.min(unit * 28, step.w / 4)}
+                          x={(m.box.minX + m.box.maxX) / 2}
+                          y={vy((m.box.minY + m.box.maxY) / 2)}
+                          fontSize={Math.min(unit * 28, (m.box.maxX - m.box.minX) / 4)}
                           textAnchor='middle'
                           dominantBaseline='middle'
                           fill={SHEET_INK.blue}
@@ -460,52 +532,103 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               </CalloutBox>
             )}
 
-            {/* missing pages: the picture first — the page cells, the empty ones dashed '?' */}
+            {/* missing pages: ONE question — the page cells as its picture, then the answers:
+                blank pages (UX-HOOKS sheetAcceptMissing, exactly the cells shown) or a page set
+                aside brought back. The hand grid stays the fold below. */}
             {missing > 0 && (
-              <div
-                data-ask-zone=''
-                data-ask-label={`${missing} ${missing === 1 ? 'page' : 'pages'} missing — which?`}
-                data-ask-hint={GRID_HINT}
-                className='flex flex-col gap-2'
-              >
+              <div data-ask-zone='' data-ask-label={missingAsk} className='flex flex-col gap-2'>
                 <Text size='micro' component='p' className='text-warning'>
-                  ! {missing} {missing === 1 ? 'page' : 'pages'} missing — which?
+                  {missingAsk}
                 </Text>
                 <CellMap
-                  poses={sheet.poses}
-                  holes={sheet.missing}
-                  partOf={(p) => partOf(p)?.sheet ?? 0}
+                  groups={groups}
+                  label={(g) =>
+                    [
+                      sheets.length > 1 || (sheet.parts?.length ?? 0) > 1
+                        ? `sheet ${g.sheet + 1}`
+                        : '',
+                      g.file != null && groups.length > 1 ? fileName(g.file) : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }
+                  ratio={first ? first.heightMm / first.widthMm : 1.4}
                   hover={hover}
                   onHover={setHover}
                 />
-                <Text size='micro' variant='label' component='p'>
-                  the drawing runs into the dashed cells — a page there is not in the file, or set
-                  aside
-                </Text>
-                {asideTiles.length > 0 && (
-                  <div className='flex flex-wrap items-center gap-1'>
-                    <Text size='micro' variant='label' component='span'>
-                      set aside:
-                    </Text>
-                    {asideTiles.slice(0, 8).map((d) => (
-                      <Chip
-                        key={keyOf(d)}
-                        disabled={busy}
-                        onClick={() =>
-                          void api.dispatch({
-                            type: 'clean',
-                            edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
-                          })
-                        }
-                        title={`use ${pageWord(d)} as a pattern page (${d.why})`}
-                      >
-                        use {pageWord(d)}
-                      </Chip>
-                    ))}
-                  </div>
-                )}
+                <div className='flex flex-wrap items-center gap-1'>
+                  {asideTiles.length > 0 && (
+                    <Chip
+                      tone={asideFix ? 'attention' : undefined}
+                      disabled={busy}
+                      onClick={useAside}
+                      title={`read as pattern pages again — set aside with line work: ${asideTiles
+                        .map((d) => `${pageWord(d)} (${d.why})`)
+                        .join(' · ')}`}
+                      {...ask(
+                        'sheet-missing',
+                        true,
+                        asideFix ? 'they hold line work' : 'look at the dashed cells, then answer',
+                      )}
+                      {...(asideFix ? { 'data-ask-fix': 'sheet-missing' } : {})}
+                    >
+                      use {pagesWord}
+                    </Chip>
+                  )}
+                  <Chip
+                    tone={asideFix ? undefined : 'attention'}
+                    disabled={busy}
+                    onClick={acceptBlank}
+                    title={
+                      cutLines
+                        ? `${cutLines} drawn line ends run into the dashed ${missing === 1 ? 'cell' : 'cells'} — a piece cut there is asked again on the pieces step`
+                        : 'no drawn line runs into the dashed cells'
+                    }
+                    {...ask(
+                      'sheet-missing',
+                      true,
+                      blankSure
+                        ? 'nothing is drawn there'
+                        : 'look at the dashed cells, then answer',
+                    )}
+                    {...(blankSure && !asideFix ? { 'data-ask-fix': 'sheet-missing' } : {})}
+                  >
+                    {missing === 1 ? "it's blank — go on" : "they're blank — go on"}
+                  </Chip>
+                </div>
               </div>
             )}
+
+            {/* cells accepted as blank pages: one quiet line per tile sheet, each with its undo */}
+            {blankSheets.map((k) => {
+              const bs = blanks.filter((h) => h.sheet === k);
+              return (
+                <Text
+                  key={k}
+                  size='micro'
+                  variant='label'
+                  component='p'
+                  className='flex items-baseline gap-2'
+                  title={bs
+                    .map(
+                      (h) =>
+                        `${h.file != null && session.files.length > 1 ? `${fileName(h.file)} ` : ''}${String.fromCharCode(65 + h.row)}${h.col + 1}: ${h.origin === 'autopilot' ? 'autopilot' : 'you'}`,
+                    )
+                    .join(' · ')}
+                >
+                  {blankSheets.length > 1 ? `sheet ${k + 1}: ` : ''}
+                  {bs.length} blank {bs.length === 1 ? 'page' : 'pages'} ·
+                  <button
+                    type='button'
+                    disabled={busy}
+                    onClick={() => takeBackBlanks(k)}
+                    className='underline hover:text-textColor disabled:opacity-50'
+                  >
+                    undo
+                  </button>
+                </Text>
+              );
+            })}
 
             {overLimit && (
               <div data-ask-zone='' className='flex flex-wrap items-center gap-2'>
@@ -544,7 +667,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
             data-ask-hint={GRID_HINT}
             {...(missing > 0
               ? {
-                  'data-ask-label': `${missing} ${missing === 1 ? 'page' : 'pages'} missing — which?`,
+                  'data-ask-label': missingAsk,
                 }
               : {})}
           >
@@ -707,38 +830,105 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
   );
 }
 
-type Hole = { row: number; col: number; sheet?: number };
-const holeKey = (m: Hole) => `?${m.sheet ?? 0}:${m.row}:${m.col}`;
+type Hole = { row: number; col: number; sheet?: number; file?: string };
+const holeKey = (m: Hole) =>
+  `?${m.sheet ?? 0}:${m.row}:${m.col}${m.file != null ? `:${m.file}` : ''}`;
+
+type CellGroup = {
+  key: string;
+  sheet: number;
+  /** Set when the sheet's cells name a file (a file per size): this grid is that file's. */
+  file?: string;
+  ps: PagePose[];
+  hs: MissingCell[];
+  bs: Hole[];
+};
 
 /**
- * The sheet as page cells, one small grid per tile sheet: a placed page = its page number, an empty
- * cell the drawing runs into = dashed '?'. Hovering a cell outlines that page on the canvas.
+ * The map's grids: one per tile sheet; a sheet whose missing / blank cells name a file (a file per
+ * size) is split per file, so two files' cells at the same row/col never fall on one square. Every
+ * missing cell lands in exactly one group (a cell without a file joins its sheet's file-less grid).
+ */
+function cellGroups(
+  poses: readonly PagePose[],
+  holes: readonly MissingCell[],
+  blanks: readonly Hole[],
+  partOf: (p: PagePose) => number,
+): CellGroup[] {
+  const sheetsOf = [
+    ...new Set([
+      ...poses.map(partOf),
+      ...holes.map((h) => h.sheet ?? 0),
+      ...blanks.map((h) => h.sheet ?? 0),
+    ]),
+  ].sort((a, b) => a - b);
+  const placed = poses.filter((p) => p.row != null && p.col != null);
+  const out: CellGroup[] = [];
+  for (const n of sheetsOf) {
+    const ps = placed.filter((p) => partOf(p) === n);
+    const hs = holes.filter((h) => (h.sheet ?? 0) === n);
+    const bs = blanks.filter((h) => (h.sheet ?? 0) === n);
+    const perFile = [...hs, ...bs].some((h) => h.file != null);
+    if (!perFile) {
+      out.push({ key: `${n}`, sheet: n, ps, hs, bs });
+      continue;
+    }
+    const files = [
+      ...new Set([
+        ...ps.map((p) => p.file),
+        ...hs.flatMap((h) => (h.file != null ? [h.file] : [])),
+        ...bs.flatMap((h) => (h.file != null ? [h.file] : [])),
+      ]),
+    ].sort();
+    for (const f of files)
+      out.push({
+        key: `${n}:${f}`,
+        sheet: n,
+        file: f,
+        ps: ps.filter((p) => p.file === f),
+        hs: hs.filter((h) => h.file === f),
+        bs: bs.filter((h) => h.file === f),
+      });
+    const loose = { hs: hs.filter((h) => h.file == null), bs: bs.filter((h) => h.file == null) };
+    if (loose.hs.length || loose.bs.length) out.push({ key: `${n}:-`, sheet: n, ps, ...loose });
+  }
+  return out.filter((g) => g.hs.length || g.bs.length || g.ps.length);
+}
+
+/**
+ * The sheet as page cells, one small grid per group (`cellGroups`): a placed page = its page
+ * number, an empty cell the drawing runs into = dashed '?', a cell accepted as a blank page =
+ * dashed, empty. Hovering a cell outlines that page on the canvas.
  */
 function CellMap({
-  poses,
-  holes,
-  partOf,
+  groups,
+  label,
+  ratio,
   hover,
   onHover,
 }: {
-  poses: readonly PagePose[];
-  holes: readonly Hole[];
-  partOf: (p: PagePose) => number;
+  groups: readonly CellGroup[];
+  label: (g: CellGroup) => string;
+  ratio: number;
   hover: string | null;
   onHover: (k: string | null) => void;
 }) {
-  const parts = [...new Set([...poses.map(partOf), ...holes.map((h) => h.sheet ?? 0)])].sort(
-    (a, b) => a - b,
-  );
-  const ratio = poses[0] ? poses[0].heightMm / poses[0].widthMm : 1.4;
   return (
     <div className='flex flex-wrap items-start gap-3'>
-      {parts.map((n) => {
-        const ps = poses.filter((p) => partOf(p) === n && p.row != null && p.col != null);
-        const hs = holes.filter((h) => (h.sheet ?? 0) === n);
-        const rows = Math.max(0, ...ps.map((p) => p.row! + 1), ...hs.map((h) => h.row + 1));
-        const cols = Math.max(0, ...ps.map((p) => p.col! + 1), ...hs.map((h) => h.col + 1));
-        if (!rows || !cols) return null;
+      {groups.map((g) => {
+        const { ps, hs, bs } = g;
+        const rows = Math.max(
+          1,
+          ...ps.map((p) => p.row! + 1),
+          ...hs.map((h) => h.row + 1),
+          ...bs.map((h) => h.row + 1),
+        );
+        const cols = Math.max(
+          1,
+          ...ps.map((p) => p.col! + 1),
+          ...hs.map((h) => h.col + 1),
+          ...bs.map((h) => h.col + 1),
+        );
         // fit the map in ~300 × 320 px, cells keep the page's proportion
         let w = Math.min(30, 300 / cols);
         let h = w * ratio;
@@ -768,6 +958,18 @@ function CellMap({
             </div>,
           );
         }
+        for (const m of bs) {
+          if (cell.has(`${m.row},${m.col}`)) continue;
+          cell.set(
+            `${m.row},${m.col}`,
+            <div
+              key={`b${holeKey(m)}`}
+              title={`row ${m.row + 1}, column ${m.col + 1}: blank page`}
+              className='border border-dashed border-borderColor'
+              style={{ gridRow: m.row + 1, gridColumn: m.col + 1 }}
+            />,
+          );
+        }
         for (const m of hs) {
           const k = holeKey(m);
           cell.set(
@@ -787,17 +989,29 @@ function CellMap({
             </div>,
           );
         }
+        const name = label(g);
         return (
-          <div
-            key={n}
-            className='grid gap-px'
-            style={{
-              gridTemplateColumns: `repeat(${cols}, ${w}px)`,
-              gridTemplateRows: `repeat(${rows}, ${h}px)`,
-            }}
-            aria-label={`page cells${parts.length > 1 ? ` of sheet ${n + 1}` : ''}`}
-          >
-            {[...cell.values()]}
+          <div key={g.key} className='flex flex-col gap-1'>
+            {name && (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='max-w-[300px] truncate'
+              >
+                {name}
+              </Text>
+            )}
+            <div
+              className='grid gap-px'
+              style={{
+                gridTemplateColumns: `repeat(${cols}, ${w}px)`,
+                gridTemplateRows: `repeat(${rows}, ${h}px)`,
+              }}
+              aria-label={`page cells${name ? ` of ${name}` : ''}`}
+            >
+              {[...cell.values()]}
+            </div>
           </div>
         );
       })}
