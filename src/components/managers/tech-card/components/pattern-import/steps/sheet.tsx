@@ -224,12 +224,21 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
    */
   const blankSure = missing > 0 && sheet.missing.every((m) => !!holeAutoEvidence(m));
   const cutLines = sheet.missing.reduce((a, m) => a + (m.lineEnds ?? 0), 0);
-  const acceptBlank = () => go(api.acceptMissing(sheet.missing));
-  const takeBackBlanks = () =>
-    void (async () => {
-      for (const k of [...new Set((sheet.holes ?? []).map((h) => h.sheet))])
-        await api.dispatch({ type: 'sheet-accept-missing', sheet: k, cells: [] });
-    })();
+  // the map of cells: one grid per tile sheet, per FILE when the sheet's cells name one (a file
+  // per size: the same row/col is a different cell in each file) — nothing collapses
+  const groups = cellGroups(
+    sheet.poses,
+    sheet.missing,
+    sheet.holes ?? [],
+    (p) => partOf(p)?.sheet ?? 0,
+  );
+  /** Exactly the missing cells the map shows: what "they're blank" accepts. */
+  const shownMissing = groups.flatMap((g) => g.hs);
+  const acceptBlank = () => go(api.acceptMissing(shownMissing));
+  /** Undo per tile sheet: `cells: []` for THAT sheet only (other sheets keep their answers). */
+  const blankSheets = [...new Set(blanks.map((h) => h.sheet))].sort((a, b) => a - b);
+  const takeBackBlanks = (k: number) =>
+    void api.dispatch({ type: 'sheet-accept-missing', sheet: k, cells: [] });
   const hoverPose = hover ? sheet.poses.find((p) => keyOf(p) === hover) : undefined;
   const hoverHole = hover?.startsWith('?') ? gaps.find((h) => holeKey(h) === hover) : undefined;
   const reveal: BoxMm | null = hoverPose
@@ -532,10 +541,18 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   {missingAsk}
                 </Text>
                 <CellMap
-                  poses={sheet.poses}
-                  holes={sheet.missing}
-                  blanks={sheet.holes ?? []}
-                  partOf={(p) => partOf(p)?.sheet ?? 0}
+                  groups={groups}
+                  label={(g) =>
+                    [
+                      sheets.length > 1 || (sheet.parts?.length ?? 0) > 1
+                        ? `sheet ${g.sheet + 1}`
+                        : '',
+                      g.file != null && groups.length > 1 ? fileName(g.file) : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }
+                  ratio={first ? first.heightMm / first.widthMm : 1.4}
                   hover={hover}
                   onHover={setHover}
                 />
@@ -582,31 +599,36 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               </div>
             )}
 
-            {/* cells accepted as blank pages: one quiet line with its undo */}
-            {blanks.length > 0 && (
-              <Text
-                size='micro'
-                variant='label'
-                component='p'
-                className='flex items-baseline gap-2'
-                title={blanks
-                  .map(
-                    (h) =>
-                      `${String.fromCharCode(65 + h.row)}${h.col + 1}: ${h.origin === 'autopilot' ? 'autopilot' : 'you'}`,
-                  )
-                  .join(' · ')}
-              >
-                {blanks.length} blank {blanks.length === 1 ? 'page' : 'pages'} ·
-                <button
-                  type='button'
-                  disabled={busy}
-                  onClick={takeBackBlanks}
-                  className='underline hover:text-textColor disabled:opacity-50'
+            {/* cells accepted as blank pages: one quiet line per tile sheet, each with its undo */}
+            {blankSheets.map((k) => {
+              const bs = blanks.filter((h) => h.sheet === k);
+              return (
+                <Text
+                  key={k}
+                  size='micro'
+                  variant='label'
+                  component='p'
+                  className='flex items-baseline gap-2'
+                  title={bs
+                    .map(
+                      (h) =>
+                        `${h.file != null && session.files.length > 1 ? `${fileName(h.file)} ` : ''}${String.fromCharCode(65 + h.row)}${h.col + 1}: ${h.origin === 'autopilot' ? 'autopilot' : 'you'}`,
+                    )
+                    .join(' · ')}
                 >
-                  undo
-                </button>
-              </Text>
-            )}
+                  {blankSheets.length > 1 ? `sheet ${k + 1}: ` : ''}
+                  {bs.length} blank {bs.length === 1 ? 'page' : 'pages'} ·
+                  <button
+                    type='button'
+                    disabled={busy}
+                    onClick={() => takeBackBlanks(k)}
+                    className='underline hover:text-textColor disabled:opacity-50'
+                  >
+                    undo
+                  </button>
+                </Text>
+              );
+            })}
 
             {overLimit && (
               <div data-ask-zone='' className='flex flex-wrap items-center gap-2'>
@@ -812,49 +834,101 @@ type Hole = { row: number; col: number; sheet?: number; file?: string };
 const holeKey = (m: Hole) =>
   `?${m.sheet ?? 0}:${m.row}:${m.col}${m.file != null ? `:${m.file}` : ''}`;
 
+type CellGroup = {
+  key: string;
+  sheet: number;
+  /** Set when the sheet's cells name a file (a file per size): this grid is that file's. */
+  file?: string;
+  ps: PagePose[];
+  hs: MissingCell[];
+  bs: Hole[];
+};
+
 /**
- * The sheet as page cells, one small grid per tile sheet: a placed page = its page number, an empty
- * cell the drawing runs into = dashed '?', a cell accepted as a blank page = dashed, empty.
- * Hovering a cell outlines that page on the canvas.
+ * The map's grids: one per tile sheet; a sheet whose missing / blank cells name a file (a file per
+ * size) is split per file, so two files' cells at the same row/col never fall on one square. Every
+ * missing cell lands in exactly one group (a cell without a file joins its sheet's file-less grid).
+ */
+function cellGroups(
+  poses: readonly PagePose[],
+  holes: readonly MissingCell[],
+  blanks: readonly Hole[],
+  partOf: (p: PagePose) => number,
+): CellGroup[] {
+  const sheetsOf = [
+    ...new Set([
+      ...poses.map(partOf),
+      ...holes.map((h) => h.sheet ?? 0),
+      ...blanks.map((h) => h.sheet ?? 0),
+    ]),
+  ].sort((a, b) => a - b);
+  const placed = poses.filter((p) => p.row != null && p.col != null);
+  const out: CellGroup[] = [];
+  for (const n of sheetsOf) {
+    const ps = placed.filter((p) => partOf(p) === n);
+    const hs = holes.filter((h) => (h.sheet ?? 0) === n);
+    const bs = blanks.filter((h) => (h.sheet ?? 0) === n);
+    const perFile = [...hs, ...bs].some((h) => h.file != null);
+    if (!perFile) {
+      out.push({ key: `${n}`, sheet: n, ps, hs, bs });
+      continue;
+    }
+    const files = [
+      ...new Set([
+        ...ps.map((p) => p.file),
+        ...hs.flatMap((h) => (h.file != null ? [h.file] : [])),
+        ...bs.flatMap((h) => (h.file != null ? [h.file] : [])),
+      ]),
+    ].sort();
+    for (const f of files)
+      out.push({
+        key: `${n}:${f}`,
+        sheet: n,
+        file: f,
+        ps: ps.filter((p) => p.file === f),
+        hs: hs.filter((h) => h.file === f),
+        bs: bs.filter((h) => h.file === f),
+      });
+    const loose = { hs: hs.filter((h) => h.file == null), bs: bs.filter((h) => h.file == null) };
+    if (loose.hs.length || loose.bs.length) out.push({ key: `${n}:-`, sheet: n, ps, ...loose });
+  }
+  return out.filter((g) => g.hs.length || g.bs.length || g.ps.length);
+}
+
+/**
+ * The sheet as page cells, one small grid per group (`cellGroups`): a placed page = its page
+ * number, an empty cell the drawing runs into = dashed '?', a cell accepted as a blank page =
+ * dashed, empty. Hovering a cell outlines that page on the canvas.
  */
 function CellMap({
-  poses,
-  holes,
-  blanks,
-  partOf,
+  groups,
+  label,
+  ratio,
   hover,
   onHover,
 }: {
-  poses: readonly PagePose[];
-  holes: readonly Hole[];
-  blanks: readonly Hole[];
-  partOf: (p: PagePose) => number;
+  groups: readonly CellGroup[];
+  label: (g: CellGroup) => string;
+  ratio: number;
   hover: string | null;
   onHover: (k: string | null) => void;
 }) {
-  const parts = [...new Set([...poses.map(partOf), ...holes.map((h) => h.sheet ?? 0)])].sort(
-    (a, b) => a - b,
-  );
-  const ratio = poses[0] ? poses[0].heightMm / poses[0].widthMm : 1.4;
   return (
     <div className='flex flex-wrap items-start gap-3'>
-      {parts.map((n) => {
-        const ps = poses.filter((p) => partOf(p) === n && p.row != null && p.col != null);
-        const hs = holes.filter((h) => (h.sheet ?? 0) === n);
-        const bs = blanks.filter((h) => (h.sheet ?? 0) === n);
+      {groups.map((g) => {
+        const { ps, hs, bs } = g;
         const rows = Math.max(
-          0,
+          1,
           ...ps.map((p) => p.row! + 1),
           ...hs.map((h) => h.row + 1),
           ...bs.map((h) => h.row + 1),
         );
         const cols = Math.max(
-          0,
+          1,
           ...ps.map((p) => p.col! + 1),
           ...hs.map((h) => h.col + 1),
           ...bs.map((h) => h.col + 1),
         );
-        if (!rows || !cols) return null;
         // fit the map in ~300 × 320 px, cells keep the page's proportion
         let w = Math.min(30, 300 / cols);
         let h = w * ratio;
@@ -915,17 +989,29 @@ function CellMap({
             </div>,
           );
         }
+        const name = label(g);
         return (
-          <div
-            key={n}
-            className='grid gap-px'
-            style={{
-              gridTemplateColumns: `repeat(${cols}, ${w}px)`,
-              gridTemplateRows: `repeat(${rows}, ${h}px)`,
-            }}
-            aria-label={`page cells${parts.length > 1 ? ` of sheet ${n + 1}` : ''}`}
-          >
-            {[...cell.values()]}
+          <div key={g.key} className='flex flex-col gap-1'>
+            {name && (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='max-w-[300px] truncate'
+              >
+                {name}
+              </Text>
+            )}
+            <div
+              className='grid gap-px'
+              style={{
+                gridTemplateColumns: `repeat(${cols}, ${w}px)`,
+                gridTemplateRows: `repeat(${rows}, ${h}px)`,
+              }}
+              aria-label={`page cells${name ? ` of ${name}` : ''}`}
+            >
+              {[...cell.values()]}
+            </div>
           </div>
         );
       })}
