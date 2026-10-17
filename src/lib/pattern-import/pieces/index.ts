@@ -32,6 +32,7 @@ export {
   variantMarksOut,
   pieceClaims,
   markLabels,
+  modelKey,
   type PieceClaim,
   type VariantKnife,
   type VariantLine,

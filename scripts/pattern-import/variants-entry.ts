@@ -106,8 +106,15 @@ export async function main(args: string[]): Promise<boolean> {
       `${id}: the ${model} run fills ${has.length ? has.join(', ') : 'none'} of the Style A pieces`,
     );
     check(
-      aOnly.every((l) => ch.seeds.find((s) => s.text?.text === l)?.variant === 'Style A'),
-      `${id}: Pieces 6, 7, 8 carry variant 'Style A' in pieces.out.seeds`,
+      (ch.variantMarks ?? []).some((m) => m.kind === 'piece' && !m.uncertain),
+      `${id}: the ${model} run still reports the Style A piece marks`,
+    );
+    check(
+      aOnly.every((l) => {
+        const sd = ch.seeds.find((s) => s.text?.text === l);
+        return sd?.variant === 'Style A' && sd.variantFrom === 'claim';
+      }),
+      `${id}: Pieces 6, 7, 8 carry variant 'Style A' (from the claim) in pieces.out.seeds`,
     );
     // the picture: uncut middle-size outlines grey, each model's cut lines thick, its outlines
     const strokes: Stroke[] = set.chains.map((x) => ({ pts: x.pts, color: '#d8d8d8', width: 0.7 }));

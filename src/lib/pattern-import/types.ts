@@ -725,6 +725,12 @@ export type Seed = {
   aside?: number;
   /** Variant filter the seed belongs to (Mod. 125 / Style A). null = all. */
   variant: string | null;
+  /**
+   * VARIANTS: `variant` came from a certain 'piece' mark (the model's label in the piece's own
+   * label block), not from the operator or a label by the piece number — the session re-reads it
+   * on every pieces run (a seed passed back with it is not taken as fixed).
+   */
+  variantFrom?: 'claim';
 };
 
 /**
@@ -1836,6 +1842,8 @@ export type ManifestSource = {
    */
   models?: { piece: string; model: string; kept: boolean; evidence: string }[];
 };
+/** VARIANTS: at most this many `source.models` entries (the writer and the reader alike). */
+export const MODELS_MAX = 64;
 
 export type GateCheckId =
   | 'G1-roundtrip'

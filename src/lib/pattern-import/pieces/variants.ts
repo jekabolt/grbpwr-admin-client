@@ -456,8 +456,13 @@ export function variantMarksOut(
   families: readonly PieceFamily[],
   run: SizeRun | null,
   uncut: boolean,
-  /** The fill the piece marks are read on (the uncut run's: a model run lacks the other's pieces). */
+  /** The fill the piece marks are read on (before another model's claimed pieces are dropped). */
   claimFamilies: readonly PieceFamily[] = families,
+  /**
+   * The claims the session applied (absent = every certain one): a certain piece mark on a seed
+   * with a model of its own or a click is reported uncertain — the export keeps that seed.
+   */
+  applied?: ReadonlySet<SeedId>,
 ): VariantMark[] | undefined {
   const models = labels;
   labels = markLabels(sheet, labels);
@@ -479,6 +484,13 @@ export function variantMarksOut(
       cutLines: [],
     };
     if (pm.why) return { ...base, pieces: [], uncertain: true, why: pm.why };
+    if (applied && !applied.has(pm.seed))
+      return {
+        ...base,
+        pieces: [],
+        uncertain: true,
+        why: 'the piece has a model of its own (the operator, or a label by its number)',
+      };
     const rep = repOf(pm.seed);
     return {
       ...base,
@@ -589,6 +601,16 @@ function sameGarment(
     const rep = cs[Math.floor(cs.length / 2)];
     return !!rep && joint.some((p) => pointInPoly(p, rep.outer));
   });
+}
+
+/**
+ * One spelling per model for comparisons: case, dots and spacing aside, "View"/"Version" = "Style"
+ * (as variantLabels spells them) — "STYLE A", "view a", "Mod 125" and "Mod. 125" compare equal.
+ */
+export function modelKey(label: string): string {
+  return norm(label.replace(/\./g, ' '))
+    .replace(/^(?:view|version|variante?)\b/, 'style')
+    .replace(/^model?l?\b/, 'mod');
 }
 
 /** A piece the drawing ties to one model, as the manifest records it (D5). */

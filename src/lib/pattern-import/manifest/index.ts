@@ -37,6 +37,7 @@ import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
   PATIMPORT,
+  MODELS_MAX,
   REPLAY_MAX,
   REPLAY_VALUE_MAX,
   type AutopilotAssumption,
@@ -415,7 +416,7 @@ function validateSource(x: unknown): ManifestSource {
   // validate is left out (never the manifest)
   const models = Array.isArray(x.models)
     ? x.models
-        .slice(0, 64)
+        .slice(0, MODELS_MAX)
         .flatMap((y: unknown) =>
           isObj(y) &&
           isBoundedStr(y.piece, 128) &&
