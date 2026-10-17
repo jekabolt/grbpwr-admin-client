@@ -6,7 +6,10 @@ import {
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { materialCompositionCode } from 'components/managers/materials/components/material-code';
+import {
+  formatCompositionCell,
+  materialCompositionCode,
+} from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   MaterialHoverCard,
@@ -490,7 +493,8 @@ function BomLineEditor({ index, highlight }: { index: number; highlight?: boolea
         id={`bom-composition-${index}`}
         className={cn(highlight && 'animate-pulse ring-2 ring-warning motion-reduce:animate-none')}
       >
-        {composition?.trim() || (materialId > 0 ? 'composition not set' : 'no article')}
+        {formatCompositionCell(composition) ||
+          (materialId > 0 ? 'composition not set' : 'no article')}
       </Text>
       {rollGoods && (
         <SelectField
