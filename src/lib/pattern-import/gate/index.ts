@@ -62,6 +62,10 @@ import {
   g9,
   sameManifest,
 } from './checks';
+import { g5ShapeCounts } from './shape';
+import { withShapeNotes } from '../passport/digest';
+import { countNotesOfBlocks } from '../semantics/shape-check';
+import { UNI_TOKEN } from '../write/plan';
 import { readRawDxf } from './reader';
 import { contourMm, roundTrip } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -206,6 +210,7 @@ export function createRunGate(
       await squareProbe(),
       ...g3g4(ctx, derived.ok),
       g5(ctx),
+      ...g5ShapeCounts(ctx),
       g6(ctx),
       g7(ctx),
       g8(ctx),
@@ -423,7 +428,21 @@ export async function writeAndGate(
 ): Promise<{ detail: WriteDetail; dxfText: string; report: GateReport; expect: GateExpectation }> {
   const embed = ctx.embed ?? embedManifestLocal;
   const read = ctx.read ?? readManifestLocal;
-  const detail = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  const detail0 = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  // SHAPE soft rule: the passport digest records the pieces whose WRITTEN sizes carry different
+  // notch / drill counts (from the manifest's blocks, i.e. what the file holds)
+  const detail = detail0.manifest.passport
+    ? {
+        ...detail0,
+        manifest: {
+          ...detail0.manifest,
+          passport: withShapeNotes(
+            detail0.manifest.passport,
+            countNotesOfBlocks(detail0.manifest.blocks, UNI_TOKEN),
+          ),
+        },
+      }
+    : detail0;
   const m0 = detail.manifest;
   const text0 = embed(detail.bareText, m0);
   const expect: GateExpectation = {

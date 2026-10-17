@@ -700,10 +700,23 @@ async function writeCase(
   );
   const g = w.gate[MAIN.scopeKey];
   const blocking = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
+  // SHAPE (16.10): a G5 block whose every finding is the one-shape family rule (the sizes of a
+  // piece differ in notches / drills / outline turns — a source or detection inconsistency the
+  // gate now holds on purpose) is reported, not counted against the worker's own write path
+  const shapeOnly = (c: (typeof blocking)[number]) =>
+    c.id === 'G5-features' &&
+    (c.note ?? '')
+      .split('; ')
+      .filter((x) => !x.startsWith('grain verified'))
+      .every((x) => x.includes('one piece, one shape across sizes'));
+  const held = blocking.filter(shapeOnly);
+  if (held.length)
+    console.log(`      ${name}: held by the one-shape rule — ${held[0].note?.split('; ')[0]}`);
+  const hard = blocking.filter((c) => !shapeOnly(c));
   check(
     name,
     opt.mustPass ? 'write + gate: no blocking check' : 'write + gate: a real report',
-    !!g && w.scopes.length === 1 && (!opt.mustPass || !blocking.length),
+    !!g && w.scopes.length === 1 && (!opt.mustPass || !hard.length),
     g
       ? `${w.scopes[0]?.identities.length} identities · ${g.checks.filter((c) => c.ok).length}/${g.checks.length} ok${blocking.length ? ` · BLOCK ${blocking.map((c) => `${c.id}[${c.blocks.slice(0, 4).join(',')}] ${c.note ?? ''}`).join(' | ')}` : ''}`
       : 'no report',

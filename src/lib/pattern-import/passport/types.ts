@@ -171,6 +171,12 @@ export type PassportDigest = {
   bound: { key: string; identity: string }[];
   missing: string[];
   extra: string[];
+  /**
+   * SHAPE soft rule (17.10): pieces whose sizes carry different notch / drill counts — "notches:
+   * XS 1, S 2 … — one piece, one shape" — recorded, not held (SHAPE_COUNTS_HOLD=1 holds them).
+   * Absent = none (or a digest written before the field).
+   */
+  shape?: { identity: string; note: string }[];
   /** The expected list was cut to fit the 2 KB budget. */
   truncated?: boolean;
 };

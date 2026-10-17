@@ -140,6 +140,7 @@ import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
+import { cleanNotchMarks } from '../pieces/notch-marks';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
@@ -1585,6 +1586,8 @@ export class Session {
     families = exceptNested(families);
     // UXHOOKS (D3): no piece closes across a missing page accepted as blank
     families = holeGuard(families, set, sheet.holes);
+    // SHAPE: a notch mark on the line is a notch, never outline (pieces/notch-marks.ts)
+    families = cleanNotchMarks(families, set);
     // VARIANTS: the pieces a model's own label block claims (D3: inside exactly one piece AND
     // beside its texts), read afresh on this run's fill — a claimed piece is left out of another
     // model's run. A seed with a model of its own (the operator's, or a label by its number) or a
