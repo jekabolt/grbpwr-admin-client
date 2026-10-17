@@ -80,9 +80,6 @@ import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 const TILE = 140;
 
-// Id вкладки LAB DIP в рейле тех-карты (index.tsx TABS).
-const LAB_DIP_TAB = 'lab-dip';
-
 // Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>.
 const cell =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
@@ -933,8 +930,8 @@ type ColumnProps = {
   setFocus: (f: Focus) => void;
   /** Сохранённый статус лабдипа (предупреждение шапки). */
   labDipStatus: string;
-  /** Вкладка LAB DIP. */
-  onGoToLabDip: () => void;
+  /** Строка этого колорвея в блоке LAB DIP под матрицей. */
+  onGoToLabDip: (colorwayId: number) => void;
   /** PATTERNS → раскладка слота, авто-режим. */
   onGoToMarker: (bomLineKey: string, colorwayId?: number) => void;
   seed?: UsageDraft[];
@@ -1102,7 +1099,7 @@ function ColourwayColumn({
           if (missing) onGoToMarker(key, colorwayId);
           else setFocus({ cwId: colorwayId, kind: 'norm', key });
         },
-        openLabDip: onGoToLabDip,
+        openLabDip: () => onGoToLabDip(colorwayId),
         cleanUp: (what) => cleanUpRef.current(what),
         clearPieceNorms: () => clearPieceNormsRef.current(),
         canEdit,
@@ -1361,16 +1358,12 @@ export function ColourwaysMatrix({
       }),
     [setSearchParams],
   );
-  // `lab dip waiting` → вкладка LAB DIP. Остальные параметры URL сохраняются.
-  const goToLabDip = useCallback(
-    () =>
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('tab', LAB_DIP_TAB);
-        return next;
-      }),
-    [setSearchParams],
-  );
+  // `lab dip waiting` → строка этого колорвея в блоке LAB DIP под матрицей (lab-dip-tab.tsx).
+  const goToLabDip = useCallback((colorwayId: number) => {
+    document
+      .querySelector(`[data-lab-dip-row="${colorwayId}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
   const [seed, setSeed] = useState<{ colorwayId: number; usages: UsageDraft[] } | null>(null);
 
   // Остальные колорвеи для ступени «соседний колорвей» — стабильной ссылкой, иначе план каждой
