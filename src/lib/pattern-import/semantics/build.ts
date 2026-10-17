@@ -1089,7 +1089,13 @@ export function buildPieceSpecsDetailed(
         { x: c.bbox.maxX, y: c.bbox.maxY },
       ]),
     );
-    const featOpts = { sizeCount: run.sizes.length, region: famBox };
+    // DARTS: the darts proven of this piece — each size writes its own legs on layer 8
+    const darts = (input.darts ?? []).filter((d) => d.seed === seed);
+    const featOpts = {
+      sizeCount: run.sizes.length,
+      region: famBox,
+      ...(darts.length ? { darts } : {}),
+    };
 
     for (const { c, card } of p.cands) {
       const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });

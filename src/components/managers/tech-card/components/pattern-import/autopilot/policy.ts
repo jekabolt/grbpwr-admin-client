@@ -64,7 +64,7 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
+import { PAGE_SURE, dartOf, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { bulkNames, codeBlocked } from '../bulk-names';
@@ -1370,6 +1370,9 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const why = weak.map((a) => {
     // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
     if (a.layerLoop) return { a, ev: a.layerLoop };
+    // DARTS: a dart word and a wedge whose mouth is on its seeded piece's outline (dartOf)
+    const dart = dartOf(a, fams, s.pieces?.seeds);
+    if (dart) return { a, ev: dart };
     if (a.reason === 'other-pen')
       return { a, ev: 'drawn inside a seeded piece in another pen or short strokes (a mark)' };
     const h = host(a.box);

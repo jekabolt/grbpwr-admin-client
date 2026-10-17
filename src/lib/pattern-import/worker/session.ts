@@ -127,6 +127,7 @@ import {
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { provenDarts } from '../pieces/darts';
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
@@ -383,6 +384,8 @@ export class Session {
   private sizeFaces: FacesEntry | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
+  /** DARTS: the outlines the pieces stage set aside (the proven darts are read off them). */
+  private setAside: SetAside[] = [];
   private semantics: SemanticsOutput | null = null;
   /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
   private passport: GarmentPassport | null = null;
@@ -475,6 +478,7 @@ export class Session {
       this.seeds = null;
       this.faces = null;
       this.families = null;
+      this.setAside = [];
       this.wallSet = null;
       this.pieceSession = null;
       this.pieceWallEdits = [];
@@ -1299,6 +1303,7 @@ export class Session {
       }));
       this.seeds = this.fast.seeds;
       this.families = families;
+      this.setAside = [];
       this.run = this.run ?? this.fast.run;
       this.wallSet = this.fast.chains;
       return { seeds: this.fast.seeds, families };
@@ -1434,6 +1439,7 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
+    this.setAside = setAside;
     // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
     this.sheetAnswers = input.sheetAnswers ?? {};
     this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
@@ -1586,6 +1592,8 @@ export class Session {
           ),
         ),
         seedAts: Object.fromEntries((this.seeds ?? []).map((sd) => [sd.id, sd.at])),
+        // DARTS: the darts proven of a seeded piece write their legs on layer 8
+        darts: provenDarts(this.setAside, this.families ?? [], this.seeds ?? []),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
