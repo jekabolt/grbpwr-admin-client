@@ -258,27 +258,41 @@ export function DetailsStep({
   // ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves the step on
   const shellGo = useAnsweredAndGo();
   // GRADE P1: the per-size questions never block, so the shell cannot see them — it would move on
-  // past them after any answer. The step's own go waits for the answer's re-run to be rendered and
-  // hands on to the shell only when none of them is still open (the shell then checks the rest).
+  // past them after any answer. The step's own go hands the shell, AT ONCE, a gate promise: the
+  // shell captures the step it is called on (its stepRef) and drops the go if another step is
+  // showing by then (back, next, close). The gate resolves only after the answer's re-run is
+  // rendered with no per-size question still open, and only for the newest answer (`gen`: a
+  // later answer supersedes, so rapid answers forward once); otherwise it never resolves and the
+  // shell does nothing. Not cancelled on unmount: the step remounts during every busy re-run.
   const gradeLive = useQuizSlot('details-grade-live', () => ({
     sem: null as SemanticsOutput | null,
     answers: undefined as Inputs['gradeAnswers'],
+    gen: 0,
   }));
   if (sem) {
     gradeLive.sem = sem;
     gradeLive.answers = inputs.gradeAnswers;
   }
   const go: AnsweredAndGo = (p, opts) => {
+    const gen = ++gradeLive.gen;
     const was = gradeLive.sem;
-    void Promise.resolve(p).then(async () => {
-      // the re-run's output reaches the slot on its render (≤ 2 s; no re-run: at once)
-      for (let k = 0; p && k < 60 && gradeLive.sem === was; k++)
-        await new Promise((r) => setTimeout(r, 35));
-      const still = gradeLive.sem
-        ? openGradeAsks(gradeLive.sem, gradeLive.answers, gradeSkipped).length
-        : 0;
-      if (!still) shellGo(undefined, opts);
+    const gate = new Promise<void>((resolve) => {
+      Promise.resolve(p).then(
+        async () => {
+          // the re-run's output reaches the slot on its render (≤ 2 s; no re-run: at once)
+          for (let k = 0; p && k < 60 && gradeLive.sem === was && gradeLive.gen === gen; k++)
+            await new Promise((r) => setTimeout(r, 35));
+          if (gradeLive.gen !== gen) return;
+          const still = gradeLive.sem
+            ? openGradeAsks(gradeLive.sem, gradeLive.answers, gradeSkipped).length
+            : 0;
+          if (!still) resolve();
+        },
+        // a failed answer: the step shows its error, nothing moves on
+        () => {},
+      );
     });
+    shellGo(gate, opts);
   };
   // the active question's free answer (a count not offered, a new name) is open
   const [other, setOther] = useState(false);
