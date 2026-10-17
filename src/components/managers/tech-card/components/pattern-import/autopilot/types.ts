@@ -16,6 +16,10 @@ export type AssumptionKind =
   // D6: the operator confirmed that the tile sheets' different size rows are as read
   | 'sheet-legend'
   | 'residuals'
+  // UXHOOKS: a missing tile taken as a blank page (two evidences, assemble/holes.ts)
+  | 'missing-accepted'
+  // UXHOOKS: the operator's "looked at the outlines set aside" — replayed only, never the policy's
+  | 'asides-reviewed'
   | 'drawn-sizes'
   | 'legend-row'
   | 'legend-outline'

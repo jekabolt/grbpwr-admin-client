@@ -29,7 +29,14 @@ import type {
 } from 'lib/pattern-import/types';
 import type { Inputs } from '../use-import-session';
 import { answersNowOf, liveAnswers, liveDrawnSizes, REV_SEP } from '../answers';
-import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
+import {
+  PAGE_SURE,
+  defaultedFabrics,
+  liveAsideReviewed,
+  openAsides,
+  sizeFlags,
+  weakAsides,
+} from '../auto-advance';
 import { SHEET_LAYOUT, layoutValue } from './replay-sheets';
 import type { Assumption } from './types';
 
@@ -205,6 +212,8 @@ const AUTO_KINDS: Record<string, string[]> = {
   'sheet-choice': ['sheet-choice'],
   'sheet-grid': ['sheet-grid'],
   residuals: ['residuals'],
+  // UXHOOKS: missing tiles taken as blank pages (the operator's, or the autopilot's on 2 evidences)
+  'missing-accepted': ['missing-accepted'],
   'sheet-passed': ['sheet-passed'],
   legend: ['legend-outline'],
   'legend-confirmed': ['legend-row'],
@@ -345,6 +354,24 @@ export function answerRecordOf(
     const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
     push('sheet', 'residuals', 'the tile grid', { worstMm: worst });
   }
+  // UXHOOKS: the missing tiles that count now (moved to `holes`), per sheet, as accepted
+  const holes = s.sheet?.sheet.holes ?? [];
+  if (holes.length)
+    push(
+      'sheet',
+      'missing-accepted',
+      `${holes.length} missing ${holes.length === 1 ? 'tile' : 'tiles'} taken as blank pages`,
+      {
+        holes: holes.map((h) => ({
+          sheet: h.sheet,
+          row: h.row,
+          col: h.col,
+          // the file by its index in source.files (a re-import may number its files otherwise)
+          ...(h.file != null ? { f: fileIndex(h.file) } : {}),
+          origin: h.origin,
+        })),
+      },
+    );
   const sheetWaiting = (s.sheet?.clean?.items ?? []).filter(
     (it) => it.status === 'suggest' && !it.applied,
   );
@@ -461,7 +488,14 @@ export function answerRecordOf(
   const sa = Object.entries(i.sheetAnswers ?? {});
   if (sa.length)
     push('pieces', 'sheet-pieces', `${sa.length} cross-sheet answers`, { answers: sa });
-  const weak = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds);
+  const weakAll = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds);
+  const sheetParts = s.sheet?.sheet.parts;
+  // UXHOOKS: "I looked at the outlines set aside" — the operator's answer (never the autopilot's),
+  // per sheet by the digest of the set it was given on; only the part that still holds counts
+  const reviewed = liveAsideReviewed(weakAll, sheetParts, i.asideReviewed);
+  if (Object.keys(reviewed).length)
+    push('pieces', 'asides-reviewed', 'the outlines set aside, looked at', { digests: reviewed });
+  const weak = openAsides(weakAll, sheetParts, i.asideReviewed);
   if (weak.length)
     push('pieces', 'asides-passed', `${weak.length} outlines kept aside`, {
       asides: weak.map((a) => ({

@@ -32,6 +32,7 @@ import type {
   StageName,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { holePagesKey } from 'lib/pattern-import/assemble/holes';
 import { toWireError } from 'lib/pattern-import/worker/errors';
 import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
@@ -425,6 +426,8 @@ export const CLICKS = {
   'count-answer': 1, // "cut on fold" in a count row
   // N1: "accept all N suggestions" on the files step (the clean stage's offers), one click
   'clean-accept': 1,
+  // UXHOOKS: "the missing pages are blank" on the sheet step's blocker, one click
+  'missing-accept': 1,
   blocker: 0,
   note: 0,
 } as const;
@@ -588,6 +591,10 @@ export type CaseHooks = {
   onAutoPieces?: (s: Session, out: StageIO['pieces']['out']) => void;
   /** MOOD probe: the session and the write stage's output once every scope is written and gated. */
   onWrite?: (s: Session, out: StageIO['write']['out']) => void;
+  /** UXHOOKS probe: answer the missing pages "blank pages" (`acceptMissing`). */
+  acceptMissing?: boolean;
+  /** UXHOOKS probe: the assembled sheet as the sheet step shows it (after the answer). */
+  onAssemble?: (out: StageIO['assemble']['out']) => void;
 };
 
 export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
@@ -711,10 +718,32 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     at('sheet');
     if (ex.presegmented) passed.add('sheet');
     // D6: every tile sheet of the files is in the drawing
-    const as = await run('assemble', {
+    let as = await run('assemble', {
       sheet: 0,
       ...(c.probeSheets ? { probeSheets: c.probeSheets } : {}),
     });
+    // UXHOOKS probe: the operator answers the missing pages "blank" (one click on the blocker)
+    const missingBefore = as.sheet.missing.length;
+    if (hooks.acceptMissing && missingBefore) {
+      const bySheet = new Map<number, { row: number; col: number }[]>();
+      for (const m of as.sheet.missing)
+        bySheet.set(m.sheet ?? 0, [
+          ...(bySheet.get(m.sheet ?? 0) ?? []),
+          { row: m.row, col: m.col },
+        ]);
+      as = await run('assemble', {
+        sheet: 0,
+        ...(c.probeSheets ? { probeSheets: c.probeSheets } : {}),
+        acceptMissing: [...bySheet].map(([sheet, cells]) => ({
+          sheet,
+          cells,
+          pages: holePagesKey(as.sheet, sheet),
+          origin: 'operator' as const,
+        })),
+      });
+      op('missing-accept', `accept ${missingBefore} missing pages as blank`);
+      hooks.onAssemble?.(as);
+    } else hooks.onAssemble?.(as);
     if (as.clean) (rec.clean as Record<string, unknown>).sheet = as.clean.summary;
     // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
     if (!ex.presegmented && singlePageSheet(ex.pages, as)) passed.add('sheet');

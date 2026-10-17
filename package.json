@@ -144,6 +144,7 @@
     "patimport:page-roles": "node scripts/pattern-import/page-roles.mjs",
     "patimport:passport": "node scripts/pattern-import/passport.mjs",
     "patimport:reg": "node scripts/pattern-import/reg.mjs",
+    "patimport:holes": "node scripts/pattern-import/holes.mjs",
     "patimport:legend": "node --max-old-space-size=8192 scripts/pattern-import/legend.mjs",
     "patimport:mood": "node scripts/pattern-import/mood.mjs",
     "patimport:archive": "node scripts/pattern-import/archive.mjs",

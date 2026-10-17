@@ -21,7 +21,8 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { assembleGroup, type GroupResult } from './group';
-import { labelConflicts, labelGridOf } from './labels';
+import { cellGeometry } from './holes';
+import { indexLabels, labelConflicts, labelGridOf } from './labels';
 import { drawingBox, detectLattice } from './overview';
 import { apply, placePages } from './place';
 import { edgeCrossings, furnitureOf, pageKey } from './regpage';
@@ -179,6 +180,20 @@ function chamferMedian(A: IRPage[], B: IRPage[], poses: Map<string, PagePose>): 
 
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
+/**
+ * UXHOOKS: the printed index labels of a tile group as evidence about an absent page — 'complete'
+ * when every page carries its number and the numbers run 1…N without a gap (no numbered page is
+ * absent), 'gap' when the run skips a number, undefined when the group prints no index run.
+ */
+function indexRun(pages: IRPage[]): 'complete' | 'gap' | undefined {
+  const v = indexLabels(pages);
+  if (!v) return undefined;
+  const nums = v.filter((x): x is number => x !== null).sort((a, b) => a - b);
+  if (!nums.length) return undefined;
+  for (let i = 1; i < nums.length; i++) if (nums[i] - nums[i - 1] > 1) return 'gap';
+  return nums.length === pages.length && nums[0] === 1 ? 'complete' : undefined;
+}
+
 /** Empty lattice cells that drawing runs into (lines ending on the seam facing them). */
 function missingCells(
   g: GroupResult,
@@ -335,8 +350,11 @@ export function assembleSheetDetailed(
       allPairs.push(...g.pairs);
       warnings.push(...g.warnings.map((w) => (byFile.size > 1 ? `file ${file}: ${w}` : w)));
       refused.push(...g.refused.map((w) => (byFile.size > 1 ? `file ${file}: ${w}` : w)));
-      for (const m of missingCells(g, pages, allPoses)) {
-        missing.push({ row: m.row, col: m.col });
+      const cells = missingCells(g, pages, allPoses);
+      // UXHOOKS: the printed tile numbers, as evidence whether a page of the run is absent
+      const labels = cells.length ? indexRun(pages) : undefined;
+      for (const m of cells) {
+        missing.push({ row: m.row, col: m.col, file, ...(labels ? { labels } : {}) });
         warnings.push(
           `${byFile.size > 1 ? `file ${file}: ` : ''}tile row ${m.row + 1} col ${m.col + 1} missing — ` +
             `${m.evidence} line ends / vertices of the neighbours run into it`,
@@ -465,12 +483,18 @@ export function assembleSheetDetailed(
   if (maxRes > PATIMPORT.registrationMaxResidualMm)
     warnings.push(`max loop-closure residual ${maxRes.toFixed(2)} mm`);
   progress?.(total, total);
+  // UXHOOKS: where each missing page would lie (its paper) and the part of it nothing covers
+  const poseList = [...allPoses.values()];
+  const missingAt = missing.map((m) => {
+    const geo = cellGeometry(poseList, m.file, m.row, m.col);
+    return geo ? { ...m, box: geo.box, open: geo.open } : m;
+  });
   const sheetOut: Sheet = {
     id: sheet,
-    poses: [...allPoses.values()],
+    poses: poseList,
     pairs: allPairs,
     bbox: pl.bbox,
-    missing,
+    missing: missingAt,
     ...(refused.length ? { refused } : {}),
     overview,
     paths: pl.paths,

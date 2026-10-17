@@ -355,7 +355,13 @@ export type Sheet = {
   pairs: PairTransform[];
   bbox: BoxMm;
   /** Pages the grid says exist but no file provides (`sheet`: the tile sheet of the cell, D6). */
-  missing: { row: number; col: number; sheet?: number }[];
+  missing: MissingCell[];
+  /**
+   * UXHOOKS: missing cells the operator (or the autopilot on two evidences, D5) accepted as BLANK
+   * pages (`StageIO['assemble']['in'].acceptMissing`): they no longer block the sheet step, and
+   * no piece closes across them (pieces/holes.ts `holeGuard`). Absent = none accepted.
+   */
+  holes?: SheetHole[];
   /**
    * D3: why this placement must not be used as it stands (the placement contradicts the printed
    * cell labels, tile pages left off a label grid, two pages naming one cell). Non-empty blocks
@@ -376,6 +382,62 @@ export type Sheet = {
    * DXF / one-page fast path, an older sheet).
    */
   parts?: SheetPart[];
+};
+
+/**
+ * A tile cell the grid says exists but no file provides. `row`/`col` are the cell in its group's
+ * lattice; the rest (UXHOOKS) is the evidence the sheet step and the autopilot read:
+ *   box       where the page would lie (its paper rectangle), drawing frame;
+ *   open      the part of it no placed page covers (box less its neighbours' paper), null when the
+ *             neighbours cover it whole;
+ *   lineEnds  ends of drawn (unmasked) lines inside `box` grown by 1 mm — lines the hole cuts;
+ *   outside   `open` lies outside the box of the sheet's line work;
+ *   labels    the printed index labels: 'complete' = every tile page numbered 1…N without a gap
+ *             (no numbered page is absent), 'gap' = the run skips a number (a page IS absent).
+ */
+export type MissingCell = {
+  row: number;
+  col: number;
+  sheet?: number;
+  /** The file whose tile group lacks the cell (file-per-size sets carry several per sheet). */
+  file?: FileId;
+  box?: BoxMm;
+  open?: BoxMm | null;
+  lineEnds?: number;
+  outside?: boolean;
+  labels?: 'complete' | 'gap';
+};
+
+/** UXHOOKS: a missing cell accepted as a blank page (`Sheet.holes`). */
+export type SheetHole = MissingCell & {
+  sheet: number;
+  box: BoxMm;
+  open: BoxMm | null;
+  lineEnds: number;
+  origin: 'operator' | 'autopilot';
+};
+
+/**
+ * UXHOOKS: "these missing cells of tile sheet `sheet` are blank pages" (the wizard input
+ * `sheetAcceptMissing`, the assemble stage's `acceptMissing`). `cells` is the WHOLE accepted set of
+ * the sheet (an empty list takes the answer back). `pages` binds it to the tile pages the sheet had
+ * when it was given (`holePagesKey`): a sheet whose pages changed drops the answer (asked again).
+ * Accepting never overrides a refused placement (`Sheet.refused` still blocks).
+ */
+export type SheetAcceptMissing = {
+  sheet: number;
+  /** `file`: that file's cell only (file-per-size sets); `origin`: per cell, over the entry's. */
+  cells: HoleCell[];
+  pages?: string;
+  origin?: 'operator' | 'autopilot';
+};
+
+/** UXHOOKS: one accepted cell (an answer, an event). */
+export type HoleCell = {
+  row: number;
+  col: number;
+  file?: FileId;
+  origin?: 'operator' | 'autopilot';
 };
 
 /** D6: one tile sheet inside the assembled drawing. */
@@ -932,6 +994,20 @@ export type PieceCandidate = {
   sourceCoverage: number;
   /** p95 distance from outline vertices to the nearest wall chain, mm. */
   p95Mm: Mm;
+  /**
+   * UXHOOKS (D3): this candidate was NOT let close across a missing page accepted as blank — one
+   * of its wall lines ends inside the hole's cell (a line the hole cuts), or its outline runs into
+   * the uncovered part of the cell. Set with outcome 'leak' (`leakAt` on the cut); `was` is the
+   * fill's own outcome before, `areaMm2` the area it closed to.
+   */
+  hole?: {
+    sheet: number;
+    row: number;
+    col: number;
+    why: 'cut-line' | 'through-hole';
+    was: FillOutcome;
+    areaMm2: number;
+  };
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
   /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
@@ -1830,6 +1906,19 @@ export type ManifestSource = {
   sheet: { pages: number; method: RegistrationMethod | 'single'; maxResidualMm: Mm };
   /** D6: the tile sheets the drawing is made of, when there are several (absent = one). */
   sheets?: { sheet: number; pages: number; maxResidualMm: Mm }[];
+  /**
+   * UXHOOKS: missing tile cells imported as blank pages — per cell, the drawn lines ending inside
+   * it (`lineEnds`, the sheet's lines) and the traced chains ending inside it (`chainEnds`): the
+   * lines the hole cuts. Absent = none.
+   */
+  holes?: {
+    sheet: number;
+    row: number;
+    col: number;
+    lineEnds: number;
+    chainEnds: number;
+    origin: 'operator' | 'autopilot';
+  }[];
   sizeEncoding: SizeEncoding;
   variant: string | null;
 };
@@ -2340,6 +2429,8 @@ export type StageIO = {
       override?: GridOverride;
       /** Probes only (D6 merged-vs-parts comparisons): assemble just these tile sheets. */
       probeSheets?: number[];
+      /** UXHOOKS: missing cells accepted as blank pages (moved from `missing` to `holes`). */
+      acceptMissing?: SheetAcceptMissing[];
     };
     out: {
       sheet: Omit<Sheet, 'paths' | 'texts' | 'rasters' | 'styles'>;
@@ -2587,6 +2678,16 @@ export type WizardEvent =
   | { type: 'page-roles' }
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
+  /**
+   * UXHOOKS: the missing cells of tile sheet `sheet` are blank pages — `cells` is the whole
+   * accepted set of that sheet ([] takes it back); the sheet is assembled again (`Sheet.holes`).
+   */
+  | {
+      type: 'sheet-accept-missing';
+      sheet: number;
+      cells: HoleCell[];
+      origin?: 'operator' | 'autopilot';
+    }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
   /** A low-confidence legend row confirmed as proposed (its key: sig, or `#id`). */
   | { type: 'legend-confirm'; key: string }

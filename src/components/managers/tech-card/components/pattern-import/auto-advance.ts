@@ -17,6 +17,7 @@ import type {
   Seed,
   ScaleCandidate,
   SetAside,
+  SheetPart,
   StageIO,
   WizardEvent,
   WizardStep,
@@ -231,6 +232,88 @@ export const weakAsides = (
         (!!families && a.reason === 'size-copy' && !provenCopy(a, families, seeds))),
   );
 
+// ── UXHOOKS: "I looked at the outlines set aside" (inputs.asideReviewed) ─────────────────────
+
+/**
+ * The tile sheet an outline set aside lies on (0 on a one-sheet drawing): the part whose box holds
+ * it, else the nearest (assemble/composite `partAt`, kept here off the worker's module graph).
+ */
+export function asideSheet(a: Pick<SetAside, 'at'>, parts?: readonly SheetPart[]): number {
+  let best = 0;
+  let bd = Infinity;
+  for (const q of parts ?? []) {
+    const d = Math.max(q.box.minX - a.at.x, 0, a.at.x - q.box.maxX);
+    if (d < bd) {
+      bd = d;
+      best = q.sheet;
+    }
+  }
+  return best;
+}
+
+/** FNV-1a, 32 bits, hex — a short stable digest of a string. */
+const fnv = (t: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) {
+    h ^= t.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+};
+
+/**
+ * Per tile sheet, the digest of the outlines set aside on a guess that the pieces step offers
+ * (`weakAsides`): each by its reason, place (1 mm) and area (1 cm²), order-free. The operator's
+ * "reviewed" answer is bound to it — a set that changes (another outline, one moved or grown) is
+ * a new question.
+ */
+export function asideDigests(
+  weak: readonly SetAside[],
+  parts?: readonly SheetPart[],
+): Record<number, string> {
+  const by = new Map<number, string[]>();
+  for (const a of weak) {
+    const k = asideSheet(a, parts);
+    by.set(k, [
+      ...(by.get(k) ?? []),
+      `${a.reason}@${Math.round(a.at.x)},${Math.round(a.at.y)}#${Math.round(a.areaMm2 / 100)}`,
+    ]);
+  }
+  const out: Record<number, string> = {};
+  for (const [k, v] of by) out[k] = `${v.length}:${fnv(v.sort().join(';'))}`;
+  return out;
+}
+
+/**
+ * The offered outlines still open: those on a sheet whose set the operator has not reviewed AS IT
+ * IS NOW (`asideReviewed[sheet]` equal to its digest). The autopilot never sets the answer (D3:
+ * "I looked" is the operator's); a replay gives it back only on the same digest.
+ */
+export function openAsides(
+  weak: readonly SetAside[],
+  parts?: readonly SheetPart[],
+  reviewed?: Readonly<Record<number, string>> | null,
+): SetAside[] {
+  if (!reviewed || !weak.length) return [...weak];
+  const now = asideDigests(weak, parts);
+  return weak.filter((a) => {
+    const k = asideSheet(a, parts);
+    return reviewed[k] == null || reviewed[k] !== now[k];
+  });
+}
+
+/** The live part of an `asideReviewed` answer: the sheets whose set is still the one reviewed. */
+export function liveAsideReviewed(
+  weak: readonly SetAside[],
+  parts?: readonly SheetPart[],
+  reviewed?: Readonly<Record<number, string>> | null,
+): Record<number, string> {
+  const now = asideDigests(weak, parts);
+  const out: Record<number, string> = {};
+  for (const [k, d] of Object.entries(reviewed ?? {})) if (now[+k] === d) out[+k] = d;
+  return out;
+}
+
 /**
  * Pieces cut from the main fabric only because nothing named a fabric for them, on a card with
  * more than one fabric scope (with one, main is the only answer). An assignment the operator
@@ -258,6 +341,8 @@ export type OfferCtx = Pick<
   scopes: number;
   /** The operator changed the fabrics assignment (inputs.assignment). */
   fabricsEdited: boolean;
+  /** UXHOOKS: per tile sheet, the set-aside set the operator reviewed (inputs.asideReviewed). */
+  asideReviewed?: Readonly<Record<number, string>> | null;
 };
 
 /** The tile sheets a file carries (a Burda file: several; most files: one). */
@@ -305,7 +390,11 @@ export function stepOffer(s: OfferCtx): string | null {
       return [...undrawn, ...past, ...(flags ? [flags] : [])].join(' · ') || null;
     }
     case 'pieces': {
-      const n = weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds).length;
+      const n = openAsides(
+        weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds),
+        s.sheet?.sheet.parts,
+        s.asideReviewed,
+      ).length;
       return n
         ? `${n} piece-sized ${n === 1 ? 'outline' : 'outlines'} set aside on a guess — "this is a piece", or go on`
         : null;
@@ -355,10 +444,12 @@ export const ANSWERS: Record<
 > = {
   files: { events: ['clean'], inputs: [] },
   scale: { events: [], inputs: ['scaleIndex', 'manualMeasuredMm', 'scaleConfirmed'] },
-  sheet: { events: ['sheet', 'clean'], inputs: ['residualsAccepted'] },
+  // UXHOOKS: "the missing pages are blank" is the sheet step's answer to its missing-pages stop
+  sheet: { events: ['sheet', 'clean', 'sheet-accept-missing'], inputs: ['residualsAccepted'] },
   sizes: { events: ['legend', 'size-map', 'drawn-sizes'], inputs: ['legendConfirmed'] },
   // A10: a click seed is the pieces step's own answer (`addSeed`: clickSeeds + the fill again)
-  pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds'] },
+  // UXHOOKS: `asideReviewed` — the operator's "looked at the outlines set aside" (a replay of it)
+  pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds', 'asideReviewed'] },
   // A10: the details controls answer through these fields (the grain's two clicks, the fold edge,
   // "not a fold", the outline, the cutting list, a typed name), then semantics runs again
   meaning: {

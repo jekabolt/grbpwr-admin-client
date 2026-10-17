@@ -407,6 +407,33 @@ function validateSource(x: unknown): ManifestSource {
             : [],
         )
     : [];
+  // UXHOOKS: missing pages imported as blank — optional, shape-checked; one that does not
+  // validate is left out (never the manifest)
+  const holes = Array.isArray(x.holes)
+    ? x.holes.slice(0, 256).flatMap((y: unknown) =>
+        isObj(y) &&
+        isInt(y.sheet) &&
+        y.sheet >= 0 &&
+        isInt(y.row) &&
+        isInt(y.col) &&
+        isInt(y.lineEnds) &&
+        y.lineEnds >= 0 &&
+        isInt(y.chainEnds) &&
+        y.chainEnds >= 0 &&
+        (y.origin === 'operator' || y.origin === 'autopilot')
+          ? [
+              {
+                sheet: y.sheet,
+                row: y.row,
+                col: y.col,
+                lineEnds: y.lineEnds,
+                chainEnds: y.chainEnds,
+                origin: y.origin as 'operator' | 'autopilot',
+              },
+            ]
+          : [],
+      )
+    : [];
   if (!isStr(x.sizeEncoding) || !SIZE_ENCODINGS.has(x.sizeEncoding))
     fail('source.sizeEncoding', 'unknown encoding');
   if (!(x.variant === null || isBoundedStr(x.variant, 1024)))
@@ -425,6 +452,7 @@ function validateSource(x: unknown): ManifestSource {
       maxResidualMm: sh.maxResidualMm,
     },
     ...(sheets.length ? { sheets } : {}),
+    ...(holes.length ? { holes } : {}),
     sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
     variant: x.variant,
   };

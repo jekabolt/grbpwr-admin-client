@@ -41,11 +41,19 @@ import type {
   FabricPurposeKey,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { heldCells } from 'lib/pattern-import/assemble/holes';
 import { cardSizeKindOf, sizeKindOf } from 'lib/pattern-import/sizes/map';
 import { grainOutsideMm } from 'lib/pattern-import/semantics/grain-inside';
 import type { CardContext } from '../client';
 import type { Inputs, LegendEdit } from '../use-import-session';
-import { PAGE_SURE, sizeFlags, weakAsides, type AutoResolver } from '../auto-advance';
+import {
+  PAGE_SURE,
+  asideDigests,
+  openAsides,
+  sizeFlags,
+  weakAsides,
+  type AutoResolver,
+} from '../auto-advance';
 import { PREFILL_QUESTION } from '../auto-drive';
 import { answersNowOf, liveAnswers, liveDrawnSizes, openQuestions, questionKey } from '../answers';
 import { assumptionKey, mergeAssumptions, type Assumption, type AssumptionKind } from './types';
@@ -758,6 +766,63 @@ function sheetStep(c: Ctx): Out | null {
         ],
       };
   }
+  // UXHOOKS: missing tiles taken as blank pages last time — the same cells missing now
+  const missing = s.sheet?.sheet.missing ?? [];
+  if (missing.length && !s.sheet?.sheet.refused?.length) {
+    const me = c.get('missing-accepted');
+    type WasHole = {
+      sheet: number;
+      row: number;
+      col: number;
+      /** The file by its index in the record's source.files (`c.fileOf`). */
+      f?: number;
+      origin?: 'operator' | 'autopilot';
+    };
+    const was = (me?.value as { holes?: WasHole[] } | undefined)?.holes ?? [];
+    // the same cell (and the same file, when the record names one) missing again
+    const wasOf = (m: (typeof missing)[number]) =>
+      was.find(
+        (w) =>
+          w.sheet === (m.sheet ?? 0) &&
+          w.row === m.row &&
+          w.col === m.col &&
+          // a record without the file (one file per sheet) matches any file
+          (w.f == null || (c.fileOf(w.f) != null && c.fileOf(w.f) === m.file)),
+      );
+    const hit = missing.filter((m) => !!wasOf(m));
+    if (me && hit.length && c.fresh('missing-accepted', { ref: 'holes' })) {
+      const sheets = [...new Set(hit.map((m) => m.sheet ?? 0))];
+      return {
+        events: sheets.map(
+          (k): WizardEvent => ({
+            type: 'sheet-accept-missing',
+            sheet: k,
+            cells: [
+              ...heldCells(s.sheet?.sheet, k),
+              ...hit
+                .filter((m) => (m.sheet ?? 0) === k)
+                .map((m) => ({
+                  row: m.row,
+                  col: m.col,
+                  ...(m.file != null ? { file: m.file } : {}),
+                  origin: wasOf(m)?.origin ?? 'operator',
+                })),
+            ],
+          }),
+        ),
+        as: [
+          R(
+            c,
+            me,
+            'missing-accepted',
+            `${hit.length} missing ${hit.length === 1 ? 'tile' : 'tiles'} as blank pages`,
+            [sameFiles(c), 'the same cells are missing'],
+            { ref: 'holes' },
+          ),
+        ],
+      };
+    }
+  }
   const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
   if (worst > PATIMPORT.registrationMaxResidualMm && !i.residualsAccepted) {
     const e = c.get('residuals');
@@ -1373,10 +1438,36 @@ function piecesStep(c: Ctx): Out | null {
     if (!hit)
       c.miss(`sheet-pieces|${sq.key}`, `pieces: not answered on the previous import — ${sq.text}`);
   }
+  // UXHOOKS: the operator's "looked at the outlines set aside", on the same set (digest) only
+  const parts = s.sheet?.sheet.parts;
+  const open = openAsides(weak, parts, i.asideReviewed);
+  const re = c.get('asides-reviewed');
+  if (open.length && re && c.fresh('asides-reviewed', { ref: 'asides' })) {
+    const was = (re.value as { digests?: Record<string, string> }).digests ?? {};
+    const now = asideDigests(open, parts);
+    const back = Object.fromEntries(Object.entries(now).filter(([k, d]) => was[k] === d)) as Record<
+      number,
+      string
+    >;
+    if (Object.keys(back).length)
+      return {
+        patch: { asideReviewed: { ...i.asideReviewed, ...back } },
+        as: [
+          R(
+            c,
+            re,
+            'asides-reviewed',
+            'looked at as before',
+            [sameFiles(c), 'the same outlines set aside (place and area)'],
+            { ref: 'asides', auto: false },
+          ),
+        ],
+      };
+  }
   const ae = c.get('asides-passed');
-  if (!weak.length || !ae) return null;
+  if (!open.length || !ae) return null;
   const was = (ae.value as { asides?: { id: number; at: PtMm; a: number }[] }).asides ?? [];
-  const open = weak.filter(
+  const unseen = open.filter(
     (a) =>
       !was.some(
         (w) =>
@@ -1385,12 +1476,12 @@ function piecesStep(c: Ctx): Out | null {
           Math.abs(w.a - a.areaMm2) <= Math.max(5, 0.01 * w.a),
       ),
   );
-  for (const a of open)
+  for (const a of unseen)
     c.miss(
       `asides-passed|${a.id}`,
       `the outline at (${Math.round(a.at.x)}, ${Math.round(a.at.y)}) mm set aside (${a.reason}) was not kept aside last time`,
     );
-  if (open.length) return null;
+  if (unseen.length) return null;
   return {
     proceed: true,
     as: [
