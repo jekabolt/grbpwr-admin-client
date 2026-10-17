@@ -31,10 +31,10 @@ export function DxfUnitsDialog({
     <ConfirmationModal
       open={!!items && items.length > 0}
       width='sm'
-      title='units'
+      title='upload with units'
       confirmLabel={busy ? 'uploading…' : 'upload'}
       confirmDisabled={busy}
-      cancelDisabled={busy}
+      hideCancel
       closeOnConfirm={false}
       onOpenChange={(o) => {
         if (!o && !busy) onCancel();

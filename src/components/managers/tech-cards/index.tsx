@@ -1,5 +1,6 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
+import { Suspense, lazy, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -13,8 +14,15 @@ import { openLines, useFabricDirectionGapCounts } from './components/useFabricDi
 
 type View = 'list' | 'board' | 'direction';
 
+// PLT → PDF (1:1 print of a plotter file): a tool, not a card action — lazy, so the list pays
+// nothing until somebody opens it.
+const PltToPdfDialog = lazy(() =>
+  import('./components/plt-to-pdf-dialog').then((m) => ({ default: m.PltToPdfDialog })),
+);
+
 export function TechCards() {
   const { canRead, canWrite } = usePermissions();
+  const [pltOpen, setPltOpen] = useState(false);
   // The view lives in the URL (R-1) so a board link is shareable and the spine's "see all" hand-off
   // can target the list. Each view is its own read of the same population, not a re-layout of one:
   // list = ListTechCards, board = GetStylePipeline (W2.9), direction =
@@ -76,6 +84,14 @@ export function TechCards() {
         </ChipRow>
         <ToolbarSpacer />
         <AttentionBadge />
+        <Button
+          size='sm'
+          variant='secondary'
+          onClick={() => setPltOpen(true)}
+          title='view a plotter file (.plt / HP-GL) and print it 1:1 — one sheet or A4 tiles'
+        >
+          plt → pdf
+        </Button>
         {canWrite(SECTION.techCards) && (
           <>
             <Button size='sm' variant='secondary' asChild>
@@ -98,6 +114,12 @@ export function TechCards() {
         <FabricDirectionReport />
       ) : (
         <TechCardList />
+      )}
+
+      {pltOpen && (
+        <Suspense fallback={null}>
+          <PltToPdfDialog open={pltOpen} onOpenChange={setPltOpen} />
+        </Suspense>
       )}
     </div>
   );

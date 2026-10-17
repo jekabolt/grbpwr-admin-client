@@ -48,6 +48,7 @@ import {
 } from '../tech-card-options';
 import { useRoleAssignments } from '../useRoles';
 import { EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
+import { CreateQuiz } from './create-quiz';
 import { cardFactsContext } from './core/card-facts';
 import { categoryChain, fitChoicesFor, fitLabel } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
@@ -541,6 +542,8 @@ export function CardDetails({
   colorways,
   seasonPickHint,
   onGoColourways,
+  quizOpen = false,
+  onQuizDone,
 }: {
   /** The SAVED card's id — undefined on a card that does not exist yet. */
   techCardId?: number;
@@ -560,6 +563,9 @@ export function CardDetails({
   seasonPickHint?: string;
   /** The one door out of LINKED PRODUCTS: the colourways tab (`navTo`, owned by index.tsx). */
   onGoColourways: () => void;
+  /** CREATE NEW (`?guided=1`) on a card not created yet: the chip quiz instead of the fields. */
+  quizOpen?: boolean;
+  onQuizDone?: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
@@ -645,6 +651,34 @@ export function CardDetails({
   const assignments = rolesData?.assignments ?? [];
   const ways = colorways ?? [];
 
+  // CREATE NEW (`?guided=1`, the list's door) opens as the chip quiz (TABS-LITE item 11): the card
+  // is answered, not filled in. Every other new card, and a saved one, gets the fields straight away;
+  // the quiz folds into them on `create` or `show fields`.
+  // The open/closed state lives in index.tsx, which also hides the studio's step footer meanwhile.
+  if (!techCardId && quizOpen) {
+    return (
+      <Section
+        title='new card'
+        question='— what are we making'
+        action={
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='whitespace-nowrap text-labelColor hover:text-textColor'
+            onClick={() => onQuizDone?.()}
+          >
+            show fields
+          </Button>
+        }
+        id='card-details'
+        className={cn('min-w-0', GROUP_SEAM)}
+      >
+        <CreateQuiz isAux={isAux} fitLocked={factLocked} onDone={() => onQuizDone?.()} />
+      </Section>
+    );
+  }
+
   return (
     <Section
       title='card details'
@@ -691,12 +725,10 @@ export function CardDetails({
             title={seededLocked ? 'needs products:write' : undefined}
           >
             {/* SeasonField has no lock of its own, and needs none here: its writers are the
-                `pick` button's click and SUGGEST without a season (which is disabled on the same
-                lock), and a disabled fieldset kills click and focus on the buttons inside it —
-                measured; pointerdown still fires, but nothing in this cell listens to it. The
-                picker itself portals out of the fieldset, so the lock REMOUNTS the field (`key`)
-                and closes the picker (`open` is ANDed with it): a picker already open when the
-                lock lands closes and writes nothing (Codex m2). */}
+                `pick` button's click, its inline season chips and SUGGEST without a season (which
+                is disabled on the same lock), and a disabled fieldset kills click and focus on the
+                buttons inside it. The lock still REMOUNTS the field (`key`) and folds the chips
+                (`open` is ANDed with it): chips open when the lock lands close and write nothing. */}
             <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
               <SeasonField
                 key={seededLocked ? 'locked' : 'open'}

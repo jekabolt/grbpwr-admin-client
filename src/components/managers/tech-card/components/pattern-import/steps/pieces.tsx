@@ -22,42 +22,53 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { FoldCaret } from 'ui/components/fold-caret';
 import { HeaderWarnings } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
-import { DebugFold, Fold, Panel, SplitStage, ask, fmtMm, fmtPct, useQuizSlot } from '../ui-bits';
+import {
+  DebugFold,
+  Fold,
+  Panel,
+  SplitStage,
+  ask,
+  debugUi,
+  fmtMm,
+  fmtPct,
+  useAnsweredAndGo,
+  useAutoAnswer,
+  useQuizSlot,
+} from '../ui-bits';
 import { plural } from '../stages';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
 import { provenCopy, weakAsides } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
-import { ModelThumb, RegionCrop } from './pieces-guide';
+import { AsideSilhouette, ModelThumb, OutlineTile, RegionCrop, ownChains } from './pieces-guide';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
 const HINT: Record<Tool, string> = {
   pan: 'click a piece to select · wheel zoom · drag pan',
-  seed: 'click inside a piece to seed it',
+  seed: 'click inside a piece the sheet did not number',
   bridge: 'click one end of the gap, then the other — a wall is drawn between them',
   wall: 'click a line the fill should treat as an outline (a facing line, a seam)',
   ignore: 'click a line that is not an outline (frame, watermark, label box)',
-  lasso: 'draw around several seeds to merge · inside a two-seed region to split',
-  reseed: 'click the new place for the selected seed',
+  lasso: 'draw around several numbers to join them · around one of two touching pieces to split',
+  reseed: 'click another spot inside the selected piece',
 };
 
 /** The toolbar: tool, word, what it does. */
 const TOOLS = [
   ['pan', 'pan', 'pan and select'],
-  ['seed', '+ seed', 'click inside a piece the text did not label'],
+  ['seed', '+ piece', 'click inside a piece the sheet did not number'],
   ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
   ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
   ['ignore', 'ignore line', 'a line that is not an outline'],
-  ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
+  ['lasso', 'lasso', 'join pieces, or split two pieces that touch'],
 ] as const satisfies readonly (readonly [Tool, string, string])[];
 
 type Bridge = Extract<PieceEdit, { kind: 'bridge' }>;
@@ -115,17 +126,17 @@ function nearestLine(
 const OUTCOME: Record<FillOutcome, { word: string; tone: 'ok' | 'warn' | 'attention' | 'mut' }> = {
   closed: { word: 'closed', tone: 'ok' },
   leak: { word: 'leak', tone: 'warn' },
-  merged: { word: 'two seeds', tone: 'attention' },
+  merged: { word: 'two pieces touch', tone: 'attention' },
   tiny: { word: 'tiny', tone: 'mut' },
   refused: { word: 'sizes unclear', tone: 'attention' },
 };
 
 /** Where a seed came from, as the regions list says it (A2: 'face' = a closed outline). */
 const SEED_WORD: Record<Seed['origin'], string> = {
-  text: 'text seed',
-  click: 'clicked seed',
-  ai: 'AI seed',
-  face: 'outline seed',
+  text: 'number on the sheet',
+  click: 'clicked',
+  ai: 'AI',
+  face: 'closed outline',
 };
 
 /** A2: why a closed outline was set aside (D3: shown, one click from a piece). */
@@ -136,25 +147,25 @@ const ASIDE_WORD: Record<SetAside['reason'], string> = {
   legend: 'a legend box (line samples with sizes)',
   table: 'a table',
   logo: 'a logo or a hatching',
-  background: 'drawn in lines set aside as background',
-  unlabelled: 'no piece label inside (this sheet labels its pieces)',
-  'other-size': "another size's drawing (the first size's seed covers it)",
-  'size-copy': 'another size of a piece already seeded',
-  'seam-line': 'a seam line or a seam strip of a piece already seeded',
-  joined: 'drawn against a piece already seeded',
-  'inner-line': 'split off a seeded piece by an inner line',
-  'other-pen': 'inside a piece, in another pen (a label box, a mark)',
+  background: 'drawn in background lines',
+  unlabelled: 'no piece number inside',
+  'other-size': "another size's drawing of a piece",
+  'size-copy': 'another size of a piece already found',
+  'seam-line': 'a seam line of a piece already found',
+  joined: 'drawn against a piece already found',
+  'inner-line': 'cut off a piece by an inner line',
+  'other-pen': 'a mark inside a piece (a label box, a mark)',
   'code-text': 'part of a printed code',
 };
 
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
 const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
   'sizes-not-distinguished':
-    'the sizes are drawn alike here and nothing on the sheet proves which line is which size, so this size gets no outline. closing a gap does not help. reseed: click another spot inside the piece (the reading starts from the seed, a different spot can prove the sizes). or mark it not a piece.',
+    'the sizes are drawn alike here and nothing on the sheet proves which line is which size, so this size gets no outline. closing a gap does not help. try another spot inside the piece (a different spot can prove the sizes), or mark it not a piece.',
   'size-count':
     'how many sizes this sheet draws is not settled. answer it on the sizes step ("sizes drawn on this sheet").',
   'grade-ambiguous':
-    'two size layouts fit these lines equally well, so no outline is given. reseed: click another spot inside the piece. or mark it not a piece.',
+    'two size layouts fit these lines equally well, so no outline is given. try another spot inside the piece, or mark it not a piece.',
 };
 
 /** A refusal in a row's few words; the whole of REFUSED is the row's title. */
@@ -184,8 +195,9 @@ const FOCUS_HELP: Record<PieceFocus['kind'], string> = {
   walls:
     'the written outline leaves the drawn line here. use line: click the drawn line the outline should follow. close gap: click the two ends of a gap. or mark it not a piece.',
   growth:
-    'a size is not larger than the size below it: that size took the wrong line. step through the size chips, then use line on the right line for that size, or reseed, or mark it not a piece.',
-  region: 'see the region below for what is wrong. reseed, close a gap, or mark it not a piece.',
+    'a size is not larger than the size below it: that size took the wrong line. step through the sizes, then use line on the right line for that size, try another spot, or mark it not a piece.',
+  region:
+    'see the question below for what is wrong. try another spot, close a gap, or mark it not a piece.',
 };
 
 const STYLE: Record<FillOutcome, { fill: string; stroke: string; dash: boolean }> = {
@@ -213,7 +225,102 @@ const centre = (pts: PtMm[]) => {
 type Problem =
   | { key: 'model'; kind: 'model' }
   | { key: string; kind: 'region'; seed: number; rank: number; outcome: FillOutcome }
-  | { key: 'sheet'; kind: 'sheet' };
+  | { key: 'sheet'; kind: 'sheet' }
+  /** Optional, after the required ones: were the outlines left out on a guess left out right? */
+  | { key: 'aside'; kind: 'aside' };
+
+/**
+ * How one garment differs on the sheet (the engine's optional `pieces.out.variantMarks`, not in
+ * the types yet): its label, where the label sits, its cutting lines, the pieces it changes (seed
+ * ids), its own outlines, and whether the engine is unsure. Every field is read guarded.
+ */
+type VariantMark = {
+  label: string | null;
+  cutLines: PtMm[][];
+  pieces: Set<number>;
+  outlines: PtMm[][];
+  uncertain: boolean;
+};
+const isPt = (p: unknown): p is PtMm =>
+  !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
+const polylines = (v: unknown, min: number): PtMm[][] =>
+  Array.isArray(v)
+    ? v.filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
+    : [];
+function variantMarksOf(out: unknown): VariantMark[] {
+  const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+    .map((m) => ({
+      label: typeof m.label === 'string' ? m.label : null,
+      cutLines: polylines(m.cutLines, 2),
+      pieces: new Set(
+        Array.isArray(m.pieces) ? m.pieces.filter((x): x is number => Number.isFinite(x)) : [],
+      ),
+      outlines: polylines(m.outlines, 3),
+      uncertain: m.uncertain === true,
+    }));
+}
+/** A mark the client can show: sure, and it draws something. */
+const markShows = (m: VariantMark) =>
+  !m.uncertain && (m.cutLines.length > 0 || m.pieces.size > 0 || m.outlines.length > 0);
+
+/** What the canvas shows lit (blue) because a tile or a garment picture is under the pointer. */
+type Hot =
+  | { kind: 'piece'; seed: number }
+  | { kind: 'aside'; id: number }
+  | { kind: 'garment'; v: string }
+  | null;
+
+/**
+ * A two-parts split in progress, as one transaction: stage 1 = the first loop sent, 2 = waiting
+ * for the loop round the other part, 3 = the second loop sent. `baseline` = the edits before the
+ * first loop, `cuts` = the exact split edits sent since (the edits must be baseline + cuts, by
+ * identity — any other edit in between ends the transaction, keeping what is there); `sent` = the
+ * pieces output the last loop was drawn on (the check waits for a newer one). Kept in the quiz
+ * slot: the step unmounts while the pieces run again.
+ */
+type SplitCheck = {
+  stage: 1 | 2 | 3;
+  rank: number;
+  orig: number;
+  a1: number;
+  first: number;
+  other: number;
+  baseline: readonly PieceEdit[];
+  cuts: PieceEdit[];
+  sent: unknown;
+};
+
+/** A set-aside reason in two or three words, the caption of its tiles. */
+const ASIDE_SHORT: Partial<Record<SetAside['reason'] | 'size-copy?', string>> = {
+  unlabelled: 'no number',
+  'size-copy?': 'between sizes',
+  joined: 'touches a piece',
+  'inner-line': 'cut by a line',
+  'other-pen': 'mark inside',
+};
+/**
+ * A thin band between two drawn lines (a size copy the engine calls a sliver, or an outline that
+ * fills under a tenth of its own box): never a piece, so never asked — it stays left out.
+ */
+const askable = (a: SetAside) => {
+  if (a.copy?.how === 'sliver') return false;
+  const boxArea = (a.box.maxX - a.box.minX) * (a.box.maxY - a.box.minY);
+  return !(a.areaMm2 > 0 && boxArea > 0 && a.areaMm2 / boxArea < 0.1);
+};
+/** Proven no-piece reasons: asked last, after the outlines that could be a piece. */
+const ASIDE_JUNK = new Set<string>([
+  'sheet',
+  'tile-frame',
+  'test-square',
+  'legend',
+  'table',
+  'logo',
+  'background',
+  'code-text',
+]);
 
 /** A checklist row as it was last seen open: a fixed one keeps its words, greyed, with a ✓. */
 type SeenRow = { order: number; label: string; seed?: number };
@@ -238,7 +345,28 @@ export function PiecesStep({
   const seen = useQuizSlot('pieces', () => ({
     variant: session.variant ?? null,
     rows: new Map<string, SeenRow>(),
+    /** «yes — all right» on the set-aside check. */
+    asideOk: false,
+    /** Outlines brought back from the set-aside check: aside id → the piece it became. */
+    promoted: new Map<number, { aside: SetAside; seed: number }>(),
+    split: null as SplitCheck | null,
+    /** The set-aside quiz, one outline at a time: the aside ids answered, in order. */
+    asideDone: [] as number[],
+    /** The garment picked without asking (styles the client cannot tell apart); once per import. */
+    autoVariant: null as string | null,
+    /** The run (sessionId) the automatic pick was sent for: one send per run, StrictMode-proof. */
+    autoTried: null as number | null,
+    /** «change» on the picked-for-you garment: ask from now on, never pick again. */
+    autoReopened: false,
   }));
+  const splitRef = {
+    get current() {
+      return seen.split;
+    },
+    set current(v: SplitCheck | null) {
+      seen.split = v;
+    },
+  };
   const out = session.pieces;
   const runSizes = session.sizes?.run.sizes ?? [];
   const [rank, setRank] = useState(
@@ -264,6 +392,9 @@ export function PiecesStep({
   const [hint, setHint] = useState<string | null>(null);
   // the lasso armed by «one piece»: it joins the parts drawn around, it does not split
   const [lassoJoin, setLassoJoin] = useState(false);
+  // the lasso armed by «two parts»: a loop round ONE part; round both is asked again, never joined
+  const [lassoSplit, setLassoSplit] = useState(false);
+
   /** Every tool on the toolbar, not only the ones the selected region's problem needs. */
   const [allTools, setAllTools] = useState(false);
   /** The closed regions' list, opened by hand (a closed region picked on the sheet opens it too). */
@@ -287,6 +418,85 @@ export function PiecesStep({
         )
       : null;
   const families = useMemo(() => out?.families ?? [], [out]);
+  // ── garments PROVABLY the same are not asked (owner 16.10: «why do we need it if identical»):
+  // the engine reported what tells the models apart (`variantMarks` present) and found nothing —
+  // no cutting line (knife), no piece of one model's own, no unsure label — and every garment gets
+  // the same pieces. Without that report the client cannot know: the engine cuts a model along its
+  // own cutting lines (pieces/variants.ts `variantKnives`) even when no seed carries the model,
+  // so styles sharing every seed may still differ (kombinezon: A and B cut the waist and the
+  // bodice at different heights) → asked, each garment's picture with its cutting lines in blue
+  // once the engine draws them. The automatic pick goes through the shell's `autoAnswer` (a
+  // running autopilot is resumed, not disarmed), once per run; said in the panel and the header
+  // (D5: never silent), «change» asks the question ──
+  const marks = variantMarksOf(out);
+  const rawMarks = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
+  const marksSayNone = Array.isArray(rawMarks) && rawMarks.length === 0;
+  const pieceSetOf = (v: string) =>
+    families
+      .filter((f) => {
+        const sv = out?.seeds.find((x) => x.id === f.seed)?.variant;
+        return sv == null || sv === v;
+      })
+      .map((f) => f.seed)
+      .sort((a, b) => a - b)
+      .join(',');
+  const sets = variants.map(pieceSetOf);
+  const looksSame = variants.length > 1 && marksSayNone && sets.every((k) => k === sets[0]);
+  const autoPick = named?.pick ?? variants[0] ?? null;
+  const autoGo =
+    looksSame &&
+    !session.variant &&
+    seen.autoTried !== session.sessionId &&
+    !seen.autoReopened &&
+    !!autoPick &&
+    families.length > 0;
+  const autoAnswer = useAutoAnswer(api);
+  useEffect(() => {
+    if (!autoGo || session.busy || !autoPick) return;
+    // the one-shot guard is read and set HERE, right before the send: a StrictMode replay of this
+    // effect (same render, same `autoGo`) finds it taken and sends nothing
+    const sid = session.sessionId;
+    if (sid == null || seen.autoTried === sid) return;
+    seen.autoTried = sid;
+    seen.autoVariant = autoPick;
+    void autoAnswer({ type: 'variant', variant: autoPick });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGo, session.busy]);
+  /** The garment on screen was picked for the operator (not asked). */
+  const autoShown = !!session.variant && session.variant === seen.autoVariant && !seen.autoReopened;
+  const reopenVariant = () => {
+    seen.autoReopened = true;
+    void api.dispatch({ type: 'variant', variant: null });
+  };
+  const [hot, setHot] = useState<Hot>(null);
+  const [, bump] = useState(0);
+  /** The tools strip is for ?debug=1 only: an answer starts the tool it needs. */
+  const debug = debugUi();
+  /** The answer just clicked, shown as working while the run is busy (no silent click). */
+  const [doing, setDoing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session.busy) setDoing(null);
+  }, [session.busy]);
+  useEffect(() => {
+    if (tool === 'pan') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Esc here cancels the drawing only: never the wizard's own Esc (discard this import?)
+      e.preventDefault();
+      e.stopPropagation();
+      if (splitRef.current?.stage === 2) splitRef.current = null;
+      setGapA(null);
+      setTool('pan');
+      setLassoJoin(false);
+      setLassoSplit(false);
+    };
+    // capture on window: before the dialog's own Esc listener on the document
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [tool]);
+  // the outlines left out on a guess that are big enough to be a piece: the optional check
+  const weakList = out ? weakAsides(out.setAside, families, out.seeds).filter(askable) : [];
+  const go = useAnsweredAndGo();
   const markOf = useMemo(() => new Map(families.map((f, i) => [f.seed, i + 1])), [families]);
 
   // ── what needs a fix: only the sizes that are exported must close (the footer's own rule) ──
@@ -307,13 +517,20 @@ export function PiecesStep({
 
   // ── THE GUIDE: every open question in the footer's order; one is on the card at a time ──
   const openProblems: Problem[] = [
-    ...(variants.length > 1 && !session.variant ? [{ key: 'model', kind: 'model' } as const] : []),
+    ...(variants.length > 1 && !session.variant && !autoGo
+      ? [{ key: 'model', kind: 'model' } as const]
+      : []),
     ...families.filter(needsFix).map((f): Problem => {
       const c = problemOf(f);
       return { key: `r${f.seed}`, kind: 'region', seed: f.seed, rank: c.rank, outcome: c.outcome };
     }),
     ...(sheetQ ? [{ key: 'sheet', kind: 'sheet' } as const] : []),
+    ...((weakList.length || seen.promoted.size) && !seen.asideOk
+      ? [{ key: 'aside', kind: 'aside' } as const]
+      : []),
   ];
+  /** The questions that must be answered (the set-aside check is optional). */
+  const required = openProblems.filter((p) => p.kind !== 'aside');
   /** The question the operator picked (a checklist row, a region on the sheet); else the first. */
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const active = openProblems.find((p) => p.key === activeKey) ?? openProblems[0] ?? null;
@@ -322,6 +539,10 @@ export function PiecesStep({
     // another model is another set of regions: what the last one asked is not "fixed"
     seen.variant = session.variant ?? null;
     for (const k of [...seen.rows.keys()]) if (k !== 'model') seen.rows.delete(k);
+    seen.asideOk = false;
+    seen.asideDone = [];
+    seen.promoted.clear();
+    seen.split = null;
   }
   // the card follows the active question: a resolved region hands over to the next one by itself
   const guided = useRef(false);
@@ -334,6 +555,76 @@ export function PiecesStep({
     jump({ seed: activeRegion.seed, rank: activeRegion.rank });
     setGapA(null);
     setTool('pan');
+    // the same region asked again after an answer (two pieces → a gap) is a new question too
+  }, [active?.key, activeRegion?.outcome, activeRegion?.rank]);
+  // a loop has applied: did it split? Two identified parts, both closed, adding up to the region
+  useEffect(() => {
+    const p = splitRef.current;
+    if (!p) return;
+    const want = [...p.baseline, ...p.cuts];
+    const same = (n: number) =>
+      inputs.edits.length >= n && want.slice(0, n).every((e, i) => inputs.edits[i] === e);
+    // another edit came in between (an undo, a drop, a gap): the transaction ends, nothing undone
+    // an undo that took a recorded cut off (fewer edits than the transaction holds, with nothing
+    // still in flight) ends it too — else stage 2 would wait for a cut that is no longer there
+    const shrunk = inputs.edits.length < want.length && !session.busy && out !== p.sent;
+    if (
+      shrunk ||
+      !same(Math.min(inputs.edits.length, want.length)) ||
+      inputs.edits.length > want.length
+    ) {
+      splitRef.current = null;
+      setHint('split stopped — answer again');
+      return;
+    }
+    if (p.stage === 2 || session.busy || inputs.edits.length !== want.length || out === p.sent)
+      return;
+    const at = (seed: number) =>
+      families.find((f) => f.seed === seed)?.candidates.find((c) => c.rank === p.rank);
+    // back to exactly the edits before the first loop: the cuts are the last edits (checked above),
+    // so taking them off one by one restores that list (the session has no 'set edits' answer
+    // that keeps its own copy in step)
+    const restore = () => {
+      splitRef.current = null;
+      setHint("didn't split — try again");
+      void (async () => {
+        for (let k = 0; k < p.cuts.length; k++) await api.editPieces('undo');
+      })();
+    };
+    const a = at(p.first);
+    const b = at(p.other);
+    const partition = (x: number, y: number) => Math.abs(x + y - p.orig) <= 0.05 * p.orig;
+    if (p.stage === 1) {
+      if (!a || a.outcome !== 'closed' || a.areaMm2 > 0.97 * p.orig) return restore();
+      if (b?.outcome === 'merged') {
+        // the other part still reads as the whole region: ask for its loop
+        splitRef.current = { ...p, stage: 2, a1: a.areaMm2 };
+        setHint(null);
+        setSel(p.other);
+        setRank(p.rank);
+        setZoomTo({ seed: p.other, rank: p.rank });
+        setLassoJoin(false);
+        setLassoSplit(true);
+        setTool('lasso');
+        return;
+      }
+      // the other part closed by itself: it must still be the rest of the region
+      if (b?.outcome === 'closed' && partition(a.areaMm2, b.areaMm2)) {
+        splitRef.current = null;
+        setHint('split into two parts');
+        return;
+      }
+      return restore();
+    }
+    if (!b || b.outcome !== 'closed' || !a || a.outcome !== 'closed') return restore();
+    if (!partition(a.areaMm2, b.areaMm2)) return restore();
+    splitRef.current = null;
+    setHint('split into two parts');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [out, session.busy, inputs.edits]);
+  // a new question closes the pieces list: while one is open, the card is the only thing to read
+  useEffect(() => {
+    setClosedOpen(false);
   }, [active?.key]);
 
   if (!out || !session.sheet || !session.chains) return null;
@@ -362,6 +653,7 @@ export function PiecesStep({
     setGapA(null);
     setTool(t);
     setLassoJoin(false);
+    setLassoSplit(false);
   };
 
   const seedAt = (id: number) => out.seeds.find((s) => s.id === id);
@@ -378,11 +670,13 @@ export function PiecesStep({
   const zoomCand = zoomFam
     ? zoomFam.candidates.find((c) => c.rank === (zoomTo?.rank ?? rank)) ?? cand(zoomFam)
     : undefined;
-  const zoomBox = asideAt
-    ? asideAt.box
-    : zoomCand && zoomCand.outer.length > 2
-      ? zoomCand.bbox
-      : null;
+  // an open size has no outline: the view goes to the piece's outline in another size
+  const zoomShape =
+    zoomCand && zoomCand.outer.length > 4
+      ? zoomCand
+      : zoomFam?.candidates.find((c) => c.outer.length > 4) ??
+        (zoomCand && zoomCand.outer.length > 2 ? zoomCand : undefined);
+  const zoomBox = asideAt ? asideAt.box : zoomShape ? zoomShape.bbox : null;
   const asides = out.setAside ?? [];
   // a size copy not proven a copy of a seeded piece (auto-advance provenCopy) is a guess: apart
   const asideKey = (a: SetAside) =>
@@ -391,21 +685,23 @@ export function PiecesStep({
       : a.reason === 'size-copy' && !provenCopy(a, families, out.seeds)
         ? 'size-copy?'
         : a.reason;
-  const asideGroups = [...new Set(asides.map(asideKey))].map((k) => ({
+  const weak = new Set(weakList);
+  // what was left out and is NOT asked about (proven junk, too small): the debug list only
+  const quiet = asides.filter((a) => !weak.has(a));
+  const asideGroups = [...new Set(quiet.map(asideKey))].map((k) => ({
     key: k,
-    list: asides.filter((a) => asideKey(a) === k),
+    list: quiet.filter((a) => asideKey(a) === k),
   }));
   const asideWords = (a: SetAside) =>
     asideKey(a) === 'size-copy?'
-      ? 'between size lines, but not another size of a seeded piece — a piece of its own?'
+      ? 'between the sizes of a piece, but not another size of one'
       : a.reason === 'code-text'
-        ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it) — held back as a seed'
+        ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it)'
         : a.seed
-          ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
+          ? `a piece number in ${ASIDE_WORD[a.reason]}`
           : ASIDE_WORD[a.reason];
   const closedFams = families.filter((f) => !needsFix(f));
   const selClosed = !!selected && !needsFix(selected);
-  const weak = new Set(weakAsides(asides, families, out.seeds));
   /** What is wrong with a region: a short word on the row, the whole instruction as its title. */
   const whyOf = (f: PieceFamily, c: PieceCandidate): { short: string; full: string } => {
     switch (c.outcome) {
@@ -428,7 +724,7 @@ export function PiecesStep({
       case 'merged':
         return {
           short: 'two pieces touch',
-          full: 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.',
+          full: 'two numbered pieces read as one outline: they touch. draw a lasso around one of them to split.',
         };
       case 'tiny':
         return {
@@ -458,19 +754,49 @@ export function PiecesStep({
     bridges.length && `${plural(bridges.length, 'gap')} closed`,
     used.size && `${plural(used.size, 'line')} used`,
     ignored.size && `${plural(ignored.size, 'line')} ignored`,
-    `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
+    `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'piece' : 'pieces'}`,
   ]
     .filter(Boolean)
     .join(' · ');
+
+  /**
+   * Two numbers in one outline: the region's own other number is the one whose fill, at the same
+   * size, is ALSO 'two pieces touch' and gives the same region (same area within 3 %, its number
+   * inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
+   * closes on its own — 'closed', another area — so it is never taken for a part of this one.
+   */
+  const rawPartners = (f: PieceFamily, c: PieceCandidate): PieceFamily[] =>
+    c.outcome !== 'merged' || c.outer.length < 3
+      ? []
+      : families.filter((g) => {
+          if (g.seed === f.seed) return false;
+          const gc = g.candidates.find((x) => x.rank === c.rank);
+          if (!gc || gc.outcome !== 'merged') return false;
+          if (Math.abs(gc.areaMm2 - c.areaMm2) > 0.03 * c.areaMm2) return false;
+          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
+          return !!at && inside(at, c.outer);
+        });
+  /** Proven only when reciprocal and unique: each of the two lists exactly the other. */
+  const partnersOf = (f: PieceFamily, c: PieceCandidate): PieceFamily[] => {
+    const raw = rawPartners(f, c);
+    if (raw.length !== 1) return [];
+    const gc = raw[0].candidates.find((x) => x.rank === c.rank);
+    const back = gc ? rawPartners(raw[0], gc) : [];
+    return back.length === 1 && back[0].seed === f.seed ? raw : [];
+  };
 
   const onLasso = (poly: PtMm[]) => {
     const ins = families.filter((f) => {
       const s = seedAt(f.seed);
       return s && inside(s.at, poly);
     });
+    if (ins.length >= 2 && lassoSplit) {
+      setHint('loop one part only — try again');
+      return;
+    }
     if (ins.length >= 2) {
       void api.editPieces({ kind: 'merge', seeds: ins.map((f) => f.seed) });
-      setHint(`merged ${ins.length} seeds into one piece`);
+      setHint(`joined ${ins.length} parts into one piece`);
     } else if (lassoJoin) {
       // «one piece» never splits: a lasso around fewer than two labels joins nothing
       setHint('draw around both parts (both labels inside the lasso) to join them');
@@ -482,17 +808,51 @@ export function PiecesStep({
       const target =
         ins[0] ?? families.find((f) => outcomeOf(f) === 'merged' && inside(c, cand(f).outer));
       if (target) {
-        void api.editPieces({ kind: 'split', seed: target.seed, lassoMm: poly });
-        setHint('region split along the lasso');
-      } else setHint('the lasso holds no seed and crosses no merged region — nothing to do');
+        // the loop the operator drew is the only cut sent: one part per loop. The first loop's
+        // result is checked (it cut something, it closed); the other part is asked for next, and
+        // both parts must add up to the region — else the loops are undone ("didn't split")
+        const p = splitRef.current;
+        const cut: PieceEdit = { kind: 'split', seed: target.seed, lassoMm: poly };
+        if (p?.stage === 2 && p.other === target.seed) {
+          splitRef.current = { ...p, stage: 3, cuts: [...p.cuts, cut], sent: out };
+        } else {
+          const tc = target.candidates.find((x) => x.rank === rank) ?? cand(target);
+          // the other part: the proven pair, else the one other number inside this outline
+          const proven = partnersOf(target, tc);
+          const raw = rawPartners(target, tc);
+          const other = proven.length === 1 ? proven[0] : raw.length === 1 ? raw[0] : null;
+          if (!other) {
+            // two parts need two numbers to tell them apart: nothing is cut
+            setHint('no second number in this outline — use not a piece, or add a piece');
+            setTool('pan');
+            setLassoSplit(false);
+            return;
+          }
+          splitRef.current = {
+            stage: 1,
+            rank: tc.rank,
+            orig: tc.areaMm2,
+            a1: 0,
+            first: target.seed,
+            other: other.seed,
+            baseline: [...inputs.edits],
+            cuts: [cut],
+            sent: out,
+          };
+        }
+        void api.editPieces(cut);
+        setHint('splitting…');
+      } else
+        setHint('no piece number inside the lasso and no touching pieces under it — nothing to do');
     }
     setTool('pan');
     setLassoJoin(false);
+    setLassoSplit(false);
   };
 
   // ── the guide's checklist: every question seen open, fixed ones greyed with a ✓ ──
   if (variants.length > 1 && !seen.rows.has('model'))
-    seen.rows.set('model', { order: 0, label: 'pick the model' });
+    seen.rows.set('model', { order: 0, label: 'which garment is this card' });
   for (const p of openProblems) {
     if (p.kind === 'region') {
       const f = families.find((x) => x.seed === p.seed)!;
@@ -505,8 +865,17 @@ export function PiecesStep({
       });
     } else if (p.kind === 'sheet')
       seen.rows.set(p.key, { order: 1e6, label: 'pieces across sheets' });
+    else if (p.kind === 'aside')
+      seen.rows.set(p.key, { order: 2e6, label: 'outlines left out · optional' });
   }
-  const checklist = [...seen.rows.entries()].sort((a, b) => a[1].order - b[1].order);
+  // the garment, once picked, is its own quiet line (with «change»), not a row of the list
+  const checklist = [...seen.rows.entries()]
+    // the optional check is not a row: it is asked after the list, on its own
+    .filter(([k]) => k !== 'aside')
+    .filter(([k]) => k !== 'model' || openProblems.some((p) => p.kind === 'model'))
+    .sort((a, b) => a[1].order - b[1].order);
+  /** One question needs no list and no count: the card says it. */
+  const listed = checklist.length >= 2;
 
   // ── the active card: the region it asks about, and only the answers to its kind ──
   const activeFam = activeRegion
@@ -520,17 +889,37 @@ export function PiecesStep({
   const badRanks = expRanks.filter((c) => c.outcome !== 'closed');
   /** The problem is in some sizes only: the card says which ('in 44 46'). */
   const partly = badRanks.length > 0 && badRanks.length < expRanks.length;
-  // two seeds in one region: another label inside this outline means «one piece» is a possible
-  // answer — only offered, never inferred: a separately closed nested piece (a pocket, a facing)
-  // sits inside too, so the operator lassoes exactly the parts to join
-  const partners =
-    activeFam && activeCand && activeCand.outer.length > 2
-      ? families.filter((g) => {
-          if (g.seed === activeFam.seed) return false;
-          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
-          return !!at && inside(at, activeCand.outer);
-        })
-      : [];
+  // two numbers in one outline: the region's own other number is the one whose fill, at the same
+  // size, is ALSO 'two pieces touch' and gives the same region (same area within 3 %, its number
+  // inside this outline). A separately closed nested piece (a pocket, a facing) sits inside too but
+  // closes on its own — 'closed', another area — so it is never taken for a part of this one.
+  const partners = activeFam && activeCand ? partnersOf(activeFam, activeCand) : [];
+  /** The other numbers inside this outline (shown large even when not proven a pair). */
+  const others = activeFam && activeCand ? rawPartners(activeFam, activeCand) : [];
+  /** The pieces the active question is about: lit on the canvas, their numbers drawn large. */
+  const asked = activeFam ? new Set([activeFam.seed, ...others.map((g) => g.seed)]) : null;
+  const markWord = (seed: number) => markOf.get(seed) ?? '?';
+  /**
+   * The card's picture: the region's own outline, or around the gap. A 4-point outline is the
+   * fill's placeholder box for an open region, not a shape — never shown as one.
+   */
+  const cropBox = !activeCand
+    ? null
+    : activeCand.outer.length > 4
+      ? {
+          minX: Math.min(...activeCand.outer.map((p) => p.x)),
+          minY: Math.min(...activeCand.outer.map((p) => p.y)),
+          maxX: Math.max(...activeCand.outer.map((p) => p.x)),
+          maxY: Math.max(...activeCand.outer.map((p) => p.y)),
+        }
+      : activeCand.leakAt
+        ? {
+            minX: activeCand.leakAt.x - 60,
+            minY: activeCand.leakAt.y - 60,
+            maxX: activeCand.leakAt.x + 60,
+            maxY: activeCand.leakAt.y + 60,
+          }
+        : activeFam?.candidates.find((c) => c.outer.length > 4)?.bbox ?? null;
   const arm = (t: Tool) => {
     if (!activeFam || !activeCand) return;
     setSel(activeFam.seed);
@@ -554,6 +943,32 @@ export function PiecesStep({
         onClick: () => notAPiece(activeFam),
       }
     : null;
+  // mid-split, the part already cut is still one of the two (its outline no longer overlaps)
+  const cutPart =
+    activeFam && seen.split?.stage === 2 && seen.split.other === activeFam.seed
+      ? families.find((g) => g.seed === seen.split!.first)
+      : undefined;
+  const broughtBack = new Set([...seen.promoted.values()].map((x) => x.seed));
+  // a brought-back outline whose number sits in this region is one of its parts too (after a cut
+  // it no longer reads as the same region, so the pair rule alone would miss it)
+  const backInside =
+    activeFam && activeCand && activeCand.outcome === 'merged' && activeCand.outer.length > 2
+      ? families.filter((g) => {
+          if (g.seed === activeFam.seed || !broughtBack.has(g.seed)) return false;
+          const at = movedTo.get(g.seed) ?? seedAt(g.seed)?.at;
+          return !!at && inside(at, activeCand.outer);
+        })
+      : [];
+  const parts = activeFam
+    ? [...new Set([activeFam, ...others, ...(cutPart ? [cutPart] : []), ...backInside])]
+    : [];
+  const backParts = parts.filter((g) => broughtBack.has(g.seed));
+  const dropAnswers: Answer[] = (backParts.length === 1 ? backParts : parts).map((g) => ({
+    label: `drop ${markWord(g.seed)}`,
+    how: 'one piece, or two parts',
+    title: `part ${markWord(g.seed)} is not a piece`,
+    onClick: () => notAPiece(g),
+  }));
   const answers: Answer[] = (() => {
     if (active?.kind === 'model') {
       const order = named?.pick
@@ -572,23 +987,24 @@ export function PiecesStep({
         onClick: () => void api.dispatch({ type: 'variant', variant: v }),
       }));
     }
+    if (active?.kind === 'aside') return []; // the one-outline quiz has its own answers
     if (active?.kind === 'sheet' && sheetQ) {
       return (
         sheetQ.kind === 'alternative'
           ? ([
               ['keep', 'keep one sheet'],
-              ['union', 'different pieces — keep both'],
+              ['union', 'keep both'],
             ] as const)
           : sheetQ.kind === 'copy'
             ? ([
-                ['copy', 'one piece drawn twice — keep one'],
+                ['copy', 'keep one'],
                 ['both', 'two pieces'],
               ] as const)
             : sheetQ.kind === 'empty'
-              ? ([['empty', 'no piece on this sheet']] as const)
+              ? ([['empty', 'no piece here']] as const)
               : ([
                   ['separate', 'separate pieces'],
-                  ['halves', 'one piece cut between the sheets'],
+                  ['halves', 'one, cut apart'],
                 ] as const)
       ).map(([answer, label]) => ({
         label,
@@ -607,7 +1023,7 @@ export function PiecesStep({
       case 'leak':
         return [
           {
-            label: 'yes — close the gap',
+            label: 'close the gap',
             how: 'click both ends of the gap',
             title: 'two clicks: the two line ends at the red ring',
             pressed: tool === 'bridge' && sel === activeFam.seed,
@@ -617,34 +1033,61 @@ export function PiecesStep({
         ];
       case 'merged':
         return [
-          {
-            label: 'two — split',
-            how: 'draw around one of the two pieces',
-            title: 'draw a lasso around one of the two pieces',
-            pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
-            onClick: () => arm('lasso'),
-          },
-          ...(partners.length
+          // one click: the two numbers become one piece (the merge edit, these numbers exactly)
+          ...(partners.length === 1
             ? [
                 {
                   label: 'one piece',
-                  how: 'draw around both parts to join them',
-                  title: 'both labels name one piece: draw a lasso around both parts to join them',
+                  how: 'one piece, or two parts',
+                  title: `numbers ${[activeFam, ...partners].map((g) => markWord(g.seed)).join(' and ')} name one piece`,
+                  onClick: () => {
+                    pickTool('pan');
+                    void api.editPieces({
+                      kind: 'merge',
+                      seeds: [activeFam.seed, ...partners.map((g) => g.seed)],
+                    });
+                    setHint(
+                      `${markWord(activeFam.seed)} and ${partners.map((g) => markWord(g.seed)).join(', ')} joined into one piece`,
+                    );
+                  },
+                },
+              ]
+            : [
+                // not proven a pair: the loop round the parts to join (the banner says so)
+                {
+                  label: 'one piece',
+                  how: 'one piece, or two parts',
+                  title: 'draw a loop around the parts that are one piece',
                   pressed: tool === 'lasso' && lassoJoin && sel === activeFam.seed,
                   onClick: () => {
                     arm('lasso');
                     setLassoJoin(true);
+                    setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
                   },
                 },
-              ]
-            : // the other label is no piece of this model: nothing to join, it can only go
-              [notThis]),
+              ]),
+          // a split needs the line between the parts: the sheet is already on the region, the
+          // numbers are large, and the hint says which loop to draw
+          {
+            label: 'two parts',
+            how: 'one piece, or two parts',
+            title: `draw a loop around the part with number ${markWord(activeFam.seed)}`,
+            pressed: tool === 'lasso' && !lassoJoin && sel === activeFam.seed,
+            onClick: () => {
+              arm('lasso');
+              setLassoSplit(true);
+              setZoomTo({ seed: activeFam.seed, rank: activeCand.rank });
+            },
+          },
+          // which part is not a piece: the brought-back outline when it is one of them, else
+          // one answer per part with its number (never an ambiguous «not a piece»)
+          ...dropAnswers,
         ];
       case 'tiny':
         return [
-          { ...notThis, label: 'no — not a piece' },
+          notThis,
           {
-            label: 'yes — keep',
+            label: 'yes, keep',
             how: 'click inside the piece',
             title: 'click inside the piece: the fill starts again from there',
             pressed: tool === 'reseed' && sel === activeFam.seed,
@@ -662,7 +1105,7 @@ export function PiecesStep({
             : {
                 label: 'try another spot',
                 how: 'click another spot inside the piece',
-                title: 'click another spot inside the piece (the reading starts from the seed)',
+                title: 'click another spot inside the piece: the sizes are read again from there',
                 pressed: tool === 'reseed' && sel === activeFam.seed,
                 onClick: () => arm('reseed'),
               },
@@ -672,40 +1115,167 @@ export function PiecesStep({
         return [notThis];
     }
   })();
-  /** The answer is drawn on the sheet now: the card says how, in one line. */
-  const armedHint =
-    active?.kind === 'region' && sel === active.seed
-      ? tool === 'bridge'
-        ? gapA
-          ? '! now click the other end of the gap'
-          : 'click both ends of the gap'
-        : tool === 'lasso'
-          ? lassoJoin
-            ? 'draw around both parts to join them'
-            : 'draw around one of the two pieces'
-          : tool === 'reseed'
+  /** A drawing tool is on: the banner over the sheet says what to do, in one line. */
+  const selMark = sel != null ? markWord(sel) : '';
+  const banner =
+    tool === 'bridge'
+      ? gapA
+        ? 'now click the other end of the gap'
+        : 'click both ends of the gap'
+      : tool === 'lasso'
+        ? lassoJoin
+          ? 'draw a loop around both parts'
+          : sel != null
+            ? splitRef.current?.stage === 2
+              ? `now draw a loop around part ${selMark}`
+              : `draw a loop around part ${selMark} only`
+            : 'draw a loop'
+        : tool === 'reseed'
+          ? `click another spot inside piece ${selMark}`
+          : tool === 'seed'
             ? 'click inside the piece'
-            : null
-      : null;
+            : tool === 'wall'
+              ? 'click the line the outline should follow'
+              : tool === 'ignore'
+                ? 'click the line to ignore'
+                : '';
   /** The card asks a question: what the parser is stuck on, in the operator's words. */
   const question = !active
     ? null
     : active.kind === 'model'
-      ? 'which model to import?'
-      : active.kind === 'sheet'
-        ? sheetQ?.text ?? 'how do these sheets relate?'
-        : activeCand?.outcome === 'leak'
-          ? 'is this one outline with a gap?'
-          : activeCand?.outcome === 'merged'
-            ? 'one piece or two?'
-            : activeCand?.outcome === 'tiny'
-              ? 'is this a piece?'
-              : 'can the sizes be read from another spot?';
+      ? 'which garment is this card?'
+      : active.kind === 'aside'
+        ? 'is this a pattern piece?'
+        : active.kind === 'sheet'
+          ? sheetQ?.text ?? 'how do these sheets relate?'
+          : activeCand?.outcome === 'leak'
+            ? 'outline with a gap?'
+            : activeCand?.outcome === 'merged'
+              ? 'one piece or two parts?'
+              : activeCand?.outcome === 'tiny'
+                ? 'is this a piece?'
+                : 'sizes unclear — try elsewhere?';
   const qIndex = active ? checklist.findIndex(([k]) => k === active.key) : -1;
+
+  // ── the garments, the tiles, what the canvas lights ──
+  const garments = variants.map((v) => ({
+    v,
+    // a piece no garment label claims is in every garment (the garments differ by cutting lines)
+    fams: families.filter((f) => {
+      const sv = seedAt(f.seed)?.variant;
+      return sv == null || sv === v;
+    }),
+  }));
+  const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
+  const hotSeeds =
+    hot?.kind === 'piece'
+      ? new Set([hot.seed])
+      : hotGarment
+        ? new Set(hotGarment.fams.map((f) => f.seed))
+        : null;
+  /** «sizes 6–14»: the exported sizes of a piece. */
+  const sizesOf = (f: PieceFamily) => {
+    const r = f.candidates
+      .filter((c) => isExp(c.rank))
+      .map((c) => c.rank)
+      .sort((a, b) => a - b);
+    if (!r.length) return 'no size exported';
+    return r.length === 1
+      ? `size ${labelOf(r[0])}`
+      : `sizes ${labelOf(r[0])}–${labelOf(r[r.length - 1])}`;
+  };
+  type AsideItem = { a: SetAside; seed: number | null; picked: boolean };
+  const lastEdit = inputs.edits[inputs.edits.length - 1];
+  const dropped = (seed: number) =>
+    inputs.edits.some((e) => e.kind === 'not-a-piece' && e.seed === seed);
+  const asideItems: AsideItem[] = [
+    ...weakList
+      .filter((a) => !seen.promoted.has(a.id))
+      .map((a) => ({ a, seed: null, picked: false })),
+    ...[...seen.promoted.values()].map((p) => ({
+      a: p.aside,
+      seed: p.seed,
+      picked: !dropped(p.seed),
+    })),
+  ];
+  // ── the set-aside quiz: one outline at a time, the likeliest pieces first ──
+  const pieceAreas = families
+    .map((f) => cand(f).areaMm2)
+    .filter((x) => x > 0)
+    .sort((a, b) => a - b);
+  const typical = pieceAreas.length ? pieceAreas[Math.floor(pieceAreas.length / 2)] : 0;
+  const rankOf = (a: SetAside) => {
+    const area = a.areaMm2 > 0 ? a.areaMm2 : (a.box.maxX - a.box.minX) * (a.box.maxY - a.box.minY);
+    const { idx, small } = ownChains(a.box, previews);
+    // text, a legend table, a garment sketch: mostly small marks — asked last
+    const junk = ASIDE_JUNK.has(a.reason) || (small > 30 && small > idx.length * 0.5);
+    const off = typical > 0 && area > 0 ? Math.abs(Math.log(area / typical)) : 9;
+    return (junk ? 100 : 0) + off;
+  };
+  const quizRank = new Map(asideItems.map((it) => [it.a.id, rankOf(it.a)]));
+  const quiz = [...asideItems].sort(
+    (x, y) => quizRank.get(x.a.id)! - quizRank.get(y.a.id)! || x.a.id - y.a.id,
+  );
+  const quizLeft = quiz.filter((it) => !seen.asideDone.includes(it.a.id));
+  const quizNow = active?.kind === 'aside' ? quizLeft[0] ?? null : null;
+  /** The quiz is over: everything left keeps its current guess; the shell moves on if nothing else is asked. */
+  const quizEnd = (answer?: Promise<unknown>) => {
+    seen.asideOk = true;
+    setHot(null);
+    bump((n) => n + 1);
+    go(answer ?? Promise.resolve(), { pastOffer: true });
+  };
+  const quizAnswer = (piece: boolean) => {
+    if (!quizNow) return;
+    // the same dispatch the tiles used: only a change of the guess sends anything
+    const isPiece = quizNow.seed != null && quizNow.picked;
+    const p = piece !== isPiece ? toggleAside(quizNow) : undefined;
+    seen.asideDone = [...seen.asideDone, quizNow.a.id];
+    if (quizLeft.length <= 1) quizEnd(p);
+    else bump((n) => n + 1);
+  };
+  const quizBack = () => {
+    seen.asideDone = seen.asideDone.slice(0, -1);
+    bump((n) => n + 1);
+  };
+  const wordOf = (a: SetAside) =>
+    ASIDE_SHORT[asideKey(a) === 'size-copy?' ? 'size-copy?' : a.reason] ?? 'left out';
+  /** A brought-back outline left out again comes back only by undoing that last step. */
+  const canToggle = (it: AsideItem) =>
+    it.seed == null || it.picked || (lastEdit?.kind === 'not-a-piece' && lastEdit.seed === it.seed);
+  const toggleAside = (it: AsideItem): Promise<unknown> | undefined => {
+    if (it.seed == null) {
+      const a = it.a;
+      return api.promoteAside(a).then((id) => {
+        if (id == null) return;
+        seen.promoted.set(a.id, { aside: a, seed: id });
+        bump((n) => n + 1);
+      });
+    } else if (it.picked) return api.editPieces({ kind: 'not-a-piece', seed: it.seed });
+    else if (canToggle(it)) return api.editPieces('undo');
+    return undefined;
+  };
+  const hotAside =
+    hot?.kind === 'aside' ? asideItems.find((it) => it.a.id === hot.id)?.a : undefined;
+  const hotFam = hot?.kind === 'piece' ? families.find((f) => f.seed === hot.seed) : undefined;
+  /** The canvas pans to what a tile under the pointer shows, when it is off-screen. */
+  const reveal = hotAside?.box ?? (hotFam ? cand(hotFam).bbox : null);
+  /** The header: the count only when there is a list of questions. */
+  const headTitle =
+    active && listed && qIndex >= 0
+      ? `question ${qIndex + 1} of ${checklist.length}`
+      : required.length
+        ? 'pieces'
+        : active?.kind === 'aside'
+          ? 'pieces ✓ · 1 optional check'
+          : families.length
+            ? 'pieces ✓'
+            : 'no pieces yet';
   const ASK_KEY: Record<Problem['kind'], string> = {
     model: 'pieces-model',
     region: 'pieces-region',
     sheet: 'pieces-sheet',
+    aside: 'pieces-aside',
   };
 
   return (
@@ -714,100 +1284,125 @@ export function PiecesStep({
         <Panel
           title='pieces on the sheet'
           aside={
-            <span className='flex flex-wrap items-center gap-1'>
-              {TOOLS.filter(([t]) => allTools || ctxTools.has(t)).map(([t, word, title]) => (
+            debug && (
+              <span className='flex flex-wrap items-center gap-1'>
+                {TOOLS.filter(([t]) => allTools || ctxTools.has(t)).map(([t, word, title]) => (
+                  <Chip
+                    {...ask('pieces-seed', t === 'seed' && !families.length)}
+                    quiet
+                    key={t}
+                    selected={tool === t}
+                    pressed={tool === t}
+                    onClick={() => pickTool(t)}
+                    // a refused size has no outline to close: a bridge cannot prove which line is it
+                    disabled={t === 'bridge' && refusedSel}
+                    title={
+                      t === 'bridge' && refusedSel
+                        ? 'this size is held back (sizes unclear), not open: a gap closed here would not prove it'
+                        : t === 'pan'
+                          ? HINT.pan
+                          : title
+                    }
+                  >
+                    {word}
+                  </Chip>
+                ))}
                 <Chip
-                  {...ask('pieces-seed', t === 'seed' && !families.length)}
                   quiet
-                  key={t}
-                  selected={tool === t}
-                  pressed={tool === t}
-                  onClick={() => pickTool(t)}
-                  // a refused size has no outline to close: a bridge cannot prove which line is it
-                  disabled={t === 'bridge' && refusedSel}
-                  title={
-                    t === 'bridge' && refusedSel
-                      ? 'this size is held back (sizes unclear), not open: a gap closed here would not prove it'
-                      : t === 'pan'
-                        ? HINT.pan
-                        : title
-                  }
+                  onClick={() => setAllTools((a) => !a)}
+                  title={allTools ? 'only the tools for the selected region' : 'every tool'}
                 >
-                  {word}
+                  {allTools ? 'fewer tools' : 'more tools'}
                 </Chip>
-              ))}
-              <Chip
-                quiet
-                onClick={() => setAllTools((a) => !a)}
-                title={allTools ? 'only the tools for the selected region' : 'every tool'}
-              >
-                {allTools ? 'fewer tools' : 'more tools'}
-              </Chip>
-            </span>
+              </span>
+            )
           }
           bodyClassName='p-0 flex flex-col'
         >
-          <div className='flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-2 py-1'>
-            <Text
-              size='micro'
-              variant='label'
-              tracking='label'
-              component='span'
-              className='uppercase'
-            >
-              size
-            </Text>
-            <ChipRow>
-              {runSizes.map((s) => (
-                <Chip
-                  key={s.rank}
-                  selected={rank === s.rank}
-                  pressed={rank === s.rank}
-                  onClick={() => setRank(s.rank)}
-                >
-                  {labelOf(s.rank)}
-                </Chip>
-              ))}
-            </ChipRow>
-            {(tool === 'bridge' || tool === 'wall') && (
-              <ChipRow className='ml-3'>
-                <Chip
-                  selected={!allSizes}
-                  pressed={!allSizes}
-                  onClick={() => setAllSizes(false)}
-                  title={
-                    tool === 'bridge'
-                      ? 'the gap is in this size line only'
-                      : 'the line bounds this size only'
-                  }
-                >
-                  size {labelOf(rank)}
-                </Chip>
-                <Chip
-                  selected={allSizes}
-                  pressed={allSizes}
-                  onClick={() => setAllSizes(true)}
-                  title={
-                    tool === 'bridge'
-                      ? 'the gap is in a line every size shares'
-                      : 'the line bounds every size'
-                  }
-                >
-                  all sizes
-                </Chip>
-              </ChipRow>
-            )}
-            {tool !== 'pan' && (
-              <Text size='micro' variant='label' component='span' className='ml-auto'>
-                {tool === 'bridge' && gapA ? '! now click the other end of the gap' : HINT[tool]}
+          {debug && (
+            <div className='flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-2 py-1'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                size
               </Text>
-            )}
-          </div>
+              <ChipRow>
+                {runSizes.map((s) => (
+                  <Chip
+                    key={s.rank}
+                    selected={rank === s.rank}
+                    pressed={rank === s.rank}
+                    onClick={() => setRank(s.rank)}
+                  >
+                    {labelOf(s.rank)}
+                  </Chip>
+                ))}
+              </ChipRow>
+              {(tool === 'bridge' || tool === 'wall') && (
+                <ChipRow className='ml-3'>
+                  <Chip
+                    selected={!allSizes}
+                    pressed={!allSizes}
+                    onClick={() => setAllSizes(false)}
+                    title={
+                      tool === 'bridge'
+                        ? 'the gap is in this size only'
+                        : 'the line bounds this size only'
+                    }
+                  >
+                    size {labelOf(rank)}
+                  </Chip>
+                  <Chip
+                    selected={allSizes}
+                    pressed={allSizes}
+                    onClick={() => setAllSizes(true)}
+                    title={
+                      tool === 'bridge'
+                        ? 'the gap is in a line every size shares'
+                        : 'the line bounds every size'
+                    }
+                  >
+                    all sizes
+                  </Chip>
+                </ChipRow>
+              )}
+              {tool !== 'pan' && (
+                <Text size='micro' variant='label' component='span' className='ml-auto'>
+                  {tool === 'bridge' && gapA ? '! now click the other end of the gap' : HINT[tool]}
+                </Text>
+              )}
+            </div>
+          )}
           {/* while an answer is drawn on the sheet, the sheet is where the coach points */}
-          <div className='min-h-0 flex-1' data-ask-zone={armedHint ? '' : undefined}>
+          <div
+            className='relative min-h-0 flex-1'
+            data-ask-zone={tool !== 'pan' ? '' : undefined}
+            data-ask-label={tool !== 'pan' ? banner : undefined}
+          >
+            {/* a drawing tool is only ever started by an answer: the sheet says what to do */}
+            {tool !== 'pan' && (
+              <div
+                className='absolute inset-x-2 top-2 z-10 flex items-center gap-3 px-3 py-2 text-micro text-bgColor'
+                style={{ background: SHEET_INK.blue }}
+              >
+                <span className='min-w-0 flex-1'>{banner}</span>
+                <button
+                  type='button'
+                  onClick={() => pickTool('pan')}
+                  className='shrink-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-bgColor'
+                >
+                  cancel · esc
+                </button>
+              </div>
+            )}
             <SheetViewport
               bbox={session.sheet.sheet.bbox}
-              focus={zoomBox}
+              focus={quizNow ? quizNow.a.box : zoomBox}
+              reveal={reveal}
               tool={tool === 'pan' ? 'pan' : tool === 'lasso' ? 'lasso' : 'point'}
               onPick={(k) => {
                 setSel(k ? Number(k) : null);
@@ -867,7 +1462,7 @@ export function PiecesStep({
                 }
                 if (tool === 'seed') {
                   void api.addSeed(pt).then((id) => id != null && setSel(id));
-                  setHint('seed added — the fill runs from it');
+                  setHint('piece added — its outline is read from the click');
                 } else if (tool === 'reseed' && sel != null) {
                   void api.editPieces({ kind: 'reseed', seed: sel, at: pt });
                   setTool('pan');
@@ -922,17 +1517,38 @@ export function PiecesStep({
                       const on = f.seed === sel;
                       // a piece the gate / details sent here is outlined red until dismissed
                       const sent = focusSeeds.has(f.seed);
+                      // a tile or a garment picture under the pointer lights its pieces blue
+                      // …and, with nothing under the pointer, the piece the active question asks about
+                      const lit = hotSeeds ? hotSeeds.has(f.seed) : !!asked?.has(f.seed);
+                      const dim = (hotGarment || (asked && !hotSeeds)) && !lit;
                       return (
                         <polygon
                           key={f.seed}
                           data-key={tool === 'pan' ? f.seed : undefined}
                           points={ptsAttr(c.outer)}
-                          fill={on ? SHEET_INK.pick : st.fill}
-                          fillOpacity={o === 'leak' && c.outer.length === 4 ? 0.15 : 0.85}
-                          stroke={sent ? SHEET_INK.red : on ? SHEET_INK.ink : st.stroke}
-                          strokeWidth={unit * (on || sent ? 2.2 : 1.2)}
-                          strokeDasharray={st.dash ? `${unit * 8} ${unit * 5}` : undefined}
+                          fill={lit ? SHEET_INK.blue : on ? SHEET_INK.pick : st.fill}
+                          fillOpacity={
+                            lit ? 0.15 : o === 'leak' && c.outer.length === 4 ? 0.15 : 0.85
+                          }
+                          stroke={
+                            lit
+                              ? SHEET_INK.blue
+                              : sent
+                                ? SHEET_INK.red
+                                : on
+                                  ? SHEET_INK.ink
+                                  : st.stroke
+                          }
+                          strokeWidth={unit * (lit || on || sent ? 2.2 : 1.2)}
+                          strokeDasharray={!lit && st.dash ? `${unit * 8} ${unit * 5}` : undefined}
+                          opacity={dim ? (hotGarment ? 0.35 : 0.55) : undefined}
                           className={tool === 'pan' ? 'cursor-pointer' : undefined}
+                          onPointerEnter={
+                            tool === 'pan'
+                              ? () => setHot({ kind: 'piece', seed: f.seed })
+                              : undefined
+                          }
+                          onPointerLeave={tool === 'pan' ? () => setHot(null) : undefined}
                         />
                       );
                     })}
@@ -997,6 +1613,42 @@ export function PiecesStep({
                       pointerEvents='none'
                     />
                   )}
+                  {/* the set-aside check: every outline it asks about, the hovered one lit */}
+                  {active?.kind === 'aside' &&
+                    quizNow &&
+                    [quizNow].map(({ a, picked }) => {
+                      const lit = true;
+                      const r = {
+                        x: a.box.minX,
+                        y: vy(a.box.maxY),
+                        width: a.box.maxX - a.box.minX,
+                        height: a.box.maxY - a.box.minY,
+                      };
+                      return (
+                        <g
+                          key={`q${a.id}`}
+                          onPointerEnter={() => setHot({ kind: 'aside', id: a.id })}
+                          onPointerLeave={() => setHot(null)}
+                        >
+                          <rect
+                            {...r}
+                            fill={lit ? SHEET_INK.blue : 'none'}
+                            fillOpacity={lit ? 0.12 : 0}
+                            stroke={lit ? SHEET_INK.blue : picked ? SHEET_INK.ink : SHEET_INK.mut}
+                            strokeWidth={unit * (lit ? 2 : 1)}
+                            strokeDasharray={lit ? undefined : `${unit * 3} ${unit * 3}`}
+                            pointerEvents='none'
+                          />
+                          <rect
+                            {...r}
+                            fill='none'
+                            stroke='transparent'
+                            strokeWidth={unit * 8}
+                            pointerEvents='stroke'
+                          />
+                        </g>
+                      );
+                    })}
                   {asides
                     .filter((a) => asideKey(a) === asideOpen || a === asideAt)
                     .map((a) => (
@@ -1018,7 +1670,9 @@ export function PiecesStep({
                     if (!m) return null;
                     const moved = movedTo.get(s0.id);
                     const s = moved ? { ...s0, at: moved } : s0;
-                    const r = unit * 9;
+                    // the numbers the question is about are drawn large (which part is which)
+                    const big = !!asked?.has(s.id) && asked.size > 1;
+                    const r = unit * (big ? 18 : 9);
                     const on = s.id === sel;
                     return (
                       <g
@@ -1031,12 +1685,12 @@ export function PiecesStep({
                           y={vy(s.at.y) - r}
                           width={r * 2}
                           height={r * 2}
-                          fill={on ? SHEET_INK.blue : SHEET_INK.ink}
+                          fill={on || big ? SHEET_INK.blue : SHEET_INK.ink}
                         />
                         <text
                           x={s.at.x}
                           y={vy(s.at.y)}
-                          fontSize={unit * 11}
+                          fontSize={unit * (big ? 22 : 11)}
                           fill='#ffffff'
                           textAnchor='middle'
                           dominantBaseline='central'
@@ -1051,7 +1705,7 @@ export function PiecesStep({
                             fill={SHEET_INK.mut}
                             textAnchor='middle'
                           >
-                            {moved ? 'reseed' : s.origin === 'face' ? 'outline' : 'click'}
+                            {moved ? 'moved' : s.origin === 'face' ? 'outline' : 'click'}
                           </text>
                         )}
                       </g>
@@ -1066,16 +1720,22 @@ export function PiecesStep({
       }
       side={
         <Panel
-          title={
-            active && qIndex >= 0
-              ? `question ${qIndex + 1} of ${checklist.length}`
-              : families.length
-                ? 'all pieces closed ✓'
-                : 'no pieces yet'
-          }
+          title={headTitle}
           aside={
             /* the grade's open questions: notes behind the header door, not lines in the list */
-            <HeaderWarnings items={(out.grade?.ambiguities ?? []).map((a) => a.message)} />
+            <HeaderWarnings
+              items={[
+                autoShown && {
+                  text: `picked ${session.variant} — the file's styles look the same`,
+                  action: {
+                    label: 'change the garment',
+                    onClick: reopenVariant,
+                    disabled: !!session.busy,
+                  },
+                },
+                ...(out.grade?.ambiguities ?? []).map((a) => a.message),
+              ]}
+            />
           }
         >
           {focus && (
@@ -1152,22 +1812,56 @@ export function PiecesStep({
                     disabled={sel == null}
                     onClick={() => setTool('reseed')}
                   >
-                    reseed
+                    try another spot
                   </Chip>
                 )}
               </ChipRow>
             </CalloutBox>
           )}
-          {/* THE GUIDE: every question as one plain row, the active one answered on the card */}
-          {checklist.length > 0 && (
-            <ol className='flex flex-col'>
+          {/* the garment picked for the operator: always said, with «change» */}
+          {autoShown && (
+            <div className='flex items-center gap-2 px-1 py-1' data-auto-variant={session.variant}>
+              <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
+                garment: {session.variant} · the styles look the same here
+              </Text>
+              <Button
+                variant='underline'
+                size='xs'
+                className='shrink-0 text-labelColor hover:text-textColor'
+                disabled={!!session.busy}
+                onClick={reopenVariant}
+              >
+                change
+              </Button>
+            </div>
+          )}
+          {/* the garment, once picked: one quiet line */}
+          {variants.length > 1 && session.variant && !autoShown && !active && (
+            <div className='flex items-center gap-2 px-1 py-1'>
+              <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
+                garment: {session.variant} ✓
+              </Text>
+              <Button
+                variant='underline'
+                size='xs'
+                className='shrink-0 text-labelColor hover:text-textColor'
+                disabled={!!session.busy}
+                onClick={() => void api.dispatch({ type: 'variant', variant: null })}
+              >
+                change
+              </Button>
+            </div>
+          )}
+          {/* THE GUIDE: with two questions or more, every one as a plain row; the card answers one */}
+          {listed && (
+            <ol className='flex flex-col gap-0.5'>
               {checklist.map(([key, row]) => {
                 const open = openProblems.find((p) => p.key === key);
                 const on = !!open && active?.key === key;
                 const fam =
                   row.seed != null ? families.find((f) => f.seed === row.seed) : undefined;
                 return (
-                  <li key={key} className='flex items-center gap-2'>
+                  <li key={key}>
                     <button
                       type='button'
                       aria-current={on ? 'step' : undefined}
@@ -1182,16 +1876,14 @@ export function PiecesStep({
                         } else if (fam) jump({ seed: fam.seed, rank: null });
                       }}
                       className={cn(
-                        'flex min-w-0 flex-1 items-center gap-2 px-1 py-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
-                        on ? 'bg-bgZebra font-bold' : open ? 'hover:bg-bgZebra' : 'text-labelColor',
+                        'flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
+                        on ? 'bg-bgZebra' : open ? 'hover:bg-bgZebra' : 'text-labelColor',
                       )}
                     >
                       <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        {key === 'model' && !open && session.variant
-                          ? `model ${session.variant}`
-                          : fam && markOf.get(fam.seed)
-                            ? `${markOf.get(fam.seed)} · ${row.label}`
-                            : row.label}
+                        {fam && markOf.get(fam.seed)
+                          ? `${markOf.get(fam.seed)} · ${row.label}`
+                          : row.label}
                       </Text>
                       {!open && (
                         <Text size='micro' variant='label' component='span' aria-label='fixed'>
@@ -1199,30 +1891,26 @@ export function PiecesStep({
                         </Text>
                       )}
                     </button>
-                    {key === 'model' && !open && (
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        className='shrink-0 text-labelColor hover:text-textColor'
-                        disabled={!!session.busy}
-                        onClick={() => void api.dispatch({ type: 'variant', variant: null })}
-                      >
-                        change
-                      </Button>
-                    )}
                   </li>
                 );
               })}
             </ol>
           )}
 
-          {/* the active question: its title, where it is, and only its own answers */}
+          {/* the active question: its title, its picture, and only its own answers */}
           {active && (
-            <div data-ask-zone className='mt-2 flex flex-col gap-1.5 border-t border-hairline pt-2'>
+            <div
+              data-ask-zone
+              data-ask-label={
+                active.kind === 'aside'
+                  ? `is this a pattern piece? · ${quiz.length - quizLeft.length + 1} of ${quiz.length}`
+                  : `${active.kind === 'region' && markOf.get(active.seed) ? `${markOf.get(active.seed)} · ` : ''}${question}`
+              }
+              className={cn('flex flex-col gap-3', listed && 'mt-3 border-t border-hairline pt-3')}
+            >
               <Text
                 size='micro'
                 component='p'
-                className='font-bold'
                 title={
                   active.kind === 'region'
                     ? activeWhy?.full
@@ -1241,34 +1929,143 @@ export function PiecesStep({
                   : ''}
                 {question}
               </Text>
-              {active.kind === 'region' && activeCand && activeCand.bbox && (
+              {active.kind === 'region' && activeCand && cropBox && (
                 <RegionCrop
-                  box={activeCand.bbox}
-                  outer={activeCand.outer}
+                  box={cropBox}
+                  outer={activeCand.outer.length > 4 ? activeCand.outer : []}
                   previews={previews}
-                  stroke={STYLE[activeCand.outcome].stroke}
+                  stroke={SHEET_INK.blue}
                   leakAt={activeCand.leakAt}
+                  marks={
+                    asked && asked.size > 1
+                      ? [...asked].flatMap((id) => {
+                          const at = movedTo.get(id) ?? seedAt(id)?.at;
+                          return at ? [{ at, n: markWord(id) }] : [];
+                        })
+                      : undefined
+                  }
                   className='w-full border border-hairline bg-bgColor'
-                  style={{ height: 112 }}
+                  style={{ height: 160 }}
                 />
               )}
+              {/* a garment: its picture IS the answer (hover lights its pieces on the sheet) */}
               {active.kind === 'model' && (
-                <div className='grid grid-cols-2 gap-2'>
-                  {answers.map((x) => (
-                    <div key={x.label} className='flex flex-col gap-0.5'>
-                      <ModelThumb
-                        sheet={sheetBox}
-                        outlines={families
-                          .filter((f) => seedAt(f.seed)?.variant === x.label)
-                          .map((f) => cand(f).outer)}
-                        className='w-full border border-hairline bg-bgColor'
-                        style={{ height: 72 }}
-                      />
-                      <Text size='nano' variant='label' component='span'>
-                        {x.label}
-                      </Text>
-                    </div>
-                  ))}
+                <div className='flex flex-col gap-3'>
+                  {answers.map((x, i) => {
+                    const g = garments.find((y) => y.v === x.label);
+                    const on = hot?.kind === 'garment' && hot.v === x.label;
+                    // how this garment differs, when the engine says (sure marks only)
+                    const mk = marks.filter((m) => m.label === x.label && markShows(m));
+                    const changed = new Set(mk.flatMap((m) => [...m.pieces]));
+                    return (
+                      <button
+                        key={x.label}
+                        type='button'
+                        {...ask(ASK_KEY.model, i === 0)}
+                        // the garment the card itself names (strong evidence) is the one-click
+                        // fix; a suggestion or no name stays a choice, coached
+                        {...(i === 0 && named?.strong && x.label === named.pick
+                          ? { 'data-ask-fix': ASK_KEY.model }
+                          : {})}
+                        data-ask-hint={i === 0 ? x.how : undefined}
+                        aria-label={`garment ${x.label}`}
+                        title={x.title}
+                        disabled={!!session.busy}
+                        aria-busy={doing === x.label && !!session.busy}
+                        onClick={() => {
+                          setDoing(x.label);
+                          x.onClick();
+                        }}
+                        onPointerEnter={() => setHot({ kind: 'garment', v: x.label })}
+                        onPointerLeave={() => setHot(null)}
+                        onFocus={() => setHot({ kind: 'garment', v: x.label })}
+                        onBlur={() => setHot(null)}
+                        className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+                        style={on ? { borderColor: SHEET_INK.blue } : undefined}
+                      >
+                        <ModelThumb
+                          sheet={sheetBox}
+                          outlines={(g?.fams ?? []).map((f) => cand(f).outer)}
+                          tinted={(g?.fams ?? []).map((f) => changed.has(f.seed))}
+                          cutLines={mk.flatMap((m) => m.cutLines)}
+                          extra={mk.flatMap((m) => m.outlines)}
+                          hot={on}
+                          className='w-full'
+                          style={{ height: 150 }}
+                        />
+                        <Text size='micro' component='span'>
+                          {doing === x.label && session.busy ? 'opening… · ' : ''}
+                          {x.label} · {plural(g?.fams.length ?? 0, 'piece')}
+                          {x.title ? ' · named on the card' : ''}
+                        </Text>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {/* the outlines left out on a guess: one at a time, its silhouette, yes or no */}
+              {active.kind === 'aside' && quizNow && (
+                <div className='flex flex-col gap-3'>
+                  <AsideSilhouette
+                    box={quizNow.a.box}
+                    previews={previews}
+                    title={`${wordOf(quizNow.a)} · ${asideWords(quizNow.a)}`}
+                    className='w-full border border-borderColor bg-bgColor p-2'
+                    style={{ height: 220 }}
+                  />
+                  <div className='flex flex-wrap items-center gap-2'>
+                    {(
+                      [
+                        ['yes, a piece', true],
+                        ['no', false],
+                      ] as const
+                    ).map(([label, yes], i) => (
+                      <Button
+                        {...ask(ASK_KEY.aside, i === 0)}
+                        data-ask-hint={i === 0 ? 'say if it is a piece' : undefined}
+                        key={label}
+                        variant='secondary'
+                        size='sm'
+                        disabled={
+                          !!session.busy ||
+                          (yes && quizNow.seed != null && !quizNow.picked && !canToggle(quizNow))
+                        }
+                        onClick={() => quizAnswer(yes)}
+                        className={cn(i === 0 && 'border-textColor')}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                    <Text size='micro' variant='label' component='span' className='ml-auto'>
+                      {quiz.length - quizLeft.length + 1} of {quiz.length}
+                    </Text>
+                  </div>
+                  <div className='flex flex-wrap items-center gap-3'>
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      className='text-labelColor hover:text-textColor'
+                      title='every outline still to ask stays as it is now'
+                      // an explicit operator choice (it keeps the guesses for unseen outlines):
+                      // never the ask line's one-click fix
+                      disabled={!!session.busy}
+                      onClick={() => quizEnd()}
+                    >
+                      none of the rest are pieces
+                    </Button>
+                    {seen.asideDone.length > 0 && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        className='text-labelColor hover:text-textColor'
+                        title='ask the last outline again'
+                        disabled={!!session.busy}
+                        onClick={quizBack}
+                      >
+                        back
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
               {active.kind === 'region' && partly && (
@@ -1292,185 +2089,113 @@ export function PiecesStep({
                   ))}
                 </div>
               )}
-              <div className='flex flex-wrap items-center gap-2'>
-                {answers.map((x, i) => (
-                  <Button
-                    {...ask(ASK_KEY[active.kind], i === 0)}
-                    data-ask-hint={i === 0 ? x.how : undefined}
-                    key={x.label}
-                    variant='secondary'
-                    size='sm'
-                    disabled={!!session.busy || x.disabled}
-                    aria-pressed={x.pressed}
-                    title={x.title}
-                    onClick={x.onClick}
-                    className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
-                  >
-                    {x.label}
-                  </Button>
-                ))}
-              </div>
-              {armedHint && (
+              {active.kind !== 'model' && active.kind !== 'aside' && (
                 <div className='flex flex-wrap items-center gap-2'>
-                  <Text size='micro' component='span' className='text-warning'>
-                    {armedHint}
-                  </Text>
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    className='text-labelColor hover:text-textColor'
-                    onClick={() => pickTool('pan')}
-                  >
-                    cancel
-                  </Button>
+                  {answers.map((x, i) => (
+                    <Button
+                      {...ask(ASK_KEY[active.kind], i === 0)}
+                      data-ask-hint={i === 0 ? x.how : undefined}
+                      key={x.label}
+                      variant='secondary'
+                      size='sm'
+                      disabled={!!session.busy || x.disabled}
+                      aria-pressed={x.pressed}
+                      title={x.title}
+                      aria-busy={doing === x.label && !!session.busy}
+                      onClick={() => {
+                        setDoing(x.label);
+                        x.onClick();
+                      }}
+                      className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
+                    >
+                      {doing === x.label && session.busy ? `${x.label}…` : x.label}
+                    </Button>
+                  ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* the regions that closed: one count line, the list behind it */}
-          {closedFams.length > 0 && (
+          {/* no piece found at all: the one answer is to click one on the sheet */}
+          {!active && !families.length && (
+            <div data-ask-zone data-ask-label='no pieces found' className='flex flex-col gap-3'>
+              <Text size='micro' component='p'>
+                no pieces found
+              </Text>
+              <div className='flex flex-wrap items-center gap-2'>
+                <Button
+                  {...ask('pieces-seed', true, 'click inside a piece')}
+                  variant='secondary'
+                  size='sm'
+                  className='border-textColor'
+                  aria-pressed={tool === 'seed'}
+                  disabled={!!session.busy}
+                  onClick={() => pickTool('seed')}
+                >
+                  add a piece
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* the pieces found: a tile each; not shown while a question is open */}
+          {closedFams.length > 0 && !active && (
             <Fold
+              className='mt-4'
               label={plural(closedFams.length, 'piece')}
-              open={closedOpen || selClosed}
+              open={closedOpen || (selClosed && !required.length)}
               onOpenChange={(o) => {
                 setClosedOpen(o);
                 if (!o && selClosed) setSel(null);
               }}
             >
-              <ul className='flex flex-col'>
+              <div className='grid grid-cols-4 gap-3 pt-1'>
                 {closedFams.map((f) => {
-                  const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
+                  const c = cand(f);
+                  const m = markOf.get(f.seed);
                   return (
-                    <li
+                    <OutlineTile
                       key={f.seed}
-                      className={cn(
-                        'flex items-center gap-2 px-1 py-0.5',
-                        f.seed === sel ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                      )}
-                    >
-                      <button
-                        type='button'
-                        aria-label={`region ${markOf.get(f.seed)}`}
-                        onClick={() => setSel(f.seed === sel ? null : f.seed)}
-                        className='focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
-                      >
-                        <MarkSquare n={markOf.get(f.seed)} />
-                      </button>
-                      <span className='flex flex-wrap items-center gap-0.5'>
-                        {ranks.map((x) => (
-                          <RankCell
-                            key={x.rank}
-                            label={labelOf(x.rank)}
-                            outcome={x.outcome}
-                            exported={!mapped || mapped.has(x.rank)}
-                            current={x.rank === rank && f.seed === sel}
-                            onClick={() => {
-                              setRank(x.rank);
-                              setSel(f.seed);
-                            }}
-                          />
-                        ))}
-                      </span>
-                      {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
-                    </li>
+                      box={c.bbox}
+                      outline={c.outer}
+                      previews={previews}
+                      mark={m}
+                      picked={f.seed === sel}
+                      hot={hotSeeds?.has(f.seed) ?? false}
+                      label={`piece ${m}`}
+                      title={`piece ${m} · ${sizesOf(f)}`}
+                      onHover={(o) => setHot(o ? { kind: 'piece', seed: f.seed } : null)}
+                      onClick={() => setSel(f.seed === sel ? null : f.seed)}
+                    />
                   );
                 })}
-              </ul>
+              </div>
               {selected && selClosed && (
-                <div className='mt-1 flex flex-wrap gap-2 pl-6'>
-                  <Chip disabled={!!session.busy} onClick={() => notAPiece(selected)}>
+                <div className='mt-3 flex flex-wrap items-center gap-2'>
+                  <Text size='micro' component='span' className='min-w-0 flex-1'>
+                    {markOf.get(selected.seed)} · {sizesOf(selected)}
+                    {focusSeeds.has(selected.seed) ? ' · ! sent here' : ''}
+                  </Text>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    disabled={!!session.busy}
+                    onClick={() => notAPiece(selected)}
+                  >
                     not a piece
-                  </Chip>
-                  <Chip
-                    selected={tool === 'reseed'}
-                    pressed={tool === 'reseed'}
+                  </Button>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    aria-pressed={tool === 'reseed'}
                     disabled={!!session.busy}
                     onClick={() => setTool('reseed')}
+                    className={cn(tool === 'reseed' && 'bg-bgZebra')}
                   >
-                    reseed
-                  </Chip>
+                    try another spot
+                  </Button>
                 </div>
               )}
-            </Fold>
-          )}
-
-          {asideGroups.length > 0 && (
-            <Fold
-              label={`${asides.length} set aside`}
-              defaultOpen={weak.size > 0}
-              ask={weak.size ? 'pieces-aside' : undefined}
-            >
-              <ul className='divide-y divide-hairline'>
-                {asideGroups.map(({ key: k, list }) => {
-                  const weakHere = list.some((a) => weak.has(a));
-                  return (
-                    <li key={k} className='pb-1'>
-                      <button
-                        type='button'
-                        aria-expanded={asideOpen === k}
-                        {...(weakHere && asideOpen !== k
-                          ? { 'data-ask': 'pieces-aside', 'data-ask-fold': 'folded' }
-                          : {})}
-                        onClick={() => {
-                          setAsideOpen(asideOpen === k ? null : k);
-                          setAsideAt(null);
-                        }}
-                        className={cn(
-                          'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                          asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                        )}
-                      >
-                        <Text
-                          size='micro'
-                          component='span'
-                          className={cn('min-w-0 flex-1', weakHere && 'text-warning')}
-                        >
-                          {weakHere ? '! ' : ''}
-                          {list.length} · {asideWords(list[0])}
-                        </Text>
-                        <FoldCaret open={asideOpen === k} />
-                      </button>
-                      {asideOpen === k && (
-                        <ul className='flex flex-col pl-3'>
-                          {list.map((a) => (
-                            <li key={a.id} className='flex items-center gap-2 py-0.5'>
-                              <button
-                                type='button'
-                                title={a.why || undefined}
-                                onClick={() => setAsideAt(a === asideAt ? null : a)}
-                                className={cn(
-                                  'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                                  a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
-                                )}
-                              >
-                                <Text size='micro' component='span' className='tabular-nums'>
-                                  {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
-                                  {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
-                                  {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
-                                </Text>
-                              </button>
-                              <Button
-                                {...ask('pieces-aside', weak.has(a))}
-                                variant='underline'
-                                size='xs'
-                                disabled={!!session.busy}
-                                onClick={() => {
-                                  setAsideAt(null);
-                                  void api.promoteAside(a).then((id) => id != null && setSel(id));
-                                  setHint('made a piece — the fill runs from it');
-                                }}
-                              >
-                                this is a piece
-                              </Button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
             </Fold>
           )}
 
@@ -1529,58 +2254,72 @@ export function PiecesStep({
               />
             </DebugFold>
           )}
+          {asideGroups.length > 0 && (
+            <DebugFold label={`${asides.length - weak.size} left out, not asked`}>
+              <ul className='divide-y divide-hairline'>
+                {asideGroups.map(({ key: k, list }) => {
+                  return (
+                    <li key={k} className='pb-1'>
+                      <button
+                        type='button'
+                        aria-expanded={asideOpen === k}
+                        onClick={() => {
+                          setAsideOpen(asideOpen === k ? null : k);
+                          setAsideAt(null);
+                        }}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                          asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                        )}
+                      >
+                        <Text size='micro' component='span' className='min-w-0 flex-1'>
+                          {list.length} · {asideWords(list[0])}
+                        </Text>
+                        <FoldCaret open={asideOpen === k} />
+                      </button>
+                      {asideOpen === k && (
+                        <ul className='flex flex-col pl-3'>
+                          {list.map((a) => (
+                            <li key={a.id} className='flex items-center gap-2 py-0.5'>
+                              <button
+                                type='button'
+                                title={a.why || undefined}
+                                onClick={() => setAsideAt(a === asideAt ? null : a)}
+                                className={cn(
+                                  'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                                  a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                                )}
+                              >
+                                <Text size='micro' component='span' className='tabular-nums'>
+                                  {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
+                                  {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
+                                  {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
+                                </Text>
+                              </button>
+                              <Button
+                                variant='underline'
+                                size='xs'
+                                disabled={!!session.busy}
+                                onClick={() => {
+                                  setAsideAt(null);
+                                  void api.promoteAside(a).then((id) => id != null && setSel(id));
+                                  setHint('made a piece — the fill runs from it');
+                                }}
+                              >
+                                this is a piece
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </DebugFold>
+          )}
         </Panel>
       }
     />
-  );
-}
-
-function MarkSquare({ n }: { n: number | undefined }) {
-  return (
-    <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano text-bgColor tabular-nums'>
-      {n}
-    </span>
-  );
-}
-
-/** One size of a region: filled ink when closed; a leak / two seeds / tiny reads in words too. */
-function RankCell({
-  label,
-  outcome,
-  exported,
-  current,
-  onClick,
-}: {
-  label: string;
-  outcome: FillOutcome;
-  exported: boolean;
-  current: boolean;
-  onClick: () => void;
-}) {
-  const word = exported ? OUTCOME[outcome].word : 'not exported';
-  return (
-    <button
-      type='button'
-      onClick={onClick}
-      title={`size ${label}: ${word}`}
-      aria-label={`size ${label}: ${word}`}
-      className={cn(
-        'h-4 min-w-6 border px-0.5 text-nano tabular-nums leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-        !exported
-          ? 'border-dashed border-borderColor text-labelColor'
-          : outcome === 'closed'
-            ? 'border-textColor bg-textColor text-bgColor'
-            : outcome === 'leak'
-              ? 'border-error text-error line-through'
-              : outcome === 'refused'
-                ? 'border-dashed border-warning text-warning'
-                : outcome === 'merged'
-                  ? 'border-warning text-warning'
-                  : 'border-borderColor text-labelColor',
-        current && 'outline outline-1 outline-offset-1 outline-textColor',
-      )}
-    >
-      {label}
-    </button>
   );
 }

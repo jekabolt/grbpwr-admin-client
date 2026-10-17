@@ -10,18 +10,21 @@ const INK = '#000000';
 
 /**
  * `widthMm` crops the stretch (the legend table shows the first 24 mm, the row detail all of it);
- * the scale stays 1:1. Without a swatch the row falls back to its dash sample.
+ * the scale stays 1:1. Without a swatch the row falls back to its dash sample. `minStrokeMm`
+ * thickens hairline strokes (a 0.18 mm pen is under a screen pixel) without touching the rhythm.
  */
 export function LineSwatchView({
   swatch,
   widthMm,
   fallbackDash,
   title,
+  minStrokeMm = 0.1,
 }: {
   swatch: LineSwatch | null | undefined;
   widthMm?: number;
   fallbackDash?: number[] | null;
   title?: string;
+  minStrokeMm?: number;
 }) {
   if (!swatch) return <DashSample dash={fallbackDash ?? null} width={48} />;
   const w = Math.min(widthMm ?? swatch.lengthMm, swatch.lengthMm);
@@ -47,7 +50,7 @@ export function LineSwatchView({
               points={points}
               fill={s.fill ? INK : 'none'}
               stroke={s.fill ? 'none' : INK}
-              strokeWidth={s.fill ? undefined : Math.max(0.1, s.widthMm)}
+              strokeWidth={s.fill ? undefined : Math.max(minStrokeMm, s.widthMm)}
             />
           );
         return (
@@ -56,7 +59,7 @@ export function LineSwatchView({
             points={points}
             fill='none'
             stroke={INK}
-            strokeWidth={Math.max(0.1, s.widthMm)}
+            strokeWidth={Math.max(minStrokeMm, s.widthMm)}
             strokeDasharray={s.dash?.length ? s.dash.join(' ') : undefined}
             strokeDashoffset={s.dash?.length ? s.dashOffset : undefined}
           />

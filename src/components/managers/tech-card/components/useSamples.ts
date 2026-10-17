@@ -42,7 +42,7 @@ export function useSamples(techCardId?: number) {
 // this adds no extra fetch), so the card board's "N fittings · last verdict" chip and the open
 // sample's fittings panel always read the exact same grouping.
 export function useSampleFittings(techCardId?: number) {
-  const { data, isLoading } = useTechCardFittings(techCardId);
+  const { data, isLoading, isError, isSuccess, refetch } = useTechCardFittings(techCardId);
   const bySample = useMemo(() => {
     const m = new Map<number, common_Fitting[]>();
     for (const f of data ?? []) {
@@ -54,7 +54,7 @@ export function useSampleFittings(techCardId?: number) {
     }
     return m;
   }, [data]);
-  return { bySample, isLoading };
+  return { bySample, isLoading, isError, isSuccess, refetch };
 }
 
 // One sample with its composed cost (materials issued + manual dev-expenses). costing:read strips
@@ -89,6 +89,28 @@ export function useSaveSample() {
       }
       const res = await adminService.AddSample({ sample });
       return res.id ?? 0;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
+  });
+}
+
+/**
+ * An INSTANT write of a few fields (auto status: in sewing after the write-off, done at the first
+ * fitting). Reads the sample fresh right before writing — server copy + patch, fresh lockVersion —
+ * so it never overwrites a colleague's edit with a stale render.
+ */
+export function usePatchSampleNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, patch }: { id: number; patch: Partial<common_SampleInsert> }) => {
+      const fresh = await adminService.GetSample({ id });
+      const cur = fresh.sample;
+      if (!cur?.sample) throw new Error('sample not found');
+      await adminService.UpdateSample({
+        id,
+        expectedLockVersion: cur.lockVersion ?? 0,
+        sample: { ...cur.sample, ...patch },
+      });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
   });

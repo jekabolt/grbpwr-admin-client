@@ -54,6 +54,7 @@ export function furniture(
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
+  for (const i of tileMarks(chains, poses)) out[i] = out[i] ?? 'tile mark';
   const grid = backgroundGrid(chains);
   for (const i of grid) out[i] = out[i] ?? 'background grid';
   for (const i of testSquares(chains, poses, texts, out)) out[i] = out[i] ?? 'test square';
@@ -558,6 +559,81 @@ export function axisRuns(pts: readonly PtMm[], closed: boolean, minMm: number): 
   return out;
 }
 
+/** KINKS · tile marks: the length band of a mark (mm), the share of a member that must be straight. */
+export const TILE_MARK = {
+  minMm: 10,
+  maxMm: 45,
+  /** members of one length and direction, sheet-wide… */
+  minGroup: 12,
+  /** …of them on the tile lattice (a middle sharing its x with ≥ 2 others and its y with ≥ 2). */
+  minLattice: 9,
+  latticeMm: 0.6,
+};
+
+/**
+ * KINKS · TILE MARKS: the short straight marks a tiled print repeats at every tile corner — Mood's
+ * old patterns a 1" registration cross (two 25.4 mm arms, read as a common edge), Mood 2024 the
+ * diagonals of the tiles' overlap square (17.9 / 28.6 mm, rescued as walls where both ends touch a
+ * size line). Inside a piece such a mark cuts a corner off the outline or walks it onto the next
+ * size's line. Three evidences: ≥ 12 straight chains of ONE length (0.2 mm) and direction (1°) on
+ * the sheet; ≥ 9 of them on a lattice — each middle sharing its x with ≥ 2 other members' and its
+ * y with ≥ 2 others' (the tile grid); and each of those at one PAGE-RELATIVE spot (2 mm) that ≥ 3
+ * tile pages share (Codex: a garment's pleat or quilting lines may stand on a grid, never at one
+ * spot of every page). No tiles (< 3 page poses), no marks.
+ */
+export function tileMarks(chains: readonly Chain[], poses: readonly PagePose[] = []): number[] {
+  if (poses.length < 3) return [];
+  const rects = poses.map(pageRect);
+  // a page POSITION, not a pose: overlaid per-size files sit at one position and vote once (Codex)
+  const posOf = rects.map((r) => `${Math.round(r.minX)},${Math.round(r.minY)}`);
+  if (new Set(posOf).size < 3) return [];
+  const groups = new Map<string, { i: number; m: PtMm }[]>();
+  chains.forEach((c, i) => {
+    if (c.closed || c.pts.length < 2) return;
+    if (c.lengthMm < TILE_MARK.minMm || c.lengthMm > TILE_MARK.maxMm) return;
+    if (!straightAxis(c).straight) return;
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    const ang = Math.round(((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 360) % 180) % 180;
+    const k = `${Math.round(c.lengthMm * 5)}|${ang}`;
+    const g = groups.get(k) ?? [];
+    g.push({ i, m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } });
+    groups.set(k, g);
+  });
+  const out: number[] = [];
+  for (const g of groups.values()) {
+    if (g.length < TILE_MARK.minGroup) continue;
+    const share = (v: (p: PtMm) => number, k: number) => {
+      let n = 0;
+      for (const o of g) if (Math.abs(v(o.m) - v(g[k].m)) <= TILE_MARK.latticeMm) n++;
+      return n - 1;
+    };
+    const lattice = g.filter((_, k) => share((p) => p.x, k) >= 2 && share((p) => p.y, k) >= 2);
+    if (lattice.length < TILE_MARK.minLattice) continue;
+    // the page-relative spots of each member (every page whose rect holds its middle) → the page
+    // positions that print a mark there
+    const spotsOf = (m: PtMm) =>
+      rects.flatMap((r, p) =>
+        m.x >= r.minX && m.x <= r.maxX && m.y >= r.minY && m.y <= r.maxY
+          ? [{ p, k: `${Math.round((m.x - r.minX) / 2)},${Math.round((m.y - r.minY) / 2)}` }]
+          : [],
+      );
+    const pages = new Map<string, Set<string>>();
+    const spots = lattice.map((o) => spotsOf(o.m));
+    for (const ss of spots)
+      for (const { p, k } of ss) {
+        const set = pages.get(k) ?? new Set<string>();
+        set.add(posOf[p]);
+        pages.set(k, set);
+      }
+    const onPages = lattice.filter((_, k) =>
+      spots[k].some(({ k: key }) => (pages.get(key)?.size ?? 0) >= 3),
+    );
+    if (onPages.length >= TILE_MARK.minLattice) for (const o of onPages) out.push(o.i);
+  }
+  return out;
+}
+
 /**
  * TILE FRAMES drawn as line work (BLAZER: a 190 × 280 mm frame inside every 210 × 297 page, in the
  * cut-line pen; where tiles meet, the frames share sides and the linker draws them as L, U and
@@ -570,6 +646,9 @@ export function axisRuns(pts: readonly PtMm[], closed: boolean, minMm: number): 
 export function tileFrameLines(chains: Chain[], poses: PagePose[]): number[] {
   if (poses.length < 3) return [];
   const rects = poses.map(pageRect);
+  // a page POSITION, not a pose: overlaid per-size files sit at one position and vote once (Codex)
+  const posOf = rects.map((r) => `${Math.round(r.minX)},${Math.round(r.minY)}`);
+  if (new Set(posOf).size < 3) return [];
   const posKey = (r: (typeof rects)[number]) => `${Math.round(r.minX)},${Math.round(r.minY)}`;
   const positions = new Set(rects.map(posKey)).size;
   if (positions < 3) return [];
@@ -1227,6 +1306,8 @@ export function pageMarginIds(chains: Chain[], poses: PagePose[]): Set<number> {
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
+  // KINKS: a tile corner's mark is never a rescued wall either
+  for (const i of tileMarks(chains, poses)) out[i] = out[i] ?? 'tile mark';
   for (const i of backgroundGrid(chains)) out[i] = out[i] ?? 'background grid';
   const ids = new Set<number>();
   out.forEach((w, i) => w && ids.add(chains[i].id));

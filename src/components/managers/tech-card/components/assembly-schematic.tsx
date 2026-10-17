@@ -303,7 +303,11 @@ export function AssemblySchematic({
   const [hovered, setHovered] = useState<string | null>(null);
 
   const layout = useMemo(
-    () => applyOverrides(auto, drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions),
+    () =>
+      applyOverrides(
+        auto,
+        drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions,
+      ),
     [auto, positions, drag],
   );
 
@@ -502,7 +506,8 @@ export function AssemblySchematic({
       const p = toLayoutPoint(e);
       if (!p) return;
       lastClient.current = { x: e.clientX, y: e.clientY };
-      const far = Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
+      const far =
+        Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
       if (!d.started && !far) return;
       commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
     };
@@ -562,7 +567,19 @@ export function AssemblySchematic({
       window.removeEventListener('blur', onLost);
       document.removeEventListener('visibilitychange', onLost);
     };
-  }, [dragActive, auto, positions, res, steps, frozen, onMove, onCreate, showMessage, toLayoutPoint, commitDrag]);
+  }, [
+    dragActive,
+    auto,
+    positions,
+    res,
+    steps,
+    frozen,
+    onMove,
+    onCreate,
+    showMessage,
+    toLayoutPoint,
+    commitDrag,
+  ]);
 
   // Escape во время драга — тот же откат: жест отменён, нода возвращается на прежнее место.
   useEffect(() => {
@@ -726,7 +743,7 @@ export function AssemblySchematic({
           {/* nonForm по той же причине, что у переключателя режима: сброс раскладки не меняет
               данных, но под внешним `<fieldset disabled>` настоящая кнопка мертва — и сбросить
               чужую расстановку на выпущенной карточке было бы нечем. */}
-          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='restore the automatic layout'>
+          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='reset the layout'>
             auto
           </Chip>
         </ChipRow>
@@ -800,7 +817,12 @@ export function AssemblySchematic({
                 // ПЕРВУЮ операцию узла — всё ещё операцию этого узла, а не выделение.
                 headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep)))}
                 stepProps={stepOrgan}
-                tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
+                tokenProps={(k) =>
+                  activate(
+                    clickGuard(() => goToNode(k)),
+                    true,
+                  )
+                }
                 // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,
                 // и `revealDelta` здесь двигает прокрутку, а не трансформ; обещать «on the
                 // canvas» значило бы назвать место, которого человек на этом экране не найдёт.
@@ -878,23 +900,14 @@ export function AssemblySchematic({
         </div>
       </div>
 
-      <ConfirmationModal
+      <ResetLayoutModal
         open={resetOpen}
         onOpenChange={setResetOpen}
-        onConfirm={() => {
+        onReset={() => {
           onResetPositions();
           setResetOpen(false);
         }}
-        title='restore the automatic layout'
-        confirmLabel='reset'
-        cancelLabel='keep'
-        width='sm'
-      >
-        <Text size='micro' variant='label'>
-          every manual position on this card will be forgotten, and the schematic will place the
-          units by itself again. the card's data doesn't change: positions are only a way of looking.
-        </Text>
-      </ConfirmationModal>
+      />
     </>
   );
 }
@@ -979,5 +992,39 @@ function ActionPanel({
         cancel
       </Chip>
     </ChipRow>
+  );
+}
+
+/**
+ * RESET THE LAYOUT — ONE confirm for both surfaces (the inline schematic and the fullscreen
+ * canvas), so the two can never explain the same act differently. One consequence line, no cancel:
+ * the shell's ✕ closes it.
+ */
+export function ResetLayoutModal({
+  open,
+  onOpenChange,
+  onReset,
+  onCloseAutoFocus,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReset: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
+}) {
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={onReset}
+      title='reset layout'
+      confirmLabel='reset layout'
+      hideCancel
+      width='sm'
+      onCloseAutoFocus={onCloseAutoFocus}
+    >
+      <Text size='micro' variant='label'>
+        manual positions are forgotten
+      </Text>
+    </ConfirmationModal>
   );
 }
