@@ -59,6 +59,7 @@ import {
 } from './stages';
 import {
   AnsweredAndGoContext,
+  AutopilotOnContext,
   AskCoach,
   AutoAnswerContext,
   QuizHistoryContext,
@@ -847,18 +848,20 @@ function WizardBody({
               <WizardPrimaryContext.Provider value={setOverride}>
                 <DroppedLabels.Provider value={droppedCtx}>
                   <QuizHistoryContext.Provider value={quizHistory}>
-                    <AnsweredAndGoContext.Provider value={answeredAndGo}>
-                      <AutoAnswerContext.Provider value={autoAnswer}>
-                        {session.busy ? (
-                          // the last picture the run has, dimmed and out of reach while it works
-                          <div className='h-full opacity-40' inert aria-hidden>
-                            {body}
-                          </div>
-                        ) : (
-                          body
-                        )}
-                      </AutoAnswerContext.Provider>
-                    </AnsweredAndGoContext.Provider>
+                    <AutopilotOnContext.Provider value={autopilot}>
+                      <AnsweredAndGoContext.Provider value={answeredAndGo}>
+                        <AutoAnswerContext.Provider value={autoAnswer}>
+                          {session.busy ? (
+                            // the last picture the run has, dimmed and out of reach while it works
+                            <div className='h-full opacity-40' inert aria-hidden>
+                              {body}
+                            </div>
+                          ) : (
+                            body
+                          )}
+                        </AutoAnswerContext.Provider>
+                      </AnsweredAndGoContext.Provider>
+                    </AutopilotOnContext.Provider>
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>

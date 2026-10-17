@@ -6,7 +6,7 @@
 // drawn with one evidence, or the outline's fold / symmetry axis / straight edge). D3: proposals
 // are accepted only from the overview that shows every one of them on its piece — "review N"
 // opens it, "accept these N" there applies them (two clicks, nothing accepted unseen).
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   FoldAsk,
@@ -72,6 +72,7 @@ import {
   ask,
   fmtPct,
   AnsweredAndGoContext,
+  AutopilotOnContext,
   type AnsweredAndGo,
   useAnsweredAndGo,
   useQuizSlot,
@@ -275,8 +276,11 @@ export function DetailsStep({
   if (sem) {
     gradeLive.sem = sem;
   }
+  const autopilotOn = useContext(AutopilotOnContext);
   const go: AnsweredAndGo = (p, opts) => {
     const gen = ++gradeLive.gen;
+    // the autopilot on: the shell's go resumes the drive, which never waits for these questions
+    if (autopilotOn) return shellGo(p, opts);
     const was = gradeLive.sem;
     const gate = new Promise<void>((resolve) => {
       Promise.resolve(p).then(
