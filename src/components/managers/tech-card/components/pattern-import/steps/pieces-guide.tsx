@@ -908,3 +908,181 @@ export function TouchCrop({
     </svg>
   );
 }
+
+/** Where an outline is open: the two line ends either side of the gap, and the line each ends. */
+export type GapGuess = {
+  from: PtMm;
+  to: PtMm;
+  /** The gap's width, mm. */
+  mm: number;
+  /** Both ends point at each other (a line broken in two, not two lines passing). */
+  facing: boolean;
+  /** The lines that end there (index = ChainId). */
+  chains: number[];
+};
+
+/**
+ * The gap the fill ran out through: the open line ends round the ring (`at`), paired nearest
+ * first — two ends that point at each other before two that only lie close.
+ */
+export function findGap(
+  at: PtMm,
+  previews: readonly Float32Array[],
+  skip: ReadonlySet<number> = new Set(),
+  reach = 40,
+): GapGuess | null {
+  const bx = chainBoxes(previews);
+  type End = { p: PtMm; d: PtMm; chain: number };
+  const ends: End[] = [];
+  previews.forEach((a, i) => {
+    if (skip.has(i) || a.length < 4) return;
+    if (bx[i * 4] > at.x + reach || bx[i * 4 + 2] < at.x - reach) return;
+    if (bx[i * 4 + 1] > at.y + reach || bx[i * 4 + 3] < at.y - reach) return;
+    const n = a.length;
+    if (Math.hypot(a[0] - a[n - 2], a[1] - a[n - 1]) <= 0.5) return;
+    // each end and the way the line runs out of it (over its last few mm)
+    const dirAt = (k: number, back: number) => {
+      let j = k;
+      while (j !== back && Math.hypot(a[j] - a[k], a[j + 1] - a[k + 1]) < 3) j += k < back ? 2 : -2;
+      const dx = a[k] - a[j];
+      const dy = a[k + 1] - a[j + 1];
+      const l = Math.hypot(dx, dy) || 1;
+      return { x: dx / l, y: dy / l };
+    };
+    for (const [k, back] of [
+      [0, n - 2],
+      [n - 2, 0],
+    ]) {
+      const p = { x: a[k], y: a[k + 1] };
+      if (Math.hypot(p.x - at.x, p.y - at.y) <= reach)
+        ends.push({ p, d: dirAt(k, back), chain: i });
+    }
+  });
+  let best: (GapGuess & { score: number }) | null = null;
+  for (let i = 0; i < ends.length; i++)
+    for (let j = i + 1; j < ends.length; j++) {
+      const A = ends[i];
+      const B = ends[j];
+      const dx = B.p.x - A.p.x;
+      const dy = B.p.y - A.p.y;
+      const mm = Math.hypot(dx, dy);
+      if (mm < 0.05) continue;
+      const facing = (A.d.x * dx + A.d.y * dy) / mm > 0.7 && (B.d.x * -dx + B.d.y * -dy) / mm > 0.7;
+      // the gap lies at the ring: its middle near where the fill got out
+      const mid = Math.hypot((A.p.x + B.p.x) / 2 - at.x, (A.p.y + B.p.y) / 2 - at.y);
+      const score = (mm + mid * 0.5) * (facing ? 1 : 2.5);
+      if (!best || score < best.score)
+        best = { from: A.p, to: B.p, mm, facing, chains: [...new Set([A.chain, B.chain])], score };
+    }
+  if (!best) return null;
+  const { score: _s, ...g } = best;
+  void _s;
+  return g;
+}
+
+/**
+ * A piece that does not close, alone: its open line(s) in blue, the sheet's other lines faint, the
+ * two ends marked and the closing stroke across the gap — dashed (`ask`), solid (`closed`).
+ */
+export function GapCrop({
+  gap,
+  previews,
+  mode = 'ask',
+  className,
+  style,
+}: {
+  gap: GapGuess;
+  previews: readonly Float32Array[];
+  mode?: 'ask' | 'closed' | 'drop';
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const bx = chainBoxes(previews);
+  // cropped to the piece: the open line's box (never smaller than a hand's width round the gap)
+  const box = gap.chains.reduce(
+    (b, i) => ({
+      minX: Math.min(b.minX, bx[i * 4]),
+      minY: Math.min(b.minY, bx[i * 4 + 1]),
+      maxX: Math.max(b.maxX, bx[i * 4 + 2]),
+      maxY: Math.max(b.maxY, bx[i * 4 + 3]),
+    }),
+    {
+      minX: Math.min(gap.from.x, gap.to.x) - 30,
+      minY: Math.min(gap.from.y, gap.to.y) - 30,
+      maxX: Math.max(gap.from.x, gap.to.x) + 30,
+      maxY: Math.max(gap.from.y, gap.to.y) + 30,
+    },
+  );
+  const v = pad(box, 0.06);
+  const unit = Math.max(v.w, v.h) / 160;
+  const clip = `gap${useId().replace(/[^\w-]/g, '')}`;
+  const own = new Set(gap.chains);
+  const ink = mode === 'drop' ? SHEET_INK.mut : SHEET_INK.blue;
+  return (
+    <svg
+      viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
+      preserveAspectRatio='xMidYMid meet'
+      role='img'
+      aria-label={mode === 'closed' ? 'the outline closed' : 'the open outline'}
+      className={className}
+      style={style}
+    >
+      <defs>
+        <clipPath id={clip}>
+          <rect x={v.x} y={v.y} width={v.w} height={v.h} />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clip})`}>
+        {boxLines(
+          { minX: v.x, maxX: v.x + v.w, minY: -(v.y + v.h), maxY: -v.y },
+          previews,
+          own,
+        ).map((r, k) => (
+          <polyline
+            key={k}
+            points={ptsAttr(r)}
+            fill='none'
+            stroke={SHEET_INK.pick}
+            strokeWidth={unit * 0.6}
+          />
+        ))}
+        {gap.chains.map((i) => (
+          <polyline
+            key={`c${i}`}
+            points={f32Attr(previews[i])}
+            fill='none'
+            stroke={ink}
+            strokeWidth={unit * 1.4}
+            strokeDasharray={mode === 'drop' ? `${unit * 3} ${unit * 2}` : undefined}
+            data-gap-chain={i}
+          />
+        ))}
+        {mode !== 'drop' && (
+          <line
+            x1={gap.from.x}
+            y1={vy(gap.from.y)}
+            x2={gap.to.x}
+            y2={vy(gap.to.y)}
+            stroke={SHEET_INK.blue}
+            strokeWidth={unit * (mode === 'closed' ? 1.4 : 1.8)}
+            strokeDasharray={mode === 'ask' ? `${unit * 2.5} ${unit * 2}` : undefined}
+            data-gap-bridge
+          />
+        )}
+        {mode === 'ask' &&
+          [gap.from, gap.to].map((p, k) => (
+            <circle
+              key={`e${k}`}
+              cx={p.x}
+              cy={vy(p.y)}
+              r={unit * 2.6}
+              fill='#ffffff'
+              stroke={SHEET_INK.blue}
+              strokeWidth={unit * 1.2}
+              data-gap-end
+            />
+          ))}
+      </g>
+    </svg>
+  );
+}
