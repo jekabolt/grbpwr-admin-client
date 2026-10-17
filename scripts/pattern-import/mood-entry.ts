@@ -237,7 +237,36 @@ type KeyRow = { label: string; at: PtMm; look: Look | null; sample: number[] };
  * holding the LONGEST stroke read the next row's sample (rows 3.9 mm apart, band 4.8 mm; G0 samples
  * 32.1 mm, 12/14's 32.3 mm): 24/26 = 28/30's pen, 8/10 = 12/14's (g0key, 17.10).
  */
+/**
+ * The key's rows, read two ways — the stroke NEAREST each label (one-to-one; Mood G0 stacks its rows
+ * 3.9 mm apart, a 4.8 mm band under the label holds the next row's sample too) and the old band
+ * under the label (longest stroke). The band stands unless the nearest reading tells more pens apart
+ * (the band read a neighbour's row: Apricot's 24/26 = 28/30, Moonflower's six rows on one chain);
+ * florence's key reads right only by the band. SILENT: the judge must not invent a wrong from a
+ * misread key.
+ */
 function readKey(
+  sheet: Sheet,
+  set: ChainSet,
+  labels: string[],
+  styles: Map<number, Style>,
+): KeyRow[] {
+  const a = readKeyNearest(sheet, set, labels, styles);
+  const b = readKeyBand(sheet, set, labels, styles);
+  const distinct = (rows: KeyRow[]) => {
+    const ls: Look[] = [];
+    for (const r of rows) if (r.look && !ls.some((x) => looseSame(x, r.look!))) ls.push(r.look);
+    return ls.length;
+  };
+  // MOOD_KEY=band|nearest: one reading only (diagnosis)
+  const force = typeof process !== 'undefined' ? process.env?.MOOD_KEY : undefined;
+  if (force === 'band') return b;
+  if (force === 'nearest') return a;
+  // the band reading stands unless the nearest one tells more pens apart
+  return distinct(a) > distinct(b) ? a : b;
+}
+
+function readKeyNearest(
   sheet: Sheet,
   set: ChainSet,
   labels: string[],
@@ -280,6 +309,53 @@ function readKey(
     seen.add(p.label);
     used.add(p.c.id);
     rows.push({ label: p.label, at: p.at, look: chainLook(p.c, styles), sample: [p.c.id] });
+  }
+  return rows;
+}
+
+function readKeyBand(
+  sheet: Sheet,
+  set: ChainSet,
+  labels: string[],
+  styles: Map<number, Style>,
+): KeyRow[] {
+  const want = new Set(labels.map(canon));
+  const head = sheet.texts.filter((t) => /line\s*key|size\s*key/i.test(t.text));
+  const near = (t: IRText) =>
+    !head.length ||
+    head.some((h) => Math.hypot(h.anchor.x - t.anchor.x, h.anchor.y - t.anchor.y) < 300);
+  const rows: KeyRow[] = [];
+  const seen = new Set<string>();
+  const grid = new SegGrid(10);
+  set.chains.forEach((c) => c.pts.length > 1 && grid.addPolyline(c.id, c.pts));
+  for (const t of sheet.texts) {
+    const l = canon(t.text);
+    if (!want.has(l) || seen.has(l) || !near(t)) continue;
+    const h = t.bbox.maxY - t.bbox.minY;
+    // the row's band: from the label's foot down to ~1 line height, from its left edge right 70 mm
+    const box = {
+      minX: t.bbox.minX - 4,
+      maxX: t.bbox.minX + 70,
+      minY: t.bbox.minY - Math.max(4, h),
+      maxY: t.bbox.minY + 0.8,
+    };
+    const ids = new Set<number>();
+    grid.near({ x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 }, 40, (id) => {
+      const b = bboxOf(set.chains[id].pts);
+      if (b.minX >= box.minX && b.maxX <= box.maxX + 10 && b.minY >= box.minY && b.maxY <= box.maxY)
+        ids.add(id);
+    });
+    const cs = [...ids].map((id) => set.chains[id]).sort((a, b) => b.lengthMm - a.lengthMm);
+    if (!cs.length) continue;
+    // a sample is short (≤ 80 mm) and horizontal-ish
+    const looked = cs.find((c) => c.lengthMm <= 80 && chainLook(c, styles));
+    rows.push({
+      label: l,
+      at: t.anchor,
+      look: looked ? chainLook(looked, styles) : null,
+      sample: cs.map((c) => c.id),
+    });
+    seen.add(l);
   }
   return rows;
 }
