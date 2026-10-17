@@ -187,10 +187,16 @@ export function silentOff(): boolean {
 }
 
 export const GRADE_HOLD = {
-  /** A neighbour verdict holds from this residual on, mm (the review's real ones: 19–40 mm). */
-  holdMinMm: 2,
-  /** An edge other than the worst counts as on a neighbour's line from this off run, mm. */
-  neighbourRunMm: 3,
+  /**
+   * A neighbour verdict holds from max(holdMinMm, holdMinStep × the family's step) residual on: an
+   * outline on another size's line is about a grade step off its own (the review's real ones: 19–40
+   * mm); a 2 mm stretch near a line where two sizes converge is not (archive G0: 2.3 mm at step 13).
+   */
+  holdMinMm: 3,
+  holdMinStep: 0.5,
+  /** Neighbour: of the export's stretch away from the prediction (> max(2 mm, the edge tolerance)),
+   * at least this share on another size's line and not on its own. */
+  offOnNeighbour: 0.6,
   /** Sheet break: the step-weighted median of residual / family step at a rank ≥ this … */
   breakMin: 0.15,
   /** … and ≥ this × the sheet's typical rank. */
@@ -315,6 +321,35 @@ function nearAny(
   };
 }
 
+/**
+ * The export's stretch away from the grade prediction: its length (mm) and the share of it on
+ * another size's line and not on its own / a common line (within 0.6 mm).
+ */
+function offStretch(
+  fam: GfitFamily,
+  v: GfitFamily['sizes'][number],
+  outer: readonly PtMm[],
+  own: readonly (readonly PtMm[])[],
+  neighbour: readonly (readonly PtMm[])[],
+  k = GRADE_HOLD,
+): { lenMm: number; neighbour: number } | undefined {
+  const ps = fam.predict(v.rank);
+  const p = ps.find((x) => v.from && x.from[0] === v.from[0] && x.from[1] === v.from[1]) ?? ps[0];
+  if (!p || !p.pts.length) return undefined;
+  const pred = nearAny([p.pts], true);
+  const onOwn = nearAny(own, false);
+  const onNb = nearAny(neighbour, false);
+  const far = Math.max(k.farMm, ...v.edges.map((e) => e.tol));
+  let n = 0;
+  let nb = 0;
+  for (const q of samples(outer, 1)) {
+    if (pred(q, far)) continue;
+    n++;
+    if (!onOwn(q, 0.6) && onNb(q, 0.6)) nb++;
+  }
+  return { lenMm: n, neighbour: n ? nb / n : 0 };
+}
+
 /** Share of the prediction (where it is away from the drawn outline) on the size's own lines. */
 function ownAtPrediction(
   fam: GfitFamily,
@@ -372,21 +407,26 @@ export function gradeVerdicts(
     if (!fam?.model) continue;
     for (const v of fam.sizes) {
       if (v.status !== 'disagrees') continue;
-      // a stretch on another size's line on ANY disagreeing edge, not only the worst one (Codex)
-      const onNeighbourEdge = v.edges.some(
-        (e) => e.p95 > e.tol && e.offN > 0 && e.onN / e.offN >= 0.6 && e.run >= k.neighbourRunMm,
-      );
-      const cause = v.cause === 'neighbour' || onNeighbourEdge ? 'neighbour' : v.cause ?? 'other';
       const resid = residOf(v);
       const brk = breaks.get(v.rank);
       const excused =
         brk != null && resid <= k.breakSlack * brk * fam.stepMm + tol.ptMm * (tol.extrapMul ?? 1);
+      // the export's own stretch away from the grade, read on the drawing: on another size's line
+      // and NOT on its own (a size whose own line converges with a neighbour's, or whose extreme
+      // size the model extrapolates badly, rides its own line there — Trillium 0/2, Lita 16/18)
+      const outer = f.sizes.find((s) => s.rank === v.rank)?.outer;
+      const off = outer
+        ? offStretch(fam, v, outer, f.lines.own(v.rank), f.lines.neighbour(v.rank), k)
+        : undefined;
+      const onNeighbour = !!off && off.lenMm >= k.farMinMm && off.neighbour >= k.offOnNeighbour;
+      const cause = onNeighbour ? 'neighbour' : v.cause === 'neighbour' ? 'other' : v.cause ?? 'other';
       let own: number | undefined;
       let hold = false;
       if (cause === 'neighbour') {
-        const outer = f.sizes.find((s) => s.rank === v.rank)?.outer;
         own = outer ? ownAtPrediction(fam, v, outer, f.lines.own(v.rank), k) : undefined;
-        hold = resid >= k.holdMinMm && (!excused || (own ?? 0) >= k.ownAtPrediction);
+        hold =
+          resid >= Math.max(k.holdMinMm, k.holdMinStep * fam.stepMm) &&
+          (!excused || (own ?? 0) >= k.ownAtPrediction);
       }
       verdicts.push({
         seed: f.seed,
@@ -401,7 +441,7 @@ export function gradeVerdicts(
         ...(excused ? { excused } : {}),
         note:
           cause === 'neighbour'
-            ? `${(v.offRunMm ?? 0).toFixed(0)} mm of its outline lies on another size's line, ${resid.toFixed(1)} mm off the grade of the other sizes${own != null ? ` (its own line drawn along ${Math.round(100 * own)} % of where the grade puts it)` : ''}`
+            ? `${(off?.lenMm ?? 0).toFixed(0)} mm of its outline lies on another size's line (${Math.round(100 * (off?.neighbour ?? 0))} % of where it leaves the grade), ${resid.toFixed(1)} mm off the grade of the other sizes${own != null ? ` (its own line drawn along ${Math.round(100 * own)} % of where the grade puts it)` : ''}`
             : `${resid.toFixed(1)} mm off the grade of the other sizes (${cause}${excused ? ', at a grade break of the sheet' : ''})`,
       });
     }
