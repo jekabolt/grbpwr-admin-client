@@ -2,8 +2,8 @@
 // outline geometry): a notch-shaped in/out stretch of one size's drawn line — 1–8 mm deep, mouth ≤
 // 15 mm, both legs on the chord's line (outline.ts excursionsOf; looser semicircles and slits:
 // bumpSpans) — is cut off by its chord and becomes a notch mark at the chord, ONLY with a second
-// evidence (D3): the same bump at a grade-consistent place on the piece's canonical topology in ≥ 2
-// sizes (notch-grade.ts tracks). A bump in one size only stays as drawn (the G5 turn check asks).
+// evidence (D3): the same bump at a grade-consistent place on the piece's canonical topology in EVERY
+// size (notch-grade.ts tracks). A bump in some sizes only stays as drawn (the G5 turn check asks).
 // Pure, mm. The chord and the bump it replaced go to the gate (G3/G4 measure the drawn line, which
 // still carries the bump) as `NotchChord`s.
 import type { PtMm } from 'lib/pattern-import/types';
@@ -77,7 +77,7 @@ export function bumpsOf(outer: readonly PtMm[]): NotchBump[] {
 
 /**
  * One family's sizes (any order): per size index, the bumps that are notches — the same bump at a
- * grade-consistent place in ≥ 2 sizes (a graded series of one drawn notch).
+ * grade-consistent place in every size (a graded series of one drawn notch).
  */
 export function notchBumpSeries(
   sizes: readonly { rank: number; token: string; outer: readonly PtMm[] }[],
@@ -100,7 +100,9 @@ export function notchBumpSeries(
   );
   if (!g.ok) return out;
   for (const t of g.tracks) {
-    if (!t.consistent || t.members.length < 2) continue;
+    // EVERY size draws it (a bump in some sizes only is not proven a notch — r4454 P08: 2 of 6 sizes,
+    // polupalto CUF: the two extreme sizes only; crossing those would invent a notch in all of them)
+    if (!t.consistent || t.members.length < sizes.length) continue;
     // one sign: a bump out in some sizes and a dip in others is not one notch's copies
     const signs = new Set(t.members.map((m) => Math.sign(bumps[m.k][m.n].depth)));
     if (signs.size > 1) continue;

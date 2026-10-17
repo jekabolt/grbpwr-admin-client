@@ -29,6 +29,7 @@ import { gradeShape } from 'lib/pattern-import/semantics/grade-shape';
 import type { Session } from 'lib/pattern-import/worker/session';
 
 import { CASES, runCase } from './e2e-entry';
+import { MOOD_DIR, SAMPLE } from './mood-entry';
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 
 // ── units ─────────────────────────────────────────────────────────────────────────────────────
@@ -337,13 +338,22 @@ function units() {
     const lines = R.map((r) => ({
       rank: r,
       token: `${r}`,
-      outer: r >= 2 ? withDip(r, 0.4) : ring(r),
+      outer: withDip(r, 0.4),
     }));
     const ser = notchBumpSeries(lines);
     ok(
-      'u11 dip in 3 sizes → a notch series in those 3',
-      [2, 3, 4].every((k) => ser.get(k)?.length === 1) && !ser.get(0),
+      'u11 dip in every size → a notch series in all 5',
+      R.every((k) => ser.get(k)?.length === 1),
       JSON.stringify([...ser].map(([k, v]) => [k, v.length])),
+    );
+    const some = R.map((r) => ({
+      rank: r,
+      token: `${r}`,
+      outer: r >= 2 ? withDip(r, 0.4) : ring(r),
+    }));
+    ok(
+      'u11 dip in 3 of 5 sizes → not crossed (not proven in every size)',
+      notchBumpSeries(some).size === 0,
     );
     const b = ser.get(2)?.[0];
     if (b) {
@@ -628,6 +638,16 @@ async function oneCase(id: string, png: string | null) {
         card: ['XS', 'S', 'M', 'L', 'XL'],
         mapTo: ['', 'XS', 'S', 'M', 'L', 'XL'],
       } as typeof a;
+  }
+  if (!c && id.startsWith('mood:')) {
+    const sm = SAMPLE.find((x) => `mood:${x.id}` === id);
+    if (sm)
+      c = {
+        id,
+        group: 'pdf',
+        files: [resolve(MOOD_DIR, sm.path)],
+        card: sm.key,
+      } as unknown as typeof c;
   }
   if (!c) return { id, error: 'no case' };
   let res: ReturnType<typeof analyse> | null = null;
