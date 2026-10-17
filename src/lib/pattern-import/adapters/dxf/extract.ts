@@ -70,7 +70,7 @@ import { decodeLabel, decodeMText, decodeTextValue, type DecodedLabel } from './
 const MAX_DEPTH = 16;
 const MAX_INSTANCES = 50_000;
 
-const INSUNITS_MM: Record<number, number> = {
+export const INSUNITS_MM: Record<number, number> = {
   1: 25.4,
   2: 304.8,
   3: 1_609_344,
@@ -871,7 +871,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
 
 // ── units, dialect ──────────────────────────────────────────────────────────────────────────
 
-function modelLabelsOf(raw: RawDxf): DecodedLabel[] {
+export function modelLabelsOf(raw: RawDxf): DecodedLabel[] {
   const out: DecodedLabel[] = [];
   for (const e of raw.entities) {
     if (e.type !== 'TEXT' && e.type !== 'MTEXT') continue;
@@ -885,7 +885,7 @@ function modelLabelsOf(raw: RawDxf): DecodedLabel[] {
   return out;
 }
 
-function unitsOf(raw: RawDxf, labels: DecodedLabel[]): DxfUnits {
+export function unitsOf(raw: RawDxf, labels: DecodedLabel[]): DxfUnits {
   const ins = raw.header['$INSUNITS'];
   const insunits = ins?.[0] ? Math.trunc(num(ins[0])) : null;
   if (insunits != null && INSUNITS_MM[insunits]) {

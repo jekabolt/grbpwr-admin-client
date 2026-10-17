@@ -28,7 +28,10 @@ export type UnsupportedCode =
   | 'pdf-password' // PDF that needs a password to open
   | 'office-document' // Word / Excel / PowerPoint / OpenDocument
   | 'image-unsupported' // an image container the raster adapter does not decode (HEIC, PSD…)
-  | 'zip-archive'; // any other ZIP — the importer does not open archives
+  | 'zip-archive' // any other ZIP — the importer does not open archives
+  // RUL · an AAMA/ASTM grade rule table (text .rul) — read only together with its base-size DXF
+  | 'rul-alone' // a RUL without the base DXF it grades (or with something that is not that DXF)
+  | 'rul-invalid'; // a RUL / base DXF pair we cannot grade exactly: malformed, or not matching
 
 type Refusal = { what: string; hint: string };
 
@@ -112,6 +115,14 @@ const REFUSALS: Record<UnsupportedCode, Refusal> = {
   'image-unsupported': {
     what: 'This image format is not read (only PNG, JPG, TIFF, GIF, WebP and BMP scans are).',
     hint: 'Save it as PNG, JPG or TIFF keeping its dpi (scanned at 100%), or drop the vector PDF/SVG/DXF it came from.',
+  },
+  'rul-alone': {
+    what: 'This is an AAMA/ASTM grade rule table (.rul): it holds the grading, not the pieces.',
+    hint: 'Drop it together with its base-size DXF (the AAMA/ASTM DXF exported with it, one DXF + one RUL), or export all sizes as one DXF instead.',
+  },
+  'rul-invalid': {
+    what: 'The grade rule table (.rul) and its DXF cannot be graded exactly, so nothing was graded.',
+    hint: 'Re-export the DXF and RUL together from the pattern CAD (AAMA/ASTM, with grading), or export all sizes as one DXF instead.',
   },
   'zip-archive': {
     what: 'This is a ZIP archive; the importer does not open archives.',
