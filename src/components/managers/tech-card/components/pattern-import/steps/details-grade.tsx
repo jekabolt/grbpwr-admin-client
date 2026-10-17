@@ -18,14 +18,20 @@ import type {
 import Text from 'ui/components/text';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 
-/** The questions still open: no answer from the engine, none given here, none set aside. */
-export function openGradeAsks(
-  sem: Pick<SemanticsOutput, 'gradeAsks'>,
-  answers: Readonly<Record<string, GradeAnswer>> | undefined,
-  skipped: ReadonlySet<string>,
-): GradeAsk[] {
-  return (sem.gradeAsks ?? []).filter((a) => !a.answer && !answers?.[a.key] && !skipped.has(a.key));
+/**
+ * The questions still open: `ask.answer` is the APPLIED answer (GRADE-P1 §1.5) — absent = open,
+ * a refused all / none included (its `refused` says why; the question stays).
+ */
+export function openGradeAsks(sem: Pick<SemanticsOutput, 'gradeAsks'>): GradeAsk[] {
+  return (sem.gradeAsks ?? []).filter((a) => !a.answer);
 }
+
+/** Why the operator's all / none could not be applied (null = not refused). */
+export const gradeRefusal = (
+  sem: Pick<SemanticsOutput, 'gradeRefusals'>,
+  ask: GradeAsk,
+): string | null =>
+  (ask.kind === 'counts' ? ask.refused : undefined) ?? sem.gradeRefusals?.[ask.key] ?? null;
 
 /** Every size the question is about, with its counted places (a lone notch: the one size has it). */
 export function placesBySize(
@@ -261,13 +267,12 @@ export function GradeCanvasMarks({
 
 /**
  * The answers the engine applies, in plain words. A lone notch: every size / none / only its size
- * (`all` / `none` / `only`). A count: `intended` — the engine has no "copy to every size / remove"
- * for counts, so the other answer only sets the question aside on this run (the G5 count warning
- * and the passport keep it).
+ * (`all` / `none` / `only`). A count: intended / every size / no size (`intended` / `all` /
+ * `none`); `all` is placed only where the grade derives a place — else refused, with the reason.
  */
 export function gradeAnswerChoices(
   ask: GradeAsk,
-): { label: string; answer: GradeAnswer | null; title: string }[] {
+): { label: string; answer: GradeAnswer; title: string }[] {
   if (ask.kind === 'notch-lone')
     return [
       {
@@ -282,16 +287,23 @@ export function gradeAnswerChoices(
         title: `kept in ${ask.size} only, as drawn`,
       },
     ];
+  const w = gradeWord(ask);
   return [
     {
       label: "it's intended",
       answer: 'intended',
-      title: 'the sizes differ on purpose: the count warning is lifted for this piece',
+      title:
+        'the sizes differ on purpose: nothing moves, the count warning is lifted for this piece',
     },
     {
-      label: 'not intended — keep it flagged',
-      answer: null,
-      title: 'nothing changes in the export; the count warning stays in the check and the passport',
+      label: 'every size should have it',
+      answer: 'all',
+      title: `the missing ${w} are placed where the grade puts them (only if every one has such a place)`,
+    },
+    {
+      label: 'no size should',
+      answer: 'none',
+      title: `the ${w} not drawn in every size are removed where they are drawn`,
     },
   ];
 }

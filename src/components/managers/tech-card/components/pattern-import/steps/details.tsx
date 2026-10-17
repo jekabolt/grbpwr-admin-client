@@ -43,7 +43,13 @@ import { questionKey } from '../answers';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
 import { textNameOf } from '../use-import-session';
 import { PendingDetails } from './details-pending';
-import { GradeCanvasMarks, GradeSizes, gradeAnswerChoices, openGradeAsks } from './details-grade';
+import {
+  GradeCanvasMarks,
+  GradeSizes,
+  gradeAnswerChoices,
+  gradeRefusal,
+  openGradeAsks,
+} from './details-grade';
 import {
   ConfirmStrip,
   OutlineQuestion,
@@ -246,8 +252,6 @@ export function DetailsStep({
   // the groups the operator opened "one by one" (kept while the step remounts on a re-run)
   const split = useQuizSlot('details-split', () => new Set<Group>());
   const [, setSplitN] = useState(0);
-  // GRADE P1: count questions answered "not intended" — set aside on this run (no engine input)
-  const gradeSkipped = useQuizSlot('details-grade-skip', () => new Set<string>());
   const splitGroup = (g: Group) => {
     split.add(g);
     seen.delete(`grp:${g}`);
@@ -266,12 +270,10 @@ export function DetailsStep({
   // shell does nothing. Not cancelled on unmount: the step remounts during every busy re-run.
   const gradeLive = useQuizSlot('details-grade-live', () => ({
     sem: null as SemanticsOutput | null,
-    answers: undefined as Inputs['gradeAnswers'],
     gen: 0,
   }));
   if (sem) {
     gradeLive.sem = sem;
-    gradeLive.answers = inputs.gradeAnswers;
   }
   const go: AnsweredAndGo = (p, opts) => {
     const gen = ++gradeLive.gen;
@@ -283,9 +285,7 @@ export function DetailsStep({
           for (let k = 0; p && k < 60 && gradeLive.sem === was && gradeLive.gen === gen; k++)
             await new Promise((r) => setTimeout(r, 35));
           if (gradeLive.gen !== gen) return;
-          const still = gradeLive.sem
-            ? openGradeAsks(gradeLive.sem, gradeLive.answers, gradeSkipped).length
-            : 0;
+          const still = gradeLive.sem ? openGradeAsks(gradeLive.sem).length : 0;
           if (!still) resolve();
         },
         // a failed answer: the step shows its error, nothing moves on
@@ -975,7 +975,7 @@ export function DetailsStep({
     if (!problems.length && api.blocker)
       problems.push({ key: `gate:${api.blocker}`, seed: null, kind: 'gate', label: api.blocker });
     // GRADE P1: the per-size questions come after every blocking one — they never hold the step
-    for (const g of openGradeAsks(sem, inputs.gradeAnswers, gradeSkipped))
+    for (const g of openGradeAsks(sem))
       problems.push({
         key: `grade:${g.key}`,
         seed: g.seed,
@@ -1116,18 +1116,11 @@ export function DetailsStep({
   const gradeSpecOf = (g: GradeAsk) =>
     specsOf(g.seed).find((x) => x.identity === g.identity) ?? specsOf(g.seed)[0];
   /**
-   * GRADE P1: an answer to a per-size question re-runs semantics with `gradeAnswers[key]`; null =
-   * "not intended" on a count (no engine input): set aside on this run. ANSWERED AND GO through
-   * the step's own go: it moves on only when no per-size question is left open.
+   * GRADE P1: an answer to a per-size question re-runs semantics with `gradeAnswers[key]`.
+   * ANSWERED AND GO through the step's own go: it moves on only when no per-size question is left
+   * open — a refused all / none keeps its question open (and on screen, with the reason).
    */
-  const answerGrade = (g: GradeAsk, a: GradeAnswer | null) => {
-    if (a == null) {
-      gradeSkipped.add(g.key);
-      setPick(null);
-      setSplitN((n) => n + 1);
-      go();
-      return;
-    }
+  const answerGrade = (g: GradeAsk, a: GradeAnswer) => {
     go(rerun({ gradeAnswers: { ...(inputs.gradeAnswers ?? {}), [g.key]: a } }));
   };
 
@@ -1587,22 +1580,30 @@ export function DetailsStep({
       answers = codeField(seed);
     } else if (p.kind === 'grade' && p.grade) {
       const g = p.grade;
+      const refusal = gradeRefusal(sem, g);
       why = 'the export goes on as drawn either way; the answer is written to the passport';
       answers = (
         <span className='flex flex-col items-stretch gap-1.5'>
           <GradeSizes ask={g} spec={gradeSpecOf(g)} />
           {gradeAnswerChoices(g).map((c) => (
-            <Button
-              key={c.label}
-              variant='secondary'
-              size='xs'
-              disabled={busy}
-              title={c.title}
-              data-testid={`grade-answer-${c.answer ?? 'skip'}`}
-              onClick={() => answerGrade(g, c.answer)}
-            >
-              {c.label}
-            </Button>
+            <span key={c.label} className='flex flex-col items-stretch gap-0.5'>
+              <Button
+                variant='secondary'
+                size='xs'
+                disabled={busy}
+                title={c.title}
+                data-testid={`grade-answer-${c.answer}`}
+                onClick={() => answerGrade(g, c.answer)}
+              >
+                {c.label}
+              </Button>
+              {/* a refused all / none: why, quietly, under the answer that was refused */}
+              {refusal && inputs.gradeAnswers?.[g.key] === c.answer && (
+                <Text size='micro' variant='label' component='p' data-testid='grade-refused'>
+                  not possible: {refusal}
+                </Text>
+              )}
+            </span>
           ))}
         </span>
       );
