@@ -11,6 +11,7 @@ import type {
   GateCheck,
   GateCheckId,
   GateExpectation,
+  IdentityGeometry,
   ManifestBlock,
   PieceSizeSpec,
   PieceSpec,
@@ -1874,6 +1875,7 @@ export function g22(ctx: GateCtx): GateCheck {
   const notes: string[] = [];
   let worst = 1;
   let measured = 0;
+  let kinked = 0;
   for (const b of ctx.blocks) {
     const g = by[b.block];
     if (!g) continue;
@@ -1887,6 +1889,17 @@ export function g22(ctx: GateCtx): GateCheck {
       failed.push(b.block);
       notes.push(`${b.block}: no written line on layer ${layer}`);
       continue;
+    }
+    // KINKS: no bend off its own line, whatever the share (a stretch on a neighbour's line is a
+    // few % of a long outline)
+    const kinks = kinksOfBlock(ctx, b, g, line);
+    if (kinks.length) {
+      failed.push(b.block);
+      kinked++;
+      const k0 = kinks.reduce((a, r) => (r.offMm * r.lengthMm > a.offMm * a.lengthMm ? r : a));
+      notes.push(
+        `${b.block}: ${kinks.length} bend${kinks.length > 1 ? 's' : ''} off its own line (${g.pen}) the drawing does not make — worst ${k0.lengthMm.toFixed(1)} mm long, ${k0.offMm.toFixed(1)} mm off, turning ${k0.turnDeg.toFixed(0)}°`,
+      );
     }
     const { share, ownAll, foreignAll } = identityShare(line, g);
     if (share == null) continue;
@@ -1905,9 +1918,9 @@ export function g22(ctx: GateCtx): GateCheck {
     failed,
     'block',
     notes.join('; ') ||
-      `every size lies on its own line (${measured} measured, worst ${(worst * 100).toFixed(0)} %)`,
+      `every size lies on its own line (${measured} measured, worst ${(worst * 100).toFixed(0)} %, no bend off it)`,
     fmt(worst),
-    `≥ ${IDENTITY_SHARE_MIN} (declared pen) / ${IDENTITY_SHARE_MIN_MEASURED} (measured) of own + another size's line on its own pen, ≥ ${IDENTITY_OWN_MIN} of the line`,
+    `≥ ${IDENTITY_SHARE_MIN} (declared pen) / ${IDENTITY_SHARE_MIN_MEASURED} (measured) of own + another size's line on its own pen, ≥ ${IDENTITY_OWN_MIN} of the line; no stretch > ${KINK.runMm} mm off it by ≥ ${KINK.offMm} mm${kinked ? ` (${kinked} kinked)` : ''}`,
   );
 }
 
@@ -1985,4 +1998,151 @@ export function g24(ctx: GateCtx): GateCheck {
     fmt(worst),
     `no other piece's header or same-size overlap > 5 %; area step ≤ ×${ONE_PIECE_JUMP} its neighbours' or < ${ONE_PIECE_EXCESS} median steps / ${ONE_PIECE_SHARE * 100} % of the area over them`,
   );
+}
+
+// ── G25 (KINKS) ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * G25 (inside G22): a written size line leaves its own drawn line. Samples every `stepMm`; a
+ * sample is ON when it lies within `reachMm` of the size's own lines, their end tangents carried
+ * `extMm` (a corner closed by its own stub, ramp or extended edges lies on them), a common edge or
+ * a derived edge G15 audits (bridge, band cut). A KINK is a run of OFF samples longer than `runMm`
+ * that is ≥ `offMm` off the own lines at its worst — the mood probe's (4) measure, read on the
+ * gate's own evidence. Measured on the Mood sample (11 files, 452 outlines), no outline the probe
+ * finds clean has such a run; a hold is a question, never a wrong export.
+ */
+export const KINK = {
+  stepMm: 0.25,
+  reachMm: 0.5,
+  extMm: 12,
+  runMm: 2,
+  offMm: 0.5,
+  /** own lines farther than this from a sample count as this far (no own line near at all) */
+  farMm: 50,
+};
+
+export type KinkRun = { at: PtMm; lengthMm: number; offMm: number; turnDeg: number };
+
+/** The open lines' end tangents (from ~2 mm back) carried `extMm` past each end. */
+function tangentExtensions(lines: readonly PtMm[][], extMm: number): PtMm[][] {
+  const out: PtMm[][] = [];
+  for (const pts of lines) {
+    const n = pts.length;
+    if (n < 2 || dist(pts[0], pts[n - 1]) < 0.05) continue;
+    if (polylineLength(pts, false) < 3) continue;
+    for (const end of [0, 1] as const) {
+      const p = end ? pts[n - 1] : pts[0];
+      let k = end ? n - 1 : 0;
+      const step = end ? -1 : 1;
+      let acc = 0;
+      while (k + step >= 0 && k + step < n && acc < 2) {
+        acc += dist(pts[k], pts[k + step]);
+        k += step;
+      }
+      const q = pts[k];
+      const L = dist(p, q);
+      if (L < 1e-6) continue;
+      out.push([p, { x: p.x + ((p.x - q.x) / L) * extMm, y: p.y + ((p.y - q.y) / L) * extMm }]);
+    }
+  }
+  return out;
+}
+
+/**
+ * G25 measure: the kinks of a written closed line against its own lines (see `KINK`). `own` are the
+ * size's own drawn lines; `excused` the common edges and audited derived edges (never measured as
+ * own: a sample on them is simply not off).
+ */
+export function kinkRuns(
+  line: readonly PtMm[],
+  own: readonly PtMm[][],
+  excused: readonly PtMm[][],
+  k = KINK,
+): KinkRun[] {
+  if (line.length < 3) return [];
+  const idx = (ls: readonly PtMm[][]) =>
+    new SegmentIndex(
+      ls.map((pts) => ({ pts, closed: false })),
+      4,
+    );
+  const ownIdx = idx(own);
+  const onIdx = idx([...own, ...tangentExtensions(own, k.extMm), ...excused]);
+  const s = sampleAlong(line, true, k.stepMm);
+  const n = s.length;
+  if (!n) return [];
+  const off = s.map((p) => onIdx.nearest(p, k.reachMm) > k.reachMm);
+  const first = off.indexOf(false);
+  // nowhere on a line it may lie on (Codex: no own line at all, or a line wholly another size's):
+  // the whole outline is one run off its own line
+  if (first < 0)
+    return [
+      {
+        at: s[n >> 1],
+        lengthMm: n * k.stepMm,
+        offMm: own.length ? Math.min(k.farMm, ownIdx.nearest(s[n >> 1], k.farMm)) : k.farMm,
+        turnDeg: 0,
+      },
+    ];
+  // heading change over ±1.5 mm around sample i (degrees, 0…180)
+  const w = Math.max(1, Math.round(1.5 / k.stepMm));
+  const turnAt = (i: number) => {
+    const a = s[(i - w + n) % n];
+    const b = s[i];
+    const c = s[(i + w) % n];
+    const h1 = Math.atan2(b.y - a.y, b.x - a.x);
+    const h2 = Math.atan2(c.y - b.y, c.x - b.x);
+    let t = Math.abs(((h2 - h1) * 180) / Math.PI) % 360;
+    if (t > 180) t = 360 - t;
+    return t;
+  };
+  const out: KinkRun[] = [];
+  let run: number[] = [];
+  const flush = () => {
+    const L = run.length * k.stepMm;
+    if (L > k.runMm) {
+      let worst = 0;
+      let turn = 0;
+      for (const i of run) {
+        worst = Math.max(worst, Math.min(k.farMm, ownIdx.nearest(s[i], k.farMm)));
+        turn = Math.max(turn, turnAt(i));
+      }
+      // the bends where it leaves and rejoins its line count too
+      turn = Math.max(turn, turnAt((run[0] - 1 + n) % n), turnAt((run[run.length - 1] + 1) % n));
+      out.push({ at: s[run[run.length >> 1]], lengthMm: L, offMm: worst, turnDeg: turn });
+    }
+    run = [];
+  };
+  for (let j = 1; j <= n; j++) {
+    const i = (first + j) % n;
+    if (off[i]) run.push(i);
+    else flush();
+  }
+  return out;
+}
+
+/** G25: is this run a kink — long enough off every line it may lie on, and off its own line? */
+export const isKink = (r: KinkRun, k = KINK) => r.lengthMm > k.runMm && r.offMm >= k.offMm;
+
+/**
+ * G25 (KINKS) inside G22: per measured block, its kinks (`isKink` runs) — a size block of an
+ * identity-encoded run has no bend its own drawn line does not have: no stretch where it leaves its
+ * own pen's line (for a neighbouring size's line, a tile mark, a corner cut short) and comes back.
+ * The owner (Ulmus, 12.10): "part of the lines in some sizes are crooked with bends — it must not
+ * be so". A kinked outline that passed every other check is the silent wrong export D3 forbids.
+ */
+function kinksOfBlock(ctx: GateCtx, b: BlockInfo, g: IdentityGeometry, line: PtMm[]): KinkRun[] {
+  // only a size the drawing's own KEY names (a printed size-line key sample): there the pen is the
+  // size's identity and its line is the line the outline must lie on (palto measures a rhythm per
+  // size with no key, and its sizes coincide along long edges)
+  if (!g.keyed) return [];
+  // an empty strict set (every line of the pen is another size's class line: S and L read as one
+  // row) is no line of its own to lie on — one run off it, held (Codex)
+  const own = g.ownStrict ?? g.own;
+  const derived = (ctx.expect.derivedByBlock?.[b.block] ?? []).map((d) => d.pts);
+  const runs = kinkRuns(line, own, [...g.excused, ...derived]);
+  if (typeof process !== 'undefined' && process.env?.PATIMPORT_KINK_DEBUG)
+    console.log(
+      `@@KINK ${JSON.stringify({ block: b.block, runs: runs.map((r) => ({ ...r, kink: isKink(r) })) })}`,
+    );
+  return runs.filter((r) => isKink(r));
 }

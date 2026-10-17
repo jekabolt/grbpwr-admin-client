@@ -27,7 +27,7 @@ import {
   aiWords,
 } from 'lib/pattern-import/clean/page-roles';
 import { PAGE_SURE } from '../auto-advance';
-import { SHEET_INK, SheetViewport } from '../sheet-viewport';
+import { SHEET_INK } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { Fold, ask } from '../ui-bits';
 
@@ -230,9 +230,6 @@ export function KindTable({
 /** The coach's how (THE ASK CONTRACT, ui-bits) for a kind suggested to set aside. */
 const KIND_HINT = 'accept it, or press next to keep lines';
 const ROW_HINT = 'accept or keep each kind of line';
-/** … and for a page to check. */
-const PAGE_HINT = 'keep it or read it as a tile';
-const TILE_HINT = 'keep it as a tile, or set aside';
 
 function KindRowsTable({
   rows,
@@ -319,54 +316,6 @@ function KindRowsTable({
   );
 }
 
-/** One page with its mask: live lines ink, masked grey, waiting suggestions blue (dashed). */
-function PageView({ p, hover }: { p: CleanPreview; hover: BackgroundKind | null }) {
-  const live = useMemo(() => pathData(p.live), [p]);
-  const layers = useMemo(() => p.masked.map((m) => ({ ...m, d: pathData(m.lines) })), [p]);
-  return (
-    <div className='h-72 border border-borderColor'>
-      <SheetViewport bbox={{ minX: 0, minY: 0, maxX: p.widthMm, maxY: p.heightMm }}>
-        {() => (
-          <>
-            <rect
-              x={0}
-              y={-p.heightMm}
-              width={p.widthMm}
-              height={p.heightMm}
-              fill='#ffffff'
-              stroke='#d5d5d5'
-              vectorEffect='non-scaling-stroke'
-            />
-            {layers.map((m, i) => (
-              <path
-                key={i}
-                d={m.d}
-                fill='none'
-                pointerEvents='none'
-                stroke={
-                  hover === m.kind ? SHEET_INK.ink : m.applied ? SHEET_INK.source : SHEET_INK.blue
-                }
-                strokeDasharray={m.applied ? undefined : '3 2'}
-                strokeWidth={hover === m.kind ? 1.25 : 0.75}
-                vectorEffect='non-scaling-stroke'
-              />
-            ))}
-            <path
-              d={live}
-              fill='none'
-              pointerEvents='none'
-              stroke={SHEET_INK.ink}
-              strokeOpacity={hover ? 0.35 : 0.85}
-              strokeWidth={0.75}
-              vectorEffect='non-scaling-stroke'
-            />
-          </>
-        )}
-      </SheetViewport>
-    </div>
-  );
-}
-
 /**
  * A9: what the AI and the geometry say of a page set aside, in words (the thumbnail's title):
  * "AI: instructions 0.92 («step 3 …») · geometry: another page format …".
@@ -380,168 +329,224 @@ export function asideEvidence(d: StageIO['clean']['out']['dropped'][number]): st
   return [ai, ex, geo].filter(Boolean).join(' · ');
 }
 
-/** A page drawn small: its live lines, its number and role, the doors under it. */
-function PageThumb({
+/**
+ * A page as a toggle (owner 16.10: "KEEP AS TILE / SET ASIDE repeats continuously"): the whole
+ * thumbnail is the switch — used = drawn plain, set aside = greyed with a corner ✕; a page the
+ * classifier is unsure of carries a small corner "?". The page number sits small in the corner.
+ */
+function PageToggle({
   p,
-  page,
-  file,
-  files,
-  role,
-  check,
+  label,
+  used,
+  unsure,
   title,
-  ariaLabel,
-  selected,
-  pick,
+  small,
+  disabled,
   onToggle,
-  children,
 }: {
   p: CleanPreview | undefined;
-  page: number;
-  file: string;
-  files: number;
-  role: string;
-  /** Needs the operator's look: framed in ink, the role pill reads "check". */
-  check: boolean;
+  label: string;
+  used: boolean;
+  unsure: boolean;
   title: string;
-  ariaLabel: string;
-  selected?: boolean;
-  /** The bulk pick's checkbox id (absent = no checkbox). */
-  pick?: string;
-  onToggle?: () => void;
-  children: React.ReactNode;
+  small?: boolean;
+  disabled: boolean;
+  onToggle: () => void;
 }) {
   const live = useMemo(() => (p ? pathData(p.live) : ''), [p]);
   const W = p?.widthMm ?? 210;
   const H = p?.heightMm ?? 297;
-  const thumb = (
-    <svg
-      viewBox={`0 ${-H} ${W} ${H}`}
+  return (
+    <button
+      type='button'
+      aria-pressed={used}
+      aria-label={`${label}${unsure ? ', unsure' : ''} — ${used ? 'used as a pattern page' : 'set aside'}`}
+      title={title}
+      disabled={disabled}
+      onClick={onToggle}
       className={cn(
-        'h-32 w-24 border',
-        check ? 'border-textColor' : 'border-borderColor',
-        selected && 'outline outline-2 outline-offset-1 outline-textColor',
+        'group relative block border bg-bgColor p-1 text-left text-textBaseSize',
+        'cursor-pointer hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
+        'disabled:cursor-wait',
+        unsure ? 'border-warning' : 'border-borderColor',
+        small ? 'w-[88px]' : 'w-[120px]',
       )}
-      preserveAspectRatio='xMidYMid meet'
-      aria-label={ariaLabel}
     >
-      <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
-      <path
-        d={live}
-        fill='none'
-        stroke={SHEET_INK.ink}
-        strokeWidth={0.6}
-        vectorEffect='non-scaling-stroke'
-      />
-    </svg>
-  );
-  return (
-    <figure className='flex w-24 flex-col gap-0.5' title={title}>
-      {/* the whole thumbnail is the checkbox's label: a click on the page picks it */}
-      {pick ? (
-        <label htmlFor={pick} className='cursor-pointer'>
-          {thumb}
-        </label>
-      ) : (
-        thumb
-      )}
-      <figcaption className='flex flex-wrap items-center gap-1'>
-        {pick && (
-          <CheckboxCommon
-            name={pick}
-            checked={!!selected}
-            onChange={() => onToggle?.()}
-            aria-label={`pick page ${page + 1}${files > 1 ? ` of file ${Number(file) + 1}` : ''}`}
-          />
-        )}
-        <Text size='micro' component='span' className='tabular-nums'>
-          p{page + 1}
-          {files > 1 ? `·f${Number(file) + 1}` : ''}
-        </Text>
-        <Pill tone={check ? 'attention' : 'mut'}>{check ? 'check' : role}</Pill>
-        {children}
-      </figcaption>
-    </figure>
-  );
-}
-
-/** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */
-function AsideThumb({
-  p,
-  d,
-  busy,
-  files,
-  uncertain,
-  onRead,
-  onKeep,
-  selected,
-  onToggle,
-}: {
-  p: CleanPreview | undefined;
-  d: StageIO['clean']['out']['dropped'][number];
-  busy: boolean;
-  files: number;
-  /** The classifier placed the page below "sure": a question even when set aside by itself. */
-  uncertain?: boolean;
-  onRead: () => void;
-  /** A9: "keep it aside" — the operator's answer to a page to check (the AI's, pre-filled). */
-  onKeep: () => void;
-  /** Owner 12.10: picked for a bulk answer (absent = no checkbox: a single page). */
-  selected?: boolean;
-  onToggle?: () => void;
-}) {
-  // A9: the AI's reading pre-fills the answer the operator gives with one click
-  const aiPattern = !!d.ai && PATTERN_ROLES.has(d.ai.role);
-  const aiAside = !!d.ai && !aiPattern && d.ai.role !== 'other';
-  const check = d.status === 'suggest' || !!uncertain;
-  const ev = asideEvidence(d);
-  const ai = d.ai ? `AI${d.ai.stale ? ' (before your edits)' : ''}: ${aiWords(d.ai)}` : '';
-  return (
-    <PageThumb
-      p={p}
-      page={d.page}
-      file={d.file}
-      files={files}
-      role={d.cls}
-      check={check}
-      pick={onToggle ? pickId(d) : undefined}
-      selected={selected}
-      onToggle={onToggle}
-      ariaLabel={`page ${d.page + 1}, set aside as ${d.cls}`}
-      title={[
-        d.why,
-        d.drawing ? `holds ${d.drawing}: check it is not a pattern page` : '',
-        d.aiAside ? 'set aside · AI + geometry' : '',
-        ai,
-        ev,
-      ]
-        .filter(Boolean)
-        .join(' — ')}
-    >
-      {check && (
-        <Button
-          variant={aiAside ? 'main' : 'underline'}
-          size='xs'
-          disabled={busy}
-          onClick={onKeep}
-          {...ask('files-page', !aiPattern, PAGE_HINT)}
-        >
-          keep aside
-        </Button>
-      )}
-      <Button
-        variant={aiPattern && check ? 'main' : 'underline'}
-        size='xs'
-        disabled={busy}
-        onClick={onRead}
-        {...ask('files-page', check && aiPattern, PAGE_HINT)}
+      <svg
+        viewBox={`0 ${-H} ${W} ${H}`}
+        className={cn('block h-auto w-full', !used && 'opacity-30')}
+        style={{ aspectRatio: `${W} / ${H}` }}
+        preserveAspectRatio='xMidYMid meet'
+        aria-hidden
       >
-        {d.aiAside ? 'undo · read as tile' : 'read as tile'}
-      </Button>
-    </PageThumb>
+        <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
+        <path
+          d={live}
+          fill='none'
+          stroke={SHEET_INK.ink}
+          strokeWidth={0.6}
+          vectorEffect='non-scaling-stroke'
+        />
+      </svg>
+      <span className='absolute bottom-1 left-1 bg-bgColor px-0.5 tabular-nums leading-none'>
+        {label}
+      </span>
+      {unsure && (
+        <span className='absolute left-1 top-1 bg-bgColor px-0.5 leading-none text-warning'>?</span>
+      )}
+      {!used && <span className='absolute right-1 top-1 bg-bgColor px-0.5 leading-none'>✕</span>}
+    </button>
   );
 }
 
-/** The files step's clean block: the removed line, the kinds behind a fold, the page with its mask. */
+/**
+ * The panels' view state (the clean-up "show", its page, the "more pages" fold) outlives the
+ * step's remount while a run reads again — a click must not fold the view it was made in.
+ */
+const viewMemo = new Map<string, unknown>();
+function useViewState<T>(key: string, init: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => (viewMemo.has(key) ? (viewMemo.get(key) as T) : init));
+  return [
+    v,
+    (n: T) => {
+      viewMemo.set(key, n);
+      setV(n);
+    },
+  ];
+}
+
+/** Short kind names for the clean-up line and its chips ("frames 17", "copyright 1"). */
+const KIND_SHORT: Record<BackgroundKind, string> = {
+  grid: 'grid',
+  'tile-frame': 'frames',
+  regmark: 'marks',
+  'tile-label': 'labels',
+  watermark: 'watermark',
+  'curve-text': 'text',
+  logo: 'logo',
+  copyright: 'copyright',
+  table: 'table',
+  'legend-swatch': 'legend',
+  'test-square': 'test square',
+  stray: 'stray lines',
+};
+
+/** The coach's how for "remove these too?" (THE ASK CONTRACT, ui-bits). */
+const SUGGEST_HINT = 'press yes, or next to keep the lines';
+
+/**
+ * One page before/after: kept lines ink, removed lines light grey dashed, lines suggested for
+ * removal blue dashed; the kind under the pointer blue. Fit to the panel width, never cropped.
+ */
+function CleanPage({ p, hover }: { p: CleanPreview; hover: BackgroundKind | null }) {
+  const live = useMemo(() => pathData(p.live), [p]);
+  const layers = useMemo(() => p.masked.map((m) => ({ ...m, d: pathData(m.lines) })), [p]);
+  const W = p.widthMm;
+  const H = p.heightMm;
+  const lit = (m: (typeof layers)[number]) => hover === m.kind;
+  return (
+    <div className='flex min-h-[360px] justify-center border border-borderColor bg-bgColor p-2'>
+      <svg
+        viewBox={`0 ${-H} ${W} ${H}`}
+        preserveAspectRatio='xMidYMid meet'
+        className='block h-auto max-h-[75vh] min-h-[360px] w-full'
+        role='img'
+        aria-label={`page ${p.page + 1}: ink = kept, grey dashed = removed`}
+      >
+        <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
+        <path
+          d={live}
+          fill='none'
+          stroke={SHEET_INK.ink}
+          strokeOpacity={hover ? 0.4 : 1}
+          strokeWidth={0.6}
+          vectorEffect='non-scaling-stroke'
+        />
+        {layers
+          .filter((m) => !lit(m))
+          .map((m, i) => (
+            <path
+              key={i}
+              d={m.d}
+              fill='none'
+              stroke={
+                m.applied
+                  ? SHEET_INK.source
+                  : m.status === 'suggest'
+                    ? SHEET_INK.blue
+                    : SHEET_INK.ink
+              }
+              strokeOpacity={m.applied || m.status === 'suggest' ? 0.9 : hover ? 0.4 : 1}
+              strokeDasharray={m.applied || m.status === 'suggest' ? '3 2' : undefined}
+              strokeWidth={0.6}
+              vectorEffect='non-scaling-stroke'
+            />
+          ))}
+        {layers.filter(lit).map((m, i) => (
+          <path
+            key={`h${i}`}
+            d={m.d}
+            fill='none'
+            stroke={SHEET_INK.blue}
+            strokeWidth={1.6}
+            vectorEffect='non-scaling-stroke'
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+/** A kind as a toggle chip: removed (grey, dashed) ↔ kept (ink); hover lights its lines. */
+function KindToggle({
+  r,
+  on,
+  disabled,
+  onClick,
+  onHover,
+  title,
+  ...rest
+}: {
+  r: KindRow;
+  /** Pressed: removed (or, in the question, picked to remove). */
+  on: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  onHover: (k: BackgroundKind | null) => void;
+  title: string;
+} & Record<`data-${string}`, string | undefined>) {
+  const n = r.applied + r.suggested + r.kept;
+  return (
+    <button
+      type='button'
+      aria-pressed={on}
+      disabled={disabled}
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => onHover(r.kind)}
+      onMouseLeave={() => onHover(null)}
+      onFocus={() => onHover(r.kind)}
+      onBlur={() => onHover(null)}
+      className={cn(
+        'border px-2 py-1 text-textBaseSize tabular-nums hover:border-warning hover:text-warning disabled:cursor-wait',
+        on ? 'border-dashed border-labelColor text-labelColor' : 'border-textColor text-textColor',
+      )}
+      {...rest}
+    >
+      {on ? '✕ ' : ''}
+      {KIND_SHORT[r.kind]} {n.toLocaleString('en-US').replace(/,/g, ' ')}
+    </button>
+  );
+}
+
+/**
+ * The files step's clean-up (owner 16.10): machine work, so ONE quiet line —
+ * "cleaned up: frames, labels, text ✓ · show" — aligned with the file table's cells. "show" opens
+ * a before/after: the page with the most removed lines (← → through the pages that had removals),
+ * a row of kind chips over it — hover lights a kind's lines, a click keeps ↔ removes it (the old
+ * KEEP / accept edit, `withKind`). Kinds the engine only SUGGESTS ask "remove these too?" with
+ * their chips picked and [yes] (accept, as the old "accept all").
+ */
 export function CleanBlock({
   api,
   page,
@@ -549,52 +554,172 @@ export function CleanBlock({
   onOpenChange,
 }: {
   api: ImportSessionApi;
-  /** The page picked in the pages panel (`file:page`). */
+  /** A page to show first (`file:page`). */
   page: string | null;
-  /** The fold, held by the files step (a tile picked on the pages panel opens it); null = auto. */
+  /** "show", held by the files step; null = folded. */
   open?: boolean | null;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { session, inputs } = api;
   const clean = session.clean;
   const [hover, setHover] = useState<BackgroundKind | null>(null);
+  const sid = String(session.sessionId ?? '');
+  const [ownOpen, setOwnOpen] = useViewState(`${sid}:clean-open`, false);
+  const [at, setAt] = useViewState<string | null>(`${sid}:clean-at`, null);
+  // the question's chips the operator un-picked (bound to the clean output they were made on)
+  const [skipOn, setSkipOn] = useState<{ of: unknown; s: ReadonlySet<BackgroundKind> }>(() => ({
+    of: null,
+    s: new Set(),
+  }));
   const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
-  if (!clean) return null;
-  const tilePreviews = clean.previews.filter((p) =>
-    clean.pages.some((m) => m.file === p.file && m.page === p.page && m.role === 'tile'),
+  if (!clean || !rows.length) return null;
+  const busy = !!session.busy;
+  const isOpen = open ?? ownOpen;
+  const setOpen = (o: boolean) => {
+    setOwnOpen(o);
+    onOpenChange?.(o);
+  };
+  const removedOf = (p: CleanPreview) =>
+    p.masked.reduce((n, m) => n + (m.applied || m.status === 'suggest' ? m.lines.length : 0), 0);
+  const pages = clean.previews.filter((p) => removedOf(p) > 0);
+  const keyOf = (p: CleanPreview) => `${p.file}:${p.page}`;
+  const most = pages.reduce<CleanPreview | undefined>(
+    (b, p) => (!b || removedOf(p) > removedOf(b) ? p : b),
+    undefined,
   );
-  const shown =
-    tilePreviews.find((p) => `${p.file}:${p.page}` === page) ??
-    clean.previews.find((p) =>
-      clean.pages.some((m) => m.file === p.file && m.page === p.page && m.items.length),
-    ) ??
-    tilePreviews[0];
+  const idx = Math.max(
+    0,
+    pages.findIndex((p) => keyOf(p) === (at ?? page ?? (most && keyOf(most)))),
+  );
+  const shown = pages[idx];
+  const step = (d: number) => {
+    if (!pages.length) return;
+    setAt(keyOf(pages[(idx + d + pages.length) % pages.length]));
+  };
   const edit = (kind: BackgroundKind, keep: boolean) =>
     void api.dispatch({ type: 'clean', edits: withKind(inputs.cleanEdits, kind, keep) });
-  const view = shown && (
-    <div className='mt-2'>
-      <Text size='micro' variant='label' component='p' className='mb-0.5'>
-        page {shown.page + 1}
-        {session.files.length > 1 ? ` of file ${Number(shown.file) + 1}` : ''}
-      </Text>
-      <PageView p={shown} hover={hover} />
-    </div>
-  );
-  if (!rows.length) return null;
+
+  const removed = rows.filter((r) => r.applied > 0);
+  const waiting = rows.filter((r) => r.suggested > 0);
+  const decided = rows.filter((r) => r.applied > 0 || r.kept > 0);
+  const skip = skipOn.of === clean ? skipOn.s : new Set<BackgroundKind>();
+  const picked = waiting.filter((r) => !skip.has(r.kind));
+  const files = session.files.length;
+  const line = removed.length
+    ? `cleaned up: ${removed.map((r) => KIND_SHORT[r.kind]).join(', ')} ✓`
+    : 'nothing cleaned up';
+
   return (
-    <KindTable
-      rows={rows}
-      busy={!!session.busy}
-      onEdit={edit}
-      onAcceptAll={() =>
-        void api.dispatch({ type: 'clean', edits: withAllAccepted(inputs.cleanEdits, rows) })
-      }
-      onHover={setHover}
-      open={open}
-      onOpenChange={onOpenChange}
-    >
-      {view}
-    </KindTable>
+    <div className='flex min-w-0 flex-col gap-3 px-1.5 text-textBaseSize'>
+      <div className='flex flex-wrap items-baseline gap-x-2 gap-y-1 text-labelColor'>
+        <span>{line}</span>
+        <span aria-hidden>·</span>
+        <button
+          type='button'
+          aria-expanded={isOpen}
+          onClick={() => setOpen(!isOpen)}
+          className='underline hover:text-textColor'
+        >
+          {isOpen ? 'hide' : 'show'}
+        </button>
+      </div>
+
+      {waiting.length > 0 && (
+        <div
+          className='flex flex-wrap items-center gap-x-3 gap-y-2'
+          data-ask-zone=''
+          data-ask-hint={SUGGEST_HINT}
+          data-ask-label='remove these lines too?'
+        >
+          <span>remove these too?</span>
+          {waiting.map((r) => (
+            <KindToggle
+              key={r.kind}
+              r={{ ...r, applied: 0, kept: 0 }}
+              on={!skip.has(r.kind)}
+              disabled={busy}
+              onHover={setHover}
+              title={`${KIND_LABEL[r.kind]} — ${r.evidence.join(' · ')}`}
+              onClick={() =>
+                setSkipOn(() => {
+                  const s = new Set(skip);
+                  if (s.has(r.kind)) s.delete(r.kind);
+                  else s.add(r.kind);
+                  return { of: clean, s };
+                })
+              }
+            />
+          ))}
+          <Button
+            variant='main'
+            className='px-3 py-1'
+            disabled={busy || !picked.length}
+            onClick={() =>
+              void api.dispatch({
+                type: 'clean',
+                edits: picked.reduce((e, r) => withKind(e, r.kind, false), inputs.cleanEdits),
+              })
+            }
+            {...ask('files-keep', SUGGEST_HINT)}
+          >
+            yes
+          </Button>
+        </div>
+      )}
+
+      {isOpen && (
+        <div className='flex flex-col gap-3'>
+          {decided.length > 0 && (
+            <div className='flex flex-wrap items-center gap-2'>
+              {decided.map((r) => (
+                <KindToggle
+                  key={r.kind}
+                  r={r}
+                  on={r.applied > 0}
+                  disabled={busy}
+                  onHover={setHover}
+                  title={`${KIND_LABEL[r.kind]}: ${r.applied > 0 ? 'removed — click to keep' : 'kept — click to remove'}${r.evidence.length ? ` — ${r.evidence.join(' · ')}` : ''}`}
+                  onClick={() => edit(r.kind, r.applied > 0)}
+                />
+              ))}
+            </div>
+          )}
+          <div className='flex flex-wrap items-baseline justify-between gap-2 text-labelColor'>
+            <span>ink = kept · grey dashed = removed · click a kind to keep or remove it</span>
+            {shown && (
+              <span className='flex items-baseline gap-3 tabular-nums'>
+                {pages.length > 1 && (
+                  <button
+                    type='button'
+                    aria-label='previous page'
+                    onClick={() => step(-1)}
+                    className='px-1 hover:text-textColor'
+                  >
+                    ←
+                  </button>
+                )}
+                <span className='text-textColor'>
+                  page {shown.page + 1}
+                  {files > 1 ? ` of file ${Number(shown.file) + 1}` : ''}
+                  {pages.length > 1 ? ` · ${idx + 1}/${pages.length}` : ''}
+                </span>
+                {pages.length > 1 && (
+                  <button
+                    type='button'
+                    aria-label='next page'
+                    onClick={() => step(1)}
+                    className='px-1 hover:text-textColor'
+                  >
+                    →
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+          {shown && <CleanPage p={shown} hover={hover} />}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -602,227 +727,217 @@ export function CleanBlock({
 const roleSet = (edits: readonly PageMaskEdit[]) =>
   new Set(edits.flatMap((e) => ('role' in e ? [`${e.file}:${e.page}`] : [])));
 
+/** The coach's how for the pages question (THE ASK CONTRACT, ui-bits). */
+const PAGE_HINT = 'click a page to set it aside';
+
+/** One page of the pages panel: used (a tile) or set aside, and the role edit that flips it. */
+type PageItem = {
+  key: string;
+  file: string;
+  page: number;
+  used: boolean;
+  /** Asks the operator: placed below "sure", or set aside holding line work, not answered yet. */
+  unsure: boolean;
+  title: string;
+  /** The edit that answers "use it" (read as tile / keep as tile). */
+  use: PageRole;
+  /** The edit that answers "set it aside" (keep aside as its class / a tile set aside). */
+  aside: PageRole;
+};
+
 /**
- * The pages panel: only the pages that ask (set aside on a doubt, read below "sure") as
- * thumbnails with their two doors; the pages set aside for sure and the tiles are a count each,
- * behind a fold. The bulk pick stays for several pages to check (owner 12.10).
+ * The pages panel (owner 16.10): ONE grid of page thumbnails, each a toggle — use ↔ set aside.
+ * The unsure pages first under one plain question ("N pages unsure — use them as pattern
+ * pages?" [yes, use all] [set aside the unsure ones]); the pages set aside (cover,
+ * instructions) in the same grid, greyed, a click brings one back; the pages read as tiles for
+ * sure behind a quiet "N more pages used ✓ · show" that opens the same grid, smaller.
+ * The edits are the ones the old per-page doors wrote: read as tile / keep aside as its class /
+ * keep as tile / a tile set aside as blank.
  */
 export function PageRoles({
   api,
-  shown,
-  onShow,
 }: {
   api: ImportSessionApi;
-  /** The tile drawn with its mask on the files panel (`file:page`). */
-  shown: string | null;
-  onShow: (key: string) => void;
+  /** The tile drawn with its mask on the files panel (`file:page`) — unused by the toggle grid. */
+  shown?: string | null;
+  onShow?: (key: string) => void;
 }) {
   const { session, inputs } = api;
   const clean = session.clean;
-  // owner 12.10: the set-aside pages picked for one bulk answer — nothing picked by default (D3)
-  // — bound to the clean output it was made on: `file:page` keys are positional and get reused
-  // (a rerun with fresh AI answers, a replaced file), so a pick never outlives its snapshot
-  const [pickedOn, setPickedOn] = useState<{ of: unknown; keys: ReadonlySet<string> }>(() => ({
-    of: null,
-    keys: new Set(),
-  }));
+  // a click flips the thumbnail at once; the run's answer replaces it (bound to its snapshot)
+  const [pendingOn, setPendingOn] = useViewState<{
+    of: unknown;
+    m: ReadonlyMap<string, boolean>;
+  }>(`${String(session.sessionId ?? '')}:pages-pending`, { of: null, m: new Map() });
+  const [moreOpen, setMoreOpen] = useViewState(
+    `${String(session.sessionId ?? '')}:pages-more`,
+    false,
+  );
   if (!clean) return null;
   const busy = !!session.busy;
   const files = session.files.length;
   const answered = roleSet(inputs.cleanEdits);
   const uncertain = (p: { file: string; page: number; cls: PageClass; confidence: number }) =>
     !answered.has(`${p.file}:${p.page}`) && (p.cls === 'unknown' || p.confidence < PAGE_SURE);
-  const unsure = new Set(session.pages.filter(uncertain).map(pageKey));
-  const dropped = clean.dropped;
-  const droppedKeys = new Set(dropped.map(pageKey));
-  const toCheck = dropped.filter((d) => d.status === 'suggest' || unsure.has(pageKey(d)));
-  const asideRest = dropped.filter((d) => !toCheck.includes(d));
-  const tiles = session.pages.filter((p) => p.cls === 'tile' && !droppedKeys.has(pageKey(p)));
-  const tilesToCheck = tiles.filter((p) => unsure.has(pageKey(p)));
-  const tilesSure = tiles.filter((p) => !unsure.has(pageKey(p)));
-
-  const keys = dropped.map(pageKey);
-  const picked = pickedOn.of === clean ? pickedOn.keys : new Set<string>();
-  const setPicked = (next: (prev: ReadonlySet<string>) => ReadonlySet<string>) =>
-    setPickedOn((cur) => ({
-      of: clean,
-      keys: next(cur.of === clean ? cur.keys : new Set()),
-    }));
-  const sel = new Set(keys.filter((k) => picked.has(k)));
-  // the bulk answer is offered when several set-aside pages ask
-  const selectable = dropped.length > 1 && toCheck.length > 1;
-  const toggle = (k: string) =>
-    setPicked((prev) => {
-      const n = new Set(prev);
-      if (n.has(k)) n.delete(k);
-      else n.add(k);
-      return n;
-    });
-  const keepPicked = bulkKeep(dropped, sel);
-  const readPicked = bulkRead(dropped, sel);
-  const aiPicks = dropped.filter(aiKeepSuggested).map(pageKey);
-  const applyBulk = (pages: readonly PageRole[]) => {
-    setPicked(() => new Set());
-    void api.dispatch({ type: 'clean', edits: rolesEdit(inputs.cleanEdits, pages) });
-  };
+  const unsureKeys = new Set(session.pages.filter(uncertain).map(pageKey));
+  const pending = pendingOn.of === clean ? pendingOn.m : new Map<string, boolean>();
+  const label = (file: string, page: number) =>
+    `p${page + 1}${files > 1 ? `·f${Number(file) + 1}` : ''}`;
   const preview = (file: string, page: number) =>
     clean.previews.find((x) => x.file === file && x.page === page);
-  const setRole = (file: string, page: number, role: PageClass) =>
-    void api.dispatch({ type: 'clean', edits: roleEdit(inputs.cleanEdits, file, page, role) });
-  const aside = (d: Dropped) => (
-    <AsideThumb
-      key={pageKey(d)}
-      d={d}
-      p={preview(d.file, d.page)}
-      busy={busy}
-      files={files}
-      uncertain={unsure.has(pageKey(d))}
-      selected={selectable ? sel.has(pageKey(d)) : undefined}
-      onToggle={selectable ? () => toggle(pageKey(d)) : undefined}
-      onRead={() => setRole(d.file, d.page, 'tile')}
-      onKeep={() => setRole(d.file, d.page, d.cls)}
+
+  const dropped = clean.dropped;
+  const droppedKeys = new Set(dropped.map(pageKey));
+  const asideItems: PageItem[] = dropped.map((d) => {
+    const key = pageKey(d);
+    const ai = d.ai ? `AI${d.ai.stale ? ' (before your edits)' : ''}: ${aiWords(d.ai)}` : '';
+    return {
+      key,
+      file: d.file,
+      page: d.page,
+      used: false,
+      unsure: !answered.has(key) && (d.status === 'suggest' || unsureKeys.has(key)),
+      title: [
+        `set aside as ${d.cls}`,
+        d.why,
+        d.drawing ? `holds ${d.drawing}: check it is not a pattern page` : '',
+        d.aiAside ? 'set aside · AI + geometry' : '',
+        ai,
+        asideEvidence(d),
+      ]
+        .filter(Boolean)
+        .join(' — '),
+      use: { file: d.file, page: d.page, role: 'tile' },
+      aside: { file: d.file, page: d.page, role: d.cls },
+    };
+  });
+  const tileItems: PageItem[] = session.pages
+    .filter((p) => p.cls === 'tile' && !droppedKeys.has(pageKey(p)))
+    .map((p) => ({
+      key: pageKey(p),
+      file: p.file,
+      page: p.page,
+      used: true,
+      unsure: unsureKeys.has(pageKey(p)),
+      title: `used as a pattern page — ${p.why}`,
+      use: { file: p.file, page: p.page, role: 'tile' },
+      aside: { file: p.file, page: p.page, role: 'blank' },
+    }));
+  const byPage = (a: PageItem, b: PageItem) =>
+    Number(a.file) - Number(b.file) || a.file.localeCompare(b.file) || a.page - b.page;
+  // the main grid: the pages that ask, then every page answered or set aside; the rest (tiles read
+  // for sure, nobody touched) behind the quiet line
+  const asking = [...asideItems, ...tileItems].filter((it) => it.unsure).sort(byPage);
+  // a page answered stays where it was asked (by page, among the unsure ones); then the pages the
+  // run set aside by itself
+  const all = [...asideItems, ...tileItems];
+  const first = all.filter((it) => it.unsure || answered.has(it.key)).sort(byPage);
+  const rest = asideItems.filter((it) => !it.unsure && !answered.has(it.key)).sort(byPage);
+  const more = tileItems.filter((it) => !it.unsure && !answered.has(it.key)).sort(byPage);
+  const main = [...first, ...rest];
+
+  const apply = (pages: readonly PageRole[], flips: readonly [string, boolean][]) => {
+    if (!pages.length) return;
+    const m = new Map(pendingOn.of === clean ? pendingOn.m : []);
+    for (const [k, v] of flips) m.set(k, v);
+    setPendingOn({ of: clean, m });
+    void api.dispatch({ type: 'clean', edits: rolesEdit(inputs.cleanEdits, pages) });
+  };
+  const usedNow = (it: PageItem) => pending.get(it.key) ?? it.used;
+  const toggle = (it: PageItem) => {
+    const next = !usedNow(it);
+    apply([next ? it.use : it.aside], [[it.key, next]]);
+  };
+  const tile = (it: PageItem, small?: boolean) => (
+    <PageToggle
+      key={it.key}
+      p={preview(it.file, it.page)}
+      label={label(it.file, it.page)}
+      used={usedNow(it)}
+      unsure={it.unsure}
+      title={it.title}
+      small={small}
+      disabled={busy}
+      onToggle={() => toggle(it)}
     />
   );
+  const n = asking.length;
+  const grid = 'grid gap-3';
 
   return (
-    <div className='flex flex-col gap-2'>
-      {selectable && (
-        <ChipRow className='gap-2'>
-          <span className='inline-flex items-center gap-1'>
-            <CheckboxCommon
-              name='pi-aside-all'
-              checked={sel.size === dropped.length}
-              onChange={(on) => setPicked(() => (on ? new Set(keys) : new Set()))}
-            />
-            <label htmlFor='pi-aside-all' className='cursor-pointer'>
-              <Text size='micro' variant='label' component='span'>
-                select all
+    <div className='flex flex-col gap-4 text-textBaseSize'>
+      {main.length > 0 && (
+        <div
+          className='flex flex-col gap-3'
+          {...(n
+            ? {
+                'data-ask-zone': '',
+                'data-ask-hint': PAGE_HINT,
+                'data-ask-label': `use ${n === 1 ? 'this page' : `${n} pages`} as pattern?`,
+              }
+            : {})}
+        >
+          {n > 0 && (
+            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+              <Text component='span'>
+                {n} {n === 1 ? 'page' : 'pages'} unsure — use {n === 1 ? 'it' : 'them'} as pattern{' '}
+                {n === 1 ? 'page' : 'pages'}?
               </Text>
-            </label>
-          </span>
-          <Text size='micro' component='span' className='tabular-nums'>
-            · {sel.size} selected
-          </Text>
-          {aiPicks.length > 0 && (
-            <Chip
-              tone='attention'
-              onClick={() => setPicked(() => new Set(aiPicks))}
-              title={`pick the pages to check that the AI reads as not pattern at ${AI_PAGES.autoMin} or more — nothing is set aside until you press "keep aside"`}
-            >
-              select AI suggestions ({aiPicks.length})
-            </Chip>
+              <span className='flex flex-wrap gap-2'>
+                <Button
+                  variant='main'
+                  className='px-3 py-1'
+                  disabled={busy}
+                  onClick={() =>
+                    apply(
+                      asking.map((it) => it.use),
+                      asking.map((it) => [it.key, true]),
+                    )
+                  }
+                  {...ask('files-page', PAGE_HINT)}
+                >
+                  yes, use {n === 1 ? 'it' : 'all'}
+                </Button>
+                <Button
+                  variant='secondary'
+                  className='px-3 py-1'
+                  disabled={busy}
+                  onClick={() =>
+                    apply(
+                      asking.map((it) => it.aside),
+                      asking.map((it) => [it.key, false]),
+                    )
+                  }
+                >
+                  set aside {n === 1 ? 'this one' : 'the unsure ones'}
+                </Button>
+              </span>
+            </div>
           )}
-          <Chip
-            disabled={busy || !keepPicked.length}
-            onClick={() => applyBulk(keepPicked)}
-            title={
-              readPicked.length > keepPicked.length
-                ? 'only the pages to check take this answer — a page already set aside stays as it is'
-                : 'keep the picked pages aside (the run reads again once)'
-            }
-          >
-            keep {keepPicked.length} aside
-          </Chip>
-          <Chip
-            disabled={busy || !readPicked.length}
-            onClick={() => applyBulk(readPicked)}
-            title='read the picked pages as tiles (the run reads again once)'
-          >
-            read {readPicked.length} as {readPicked.length === 1 ? 'tile' : 'tiles'}
-          </Chip>
-        </ChipRow>
-      )}
-
-      {toCheck.length + tilesToCheck.length > 0 && (
-        <div data-ask-zone='' className='flex flex-wrap gap-2'>
-          {toCheck.map(aside)}
-          {tilesToCheck.map((p) => (
-            <PageThumb
-              key={pageKey(p)}
-              p={preview(p.file, p.page)}
-              page={p.page}
-              file={p.file}
-              files={files}
-              role='tile'
-              check
-              ariaLabel={`page ${p.page + 1}, read as tile`}
-              title={`read as tile — ${p.why}`}
-            >
-              <Button
-                variant='underline'
-                size='xs'
-                disabled={busy}
-                onClick={() => setRole(p.file, p.page, 'tile')}
-                {...ask('files-page', TILE_HINT)}
-              >
-                keep as tile
-              </Button>
-              <Button
-                variant='underline'
-                size='xs'
-                disabled={busy}
-                onClick={() => setRole(p.file, p.page, 'blank')}
-                {...ask('files-page', TILE_HINT)}
-              >
-                set aside
-              </Button>
-            </PageThumb>
-          ))}
+          <div className={cn(grid, 'grid-cols-[repeat(auto-fill,120px)]')}>
+            {main.map((it) => tile(it))}
+          </div>
         </div>
       )}
 
-      {asideRest.length > 0 && (
-        <Fold label={`${asideRest.length} set aside`} className='mt-0'>
-          <div className='flex flex-wrap gap-2'>{asideRest.map(aside)}</div>
-        </Fold>
-      )}
-
-      {tilesSure.length > 0 && (
-        <Fold
-          label={`${tilesSure.length} ${tilesSure.length === 1 ? 'tile' : 'tiles'}`}
-          className='mt-0'
-        >
-          <DataTable>
-            <thead>
-              <tr>
-                <th data-align='left'>page</th>
-                <th aria-label='page role' />
-              </tr>
-            </thead>
-            <tbody>
-              {tilesSure.map((p) => (
-                <tr
-                  key={pageKey(p)}
-                  className={shown === pageKey(p) ? 'bg-hairline' : 'cursor-pointer'}
-                  onClick={() => onShow(pageKey(p))}
-                  title={p.why}
-                >
-                  <td data-align='left' className='tabular-nums'>
-                    p{p.page + 1}
-                    {files > 1
-                      ? ` · ${session.files.find((f) => f.id === p.file)?.name ?? p.file}`
-                      : ''}
-                  </td>
-                  <td>
-                    {/* the door: a tile set aside */}
-                    <Button
-                      variant='underline'
-                      size='xs'
-                      className='text-labelColor hover:text-textColor'
-                      disabled={busy}
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        setRole(p.file, p.page, 'blank');
-                      }}
-                    >
-                      set aside
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
-        </Fold>
+      {more.length > 0 && (
+        <div className='flex flex-col gap-3'>
+          <button
+            type='button'
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(!moreOpen)}
+            className='self-start text-left text-labelColor hover:text-textColor'
+          >
+            {more.length} {main.length ? 'more ' : ''}
+            {more.length === 1 ? 'page' : 'pages'} used ✓ ·{' '}
+            <span className='underline'>{moreOpen ? 'hide' : 'show'}</span>
+          </button>
+          {moreOpen && (
+            <div className={cn(grid, 'grid-cols-[repeat(auto-fill,88px)]')}>
+              {more.map((it) => tile(it, true))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -864,8 +979,6 @@ export type PageRole = { file: string; page: number; role: PageClass };
 
 /** A set-aside page's key (`file:page`) — the bulk pick's identity. */
 export const pageKey = (d: Pick<Dropped, 'file' | 'page'>) => `${d.file}:${d.page}`;
-/** The DOM id of a page's pick checkbox (its thumbnail is the label). */
-const pickId = (d: Pick<Dropped, 'file' | 'page'>) => `pi-aside-${d.file}-${d.page}`;
 
 /**
  * Owner 12.10: several pages' roles in ONE edit list — one dispatch, one rerun of the session —
@@ -874,35 +987,6 @@ const pickId = (d: Pick<Dropped, 'file' | 'page'>) => `pi-aside-${d.file}-${d.pa
  */
 export function rolesEdit(edits: PageMaskEdit[], pages: readonly PageRole[]): PageMaskEdit[] {
   return pages.reduce((e, p) => roleEdit(e, p.file, p.page, p.role), edits);
-}
-
-/** "keep N aside": the picked pages TO CHECK (only they carry the tile's "keep aside"), each as its class. */
-export function bulkKeep(dropped: readonly Dropped[], picked: ReadonlySet<string>): PageRole[] {
-  return dropped
-    .filter((d) => d.status === 'suggest' && picked.has(pageKey(d)))
-    .map((d) => ({ file: d.file, page: d.page, role: d.cls }));
-}
-
-/** "read N as tiles": every picked page (the tile's "read as tile" is on each). */
-export function bulkRead(dropped: readonly Dropped[], picked: ReadonlySet<string>): PageRole[] {
-  return dropped
-    .filter((d) => picked.has(pageKey(d)))
-    .map((d) => ({ file: d.file, page: d.page, role: 'tile' as PageClass }));
-}
-
-/**
- * "select AI suggestions": a page to check the AI reads as not pattern at the confidence of the
- * set-aside rule (≥ AI_PAGES.autoMin, a NOT_PATTERN role, asked after the last edit). A PICK only —
- * never applied without the operator's "keep aside" (D3: a page set aside wrongly = missing pieces).
- */
-export function aiKeepSuggested(d: Dropped): boolean {
-  return (
-    d.status === 'suggest' &&
-    !!d.ai &&
-    !d.ai.stale &&
-    NOT_PATTERN_ROLES.has(d.ai.role) &&
-    d.ai.confidence >= AI_PAGES.autoMin
-  );
 }
 
 /** The sheet pass (8b) on the sheet step: the watermark and stroke text no page could prove. */

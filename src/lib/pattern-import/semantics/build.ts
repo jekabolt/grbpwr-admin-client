@@ -1921,11 +1921,17 @@ export function buildPieceSpecsDetailed(
       ]),
     ];
     const map = (ids: ChainId[]) => toFrame(src.w, linesOfIds(ids));
+    const exact = look.length > 0 && look.every((l) => l.kind !== 'motif');
+    // KINKS (G25): a measured look may be two sizes' (Mood's S and L motifs): a line another
+    // size's class holds is not this size's line to bend along
+    const strict = exact ? own : own.filter((id) => !others.has(id));
     return {
       // keyed by the drawing but no one look: the rank's own lines as F3 read them
       pen: look.length ? describePen(look) : 'its own size lines',
-      ...(look.length && look.every((l) => l.kind !== 'motif') ? { exact: true } : {}),
+      ...(exact ? { exact: true } : {}),
       own: map(own),
+      ...(strict.length !== own.length ? { ownStrict: map(strict) } : {}),
+      ...(cls?.evidence.some((e) => e.kind === 'legend-sample') ? { keyed: true } : {}),
       excused,
       ...(shared.length ? { shared: map(shared) } : {}),
       ...(foreign.length ? { foreign: map(foreign) } : {}),

@@ -217,13 +217,12 @@ export default function DollOverlay({
         >
           <Dialog.Title className='sr-only'>paper doll</Dialog.Title>
           <Dialog.Description className='sr-only'>
-            the pattern’s pieces pulled shut along the seam graph, with the measures read from the
-            pattern laid flat
+            the pattern's pieces closed along the seams
           </Dialog.Description>
 
           <Section
             title='paper doll'
-            question={`— ${title} · does the pattern close into a garment`}
+            question={title}
             action={
               <>
                 <Chip quiet onClick={() => setFix(null)} data-doll-door='seams'>
@@ -258,15 +257,9 @@ export default function DollOverlay({
                 {state}
               </Text>
             </div>
-            <Text size='micro' variant='label' component='p' data-doll-honesty=''>
-              paper doll — shape approximate, no fabric or body · measures from the pattern laid
-              flat (seam lines) · size {card ? card.sizeLabel(at) : at}
-            </Text>
             {missing.length > 0 && (
               <Text size='micro' variant='label' component='p'>
-                {missing.length} {missing.length === 1 ? 'piece has' : 'pieces have'} no contour in
-                size {card ? card.sizeLabel(at) : at} and {missing.length === 1 ? 'is' : 'are'} left
-                out: {missing.join(', ')}
+                no contour in size {card ? card.sizeLabel(at) : at}: {missing.join(', ')}
               </Text>
             )}
           </Section>
@@ -274,7 +267,6 @@ export default function DollOverlay({
           <div className='grid shrink-0 grid-cols-1 gap-gutter lg:min-h-0 lg:flex-1 lg:shrink lg:grid-cols-[minmax(0,1fr)_360px]'>
             <Section
               title='doll'
-              question='— drag to turn it, scroll to zoom'
               action={
                 <ViewSwitch<CameraPreset>
                   quiet

@@ -44,7 +44,6 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
@@ -206,8 +205,10 @@ type PieceFields = {
 };
 const FIELD_KEYS = ['fused', 'fusingMode', 'fusingWidthMm', 'ungraded', 'grainline', 'note'] as const;
 
+// No width of its own: a `w-full` here beat the caller's `w-24`/`w-56` in the stylesheet and
+// squeezed the row's name to nothing (the gone-pieces rows read just «delete»).
 const selectCls =
-  'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
 
 // The piece panel beside the sheet: one type size (micro) and one box height (22px) for every
 // field, toggle and select in it.
@@ -1860,17 +1861,102 @@ export function PieceMatchModal({
   const optionKeyOf = (key: string) =>
     pieceOptions.find((p) => p.lineKey.toLowerCase() === key.toLowerCase())?.lineKey ?? key;
 
-  const editor = (() => {
-    if (!focus) {
-      return (
+  // ── pieces gone from the file ─────────────────────────────────────────────────────────
+  // ONE question, asked where the eye already is (the panel beside the sheet) when no piece is
+  // picked: which card pieces bound to this cloth to drop now that the file no longer has them.
+  // Each row names the piece and its code (the block it was bound to) — the drawing cannot show
+  // it, the block is gone. The card stores no outline, so there is no picture to draw. What the
+  // delete takes with it (recipe rows, norms, areas, operations) rides on the delete chip's title.
+  const setAllGone = (v: 'delete' | 'keep') =>
+    setDeleteChoice(new Map(deleteCandidates.map((c) => [c.lineKey, v])));
+  const goneQuestion =
+    deleteCandidates.length > 0 ? (
+      <div className='space-y-1'>
         <Text
           size='micro'
-          variant='label'
           component='p'
           className='border-b border-borderColor pb-0.5 uppercase'
         >
-          select a piece
+          {deleteCandidates.length === 1
+            ? '1 card piece not in this file'
+            : `${deleteCandidates.length} card pieces not in this file`}
         </Text>
+        {deleteCandidates.map((c) => {
+          const decision = deleteDecision(c.lineKey);
+          const key = c.lineKey.trim().toLowerCase();
+          const hold = recipeHold.get(key);
+          const areas = areaRowsByPiece.get(key) ?? 0;
+          const ops = opsByPiece.get(key) ?? 0;
+          const losses = [
+            hold?.rows ? `recipe ${hold.rows}` : '',
+            hold?.withNorm ? `norms ${hold.withNorm}` : '',
+            areas ? `areas ${areas}` : '',
+            ops ? `operations ${ops}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          const name = c.name?.trim() || c.lineKey;
+          const code = c.blocks.filter((b) => b.toLowerCase() !== name.toLowerCase()).join(' ');
+          return (
+            <div key={c.lineKey} className='flex items-center gap-2'>
+              <Text
+                size='micro'
+                component='span'
+                className='min-w-0 flex-1 truncate'
+                title={code ? `${name} · ${code}` : name}
+              >
+                {name}
+                {code && <span className='text-labelColor'> · {code}</span>}
+              </Text>
+              <div className='flex shrink-0 gap-1'>
+                <Chip
+                  selected={decision === 'keep'}
+                  pressed={decision === 'keep'}
+                  disabled={readOnly}
+                  aria-label={`keep ${name}`}
+                  onClick={() => setDeleteChoice((prev) => new Map(prev).set(c.lineKey, 'keep'))}
+                >
+                  keep
+                </Chip>
+                <Chip
+                  selected={decision === 'delete'}
+                  pressed={decision === 'delete'}
+                  tone={decision === 'delete' ? 'error' : 'default'}
+                  disabled={readOnly}
+                  aria-label={`delete ${name}`}
+                  title={losses ? `deletes with it: ${losses}` : undefined}
+                  onClick={() => setDeleteChoice((prev) => new Map(prev).set(c.lineKey, 'delete'))}
+                >
+                  delete
+                </Chip>
+              </div>
+            </div>
+          );
+        })}
+        {!readOnly && deleteCandidates.length > 1 && (
+          <div className='flex justify-end gap-1 pt-0.5'>
+            <Chip onClick={() => setAllGone('keep')} disabled={toDelete.length === 0}>
+              keep all
+            </Chip>
+            <Chip
+              onClick={() => setAllGone('delete')}
+              disabled={toDelete.length === deleteCandidates.length}
+            >
+              delete all
+            </Chip>
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  const editor = (() => {
+    if (!focus) {
+      return (
+        goneQuestion ?? (
+          <Text size='micro' variant='label' component='p'>
+            click a piece to edit it
+          </Text>
+        )
       );
     }
     const ci = focus.ci;
@@ -2215,7 +2301,21 @@ export function PieceMatchModal({
                 }
               />
             </div>
-            <div className='w-full shrink-0 lg:w-[280px]'>{editor}</div>
+            <div className='w-full shrink-0 space-y-3 lg:max-h-[60vh] lg:w-[280px] lg:overflow-y-auto'>
+              {editor}
+              {/* A piece is open: the open question stays one click away instead of vanishing. */}
+              {focus && deleteCandidates.length > 0 && (
+                <button
+                  type='button'
+                  className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
+                  onClick={() => setSelected(null)}
+                >
+                  {deleteCandidates.length === 1
+                    ? '1 card piece not in this file'
+                    : `${deleteCandidates.length} card pieces not in this file`}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -2248,52 +2348,8 @@ export function PieceMatchModal({
           </div>
         )}
 
-        {/* Pieces whose blocks are gone from a COMPLETE parse. Default delete; the losses stay
-            visible as data on the row. */}
-        {parse.phase === 'ready' && deleteCandidates.length > 0 && (
-          <div>
-            <GroupLabel>gone from the file</GroupLabel>
-            {deleteCandidates.map((c) => {
-              const decision = deleteDecision(c.lineKey);
-              const key = c.lineKey.trim().toLowerCase();
-              const hold = recipeHold.get(key);
-              const areas = areaRowsByPiece.get(key) ?? 0;
-              const ops = opsByPiece.get(key) ?? 0;
-              const losses = [
-                hold?.rows ? `recipe ${hold.rows}` : '',
-                hold?.withNorm ? `norms ${hold.withNorm}` : '',
-                areas ? `areas ${areas}` : '',
-                ops ? `operations ${ops}` : '',
-              ]
-                .filter(Boolean)
-                .join(' · ');
-              return (
-                <div key={c.lineKey} className='flex items-center gap-2 py-0.5'>
-                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                    {c.name?.trim() || '—'}
-                  </Text>
-                  {decision === 'delete' && losses && (
-                    <Pill tone={hold?.withNorm ? 'warn' : 'mut'}>{losses}</Pill>
-                  )}
-                  <select
-                    className={`${selectCls} w-24`}
-                    aria-label={`piece ${c.name?.trim() || c.lineKey}`}
-                    disabled={readOnly}
-                    value={decision}
-                    onChange={(e) =>
-                      setDeleteChoice((prev) =>
-                        new Map(prev).set(c.lineKey, e.target.value === 'keep' ? 'keep' : 'delete'),
-                      )
-                    }
-                  >
-                    <option value='delete'>delete</option>
-                    <option value='keep'>keep</option>
-                  </select>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* No sheet to sit beside (nothing drew): the gone-pieces question stands on its own. */}
+        {parse.phase === 'ready' && !sheet && goneQuestion}
       </div>
     </ConfirmationModal>
   );

@@ -6,6 +6,7 @@ import { cn } from 'lib/utility';
 import { FoldCaret } from 'ui/components/fold-caret';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
+import type { WizardEvent } from 'lib/pattern-import/types';
 
 /**
  * The steps' quiz histories (every question seen open on this run, so a fixed one stays listed,
@@ -14,6 +15,50 @@ import Text from 'ui/components/text';
  */
 export type QuizHistory = Map<string, unknown>;
 export const QuizHistoryContext = createContext<QuizHistory | null>(null);
+
+// ═══ ANSWERED AND GO ══════════════════════════════════════════════════════════════════════════════
+//
+// Owner (16.10): «after the answer, go to the next question — or, if nothing else is asked on this
+// step, advance to the next step by itself (no NEXT click)». A step calls the shell's
+// `answeredAndGo` right after an OPERATOR'S QUIZ ANSWER, with the answer's promise:
+//
+//   const go = useAnsweredAndGo();
+//   go(api.dispatch({ type: 'size-map', entries }));
+//
+// The shell waits for that promise, then for the re-run it started to finish (not busy). If the
+// step is still the same one and asks nothing more — no blocker, no offer, no error — the shell
+// runs exactly what its primary would (`continueAnyway`: next, and with the autopilot on, resumes
+// the drive). Anything still asked: nothing happens, the step shows its next question. Only for
+// answers given by hand in a quiz — never for an automatic map, a row edit or a fold toggle.
+// `{ pastOffer: true }`: the quiz just answered exactly what the step's OFFER is about (the pieces
+// step's "N outlines set aside on a guess"), so that offer no longer holds the step back.
+
+/** See ANSWERED AND GO above. Outside a wizard: a no-op. */
+export type AnsweredAndGo = (answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => void;
+export const AnsweredAndGoContext = createContext<AnsweredAndGo>(() => {});
+export const useAnsweredAndGo = () => useContext(AnsweredAndGoContext);
+
+// ═══ AUTOMATIC ANSWERS ═════════════════════════════════════════════════════════════════════════
+//
+// A step that answers a question BY ITSELF (owner 16.10: styles the file cannot tell apart, as
+// many sizes drawn as the card has with none matching by name) must not go through the operator's
+// `api.dispatch` alone: that is an operator action — it disarms a running autopilot, which then
+// sits stopped with no reason on screen. The shell's `autoAnswer` dispatches the same event and,
+// when the autopilot was driving this run, resumes it after the answer has landed.
+//
+//   const autoAnswer = useAutoAnswer(api);
+//   useEffect(() => {
+//     if (!due || slot.doneFor === session.sessionId) return;   // one-shot, checked AND set here,
+//     slot.doneFor = session.sessionId;                         // inside the effect (StrictMode
+//     void autoAnswer({ type: 'variant', variant });            // replays an effect: no 2nd send)
+//   });
+//
+// Outside a wizard (no provider): the plain `api.dispatch`.
+
+export type AutoAnswer = (ev: WizardEvent) => Promise<void>;
+export const AutoAnswerContext = createContext<AutoAnswer | null>(null);
+export const useAutoAnswer = (api: { dispatch: AutoAnswer }): AutoAnswer =>
+  useContext(AutoAnswerContext) ?? api.dispatch;
 
 /** A step's slot in the wizard's quiz history; outside a wizard, a slot that lives with the step. */
 export function useQuizSlot<T>(name: string, init: () => T): T {
@@ -281,6 +326,20 @@ export function DashSample({
 //   by every control in it. Missing → the bubble shows the footer sentence alone.
 // * The highlight stays until the operator acts inside the zone (pointer, key, input), presses ✕,
 //   or the blocker changes; nothing else on screen is dimmed.
+//
+// PLAIN WORDS (owner: "minimal plain text"). The session's blocker / offer sentence is the
+// engine's account ('7 pieces have no grainline — draw it (two clicks)'); the step's question card
+// already asks it in plain words. A step publishes that wording for the footer:
+//
+//   <div data-ask-zone data-ask-label='which file size is your XS?'>…</div>
+//
+// * `data-ask-label="<the question, plain, ≤6 words>"`: on the `[data-ask]` control or on its
+//   zone (read like the hint: the control, then up to the zone). The footer then shows it
+//   ('! which file size is your XS?'); the session's sentence moves to the ask link's tooltip and
+//   the header warnings (D5: no stop reason is dropped). Missing → the footer shows the sentence.
+// * For an offer (optional), word it as an offer: '1 optional check'.
+// * Read off the first live `[data-ask]` after every render of the stage: put it only on the
+//   question that is asked NOW (the card on screen), never on every card of a list.
 
 /**
  * Spread onto a control that answers the footer's ask line: `<Chip {...ask('sizes-confirm')}>`.
@@ -332,12 +391,54 @@ export function focusAsk(
   return true;
 }
 
+// ═══ ONE-CLICK FIX (`data-ask-fix`) ═══════════════════════════════════════════════════════════════
+//
+// Owner 16.10: «every warning / stop line must be a link that FIXES it». A step marks the ONE
+// button that is the most likely one-click fix of a question, BOUND to that question by its ask
+// key (THE ASK CONTRACT above):
+//
+//   <Chip {...ask('sheet-missing')} data-ask-fix='sheet-missing' onClick={setAsideMissing}>…</Chip>
+//
+// `data-ask-fix="<key>"` = this button fixes the question whose control carries `data-ask="<key>"`;
+// an empty value means its own `data-ask` key. The shell's ask line (the footer link, and the same
+// sentence in the header warnings popover) fixes the question asked NOW — the first live
+// `[data-ask]`, the one its door focuses — and clicks only the live fix bound to THAT key (its own
+// handler runs, so the run's busy state is the feedback). Every other warning line (an autopilot
+// stop that is not the ask line, a notice, a replay miss) is not a question with a key: it never
+// clicks anything — it coaches (focus, highlight, bubble). No live fix with the matching key (none
+// marked, disabled / hidden, or the question moved on): coach too. A fix is never taken for a line
+// it does not belong to. Mark only a fix that is safe in one click (no deletion of the operator's
+// work); a choice between answers stays a coached question.
+
+/** The question a `[data-ask-fix]` fixes: its value, else its own `data-ask` key. */
+const fixKeyOf = (el: HTMLElement) => el.dataset.askFix || el.dataset.ask || '';
+
+/** The key of the question asked now: the first live `[data-ask]` under `root` (null = none). */
+export function currentAskKey(root: ParentNode | null): string | null {
+  return firstAsk(root)?.dataset.ask || null;
+}
+
+/**
+ * Click the live `[data-ask-fix]` under `root` bound to `key`; false when there is none or no key
+ * (the caller coaches instead) — never a fix of another question.
+ */
+export function clickAskFix(root: ParentNode | null, key: string | null): boolean {
+  if (!root || !key) return false;
+  const el = Array.from(root.querySelectorAll<HTMLElement>('[data-ask-fix]')).find(
+    (x) => usable(x) && fixKeyOf(x) === key,
+  );
+  if (!el) return false;
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  el.click();
+  return true;
+}
+
 function mark(el: HTMLElement) {
   el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   el.focus({ preventScroll: true });
   const before = el.style.outline;
   const offset = el.style.outlineOffset;
-  el.style.outline = '2px solid var(--color-warning)';
+  el.style.outline = '1px solid var(--color-warning)';
   el.style.outlineOffset = '2px';
   window.setTimeout(() => {
     el.style.outline = before;
@@ -362,6 +463,61 @@ export function askHintOf(el: HTMLElement): string | null {
   return null;
 }
 
+/** The plain question (`data-ask-label`) of the first live answer under `root`, else null. */
+export function askLabelOf(root: ParentNode | null): string | null {
+  const el = firstAsk(root);
+  if (!el) return null;
+  const zone = askZoneOf(el);
+  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+    const l = n.getAttribute('data-ask-label')?.trim();
+    if (l) return l;
+    if (n === zone) break;
+  }
+  return null;
+}
+
+/**
+ * `askLabelOf(root)` kept current: re-read after each render of the stage (a mutation observer,
+ * batched to one read per frame). `dep` re-reads when the session's sentence changes.
+ */
+export function useAskLabel(root: { current: HTMLElement | null }, dep: unknown): string | null {
+  const [label, setLabel] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!el) return setLabel(null);
+    const read = () => setLabel(askLabelOf(el));
+    read();
+    let raf = 0;
+    const mo = new MutationObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        read();
+      });
+    });
+    mo.observe(el, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        'data-ask',
+        'data-ask-label',
+        'data-ask-zone',
+        'disabled',
+        'aria-disabled',
+        'aria-invalid',
+        'hidden',
+        'class',
+      ],
+    });
+    return () => {
+      mo.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [root, dep]);
+  return label;
+}
+
 export type CoachTarget = {
   /** The control that answers (anchor of the bubble when the zone is too big to sit beside). */
   el: HTMLElement;
@@ -373,40 +529,76 @@ export type CoachTarget = {
   bare?: boolean;
 };
 
-// one pulse of the tint, then the calm state; the outline sits inside the zone so a scroller's
-// overflow does not clip it
+// Owner 16.10 («not that bold, the hints must not run into each other»): a 1px blue outline 2px
+// OUTSIDE the zone — an outline never grows the box, so nothing moves — and a faint tint on the
+// zone only, faded in once (no pulse). A zone with a neighbour or an edge closer than 3px is
+// `tight`: its outline goes 1px INSIDE, so it never draws over the next tile or gets clipped.
 const COACH_CSS = `
-[data-ask-coached]{outline:2px solid #2323ff!important;outline-offset:-2px!important;box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)!important;animation:ask-coach-pulse 900ms ease-out 1}
-@keyframes ask-coach-pulse{0%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .2)}100%{box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .06)}}
+[data-ask-coached]{outline:1px solid #2323ff!important;outline-offset:2px!important;box-shadow:inset 0 0 0 100vmax rgb(35 35 255 / .035)!important;animation:ask-coach-in 200ms ease-out 1}
+[data-ask-coached=tight]{outline-offset:-1px!important}
+@keyframes ask-coach-in{from{outline-color:transparent;box-shadow:none}}
 @media (prefers-reduced-motion: reduce){[data-ask-coached]{animation:none}}
 `;
 
-const BUBBLE_W = 260;
+/** Is there under 3px between the zone and a sibling or the edge of a clipping parent? */
+function ancestors(el: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (let p = el.parentElement; p; p = p.parentElement) out.push(p);
+  return out;
+}
+
+function tightZone(zone: HTMLElement): boolean {
+  const r = zone.getBoundingClientRect();
+  const near = (o: DOMRect) =>
+    !(
+      o.right + 3 <= r.left ||
+      o.left - 3 >= r.right ||
+      o.bottom + 3 <= r.top ||
+      o.top - 3 >= r.bottom
+    );
+  for (const sib of [zone.previousElementSibling, zone.nextElementSibling])
+    if (
+      sib instanceof HTMLElement &&
+      sib.getClientRects().length &&
+      near(sib.getBoundingClientRect())
+    )
+      return true;
+  for (const p of ancestors(zone)) {
+    if (getComputedStyle(p).overflow === 'visible') continue;
+    const q = p.getBoundingClientRect();
+    return (
+      r.left - q.left < 3 || q.right - r.right < 3 || r.top - q.top < 3 || q.bottom - r.bottom < 3
+    );
+  }
+  return false;
+}
+
+const BUBBLE_W = 240;
 const GAP = 8;
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
 /**
- * Beside the zone (below, above, left, right — the first that fits inside `area`), else under /
- * over the control. `area` = the stage: the bubble never covers the footer's primary.
+ * OUTSIDE the zone — it holds the control and its sibling answers, so the bubble covers none of
+ * them: right, left, below, above (the first that fits inside `area`); else under / over the
+ * control itself. `area` = the stage: the bubble never covers the footer's primary.
  */
-function place(zone: Box, ctl: Box, h: number, area: Box) {
-  const clampX = (x: number) => Math.min(Math.max(area.left, x), area.right - BUBBLE_W);
+function place(zone: Box, ctl: Box, w: number, h: number, area: Box) {
+  const clampX = (x: number) => Math.min(Math.max(area.left, x), area.right - w);
   const clampY = (y: number) => Math.min(Math.max(area.top, y), area.bottom - h);
+  if (zone.right + GAP + w <= area.right) return { left: zone.right + GAP, top: clampY(ctl.top) };
+  // beside before below: what sits below a zone is usually the step's next answer
+  if (zone.left - GAP - w >= area.left) return { left: zone.left - GAP - w, top: clampY(ctl.top) };
   if (zone.bottom + GAP + h <= area.bottom)
     return { left: clampX(zone.left), top: zone.bottom + GAP };
   if (zone.top - GAP - h >= area.top) return { left: clampX(zone.left), top: zone.top - GAP - h };
-  if (zone.left - GAP - BUBBLE_W >= area.left)
-    return { left: zone.left - GAP - BUBBLE_W, top: clampY(ctl.top) };
-  if (zone.right + GAP + BUBBLE_W <= area.right)
-    return { left: zone.right + GAP, top: clampY(ctl.top) };
   return ctl.bottom + GAP + h <= area.bottom
     ? { left: clampX(ctl.left), top: ctl.bottom + GAP }
     : { left: clampX(ctl.left), top: clampY(ctl.top - GAP - h) };
 }
 
 /**
- * Coach mode's picture: the zone outlined + tinted (one pulse), a fixed bubble beside it with
+ * Coach mode's picture: the zone outlined + tinted (faded in once), a small bubble beside it with
  * what is asked and how. Fixed-position inside the dialog: no overflow container clips it. It
  * goes away on ✕, on any act inside the zone, or when the zone leaves the page; the shell drops
  * it when the blocker changes.
@@ -429,9 +621,12 @@ export function AskCoach({
   // the zone: lit, pulsing once per coach click, unlit on any act inside it
   useEffect(() => {
     if (!zone) return;
-    zone.removeAttribute('data-ask-coached');
-    void zone.offsetWidth; // restart the pulse
-    zone.setAttribute('data-ask-coached', '');
+    // ONE highlight at a time: whatever an earlier coach left lit goes first
+    document
+      .querySelectorAll('[data-ask-coached]')
+      .forEach((n) => n.removeAttribute('data-ask-coached'));
+    void zone.offsetWidth; // restart the fade-in
+    zone.setAttribute('data-ask-coached', tightZone(zone) ? 'tight' : '');
     const acted = () => close.current();
     const evs = ['pointerdown', 'keydown', 'input', 'change'] as const;
     // a tick later: the click that opened a fold for us must not count as the operator's act
@@ -470,6 +665,7 @@ export function AskCoach({
         const p = place(
           anchor.getBoundingClientRect(),
           target.el.getBoundingClientRect(),
+          b.offsetWidth,
           b.offsetHeight,
           a
             ? {
@@ -498,8 +694,8 @@ export function AskCoach({
         role='status'
         aria-live='polite'
         data-testid='pattern-import-coach'
-        className='pointer-events-none fixed z-[var(--z-popover)] flex flex-col gap-1 border border-textColor bg-bgColor px-2 py-1.5 shadow-[var(--shadow-popover)]'
-        style={{ width: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
+        className='pointer-events-none fixed z-[var(--z-popover)] flex w-max flex-col gap-0.5 border border-borderColor bg-bgColor px-2 py-1'
+        style={{ maxWidth: BUBBLE_W, left: 0, top: 0, visibility: 'hidden' }}
       >
         <span className='flex items-start gap-2'>
           <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
