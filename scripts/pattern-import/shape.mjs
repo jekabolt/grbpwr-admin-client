@@ -3,7 +3,9 @@
 // sample in its own node process (SHAPE_PAR at a time, SHAPE_CAP_S seconds each), writes
 // $PATIMPORT_REPORTS/SHAPE-<date>.json + a table: per case the graded families whose sizes differ
 // in features (notches, drills) or outline structure, and how many of those the gate let pass.
-// Exit 1 when a mismatched family passes the gate (timeouts are listed as unjudged).
+// Exit 1 when a family whose sizes differ in their cut-line TURNS passes the gate (soft rule 17.10:
+// a notch / drill COUNT difference passes with a recorded warning — unless SHAPE_COUNTS_HOLD=1).
+// Timeouts are listed as unjudged.
 //   node scripts/pattern-import/shape.mjs [case|mood:<id>|card49…]   (card49 = kombinezon A on a
 //   card XS–XL with 8…16 mapped, the owner's tech card 49)
 //   env SHAPE_PNG=<dir> (per-size PNGs), PATIMPORT_REPORTS, SHAPE_PAR (3), SHAPE_CAP_S (900)
@@ -137,14 +139,19 @@ const total = {
   families: sum('families'),
   mismatched: sum('mismatched'),
   mismatchedPassing: sum('mismatchedPassing'),
+  turnPassing: sum('turnPassing'),
+  countPassing: sum('countPassing'),
+  holdingPassing: sum('holdingPassing'),
+  turnFamilies: results.reduce((a, r) => a + r.rows.filter((x) => x.turn).length, 0),
+  countFamilies: results.reduce((a, r) => a + r.rows.filter((x) => x.count).length, 0),
   byKind,
   unjudged,
 };
 console.log(
-  `\nTOTAL families ${total.families} · mismatched ${total.mismatched} (${JSON.stringify(byKind)}) · mismatched passing the gate ${total.mismatchedPassing}${unjudged.length ? ` · unjudged ${unjudged.join(', ')}` : ''}`,
+  `\nTOTAL families ${total.families} · mismatched ${total.mismatched} (${JSON.stringify(byKind)}) · passing the gate: with a turn difference ${total.turnPassing}/${total.turnFamilies}, with a count difference (warned) ${total.countPassing}/${total.countFamilies}${unjudged.length ? ` · unjudged ${unjudged.join(', ')}` : ''}`,
 );
 const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 const file = resolve(REPORTS, `SHAPE-${date}.json`);
 writeFileSync(file, JSON.stringify({ total, results }, null, 1));
 console.log(`→ ${file}`);
-process.exit(total.mismatchedPassing ? 1 : 0);
+process.exit(total.holdingPassing ? 1 : 0);

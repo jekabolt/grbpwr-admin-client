@@ -61,6 +61,7 @@ import {
   g9,
   sameManifest,
 } from './checks';
+import { g5ShapeCounts } from './shape';
 import { readRawDxf } from './reader';
 import { contourMm, roundTrip } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -205,6 +206,7 @@ export function createRunGate(
       await squareProbe(),
       ...g3g4(ctx, derived.ok),
       g5(ctx),
+      ...g5ShapeCounts(ctx),
       g6(ctx),
       g7(ctx),
       g8(ctx),

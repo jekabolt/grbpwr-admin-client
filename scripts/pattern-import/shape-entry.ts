@@ -8,7 +8,12 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { ChainSet, PieceCandidate, PieceSpec, PtMm, StageIO } from 'lib/pattern-import/types';
-import { shapeOf, shapeMismatch } from 'lib/pattern-import/semantics/shape-check';
+import {
+  countMismatch,
+  countsHold,
+  shapeOf,
+  turnMismatch,
+} from 'lib/pattern-import/semantics/shape-check';
 import { readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
 import type { Session } from 'lib/pattern-import/worker/session';
 
@@ -25,6 +30,10 @@ type FamRec = {
   corners: number[];
   /** what differs ('' = consistent) */
   diff: string;
+  /** the turn-structure difference ('' = none) — holds the export */
+  turn: string;
+  /** the notch / drill count difference ('' = none) — a warning (holds with SHAPE_COUNTS_HOLD) */
+  count: string;
   /** the family is written and every one of its blocks passes the gate */
   passing: boolean;
 };
@@ -119,7 +128,12 @@ function analyse(
   for (const p of specs) {
     if (p.ungraded || p.sizes.length < 2) continue;
     const sh = p.sizes.map((z) => shapeOf(z));
-    const diff = shapeMismatch(sh);
+    const fmt = (d: ReturnType<typeof turnMismatch>) =>
+      d
+        ? `${d.what} [${p.sizes[d.a].sizeToken} vs ${p.sizes[d.b].sizeToken}${d.at ? ` at ${d.at.map((q) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`).join(' ')}` : ''}]`
+        : '';
+    const turn = fmt(turnMismatch(sh));
+    const count = fmt(countMismatch(sh));
     recs.push({
       identity: p.identity,
       sizes: p.sizes.map((z) => z.sizeToken),
@@ -127,9 +141,9 @@ function analyse(
       drills: sh.map((x) => x.drills),
       internal: p.sizes.map((z) => z.internal.length),
       corners: sh.map((x) => x.corners.length),
-      diff: diff
-        ? `${diff.what} [${p.sizes[diff.a].sizeToken} vs ${p.sizes[diff.b].sizeToken}${diff.at ? ` at ${diff.at.map((q) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`).join(' ')}` : ''}]`
-        : '',
+      diff: count || turn,
+      turn,
+      count,
       passing: written.has(p.identity) && !bad.has(p.identity),
     });
     if (process.env.SHAPE_MARKS) marksOn(p, s);
@@ -344,6 +358,9 @@ type CaseRes = {
   families: number;
   mismatched: number;
   mismatchedPassing: number;
+  turnPassing?: number;
+  countPassing?: number;
+  holdingPassing?: number;
   rows: FamRec[];
   error?: string;
 };
@@ -384,6 +401,8 @@ async function one(id: string): Promise<CaseRes> {
     },
   });
   const mism = rows.filter((r) => r.diff);
+  // what must never pass: a turn difference (always), a count difference (with SHAPE_COUNTS_HOLD)
+  const holds = (r: FamRec) => !!r.turn || (countsHold() && !!r.count);
   return {
     id,
     verdict: rec.verdict as string | undefined,
@@ -391,6 +410,9 @@ async function one(id: string): Promise<CaseRes> {
     families: rows.length,
     mismatched: mism.length,
     mismatchedPassing: mism.filter((r) => r.passing).length,
+    turnPassing: rows.filter((r) => r.turn && r.passing).length,
+    countPassing: rows.filter((r) => r.count && r.passing).length,
+    holdingPassing: rows.filter((r) => holds(r) && r.passing).length,
     rows,
     ...(err ? { error: err } : {}),
   };

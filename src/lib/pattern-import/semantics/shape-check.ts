@@ -141,19 +141,34 @@ export function shapeOf(z: Pick<PieceSizeSpec, 'cut' | 'notches' | 'drills'>): S
 }
 
 /**
- * The first difference between the sizes of one family, or null when they are one shape:
- * a feature count that differs, or a size with more strong events of one kind (scale × convex /
- * concave) than another size has weak ones. Indices are into the given array.
+ * SHAPE soft rule (coordinator 17.10): a difference in the cut line's TURN structure holds the
+ * export; a notch / drill COUNT difference between sizes is a recorded warning (gate warn check,
+ * manifest passport digest) unless this switch is on (GRADE P1's notch transfer will turn it on).
  */
-export function shapeMismatch(
+export function countsHold(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.SHAPE_COUNTS_HOLD;
+}
+
+/** The first notch / drill count difference between the sizes, or null. */
+export function countMismatch(
   sh: readonly SizeShape[],
-): { what: string; a: number; b: number; at?: PtMm[] } | null {
+): { what: string; a: number; b: number } | null {
   for (let i = 1; i < sh.length; i++) {
     if (sh[i].notches !== sh[0].notches)
       return { what: `notches ${sh[0].notches}≠${sh[i].notches}`, a: 0, b: i };
     if (sh[i].drills !== sh[0].drills)
       return { what: `drills ${sh[0].drills}≠${sh[i].drills}`, a: 0, b: i };
   }
+  return null;
+}
+
+/**
+ * The first turn-structure difference: a size with more strong events of one kind (scale ×
+ * convex / concave) than another size has weak ones. Indices are into the given array.
+ */
+export function turnMismatch(
+  sh: readonly SizeShape[],
+): { what: string; a: number; b: number; at?: PtMm[] } | null {
   for (let i = 0; i < sh.length; i++)
     for (let j = 0; j < sh.length; j++) {
       if (i === j) continue;
@@ -161,13 +176,45 @@ export function shapeMismatch(
         const a = sh[i].events[k];
         const b = sh[j].events[k];
         if (b && a.strong > b.weak)
-          return {
-            what: `corners ${a.key} ${a.strong}>${b.weak}`,
-            a: i,
-            b: j,
-            at: a.at,
-          };
+          return { what: `corners ${a.key} ${a.strong}>${b.weak}`, a: i, b: j, at: a.at };
       }
     }
   return null;
+}
+
+/** Either difference, counts first (the probe's single summary). */
+export function shapeMismatch(
+  sh: readonly SizeShape[],
+): { what: string; a: number; b: number; at?: PtMm[] } | null {
+  return countMismatch(sh) ?? turnMismatch(sh);
+}
+
+/**
+ * Per piece whose sizes differ in notch / drill counts: "notches: XS 1, S 2, M 2 — one piece, one
+ * shape" (drills likewise) — the warning the manifest carries.
+ */
+export function countNotes(
+  pieces: readonly {
+    identity: string;
+    ungraded: boolean;
+    sizes: readonly {
+      sizeToken: string;
+      notches: readonly unknown[];
+      drills: readonly unknown[];
+    }[];
+  }[],
+): { identity: string; note: string }[] {
+  const out: { identity: string; note: string }[] = [];
+  for (const p of pieces) {
+    if (p.ungraded || p.sizes.length < 2) continue;
+    const parts: string[] = [];
+    for (const k of ['notches', 'drills'] as const) {
+      const n = p.sizes.map((z) => z[k].length);
+      if (n.some((v) => v !== n[0]))
+        parts.push(`${k}: ${p.sizes.map((z, i) => `${z.sizeToken} ${n[i]}`).join(', ')}`);
+    }
+    if (parts.length)
+      out.push({ identity: p.identity, note: `${parts.join('; ')} — one piece, one shape` });
+  }
+  return out;
 }

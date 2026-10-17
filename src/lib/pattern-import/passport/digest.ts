@@ -35,7 +35,10 @@ const MEANINGS: readonly OutlineMeaning[] = ['cut', 'seam', 'both'];
 const LIST_MAX = 60;
 
 /** The digest of a passport, cut to fit `PASSPORT_DIGEST_MAX` bytes of JSON. */
-export function passportDigest(p: GarmentPassport): PassportDigest {
+export function passportDigest(
+  p: GarmentPassport,
+  shape: readonly { identity: string; note: string }[] = [],
+): PassportDigest {
   const identityOf = new Map(
     p.pieces.flatMap((e) => (e.binding?.identity ? [[e.key, e.binding.identity] as const] : [])),
   );
@@ -75,12 +78,20 @@ export function passportDigest(p: GarmentPassport): PassportDigest {
     })),
     missing: (p.missing ?? []).slice(0, LIST_MAX).map((k) => clip(k, 8)),
     extra: (p.extra ?? []).slice(0, LIST_MAX).map((k) => clip(k, 32)),
+    ...(shape.length
+      ? {
+          shape: shape
+            .slice(0, LIST_MAX)
+            .map((x) => ({ identity: clip(x.identity, 32), note: clip(x.note, 160) })),
+        }
+      : {}),
   };
   // the budget: drop the tail of the lists (expected last-in first) until the JSON fits
   const size = () => JSON.stringify(d).length;
   while (size() > PASSPORT_DIGEST_MAX) {
     d.truncated = true;
     if (d.extra.length) d.extra.pop();
+    else if (d.shape && d.shape.length > 1) d.shape.pop();
     else if (d.expected.length) {
       const e = d.expected.pop()!;
       d.bound = d.bound.filter((b) => b.key !== e.key);
@@ -180,6 +191,16 @@ export function readPassportDigest(x: unknown): PassportDigest | undefined {
     }),
     missing: listOf(x.missing, (y) => str(y, 8)),
     extra: listOf(x.extra, (y) => str(y, 32)),
+    ...(Array.isArray(x.shape)
+      ? {
+          shape: listOf(x.shape, (y) => {
+            if (!isObj(y)) return null;
+            const identity = str(y.identity, 32);
+            const note = str(y.note, 160);
+            return identity && note ? { identity, note } : null;
+          }),
+        }
+      : {}),
     ...(x.truncated === true ? { truncated: true } : {}),
   };
 }

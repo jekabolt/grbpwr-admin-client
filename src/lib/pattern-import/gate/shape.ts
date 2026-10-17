@@ -1,12 +1,19 @@
 // SHAPE gate (owner 16.10, card 49 — part of G5-features, no check id of its own): one piece is ONE
 // shape graded across sizes. Within one identity, every written size block must carry the same
-// number of notches (layer 4) and drills (layer 8 squares), and the same cut-line corner structure
-// (semantics/shape-check.ts: no extra bump, dip or step in one size). A mismatch holds every block
-// of the identity — a question for the operator, never a silent pass (D3).
+// cut-line turn structure (semantics/shape-check.ts: no extra bump, dip, step or kink in one size) —
+// a difference holds every block of the identity (D3: a question, never a silent pass). A notch /
+// drill COUNT difference (layer 4, layer 8 squares) is a recorded warning (a G5 warn check in the
+// report the manifest carries) — it holds only with SHAPE_COUNTS_HOLD=1 (soft rule, 17.10).
 //   probe switch (node only): SHAPE_GATE_OFF=1 — not evaluated (the "before" column)
 
-import type { PtMm } from '../types';
-import { shapeMismatch, shapeOfCut, type SizeShape } from '../semantics/shape-check';
+import type { GateCheck, PtMm } from '../types';
+import {
+  countMismatch,
+  countsHold,
+  shapeOfCut,
+  turnMismatch,
+  type SizeShape,
+} from '../semantics/shape-check';
 import { bboxOf } from '../write/geom';
 import { LAYERS } from '../write/manifest-build';
 import { UNI_TOKEN } from '../write/plan';
@@ -24,10 +31,17 @@ const isDrillSquare = (e: { closed?: boolean; pts: PtMm[] }) => {
 };
 
 /** The blocks of identities whose sizes differ, and why (one note per identity). */
-export function shapeFamilies(ctx: GateCtx): { failed: string[]; notes: string[] } {
+export function shapeFamilies(ctx: GateCtx): {
+  failed: string[];
+  notes: string[];
+  warned: string[];
+  warnNotes: string[];
+} {
   const failed: string[] = [];
   const notes: string[] = [];
-  if (shapeGateOff() || !ctx.raw) return { failed, notes };
+  const warned: string[] = [];
+  const warnNotes: string[] = [];
+  if (shapeGateOff() || !ctx.raw) return { failed, notes, warned, warnNotes };
   const rankOf = new Map(ctx.m.sizes.map((s) => [s.token, s.rank]));
   const byId = new Map<string, typeof ctx.blocks>();
   for (const b of ctx.blocks) {
@@ -61,17 +75,46 @@ export function shapeFamilies(ctx: GateCtx): { failed: string[]; notes: string[]
     // an unreadable block is G1 / G5's finding, not a shape difference
     if (unreadable) continue;
     rows.sort((a, b) => a.rank - b.rank);
-    const d = shapeMismatch(rows.map((r) => r.sh));
-    if (!d) continue;
-    failed.push(...rows.map((r) => r.block));
-    const a = rows[d.a];
-    const b = rows[d.b];
-    const what = d.what.startsWith('corners')
-      ? `${a.token}'s cut line turns where ${b.token}'s does not (${d.what.slice(8)}: a bump, dip or step in one size only)`
-      : d.what.startsWith('notches')
-        ? `${a.token} has ${a.sh.notches} notch(es), ${b.token} ${b.sh.notches}`
-        : `${a.token} has ${a.sh.drills} drill(s), ${b.token} ${b.sh.drills}`;
-    notes.push(`${identity}: one piece, one shape across sizes — ${what}`);
+    const sh = rows.map((r) => r.sh);
+    const t = turnMismatch(sh);
+    if (t) {
+      failed.push(...rows.map((r) => r.block));
+      notes.push(
+        `${identity}: one piece, one shape across sizes — ${rows[t.a].token}'s cut line turns where ${rows[t.b].token}'s does not (${t.what.slice(8)}: a bump, dip, step or kink in one size only)`,
+      );
+    }
+    const c = countMismatch(sh);
+    if (c) {
+      const k = c.what.startsWith('notches') ? 'notches' : 'drills';
+      const line = `${identity}: ${k}: ${rows.map((r) => `${r.token} ${r.sh[k]}`).join(', ')} — one piece, one shape across sizes`;
+      if (countsHold()) {
+        failed.push(...rows.map((r) => r.block));
+        notes.push(line);
+      } else {
+        warned.push(...rows.map((r) => r.block));
+        warnNotes.push(line);
+      }
+    }
   }
-  return { failed, notes };
+  return { failed, notes, warned, warnNotes };
+}
+
+/**
+ * The soft rule's record: notch / drill counts that differ between the sizes of a piece, as a G5
+ * WARN check (rides in the manifest's gate report; the check step lists it). [] when none.
+ */
+export function g5ShapeCounts(ctx: GateCtx): GateCheck[] {
+  const f = shapeFamilies(ctx);
+  if (!f.warned.length) return [];
+  return [
+    {
+      id: 'G5-features',
+      ok: false,
+      severity: 'warn',
+      value: null,
+      threshold: 'same notch / drill count in every size (warning; SHAPE_COUNTS_HOLD=1 holds)',
+      blocks: [...new Set(f.warned)].sort(),
+      note: f.warnNotes.join('; '),
+    },
+  ];
 }
