@@ -24,7 +24,21 @@ export {
   type PieceSession,
   type WallPieceEdit,
 } from './operator';
-export { proposeVariants, variantKnives, type VariantOption } from './variants';
+export {
+  proposeVariants,
+  variantKnifeItems,
+  variantKnives,
+  variantMarksOf,
+  variantMarksOut,
+  pieceClaims,
+  markLabels,
+  modelKey,
+  type PieceClaim,
+  type VariantKnife,
+  type VariantLine,
+  type VariantMarkGeom,
+  type VariantOption,
+} from './variants';
 export { labelOf, pageLabels, seedLabel, textSeeds, variantLabels } from './seeds';
 export { wallModel, type WallModel } from './walls';
 

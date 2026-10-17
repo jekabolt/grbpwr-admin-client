@@ -149,6 +149,7 @@
     "patimport:legend": "node --max-old-space-size=8192 scripts/pattern-import/legend.mjs",
     "patimport:mood": "node scripts/pattern-import/mood.mjs",
     "patimport:archive": "node scripts/pattern-import/archive.mjs",
+    "patimport:variants": "node scripts/pattern-import/variants.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
     "doll:shape": "node scripts/doll/shape.mjs"
   },

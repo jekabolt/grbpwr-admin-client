@@ -817,6 +817,12 @@ export type Seed = {
   aside?: number;
   /** Variant filter the seed belongs to (Mod. 125 / Style A). null = all. */
   variant: string | null;
+  /**
+   * VARIANTS: `variant` came from a certain 'piece' mark (the model's label in the piece's own
+   * label block), not from the operator or a label by the piece number — the session re-reads it
+   * on every pieces run (a seed passed back with it is not taken as fixed).
+   */
+  variantFrom?: 'claim';
 };
 
 /**
@@ -1116,6 +1122,36 @@ export type DerivedEdge = {
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
+/**
+ * One printed "Cutting line <model>" label and what it does to the pieces (pieces/variants), sheet
+ * mm, the frame of `families[].candidates[].outer`.
+ *   kind 'cut'  — the label runs along a line drawn ACROSS a piece: the model cuts the piece there
+ *                 (`cutLines` = that line, one polyline per size it is drawn in);
+ *   kind 'edge' — the label runs along the piece's own outline edge: the model keeps the piece as
+ *                 drawn to that edge (`cutLines` = the edge, every size's run on that carrier);
+ *   kind 'piece' — a bare model label ("Style A") in a piece's own label block: the piece belongs
+ *                 to that model alone (`cutLines` empty, `pieces` = [that seed]).
+ * `pieces`: the seeds the line lies in / on. `outlines` (only on a run without a chosen model, the
+ * fill being uncut then): each such piece in one representative size, cut as the model cuts it —
+ * absent where the cut cannot be made safely (the line does not cross the outline as one straight
+ * cut). `uncertain` (D3): the label's line has no second evidence — `cutLines`, `pieces` and
+ * `outlines` are empty, `why` says what is missing; nothing is cut by it.
+ */
+export type VariantMark = {
+  /** The model ("Style A"), spelled as `variants` spells it. */
+  label: string;
+  /** Centre of the printed label. */
+  at: PtMm;
+  /** The printed text ("Cutting line Style A - High Waisted"). */
+  text: string;
+  kind: 'cut' | 'edge' | 'piece';
+  cutLines: PtMm[][];
+  pieces: SeedId[];
+  outlines?: { seed: SeedId; size: string; poly: PtMm[] }[];
+  uncertain?: boolean;
+  why?: string;
+};
+
 export type PieceFamily = {
   seed: SeedId;
   candidates: PieceCandidate[];
@@ -1946,7 +1982,15 @@ export type ManifestSource = {
   }[];
   sizeEncoding: SizeEncoding;
   variant: string | null;
+  /**
+   * VARIANTS (D5): the pieces the drawing ties to ONE model (a bare "Style A" in the piece's label
+   * block), with what it rests on — `kept` = written in this file (it is the chosen model's, or no
+   * model was chosen), else left out. Optional, shape-tolerant on read; absent = none tied.
+   */
+  models?: { piece: string; model: string; kept: boolean; evidence: string }[];
 };
+/** VARIANTS: at most this many `source.models` entries (the writer and the reader alike). */
+export const MODELS_MAX = 64;
 
 export type GateCheckId =
   | 'G1-roundtrip'
@@ -2539,6 +2583,14 @@ export type StageIO = {
        * choice, and the chosen one's cutting lines become knives (FillOpts.variant).
        */
       variants?: string[];
+      /**
+       * What tells the models apart on the drawing (pieces/variants `variantMarksOut`): one entry
+       * per printed "Cutting line <model>" label (and per single-model label in a piece), with the
+       * line it names in sheet mm. `[]` = the models are PROVEN one garment (≥ 2 models, no mark of
+       * any kind, no seed tied to a model, every piece holds a text naming all models together) —
+       * the wizard may pick without asking. Absent = unknown: ask. See VariantMark.
+       */
+      variantMarks?: VariantMark[];
       /**
        * pieces/grade (H1): what the size solver could not decide (kind 'size-count' /
        * 'grade-ambiguous'), and the size count the fill assumed — the refused candidates carry

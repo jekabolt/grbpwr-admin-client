@@ -33,7 +33,7 @@ import type {
 import { SegGrid } from '../geom';
 import { drawPolyline, exterior, Grid, openMask, regionOf, traceOuter } from '../raster';
 import type { WallItem } from '../snap';
-import { variantKnives } from '../variants';
+import { variantKnifeItems } from '../variants';
 import { itemsOf, type WallModel } from '../walls';
 
 import { gradingEvidence, notEvidence, type GuardOpts, type StyleMap } from './guard';
@@ -378,8 +378,9 @@ export function gradeHook(
       () => [],
     );
 
-  const kIds = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
-  const knives = itemsOf(set, kIds).map((it) => it.pts);
+  const kItems = opts.variant ? variantKnifeItems(sheet, set, opts.variant) : [];
+  const kIds = kItems.map((it) => it.chain);
+  const knives = kItems.map((it) => it.pts);
   const key = JSON.stringify([
     n,
     seeds.map((s) => [s.id, +s.at.x.toFixed(3), +s.at.y.toFixed(3)]),

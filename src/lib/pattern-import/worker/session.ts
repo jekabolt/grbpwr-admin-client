@@ -50,7 +50,7 @@ import type {
   StageIO,
   StageName,
 } from '../types';
-import { PATIMPORT } from '../types';
+import { MODELS_MAX, PATIMPORT } from '../types';
 import type { GarmentPassport } from '../passport/types';
 import {
   bindPassport,
@@ -127,6 +127,10 @@ import {
   proposeSeeds,
   startSession,
   variantLabels,
+  variantMarksOut,
+  pieceClaims,
+  markLabels,
+  modelKey,
   wallEditsInto,
   type PieceSession,
   type WallPieceEdit,
@@ -396,6 +400,13 @@ export class Session {
   private sizeFaces: FacesEntry | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
+  /**
+   * VARIANTS: seeds a certain 'piece' mark tied to one model, by position (read on the run without
+   * a model; a model run then fills without the other model's pieces) — and that uncut fill.
+   */
+  private modelClaims = new Map<SeedId, { label: string; piece: string; evidence: string }>();
+  /** The model the last pieces run was filled for (null = none chosen). */
+  private pieceVariant: string | null = null;
   private semantics: SemanticsOutput | null = null;
   /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
   private passport: GarmentPassport | null = null;
@@ -535,6 +546,8 @@ export class Session {
       this.sheetRead = null;
       this.sheetAnswers = {};
       this.pieceKey = '';
+      this.modelClaims = new Map();
+      this.pieceVariant = null;
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
@@ -1447,7 +1460,15 @@ export class Session {
     const superseded = new Set(
       given.filter((x) => x.origin === 'face' && clicked.has(blobOf(fm, x.at))).map((x) => x.id),
     );
-    const seeds = given.filter((x) => !superseded.has(x.id));
+    // VARIANTS: a model a seed carries only because an earlier run's claim put it there is read
+    // afresh below (the claim follows this run's fill), never taken as the seed's own
+    const seeds = given
+      .filter((x) => !superseded.has(x.id))
+      .map((x) => {
+        if (x.variantFrom !== 'claim') return x;
+        const { variantFrom: _f, ...own } = x;
+        return { ...own, variant: null };
+      });
     // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or
     // shared another seed's region), or it sits inside another piece's outline — takes it out of
     // the FILL, not only out of the result: such a seed makes its neighbour "merged", drops
@@ -1536,7 +1557,36 @@ export class Session {
     families = exceptNested(families);
     // UXHOOKS (D3): no piece closes across a missing page accepted as blank
     families = holeGuard(families, set, sheet.holes);
-    const shown = seeds;
+    // VARIANTS: the pieces a model's own label block claims (D3: inside exactly one piece AND
+    // beside its texts), read afresh on this run's fill — a claimed piece is left out of another
+    // model's run. A seed with a model of its own (the operator's, or a label by its number) or a
+    // click keeps it: the claim does not override it.
+    const models = variantLabels(sheet.texts.map((t) => t.text));
+    const filled = families;
+    this.modelClaims = new Map();
+    for (const c of pieceClaims(sheet, markLabels(sheet, models), filled)) {
+      const sd = seeds.find((x) => x.id === c.seed);
+      if (!sd || sd.variant != null || sd.origin === 'click') continue;
+      this.modelClaims.set(sd.id, {
+        label: c.label,
+        piece: sd.text?.text.trim() || `seed ${sd.id}`,
+        evidence: c.evidence,
+      });
+    }
+    if (opts.variant) {
+      const v = modelKey(opts.variant);
+      families = families.filter((f) => {
+        const c = this.modelClaims.get(f.seed);
+        return !c || modelKey(c.label) === v;
+      });
+    }
+    this.pieceVariant = opts.variant ?? null;
+    // the claim reaches the wizard as the seed's model (the garment it belongs to), marked as
+    // the claim's so a seed passed back is read afresh
+    const shown = seeds.map((sd) => {
+      const c = this.modelClaims.get(sd.id);
+      return c ? { ...sd, variant: c.label, variantFrom: 'claim' as const } : sd;
+    });
     // what was set aside and is not a piece now
     const taken = new Set<number>();
     for (const x of given) {
@@ -1552,7 +1602,23 @@ export class Session {
     this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
     // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
     // of an instruction or overview page naming every model of the magazine
-    const variants = variantLabels(sheet.texts.map((t) => t.text));
+    const variants = models;
+    // what tells those models apart on the drawing: each printed cutting line, its pieces, and —
+    // before a model is chosen (the fill uncut) — those pieces as each model cuts them
+    // (`[]` only when the models are proven one garment; absent = unknown, the wizard asks)
+    const variantMarks = variants.length
+      ? variantMarksOut(
+          sheet,
+          set,
+          variants,
+          shown,
+          families,
+          run,
+          !opts.variant,
+          filled,
+          new Set(this.modelClaims.keys()),
+        )
+      : undefined;
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
@@ -1562,6 +1628,7 @@ export class Session {
       families,
       sheets: this.sheetRead,
       variants,
+      ...(variantMarks ? { variantMarks } : {}),
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
     };
@@ -1929,8 +1996,24 @@ export class Session {
           }
         : {}),
       sizeEncoding: this.run?.encoding ?? 'single',
-      variant: sem.pieces.find((p) => p.variant)?.variant ?? null,
+      variant: this.pieceVariant ?? sem.pieces.find((p) => p.variant)?.variant ?? null,
     };
+    // VARIANTS (D5): the pieces the drawing ties to one model — in THIS file or left out — and why
+    const chosen = this.pieceVariant;
+    const sourceFor = (specs: readonly { seed: SeedId }[]): ManifestSource =>
+      this.modelClaims.size
+        ? {
+            ...source,
+            models: [...this.modelClaims].slice(0, MODELS_MAX).map(([seed, c]) => ({
+              piece: c.piece,
+              model: c.label,
+              kept:
+                (chosen == null || modelKey(c.label) === modelKey(chosen)) &&
+                specs.some((x) => x.seed === seed),
+              evidence: `${c.label} only — ${c.evidence}`,
+            })),
+          }
+        : source;
     // One file per fabric scope (F7 `planScopes`): lining copies renamed LIN_…, `fabrics` = the
     // scope. Walls come from F5's own map (unfolded halves mirrored, a derived `_R` mirrored) — the
     // write stage's earlier chain lookup dropped the closing edge of closed walls (F5 report).
@@ -2013,7 +2096,7 @@ export class Session {
           scope,
           pieces: sp.specs,
           sizes: input.sizes,
-          source,
+          source: sourceFor(sp.specs),
           generator: input.generator,
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
