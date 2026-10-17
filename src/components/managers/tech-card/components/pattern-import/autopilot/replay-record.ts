@@ -246,14 +246,19 @@ export function lineAssignAnswers(
         .map((f) => ({ k: f.key, f: f.kind, d: f.detail }));
       const pen = flags.filter((f) => f.f === 'pen').length;
       const two = flags.filter((f) => f.f === 'two-sizes').length;
+      // LINEASSIGN-2: against its pen, but the graded nest explains the pen (the drawing's slip)
+      const notes = (rep?.notes ?? [])
+        .filter((f) => ids.has(f.chain))
+        .map((f) => ({ k: f.key, f: f.kind, d: f.detail }));
       out.push({
         subject: [
           `operator put ${lines} ${lines === 1 ? 'line' : 'lines'} in ${rowName(e.to)}`,
           ...(pen ? [`${pen} against its pen`] : []),
           ...(two ? [`${two} in two sizes`] : []),
+          ...(notes.length ? [`${notes.length} against a pen the drawing slipped`] : []),
           ...(stale ? [`${stale} not found`] : []),
         ].join(' · '),
-        value: { sheet: e.sheet, keys, to: e.to, flags, stale },
+        value: { sheet: e.sheet, keys, to: e.to, flags, stale, ...(notes.length ? { notes } : {}) },
       });
     }
   });

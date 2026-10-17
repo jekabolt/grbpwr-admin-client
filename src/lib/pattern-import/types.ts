@@ -761,7 +761,32 @@ export type LineAssignReport = {
    * two size rows; 'pen' = drawn with another size row's pen, not the target's.
    */
   flags: { chain: ChainId; key: string; kind: 'two-sizes' | 'pen'; detail: string }[];
+  /**
+   * LINEASSIGN-2: answers against their pen that the graded nest explains (chains/nests.ts
+   * `penVerdict` 'slip': the pen is used twice in the line's nest — at its own size's place and at
+   * the place the answer names — and the answer's size pen draws none of the nest): two evidences
+   * against the pen, so not a flag (D3); recorded, shown quietly. Absent on an older report.
+   */
+  notes?: { chain: ChainId; key: string; kind: 'pen-slip'; detail: string }[];
 };
+
+/**
+ * LINEASSIGN-2: a nest outline that sits outside the size row its graded nest names (chains/nests.ts
+ * `lineSuspects`): `suggest` is that row; `pen` is the line's pen against it ('agrees' = a second
+ * evidence, 'against' = the pen names another size, 'slip' = the pen names another size whose own
+ * outline in the nest it already draws — the drawing's slip, 'unknown' = no pen read); `nest` an
+ * index shared by the outlines of one nest; `why` says it for people.
+ */
+export type LineSuspect = {
+  chain: ChainId;
+  suggest: ClassId;
+  why: string;
+  pen: 'agrees' | 'against' | 'slip' | 'unknown';
+  nest: number;
+};
+
+/** LINEASSIGN-2: per size row, the closed piece outlines its lines draw (chains/nests.ts). */
+export type SizeOutlines = { cls: ClassId; n: number; chains: ChainId[]; maxAreaMm2: number };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 5. Sizes — source size run → card size run (sizes/, owner F5; detection shared with F3)
@@ -2654,6 +2679,14 @@ export type StageIO = {
       chainLines?: { key: string; sheet: number; style: StyleId }[];
       /** LINEFIX: how `chainAssign` landed (absent = none given). */
       lineAssign?: LineAssignReport;
+      /**
+       * LINEASSIGN-2: nest outlines outside the size row their graded nest names, on the set as
+       * answered (operator-answered lines are never suspects). [] = none; absent on the DXF fast
+       * path.
+       */
+      suspects?: LineSuspect[];
+      /** LINEASSIGN-2: closed outlines per size row (ends ≤ 2 mm, ≥ 200 mm); absent on the fast path. */
+      outlines?: SizeOutlines[];
     };
   };
   sizes: {
