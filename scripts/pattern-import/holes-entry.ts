@@ -828,7 +828,15 @@ async function hookRun(path: string, drop: number[], card: string[]) {
   });
   await settle();
   const stops: { step: string; why: string }[] = [];
-  const resolve = resolverFor(cardCtx, () => api);
+  const auto = resolverFor(cardCtx, () => api);
+  // the operator answers the files step's page-role question as the autopilot metric's controls
+  // do (autopilot-entry `operatorPages`): the pages stay as read — not what this probe is about
+  const resolve = ((snap: Parameters<typeof auto>[0]) => {
+    const a = auto(snap);
+    if (a.stop && a.reason?.step === 'files' && /is it a pattern page\?/.test(a.reason.reason))
+      return { proceed: true, assumptions: [] };
+    return a;
+  }) as typeof auto;
   const drive = async () => {
     const st = newDriveState();
     for (let t = 0; t < 300; t++) {
@@ -871,9 +879,9 @@ async function hookRun(path: string, drop: number[], card: string[]) {
   );
   check(
     `hook ${name}: the autopilot went past the sheet step and never answered the holes itself`,
-    !!last &&
-      last !== first &&
-      last.step !== 'sheet' &&
+    stops.length >= 2 &&
+      !!last &&
+      ['sizes', 'pieces', 'meaning', 'fabrics', 'check', 'apply'].includes(last.step) &&
       !api.inputs.autopilot.some((a) => a.kind === 'missing-accepted'),
     last,
   );
