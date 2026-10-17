@@ -60,6 +60,7 @@ import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
+import { LabDipTab } from './lab-dip-tab';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
@@ -176,6 +177,7 @@ const TABS = [
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
+  { id: 'lab-dip', label: 'lab dip' },
   { id: 'construction', label: 'construction' },
   { id: 'sizes', label: 'sizes' },
   { id: 'labels', label: 'labels & pkg' },
@@ -219,7 +221,7 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // range from the same form, they just no longer host its editor.
   {
     band: 'develop',
-    tabs: ['sizes', 'patterns', 'bom', 'samples', 'colorways', 'construction'],
+    tabs: ['sizes', 'patterns', 'bom', 'samples', 'colorways', 'lab-dip', 'construction'],
   },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
@@ -352,7 +354,7 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   costing_computes: 'costing',
   construction_graph: 'construction',
   colorway_linked: 'colorways',
-  lab_dip: 'colorways',
+  lab_dip: 'lab-dip',
   signoffs: 'signoff',
 };
 
@@ -953,6 +955,9 @@ export function TechCardForm({
   const operationsW = useWatch({ control: form.control, name: 'operations' });
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
+  const labDipDone =
+    liveColorways.length > 0 &&
+    liveColorways.every((c) => c.labDipStatus === 'TECH_CARD_LAB_DIP_STATUS_APPROVED');
   const sectionFilled: Partial<Record<TabId, boolean>> = {
     // STUDIO holds both grids now, so it is ticked by either: a card with a moodboard and no flat
     // has started the work this tab is for. ARTIFACTS is deliberately left UNSET rather than
@@ -984,6 +989,8 @@ export function TechCardForm({
     // (isTabVisible), and stating `false` for a section that cannot exist would be a claim about
     // work that is not outstanding.
     colorways: isAux ? undefined : (techCard?.colorways?.length ?? 0) > 0,
+    // Done = every LIVE colourway has an approved lab dip (saved state). Unset for aux, like above.
+    'lab-dip': isAux ? undefined : labDipDone,
     construction: len(operationsW) > 0,
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
@@ -1027,7 +1034,7 @@ export function TechCardForm({
     // card has, so hiding this one takes nothing an aux card needs with it.
     // No error escape here, unlike the IDEA rule below: no ERROR_TAB row points at `colorways` any
     // more, so nothing can be filed against this tab while it is invisible.
-    if (t === 'colorways' && isAux) return false;
+    if ((t === 'colorways' || t === 'lab-dip') && isAux) return false;
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if (t === 'costing' && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
@@ -3729,6 +3736,27 @@ export function TechCardForm({
                 <div>
                   {isEditMode && numId ? (
                     <ColorwayRecipes
+                      techCard={techCard}
+                      techCardId={numId}
+                      canEdit={canWrite(SECTION.techCards) && !frozen}
+                    />
+                  ) : (
+                    <Text variant='inactive' size='small'>
+                      save the card first
+                    </Text>
+                  )}
+                </div>
+              )}
+            </SectionStack>
+
+            {/* LAB DIP — one row per live colourway: target vs the dyehouse swatch, one next step.
+                Mounted like colorways (hidden, not unmounted): its drafts are staged into the
+                card's one save and an unmount would drop them. No material catalogue here. */}
+            <SectionStack hidden={activeTab !== 'lab-dip' || isAux}>
+              {!isAux && (
+                <div>
+                  {isEditMode && numId ? (
+                    <LabDipTab
                       techCard={techCard}
                       techCardId={numId}
                       canEdit={canWrite(SECTION.techCards) && !frozen}
