@@ -71,6 +71,20 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     ...(b.size.notches.some((n) => n.graded)
       ? { notchesGraded: b.size.notches.filter((n) => n.graded).length }
       : {}),
+    // GRADE P1: the operator's "in every size" (graded drills / internal lines) and "in no size"
+    ...(b.size.drills.some((d) => d.graded)
+      ? { drillsGraded: b.size.drills.filter((d) => d.graded).length }
+      : {}),
+    ...(b.size.internal.some((l) => l.graded)
+      ? { internalGraded: b.size.internal.filter((l) => l.graded).length }
+      : {}),
+    ...(b.size.removedByOperator?.notches
+      ? { notchesRemoved: b.size.removedByOperator.notches }
+      : {}),
+    ...(b.size.removedByOperator?.drills ? { drillsRemoved: b.size.removedByOperator.drills } : {}),
+    ...(b.size.removedByOperator?.internal
+      ? { internalRemoved: b.size.removedByOperator.internal }
+      : {}),
     // GRADE P1: notches drawn as the outline, the line crossing them by the chord (not as drawn)
     ...(b.size.notches.some((n) => n.chord)
       ? { notchesChorded: b.size.notches.filter((n) => n.chord).length }

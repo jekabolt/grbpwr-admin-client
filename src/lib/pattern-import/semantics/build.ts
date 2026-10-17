@@ -614,6 +614,8 @@ export function buildPieceSpecsDetailed(
   const unproven: Unproven[] = [];
   /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
   const gradeAsks: GradeAsk[] = [];
+  const gradeRefusals: Record<string, string> = {};
+  const refusedSeed = new Map<string, SeedId>();
   /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
   const notchChords = new Map<string, NotchChord[]>();
   const notes: Record<PieceKey, string[]> = {};
@@ -1636,6 +1638,10 @@ export function buildPieceSpecsDetailed(
       sizes.splice(0, sizes.length, ...gs.sizes);
       pieceNotes.push(...gs.notes);
       asksHere = gs.asks;
+      for (const [k, why] of Object.entries(gs.refusals)) {
+        gradeRefusals[k] = why;
+        refusedSeed.set(k, seed);
+      }
       intendedHere = gs.intended;
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
@@ -2179,6 +2185,13 @@ export function buildPieceSpecsDetailed(
       unproven: unproven.filter((u) => written.has(u.seed)),
       ...(gradeAsks.some((a) => written.has(a.seed))
         ? { gradeAsks: gradeAsks.filter((a) => written.has(a.seed)) }
+        : {}),
+      ...([...refusedSeed].some(([, sd]) => written.has(sd))
+        ? {
+            gradeRefusals: Object.fromEntries(
+              Object.entries(gradeRefusals).filter(([k]) => written.has(refusedSeed.get(k)!)),
+            ),
+          }
         : {}),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
       ...(foldMisses.some((m) =>

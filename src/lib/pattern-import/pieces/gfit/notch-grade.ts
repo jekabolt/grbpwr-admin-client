@@ -57,6 +57,8 @@ export type NgAdd = {
   from: string[];
   /** answered (`all`) rather than graded from ≥ 2 drawn copies */
   answered?: boolean;
+  /** index into `tracks` */
+  track: number;
 };
 
 export type NgLone = {
@@ -88,6 +90,8 @@ export type NgResult = {
   }[];
   /** tracks of ≥ 2 sizes whose positions do not grade linearly (nothing transferred) */
   inconsistent: number;
+  /** per track and size lacking it: why no place was derived (the operator's "all" is refused) */
+  skips: { track: number; k: number; why: string }[];
 };
 
 /** The question's key: piece seed, the size it is drawn in, its edge and place (2 decimals). */
@@ -198,7 +202,15 @@ export function gradeNotches(
   /** appended to every question key: the piece's geometry (a changed outline asks again) */
   keyTag = '',
 ): NgResult {
-  const res: NgResult = { ok: false, add: [], remove: [], lone: [], tracks: [], inconsistent: 0 };
+  const res: NgResult = {
+    ok: false,
+    add: [],
+    remove: [],
+    lone: [],
+    tracks: [],
+    inconsistent: 0,
+    skips: [],
+  };
   if (sizes.length < 2) return { ...res, why: 'one size' };
   const order = sizes.map((_, k) => k).sort((a, b) => sizes[a].rank - sizes[b].rank);
   const outs: (GfitOutline | null)[] = sizes.map((s) => outlineOf(s.ring));
@@ -378,6 +390,9 @@ export function gradeNotches(
           consistent = false;
       }
     }
+    const ti = res.tracks.length;
+    const missing = order.filter((k) => !ms.some((q) => q.k === k));
+    const skip = (k: number, why: string) => res.skips.push({ track: ti, k, why });
     res.tracks.push({
       edge: tr.e,
       ranks: [...ranks].sort((a, b) => a - b),
@@ -401,8 +416,22 @@ export function gradeNotches(
         ...(answer ? { answer } : {}),
       });
       if (answer === 'none') res.remove.push({ k: q.k, n: q.n });
-      if (answer !== 'all') continue;
-    } else if (!consistent || !transfer) continue;
+      if (answer !== 'all') {
+        for (const k of missing) skip(k, `drawn in size ${sizes[q.k].token} only`);
+        continue;
+      }
+    } else if (!consistent || !transfer) {
+      for (const k of missing)
+        skip(
+          k,
+          ms.length < 2
+            ? 'drawn in one size only'
+            : !consistent
+              ? 'its drawn places do not grade from size to size'
+              : 'every size draws as many notches — none is missing there',
+        );
+      continue;
+    }
     const pts = ms.map((q) => ({ rank: rankOf(q.k), t: q.t }));
     const depth = [...ms.map((q) => q.depth)].sort((a, b) => a - b)[ms.length >> 1];
     const from = [...ms].sort((a, b) => rankOf(a.k) - rankOf(b.k)).map((q) => sizes[q.k].token);
@@ -413,11 +442,17 @@ export function gradeNotches(
       const r = rankOf(k);
       // past the outermost drawn copy by more than two steps: not graded that far
       // (the operator's "in every size" has no such limit)
-      if (answer !== 'all' && (r < lo - EXTRAP_MAX_RANKS || r > hi + EXTRAP_MAX_RANKS)) continue;
+      if (answer !== 'all' && (r < lo - EXTRAP_MAX_RANKS || r > hi + EXTRAP_MAX_RANKS)) {
+        skip(k, 'more than two sizes beyond the sizes that draw it');
+        continue;
+      }
       const t = tAtRank(pts, r);
       // the place runs off its edge (past a grade point): the notch's place in this size is not
       // known on the canonical topology — no guess
-      if (t < 0 || t > 1) continue;
+      if (t < 0 || t > 1) {
+        skip(k, 'its graded place falls past the corner of its edge');
+        continue;
+      }
       const L = edgeLen(k, tr.e);
       const o = outs[k]!;
       let at = pointAt(o.pts, cums.get(k)!, idxOf.get(k)![tr.e], t * L);
@@ -436,7 +471,10 @@ export function gradeNotches(
           xs.map((p) => p.y),
         );
         const P = { x: fx.a + fx.b * r, y: fy.a + fy.b * r };
-        if (dist(P, at.q) > ABS_MM) continue;
+        if (dist(P, at.q) > ABS_MM) {
+          skip(k, 'the sheet-frame grade of the drawn copies does not land on this size’s line');
+          continue;
+        }
         const idx = idxOf.get(k)!;
         const a0 = idx[tr.e];
         const n = o.pts.length;
@@ -454,7 +492,10 @@ export function gradeNotches(
         if (bi >= 0 && bd <= ABS_MM) at = { q: o.pts[bi], i: bi };
       }
       // the size draws a notch here already (not paired: another track) — its own stays
-      if (sizes[k].notches.some((x) => dist(x.at, at.q) < OWN_NEAR_MM)) continue;
+      if (sizes[k].notches.some((x) => dist(x.at, at.q) < OWN_NEAR_MM)) {
+        skip(k, 'the size draws its own notch there');
+        continue;
+      }
       const u = inward(o.pts, at.i);
       res.add.push({
         k,
@@ -462,6 +503,7 @@ export function gradeNotches(
         tip: { x: at.q.x + u.x * depth, y: at.q.y + u.y * depth },
         depthMm: depth,
         from,
+        track: ti,
         ...(answer === 'all' ? { answered: true } : {}),
       });
     }

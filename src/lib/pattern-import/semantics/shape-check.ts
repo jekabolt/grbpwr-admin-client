@@ -205,6 +205,11 @@ export function countNotesOfBlocks(
     internal?: number;
     notchesGraded?: number;
     notchesChorded?: number;
+    drillsGraded?: number;
+    internalGraded?: number;
+    notchesRemoved?: number;
+    drillsRemoved?: number;
+    internalRemoved?: number;
   }[],
   uniToken = 'UNI',
   /** GRADE P1: per identity, the count kinds the operator answered "intended" */
@@ -233,6 +238,21 @@ export function countNotesOfBlocks(
     if (parts.length) out.push({ identity, note: `${parts.join('; ')} — one piece, one shape` });
     if (yes.length) out.push({ identity, note: `${yes.join('; ')} — intended (operator)` });
     // GRADE P1 (D5): notches placed from the sizes that draw them
+    // GRADE P1: the operator's all / none on a count question (D5)
+    for (const [k, word] of [
+      ['drillsGraded', 'drill holes placed (operator: in every size, graded, not drawn)'],
+      ['internalGraded', 'internal lines placed (operator: in every size, graded, not drawn)'],
+      ['notchesRemoved', 'notches removed (operator: in no size)'],
+      ['drillsRemoved', 'drill holes removed (operator: in no size)'],
+      ['internalRemoved', 'internal lines removed (operator: in no size)'],
+    ] as const) {
+      const xs = bs.filter((b) => (b[k] ?? 0) > 0);
+      if (xs.length)
+        out.push({
+          identity,
+          note: `${word}: ${xs.map((b) => `${b.sizeToken} ${b[k]}`).join(', ')}`,
+        });
+    }
     const ch = bs.filter((b) => (b.notchesChorded ?? 0) > 0);
     if (ch.length)
       out.push({

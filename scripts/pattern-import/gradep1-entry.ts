@@ -417,6 +417,290 @@ function units() {
       !!z && z.intended.length === 0,
     );
   }
+  // ── follow-up: the operator's all / none on a COUNT question, per kind ─────────────────────
+  type CountAsk = Extract<GradeAsk, { kind: 'counts' }>;
+  const countAsk = (g: ReturnType<typeof gradeShape>, f: string) =>
+    g.asks.find((a): a is CountAsk => a.kind === 'counts' && a.feature === f);
+  // u15 notches: the notch slides 30 mm/size, drawn in M, L, XL — XS / S would fall past the corner
+  {
+    const pos = (r: number) => ({ x: bottomAt(r, 0).x + 4 + 30 * (r - 2), y: 0 });
+    const sizes = R.map((r) => sizeSpec(r, r >= 2 ? [notch(pos(r))] : []));
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'notches');
+    ok('u15 notches 0 0 1 1 1 asked', !!a);
+    if (a) {
+      const all = gradeShape(7, sizes, 'cut', { [a.key]: 'all' });
+      const why = all.refusals[a.key] ?? '';
+      ok(
+        'u15 notches: all refused with the reason, nothing placed, ask open',
+        !!why &&
+          all.sizes[0].notches.length === 0 &&
+          countAsk(all, 'notches')?.refused === why &&
+          !countAsk(all, 'notches')?.answer,
+        why,
+      );
+      const none = gradeShape(7, sizes, 'cut', { [a.key]: 'none' });
+      ok(
+        'u15 notches: none → no size has it, removed counted per size',
+        none.sizes.every((x) => x.notches.length === 0) &&
+          none.sizes[3].removedByOperator?.notches === 1 &&
+          !none.sizes[0].removedByOperator &&
+          countAsk(none, 'notches')?.answer === 'none',
+      );
+    }
+  }
+  const drill = (at: PtMm) => ({
+    kind: 'drill' as const,
+    origin: 'detected' as const,
+    ranges: [],
+    confidence: 1,
+    at,
+  });
+  const base5 = (r: number) =>
+    Array.from({ length: 5 }, (_, i) => drill({ x: 40 + 30 * i, y: 300 + 3 * r }));
+  const extra = (r: number) => [
+    drill({ x: 150 + 4 * r, y: 120 + 5 * r }),
+    drill({ x: 200 + 4 * r, y: 120 + 5 * r }),
+  ];
+  // u16 drills: 2 extra drills drawn in M, L, XL at graded places → all places them in XS, S
+  {
+    const sizes = R.map((r) =>
+      sizeSpec(r, [], { drills: [...base5(r), ...(r >= 2 ? extra(r) : [])] }),
+    );
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'drills');
+    ok('u16 drills 5 5 7 7 7 asked', !!a, a?.question);
+    if (a) {
+      const all = gradeShape(7, sizes, 'cut', { [a.key]: 'all' });
+      const xs = all.sizes[0].drills.filter((d) => d.graded);
+      const exp = extra(0);
+      const err =
+        xs.length === 2
+          ? Math.max(
+              ...xs.map((d) =>
+                Math.min(...exp.map((e) => Math.hypot(e.at.x - d.at.x, e.at.y - d.at.y))),
+              ),
+            )
+          : Infinity;
+      ok(
+        'u16 drills: all → XS, S get 2 graded drills at the graded places',
+        all.sizes.every((x) => x.drills.length === 7) &&
+          err < 0.5 &&
+          countAsk(all, 'drills')?.answer === 'all',
+        err.toFixed(2),
+      );
+      const none = gradeShape(7, sizes, 'cut', { [a.key]: 'none' });
+      ok(
+        'u16 drills: none → the 2 extra go in M, L, XL, recorded',
+        none.sizes.every((x) => x.drills.length === 5) &&
+          none.sizes[4].removedByOperator?.drills === 2,
+      );
+      // mutation: the extra drills zig-zag (do not grade) → all refused
+      const zig = R.map((r) =>
+        sizeSpec(r, [], {
+          drills: [
+            ...base5(r),
+            ...(r >= 2
+              ? [drill({ x: 150 + (r % 2) * 9, y: 120 }), drill({ x: 200, y: 120 + (r % 2) * 9 })]
+              : []),
+          ],
+        }),
+      );
+      const az = countAsk(gradeShape(7, zig, 'cut'), 'drills');
+      const rz = az ? gradeShape(7, zig, 'cut', { [az.key]: 'all' }) : null;
+      ok(
+        'u16 mutation: drills that do not grade → all refused',
+        !!rz && !!rz.refusals[az!.key] && rz.sizes[0].drills.length === 5,
+        rz?.refusals[az!.key],
+      );
+      // mutation: a drill three sizes past the drawn ones → refused
+      const far = R.map((r) =>
+        sizeSpec(r, [], { drills: [...base5(r), ...(r >= 3 ? extra(r) : [])] }),
+      );
+      const af = countAsk(gradeShape(7, far, 'cut'), 'drills');
+      const rf = af ? gradeShape(7, far, 'cut', { [af.key]: 'all' }) : null;
+      ok(
+        'u16 mutation: XS three sizes past L → all refused',
+        !!rf && /two sizes beyond/.test(rf.refusals[af!.key] ?? ''),
+        rf?.refusals[af!.key],
+      );
+    }
+  }
+  // u17 internal lines: one open line drawn in M, L, XL (graded) → all places it in XS, S; closed refused
+  {
+    const line = (r: number) => ({
+      kind: 'internal' as const,
+      origin: 'detected' as const,
+      ranges: [],
+      confidence: 1,
+      pts: [
+        { x: 60 - 2 * r, y: 400 + 4 * r },
+        { x: 150, y: 405 + 4 * r },
+        { x: 240 + 2 * r, y: 400 + 4 * r },
+      ],
+      closed: false,
+    });
+    const keep = (r: number) => ({
+      ...line(r),
+      pts: line(r).pts.map((q) => ({ x: q.x, y: q.y - 250 })),
+    });
+    const sizes = R.map((r) =>
+      sizeSpec(r, [], { internal: [keep(r), ...(r >= 2 ? [line(r)] : [])] }),
+    );
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'internal');
+    ok('u17 internal 1 1 2 2 2 asked', !!a, a?.question);
+    if (a) {
+      const all = gradeShape(7, sizes, 'cut', { [a.key]: 'all' });
+      const got = all.sizes[0].internal.find((l) => l.graded);
+      const e = line(0).pts;
+      const err = got
+        ? Math.max(
+            Math.hypot(got.pts[0].x - e[0].x, got.pts[0].y - e[0].y),
+            Math.hypot(
+              got.pts[got.pts.length - 1].x - e[2].x,
+              got.pts[got.pts.length - 1].y - e[2].y,
+            ),
+          )
+        : Infinity;
+      ok(
+        'u17 internal: all → XS gets the line, both ends graded',
+        all.sizes.every((x) => x.internal.length === 2) && err < 0.5,
+        err.toFixed(2),
+      );
+      const none = gradeShape(7, sizes, 'cut', { [a.key]: 'none' });
+      ok(
+        'u17 internal: none → removed in M, L, XL',
+        none.sizes.every((x) => x.internal.length === 1) &&
+          none.sizes[2].removedByOperator?.internal === 1,
+      );
+      // mutation: one end does not grade (the line's end zig-zags) → refused
+      const bent = R.map((r) =>
+        sizeSpec(r, [], {
+          internal: [
+            keep(r),
+            ...(r >= 2
+              ? [
+                  {
+                    ...line(r),
+                    pts: [line(r).pts[0], line(r).pts[1], { x: 240 + (r % 2) * 9, y: 400 + 4 * r }],
+                  },
+                ]
+              : []),
+          ],
+        }),
+      );
+      const ab = countAsk(gradeShape(7, bent, 'cut'), 'internal');
+      const rb = ab ? gradeShape(7, bent, 'cut', { [ab.key]: 'all' }) : null;
+      ok(
+        'u17 mutation: an end that does not grade → all refused',
+        !!rb && !!rb.refusals[ab!.key] && rb.sizes[0].internal.length === 1,
+        rb?.refusals[ab!.key],
+      );
+      // a closed internal line (a pocket box) → all refused
+      const box = (r: number) => ({
+        ...line(r),
+        closed: true,
+        pts: [
+          { x: 100, y: 200 + r },
+          { x: 140, y: 200 + r },
+          { x: 140, y: 230 + r },
+          { x: 100, y: 230 + r },
+        ],
+      });
+      const bx = R.map((r) =>
+        sizeSpec(r, [], { internal: [keep(r), ...(r >= 2 ? [box(r)] : [])] }),
+      );
+      const ax = countAsk(gradeShape(7, bx, 'cut'), 'internal');
+      const rx = ax ? gradeShape(7, bx, 'cut', { [ax.key]: 'all' }) : null;
+      ok(
+        'u17 closed internal line → all refused',
+        !!rx && /closed/.test(rx.refusals[ax!.key] ?? ''),
+        rx?.refusals[ax!.key],
+      );
+    }
+  }
+  // u18 (Codex r3): two drills close in XS, one track's copy within reach of both → which is which
+  // is a guess: none / all refused, nothing removed
+  {
+    const sizes = R.map((r) =>
+      sizeSpec(r, [], {
+        drills: [
+          ...base5(r),
+          drill({ x: 100 + 8 * r, y: 150 }),
+          ...(r === 0 ? [drill({ x: 110, y: 150 })] : []),
+        ],
+      }),
+    );
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'drills');
+    const n = a ? gradeShape(7, sizes, 'cut', { [a.key]: 'none' }) : null;
+    const al = a ? gradeShape(7, sizes, 'cut', { [a.key]: 'all' }) : null;
+    ok(
+      'u18 contested pairing → none and all refused, nothing changed',
+      !!n &&
+        /too close/.test(n.refusals[a!.key] ?? '') &&
+        n.sizes[0].drills.length === 7 &&
+        !!al?.refusals[a!.key] &&
+        al.sizes.every((x, k) => x.drills.length === sizes[k].drills.length),
+      n?.refusals[a!.key],
+    );
+  }
+  // u19 (Codex r3): a graded line whose points all lie inside but whose stretch crosses a slot of a
+  // concave outline → refused
+  {
+    const slotCut: PtMm[] = [
+      { x: 0, y: 0 },
+      { x: 400, y: 0 },
+      { x: 400, y: 600 },
+      { x: 70, y: 600 },
+      { x: 70, y: 390 },
+      { x: 62, y: 390 },
+      { x: 62, y: 600 },
+      { x: 0, y: 600 },
+    ];
+    const ln = (r: number) => ({
+      kind: 'internal' as const,
+      origin: 'detected' as const,
+      ranges: [],
+      confidence: 1,
+      pts: [
+        { x: 60 - 2 * r, y: 400 + 4 * r },
+        { x: 150, y: 405 + 4 * r },
+        { x: 240 + 2 * r, y: 400 + 4 * r },
+      ],
+      closed: false,
+    });
+    const sizes = R.map((r) => sizeSpec(r, [], { cut: slotCut, internal: r >= 2 ? [ln(r)] : [] }));
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'internal');
+    const al = a ? gradeShape(7, sizes, 'cut', { [a.key]: 'all' }) : null;
+    ok(
+      'u19 graded line crosses the outline between its points → all refused',
+      !!al && /outside/.test(al.refusals[a!.key] ?? '') && al.sizes[0].internal.length === 0,
+      al?.refusals[a!.key],
+    );
+  }
+  // u20 (Codex r3): a fold's mirrored copy (origin derived) is removed with its drawn one, but only
+  // the drawn one counts as operator-removed
+  {
+    const mir = (r: number) => ({
+      ...drill({ x: 250 - 4 * r, y: 120 + 5 * r }),
+      origin: 'derived' as const,
+    });
+    const sizes = R.map((r) =>
+      sizeSpec(r, [], {
+        drills: [
+          ...base5(r),
+          ...(r >= 2 ? [drill({ x: 150 + 4 * r, y: 120 + 5 * r }), mir(r)] : []),
+        ],
+      }),
+    );
+    const a = countAsk(gradeShape(7, sizes, 'cut'), 'drills');
+    const n = a ? gradeShape(7, sizes, 'cut', { [a.key]: 'none' }) : null;
+    ok(
+      'u20 none removes drawn + mirrored copy, counts only the drawn one',
+      !!n &&
+        n.sizes.every((x) => x.drills.length === 5) &&
+        n.sizes[3].removedByOperator?.drills === 1,
+      n ? `${n.sizes[3].removedByOperator?.drills} ${n.refusals[a!.key] ?? ''}` : 'no ask',
+    );
+  }
   return fails;
 }
 
@@ -555,6 +839,24 @@ function analyse(s: Session, out: StageIO['write']['out'], id: string, png: stri
       held: [...(heldBy.get(p.identity) ?? [])],
     });
     if (dir) pngs.push(overlay(dir, p, id));
+    // GRADEP1_ANSWER="<identity>:<feature>:<all|none|intended>[:seam|cut]" — the operator's answer to
+    // that piece's count question, applied to its written sizes (the refusal, or what changes)
+    for (const spec of (process.env.GRADEP1_ANSWER ?? '').split(';').filter(Boolean)) {
+      const [ident, feat, ans, mean] = spec.split(':');
+      if (ident !== p.identity) continue;
+      const m = (mean as 'seam' | 'cut') ?? 'seam';
+      const g0 = gradeShape(p.seed, p.sizes, m);
+      const ask = g0.asks.find((a) => a.kind === 'counts' && a.feature === feat);
+      if (!ask) {
+        console.log(`  ANSWER ${ident} ${feat}: no count question`);
+        continue;
+      }
+      const g1 = gradeShape(p.seed, p.sizes, m, { [ask.key]: ans as 'all' | 'none' | 'intended' });
+      const a1 = g1.asks.find((a) => a.key === ask.key);
+      console.log(
+        `  ANSWER ${ident} ${feat} ${ans}: ${g1.refusals[ask.key] ? `REFUSED — ${g1.refusals[ask.key]}` : `applied (${a1 && a1.kind === 'counts' ? a1.answer : '?'}) → ${feat} ${g1.sizes.map((z) => (feat === 'notches' ? z.notches : feat === 'drills' ? z.drills : z.internal).length).join(' ')}`}`,
+      );
+    }
     if (process.env.GRADEP1_DUMP && new RegExp(process.env.GRADEP1_DUMP).test(p.identity))
       for (const z of p.sizes) {
         const ln = z.seam ?? z.cut;
