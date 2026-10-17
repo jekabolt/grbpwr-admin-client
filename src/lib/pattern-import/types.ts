@@ -1881,6 +1881,8 @@ export type GateCheckId =
    * MOOD Ф0 (R12): a size block of a rank identified by its pen (declared dash, recovered motif,
    * the drawing's key) lies on that pen's lines (± its corner stubs) — ≥ 0.85 of the written line
    * off the common edges; a rank of such a run whose pen is unknown proves nothing (block).
+   * KINKS: and nowhere bends off them — no stretch > 2 mm that leaves its own line by ≥ 0.5 mm (a
+   * neighbouring size's line, a tile mark, a corner cut short).
    */
   | 'G22-identity'
   /**
@@ -1902,6 +1904,14 @@ export type IdentityGeometry = {
   shared?: PtMm[][];
   /** Lines provably another size's (another pen, another size's class, an orphan of another look). */
   foreign?: PtMm[][];
+  /**
+   * KINKS (G25): `own` without the lines another size's class holds — on a measured pen two sizes
+   * may share one look (Mood's S and L motifs), and a line of the other one is no line of this size.
+   * Absent = `own`.
+   */
+  ownStrict?: PtMm[][];
+  /** KINKS (G25): the drawing's own size-line key names this size (a legend sample). */
+  keyed?: boolean;
   /**
    * The pen is declared (a dash pattern, a plain stroke) — not a rhythm measured off the drawing or
    * the class's own lines: the stricter share applies.

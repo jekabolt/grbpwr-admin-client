@@ -2,6 +2,9 @@
 
 import { common_Sample } from 'api/proto-http/admin';
 
+// One staged change per sample (`sample:<id>`) — shared by the screen, the board and delete.
+export const SAMPLE_STAGING_PREFIX = 'sample:';
+
 export const samplePurposeOptions = [
   { value: 'proto', label: 'proto' },
   { value: 'fit', label: 'fit' },
@@ -19,10 +22,7 @@ export const sampleStatusOptions = [
 // fabric_source (owner decision, UX pass): the wire values (sample|production) are NOT renamed —
 // only how the field reads in the UI. "Sample fabric" read as unexplained jargon; spell out what
 // each side actually means so purpose (proto/fit/sms/PP) and fabric choice visibly line up.
-export const sampleFabricSourceFieldLabel = 'fabric: stand-in (sample) / final (production)';
-export const sampleFabricSourceHint =
-  "stand-in — a rough fabric, only to check the fit and the cut; final — the style's own fabric. a PP sample is usually sewn from the final fabric, proto/fit/sms — from a stand-in.";
-
+export const sampleFabricSourceFieldLabel = 'fabric';
 export const sampleFabricSourceOptions = [
   { value: 'sample', label: 'stand-in (sample)' },
   { value: 'production', label: 'final (production)' },

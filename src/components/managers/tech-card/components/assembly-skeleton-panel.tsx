@@ -49,7 +49,11 @@ import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { FoldCaret } from 'ui/components/fold-caret';
+import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
 import { HeaderNote } from 'ui/components/section-header';
+import { useSearchParams } from 'react-router-dom';
+import { revealField } from 'utils/field-errors';
 import Text from 'ui/components/text';
 
 import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './assembly-frontier';
@@ -383,7 +387,15 @@ export function useSkeletonDoor({
     // A card without a pattern has nothing to read: the header stays silent (as the silhouette
     // line does), and only the empty state names the reason.
     if (where === 'header' && !shapes.hasDxf) return null;
-    const label = where === 'header' ? 'suggest skeleton' : 'suggest a skeleton from the pattern';
+    // Nor while the header already names the reason: a released card, a pattern still being read
+    // (the header's own note) or one whose pieces match no block (the header's warning).
+    if (
+      where === 'header' &&
+      !gate.open &&
+      (frozen || !shapes.shapeByKey || shapes.foundCount === 0)
+    )
+      return null;
+    const label = where === 'header' ? 'suggest order' : 'suggest order from pattern';
     const button =
       where === 'header' ? (
         <Button
@@ -630,7 +642,9 @@ function AssemblySkeletonPanel({
   );
 
   const [pressOpen, setPressOpen] = useState(true);
-  const [confirmReplace, setConfirmReplace] = useState(false);
+  // Template, «press open» and auto: advanced, folded by default (R2.5).
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [, setParams] = useSearchParams();
   const existing = operations.length;
   // An empty order has nothing to choose about; with steps, nothing is read until a mode is chosen.
   const mode: SkeletonMode | null = existing === 0 ? 'append' : chosenMode;
@@ -899,7 +913,8 @@ function AssemblySkeletonPanel({
     onRun(built.facts, deps);
   };
 
-  // What a confirmed replace takes with the old steps, said before the confirming press.
+  // What a replace takes with the old steps, said beside the one apply (no second confirm: the
+  // applied steps are drafts and the apply is undoable).
   const photosInForm = operations.reduce(
     (n, o) => n + ((o as { media?: unknown[] }).media?.length ?? 0),
     0,
@@ -924,19 +939,11 @@ function AssemblySkeletonPanel({
       : '',
     hasUnitsInForm ? 'the unit markup' : '',
   ].filter(Boolean);
-  const chooseMode = (m: SkeletonMode) => {
-    setConfirmReplace(false);
-    onMode(m);
-  };
+  const chooseMode = (m: SkeletonMode) => onMode(m);
 
   const applyAll = () => {
     if (batch.steps.length === 0 || rebuilding) return;
-    if (effectiveMode === 'replace' && !confirmReplace) {
-      setConfirmReplace(true);
-      return;
-    }
     onApply(batch.steps, batch.idx, effectiveMode, shownGen, effectiveMode === 'replace');
-    setConfirmReplace(false);
   };
 
   const steps = proposal?.steps ?? [];
@@ -989,6 +996,31 @@ function AssemblySkeletonPanel({
     return ns.length > 1 ? `${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}` : String(ns[0]);
   };
 
+  // Warnings go in the modal head (R2.4): the category the template was guessed from, with the
+  // door to where the category is set, and the engine's own warnings.
+  const goToCategory = () => {
+    onClose();
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'studio');
+        return next;
+      },
+      { replace: true },
+    );
+    window.setTimeout(() => revealField('categoryId'), 120);
+  };
+  const headWarnings: HeaderWarning[] = [...(proposal?.warnings ?? [])];
+  if (proposal && categoryReading.source !== 'card') {
+    headWarnings.unshift({
+      text:
+        categoryReading.source === 'pieces'
+          ? `category not set · read as ${categoryReading.category}`
+          : 'category not set · generic order',
+      action: { label: 'set the category', onClick: goToCategory },
+    });
+  }
+
   return (
     <Dialog.Root
       open
@@ -1013,7 +1045,7 @@ function AssemblySkeletonPanel({
                 component='span'
                 className='font-bold'
               >
-                assembly skeleton
+                suggest assembly order
               </Text>
             </Dialog.Title>
             {proposal && (
@@ -1037,10 +1069,10 @@ function AssemblySkeletonPanel({
                     }`
                   : toCheck > 0
                     ? ` · ${toCheck} to decide`
-                    : ''}{' '}
-                · read off the pattern, nothing written yet
+                    : ''}
               </Text>
             )}
+            {proposal && <HeaderWarnings items={headWarnings} />}
             <Dialog.Close asChild>
               <button
                 type='button'
@@ -1073,19 +1105,17 @@ function AssemblySkeletonPanel({
                 className='mb-1.5'
                 data-skeleton-nothing-to-add='1'
               >
-                to read the pattern again, replace the {existing}{' '}
-                {existing === 1 ? 'step' : 'steps'}: the skeleton then starts over from every piece.
+                every piece is in the order · replace to read again
               </Text>
             )}
             {mode && run.status === 'running' && (
               <Text size='micro' variant='label' component='p' data-skeleton-state='running'>
-                reading the pattern — edges, notches, mirror pairs…
+                reading the pattern…
               </Text>
             )}
             {mode && rebuilding && (
               <Text size='micro' variant='label' component='p' data-skeleton-state='rebuilding'>
-                rebuilding around the chosen reading — the steps below are the old ones until it
-                lands; nothing can be applied meanwhile…
+                rebuilding around the chosen reading…
               </Text>
             )}
             {mode && run.status === 'error' && (
@@ -1108,53 +1138,54 @@ function AssemblySkeletonPanel({
             )}
             {proposal && (
               <>
-                <ChipRow className='mb-1.5'>
-                  <Text
-                    size='micro'
-                    variant='label'
-                    component='span'
-                    data-skeleton-template={proposal.template}
+                <div className='mb-1.5'>
+                  <button
+                    type='button'
+                    onClick={() => setOptionsOpen((v) => !v)}
+                    aria-expanded={optionsOpen}
+                    className='inline-flex items-center text-micro uppercase tracking-label text-labelColor hover:text-textColor'
                   >
-                    order from the “{proposal.template}” template
-                  </Text>
-                  {categoryReading.source !== 'card' && (
-                    <Text
-                      size='micro'
-                      variant='label'
-                      component='span'
-                      data-skeleton-category-read={categoryReading.source}
-                      title='set the category on the card to choose the order template yourself'
-                    >
-                      {categoryReading.source === 'pieces'
-                        ? `· category not set: read as ${categoryReading.category} from the pieces (${categoryReading.why})`
-                        : categoryReading.source === 'purpose'
-                          ? '· category not set: an auxiliary item, so the generic order'
-                          : `· category not set, and the piece names do not say which garment (${categoryReading.why}), so the generic order: set the category`}
-                    </Text>
+                    options
+                    <FoldCaret open={optionsOpen} />
+                  </button>
+                  {optionsOpen && (
+                    <ChipRow className='mt-1'>
+                      <Text
+                        size='micro'
+                        variant='label'
+                        component='span'
+                        data-skeleton-template={proposal.template}
+                        data-skeleton-category-read={
+                          categoryReading.source !== 'card' ? categoryReading.source : undefined
+                        }
+                      >
+                        template: {proposal.template}
+                      </Text>
+                      <Chip
+                        nonForm
+                        selected={pressOpen}
+                        onClick={() => setPressOpen((v) => !v)}
+                        title='insert «press open» after each join'
+                        data-skeleton-press={pressOpen ? 'on' : 'off'}
+                      >
+                        {pressOpen ? '✓ ' : ''}press open after joins
+                      </Chip>
+                      <Chip
+                        nonForm
+                        selected={autoMode}
+                        onClick={() => onAutoMode(!autoMode)}
+                        title={
+                          autoMode
+                            ? 'every step ticked at the engine’s reading, marked AUTO'
+                            : 'only what the pattern showed is ticked; guesses wait for you'
+                        }
+                        data-skeleton-auto={autoMode ? 'on' : 'off'}
+                      >
+                        {autoMode ? '✓ ' : ''}auto: every step picked
+                      </Chip>
+                    </ChipRow>
                   )}
-                  <Chip
-                    nonForm
-                    selected={pressOpen}
-                    onClick={() => setPressOpen((v) => !v)}
-                    title='insert «press open» after each join, as most cards press seams before crossing them'
-                    data-skeleton-press={pressOpen ? 'on' : 'off'}
-                  >
-                    {pressOpen ? '✓ ' : ''}press open after joins
-                  </Chip>
-                  <Chip
-                    nonForm
-                    selected={autoMode}
-                    onClick={() => onAutoMode(!autoMode)}
-                    title={
-                      autoMode
-                        ? 'auto: every step is ticked and each guess takes the engine’s reading, marked AUTO — press for manual, where guesses wait for you'
-                        : 'manual: only what the pattern showed is ticked, guesses wait for you — press to tick every step at the engine’s reading'
-                    }
-                    data-skeleton-auto={autoMode ? 'on' : 'off'}
-                  >
-                    {autoMode ? '✓ ' : ''}auto: every step picked
-                  </Chip>
-                </ChipRow>
+                </div>
                 <SkeletonAIBar
                   state={ai.state}
                   available={ai.available}
@@ -1194,18 +1225,6 @@ function AssemblySkeletonPanel({
                     return [n, st.label || st.outputUnitName || 'a step'].filter(Boolean).join(' ');
                   }}
                 />
-                {proposal.warnings.map((w, i) => (
-                  <Text
-                    key={i}
-                    size='micro'
-                    variant='label'
-                    component='p'
-                    className='mb-1'
-                    data-skeleton-warning={i}
-                  >
-                    {w}
-                  </Text>
-                ))}
 
                 {(closingJoins.length > 0 ||
                   ties.length > 0 ||
@@ -1223,13 +1242,7 @@ function AssemblySkeletonPanel({
                           ticked to close the order: {closingJoins.length === 1 ? 'step' : 'steps'}{' '}
                           {listNumbers(closingJoins)}
                         </b>
-                        <span className='text-labelColor'>
-                          {' '}
-                          {closingJoins.length === 1 ? 'is a guess' : 'are guesses'} (the standard
-                          order, no seam read) on the way to one finished garment. Check{' '}
-                          {closingJoins.length === 1 ? 'it' : 'them'}; unticked, the order stops
-                          short of the garment.
-                        </span>
+                        <span className='text-labelColor'> · guessed, check</span>
                       </Text>
                     )}
                     {ties.map((i) => {
@@ -1239,11 +1252,7 @@ function AssemblySkeletonPanel({
                         <div key={`tie${i}`} data-skeleton-tie={i}>
                           <Text size='micro' component='p'>
                             <b>to decide: «{st.label || st.outputUnitName}» is a tie</b>
-                            <span className='text-labelColor'>
-                              {' '}
-                              — {st.decision?.tie}. Auto mode does not pick it, and the steps built
-                              on it wait unticked: choose one, or tick the step to take the first.
-                            </span>
+                            <span className='text-labelColor'> · {st.decision?.tie}</span>
                           </Text>
                           {vs.length > 1 && (
                             <ChipRow className='mt-0.5'>
@@ -1280,12 +1289,7 @@ function AssemblySkeletonPanel({
                             auto-picked: {autoPicked.length}{' '}
                             {autoPicked.length === 1 ? 'step' : 'steps'}
                           </b>
-                          <span className='text-labelColor'>
-                            {' '}
-                            {autoPicked.length === 1 ? 'takes' : 'take'} the engine’s reading and{' '}
-                            {autoPicked.length === 1 ? 'is' : 'are'} marked AUTO on the line. Check
-                            them: flip a reading or untick to change.
-                          </span>
+                          <span className='text-labelColor'> · marked AUTO, check</span>
                         </Text>
                         {autoKinds.map((g) => (
                           <Text
@@ -1313,12 +1317,7 @@ function AssemblySkeletonPanel({
                           ticked with their join: {riderGuesses.length === 1 ? 'step' : 'steps'}{' '}
                           {listNumbers(riderGuesses)}
                         </b>
-                        <span className='text-labelColor'>
-                          {' '}
-                          {riderGuesses.length === 1 ? 'is a guess' : 'are guesses'} riding on{' '}
-                          {autoMode ? 'their join' : 'a join the pattern did read'}. Check{' '}
-                          {riderGuesses.length === 1 ? 'it' : 'them'}, or untick.
-                        </span>
+                        <span className='text-labelColor'> · guessed, check</span>
                       </Text>
                     )}
                     {decidingJoins.map((i) => {
@@ -1328,11 +1327,7 @@ function AssemblySkeletonPanel({
                         <div key={i} data-skeleton-deciding={i}>
                           <Text size='micro' component='p'>
                             <b>step {numbers.get(i) ?? stepNumber(i)} decides the order:</b>
-                            <span className='text-labelColor'>
-                              {' '}
-                              {vs.length} readings are as likely as each other, and every step after
-                              it follows the one picked. Pick it first:
-                            </span>
+                            <span className='text-labelColor'> pick a reading</span>
                           </Text>
                           <ChipRow className='mt-0.5'>
                             {vs.map((v, vi) => (
@@ -1355,18 +1350,14 @@ function AssemblySkeletonPanel({
                     {looseEnds.length > 0 && (
                       <Text size='micro' component='p' data-skeleton-loose-ends={looseEnds.length}>
                         <b>the proposal ends in {looseEnds.length} units, not one garment:</b>
-                        <span className='text-labelColor'>
-                          {' '}
-                          {looseEnds.map(nameOf).join(', ')}. The pattern did not say how they meet;
-                          join them by hand after applying.
-                        </span>
+                        <span className='text-labelColor'> {looseEnds.map(nameOf).join(', ')}</span>
                       </Text>
                     )}
                   </div>
                 )}
                 {steps.length === 0 && (
                   <Text size='micro' variant='label' component='p' data-skeleton-empty='1'>
-                    no step to propose: the pattern gave nothing to join. The reasons are above
+                    nothing to propose
                   </Text>
                 )}
                 <div className='flex flex-col divide-y divide-hairline'>
@@ -1456,7 +1447,7 @@ function AssemblySkeletonPanel({
                           data-skeleton-leftout={leftOut.length}
                         >
                           <Text size='micro' variant='label' component='span' className='w-full'>
-                            the pattern gave no evidence where these join — add their steps by hand
+                            no join found · add by hand
                           </Text>
                           {leftOut.map((k) => (
                             <PieceTile
@@ -1475,8 +1466,7 @@ function AssemblySkeletonPanel({
                           component='p'
                           data-skeleton-nocontour={built.withoutContour.length}
                         >
-                          no contour, so not read: {built.withoutContour.map(nameOf).join(', ')} —
-                          match them to pattern blocks on the PATTERNS tab
+                          no contour: {built.withoutContour.map(nameOf).join(', ')}
                         </Text>
                       )}
                       {built.withoutKey.length > 0 && (
@@ -1486,8 +1476,7 @@ function AssemblySkeletonPanel({
                           component='p'
                           data-skeleton-nokey={built.withoutKey.length}
                         >
-                          no piece key yet, so no step can refer to them:{' '}
-                          {built.withoutKey.join(', ')}. Save the card to give them keys
+                          save the card first: {built.withoutKey.join(', ')}
                         </Text>
                       )}
                       {proposal.unresolved.length > 0 && (
@@ -1498,8 +1487,7 @@ function AssemblySkeletonPanel({
                           data-skeleton-unresolved={proposal.unresolved.length}
                         >
                           {proposal.unresolved.length}{' '}
-                          {proposal.unresolved.length === 1 ? 'edge pair' : 'edge pairs'} the
-                          pattern could not decide between — left out rather than guessed
+                          {proposal.unresolved.length === 1 ? 'edge pair' : 'edge pairs'} undecided
                         </Text>
                       )}
                     </div>
@@ -1517,34 +1505,28 @@ function AssemblySkeletonPanel({
               className='min-w-0 flex-1'
               data-skeleton-footer='1'
             >
-              {confirmReplace ? (
+              {replacing && !result ? (
                 <span data-skeleton-replace-loses={photosInForm}>
-                  goes for good: {replaceLoses.join(' · ')}
-                  {unitsGo ? ' (the new steps make no units)' : ''}
-                  {' · undo is available until the next save'}
+                  removes {replaceLoses.join(' · ')}
+                  {unitsGo ? ' · no units in the new steps' : ''}
                 </span>
               ) : result?.refused ? (
                 <span className='text-error' data-skeleton-refused='1'>
-                  not applied — {result.refused}
+                  not applied: {result.refused}
                 </span>
               ) : result?.undoRefused ? (
                 <span className='text-error' data-skeleton-undo-refused='1'>
-                  not undone — {result.undoRefused}
+                  not undone: {result.undoRefused}
                 </span>
               ) : result?.undone ? (
                 <span data-skeleton-undone={result.undone}>
-                  {result.undone} {result.undone === 1 ? 'step' : 'steps'} taken back — the steps,
-                  photos and units are as they were before the apply
+                  {result.undone} {result.undone === 1 ? 'step' : 'steps'} taken back
                 </span>
               ) : result && result.applied > 0 ? (
                 <span data-skeleton-applied={result.applied}>
-                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added — the rail marks
-                  them “draft” until you change them or mark them reviewed
-                  {undoable ? ' · undo takes the whole batch back' : ''}
+                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added as draft
                 </span>
-              ) : (
-                'seam types, work and minutes stay empty — they are yours to fill · esc — close'
-              )}
+              ) : null}
             </Text>
             {undoable && (
               <Button
@@ -1569,16 +1551,6 @@ function AssemblySkeletonPanel({
                 {batchViolations.size === 1 ? 'step breaks' : 'steps break'} the order
               </Text>
             )}
-            {confirmReplace && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                onClick={() => setConfirmReplace(false)}
-              >
-                keep the steps
-              </Button>
-            )}
             <Button
               type='button'
               variant='main'
@@ -1593,11 +1565,9 @@ function AssemblySkeletonPanel({
             >
               {rebuilding
                 ? 'rebuilding…'
-                : confirmReplace
-                  ? `replace ${existing} with ${batch.steps.length} — confirm`
-                  : effectiveMode === 'replace'
-                    ? `replace with ${batch.steps.length} accepted`
-                    : `apply all accepted (${batch.steps.length})`}
+                : effectiveMode === 'replace'
+                  ? `replace with ${batch.steps.length} steps`
+                  : `apply ${batch.steps.length} ${batch.steps.length === 1 ? 'step' : 'steps'}`}
             </Button>
           </div>
         </Dialog.Content>
@@ -1633,22 +1603,17 @@ function ModeChoice({
       title: `add to the ${steps}`,
       detail:
         openPieces === 0
-          ? 'every piece is already in the order: nothing to add'
-          : `reads only the ${openPieces} ${openPieces === 1 ? 'piece' : 'pieces'} not in the order yet; your steps and units stay as they are`,
+          ? 'nothing to add'
+          : `${openPieces} ${openPieces === 1 ? 'piece' : 'pieces'} not in the order`,
     },
     {
       id: 'replace',
       title: `replace the ${steps}`,
-      detail: `reads the whole pattern and starts over. Goes when you apply: ${replaceLoses.join(' · ')}`,
+      detail: `removes ${replaceLoses.join(' · ')}`,
     },
   ];
   return (
     <div className='mb-2' data-skeleton-modes={mode ?? 'unchosen'}>
-      {!mode && (
-        <Text size='micro' variant='label' component='p' className='mb-1'>
-          the card already has an order. Choose how the skeleton meets it:
-        </Text>
-      )}
       <div
         role='radiogroup'
         aria-label='add or replace'

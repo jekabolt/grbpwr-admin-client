@@ -7,7 +7,7 @@
 // the outputs after it). The footer is three things only: ← back · the one question (a link to
 // the control that answers it, `data-ask` in ui-bits.tsx) · the one primary, named by what it does.
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
@@ -58,10 +58,16 @@ import {
   type StageState,
 } from './stages';
 import {
+  AnsweredAndGoContext,
   AskCoach,
+  AutoAnswerContext,
   QuizHistoryContext,
+  clickAskFix,
+  currentAskKey,
   firstAsk,
   focusAsk,
+  useAskLabel,
+  type AutoAnswer,
   type CoachTarget,
   type QuizHistory,
 } from './ui-bits';
@@ -278,13 +284,38 @@ function WizardBody({
   }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
   const autopilotStop =
     autopilot && started.current === session.sessionId
-      ? apStop ?? (api.driveStop && api.driveStop.why !== 'auto-stop' ? api.driveStop.reason : null)
+      ? apStop ??
+        // the drive's stop speaks only while its question is still open on this step: an operator
+        // answer (the garment picked, the row confirmed) leaves no blocker / offer behind, and the
+        // old reason must not linger in the footer next to a step that is already fine
+        (api.driveStop &&
+        api.driveStop.why !== 'auto-stop' &&
+        api.driveStop.step === session.step &&
+        (blocker || api.offer)
+          ? api.driveStop.reason
+          : null)
       : null;
   const resumeAutopilot = () => {
     setApStop(null);
     applying.current = null;
     api.advance(replay.auto);
   };
+  // ── AUTOMATIC ANSWERS (ui-bits): a step's own answer (the garment the file cannot tell apart,
+  // the sizes mapped in order) is dispatched like the operator's — which disarms the drive — and
+  // the autopilot, when it was driving this run (started here, not stopped by a failed apply), is
+  // resumed once the answer has landed: it never sits stopped with no reason on screen ──
+  const autopilotRef = useRef(autopilot);
+  autopilotRef.current = autopilot;
+  const apStopRef = useRef(apStop);
+  apStopRef.current = apStop;
+  const resumeRef = useRef(resumeAutopilot);
+  resumeRef.current = resumeAutopilot;
+  const autoAnswer = useCallback<AutoAnswer>(async (ev) => {
+    const sid = apiRef.current.session.sessionId;
+    const driving = autopilotRef.current && started.current === sid && apStopRef.current == null;
+    await apiRef.current.dispatch(ev);
+    if (driving && autopilotRef.current && started.current === sid) resumeRef.current();
+  }, []);
   /** AP-replay: turn the previous import's answers on — they answer from where the run stands. */
   const reuse = () => {
     if (!prior) return;
@@ -378,6 +409,9 @@ function WizardBody({
   const subSteps = STAGE_OF_STEP[session.step].steps;
 
   const mainRef = useRef<HTMLElement | null>(null);
+  // the step's plain wording of the question asked now (ui-bits PLAIN WORDS), else the sentence
+  const askLabel = useAskLabel(mainRef, `${session.step}|${askText ?? ''}`);
+  const askShown = askText && !offWizard(askText) ? askLabel ?? askText : askText;
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   // ── COACH MODE: a click that cannot advance shows WHERE and HOW instead (ui-bits ASK COACH) ──
   const [coach, setCoach] = useState<CoachTarget | null>(null);
@@ -387,7 +421,7 @@ function WizardBody({
     // an ask fixed on the card closes the wizard only when nothing in the wizard answers it
     // (fabrics' interlining-only blocker names the BOM tab and is answered by a tick here)
     if (askText && offWizard(askText) && !firstAsk(mainRef.current)) return requestClose();
-    const text = askText ?? '';
+    const text = askShown ?? '';
     const show = (el: HTMLElement, bare = false) =>
       setCoach((c) => ({ el, text, n: (c?.n ?? 0) + 1, bare }));
     const bare = () => primaryRef.current && show(primaryRef.current, true);
@@ -407,17 +441,51 @@ function WizardBody({
     if (!focusAsk(mainRef.current, (el) => show(el))) bare();
   };
 
+  /**
+   * The ask line clicked (footer link, or its sentence in the warnings): the one-click fix bound to
+   * the question asked now (ui-bits ONE-CLICK FIX: `data-ask-fix` keyed by the ask), else the coach.
+   */
+  const fixOrCoach = () => {
+    const main = mainRef.current;
+    if (!clickAskFix(main, currentAskKey(main))) onAsk();
+  };
+
   // ── the one primary: action + count, derived from the session ──────────────────────────────
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
   const created = draft ? draft.pieces.filter((p) => !p.existingLineKey).length : 0;
-  const continueAnyway = () => {
+  const continueAnyway = async () => {
     if (autopilot) {
-      // the primary IS "resume autopilot": the drive runs on past every step that asks nothing
+      // the primary IS "resume autopilot": the drive runs on past every step that asks nothing.
+      // A step that only OFFERS (or where the autopilot stopped) is the operator's explicit «go on
+      // as is»: resuming alone would stop again on the same offer and the click looked dead
+      // (owner, 16.10: «I press use 8 pieces, nothing happens») — step past it first, then resume.
       started.current = session.sessionId;
+      if (askKind === 'offer' || askKind === 'stop') await api.next();
       resumeAutopilot();
     } else void api.next();
   };
+  // ── ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves on by itself ──
+  const stepRef = useRef(session.step);
+  stepRef.current = session.step;
+  const goPending = useRef<{ step: WizardStep; pastOffer: boolean } | null>(null);
+  const [goTick, setGoTick] = useState(0);
+  const answeredAndGo = useCallback((answer?: Promise<unknown>, opts?: { pastOffer?: boolean }) => {
+    const step = stepRef.current;
+    void Promise.resolve(answer).then(() => {
+      goPending.current = { step, pastOffer: !!opts?.pastOffer };
+      setGoTick((t) => t + 1);
+    });
+  }, []);
+  useEffect(() => {
+    const go = goPending.current;
+    if (go == null || session.busy) return;
+    goPending.current = null;
+    if (go.step !== session.step || session.error || blocker || !nextStep) return;
+    if (api.offer && !go.pastOffer) return;
+    void continueAnyway();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goTick, session.busy, session.step]);
   const primary = ((): PrimaryOverride & { loading?: boolean } => {
     const nextStage = nextStep ? stageLabel(STAGE_OF_STEP[nextStep.id]) : '';
     const nextTitle = nextStep ? `next: ${nextStep.label}` : undefined;
@@ -521,14 +589,28 @@ function WizardBody({
 
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
-  if (api.notice && !session.error && api.notice !== askText) warnings.push(api.notice);
+  // every line is a link that fixes it (ui-bits ONE-CLICK FIX): the step's marked fix, else the coach
+  // only the ask line's own sentence takes its bound fix; every other line coaches (never a fix
+  // of something else: an old replay miss must not click «accept residuals»)
+  const fix = { label: 'fix it', onClick: () => fixOrCoach() };
+  const coachOnly = { label: 'show where', onClick: () => onAsk() };
+  if (api.notice && !session.error && api.notice !== askText)
+    warnings.push({ text: api.notice, action: coachOnly });
+  // the footer shows the step's plain question: the session's own sentence stays visible here
+  if (askText && askShown !== askText)
+    warnings.push({
+      text: askKind === 'stop' ? `autopilot stopped · ${askText}` : askText,
+      action: fix,
+    });
   if (autopilotStop && autopilotStop !== askText)
-    warnings.push(`autopilot stopped · ${autopilotStop}`);
+    warnings.push({ text: `autopilot stopped · ${autopilotStop}`, action: coachOnly });
   if (card.downloadOnly)
-    warnings.push(
-      'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
-    );
-  if (replayOn) for (const m of misses) warnings.push(`not replayed · ${m.why}`);
+    warnings.push({
+      text: 'download only: the BOM has no fabric line, so the run ends in a DXF download — add a fabric line on the BOM tab to apply an import',
+      action: { label: 'close the import and add it on the BOM tab', onClick: requestClose },
+    });
+  if (replayOn)
+    for (const m of misses) warnings.push({ text: `not replayed · ${m.why}`, action: coachOnly });
 
   const body = (() => {
     switch (session.step) {
@@ -765,14 +847,18 @@ function WizardBody({
               <WizardPrimaryContext.Provider value={setOverride}>
                 <DroppedLabels.Provider value={droppedCtx}>
                   <QuizHistoryContext.Provider value={quizHistory}>
-                    {session.busy ? (
-                      // the last picture the run has, dimmed and out of reach while it works
-                      <div className='h-full opacity-40' inert aria-hidden>
-                        {body}
-                      </div>
-                    ) : (
-                      body
-                    )}
+                    <AnsweredAndGoContext.Provider value={answeredAndGo}>
+                      <AutoAnswerContext.Provider value={autoAnswer}>
+                        {session.busy ? (
+                          // the last picture the run has, dimmed and out of reach while it works
+                          <div className='h-full opacity-40' inert aria-hidden>
+                            {body}
+                          </div>
+                        ) : (
+                          body
+                        )}
+                      </AutoAnswerContext.Provider>
+                    </AnsweredAndGoContext.Provider>
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>
@@ -806,6 +892,7 @@ function WizardBody({
                     className={askKind === 'offer' ? undefined : 'text-warning'}
                     data-testid='pattern-import-blocker'
                     data-ask-kind={askKind}
+                    {...(askShown !== askText ? { 'data-ask-text': askText } : {})}
                     {...(autopilotStop ? { 'data-autopilot-stop': '' } : {})}
                   >
                     <button
@@ -814,11 +901,13 @@ function WizardBody({
                       title={
                         offWizard(askText) && !firstAsk(mainRef.current)
                           ? 'close the import and fix it on the card'
-                          : 'show the control that answers this'
+                          : askShown !== askText
+                            ? `${askText} — click to see where`
+                            : 'show the control that answers this'
                       }
-                      onClick={onAsk}
+                      onClick={fixOrCoach}
                     >
-                      {askKind === 'offer' ? askText : `! ${askText}`}
+                      {askKind === 'offer' ? askShown : `! ${askShown}`}
                     </button>
                   </Text>
                 ) : null}

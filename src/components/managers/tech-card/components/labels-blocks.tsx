@@ -214,7 +214,7 @@ export function LabelsBlock({
   resolvedMedia?: readonly common_TechCardMediaFull[];
 }): JSX.Element {
   return (
-    <Section title='labels' question='· every other label on the garment, each with its mockup'>
+    <Section title='labels'>
       <KeyedCards
         field='garmentLabels'
         kinds={garmentLabelKinds}
@@ -240,7 +240,7 @@ export function PackagingBlock({
   resolvedMedia?: readonly common_TechCardMediaFull[];
 }): JSX.Element {
   return (
-    <Section title='packaging' question='· the carton, and every item the garment ships with'>
+    <Section title='packaging'>
       <div id='packaging-spec'>
         <GroupLabel flush>carton</GroupLabel>
         <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>

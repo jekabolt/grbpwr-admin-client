@@ -1,10 +1,14 @@
 // Stage 2 · SHEET — the tiles put back together. Residuals are VISIBLE (Codex C6) on the drawing:
 // a tile that does not close is outlined blue with its number, a weak registration is a blue seam.
-// The panel is one line ("44/44 tiles placed"); it asks only when tiles are missing, refused or
-// do not close — accept, or set the grid by hand. Seams, votes and loop numbers are diagnostics.
+// The panel is one line ("44 pages joined ✓"); it asks only when tiles are missing, refused or
+// do not close — accept, or fix the layout (a rows × columns picker). Missing pages lead with a
+// map of the page cells, the empty ones dashed '?'. Any page on the sheet can be removed by hand
+// (click it → [remove page]: the files step's own page-role edit, undone from the panel). Seams,
+// votes and loop numbers are diagnostics.
 import { useMemo, useState } from 'react';
-import type { GridOverride, PagePose } from 'lib/pattern-import/types';
+import type { GridOverride, PagePose, BoxMm } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
@@ -26,12 +30,16 @@ import {
   ask,
   fmtMm,
 } from '../ui-bits';
-import { SheetCleanRows } from './files-clean';
+import { SheetCleanRows, roleEdit } from './files-clean';
 
 /** The coach's how (THE ASK CONTRACT, ui-bits) when the grid by hand is the answer. */
-const GRID_HINT = 'set rows, columns and step, then apply';
+const GRID_HINT = 'pick rows × columns of the printed layout';
 
 const keyOf = (p: { file: string; page: number }) => `${p.file}:${p.page}`;
+/** The inline [remove page] on the canvas carries this key prefix (SheetViewport picks by key). */
+const RM = 'rm|';
+/** The role a page removed from the sheet by hand gets (the files step's set-aside). */
+const REMOVED = 'blank' as const;
 
 /** "p3–17" (pages are 0-based; several files: "2/p3–17 …"). */
 function pageSpan(pages: readonly { file: string; page: number }[]): string {
@@ -61,7 +69,10 @@ function pathData(arrays: readonly Float32Array[]): string {
 export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }) {
   const { session, inputs, patchInputs } = api;
   const out = session.sheet;
+  const busy = !!session.busy;
   const [picked, setPicked] = useState<string | null>(null);
+  /** A page under the pointer, on the canvas or on the map of cells (outlined on both). */
+  const [hover, setHover] = useState<string | null>(null);
   const multiFile = new Set(out?.sheet.poses.map((p) => p.file) ?? []).size > 1;
   const fileName = (id: string) => session.files.find((f) => f.id === id)?.name ?? `file ${id}`;
   /** A1, B3 … in the tile grid; with a file-per-size set the file says which drawing. */
@@ -98,7 +109,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
   // Tile sheets of the files (a Burda file carries two; r4454 a main sheet + interfacing) — D6:
   // every one is in the drawing; the hand grid is set on one of them.
   const [gridSheet, setGridSheet] = useState<number>(inputs.sheetIndex);
-  /** The hand-grid fold; null = its own rule (open while the grid is the answer). */
+  /** The layout fold; null = its own rule (open while the layout is the answer). */
   const [gridOpen, setGridOpen] = useState<boolean | null>(null);
   const sheets = useMemo(
     () =>
@@ -124,9 +135,10 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
     session.pages.filter((p) => p.cls === 'tile' && p.sheet === n).length;
   const refused = sheet.refused ?? [];
   const missing = sheet.missing.length;
-  /** The grid by hand is the answer: pages left off the grid, or a placement refused. */
+  /** The layout by hand is the answer: pages left off the grid, or a placement refused. */
   const gridAsks = missing > 0 || refused.length > 0;
   const acceptAsks = overLimit && !inputs.residualsAccepted && !gridAsks;
+  const fine = !gridAsks && !overLimit;
   const gridFold = {
     open: gridOpen ?? (gridAsks || !!inputs.gridOverride),
     onOpenChange: setGridOpen,
@@ -136,6 +148,81 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
         .map((f) => `${Number(f) + 1} = ${fileName(f)}`)
         .join(' · ')
     : '';
+
+  // the grid by hand, the same dispatch whichever control sends it
+  const applyGrid = (g: GridOverride) =>
+    void api.dispatch({
+      type: 'sheet',
+      sheet: gridSheet,
+      override: {
+        ...g,
+        // The hand grid starts at the first tile page of THAT sheet, in file order.
+        originPage: (() => {
+          const t = session.pages.find((p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet);
+          return { file: t?.file ?? first?.file ?? '0', page: t?.page ?? first?.page ?? 0 };
+        })(),
+      },
+    });
+
+  /**
+   * Every committed grid change (page order, page step across / down) is sent as the whole hand
+   * grid — the same `sheet` event the rows × cols picker sends. Local state alone looked applied
+   * but the assembly never saw it (Codex review 16.10 #4). An unchanged value sends nothing.
+   */
+  const commitGrid = (p: Partial<GridOverride>) => {
+    const g = { ...grid, ...p };
+    if (g.order === grid.order && g.stepXMm === grid.stepXMm && g.stepYMm === grid.stepYMm) return;
+    setGrid(g);
+    applyGrid(g);
+  };
+
+  // a page removed by hand = the files step's page-role edit (re-runs clean → scale → assembly)
+  const splitKey = (k: string) => {
+    const at = k.lastIndexOf(':');
+    return { file: k.slice(0, at), page: Number(k.slice(at + 1)) };
+  };
+  const removePage = (k: string) => {
+    const { file, page } = splitKey(k);
+    setPicked(null);
+    setHover(null);
+    void api.dispatch({ type: 'clean', edits: roleEdit(inputs.cleanEdits, file, page, REMOVED) });
+  };
+  const removed = inputs.cleanEdits.flatMap((e) =>
+    'role' in e && e.role === REMOVED ? [{ file: e.file, page: e.page }] : [],
+  );
+  const restore = (r: { file: string; page: number }) =>
+    void api.dispatch({
+      type: 'clean',
+      edits: roleEdit(inputs.cleanEdits, r.file, r.page, 'tile'),
+    });
+  const pageWord = (r: { file: string; page: number }) =>
+    `page ${r.page + 1}${session.files.length > 1 ? ` of ${fileName(r.file)}` : ''}`;
+
+  // empty cells (missing pages) placed where their row and column are on the sheet
+  const step = { w: first?.widthMm ?? 0, h: first?.heightMm ?? 0 };
+  const holes = sheet.missing.flatMap((m) => {
+    const same = (p: PagePose) => (partOf(p)?.sheet ?? 0) === (m.sheet ?? 0);
+    const inCol = sheet.poses.find((p) => same(p) && p.col === m.col);
+    const inRow = sheet.poses.find((p) => same(p) && p.row === m.row);
+    if (!inCol || !inRow) return [];
+    const x = inCol.toSheet.e;
+    const y = inRow.toSheet.f;
+    return [{ ...m, box: { minX: x, minY: y, maxX: x + step.w, maxY: y + step.h } as BoxMm }];
+  });
+  const hoverPose = hover ? sheet.poses.find((p) => keyOf(p) === hover) : undefined;
+  const hoverHole = hover?.startsWith('?') ? holes.find((h) => holeKey(h) === hover) : undefined;
+  const reveal: BoxMm | null = hoverPose
+    ? {
+        minX: hoverPose.toSheet.e,
+        minY: hoverPose.toSheet.f,
+        maxX: hoverPose.toSheet.e + hoverPose.widthMm,
+        maxY: hoverPose.toSheet.f + hoverPose.heightMm,
+      }
+    : hoverHole?.box ?? null;
+  // pages the files step set aside: one of them may be a missing page (the role edit brings it)
+  const asideTiles = (session.clean?.dropped ?? []).filter(
+    (d) => d.status === 'suggest' && !removed.some((r) => keyOf(r) === keyOf(d)),
+  );
 
   return (
     <SplitStage
@@ -158,91 +245,176 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               {((sheet.bbox.maxY - sheet.bbox.minY) / 10).toFixed(1)} cm
             </Text>
           }
-          bodyClassName='p-0'
+          bodyClassName='p-0 flex flex-col'
         >
-          <SheetViewport bbox={sheet.bbox} onPick={(k) => setPicked(k || null)}>
-            {({ unit }) => (
-              <>
-                {sheet.poses.map((p) => {
-                  const x = p.toSheet.e;
-                  const y = p.toSheet.f;
-                  const w = p.widthMm;
-                  const h = p.heightMm;
-                  const on = picked === keyOf(p);
-                  const bad = p.residualMm > PATIMPORT.registrationMaxResidualMm * 0.66;
-                  return (
-                    <g key={keyOf(p)} data-key={keyOf(p)}>
-                      <rect
-                        x={x}
-                        y={vy(y + h)}
-                        width={w}
-                        height={h}
-                        fill={on ? SHEET_INK.pick : '#ffffff'}
-                        fillOpacity={on ? 0.7 : 0}
-                        stroke={bad ? SHEET_INK.blue : '#d5d5d5'}
-                        strokeWidth={on ? 2 : 1}
-                        vectorEffect='non-scaling-stroke'
-                      />
-                      <text
-                        x={x + 6}
-                        y={vy(y + h - 6) + Math.min(unit * 12, w / 10)}
-                        fontSize={Math.min(unit * 12, w / 10)}
-                        fill={bad ? SHEET_INK.blue : SHEET_INK.mut}
+          <div className='min-h-0 flex-1'>
+            <SheetViewport
+              bbox={sheet.bbox}
+              reveal={reveal}
+              onPick={(k) =>
+                k.startsWith(RM) ? removePage(k.slice(RM.length)) : setPicked(k || null)
+              }
+            >
+              {({ unit }) => (
+                <>
+                  {sheet.poses.map((p) => {
+                    const x = p.toSheet.e;
+                    const y = p.toSheet.f;
+                    const w = p.widthMm;
+                    const h = p.heightMm;
+                    const on = picked === keyOf(p);
+                    const hot = hover === keyOf(p);
+                    const bad = p.residualMm > PATIMPORT.registrationMaxResidualMm * 0.66;
+                    return (
+                      <g
+                        key={keyOf(p)}
+                        data-key={keyOf(p)}
+                        onPointerEnter={() => setHover(keyOf(p))}
+                        onPointerLeave={() => setHover((k) => (k === keyOf(p) ? null : k))}
                       >
-                        {tileName(p)}
-                        {bad ? ` · ${p.residualMm.toFixed(2)}` : ''}
-                      </text>
-                    </g>
-                  );
-                })}
-                {masked && (
+                        <rect
+                          x={x}
+                          y={vy(y + h)}
+                          width={w}
+                          height={h}
+                          fill={on ? SHEET_INK.pick : '#ffffff'}
+                          fillOpacity={on ? 0.7 : 0}
+                          stroke={hot || on ? SHEET_INK.blue : bad ? SHEET_INK.blue : '#d5d5d5'}
+                          strokeWidth={hot || on ? 2 : 1}
+                          vectorEffect='non-scaling-stroke'
+                        />
+                        <text
+                          x={x + 6}
+                          y={vy(y + h - 6) + Math.min(unit * 12, w / 10)}
+                          fontSize={Math.min(unit * 12, w / 10)}
+                          fill={bad ? SHEET_INK.blue : SHEET_INK.mut}
+                        >
+                          {tileName(p)}
+                          {bad ? ` · ${p.residualMm.toFixed(2)}` : ''}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {holes.map((m) => {
+                    const hot = hover === holeKey(m);
+                    return (
+                      <g key={holeKey(m)} pointerEvents='none'>
+                        <rect
+                          x={m.box.minX}
+                          y={vy(m.box.maxY)}
+                          width={step.w}
+                          height={step.h}
+                          fill={SHEET_INK.blue}
+                          fillOpacity={hot ? 0.12 : 0.04}
+                          stroke={SHEET_INK.blue}
+                          strokeWidth={hot ? 2 : 1}
+                          strokeDasharray='6 4'
+                          vectorEffect='non-scaling-stroke'
+                        />
+                        <text
+                          x={m.box.minX + step.w / 2}
+                          y={vy(m.box.minY + step.h / 2)}
+                          fontSize={Math.min(unit * 28, step.w / 4)}
+                          textAnchor='middle'
+                          dominantBaseline='middle'
+                          fill={SHEET_INK.blue}
+                        >
+                          ?
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {masked && (
+                    <path
+                      d={masked}
+                      pointerEvents='none'
+                      fill='none'
+                      stroke={SHEET_INK.source}
+                      strokeOpacity={0.6}
+                      strokeWidth={0.5}
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  )}
                   <path
-                    d={masked}
+                    d={preview}
                     pointerEvents='none'
                     fill='none'
-                    stroke={SHEET_INK.source}
-                    strokeOpacity={0.6}
-                    strokeWidth={0.5}
+                    stroke={SHEET_INK.ink}
+                    strokeOpacity={0.7}
+                    // Hairlines at every zoom: a stroke in sheet mm turns a 9-metre file-per-size
+                    // strip into solid grey at fit.
+                    strokeWidth={0.75}
                     vectorEffect='non-scaling-stroke'
+                    strokeLinejoin='round'
                   />
-                )}
-                <path
-                  d={preview}
-                  pointerEvents='none'
-                  fill='none'
-                  stroke={SHEET_INK.ink}
-                  strokeOpacity={0.7}
-                  // Hairlines at every zoom: a stroke in sheet mm turns a 9-metre file-per-size
-                  // strip into solid grey at fit.
-                  strokeWidth={0.75}
-                  vectorEffect='non-scaling-stroke'
-                  strokeLinejoin='round'
-                />
-                {weak.map((w, i) => {
-                  const a = poseOf(w.from);
-                  const b = poseOf(w.to);
-                  if (!a || !b) return null;
-                  const ax = a.toSheet.e + a.widthMm / 2;
-                  const ay = a.toSheet.f + a.heightMm / 2;
-                  const bx = b.toSheet.e + b.widthMm / 2;
-                  const by = b.toSheet.f + b.heightMm / 2;
-                  return (
-                    <line
-                      key={i}
-                      x1={ax}
-                      y1={vy(ay)}
-                      x2={bx}
-                      y2={vy(by)}
-                      stroke={SHEET_INK.blue}
-                      strokeWidth={Math.min(unit * 3, 3 * (a.widthMm / 200))}
-                      strokeDasharray={`${unit * 10} ${unit * 6}`}
-                      pointerEvents='none'
-                    />
-                  );
-                })}
-              </>
-            )}
-          </SheetViewport>
+                  {weak.map((w, i) => {
+                    const a = poseOf(w.from);
+                    const b = poseOf(w.to);
+                    if (!a || !b) return null;
+                    const ax = a.toSheet.e + a.widthMm / 2;
+                    const ay = a.toSheet.f + a.heightMm / 2;
+                    const bx = b.toSheet.e + b.widthMm / 2;
+                    const by = b.toSheet.f + b.heightMm / 2;
+                    return (
+                      <line
+                        key={i}
+                        x1={ax}
+                        y1={vy(ay)}
+                        x2={bx}
+                        y2={vy(by)}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={Math.min(unit * 3, 3 * (a.widthMm / 200))}
+                        strokeDasharray={`${unit * 10} ${unit * 6}`}
+                        pointerEvents='none'
+                      />
+                    );
+                  })}
+                  {/* the picked page's one action, at the cell (a key the viewport picks) */}
+                  {(() => {
+                    const p = picked ? sheet.poses.find((q) => keyOf(q) === picked) : undefined;
+                    if (!p || busy) return null;
+                    const fs = unit * 15;
+                    const bw = fs * 8.6;
+                    const bh = fs * 1.9;
+                    const bx = p.toSheet.e + p.widthMm / 2 - bw / 2;
+                    const by = vy(p.toSheet.f + p.heightMm / 2) - bh / 2;
+                    return (
+                      <g data-key={`${RM}${keyOf(p)}`} className='cursor-pointer' role='button'>
+                        <title>
+                          take this page off the sheet (it is set aside, like on the files step)
+                        </title>
+                        <rect
+                          x={bx}
+                          y={by}
+                          width={bw}
+                          height={bh}
+                          fill='#ffffff'
+                          stroke={SHEET_INK.ink}
+                          strokeWidth={1}
+                          vectorEffect='non-scaling-stroke'
+                        />
+                        <text
+                          x={bx + bw / 2}
+                          y={by + bh / 2}
+                          fontSize={fs}
+                          textAnchor='middle'
+                          dominantBaseline='middle'
+                          fill={SHEET_INK.ink}
+                        >
+                          REMOVE PAGE
+                        </text>
+                      </g>
+                    );
+                  })()}
+                </>
+              )}
+            </SheetViewport>
+          </div>
+          <Text size='micro' variant='label' component='p' className='shrink-0 px-2 py-1'>
+            {busy && removed.length
+              ? 'putting the sheet together again…'
+              : 'click a page to remove it'}
+          </Text>
         </Panel>
       }
       side={
@@ -250,10 +422,32 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
           <div className='flex flex-col gap-2'>
             {/* the state in one line */}
             <Text size='micro' component='p' className='tabular-nums'>
-              {sheet.poses.length}/{sheet.poses.length + missing} tiles placed
+              {fine
+                ? `${sheet.poses.length} pages joined ✓`
+                : `${sheet.poses.length} of ${sheet.poses.length + missing} pages joined`}
               {sheets.length > 1 ? ` · ${sheets.length} sheets` : ''}
-              {sheet.overview ? ` · overview p${sheet.overview.page + 1}` : ''}
             </Text>
+
+            {/* the pages taken off by hand, each with its undo */}
+            {removed.map((r) => (
+              <Text
+                key={keyOf(r)}
+                size='micro'
+                variant='label'
+                component='p'
+                className='flex items-baseline gap-2'
+              >
+                {pageWord(r)} removed ·
+                <button
+                  type='button'
+                  disabled={busy}
+                  onClick={() => restore(r)}
+                  className='underline hover:text-textColor disabled:opacity-50'
+                >
+                  undo
+                </button>
+              </Text>
+            ))}
 
             {/* D3: a refused placement has no "accept" — every reason stays in view */}
             {refused.length > 0 && (
@@ -265,11 +459,54 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                 ))}
               </CalloutBox>
             )}
+
+            {/* missing pages: the picture first — the page cells, the empty ones dashed '?' */}
             {missing > 0 && (
-              <Text size='micro' component='p' className='text-warning'>
-                ! {missing} {missing === 1 ? 'page' : 'pages'} missing
-              </Text>
+              <div
+                data-ask-zone=''
+                data-ask-label={`${missing} ${missing === 1 ? 'page' : 'pages'} missing — which?`}
+                data-ask-hint={GRID_HINT}
+                className='flex flex-col gap-2'
+              >
+                <Text size='micro' component='p' className='text-warning'>
+                  ! {missing} {missing === 1 ? 'page' : 'pages'} missing — which?
+                </Text>
+                <CellMap
+                  poses={sheet.poses}
+                  holes={sheet.missing}
+                  partOf={(p) => partOf(p)?.sheet ?? 0}
+                  hover={hover}
+                  onHover={setHover}
+                />
+                <Text size='micro' variant='label' component='p'>
+                  the drawing runs into the dashed cells — a page there is not in the file, or set
+                  aside
+                </Text>
+                {asideTiles.length > 0 && (
+                  <div className='flex flex-wrap items-center gap-1'>
+                    <Text size='micro' variant='label' component='span'>
+                      set aside:
+                    </Text>
+                    {asideTiles.slice(0, 8).map((d) => (
+                      <Chip
+                        key={keyOf(d)}
+                        disabled={busy}
+                        onClick={() =>
+                          void api.dispatch({
+                            type: 'clean',
+                            edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
+                          })
+                        }
+                        title={`use ${pageWord(d)} as a pattern page (${d.why})`}
+                      >
+                        use {pageWord(d)}
+                      </Chip>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
+
             {overLimit && (
               <div data-ask-zone='' className='flex flex-wrap items-center gap-2'>
                 <Text
@@ -290,6 +527,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                   onClick={() => patchInputs({ residualsAccepted: !inputs.residualsAccepted })}
                   title='I looked at the blue seams — the drawing runs on across them'
                   {...ask('sheet-accept', acceptAsks, 'check the blue seams, then accept')}
+                  {...(acceptAsks ? { 'data-ask-fix': 'sheet-accept' } : {})}
                 >
                   accept {fmtMm(worst)}
                 </Chip>
@@ -300,12 +538,20 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
             {out.clean && <SheetCleanRows api={api} clean={out.clean} askOn={!api.blocker} />}
           </div>
 
-          {/* the hand grid: the coach's zone when pages are missing or the placement is refused */}
-          <div data-ask-zone='' data-ask-hint={GRID_HINT}>
-            <Fold label='grid by hand' ask={gridAsks ? 'sheet-grid' : undefined} {...gridFold}>
-              <div className='grid grid-cols-2 gap-2'>
+          {/* the layout by hand: the coach's zone when pages are missing or the placement is refused */}
+          <div
+            data-ask-zone=''
+            data-ask-hint={GRID_HINT}
+            {...(missing > 0
+              ? {
+                  'data-ask-label': `${missing} ${missing === 1 ? 'page' : 'pages'} missing — which?`,
+                }
+              : {})}
+          >
+            <Fold label='fix the layout' ask={gridAsks ? 'sheet-grid' : undefined} {...gridFold}>
+              <div className='flex flex-col gap-2'>
                 {sheets.length > 1 && (
-                  <Field label='grid of sheet' className='col-span-2'>
+                  <Field label='layout of sheet'>
                     <NativeSelect
                       value={String(gridSheet)}
                       onChange={(v) => setGridSheet(Number(v))}
@@ -316,85 +562,47 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                     />
                   </Field>
                 )}
-                <Field label='rows'>
-                  <NumberField
-                    {...ask('sheet-grid', gridAsks, GRID_HINT)}
-                    value={grid.rows}
-                    min={1}
-                    step='1'
-                    onCommit={(v) =>
-                      setGrid((g) => ({ ...g, rows: Math.max(1, Math.round(v ?? 1)) }))
-                    }
-                  />
-                </Field>
-                <Field label='columns'>
-                  <NumberField
-                    value={grid.cols}
-                    min={1}
-                    step='1'
-                    onCommit={(v) =>
-                      setGrid((g) => ({ ...g, cols: Math.max(1, Math.round(v ?? 1)) }))
-                    }
-                  />
-                </Field>
-                <Field label='step across, mm'>
-                  <NumberField
-                    value={grid.stepXMm}
-                    min={1}
-                    onCommit={(v) => setGrid((g) => ({ ...g, stepXMm: v ?? g.stepXMm }))}
-                  />
-                </Field>
-                <Field label='step down, mm'>
-                  <NumberField
-                    value={grid.stepYMm}
-                    min={1}
-                    onCommit={(v) => setGrid((g) => ({ ...g, stepYMm: v ?? g.stepYMm }))}
-                  />
-                </Field>
-                <Field label='page order' className='col-span-2'>
-                  <NativeSelect
-                    value={grid.order}
-                    onChange={(v) => setGrid((g) => ({ ...g, order: v as GridOverride['order'] }))}
-                    options={[
-                      { value: 'row-major', label: 'by rows (A1 A2 A3 … B1)' },
-                      { value: 'col-major', label: 'by columns (A1 B1 C1 … A2)' },
-                    ]}
-                  />
-                </Field>
-              </div>
-              <div className='mt-2 flex flex-wrap gap-2'>
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  disabled={!!session.busy}
-                  {...ask('sheet-grid', gridAsks, 'apply the grid to place the pages')}
-                  onClick={() =>
-                    void api.dispatch({
-                      type: 'sheet',
-                      sheet: gridSheet,
-                      override: {
-                        ...grid,
-                        // The hand grid starts at the first tile page of THAT sheet, in file order.
-                        originPage: (() => {
-                          const t = session.pages.find(
-                            (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
-                          );
-                          return {
-                            file: t?.file ?? first?.file ?? '0',
-                            page: t?.page ?? first?.page ?? 0,
-                          };
-                        })(),
-                      },
-                    })
-                  }
-                >
-                  apply {grid.rows}×{grid.cols} grid
-                </Button>
+                <OrderPick
+                  value={grid.order}
+                  disabled={busy}
+                  onChange={(order) => commitGrid({ order })}
+                />
+                <LayoutPick
+                  rows={grid.rows}
+                  cols={grid.cols}
+                  disabled={busy}
+                  askOn={gridAsks}
+                  onPick={(rows, cols) => {
+                    const g = { ...grid, rows, cols };
+                    setGrid(g);
+                    applyGrid(g);
+                  }}
+                />
+                <Fold label='page size' className='mt-0'>
+                  <div className='grid grid-cols-2 gap-2'>
+                    <Field label='across, mm'>
+                      <NumberField
+                        value={grid.stepXMm}
+                        min={1}
+                        disabled={busy}
+                        onCommit={(v) => v != null && commitGrid({ stepXMm: v })}
+                      />
+                    </Field>
+                    <Field label='down, mm'>
+                      <NumberField
+                        value={grid.stepYMm}
+                        min={1}
+                        disabled={busy}
+                        onCommit={(v) => v != null && commitGrid({ stepYMm: v })}
+                      />
+                    </Field>
+                  </div>
+                </Fold>
                 {inputs.gridOverride && (
                   <Button
                     variant='underline'
                     size='xs'
-                    className='text-labelColor hover:text-textColor'
+                    className='self-start text-labelColor hover:text-textColor'
                     onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
                   >
                     back to detected
@@ -496,5 +704,207 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
         </Panel>
       }
     />
+  );
+}
+
+type Hole = { row: number; col: number; sheet?: number };
+const holeKey = (m: Hole) => `?${m.sheet ?? 0}:${m.row}:${m.col}`;
+
+/**
+ * The sheet as page cells, one small grid per tile sheet: a placed page = its page number, an empty
+ * cell the drawing runs into = dashed '?'. Hovering a cell outlines that page on the canvas.
+ */
+function CellMap({
+  poses,
+  holes,
+  partOf,
+  hover,
+  onHover,
+}: {
+  poses: readonly PagePose[];
+  holes: readonly Hole[];
+  partOf: (p: PagePose) => number;
+  hover: string | null;
+  onHover: (k: string | null) => void;
+}) {
+  const parts = [...new Set([...poses.map(partOf), ...holes.map((h) => h.sheet ?? 0)])].sort(
+    (a, b) => a - b,
+  );
+  const ratio = poses[0] ? poses[0].heightMm / poses[0].widthMm : 1.4;
+  return (
+    <div className='flex flex-wrap items-start gap-3'>
+      {parts.map((n) => {
+        const ps = poses.filter((p) => partOf(p) === n && p.row != null && p.col != null);
+        const hs = holes.filter((h) => (h.sheet ?? 0) === n);
+        const rows = Math.max(0, ...ps.map((p) => p.row! + 1), ...hs.map((h) => h.row + 1));
+        const cols = Math.max(0, ...ps.map((p) => p.col! + 1), ...hs.map((h) => h.col + 1));
+        if (!rows || !cols) return null;
+        // fit the map in ~300 × 320 px, cells keep the page's proportion
+        let w = Math.min(30, 300 / cols);
+        let h = w * ratio;
+        if (h * rows > 320) {
+          h = 320 / rows;
+          w = h / ratio;
+        }
+        const cell = new Map<string, React.ReactNode>();
+        for (const p of ps) {
+          const k = keyOf(p);
+          cell.set(
+            `${p.row},${p.col}`,
+            <div
+              key={k}
+              onPointerEnter={() => onHover(k)}
+              onPointerLeave={() => onHover(null)}
+              title={`page ${p.page + 1}`}
+              className={cn(
+                'flex items-center justify-center border text-micro tabular-nums',
+                hover === k
+                  ? 'border-warning bg-bgZebra text-textColor'
+                  : 'border-borderColor bg-bgColor text-labelColor',
+              )}
+              style={{ gridRow: p.row! + 1, gridColumn: p.col! + 1 }}
+            >
+              {p.page + 1}
+            </div>,
+          );
+        }
+        for (const m of hs) {
+          const k = holeKey(m);
+          cell.set(
+            `${m.row},${m.col}`,
+            <div
+              key={k}
+              onPointerEnter={() => onHover(k)}
+              onPointerLeave={() => onHover(null)}
+              title={`row ${m.row + 1}, column ${m.col + 1}: no page`}
+              className={cn(
+                'flex items-center justify-center border border-dashed border-warning text-micro text-warning',
+                hover === k && 'bg-bgZebra',
+              )}
+              style={{ gridRow: m.row + 1, gridColumn: m.col + 1 }}
+            >
+              ?
+            </div>,
+          );
+        }
+        return (
+          <div
+            key={n}
+            className='grid gap-px'
+            style={{
+              gridTemplateColumns: `repeat(${cols}, ${w}px)`,
+              gridTemplateRows: `repeat(${rows}, ${h}px)`,
+            }}
+            aria-label={`page cells${parts.length > 1 ? ` of sheet ${n + 1}` : ''}`}
+          >
+            {[...cell.values()]}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Page order as two pictograms: → along the rows, ↓ down the columns. */
+function OrderPick({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: GridOverride['order'];
+  onChange: (v: GridOverride['order']) => void;
+  disabled?: boolean;
+}) {
+  const opts = [
+    {
+      v: 'row-major' as const,
+      glyph: '→',
+      word: 'by rows',
+      title: 'pages run along the rows: A1 A2 A3 … B1',
+    },
+    {
+      v: 'col-major' as const,
+      glyph: '↓',
+      word: 'by columns',
+      title: 'pages run down the columns: A1 B1 C1 … A2',
+    },
+  ];
+  return (
+    <div role='radiogroup' aria-label='page order' className='flex gap-2'>
+      {opts.map((o) => (
+        <Chip
+          key={o.v}
+          role='radio'
+          aria-checked={value === o.v}
+          selected={value === o.v}
+          disabled={disabled}
+          onClick={() => onChange(o.v)}
+          title={o.title}
+        >
+          {o.glyph} {o.word}
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Rows × columns like a table-size picker: hover marks the block, a click applies it. The detected
+ * (or last applied) layout stays outlined while nothing is hovered.
+ */
+function LayoutPick({
+  rows,
+  cols,
+  disabled,
+  askOn,
+  onPick,
+}: {
+  rows: number;
+  cols: number;
+  disabled: boolean;
+  askOn: boolean;
+  onPick: (rows: number, cols: number) => void;
+}) {
+  const [at, setAt] = useState<{ r: number; c: number } | null>(null);
+  const R = Math.max(rows + 2, 12);
+  const C = Math.max(cols + 2, 8);
+  const shown = at ?? { r: rows, c: cols };
+  return (
+    <div className='flex flex-col gap-1'>
+      <div
+        className='grid w-max gap-[2px]'
+        style={{ gridTemplateColumns: `repeat(${C}, 12px)` }}
+        onPointerLeave={() => setAt(null)}
+        role='grid'
+        aria-label='rows and columns of the printed layout'
+      >
+        {Array.from({ length: R * C }, (_, i) => {
+          const r = Math.floor(i / C) + 1;
+          const c = (i % C) + 1;
+          const inBlock = r <= shown.r && c <= shown.c;
+          const isDetected = r === rows && c === cols;
+          return (
+            <button
+              key={i}
+              type='button'
+              disabled={disabled}
+              onPointerEnter={() => setAt({ r, c })}
+              onFocus={() => setAt({ r, c })}
+              onClick={() => onPick(r, c)}
+              aria-label={`${r} rows × ${c} columns`}
+              {...(isDetected ? ask('sheet-grid', askOn, GRID_HINT) : {})}
+              className={cn(
+                'size-3 border focus-visible:outline focus-visible:outline-1 focus-visible:outline-textColor disabled:cursor-not-allowed',
+                inBlock ? 'border-textColor bg-textColor' : 'border-borderColor bg-bgColor',
+                !at && isDetected && 'border-warning bg-warning',
+              )}
+            />
+          );
+        })}
+      </div>
+      <Text size='micro' variant='label' component='p' className='tabular-nums'>
+        {shown.r} × {shown.c} pages · {at ? 'click to apply' : 'as found — click a size to apply'}
+      </Text>
+    </div>
   );
 }

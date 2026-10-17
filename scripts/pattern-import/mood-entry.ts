@@ -303,6 +303,8 @@ type BlockTruth = {
   pen: { own: number | null; best: string | null; bestShare: number };
   /** (4) stretches off its own pen's lines (null: no key sample for its label). */
   kinks: number | null;
+  /** (4) where: "x,y/length" per kink. */
+  kinkAt?: string[];
   wrong: string[];
   unverified?: string;
 };
@@ -406,8 +408,11 @@ function kinksOf(
   look: Look,
   /** Where each kink is ("x,y/length"), when given. */
   at?: string[],
+  /** Each kink's stretch (first / middle / last off sample, length), when given. */
+  runs?: { a: PtMm; m: PtMm; b: PtMm; len: number }[],
 ): number {
   const at0: string[] = [];
+  const xs: PtMm[] = [];
   const b = bboxOf(outer);
   const pad = KINK_EXT_MM + 2;
   const segs: [PtMm, PtMm][] = [];
@@ -465,6 +470,7 @@ function kinksOf(
       });
       off.push(!on);
       at0.push(`${x.x.toFixed(0)},${x.y.toFixed(0)}`);
+      xs.push(x);
     }
   }
   const n = off.length;
@@ -478,6 +484,12 @@ function kinksOf(
       if (run * STEP > KINK_RUN_MM) {
         kinks++;
         at?.push(`${at0[(first + k - Math.ceil(run / 2)) % n]}/${(run * STEP).toFixed(1)}`);
+        runs?.push({
+          a: xs[(first + k - run) % n],
+          m: xs[(first + k - Math.ceil(run / 2)) % n],
+          b: xs[(first + k - 1) % n],
+          len: run * STEP,
+        });
       }
       run = 0;
     }
@@ -633,6 +645,97 @@ function autoKinks(sm: Sample, s: Session, families: PieceFamily[]): Partial<Fil
   };
 }
 
+/**
+ * MOOD_KINK_DUMP=<dir>: one JSON per kinked written outline — the outline, its kinks, the drawn
+ * line work near each kink (each chain with the key labels whose pen it matches) and the chains
+ * the session built the outline from (walls, corner walls, derived / continuity stretches).
+ */
+function dumpKink(
+  sm: Sample,
+  s: Session,
+  set: ChainSet,
+  styles: Map<number, Style>,
+  key: KeyRow[],
+  cand: PieceFamily['candidates'][number],
+  t: BlockTruth,
+  runs: { a: PtMm; m: PtMm; b: PtMm; len: number }[],
+  scope: string,
+) {
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const P = (p: PtMm) => [r2(p.x), r2(p.y)];
+  // everything drawn over the outline's box (+15 mm): the kinks are judged against it
+  const ob = bboxOf(cand.outer);
+  const nearAny = (pts: PtMm[]) => {
+    const b = bboxOf(pts);
+    return !(
+      b.maxX < ob.minX - 15 ||
+      b.minX > ob.maxX + 15 ||
+      b.maxY < ob.minY - 15 ||
+      b.minY > ob.maxY + 15
+    );
+  };
+  const lab = (c: Chain) => {
+    const l = chainLook(c, styles);
+    return l ? key.filter((r) => r.look && looseSame(l, r.look)).map((r) => r.label) : [];
+  };
+  const pick = (cs: Chain[]) =>
+    cs
+      .filter((c) => c.pts.length > 1 && nearAny(c.pts))
+      .map((c) => ({
+        id: c.id,
+        closed: c.closed,
+        style: c.style,
+        motif: c.motif,
+        labels: lab(c),
+        pts: c.pts.map(P),
+      }));
+  const classOf = new Map<number, string>();
+  for (const k of set.classes)
+    for (const id of k.chains)
+      classOf.set(
+        id,
+        `${k.role}:${k.sizeLabel ?? ''} ${JSON.stringify(
+          k.evidence.map((e) =>
+            e.kind === 'face-stray'
+              ? { kind: e.kind, why: e.byWhy?.find((w) => w.chains.includes(id))?.why ?? e.why }
+              : e,
+          ),
+        ).slice(0, 200)}`,
+      );
+  const sess = pick(set.chains).map((c) => ({
+    ...c,
+    cls: classOf.get(c.id) ?? null,
+    wall: cand.walls.includes(c.id),
+  }));
+  const out = {
+    id: sm.id,
+    scope,
+    block: t.block,
+    label: t.label,
+    rank: t.rank,
+    seed: t.seed,
+    passes: t.passes,
+    by: t.by,
+    rankFrom: cand.rankFrom ?? null,
+    outer: cand.outer.map(P),
+    runs: runs.map((k) => ({ a: P(k.a), m: P(k.m), b: P(k.b), len: k.len })),
+    drawn: pick(drawnChains(s).chains),
+    session: sess,
+    corner: (set.cornerWalls ?? [])
+      .filter((w) => nearAny(w.pts))
+      .map((w) => ({ rule: w.rule, ends: w.ends, own: w.own, pts: w.pts.map(P) })),
+    derived: (cand.derived ?? []).map((d) => ({ kind: d.kind, pts: d.pts.map(P) })),
+    continuity: (cand.continuity ?? []).map((c) => ({
+      pts: (c as { pts: PtMm[] }).pts.map(P),
+      chains: (c as { chains: number[] }).chains,
+    })),
+  };
+  writeFileSync(
+    resolve(process.env.MOOD_KINK_DUMP!, `${sm.id}-${t.block.replace(/\//g, '_')}.json`),
+    JSON.stringify(out),
+  );
+}
+
 export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {
   const S = s as unknown as {
     sheet: Sheet;
@@ -705,9 +808,17 @@ export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): P
         by: [...new Set(blocking.get(`${sc.target.scopeKey}|${mb.block}`) ?? ['?'])],
         areaCm2: Math.round(Math.abs(signedArea(cand.outer)) / 100),
         pen: { own: own == null ? null : +own.toFixed(2), best, bestShare: +bestShare.toFixed(2) },
-        kinks: ownRow?.look ? kinksOf(cand.outer, drawnChains(s), styles, ownRow.look) : null,
+        kinks: null,
         wrong: [],
       };
+      if (ownRow?.look) {
+        const runs: { a: PtMm; m: PtMm; b: PtMm; len: number }[] = [];
+        t.kinks = kinksOf(cand.outer, drawnChains(s), styles, ownRow.look, undefined, runs);
+        if (runs.length)
+          t.kinkAt = runs.map((r) => `${r.m.x.toFixed(0)},${r.m.y.toFixed(0)}/${r.len}`);
+        if (runs.length && process.env.MOOD_KINK_DUMP)
+          dumpKink(sm, s, set, styles, key, cand, t, runs, sc.target.scopeKey);
+      }
       if (uni) t.unverified = 'one-size piece';
       else if (best && best !== label && bestShare >= 0.5 && bestShare >= (own ?? 0) + 0.15)
         t.wrong.push(
@@ -813,7 +924,7 @@ export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): P
       .map((t) => `${t.block}[${t.label}]: ${t.wrong.join('; ')}`),
     truth: truths.map(
       (t) =>
-        `${t.block}${t.passes ? '✓' : `✗${t.by.join('+')}`} ${t.label} own=${t.pen.own} best=${t.pen.best}:${t.pen.bestShare} kinks=${t.kinks}${t.wrong.length ? ` WRONG ${t.wrong.join('; ')}` : ''}`,
+        `${t.block}${t.passes ? '✓' : `✗${t.by.join('+')}`} ${t.label} own=${t.pen.own} best=${t.pen.best}:${t.pen.bestShare} kinks=${t.kinks}${t.kinkAt ? ` at ${t.kinkAt.join(' ')}` : ''}${t.wrong.length ? ` WRONG ${t.wrong.join('; ')}` : ''}`,
     ),
   };
 }
