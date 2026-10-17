@@ -19,7 +19,7 @@
 // Pure functions: the gate (written contours), the semantics stage (fill candidates + the wall
 // model's size lines) and the archive probe call the same code.
 import type { PtMm } from 'lib/pattern-import/types';
-import { bboxOf, segNearest, SegGrid, signedArea } from 'lib/pattern-import/pieces/geom';
+import { bboxOf, segNearest, SegGrid, signedArea, simplify } from 'lib/pattern-import/pieces/geom';
 
 import { fitFamily, GFIT_TOL_P0, type GfitFamily, type GfitSizeIn, type GfitTol } from './fit';
 
@@ -44,6 +44,8 @@ export const SIZE_RUN = {
   collapseOnShare: 0.85,
   /** …sampled every this many mm. */
   sampleMm: 1,
+  /** Perimeters are measured on the outline simplified to this, mm. */
+  perimeterTolMm: 0.5,
 };
 
 export type SizeRunRow = { key: string; rank: number; ring: readonly PtMm[] };
@@ -54,7 +56,10 @@ export type SizeRunProblem = {
   note: string;
 };
 
-const perimeterOf = (p: readonly PtMm[]) => {
+/** Perimeter of a closed ring, measured on its 0.5 mm simplification: a traced (scan) outline's
+ * pixel jitter adds length the drawing does not (leonie: 36 read 411 mm longer than 40). */
+const perimeterOf = (p0: readonly PtMm[]) => {
+  const p = simplify([...p0, p0[0]], SIZE_RUN.perimeterTolMm).slice(0, -1);
   let L = 0;
   for (let i = 0; i < p.length; i++) {
     const a = p[i];
