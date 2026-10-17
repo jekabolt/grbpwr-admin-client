@@ -14,18 +14,32 @@ import type {
   PageClassification,
   PagePose,
   PairTransform,
+  PitchSource,
   Progress,
   Sheet,
   SourceDoc,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { assembleGroup, type GroupResult } from './group';
+import { assembleGroup, DEFAULT_GROUP_OPTS, type GroupResult } from './group';
 import { cellGeometry } from './holes';
 import { indexLabels, labelConflicts, labelGridOf } from './labels';
 import { drawingBox, detectLattice } from './overview';
 import { apply, placePages } from './place';
 import { edgeCrossings, furnitureOf, pageKey } from './regpage';
+import { tilesLineOf } from './tiles-line';
+
+/** TILESTEP: weakest first — a sheet of several files reports its least-founded pitch. */
+const PITCH_RANK: PitchSource[] = [
+  'page-size',
+  'tiles-line',
+  'edge-votes',
+  'raster-frame',
+  'recurrence',
+  'single',
+  'manual',
+];
+export const pitchRank = (p: PitchSource) => PITCH_RANK.indexOf(p);
 
 export type SheetReport = {
   groups: GroupResult[];
@@ -211,9 +225,11 @@ function missingCells(
   // Frame, rulers and corner targets end on every page edge — they are not drawing.
   const furniture = furnitureOf(pages);
 
+  // TILESTEP: the cells the file's tiles line declares blank were never printed — not missing
+  const blank = new Set(g.blank.map((b) => `${b.row},${b.col}`));
   for (let r = Math.min(...rows); r <= Math.max(...rows); r++)
     for (let c = Math.min(...cols); c <= Math.max(...cols); c++) {
-      if (cells.has(`${r},${c}`)) continue;
+      if (cells.has(`${r},${c}`) || blank.has(`${r},${c}`)) continue;
       let evidence = 0;
       for (const [dr, dc, side] of [
         [0, -1, 'R'],
@@ -289,10 +305,12 @@ export function assembleSheetDetailed(
   const total = byFile.size + 1;
   const fileOffsets = new Map<string, { dx: number; dy: number }>();
   const alignment: SheetReport['alignment'] = [];
+  const pitchFroms: PitchSource[] = [];
   for (const [file, pages] of byFile) {
     progress?.(done, total, `file ${file}: ${pages.length} tiles`);
     if (override && (override.originPage.file === file || byFile.size === 1)) {
       const m = manualPoses(pages, override);
+      pitchFroms.push('manual');
       for (const p of m.poses) allPoses.set(pageKey(p.file, p.page), p);
       allPairs.push(...m.pairs);
       warnings.push(
@@ -332,6 +350,7 @@ export function assembleSheetDetailed(
             ' — clear the hand grid: the labels place the tiles',
         );
     } else if (pages.length === 1) {
+      pitchFroms.push('single');
       const p = pages[0];
       allPoses.set(pageKey(p.file, p.page), {
         file: p.file,
@@ -344,7 +363,12 @@ export function assembleSheetDetailed(
         residualMm: 0,
       });
     } else {
-      const g = assembleGroup(pages);
+      // TILESTEP: the file's tiles line (its page 1), held to the file inside the group.
+      const doc = docs.find((d) => d.file.id === file);
+      const tl = tilesLineOf(doc?.pages.find((p) => p.page === 0));
+      warnings.push(...tl.warnings.map((w) => (byFile.size > 1 ? `file ${file}: ${w}` : w)));
+      const g = assembleGroup(pages, DEFAULT_GROUP_OPTS, undefined, tl.decl);
+      pitchFroms.push(g.pitch.from);
       groups.push(g);
       for (const p of g.poses) allPoses.set(pageKey(p.file, p.page), p);
       allPairs.push(...g.pairs);
@@ -496,6 +520,11 @@ export function assembleSheetDetailed(
     bbox: pl.bbox,
     missing: missingAt,
     ...(refused.length ? { refused } : {}),
+    ...(pitchFroms.length
+      ? {
+          pitchFrom: pitchFroms.reduce((a, b) => (pitchRank(b) < pitchRank(a) ? b : a)),
+        }
+      : {}),
     overview,
     paths: pl.paths,
     texts: pl.texts,

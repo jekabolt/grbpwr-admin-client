@@ -21,7 +21,15 @@ export type RawLink = {
   n2: number;
   /** Max deviation of the individual measurements from the mean, mm. */
   spreadMm: number;
+  /**
+   * TILESTEP: a shape of the link runs past a page's edge (drawn whole, the page a window onto
+   * it) — it crosses a seam, so it cannot be a copy of a piece that sits inside another page.
+   */
+  crossing?: boolean;
 };
+
+const runsOff = (pts: { x: number; y: number }[], r: RegPage['rect']) =>
+  pts.some((v) => v.x < r.minX - 1 || v.y < r.minY - 1 || v.x > r.maxX + 1 || v.y > r.maxY + 1);
 
 function shapeHash(pts: { x: number; y: number }[], q: number): string {
   // FNV-1a over the quantised relative vertices, plus the count — collisions are re-checked.
@@ -55,19 +63,26 @@ function sameShape(
 
 /**
  * Pairwise links from shapes that recur on several pages. A shape that occurs twice on one page
- * (two identical darts) or on more than `maxOcc` pages (a logo) is ambiguous and skipped.
+ * (two identical darts) or on more than `maxOcc` pages (a logo) is ambiguous and skipped. A link
+ * needs `minN` agreeing shapes (2: one shape may be a copy of a piece on another page); TILESTEP
+ * asks for 1 to CHECK a step it got elsewhere, never to set one.
  */
-export function recurrenceLinks(pages: RegPage[], maxOcc = 12): RawLink[] {
+export function recurrenceLinks(
+  pages: RegPage[],
+  maxOcc = 12,
+  minN = 2,
+  shapesOf: (p: RegPage) => RegPage['shapes'] = (p) => p.shapes,
+): RawLink[] {
   const q = PATIMPORT.registrationStepMm;
   const occ = new Map<string, { p: RegPage; s: RegPage['shapes'][number] }[]>();
   for (const p of pages)
-    for (const s of p.shapes) {
+    for (const s of shapesOf(p)) {
       const k = shapeHash(s.pts, q);
       const list = occ.get(k);
       if (list) list.push({ p, s });
       else occ.set(k, [{ p, s }]);
     }
-  type Acc = { a: RegPage; b: RegPage; ds: { dx: number; dy: number }[] };
+  type Acc = { a: RegPage; b: RegPage; ds: { dx: number; dy: number }[]; crossing: boolean };
   const acc = new Map<string, Acc>();
   for (const list of occ.values()) {
     if (list.length < 2 || list.length > maxOcc) continue;
@@ -79,7 +94,9 @@ export function recurrenceLinks(pages: RegPage[], maxOcc = 12): RawLink[] {
         if (A.p.idx > B.p.idx) [A, B] = [B, A];
         if (!sameShape(A.s.pts, B.s.pts, 2 * q)) continue;
         const key = `${A.p.key}|${B.p.key}`;
-        const e = acc.get(key) ?? { a: A.p, b: B.p, ds: [] };
+        const e = acc.get(key) ?? { a: A.p, b: B.p, ds: [], crossing: false };
+        if (!e.crossing && (runsOff(A.s.pts, A.p.rect) || runsOff(B.s.pts, B.p.rect)))
+          e.crossing = true;
         // Same point: a + t_a = b + t_b → t_b = t_a + (a − b).
         e.ds.push({ dx: A.s.pts[0].x - B.s.pts[0].x, dy: A.s.pts[0].y - B.s.pts[0].y });
         acc.set(key, e);
@@ -91,8 +108,18 @@ export function recurrenceLinks(pages: RegPage[], maxOcc = 12): RawLink[] {
     if (!best) continue;
     const { n, n2, dx, dy, spread } = best;
     const total = e.ds.length;
-    if (n < 2 || n < 0.6 * total || n < PATIMPORT.registrationMinPeakRatio * n2) continue;
-    links.push({ a: e.a, b: e.b, dx, dy, method: 'recurrence', n, n2, spreadMm: spread });
+    if (n < minN || n < 0.6 * total || n < PATIMPORT.registrationMinPeakRatio * n2) continue;
+    links.push({
+      a: e.a,
+      b: e.b,
+      dx,
+      dy,
+      method: 'recurrence',
+      n,
+      n2,
+      spreadMm: spread,
+      ...(e.crossing ? { crossing: true } : {}),
+    });
   }
   return links;
 }

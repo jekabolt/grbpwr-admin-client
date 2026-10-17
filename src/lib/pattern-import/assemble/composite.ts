@@ -29,7 +29,7 @@ import type {
   Style,
 } from 'lib/pattern-import/types';
 
-import { assembleSheetDetailed, type SheetReport } from './sheet';
+import { assembleSheetDetailed, pitchRank, type SheetReport } from './sheet';
 
 /**
  * D6: the gap between two tile sheets laid side by side in one import, mm — far beyond any snap,
@@ -182,6 +182,9 @@ export function assembleAllSheets(
       (out.refused ??= []).push(...s.refused.map((r) => (multi ? `sheet ${k + 1}: ${r}` : r)));
     out.warnings.push(...s.warnings.map((w) => (multi ? `sheet ${k + 1}: ${w}` : w)));
     if (!multi) out.overview = s.overview;
+    // TILESTEP: the drawing reports its least-founded pitch (sheet.ts PITCH_RANK)
+    if (s.pitchFrom && (!out.pitchFrom || pitchRank(s.pitchFrom) < pitchRank(out.pitchFrom)))
+      out.pitchFrom = s.pitchFrom;
     const [tw, th] = report.tileExtent;
     const w = Math.max(
       Number.isFinite(tw) ? tw : 0,
@@ -203,6 +206,7 @@ export function assembleAllSheets(
       anchor: n === 0,
       maxResidualMm: Math.max(0, ...s.poses.map((p) => p.residualMm)),
       missing: s.missing.length,
+      ...(s.pitchFrom ? { pitchFrom: s.pitchFrom } : {}),
     });
     x = dx + w + SHEET_GAP_MM;
   });

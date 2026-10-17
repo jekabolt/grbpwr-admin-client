@@ -320,6 +320,21 @@ export type PageClassification = {
 
 export type RegistrationMethod = 'recurrence' | 'edge-stitch' | 'grid-label' | 'manual';
 
+/**
+ * TILESTEP: where a tile sheet's pitch (the offset between neighbouring tiles) came from —
+ * 'recurrence' / 'edge-votes' measured on the drawing, 'raster-frame' (traced images abut),
+ * 'tiles-line' (our own export's GRBPWR-TILES line, held to the file: assemble/tiles-line.ts),
+ * 'page-size' (nothing measured: assumed), 'manual' (the operator's hand grid), 'single' (one page).
+ */
+export type PitchSource =
+  | 'recurrence'
+  | 'edge-votes'
+  | 'raster-frame'
+  | 'tiles-line'
+  | 'page-size'
+  | 'manual'
+  | 'single';
+
 export type PairTransform = {
   from: { file: FileId; page: PageIndex };
   to: { file: FileId; page: PageIndex };
@@ -368,6 +383,8 @@ export type Sheet = {
    * the sheet step; there is no "accept" — the operator fixes the pages or the grid.
    */
   refused?: string[];
+  /** TILESTEP: where the tile pitch came from (absent on an older sheet / the DXF fast path). */
+  pitchFrom?: PitchSource;
   /** Overview page, if one was found: its own scale relative to the sheet, for the gate. */
   overview?: { file: FileId; page: PageIndex; factor: number; bbox: BoxMm };
   /** Paths of every tile already in sheet frame and deduplicated across overlaps. */
@@ -458,6 +475,8 @@ export type SheetPart = {
   maxResidualMm: Mm;
   /** Missing tile cells of this sheet. */
   missing: number;
+  /** TILESTEP: where this sheet's tile pitch came from. */
+  pitchFrom?: PitchSource;
 };
 
 export type GridOverride = {
@@ -1903,9 +1922,15 @@ export type ManifestSource = {
   files: { name: string; sha256: string; bytes: number; kind: SourceKind; pages: number }[];
   scale: { method: ScaleMethod; factor: number; measuredMm: Mm | null; declaredMm: Mm | null };
   /** The whole drawing (D6: every tile sheet): pages placed, first registration method, worst residual. */
-  sheet: { pages: number; method: RegistrationMethod | 'single'; maxResidualMm: Mm };
+  sheet: {
+    pages: number;
+    method: RegistrationMethod | 'single';
+    maxResidualMm: Mm;
+    /** TILESTEP: where the tile pitch came from. Optional and shape-tolerant on read. */
+    pitch?: PitchSource;
+  };
   /** D6: the tile sheets the drawing is made of, when there are several (absent = one). */
-  sheets?: { sheet: number; pages: number; maxResidualMm: Mm }[];
+  sheets?: { sheet: number; pages: number; maxResidualMm: Mm; pitch?: PitchSource }[];
   /**
    * UXHOOKS: missing tile cells imported as blank pages — per cell, the drawn lines ending inside
    * it (`lineEnds`, the sheet's lines) and the traced chains ending inside it (`chainEnds`): the

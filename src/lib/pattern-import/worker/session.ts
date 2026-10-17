@@ -1897,6 +1897,8 @@ export class Session {
             ? 'single'
             : this.sheet?.pairs[0]?.method ?? 'single',
         maxResidualMm: Math.max(0, ...(this.sheet?.poses.map((p) => p.residualMm) ?? [0])),
+        // TILESTEP: where the tile pitch came from (measured, the tiles line, assumed, by hand)
+        ...(this.sheet?.pitchFrom ? { pitch: this.sheet.pitchFrom } : {}),
       },
       // D6: every tile sheet the drawing is made of
       ...((this.sheet?.parts?.length ?? 0) > 1
@@ -1905,6 +1907,7 @@ export class Session {
               sheet: p.sheet,
               pages: p.pages.length,
               maxResidualMm: p.maxResidualMm,
+              ...(p.pitchFrom ? { pitch: p.pitchFrom } : {}),
             })),
           }
         : {}),
