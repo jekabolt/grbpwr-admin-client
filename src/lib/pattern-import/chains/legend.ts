@@ -191,14 +191,47 @@ function splitByLook(set: ChainSet, row: LineClass): [number[], number[]] | null
   return twoBiggest(set, [...look.values()], row.chains);
 }
 
+/**
+ * Nesting split tuning. A line of the row reads its place among the other sizes only where it
+ * stands apart from them: on a stretch where every size runs on top of one another (a fold, a
+ * straight edge all sizes share — LEAKS' motif rows give each size its own copy of it) the nearest
+ * line on either side says nothing about the line's size.
+ */
+const NEST = {
+  stepMm: 5,
+  reachMm: 25,
+  /** a size line this close runs on top of this one: the sample is coincident, not read */
+  coincideMm: 0.15,
+  /** lines within this of the nearest on one side stand there together (a coincident bundle) */
+  bundleMm: 0.15,
+  /** the nearer neighbour is ≥ this fraction of the local grade step (not a converging stretch) */
+  apartFrac: 0.25,
+  /** a line is placed by ≥ this many separated samples */
+  minSamples: 3,
+  /** a line read only on coincident stretches: ≥ this share of its samples say one of the two gaps */
+  hairAgree: 0.8,
+  /** a copy of a line: ≥ copyCover of it within copyMm of that line; a line shorter than
+   *  copyMinMm on a placed line is not trusted to be the other size (a tile-overlap duplicate) */
+  copyMm: 0.5,
+  copyCover: 0.6,
+  copyMinMm: 30,
+  /** extents compared only when each copy lies ≥ this much on the other colour's copies; another
+   *  size's copy of the line counts in the trend when ≥ this much of it lies on the copies */
+  trendCover: 0.75,
+  /** the extent trend over the other sizes' copies (Kendall τ), and the colours' length difference */
+  trendTau: 0.6,
+  trendMinSizes: 3,
+  copyDiffMm: 1,
+};
+
 function splitByNesting(
   set: ChainSet,
   row: LineClass,
   classes: LineClass[],
 ): [number[], number[]] | null {
   // other size rows' lines, with their nesting rank: where does each line of this row stand among
-  // them — the mean rank of the size lines next to it on either side (S between XS and M ≈ 2, L
-  // between M and XL ≈ 4); the row's lines fall in two groups when the row holds two sizes
+  // them — between the size lines next to it on either side (S between XS and M ≈ 2, L between M
+  // and XL ≈ 4); the row's lines fall in two groups when the row holds two sizes
   const rankOfRow = (c: LineClass) => {
     for (const e of c.evidence) if (e.kind === 'nesting-order') return e.rank;
     return null;
@@ -210,18 +243,34 @@ function splitByNesting(
   }
   const grid = new SegGrid(8);
   for (const i of rankOf.keys()) if (set.chains[i]) grid.addPolyline(i, set.chains[i].pts);
-  const at: { i: number; v: number; len: number }[] = [];
+  const lenOf = (i: number) => set.chains[i]?.lengthMm ?? 0;
+
+  // the gaps between the other sizes, in nesting order: each of the row's two sizes stands in one
+  // (S between XS and M, L between M and XL)
+  const ranks = [...new Set(rankOf.values())].sort((x, y) => x - y);
+  const cellOf = new Map(ranks.map((r, k) => [r, k]));
+
+  // 1 — each line's place, read on its separated stretches only: every sample says "between these
+  // two sizes" (a span of gaps); a sample spanning several gaps shares its vote among them
+  const score = new Map<number, Map<number, number>>();
+  // the same read on its coincident stretches: lines a hair apart (≤ coincideMm) still in order
+  // (L 0.05 mm inside XL and 0.05 mm outside M) — trusted only for a line with no separated read,
+  // and only when nearly all of it says one gap (true coincidence jitters from gap to gap)
+  const hair = new Map<number, { sc: Map<number, number>; n: number }>();
   for (const i of row.chains) {
     const ch = set.chains[i];
-    if (!ch || ch.lengthMm < 10) continue;
-    const vs: number[] = [];
-    for (const sm of resample(ch.pts, 5)) {
-      const best = [Infinity, Infinity];
-      const side = [-1, -1];
-      grid.near(sm.p, 25, (j, si) => {
+    if (!ch) continue;
+    const sc = new Map<number, number>();
+    const sc2 = new Map<number, number>();
+    let n = 0;
+    let n2 = 0;
+    for (const sm of resample(ch.pts, NEST.stepMm)) {
+      // per side: the nearest distance of each rank there
+      const sides = [new Map<number, number>(), new Map<number, number>()];
+      grid.near(sm.p, NEST.reachMm, (j, si) => {
         const q = set.chains[j].pts;
         const r = segNearest(sm.p, q[si], q[si + 1]);
-        if (r.d > 25 || r.d < 0.05) return;
+        if (r.d > NEST.reachMm) return;
         const a = q[si];
         const b = q[si + 1];
         const v: PtMm = {
@@ -229,40 +278,209 @@ function splitByNesting(
           y: a.y + (b.y - a.y) * r.u - sm.p.y,
         };
         // which side of the line's direction the neighbour is on
-        const k = sm.t.x * v.y - sm.t.y * v.x > 0 ? 0 : 1;
-        if (r.d < best[k]) {
-          best[k] = r.d;
-          side[k] = rankOf.get(j)!;
-        }
+        const m = sides[sm.t.x * v.y - sm.t.y * v.x > 0 ? 0 : 1];
+        const rk = rankOf.get(j)!;
+        if (r.d < (m.get(rk) ?? Infinity)) m.set(rk, r.d);
       });
-      if (side[0] >= 0 && side[1] >= 0) vs.push((side[0] + side[1]) / 2);
+      if (!sides[0].size || !sides[1].size) continue;
+      const best = sides.map((m) => Math.min(...m.values()));
+      const near = Math.min(best[0], best[1]);
+      // the bundle standing nearest on each side (sizes coinciding there stand together)
+      const [A, B] = sides.map((m, k) =>
+        [...m].filter(([, d]) => d <= best[k] + NEST.bundleMm).map(([rk]) => rk),
+      );
+      let lo: number;
+      let hi: number;
+      if (Math.max(...A) < Math.min(...B)) [lo, hi] = [Math.max(...A), Math.min(...B)];
+      else if (Math.max(...B) < Math.min(...A)) [lo, hi] = [Math.max(...B), Math.min(...A)];
+      else continue; // the same size on both sides (two pieces' lines), or out of order
+      const c0 = cellOf.get(lo)!;
+      const c1 = cellOf.get(hi)!;
+      // another size runs on top of this one here: only a hair's read
+      if (near < NEST.coincideMm) {
+        for (let c = c0; c < c1; c++) sc2.set(c, (sc2.get(c) ?? 0) + 1 / (c1 - c0));
+        n2++;
+        continue;
+      }
+      // converging: the line hugs one side much closer than a grade step
+      if (near < (NEST.apartFrac * (best[0] + best[1])) / (hi - lo)) continue;
+      for (let c = c0; c < c1; c++) sc.set(c, (sc.get(c) ?? 0) + 1 / (c1 - c0));
+      n++;
     }
-    if (vs.length < 2) continue;
-    vs.sort((x, y) => x - y);
-    at.push({ i, v: vs[vs.length >> 1], len: ch.lengthMm });
+    if (n >= NEST.minSamples) score.set(i, sc);
+    else if (n2 >= NEST.minSamples) hair.set(i, { sc: sc2, n: n2 });
   }
-  if (at.length < 2) return null;
-  // two groups along the rank axis: the cut with the widest gap, both sides ≥ 10 % of the length
-  at.sort((x, y) => x.v - y.v);
-  const total = at.reduce((t, e) => t + e.len, 0);
-  let cut = -1;
-  let gap = 0;
-  let acc = 0;
-  for (let k = 0; k + 1 < at.length; k++) {
-    acc += at[k].len;
-    const g = at[k + 1].v - at[k].v;
-    if (g > gap && acc >= 0.1 * total && total - acc >= 0.1 * total) {
-      gap = g;
-      cut = k;
+  // the two gaps holding the most of the row's read length (its separated samples), each ≥ 10 %
+  // of it — a long line read on a few samples weighs those samples, not its whole length
+  const byCell = new Map<number, number>();
+  let total = 0;
+  for (const sc of score.values())
+    for (const [c, x] of sc) {
+      byCell.set(c, (byCell.get(c) ?? 0) + x * NEST.stepMm);
+      total += x * NEST.stepMm;
+    }
+  const [cA, cB] = [...byCell]
+    .filter(([, len]) => len >= 0.1 * total)
+    .sort((x, y) => y[1] - x[1])
+    .map(([c]) => c);
+  // the row's lines all stand in one gap: one size
+  if (cA == null || cB == null) return null;
+  const [cLo, cHi] = cA < cB ? [cA, cB] : [cB, cA];
+  const lo = new Set<number>();
+  const hi = new Set<number>();
+  const place = new Set<number>();
+  for (const [i, sc] of score) {
+    const a = sc.get(cLo) ?? 0;
+    const b = sc.get(cHi) ?? 0;
+    if (a === b) continue;
+    (a > b ? lo : hi).add(i);
+    place.add(i);
+  }
+  for (const [i, { sc, n }] of hair) {
+    const a = sc.get(cLo) ?? 0;
+    const b = sc.get(cHi) ?? 0;
+    if (Math.max(a, b) < NEST.hairAgree * n) continue;
+    (a > b ? lo : hi).add(i);
+    place.add(i);
+  }
+  // a gap whose lines all lean to the other one after all: no second size
+  if (!lo.size || !hi.size) return null;
+
+  // 2 — the lines with no separated stretch (every size on top of them). A line of this row lying on
+  // another line of this row is the other size's copy of that stretch (a size does not draw its line
+  // twice): it goes to the other group. So the copies of one line are coloured in two, starting
+  // from the lines placed above; copies of a line none of which is placed are told apart by their
+  // extent — the other sizes' copies of that line grow (or shrink) with the size, and the longer
+  // colour follows that trend. Anything else stays with the larger part, as before.
+  const unplaced = row.chains.filter((i) => set.chains[i] && !place.has(i));
+  if (unplaced.length) {
+    const rowGrid = new SegGrid(8);
+    for (const i of row.chains) if (set.chains[i]) rowGrid.addPolyline(i, set.chains[i].pts);
+    // the share of line i's samples running within copyMm of each line of the grid (or of any of
+    // `only`, when given)
+    const onTop = (i: number, g: SegGrid, only?: Set<number>) => {
+      const n = new Map<number, number>();
+      let any = 0;
+      const smp = resample(set.chains[i].pts, NEST.stepMm);
+      for (const sm of smp) {
+        const hit = new Set<number>();
+        g.near(sm.p, NEST.copyMm, (j, si) => {
+          if (j === i || hit.has(j) || (only && !only.has(j))) return;
+          const q = set.chains[j].pts;
+          if (segNearest(sm.p, q[si], q[si + 1]).d <= NEST.copyMm) hit.add(j);
+        });
+        for (const j of hit) n.set(j, (n.get(j) ?? 0) + 1);
+        if (hit.size) any++;
+      }
+      const k = Math.max(1, smp.length);
+      return { share: new Map([...n].map(([j, c]) => [j, c / k])), any: any / k };
+    };
+    // copies: an unplaced line lying on another line of the row (both ways count as one edge)
+    const edges = new Map<number, Set<number>>();
+    const link = (x: number, y: number) => {
+      for (const [p, q] of [
+        [x, y],
+        [y, x],
+      ]) {
+        const e = edges.get(p);
+        if (e) e.add(q);
+        else edges.set(p, new Set([q]));
+      }
+    };
+    // a short stray on a placed line may be a tile-overlap duplicate of the same size
+    for (const u of unplaced)
+      for (const [j, sh] of onTop(u, rowGrid).share)
+        if (sh >= NEST.copyCover && (!place.has(j) || lenOf(u) >= NEST.copyMinMm)) link(u, j);
+    // the other sizes' copies of one line (its copies in two colours): how their length goes with
+    // their rank (Kendall τ) — each counts when ≥ trendCover of it lies on one colour's copies
+    const trendOf = (cls: Set<number>[]) => {
+      const over = new Map<number, number>();
+      for (const c of cls) {
+        const mm = new Map<number, number>();
+        for (const i of c)
+          for (const [j, sh] of onTop(i, grid).share) mm.set(j, (mm.get(j) ?? 0) + sh * lenOf(i));
+        for (const [j, x] of mm) over.set(j, Math.max(over.get(j) ?? 0, x));
+      }
+      const pts = [...over]
+        .filter(([j, mm]) => mm >= NEST.trendCover * lenOf(j))
+        .map(([j]) => ({ r: rankOf.get(j)!, len: lenOf(j) }));
+      if (new Set(pts.map((p) => p.r)).size < NEST.trendMinSizes) return 0;
+      let c = 0;
+      let d = 0;
+      for (let a = 0; a < pts.length; a++)
+        for (let b = a + 1; b < pts.length; b++) {
+          const x = Math.sign(pts[a].r - pts[b].r) * Math.sign(pts[a].len - pts[b].len);
+          if (x > 0) c++;
+          else if (x < 0) d++;
+        }
+      return c + d ? (c - d) / (c + d) : 0;
+    };
+    // colour from the placed lines: across an edge, the other group
+    const side = new Map<number, 0 | 1>();
+    for (const i of lo) side.set(i, 0);
+    for (const i of hi) side.set(i, 1);
+    const clash = new Set<number>();
+    const spread = (seeds: number[], into: Map<number, 0 | 1>) => {
+      const q = seeds.slice();
+      while (q.length) {
+        const x = q.shift()!;
+        for (const y of edges.get(x) ?? []) {
+          if (place.has(y)) continue;
+          const want = (1 - into.get(x)!) as 0 | 1;
+          const had = into.get(y);
+          if (had == null) {
+            into.set(y, want);
+            q.push(y);
+          } else if (had !== want) clash.add(y);
+        }
+      }
+    };
+    spread(
+      [...place].filter((i) => edges.has(i)),
+      side,
+    );
+    // copies coloured both ways (a duplicate of one size, a third copy): their whole run of
+    // unplaced copies stays unplaced
+    for (const q = [...clash]; q.length; )
+      for (const y of edges.get(q.pop()!) ?? [])
+        if (!place.has(y) && !clash.has(y)) {
+          clash.add(y);
+          q.push(y);
+        }
+    // components with no placed line: two colours, oriented by the extent trend
+    const free = new Set(unplaced.filter((u) => !side.has(u) && edges.has(u)));
+    for (const u of free) {
+      if (side.has(u)) continue;
+      const col = new Map<number, 0 | 1>([[u, 0]]);
+      spread([u], col);
+      for (const [x, c] of col) side.set(x, c); // claimed, oriented below
+      const comp = [...col.keys()];
+      if (comp.some((x) => clash.has(x))) {
+        for (const x of comp) clash.add(x);
+        continue;
+      }
+      const cls = [0, 1].map((c) => new Set(comp.filter((x) => col.get(x) === c)));
+      // each copy runs end to end on the other colour's copies (not a line turning a corner)
+      const ok = comp.every((x) => onTop(x, rowGrid, cls[1 - col.get(x)!]).any >= NEST.trendCover);
+      const tau = ok ? trendOf(cls) : 0;
+      const L2 = cls.map((c) => [...c].reduce((t, i) => t + lenOf(i), 0));
+      const diff = L2[0] - L2[1];
+      if (Math.abs(tau) < NEST.trendTau || Math.abs(diff) < NEST.copyDiffMm) {
+        for (const x of comp) clash.add(x);
+        continue;
+      }
+      // the longer colour is the larger size when the other sizes' copies grow with the size
+      const big = diff > 0 === tau > 0 ? 0 : 1;
+      for (const x of comp) side.set(x, col.get(x) === big ? 1 : 0);
+    }
+    for (const [x, c] of side) {
+      if (place.has(x) || clash.has(x)) continue;
+      (c ? hi : lo).add(x);
     }
   }
-  // the two groups stand at least one size apart
-  if (cut < 0 || gap < 1) return null;
-  const lo = new Set(at.slice(0, cut + 1).map((e) => e.i));
-  const hi = new Set(at.slice(cut + 1).map((e) => e.i));
-  const L = (ids: Set<number>) => [...ids].reduce((t, i) => t + set.chains[i].lengthMm, 0);
-  const [a, b] = L(lo) >= L(hi) ? [lo, hi] : [hi, lo];
-  // lines too short to place stay with the larger part
+  const L = (ids: Set<number>) => [...ids].reduce((t, i) => t + lenOf(i), 0);
+  const [, b] = L(lo) >= L(hi) ? [lo, hi] : [hi, lo];
+  // lines that could not be placed stay with the larger part
   return [row.chains.filter((i) => !b.has(i)), [...b]];
 }
 
