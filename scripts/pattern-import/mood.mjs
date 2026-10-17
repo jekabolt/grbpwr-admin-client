@@ -80,6 +80,8 @@ const runOne = (id) =>
     const timer = setTimeout(() => ch.kill('SIGKILL'), CAP);
     ch.on('close', (code, signal) => {
       clearTimeout(timer);
+      // MOOD_ECHO=<dir>: the child's diagnostics (@@KINK lines of the gate, …) kept per file
+      if (process.env.MOOD_ECHO) writeFileSync(resolve(process.env.MOOD_ECHO, `${id}.stdout`), out);
       const line = out.split('\n').find((l) => l.startsWith('@@RESULT '));
       const r = line
         ? JSON.parse(line.slice(9))
