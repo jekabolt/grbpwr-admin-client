@@ -2053,6 +2053,18 @@ export type GateCheckId =
   | 'G24-one-piece';
 
 /**
+ * SILENT (G26, inside G22 / G8): the pieces-stage grade evidence of one written size block.
+ * `hold` — the grade model's neighbour verdict: the size's outline leaves the family's grade for
+ * ANOTHER size's drawn line (G22 blocks it, "G26"); `warn` — another disagreement with the grade
+ * (shown in G8's note, never held); `drawsOwn` — the size's own drawn lines run beside its outline
+ * (1.5–15 mm off it, ≥ 20 mm): the drawing grades it there, so a size written on the same outline as
+ * its neighbour is a collapse (G8). Absent `drawsOwn` = not known (no wall model): G8 holds a
+ * collapse on the geometry alone. (No GateCheckId of its own: the check step's label map is the UI
+ * session's file — G26 rides in G22 / G8 the way KINKS' G25 rides in G22.)
+ */
+export type GradeEvidence = { hold?: string; warn?: string; drawsOwn?: boolean };
+
+/**
  * MOOD Ф0 (G22): per written size block, the lines of its rank's pen near it and the common edges
  * every size uses (excused), in the written frame. `pen` null = an identity run whose rank has no
  * known pen. Absent for a block = no identity claim (the run is not identity encoded).
@@ -2271,6 +2283,8 @@ export type GateExpectation = {
   identityByBlock?: Record<string, IdentityGeometry>;
   /** MOOD Ф0 (G24): per block, why its outline may hold two pieces (pieces-stage evidence). */
   onePieceByBlock?: Record<string, string>;
+  /** SILENT (G26 / G8): per block, the grade model's verdict and the drawing's own lines. */
+  gradeByBlock?: Record<string, GradeEvidence>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;

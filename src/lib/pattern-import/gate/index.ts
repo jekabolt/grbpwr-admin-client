@@ -16,6 +16,7 @@ import type {
   ChromeLine,
   ContinuityGeometry,
   IdentityGeometry,
+  GradeEvidence,
   DerivedEdge,
   EmbedManifestFn,
   GateCheck,
@@ -326,6 +327,19 @@ export function onePieceByBlockFor(
   return out;
 }
 
+/** SILENT (G26 / G8): the pieces stage's grade evidence, per written block. */
+export function gradeByBlockFor(
+  detail: WriteDetail,
+  gradeOf: (sourceIdentity: string, rank: number) => GradeEvidence | undefined,
+): Record<string, GradeEvidence> {
+  const out: Record<string, GradeEvidence> = {};
+  for (const b of detail.plan.blocks) {
+    const e = gradeOf(b.derivedFrom ?? b.identity, b.rank);
+    if (e) out[b.name] = e;
+  }
+  return out;
+}
+
 /**
  * Tile chrome (sheet frame) near each block → `chromeByBlock` in the written frame (G19): the
  * lines within 5 mm of the box of the block's source walls.
@@ -381,6 +395,8 @@ export type WriteAndGateCtx = {
   identityOf?: (sourceIdentity: string, rank: number) => IdentityGeometry | undefined;
   /** MOOD Ф0 (G24): why an identity × rank's outline may hold two pieces. */
   onePieceOf?: (sourceIdentity: string, rank: number) => string | undefined;
+  /** SILENT (G26 / G8): the grade model's verdict and the drawing's own lines per identity × rank. */
+  gradeOf?: (sourceIdentity: string, rank: number) => GradeEvidence | undefined;
   overview?: GateExpectation['overview'];
   /**
    * Fold questions still open in this run (E1a, D3): a piece the sheet says is cut on fold, with no
@@ -426,6 +442,7 @@ export async function writeAndGate(
         : undefined,
     identityByBlock: ctx.identityOf ? identityByBlockFor(detail, ctx.identityOf) : undefined,
     onePieceByBlock: ctx.onePieceOf ? onePieceByBlockFor(detail, ctx.onePieceOf) : undefined,
+    gradeByBlock: ctx.gradeOf ? gradeByBlockFor(detail, ctx.gradeOf) : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
     ...(ctx.openFolds?.length ? { openFolds: ctx.openFolds } : {}),

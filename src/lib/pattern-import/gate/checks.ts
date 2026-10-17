@@ -44,6 +44,7 @@ import {
 } from '../write/plan';
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
+import { SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
 import { foldShapeProblem } from '../semantics/fold';
 import { GRAIN_INSIDE_TOL_MM, grainOutsideMm, pointOnRings } from '../semantics/grain-inside';
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
@@ -931,6 +932,7 @@ export function g8(ctx: GateCtx): GateCheck {
     list.push(b);
     byId.set(b.mb.identity, list);
   }
+  const ev = ctx.expect.gradeByBlock;
   for (const [identity, bs] of byId) {
     if (bs.length < 2) continue;
     const rows = bs
@@ -938,29 +940,68 @@ export function g8(ctx: GateCtx): GateCheck {
         const c = ctx.contours.get(b.block)?.get(LAYERS.cut);
         return {
           b,
+          c,
           rank: rankOf.get(b.mb.sizeToken) ?? b.size?.rank ?? 0,
           area: c ? areaOf(c) : NaN,
         };
       })
       .sort((x, y) => x.rank - y.rank);
+    let bad = false;
+    let silent = false;
     for (let i = 1; i < rows.length; i++) {
       if (!(rows[i].area > rows[i - 1].area)) {
-        failed.push(...rows.map((r) => r.b.block));
+        bad = true;
+        // SILENT: a size under half its smaller neighbour is a sliver, whatever the run's length
+        if (rows[i].area < 0.5 * rows[i - 1].area) silent = true;
         notes.push(
           `${identity}: ${rows[i - 1].b.mb.sizeToken} ${(rows[i - 1].area / 100).toFixed(1)} cm² ≥ ${rows[i].b.mb.sizeToken} ${(rows[i].area / 100).toFixed(1)} cm²`,
         );
-        worstSizes = Math.max(worstSizes, rows.length);
         break;
       }
     }
+    // SILENT: the run's own band — perimeter grows by about its median step (no drop, no loop),
+    // and no two sizes on one outline where the drawing grades them (Anne Waistcoat 5XL a sliver,
+    // XL through 5XL's crotch curve; Albuca's 9 sizes on one outline over graded lines)
+    const tokenOf = new Map(rows.map((r) => [r.b.block, r.b.mb.sizeToken]));
+    for (const p of sizeRunProblems(
+      rows.flatMap((r) => (r.c ? [{ key: r.b.block, rank: r.rank, ring: r.c }] : [])),
+    )) {
+      // one outline the drawing draws once for both sizes (neither draws a line of its own beside
+      // it): the run shares it by design — G8's area order says the rest
+      if (p.kind === 'collapse' && ev && p.keys.every((k) => ev[k]?.drawsOwn === false)) continue;
+      bad = true;
+      silent = true;
+      const named = p.keys.map((k) => tokenOf.get(k) ?? k);
+      notes.push(
+        `${identity}: ${
+          p.kind === 'collapse'
+            ? `sizes ${named.join(' and ')} are written on one outline, the drawing grades them`
+            : p.note
+        }`,
+      );
+    }
+    if (bad) {
+      failed.push(...rows.map((r) => r.b.block));
+      // a two-size family's area order alone warns (as before); a SILENT problem holds at any length
+      worstSizes = Math.max(worstSizes, silent ? 3 : rows.length);
+    }
   }
+  // SILENT (G26): the grade model's other disagreements — shown here, never held
+  const warns = Object.entries(ev ?? {})
+    .filter(([b, e]) => e.warn && ctx.blocks.some((x) => x.block === b))
+    .map(([b, e]) => `${b}: ${e.warn}`);
+  const grade = warns.length
+    ? ` · grade model (warning only): ${warns.slice(0, 8).join('; ')}${warns.length > 8 ? ` … +${warns.length - 8}` : ''}`
+    : '';
   return check(
     'G8-monotone',
     failed,
     worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
-    notes.join('; ') || 'area grows with size rank for every identity',
+    (notes.join('; ') ||
+      'area and outline length grow with size rank for every identity, no two sizes on one outline') +
+      grade,
     null,
-    'strictly increasing (block when > 2 sizes)',
+    `strictly increasing area (block when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
   );
 }
 
@@ -1888,10 +1929,30 @@ export function identityShare(
  */
 export function g22(ctx: GateCtx): GateCheck {
   const by = ctx.expect.identityByBlock;
+  // SILENT (G26, inside G22): the grade model's neighbour verdict — the size's outline leaves the
+  // family's grade for ANOTHER size's drawn line. Evidence of the same claim G22 makes (a size lies
+  // on its own line) read off the geometry, so it holds on every run with a wall model, keyed or not
+  const gradeFailed: string[] = [];
+  const gradeNotes: string[] = [];
+  for (const b of ctx.blocks) {
+    const e = ctx.expect.gradeByBlock?.[b.block];
+    if (!e?.hold) continue;
+    gradeFailed.push(b.block);
+    gradeNotes.push(`${b.block}: off its own line onto another size's (grade model, G26) — ${e.hold}`);
+  }
   if (!by || f0Off())
-    return check('G22-identity', [], 'block', 'no identity-encoded size run — not evaluated');
-  const failed: string[] = [];
-  const notes: string[] = [];
+    return gradeFailed.length
+      ? check(
+          'G22-identity',
+          gradeFailed,
+          'block',
+          gradeNotes.join('; '),
+          null,
+          'no size outline on another size\'s line where the grade puts its own (G26)',
+        )
+      : check('G22-identity', [], 'block', 'no identity-encoded size run — not evaluated');
+  const failed: string[] = [...gradeFailed];
+  const notes: string[] = [...gradeNotes];
   let worst = 1;
   let measured = 0;
   let kinked = 0;
