@@ -394,6 +394,7 @@ export class Session {
   private continuityOf: SemanticsDetail['continuityOf'] | null = null;
   private identityOf: SemanticsDetail['identityOf'] | null = null;
   private onePieceOf: SemanticsDetail['onePieceOf'] | null = null;
+  private gradeOf: SemanticsDetail['gradeOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -489,6 +490,7 @@ export class Session {
       this.continuityOf = null;
       this.identityOf = null;
       this.onePieceOf = null;
+      this.gradeOf = null;
     }
   }
 
@@ -1610,6 +1612,7 @@ export class Session {
     this.continuityOf = detail.continuityOf;
     this.identityOf = detail.identityOf;
     this.onePieceOf = detail.onePieceOf;
+    this.gradeOf = detail.gradeOf;
     return output;
   }
 
@@ -1804,6 +1807,8 @@ export class Session {
     // reads a FILL's faces: a DXF's pieces are its blocks, each drawn in its own frame — they are
     // not faces of one drawing, and blocks laid over each other are no outline across two pieces
     const onePiece = this.fast ? null : this.onePieceOf;
+    // SILENT (G26 / G8): the grade model reads the fill's nested size lines, as G24 does
+    const grade = this.fast ? null : this.gradeOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -1884,6 +1889,7 @@ export class Session {
             : undefined,
           identityOf: identity ? (id, rank) => identity(sp.sourceOf[id] ?? id, rank) : undefined,
           onePieceOf: onePiece ? (id, rank) => onePiece(sp.sourceOf[id] ?? id, rank) : undefined,
+          gradeOf: grade ? (id, rank) => grade(sp.sourceOf[id] ?? id, rank) : undefined,
           chrome,
           openFolds,
           ...(sheets ? { sheets } : {}),

@@ -34,6 +34,8 @@ import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { chainLook, type Look } from 'lib/pattern-import/pieces/identity';
 import { sameDashShape } from 'lib/pattern-import/chains/motif';
 import { bboxOf, segNearest, SegGrid } from 'lib/pattern-import/pieces/geom';
+import { sizeRunProblems } from 'lib/pattern-import/pieces/gfit/silent';
+import { silentRead } from 'lib/pattern-import/pieces/gfit/silent-inputs';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 
@@ -90,40 +92,51 @@ const canon = (s: string) =>
 
 type KeyRow = { label: string; look: Look | null };
 
+/**
+ * The key's rows. A row's sample is the short stroke with a look NEAREST its label's box (≤ 5 mm, on
+ * any side: Mood prints the label rotated 0/90/180°, its sample on the label's baseline), labels and
+ * strokes paired one-to-one nearest first — as the engine's legendEndHits does. A band under the label
+ * holding the LONGEST stroke read the next row's sample (rows 3.9 mm apart, band 4.8 mm; G0 samples
+ * 32.1 mm, 12/14's 32.3 mm): 24/26 = 28/30's pen, 8/10 = 12/14's (g0key, 17.10).
+ */
 function readKey(sheet: Sheet, set: ChainSet, labels: string[], styles: Map<number, Style>) {
   const want = new Set(labels.map(canon));
   const head = sheet.texts.filter((t) => /line\s*key|size\s*key/i.test(t.text));
   const near = (t: IRText) =>
     !head.length ||
     head.some((h) => Math.hypot(h.anchor.x - t.anchor.x, h.anchor.y - t.anchor.y) < 300);
-  const rows: KeyRow[] = [];
-  const seen = new Set<string>();
   const grid = new SegGrid(10);
   set.chains.forEach((c) => c.pts.length > 1 && grid.addPolyline(c.id, c.pts));
   const byId = new Map(set.chains.map((c) => [c.id, c]));
+  const pairs: { label: string; c: Chain; d: number }[] = [];
   for (const t of sheet.texts) {
     const l = canon(t.text);
-    if (!want.has(l) || seen.has(l) || !near(t)) continue;
-    const h = t.bbox.maxY - t.bbox.minY;
-    const box = {
-      minX: t.bbox.minX - 4,
-      maxX: t.bbox.minX + 70,
-      minY: t.bbox.minY - Math.max(4, h),
-      maxY: t.bbox.minY + 0.8,
-    };
-    const ids = new Set<number>();
-    grid.near({ x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 }, 40, (id) => {
+    if (!want.has(l) || !near(t)) continue;
+    const b = t.bbox;
+    const best = new Map<number, number>();
+    grid.near({ x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, 40, (id, si) => {
       const c = byId.get(id);
-      if (!c) return;
-      const b = bboxOf(c.pts);
-      if (b.minX >= box.minX && b.maxX <= box.maxX + 10 && b.minY >= box.minY && b.maxY <= box.maxY)
-        ids.add(id);
+      if (!c || c.lengthMm > 80 || !chainLook(c, styles)) return;
+      const p = c.pts[si];
+      const q = c.pts[si + 1] ?? p;
+      for (const s of [p, q, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }]) {
+        const dx = Math.max(b.minX - s.x, 0, s.x - b.maxX);
+        const dy = Math.max(b.minY - s.y, 0, s.y - b.maxY);
+        const d = Math.hypot(dx, dy);
+        if (d <= 5 && d < (best.get(id) ?? Infinity)) best.set(id, d);
+      }
     });
-    const cs = [...ids].map((id) => byId.get(id)!).sort((a, b) => b.lengthMm - a.lengthMm);
-    if (!cs.length) continue;
-    const looked = cs.find((c) => c.lengthMm <= 80 && chainLook(c, styles));
-    rows.push({ label: l, look: looked ? chainLook(looked, styles) : null });
-    seen.add(l);
+    for (const [id, d] of best) pairs.push({ label: l, c: byId.get(id)!, d });
+  }
+  pairs.sort((a, b) => a.d - b.d || b.c.lengthMm - a.c.lengthMm);
+  const rows: KeyRow[] = [];
+  const seen = new Set<string>();
+  const used = new Set<number>();
+  for (const p of pairs) {
+    if (seen.has(p.label) || used.has(p.c.id)) continue;
+    seen.add(p.label);
+    used.add(p.c.id);
+    rows.push({ label: p.label, look: chainLook(p.c, styles) });
   }
   return rows;
 }
@@ -305,6 +318,11 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
   const chainById = new Map((set?.chains ?? []).map((c) => [c.id, c]));
   const key = set && sheet && ctx.key.length ? readKey(sheet, set, ctx.key, styles) : [];
   const out: Record<string, unknown>[] = [];
+  // SILENT: the product's grade reading of the sheet (G22/G26 holds, warnings, drawsOwn) and the
+  // size-run sanity of every family's closed sizes (G8 on the outlines, before the allowance)
+  const t0s = Date.now();
+  const sr = set && wm ? silentRead(families, set, wm) : null;
+  const silentMs = Date.now() - t0s;
   // GFIT_DUMP=<file.json>: the families as the check reads them (gfit.mjs fam replays it offline)
   if (process.env.GFIT_DUMP)
     writeFileSync(
@@ -370,7 +388,7 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
     try {
       fam = fitFamily(sizesIn, { tol: tols[0], neighbourLines });
       // the other tolerance sets: status per size only
-      rec.alt = tols.slice(1).map((tol) => {
+      rec.alt = (process.env.GFIT_NO_ALT ? [] : tols.slice(1)).map((tol) => {
         const f2 = fitFamily(sizesIn, { tol, neighbourLines });
         return f2.sizes
           .map((v) => `${v.rank}:${v.status[0]}${v.cause ? `/${v.cause}` : ''}:${r2(v.score)}`)
@@ -426,6 +444,26 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
           (x) => `e${x.e}:${x.kind}${x.missing.length ? `-${x.missing.join('.')}` : ''}`,
         );
       rec.exc = fam.sizes.map((v) => v.excursions.length).join(',');
+    }
+    if (sr) {
+      const closedRows = closed.map((c) => ({ key: String(c.rank), rank: c.rank, ring: c.outer }));
+      const ev = (r: number) => sr.evidence(f.seed, r);
+      const runP = sizeRunProblems(closedRows).filter(
+        (p) => !(p.kind === 'collapse' && p.keys.every((k) => ev(Number(k))?.drawsOwn === false)),
+      );
+      const sil: Record<string, unknown> = {};
+      const holds = closed.filter((c) => ev(c.rank)?.hold).map((c) => c.rank);
+      const warns = closed.filter((c) => ev(c.rank)?.warn).map((c) => c.rank);
+      if (holds.length) sil.hold = holds;
+      if (warns.length) sil.warn = warns;
+      if (runP.length) sil.run = runP.map((p) => `${p.kind}:${p.keys.join('+')}`);
+      const vs = sr.grade?.verdicts.filter((v) => v.seed === f.seed) ?? [];
+      if (vs.length)
+        sil.v = vs.map(
+          (v) =>
+            `${v.rank}:${v.cause}:${r2(v.residMm)}${v.hold ? ':H' : ''}${v.excused ? ':brk' : ''}${v.ownAtPrediction != null ? `:own${r2(v.ownAtPrediction)}` : ''}`,
+        );
+      if (Object.keys(sil).length) rec.silent = sil;
     }
     // bracketed leaks: a leak strictly between two native sizes
     const natives = [...byRank.values()].filter((c) => outcomeOf(c) === 'N').map((c) => c.rank);
@@ -545,7 +583,17 @@ export function gfitArchive(ctx: GfitArchiveCtx): Record<string, unknown> {
         rec.pngError = String(e).slice(0, 120);
       }
   }
-  return { families: out, ranks: nRanks, labels: (run?.sizes ?? []).map((s) => s.label) };
+  return {
+    families: out,
+    ranks: nRanks,
+    labels: (run?.sizes ?? []).map((s) => s.label),
+    ...(sr
+      ? {
+          silentMs,
+          breaks: Object.fromEntries([...(sr.grade?.breaks ?? [])].map(([r, b]) => [r, r2(b)])),
+        }
+      : {}),
+  };
 }
 
 /** A family's sizes (rank colours; leaks dashed), corners (strong ●, weak ·), notch candidates (magenta),

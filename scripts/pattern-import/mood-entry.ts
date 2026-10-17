@@ -11,7 +11,7 @@
 // (6) is `wrongPassing` — must be 0. `closed` = closed candidates / family × size candidates.
 //   node scripts/pattern-import/mood.mjs [id…]   env PATIMPORT_MOOD_DIR (default: the archive),
 //   PATIMPORT_REPORTS (reports go there only), MOOD_PAR (parallel children), MOOD_CAP_S (per file)
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type {
@@ -210,6 +210,12 @@ export const SAMPLE: Sample[] = [
     key: NUM18,
   },
 ];
+/**
+ * MOOD_SAMPLES=<file.json>: extra samples ([{id, gen, path, key}]) — the probe runs them like the
+ * fixed sample when named on the command line (SILENT: the GRADE-REVIEW families through write + gate).
+ */
+if (typeof process !== 'undefined' && process.env?.MOOD_SAMPLES)
+  SAMPLE.push(...(JSON.parse(readFileSync(process.env.MOOD_SAMPLES, 'utf8')) as Sample[]));
 
 // ── the key, read independently ───────────────────────────────────────────────────────────
 
@@ -224,7 +230,13 @@ const canon = (s: string) =>
 
 type KeyRow = { label: string; at: PtMm; look: Look | null; sample: number[] };
 
-/** The key's rows: each key label's sample = the line work in a band just under/beside the label. */
+/**
+ * The key's rows. A row's sample is the short stroke with a look NEAREST its label's box (≤ 5 mm, on
+ * any side: Mood prints the label rotated 0/90/180°, its sample on the label's baseline), labels and
+ * strokes paired one-to-one nearest first — as the engine's legendEndHits does. A band under the label
+ * holding the LONGEST stroke read the next row's sample (rows 3.9 mm apart, band 4.8 mm; G0 samples
+ * 32.1 mm, 12/14's 32.3 mm): 24/26 = 28/30's pen, 8/10 = 12/14's (g0key, 17.10).
+ */
 function readKey(
   sheet: Sheet,
   set: ChainSet,
@@ -236,38 +248,38 @@ function readKey(
   const near = (t: IRText) =>
     !head.length ||
     head.some((h) => Math.hypot(h.anchor.x - t.anchor.x, h.anchor.y - t.anchor.y) < 300);
-  const rows: KeyRow[] = [];
-  const seen = new Set<string>();
   const grid = new SegGrid(10);
   set.chains.forEach((c) => c.pts.length > 1 && grid.addPolyline(c.id, c.pts));
+  const byId = new Map(set.chains.map((c) => [c.id, c]));
+  const pairs: { label: string; at: PtMm; c: Chain; d: number }[] = [];
   for (const t of sheet.texts) {
     const l = canon(t.text);
-    if (!want.has(l) || seen.has(l) || !near(t)) continue;
-    const h = t.bbox.maxY - t.bbox.minY;
-    // the row's band: from the label's foot down to ~1 line height, from its left edge right 70 mm
-    const box = {
-      minX: t.bbox.minX - 4,
-      maxX: t.bbox.minX + 70,
-      minY: t.bbox.minY - Math.max(4, h),
-      maxY: t.bbox.minY + 0.8,
-    };
-    const ids = new Set<number>();
-    grid.near({ x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 }, 40, (id) => {
-      const b = bboxOf(set.chains[id].pts);
-      if (b.minX >= box.minX && b.maxX <= box.maxX + 10 && b.minY >= box.minY && b.maxY <= box.maxY)
-        ids.add(id);
+    if (!want.has(l) || !near(t)) continue;
+    const b = t.bbox;
+    const best = new Map<number, number>();
+    grid.near({ x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, 40, (id, si) => {
+      const c = byId.get(id);
+      if (!c || c.lengthMm > 80 || !chainLook(c, styles)) return;
+      const p = c.pts[si];
+      const q = c.pts[si + 1] ?? p;
+      for (const s of [p, q, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }]) {
+        const dx = Math.max(b.minX - s.x, 0, s.x - b.maxX);
+        const dy = Math.max(b.minY - s.y, 0, s.y - b.maxY);
+        const d = Math.hypot(dx, dy);
+        if (d <= 5 && d < (best.get(id) ?? Infinity)) best.set(id, d);
+      }
     });
-    const cs = [...ids].map((id) => set.chains[id]).sort((a, b) => b.lengthMm - a.lengthMm);
-    if (!cs.length) continue;
-    // a sample is short (≤ 80 mm) and horizontal-ish
-    const looked = cs.find((c) => c.lengthMm <= 80 && chainLook(c, styles));
-    rows.push({
-      label: l,
-      at: t.anchor,
-      look: looked ? chainLook(looked, styles) : null,
-      sample: cs.map((c) => c.id),
-    });
-    seen.add(l);
+    for (const [id, d] of best) pairs.push({ label: l, at: t.anchor, c: byId.get(id)!, d });
+  }
+  pairs.sort((a, b) => a.d - b.d || b.c.lengthMm - a.c.lengthMm);
+  const rows: KeyRow[] = [];
+  const seen = new Set<string>();
+  const used = new Set<number>();
+  for (const p of pairs) {
+    if (seen.has(p.label) || used.has(p.c.id)) continue;
+    seen.add(p.label);
+    used.add(p.c.id);
+    rows.push({ label: p.label, at: p.at, look: chainLook(p.c, styles), sample: [p.c.id] });
   }
   return rows;
 }
@@ -922,6 +934,31 @@ export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): P
     wrongList: wrongPassing
       .slice(0, 20)
       .map((t) => `${t.block}[${t.label}]: ${t.wrong.join('; ')}`),
+    // MOOD_PERBLOCK=1: per written block, where it came from and whether it passes (SILENT review)
+    ...(process.env.MOOD_PERBLOCK
+      ? {
+          perBlock: truths.map((t) => {
+            const o = outerOf(t);
+            const b = o.length ? bboxOf(o) : null;
+            return {
+              block: t.block,
+              seed: t.seed,
+              rank: t.rank,
+              label: t.label,
+              passes: t.passes,
+              by: t.by,
+              areaCm2: t.areaCm2,
+              box: b ? [b.minX, b.minY, b.maxX, b.maxY].map((v) => Math.round(v)) : null,
+              wrong: t.wrong,
+            };
+          }),
+          gateNotes: out.scopes.flatMap((sc) =>
+            (out.gate[sc.target.scopeKey]?.checks ?? [])
+              .filter((k) => !k.ok)
+              .map((k) => `${k.id}:${k.severity}: ${k.note.slice(0, 600)}`),
+          ),
+        }
+      : {}),
     truth: truths.map(
       (t) =>
         `${t.block}${t.passes ? '✓' : `✗${t.by.join('+')}`} ${t.label} own=${t.pen.own} best=${t.pen.best}:${t.pen.bestShare} kinks=${t.kinks}${t.kinkAt ? ` at ${t.kinkAt.join(' ')}` : ''}${t.wrong.length ? ` WRONG ${t.wrong.join('; ')}` : ''}`,

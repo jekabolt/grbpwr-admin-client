@@ -49,6 +49,7 @@ import type {
   NotchFeature,
   OffsetReport,
   PairHand,
+  GradeEvidence,
   PieceCandidate,
   PieceFamily,
   PieceKey,
@@ -69,12 +70,15 @@ import {
   describePen,
   type Pen,
   onePieceProblems,
+  onPen,
   penLines,
   rankLooks,
   sharedEdges,
 } from '../pieces/identity';
 import { wallModel } from '../pieces/walls';
 import { hausdorffMm } from '../pieces/fill';
+import { silentRead, type SilentRead } from '../pieces/gfit/silent-inputs';
+import { silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
@@ -163,6 +167,11 @@ export type SemanticsDetail = {
   identityOf: (identity: string, rank: number) => IdentityGeometry | undefined;
   /** MOOD Ф0 (G24): why this identity × rank's outline may hold two pieces (else undefined). */
   onePieceOf: (identity: string, rank: number) => string | undefined;
+  /**
+   * SILENT (G26 / G8): the grade model's verdict on this identity × rank (a neighbour line holds,
+   * other disagreements warn) and whether the size draws its own line beside its outline.
+   */
+  gradeOf: (identity: string, rank: number) => GradeEvidence | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -1858,9 +1867,19 @@ export function buildPieceSpecsDetailed(
     if (!idLooks.identity) return undefined;
     const src = sourceOf(identity, rank);
     if (!src || src.cand.rank >= idLooks.looks.length) return undefined;
-    const look = looksOn(src.cand.bbox)[src.cand.rank] ?? [];
+    const allLooks = looksOn(src.cand.bbox);
+    const look = allLooks[src.cand.rank] ?? [];
     const common = commonOf();
-    if (idLooks.absent[src.cand.rank])
+    // SILENT: an exact pen (declared dash, plain stroke) another size is drawn with too tells the two
+    // sizes nothing apart — no own-pen evidence (a key read with two rows alike, a drawing that reuses
+    // a dash): held like an absent one. A measured rhythm may read alike for two sizes (Mood's S and
+    // L motifs): KINKS' ownStrict handles those.
+    const penShared =
+      !silentOff() &&
+      look.length > 0 &&
+      look.every((l) => l.kind !== 'motif') &&
+      look.some((l) => allLooks.some((p, k) => k !== src.cand.rank && p.length && onPen(l, p)));
+    if (idLooks.absent[src.cand.rank] || penShared)
       return {
         pen: null,
         own: [],
@@ -1934,6 +1953,16 @@ export function buildPieceSpecsDetailed(
     );
     return onePiece.get(`${src.cand.seed}:${src.cand.rank}`);
   };
+  // SILENT: one grade reading of the sheet (every family: the sheet's grade breaks), on demand
+  let silent: SilentRead | null = null;
+  const gradeOf = (identity: string, rank: number): GradeEvidence | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || traced) return undefined;
+    // a DXF's blocks are no drawing of nested size lines: nothing to read
+    if ((src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    silent ??= silentRead(families, set, multiSize ? wallModel(set, run, sheet.texts, styles) : null);
+    return silent.evidence(src.cand.seed, src.cand.rank);
+  };
   const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
     const src = sourceOf(identity, rank);
@@ -1992,6 +2021,7 @@ export function buildPieceSpecsDetailed(
     continuityOf,
     identityOf,
     onePieceOf,
+    gradeOf,
     notes,
   };
 }
