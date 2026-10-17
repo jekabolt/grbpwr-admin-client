@@ -748,9 +748,8 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
             ...(d.ai ? [`AI: ${aiWords(d.ai)}`] : []),
           ],
           0.6,
-          // an overview set aside holds pattern-like line work, a piece-sized rectangle in the
-          // tile sheet's pen was read as a frame: a strong assumption
-          d.cls === 'overview' || (!!d.ink?.penFrame && !!d.ink.explained),
+          // an overview set aside holds pattern-like line work: a strong assumption
+          d.cls === 'overview',
           undefined,
           `${d.file}:${d.page}`,
         ),

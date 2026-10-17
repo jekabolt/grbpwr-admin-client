@@ -5,14 +5,14 @@
 // that line work is, every time, one of:
 //   · rules — a table's grid, a separator, the page's trim line: straight, axis-parallel, open;
 //   · frames — a text box, a table's outline, the cells of the tile-assembly map: an axis-parallel
-//     rectangle that holds a table (≥ 2 rules / frames) or, in a pen the tiles do not use, words or
-//     a drawing (a rectangle in the pattern's pen holding nothing may be a waistband);
-//   · the test square — 2 in / 5 cm …, with a scale word on the page;
+//     rectangle in a pen the tiles do not use, holding words or lines (a rectangle in the
+//     pattern's pen may be a waistband, whatever lies in it);
+//   · the test square — 2 in / 5 cm …, where text near it prints its own dimension;
 //   · reduced copies — the pieces at 1:5…1:25 (the pieces index, the tile map, the graded nest of a
 //     pieces inventory): outlines at one scale ≤ 0.35 shaped as ≥ 2 different tile pieces;
 //   · drawings — the garment flats and the sewing-step sketches: small (≤ 0.6 of the page's short
 //     side, ≤ 0.75 of its long side in a hairline), drawn with a pen no line of the tile sheet is
-//     drawn with, and — a closed piece-sized one — a hairline or full of inner detail.
+//     drawn with, and — a closed piece-sized one — full of inner detail (seams, buttons).
 // A page where EVERY long or piece-sized line is one of these is the second, geometric evidence
 // that it is not pattern (the first is the classifier's text-led role). A curve at 1:1 drawn with
 // the pattern's pen, a large curve, a curve that is no tile piece reduced — anything else — stays
@@ -49,20 +49,58 @@ export const PAGE_INK = {
   penWidthAbsMm: 0.02,
   penWidthRel: 0.1,
   penRgb: 12,
+  /** Dash motifs differ when an entry differs by more than this (or 25 %). */
+  dashTolMm: 0.3,
+  /** A chain reaching this far past the page's edge is drawn off the page. */
+  offPageMm: 3,
   /** Test squares: sides within this share of 25.4·k or 10·k mm. */
   squareTol: 0.015,
 };
 
-/** A pen: what a line is drawn with (stroke width, colour, dashed or not). Fill-only = no pen. */
-export type Pen = { w: number; rgb: [number, number, number] | null; dashed: boolean };
+/**
+ * A pen: what a line is drawn with (stroke width, colour, dashed or not, and the dash motif).
+ * Fill-only = no pen.
+ */
+export type Pen = {
+  w: number;
+  rgb: [number, number, number] | null;
+  dashed: boolean;
+  /** The dash motif, normalised (zero pairs dropped, one period): Mood tells sizes apart by it. */
+  motif: number[] | null;
+};
+
+/** One period of a dash motif, zero entries dropped ([1.1,1.1,1.1,1.1] → [1.1,1.1]). */
+function periodOf(m: readonly number[] | null | undefined): number[] | null {
+  const q = (m ?? []).filter((x) => x > 0.01);
+  if (q.length < 2) return null;
+  for (let n = 2; n < q.length; n += 2) {
+    if (q.length % n) continue;
+    if (q.every((x, k) => Math.abs(x - q[k % n]) <= 0.05 * Math.max(x, q[k % n]) + 0.02))
+      return q.slice(0, n);
+  }
+  return q;
+}
 
 const penOf = (st: Style | undefined, ch: Chain): Pen | null =>
   !st || (st.fill && !(st.widthMm > 0))
     ? null
-    : { w: st.widthMm, rgb: st.strokeRgb, dashed: !!(st.dash?.length || ch.motif?.length) };
+    : {
+        w: st.widthMm,
+        rgb: st.strokeRgb,
+        dashed: !!(st.dash?.length || ch.motif?.length),
+        motif: periodOf(st.dash?.length ? st.dash : ch.motif),
+      };
+
+/** Two motifs are different only when both are known and clearly apart (length or a dash). */
+const motifsApart = (a: number[] | null, b: number[] | null) =>
+  !!a &&
+  !!b &&
+  (a.length !== b.length ||
+    a.some((x, k) => Math.abs(x - b[k]) > Math.max(PAGE_INK.dashTolMm, 0.25 * Math.max(x, b[k]))));
 
 const samePen = (a: Pen, b: Pen) =>
   a.dashed === b.dashed &&
+  !motifsApart(a.motif, b.motif) &&
   Math.abs(a.w - b.w) <= Math.max(PAGE_INK.penWidthAbsMm, PAGE_INK.penWidthRel * b.w) &&
   (!a.rgb || !b.rgb
     ? a.rgb === b.rgb
@@ -94,17 +132,10 @@ export function axisShare(q: readonly PtMm[], closed: boolean): number {
 const isPatternLike = (c: Chain) =>
   c.lengthMm >= PAGE_INK.longMm || (c.closed && areaOf(c.pts) >= PAGE_INK.pieceMm2);
 
-/** An axis-parallel rectangle (a frame, a cell, a label box). */
-const isRect = (c: Chain, b: PageChains['box'][number]) =>
-  c.closed &&
-  axisShare(c.pts, true) >= PAGE_INK.frameAxis &&
-  areaOf(c.pts) >= PAGE_INK.frameFill * (b.maxX - b.minX) * (b.maxY - b.minY);
-
 /**
- * The line pens of a file's tile sheet: the pens of its long / piece-sized lines (fill-only glyph
- * shapes are no pen; nor are a pen's rectangles alone — the label boxes and frames a tile repeats:
- * a rectangular piece is drawn with the pen of the sheet's curved pieces). A pen here is the pattern's — a curve drawn with it on a page set aside may
- * be a piece.
+ * The line pens of a file's tile sheet: the pens of its long / piece-sized lines, proven furniture
+ * aside (fill-only glyph shapes are no pen). A pen here is the pattern's — a line drawn with it on
+ * a page set aside may be a piece.
  */
 export function tilePensOf(
   tiles: readonly PageChains[],
@@ -112,12 +143,19 @@ export function tilePensOf(
   furniture: readonly (ReadonlySet<number> | undefined)[] = [],
 ): Pen[] {
   const out: Pen[] = [];
+  const seen = new Set<string>();
   for (const [k, pc] of tiles.entries()) {
     const styles = new Map(pc.page.styles.map((s) => [s.id, s]));
     for (const [i, c] of pc.chains.entries()) {
-      if (!isPatternLike(c) || furniture[k]?.has(i) || isRect(c, pc.box[i])) continue;
+      if (!isPatternLike(c) || furniture[k]?.has(i)) continue;
       const p = penOf(styles.get(c.style), c);
-      if (p && !out.some((o) => samePen(o, p))) out.push(p);
+      // deduplicated by exact identity (the tolerant comparison is not transitive)
+      const key =
+        p && JSON.stringify([p.w.toFixed(3), p.rgb, p.dashed, p.motif?.map((x) => x.toFixed(2))]);
+      if (p && key && !seen.has(key)) {
+        seen.add(key);
+        out.push(p);
+      }
     }
   }
   return out;
@@ -138,23 +176,21 @@ export type PageInk = {
   explained: string | null;
   /** The first line nothing explains, in words (the question says what it is). */
   unexplained: string | null;
-  /** A piece-sized rectangle drawn with the tile sheet's pen was taken as a frame (a waistband
-   *  could be one): the assumption is strong. */
-  penFrame: boolean;
   counts: Partial<Record<InkKind, number>>;
 };
 
-/** Words on a page that name a test square (the square is then a scale check, not a piece). */
-const SQUARE_WORDS =
-  /\b(square|inch(es)?|test|quadrat\w*|carr[eé]\w*|cuadrado|kontroll\w*|квадрат\w*|kwadrat\w*)\b/i;
+/** A printed dimension: "2 inches", "2\"", "5 cm", "50 mm", "8x8 cm". */
+const DIMENSION =
+  /(\d+(?:[.,]\d+)?)\s*(?:[x×]\s*\d+(?:[.,]\d+)?\s*)?("|''|”|in\b|inch(?:es)?|cm|mm)/gi;
+const UNIT_MM: Record<string, number> = { cm: 10, mm: 1 };
 
 /**
  * The page's long / piece-sized lines, each explained as a rule, a frame, a test square, a reduced
  * copy of the tile pieces or a small drawing in a pen the tiles do not use (see the header). Codex
- * review (majors): a rectangle is a frame only when it holds a table or words in a foreign pen (a
- * waistband is a rectangle in the pattern's pen); a square only with a scale word on the page; a
- * reduced copy only as outlines of ≥ 2 different tile pieces at one scale; a piece-sized closed
- * drawing only in a hairline or with the inner detail of a drawing; nothing off the page.
+ * review (majors, 2 rounds): a rectangle is a frame only in a pen the tiles do not use, holding
+ * words or lines (a waistband is a rectangle in the pattern's pen); a square only where nearby text
+ * prints its own dimension; a reduced copy only as outlines of ≥ 2 different tile pieces at one
+ * scale; a piece-sized closed drawing only with the inner detail of a drawing; nothing off the page.
  */
 export function pageInk(
   pc: PageChains,
@@ -164,7 +200,6 @@ export function pageInk(
 ): PageInk {
   const styles = new Map(pc.page.styles.map((s) => [s.id, s]));
   const counts: Partial<Record<InkKind, number>> = {};
-  let penFrame = false;
   const drawMax = PAGE_INK.drawingMaxShare * Math.min(page.widthMm, page.heightMm);
   const hairMax = PAGE_INK.hairlineMaxShare * Math.max(page.widthMm, page.heightMm);
   const tilePen = (p: Pen | null) => !!p && tilePens.some((t) => samePen(p, t));
@@ -173,7 +208,35 @@ export function pageInk(
       ? `${p.w.toFixed(2)} mm${p.dashed ? ' dashed' : ''}${p.rgb ? ` rgb(${p.rgb.join(',')})` : ''}`
       : 'no pen';
   const words = pc.page.texts.filter((t) => !t.background && t.text.trim());
-  const scaleWord = SQUARE_WORDS.test(words.map((t) => t.text).join(' '));
+  /**
+   * Codex r2: a test square only where the words NEAR it (inside, or within its side / 60 mm of it)
+   * print ITS dimension ("should measure 2 inches" beside a 50.8 mm square) — never a page-global
+   * word, never a square whose side no nearby text names.
+   */
+  const calibrated = (b: Box, side: number) => {
+    const r = Math.max(60, side);
+    const near = words
+      .filter(
+        (t) =>
+          t.anchor.x >= b.minX - r &&
+          t.anchor.x <= b.maxX + r &&
+          t.anchor.y >= b.minY - r &&
+          t.anchor.y <= b.maxY + r,
+      )
+      .sort(
+        (p, q) =>
+          Math.round(q.anchor.y / 3) - Math.round(p.anchor.y / 3) || p.anchor.x - q.anchor.x,
+      )
+      .map((t) => t.text)
+      .join(' ');
+    for (const m of near.matchAll(DIMENSION)) {
+      const v = parseFloat(m[1].replace(',', '.'));
+      const u = m[2].toLowerCase();
+      const mm = v * (UNIT_MM[u] ?? 25.4);
+      if (Math.abs(mm - side) <= 0.03 * side) return true;
+    }
+    return false;
+  };
   type Box = PageChains['box'][number];
   const inside = (o: Box, b: Box, tol = 1) =>
     o.minX >= b.minX - tol &&
@@ -205,20 +268,23 @@ export function pageInk(
     const h = b.maxY - b.minY;
     const pen = penOf(styles.get(c.style), c);
     const head = `a ${c.closed ? 'closed outline' : 'line'} ${Math.round(c.lengthMm)} mm long, ${Math.round(w)}×${Math.round(h)} mm`;
-    const ax = axisShare(c.pts, c.closed);
-    // a straight rule (a table's, a separator, the trim line at the page's edge) in any pen
-    if (!c.closed && ax >= PAGE_INK.ruleAxis && Math.min(w, h) <= PAGE_INK.ruleThinMm)
-      return items.push({ i, kind: 'rule' });
-    // drawn off the page (clipped away on paper): nothing on paper says what it is
-    if (b.minX < -1 || b.minY < -1 || b.maxX > page.widthMm + 1 || b.maxY > page.heightMm + 1)
+    // drawn off the page (clipped away on paper): nothing on paper says what it is — before any
+    // explanation (Codex r2); the trim line at the page's edge stays within the tolerance
+    const t = PAGE_INK.offPageMm;
+    if (b.minX < -t || b.minY < -t || b.maxX > page.widthMm + t || b.maxY > page.heightMm + t)
       return items.push({ i, kind: null, why: `${head}, drawn off the page` });
+    const ax = axisShare(c.pts, c.closed);
     if (!c.closed) {
+      // a straight rule (a table's, a separator, the trim line) in any pen: no piece by itself
+      if (ax >= PAGE_INK.ruleAxis && Math.min(w, h) <= PAGE_INK.ruleThinMm)
+        return items.push({ i, kind: 'rule' });
       // a bent orthogonal line (a bracket, a table corner) only in a pen the tiles do not use
       if (ax >= 0.999 && pen && !tilePen(pen)) return items.push({ i, kind: 'rule' });
     } else {
       const a = areaOf(c.pts);
       if (ax >= PAGE_INK.frameAxis && a >= PAGE_INK.frameFill * w * h) {
-        if (squareSide(w, h) && scaleWord) return items.push({ i, kind: 'square' });
+        const side = squareSide(w, h);
+        if (side && calibrated(b, (w + h) / 2)) return items.push({ i, kind: 'square' });
         return items.push({ i, kind: null, frame: { pen, piece: a >= PAGE_INK.pieceMm2 } });
       }
       // a tile piece at a reduced scale: the best shape match, decided with the page's others
@@ -237,10 +303,10 @@ export function pageInk(
     const max = pen && pen.w <= PAGE_INK.hairlineMm ? Math.max(drawMax, hairMax) : drawMax;
     const small = Math.max(w, h) <= max;
     if (small && pen && !tilePen(pen)) {
-      // a piece-sized closed drawing: a hairline, or the inner detail of a garment drawing
-      // (seams, topstitching, buttons) — a pocket in a pen of its own has neither
+      // a piece-sized closed drawing only with the inner detail of a garment drawing (seams,
+      // topstitching, buttons) — a pocket in a pen of its own, hairline or not, has none (Codex r2)
       const pieceSized = c.closed && areaOf(c.pts) >= PAGE_INK.pieceMm2;
-      if (!pieceSized || pen.w <= PAGE_INK.hairlineMm || detailIn(b, i) >= PAGE_INK.drawingDetail)
+      if (!pieceSized || detailIn(b, i) >= PAGE_INK.drawingDetail)
         return items.push({ i, kind: 'drawing' });
       return items.push({
         i,
@@ -282,19 +348,16 @@ export function pageInk(
         x.why = `a closed outline ${Math.round(c.lengthMm)} mm long, one tile piece's shape at 1:${Math.round(1 / x.copy!.s)} but not one of ≥ ${PAGE_INK.copyMinPieces} different tile pieces reduced at one scale`;
     }
   }
-  // frames: a table (≥ 2 rules / frames inside it), or words / a drawing inside in a foreign pen
-  const ruled = items.filter((x) => x.kind === 'rule' || x.frame);
+  // frames: only in a pen the tiles do not use (a rectangle in the pattern's pen may be a
+  // waistband, whatever lies inside it — Codex r2), holding words or other line work
   for (const x of items) {
     if (!x.frame) continue;
     const b = pc.box[x.i];
-    const table = ruled.filter((y) => y !== x && inside(pc.box[y.i], b)).length >= 2;
     const foreign = !!x.frame.pen && !tilePen(x.frame.pen);
-    if (table || (foreign && (textIn(b) >= 1 || detailIn(b, x.i) >= 1))) {
-      x.kind = 'frame';
-      if (x.frame.piece && !foreign) penFrame = true;
-    } else {
+    if (foreign && (textIn(b) >= 1 || detailIn(b, x.i) >= 1)) x.kind = 'frame';
+    else {
       const c = pc.chains[x.i];
-      x.why = `a rectangle ${Math.round(b.maxX - b.minX)}×${Math.round(b.maxY - b.minY)} mm (${fmtPen(x.frame.pen)}${foreign ? '' : ", the tile sheet's pen"}) that frames no table${foreign ? ' and no words' : ''} — it may be a piece (${Math.round(c.lengthMm)} mm)`;
+      x.why = `a rectangle ${Math.round(b.maxX - b.minX)}×${Math.round(b.maxY - b.minY)} mm (${fmtPen(x.frame.pen)}) ${foreign ? 'that frames no words and no lines' : "drawn with the tile sheet's pen"} — it may be a piece (${Math.round(c.lengthMm)} mm)`;
     }
   }
   const first = items.find((x) => !x.kind);
@@ -312,7 +375,6 @@ export function pageInk(
         ? null
         : (Object.keys(counts) as InkKind[]).map((k) => `${counts[k]} ${wordsOf[k]}`).join(', '),
     unexplained: first ? first.why ?? 'unexplained' : null,
-    penFrame,
     counts,
   };
 }

@@ -79,7 +79,7 @@ async function dump(files: string[]) {
         `p${d.page + 1} ${c.cls} ${c.confidence.toFixed(2)} ${Math.round(pg.widthMm)}x${Math.round(pg.heightMm)} ink=${JSON.stringify(c.ink)} chains=${pc.chains.length} texts=${pg.texts.length} rasters=${pg.rasters.length} face=${!!d.face} copy=${JSON.stringify(d.reducedCopy ?? null)} | ${d.drawing}`,
       );
       console.log(
-        `   INK ${d.ink?.explained ? 'EXPLAINED ' + d.ink.explained : 'UNEXPLAINED ' + (d.ink?.unexplained ?? '(no tiles)')}${d.ink?.penFrame ? ' [penFrame]' : ''}`,
+        `   INK ${d.ink?.explained ? 'EXPLAINED ' + d.ink.explained : 'UNEXPLAINED ' + (d.ink?.unexplained ?? '(no tiles)')}`,
       );
       if (!process.env.INK_CHAINS) continue;
       let shown = 0;

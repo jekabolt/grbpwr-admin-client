@@ -513,7 +513,6 @@ function inkPass(
     d.ink = {
       ...(r.explained ? { explained: r.explained } : {}),
       ...(r.unexplained ? { unexplained: r.unexplained } : {}),
-      ...(r.explained && r.penFrame ? { penFrame: true } : {}),
     };
   }
 }
