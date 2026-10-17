@@ -14,6 +14,7 @@ import type {
   PtMm,
   Seed,
   SetAside,
+  VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -230,41 +231,86 @@ type Problem =
   | { key: 'aside'; kind: 'aside' };
 
 /**
- * How one garment differs on the sheet (the engine's optional `pieces.out.variantMarks`, not in
- * the types yet): its label, where the label sits, its cutting lines, the pieces it changes (seed
- * ids), its own outlines, and whether the engine is unsure. Every field is read guarded.
+ * How one garment differs on the sheet: the engine's `pieces.out.variantMarks` (VARIANT-MARKS.md).
+ * A mark the client can show is sure and says something: a cutting line (`cut` — the garment cuts
+ * the piece there; `edge` — it keeps the piece's drawn edge where another garment cuts) or a piece
+ * of that garment alone (`piece`). Uncertain marks change nothing, so they draw nothing.
  */
-type VariantMark = {
-  label: string | null;
-  cutLines: PtMm[][];
-  pieces: Set<number>;
-  outlines: PtMm[][];
-  uncertain: boolean;
-};
-const isPt = (p: unknown): p is PtMm =>
-  !!p && typeof p === 'object' && Number.isFinite((p as PtMm).x) && Number.isFinite((p as PtMm).y);
-const polylines = (v: unknown, min: number): PtMm[][] =>
-  Array.isArray(v)
-    ? v.filter((l): l is PtMm[] => Array.isArray(l) && l.length >= min && l.every(isPt))
-    : [];
-function variantMarksOf(out: unknown): VariantMark[] {
-  const raw = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
-    .map((m) => ({
-      label: typeof m.label === 'string' ? m.label : null,
-      cutLines: polylines(m.cutLines, 2),
-      pieces: new Set(
-        Array.isArray(m.pieces) ? m.pieces.filter((x): x is number => Number.isFinite(x)) : [],
-      ),
-      outlines: polylines(m.outlines, 3),
-      uncertain: m.uncertain === true,
-    }));
-}
-/** A mark the client can show: sure, and it draws something. */
 const markShows = (m: VariantMark) =>
-  !m.uncertain && (m.cutLines.length > 0 || m.pieces.size > 0 || m.outlines.length > 0);
+  !m.uncertain && (m.cutLines.length > 0 || m.pieces.length > 0);
+/** Squared distance from `p` to the closed outline `poly` (its edges). */
+const distToOutline2 = (p: PtMm, poly: readonly PtMm[]) => {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    const ex = a.x + t * dx - p.x;
+    const ey = a.y + t * dy - p.y;
+    best = Math.min(best, ex * ex + ey * ey);
+  }
+  return best;
+};
+/**
+ * One garment's picture: its pieces (a piece another garment owns is already left out by the
+ * caller), each in this garment's own outline where the engine cut one (`outlines`, one
+ * representative size), else as drawn; the pieces its marks touch tinted; and its cutting lines —
+ * per piece the one size's line that runs along the outline shown (the engine gives one line per
+ * size: drawn all, they blur into a band), every line where there is no outline to match.
+ */
+function garmentPicture(
+  v: string,
+  fams: readonly { seed: number; outer: PtMm[] }[],
+  marks: readonly VariantMark[],
+  /** false: keep the outlines as given (the sheet's size on screen), match the lines to them. */
+  ownShapes = true,
+) {
+  const mine = marks.filter((m) => m.label === v && markShows(m));
+  const own = new Map<number, PtMm[]>();
+  for (const m of mine)
+    for (const o of m.outlines ?? []) if (o.poly.length > 2) own.set(o.seed, o.poly);
+  const touched = new Set(mine.flatMap((m) => m.pieces));
+  const shapes = fams.map((f) => (ownShapes ? own.get(f.seed) : undefined) ?? f.outer);
+  const cutLines: PtMm[][] = [];
+  for (const m of mine) {
+    if (m.kind === 'piece') continue;
+    const lines = m.cutLines.filter((l) => l.length > 1);
+    const shown = m.pieces.flatMap((sd) => {
+      const i = fams.findIndex((f) => f.seed === sd);
+      return i >= 0 ? [shapes[i]] : [];
+    });
+    if (!shown.length || !lines.length) {
+      cutLines.push(...lines);
+      continue;
+    }
+    for (const poly of shown) {
+      if (poly.length < 3) continue;
+      // the line that lies ON this outline: both ends and the middle closest to its edges
+      let best: PtMm[] | null = null;
+      let bestD = Infinity;
+      for (const l of lines) {
+        const d =
+          distToOutline2(l[0], poly) +
+          distToOutline2(l[l.length - 1], poly) +
+          distToOutline2(l[Math.floor(l.length / 2)], poly);
+        if (d < bestD) {
+          bestD = d;
+          best = l;
+        }
+      }
+      if (best) cutLines.push(best);
+    }
+  }
+  return {
+    outlines: shapes,
+    tinted: fams.map((f) => touched.has(f.seed)),
+    cutLines,
+    changes: touched.size,
+  };
+}
 
 /** What the canvas shows lit (blue) because a tile or a garment picture is under the pointer. */
 type Hot =
@@ -424,13 +470,13 @@ export function PiecesStep({
   // the same pieces. Without that report the client cannot know: the engine cuts a model along its
   // own cutting lines (pieces/variants.ts `variantKnives`) even when no seed carries the model,
   // so styles sharing every seed may still differ (kombinezon: A and B cut the waist and the
-  // bodice at different heights) → asked, each garment's picture with its cutting lines in blue
-  // once the engine draws them. The automatic pick goes through the shell's `autoAnswer` (a
+  // bodice at different heights) → asked, each garment's picture drawn from its marks
+  // (`garmentPicture`: its own outlines, its cutting lines in blue). The automatic pick goes through the shell's `autoAnswer` (a
   // running autopilot is resumed, not disarmed), once per run; said in the panel and the header
   // (D5: never silent), «change» asks the question ──
-  const marks = variantMarksOf(out);
-  const rawMarks = (out as { variantMarks?: unknown } | null | undefined)?.variantMarks;
-  const marksSayNone = Array.isArray(rawMarks) && rawMarks.length === 0;
+  const marks: VariantMark[] = out?.variantMarks ?? [];
+  // `[]` (present, empty) = the engine proved the models identical; absent = unknown → ask
+  const marksSayNone = Array.isArray(out?.variantMarks) && out.variantMarks.length === 0;
   const pieceSetOf = (v: string) =>
     families
       .filter((f) => {
@@ -1167,6 +1213,15 @@ export function PiecesStep({
     }),
   }));
   const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
+  /** The garment under the pointer: its cutting lines on the sheet, in the size on screen. */
+  const hotGarmentLines = hotGarment
+    ? garmentPicture(
+        hotGarment.v,
+        hotGarment.fams.map((f) => ({ seed: f.seed, outer: cand(f).outer })),
+        marks,
+        false,
+      ).cutLines
+    : [];
   const hotSeeds =
     hot?.kind === 'piece'
       ? new Set([hot.seed])
@@ -1218,12 +1273,17 @@ export function PiecesStep({
   );
   const quizLeft = quiz.filter((it) => !seen.asideDone.includes(it.a.id));
   const quizNow = active?.kind === 'aside' ? quizLeft[0] ?? null : null;
-  /** The quiz is over: everything left keeps its current guess; the shell moves on if nothing else is asked. */
+  /**
+   * The quiz is over: everything left keeps its current guess, and the operator has looked at the
+   * outlines set aside — said to the engine (UXHOOKS `inputs.asideReviewed`: per tile sheet, the
+   * digest of the set as it is AFTER the last answer's re-run, so the answer itself is not a
+   * "changed set"), which drops the step's offer. The shell then moves on if nothing else is asked.
+   */
   const quizEnd = (answer?: Promise<unknown>) => {
     seen.asideOk = true;
     setHot(null);
     bump((n) => n + 1);
-    go(answer ?? Promise.resolve(), { pastOffer: true });
+    go(Promise.resolve(answer).then(() => api.reviewAsides()));
   };
   const quizAnswer = (piece: boolean) => {
     if (!quizNow) return;
@@ -1552,6 +1612,19 @@ export function PiecesStep({
                         />
                       );
                     })}
+                  {hotGarmentLines.length > 0 && (
+                    <g
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={unit * 3}
+                      strokeLinecap='round'
+                      pointerEvents='none'
+                    >
+                      {hotGarmentLines.map((l, i) => (
+                        <polyline key={`gl${i}`} points={ptsAttr(l)} />
+                      ))}
+                    </g>
+                  )}
                   {families.map((f) => {
                     const c = cand(f);
                     if (!c.leakAt) return null;
@@ -1954,9 +2027,15 @@ export function PiecesStep({
                   {answers.map((x, i) => {
                     const g = garments.find((y) => y.v === x.label);
                     const on = hot?.kind === 'garment' && hot.v === x.label;
-                    // how this garment differs, when the engine says (sure marks only)
-                    const mk = marks.filter((m) => m.label === x.label && markShows(m));
-                    const changed = new Set(mk.flatMap((m) => [...m.pieces]));
+                    // how this garment differs, when the engine says (sure marks only): its own
+                    // outlines, its cutting lines in blue, the pieces it changes tinted
+                    const pic = garmentPicture(
+                      x.label,
+                      (g?.fams ?? []).map((f) => ({ seed: f.seed, outer: cand(f).outer })),
+                      marks,
+                    );
+                    // the card's own suggestion (first in the list) is shown picked in advance
+                    const suggested = x.label === named?.pick;
                     return (
                       <button
                         key={x.label}
@@ -1980,23 +2059,28 @@ export function PiecesStep({
                         onPointerLeave={() => setHot(null)}
                         onFocus={() => setHot({ kind: 'garment', v: x.label })}
                         onBlur={() => setHot(null)}
-                        className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+                        className={`flex flex-col gap-2 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default ${suggested ? 'border-2 border-textColor' : 'border border-borderColor'}`}
+                        data-suggested={suggested || undefined}
                         style={on ? { borderColor: SHEET_INK.blue } : undefined}
                       >
                         <ModelThumb
                           sheet={sheetBox}
-                          outlines={(g?.fams ?? []).map((f) => cand(f).outer)}
-                          tinted={(g?.fams ?? []).map((f) => changed.has(f.seed))}
-                          cutLines={mk.flatMap((m) => m.cutLines)}
-                          extra={mk.flatMap((m) => m.outlines)}
+                          outlines={pic.outlines}
+                          tinted={pic.tinted}
+                          cutLines={pic.cutLines}
                           hot={on}
                           className='w-full'
-                          style={{ height: 150 }}
+                          style={{ height: 240 }}
                         />
                         <Text size='micro' component='span'>
                           {doing === x.label && session.busy ? 'opening… · ' : ''}
                           {x.label} · {plural(g?.fams.length ?? 0, 'piece')}
-                          {x.title ? ' · named on the card' : ''}
+                          {pic.cutLines.length ? ' · its cutting line in blue' : ''}
+                          {suggested && named
+                            ? named.strong
+                              ? ' · the card names it'
+                              : ' · suggested by the card'
+                            : ''}
                         </Text>
                       </button>
                     );
