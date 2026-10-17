@@ -51,6 +51,7 @@ import { analyse as moodAnalyse } from './mood-entry';
 import { mountHook, rerender } from './react-hook-shim';
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 import {
+  dartOf,
   provenCopy,
   rimTolMm,
   weakAsides,
@@ -60,6 +61,8 @@ import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { leakDiag } from './leak-diag';
 import { gfitArchive } from './gfit-archive';
+import { classifyFeatures } from 'lib/pattern-import/semantics/features';
+import { provenDarts } from 'lib/pattern-import/pieces/darts';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 export const ARCHIVE_DIR =
@@ -439,6 +442,16 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       const o = f ? countBy(f.candidates.map((c) => c.outcome)) : null;
       return `${x.id}:${x.origin}:${(seedLabel(x) ?? '').slice(0, 24)}${o ? ` ${JSON.stringify(o)}` : ' -'}`;
     }),
+    // ARCHIVE_FAMS=1: each family's sizes — rank, outcome, area cm², seed point
+    ...(process.env.ARCHIVE_FAMS
+      ? {
+          fams: fams.map((f) => ({
+            seed: f.seed,
+            at: (s.pieces?.seeds ?? []).find((x) => x.id === f.seed)?.at,
+            c: f.candidates.map((c) => `${c.rank}:${c.outcome}:${Math.round(c.areaMm2 / 100)}`),
+          })),
+        }
+      : {}),
     families: fams.length,
     /** Families whose every size closes / with a leak / with a refused (held back) size. */
     familiesClosed: fams.filter(
@@ -559,6 +572,45 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     rec.weak = weak.map((a) =>
       diagnoseAside(a, s.pieces!.families, s.pieces!.seeds, S?.sheet?.texts ?? []),
     );
+    // DARTS: does the host export the dart's legs as internal lines (layer 8)? per closed size:
+    // internal features with a point within 4 mm of the dart's point
+    const fset = S?.wallSet ?? S?.chains;
+    const nearPt = (pts: readonly PtMm[], q: PtMm, r: number) =>
+      pts.some((p, i) => {
+        const b = pts[i + 1] ?? p;
+        const dx = b.x - p.x;
+        const dy = b.y - p.y;
+        const L = dx * dx + dy * dy;
+        const u = L ? Math.max(0, Math.min(1, ((q.x - p.x) * dx + (q.y - p.y) * dy) / L)) : 0;
+        return Math.hypot(p.x + u * dx - q.x, p.y + u * dy - q.y) <= r;
+      });
+    if (fset && S?.sheet)
+      weak.forEach((a, i) => {
+        const d = a.dart;
+        const r = (rec.weak as Record<string, unknown>[])[i];
+        const dd = r.dartDiag as { hostSeed?: number | null } | undefined;
+        const hs = r.fail === 'dart' ? (r.hostSeed as number | undefined) : dd?.hostSeed;
+        const seedId =
+          hs ??
+          s.pieces!.seeds.find(
+            (x) =>
+              d?.host && Math.abs(x.at.x - d.host.x) < 0.01 && Math.abs(x.at.y - d.host.y) < 0.01,
+          )?.id;
+        if (!d || seedId == null) return;
+        const fam = s.pieces!.families.find((f) => f.seed === seedId);
+        r.l8 = (fam?.candidates ?? [])
+          .filter((c) => c.outcome === 'closed' && c.outer.length > 2)
+          .map((c) => {
+            const darts = provenDarts([a], s.pieces!.families, s.pieces!.seeds);
+            const fs = classifyFeatures(c, fset, S.sheet!, darts.length ? { darts } : {});
+            const legs = fs.filter((f) => f.kind === 'internal' && f.label === 'dart');
+            return {
+              r: c.rank,
+              legs: legs.length,
+              internal: fs.filter((f) => f.kind === 'internal').length,
+            };
+          });
+      });
     // ARCHIVE_CROPS=<dir>: a close-up PNG of each (the host's sizes in colour, its rim dotted)
     if (process.env.ARCHIVE_CROPS && S) {
       const set = S.wallSet ?? S.chains;
@@ -705,6 +757,65 @@ function diagnoseAside(
       in: closed(f).filter((x) => pointInPoly(a.at, x.outer)).length,
     }))
     .filter((x) => x.in > 0);
+  // DARTS: the face pass's dart account, and whether it is proven a dart of its piece
+  if (a.dart) {
+    out.dart = a.dart;
+    const ev = dartOf(a, families, seeds);
+    if (ev) return { ...out, fail: 'dart', dartEv: ev };
+    const d = a.dart;
+    const hs = d.host
+      ? seeds.find(
+          (x) => Math.abs(x.at.x - d.host!.x) < 0.01 && Math.abs(x.at.y - d.host!.y) < 0.01,
+        )
+      : undefined;
+    const hf = hs ? families.find((f) => f.seed === hs.id) : undefined;
+    const segD = (p: PtMm, q: readonly PtMm[]) => {
+      let m = Infinity;
+      for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+        const A = q[j];
+        const B = q[i];
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        const L = dx * dx + dy * dy;
+        const u = L ? Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / L)) : 0;
+        m = Math.min(m, Math.hypot(A.x + u * dx - p.x, A.y + u * dy - p.y));
+      }
+      return Math.round(m * 10) / 10;
+    };
+    const mid = { x: (d.base[0].x + d.base[1].x) / 2, y: (d.base[0].y + d.base[1].y) / 2 };
+    out.dartDiag = {
+      hostSeed: hs?.id ?? null,
+      sizes: (hf?.candidates ?? [])
+        .filter((x) => x.outcome === 'closed' && x.outer.length > 2)
+        .map((x) => ({
+          r: x.rank,
+          // rim samples within 2.5 cells of this outline: how many, and their place along the axis
+          on: (() => {
+            const ax = { x: mid.x - d.apex.x, y: mid.y - d.apex.y };
+            const L2 = ax.x * ax.x + ax.y * ax.y || 1;
+            const tol = Math.max(1.5, 2.5 * d.cellMm);
+            return d.rim
+              .filter((p) => segD(p, x.outer) <= tol)
+              .map(
+                (p) =>
+                  Math.round((((p.x - d.apex.x) * ax.x + (p.y - d.apex.y) * ax.y) / L2) * 100) /
+                  100,
+              );
+          })(),
+          b0: segD(d.base[0], x.outer),
+          b1: segD(d.base[1], x.outer),
+          m: segD(mid, x.outer),
+          ap: segD(d.apex, x.outer),
+          apIn: pointInPoly(d.apex, x.outer),
+        })),
+      // the families whose closed outlines hold the point
+      apexIn: families
+        .filter((f) =>
+          f.candidates.some((x) => x.outcome === 'closed' && pointInPoly(d.apex, x.outer)),
+        )
+        .map((f) => f.seed),
+    };
+  }
   if (!c) return { ...out, fail: 'no-account' };
   if (c.ownLabel) return { ...out, fail: 'own-label', ownLabel: c.ownLabel };
   if (a.reason !== 'size-copy') return { ...out, fail: `weak-reason:${a.reason}` };

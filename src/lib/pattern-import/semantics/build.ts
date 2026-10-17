@@ -1136,7 +1136,13 @@ export function buildPieceSpecsDetailed(
         { x: c.bbox.maxX, y: c.bbox.maxY },
       ]),
     );
-    const featOpts = { sizeCount: run.sizes.length, region: famBox };
+    // DARTS: the darts proven of this piece — each size writes its own legs on layer 8
+    const darts = (input.darts ?? []).filter((d) => d.seed === seed);
+    const featOpts = {
+      sizeCount: run.sizes.length,
+      region: famBox,
+      ...(darts.length ? { darts } : {}),
+    };
     // SHAPE: notch marks (small closed marks centred on the line) are notches, never outline —
     // read over every size of the family at once (semantics/notch-marks.ts)
     const markReads =
@@ -1148,7 +1154,11 @@ export function buildPieceSpecsDetailed(
           );
 
     for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });
+      const feats = classifyFeatures(c, set, sheet, {
+        ...featOpts,
+        folds: facingOf.get(c),
+        ownClass: run.sizes[c.rank]?.classId ?? null,
+      });
       const mr = markReads.get(c.rank);
       if (mr) {
         feats.push(...mr.notches);

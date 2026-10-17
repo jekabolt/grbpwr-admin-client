@@ -61,6 +61,7 @@ import type {
   Seed,
   SetAside,
   SetAsideCopy,
+  SetAsideDart,
   Sheet,
   SizeRun,
 } from 'lib/pattern-import/types';
@@ -120,6 +121,11 @@ export type FaceBlob = {
     /** A piece label (pieceLabelText) in its own face that its host carries nowhere else. */
     ownText?: string;
   };
+  /**
+   * DARTS: an aside whose only label is a dart / pleat / tuck word and whose face is a narrow wedge
+   * (SetAsideDart) — the mouth on its host's outline is proven later, against the host's sizes.
+   */
+  dart?: Omit<SetAsideDart, 'host'> & { hostSeeded: boolean };
 };
 
 /**
@@ -1030,11 +1036,14 @@ export function judgeBlobs(
           // front's size lines) — its own name and one size's lines closing it alone (D3: both).
           // Only across size lines: a face split off by a common / inner line ('joined', or a strip
           // told by its width) may be half of the piece — that stays a question (Codex r1)
+          // DARTS (class C): or drawn against it with no line between them at all — it meets the
+          // group only through the slivers between its sizes' lines — and each side printing a
+          // piece name of its own (namedApart)
           const named =
             !off.has(why) &&
             !off.has('own-name') &&
             !!o.graded &&
-            why === 'size-copy' &&
+            (why === 'size-copy' || (why === 'joined' && namedApart(f, grp))) &&
             namedOneSize(f) != null &&
             acrossSizeLines(f, grp);
           if (off.has(why) || named) {
@@ -1197,6 +1206,7 @@ export function judgeBlobs(
               },
             }
           : {}),
+        ...dartIn(x.f, F, x.host.seeded),
       });
     }
     return nextId;
@@ -1257,6 +1267,44 @@ export function judgeBlobs(
       const have = new Set(hostTexts.map(norm));
       const own = mine.find(({ t }) => !have.has(norm(t.text)));
       return own ? { ownText: own.t.text.trim().slice(0, 60) } : {};
+    }
+
+    /**
+     * DARTS · face f set aside is a dart drawn inside its host, on two evidences of its own (the
+     * third, its mouth on the host's outline and its sides off it, is asked of the host's closed
+     * sizes along its edge samples — pieces/darts provenDart):
+     *   label  every piece label standing in it (pieceLabelText) is a dart word (DART_WORD:
+     *          «DART», «PLEAT», «TUCK») — a name of a piece beside it («BACK», «CUT 2») vetoes;
+     *   wedge  its filled outline is a narrow wedge (wedgeOf): long, widest at one end, tapering
+     *          to a point at the other.
+     */
+    function dartIn(
+      f: number,
+      F: FillMask,
+      hostSeeded: boolean,
+    ): { dart?: NonNullable<FaceBlob['dart']> } {
+      const labels = textAt
+        .filter(({ t, k }) => !t.background && inFace(k, f) && pieceLabelText(t.text))
+        .map(({ t }) => t.text.trim().replace(/\s+/g, ' '));
+      if (!labels.length || !labels.every((l) => DART_WORD.test(l))) return {};
+      const w = wedgeOf(F);
+      if (!w) return {};
+      const at = (q: { x: number; y: number }) => {
+        const c = g.centre(q.x, q.y);
+        return { x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10 };
+      };
+      return {
+        dart: {
+          label: labels[0].slice(0, 30),
+          base: [at(w.baseA), at(w.baseB)],
+          apex: at(w.apex),
+          lenMm: Math.round(w.lenPx * cell),
+          openMm: Math.round(w.openPx * cell),
+          rim: rimSamples(F),
+          cellMm: cell,
+          hostSeeded,
+        },
+      };
     }
 
     /** Up to RIM_SAMPLES points along a filled outline's edge (its boundary pixels), mm. */
@@ -1374,6 +1422,55 @@ export function judgeBlobs(
         if (a >= 0 && b >= 0 && a !== b) return [a, b];
       }
       return null;
+    }
+
+    /**
+     * DARTS · class C: face f, joined to its group (joinedWhy 'joined'), is drawn apart from the
+     * group's head — not a half of it split off by a line inside it:
+     *   no line between them  no line lies mostly between f and the group's other faces (sep): f
+     *                         meets the group only through the grading slivers between its sizes'
+     *                         lines (Delta's side back beside the back, Cherry's patch pocket on
+     *                         the sleeve) — a half split off by an inner / common line has one;
+     *   two names             f and the head each print a piece name (a garment-part word, not a
+     *                         bare "CUT 2") and a cutting instruction («CUT 2») of its own — two
+     *                         label blocks — and no name of one is the other's;
+     *   no text seed          no text seed stands in f (a text seed already seeds the piece it
+     *                         stands in: a second seed in its region would merge — Atlas's sleeve).
+     * The caller still asks namedOneSize (one size's lines close it alone) and acrossSizeLines
+     * (every wall between f and the group is a ranked size line).
+     */
+    function namedApart(f: number, grp: readonly number[]): boolean {
+      if (
+        sep(
+          f,
+          grp.filter((x) => x !== f),
+        ).length
+      )
+        return false;
+      if (textSeeds.some((t) => inFace(pixelOf(t.at), f))) return false;
+      const norm = (x: string) => x.trim().replace(/\s+/g, ' ').toUpperCase();
+      const namesIn = (q: number) =>
+        new Set(
+          textAt
+            .filter(
+              ({ t, k }) =>
+                !t.background &&
+                inFace(k, q) &&
+                pieceLabelText(t.text) &&
+                PIECE_NAME.test(t.text) &&
+                !MARK_TEXT.test(t.text) &&
+                !/^\s*cut\s*\d/i.test(t.text),
+            )
+            .map(({ t }) => norm(t.text)),
+        );
+      // each its own label block: a cutting instruction of its own beside the name (a name split
+      // into two text items — «FRONT» | «FACING» — across a size line is one label, Codex r1)
+      const cutIn = (q: number) =>
+        textAt.some(({ t, k }) => !t.background && inFace(k, q) && /\bcut\s*\d+\b/i.test(t.text));
+      if (!cutIn(f) || !cutIn(grp[0])) return false;
+      const mine = namesIn(f);
+      const head = namesIn(grp[0]);
+      return mine.size > 0 && head.size > 0 && ![...mine].some((x) => head.has(x));
     }
 
     /**
@@ -1651,6 +1748,117 @@ export function judgeBlobs(
     return boxOf(s);
   }
 }
+
+/**
+ * DARTS: a dart's own word — the whole label (a piece name that mentions a dart, «DART FACING»,
+ * is no dart).
+ */
+const DART_WORD = /^(?:dart|pleat|tuck)s?$/i;
+
+/**
+ * DARTS: a filled outline that is a narrow wedge — a dart drawn as two legs meeting at its point,
+ * its mouth closed by the piece's outline (or a size line across it). Read along its principal
+ * axis in WEDGE_BINS slices (the width of a slice = its pixels over the slice's length): at least
+ * WEDGE_ASPECT times longer than its widest slice, widest in the mouth's 40 %, never widening by
+ * more than 15 % of that width towards the point, the last slice at most 40 % of it, and a
+ * triangle's fill (area / (length × widest) in 0.3…0.75: a strip, a rectangle, a pleat band is
+ * not one). Grid coordinates: the mouth's two corners (the slice's extreme pixels across the axis),
+ * the point (the mean of the last slice's tip pixels), the length and the widest slice's width
+ * (the mouth's opening) in pixels.
+ */
+function wedgeOf(F: FillMask): {
+  baseA: { x: number; y: number };
+  baseB: { x: number; y: number };
+  apex: { x: number; y: number };
+  lenPx: number;
+  openPx: number;
+} | null {
+  const { w, h, m } = F;
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  for (let ly = 0; ly < h; ly++)
+    for (let lx = 0; lx < w; lx++)
+      if (m[ly * w + lx]) {
+        n++;
+        sx += lx;
+        sy += ly;
+      }
+  if (n < 50) return null;
+  const cx = sx / n;
+  const cy = sy / n;
+  let cxx = 0;
+  let cyy = 0;
+  let cxy = 0;
+  for (let ly = 0; ly < h; ly++)
+    for (let lx = 0; lx < w; lx++)
+      if (m[ly * w + lx]) {
+        cxx += (lx - cx) ** 2;
+        cyy += (ly - cy) ** 2;
+        cxy += (lx - cx) * (ly - cy);
+      }
+  const th = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
+  const ux = Math.cos(th);
+  const uy = Math.sin(th);
+  let smin = Infinity;
+  let smax = -Infinity;
+  for (let ly = 0; ly < h; ly++)
+    for (let lx = 0; lx < w; lx++)
+      if (m[ly * w + lx]) {
+        const s = (lx - cx) * ux + (ly - cy) * uy;
+        if (s < smin) smin = s;
+        if (s > smax) smax = s;
+      }
+  const L = smax - smin + 1;
+  const nb = WEDGE_BINS;
+  const cnt = new Array<number>(nb).fill(0);
+  const binOf = (s: number) => Math.min(nb - 1, Math.floor(((s - smin) / L) * nb));
+  for (let ly = 0; ly < h; ly++)
+    for (let lx = 0; lx < w; lx++)
+      if (m[ly * w + lx]) cnt[binOf((lx - cx) * ux + (ly - cy) * uy)]++;
+  let wd = cnt.map((c) => c / (L / nb));
+  // the mouth is the wider end
+  const flip = wd[0] + wd[1] < wd[nb - 1] + wd[nb - 2];
+  if (flip) wd = wd.reverse();
+  const maxW = Math.max(...wd);
+  const arg = wd.indexOf(maxW);
+  if (L < WEDGE_ASPECT * maxW || arg > 0.4 * nb - 1 || wd[nb - 1] > 0.4 * maxW) return null;
+  for (let i = arg; i < nb - 1; i++) if (wd[i + 1] > wd[i] + 0.15 * maxW) return null;
+  const fill = n / (L * maxW);
+  if (fill < 0.3 || fill > 0.75) return null;
+  // the mouth's corners and the point, along the oriented axis (o = 0 at the mouth)
+  const along = (s: number) => (flip ? smax - s : s - smin);
+  let a = { t: Infinity, x: 0, y: 0 };
+  let b = { t: -Infinity, x: 0, y: 0 };
+  let tx = 0;
+  let ty = 0;
+  let tn = 0;
+  for (let ly = 0; ly < h; ly++)
+    for (let lx = 0; lx < w; lx++) {
+      if (!m[ly * w + lx]) continue;
+      const o = along((lx - cx) * ux + (ly - cy) * uy);
+      if (o <= 0.06 * L) {
+        const t = -(lx - cx) * uy + (ly - cy) * ux;
+        if (t < a.t) a = { t, x: lx + F.x0, y: ly + F.y0 };
+        if (t > b.t) b = { t, x: lx + F.x0, y: ly + F.y0 };
+      }
+      if (o >= 0.97 * L) {
+        tx += lx + F.x0;
+        ty += ly + F.y0;
+        tn++;
+      }
+    }
+  if (!tn || !Number.isFinite(a.t)) return null;
+  return {
+    baseA: { x: a.x, y: a.y },
+    baseB: { x: b.x, y: b.y },
+    apex: { x: tx / tn, y: ty / tn },
+    lenPx: L,
+    openPx: maxW,
+  };
+}
+const WEDGE_BINS = 10;
+const WEDGE_ASPECT = 2;
 
 /** A face's filled outline: the face and its holes, in its own box (+1 px). */
 type FillMask = { x0: number; y0: number; w: number; h: number; m: Uint8Array; area: number };
@@ -2004,7 +2212,15 @@ export function asidesOf(
       areaMm2: Math.round(b.areaMm2),
       reason: b.junk,
       ...(b.copy ? { copy: copyOf(b, b.copy) } : {}),
+      ...(b.dart ? { dart: dartOf(b, b.dart) } : {}),
     });
+  }
+  /** A dart's account, with the seed point of the seeded outline it lies in (as copyOf's host). */
+  function dartOf(b: FaceBlob, d: NonNullable<FaceBlob['dart']>): SetAsideDart {
+    const { hostSeeded, ...rest } = d;
+    const H = hostSeeded ? map.blobs.find((x) => x.id === b.inside && !x.aside) : undefined;
+    const t = H?.textSeed != null ? textSeeds.find((x) => x.id === H.textSeed) : undefined;
+    return { ...rest, host: !H ? null : t ? t.at : H.junk ? null : H.at };
   }
   /** The piece a copy belongs to: the seed point of its host outline, if that one is seeded. */
   function copyOf(b: FaceBlob, c: NonNullable<FaceBlob['copy']>): SetAsideCopy {

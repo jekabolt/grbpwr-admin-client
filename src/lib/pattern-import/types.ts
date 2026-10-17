@@ -936,6 +936,35 @@ export type SetAside = {
    * weakAsides); otherwise a guess, "this is a piece" one click away.
    */
   copy?: SetAsideCopy;
+  /**
+   * DARTS: the outline may be a dart of the piece it lies in, not a piece — its only label is a
+   * dart word and its face a narrow wedge (pieces/faces wedgeOf). A dart only once its mouth is
+   * proven on that piece's outline with its point inside every size (auto-advance dartOf);
+   * otherwise a question like any other aside.
+   */
+  dart?: SetAsideDart;
+};
+
+export type SetAsideDart = {
+  /** The dart word it prints («DART»). */
+  label: string;
+  /** The mouth's two corners and the point, mm. */
+  base: [PtMm, PtMm];
+  apex: PtMm;
+  lenMm: number;
+  /** The widest slice across the wedge (its mouth's opening), mm. */
+  openMm: number;
+  /** Points along its edge, on the lines that bound it (pieces/faces rimSamples), mm. */
+  rim: PtMm[];
+  /** The seed point of the outline it lies in (null when that one is not seeded). */
+  host: PtMm | null;
+  /** The face raster's cell, mm (how near a line its corners can be read). */
+  cellMm: number;
+  /**
+   * The host's closed sizes, and how many of them draw their own V there (semantics/features
+   * dartVs) — set by the session once the fill closed them; a dart only when every size does.
+   */
+  legs?: { sizes: number; drawn: number };
 };
 
 /**
@@ -1555,6 +1584,17 @@ export type SemanticsInput = {
   seedAts?: Partial<Record<SeedId, PtMm>>;
   /** Text of the document's other pages (instructions, cutting list); the session fills it. */
   docTexts?: string[];
+  /**
+   * DARTS: the darts proven of a seeded piece on the pieces step (pieces/darts provenDarts): each
+   * size of that piece writes its own dart legs as internal lines labelled «dart» (layer 8).
+   */
+  darts?: readonly {
+    seed: SeedId;
+    label: string;
+    apex: PtMm;
+    base: [PtMm, PtMm];
+    lenMm: number;
+  }[];
 };
 
 /**

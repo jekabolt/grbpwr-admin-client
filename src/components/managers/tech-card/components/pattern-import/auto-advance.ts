@@ -4,17 +4,13 @@
 // pure, so the e2e probe prices the same stops (scripts/pattern-import/e2e-entry.ts, A7).
 // D3: nothing is accepted here; a suggestion waiting for its click is a stop, not a pass.
 import type {
-  BoxMm,
   ChainAmbiguity,
   FabricAssignment,
   ImportSession,
   MaskItem,
   PageClassification,
   PageMaskEdit,
-  PieceFamily,
-  PtMm,
   RasterCalibration,
-  Seed,
   ScaleCandidate,
   SetAside,
   SheetPart,
@@ -24,6 +20,15 @@ import type {
 } from 'lib/pattern-import/types';
 import { drawnUnmapped, drawnUnmappedLine, notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { pointInPoly } from 'lib/pattern-import/pieces/geom';
+import {
+  closedSizes as closed,
+  dartOf,
+  hostFamily,
+  onOutlines,
+  rimTolMm,
+  type DartFam,
+  type DartSeedAt,
+} from 'lib/pattern-import/pieces/darts';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
 import { anisotropyOf, squareSidesOf } from './formats';
 
@@ -101,8 +106,10 @@ export const sizeFlags = (
   expectedN: number | null | undefined,
 ) => (ambiguities ?? []).filter((a) => !(expectedN === 1 && a.kind === 'class-merge'));
 
-type Fam = Pick<PieceFamily, 'candidates' | 'seed'>;
-type SeedAt = Pick<Seed, 'id' | 'at'>;
+type Fam = DartFam;
+type SeedAt = DartSeedAt;
+
+export { dartOf, rimTolMm };
 
 /**
  * A 'size-copy' set-aside is "another size of a piece already seeded": proven only as part of a
@@ -132,25 +139,7 @@ export const provenCopy = (
   if (c.how === 'sliver' || c.clearMm <= SLIVER_MM) return true;
   const h = c.host;
   if (!h) return false;
-  const closed = (f: Fam) =>
-    f.candidates.filter((x) => x.outcome === 'closed' && x.outer.length > 2);
-  // the seeded piece of the host outline: the family of the seed standing on the host's seed
-  // point (a click moved off it, or the seed gone → not proven); without the seeds, the innermost
-  // family whose outline holds the point
-  let fam: Fam | null = null;
-  if (seeds) {
-    const sd = seeds.find((x) => Math.abs(x.at.x - h.x) < 0.01 && Math.abs(x.at.y - h.y) < 0.01);
-    fam =
-      sd == null ? null : families.find((f) => f.seed === sd.id && closed(f).length > 0) ?? null;
-  } else {
-    let best = Infinity;
-    for (const f of families)
-      for (const x of closed(f))
-        if (x.areaMm2 < best && pointInPoly(h, x.outer)) {
-          best = x.areaMm2;
-          fam = f;
-        }
-  }
+  const fam = hostFamily(h, families, seeds);
   if (!fam) return false;
   if (c.how === 'shape') return true;
   const sizes = closed(fam);
@@ -168,53 +157,6 @@ export const provenCopy = (
 
 /** A grading strip's edge runs along its piece's size outlines at this share of its points. */
 const RIM_ON_SHARE = 0.9;
-
-/**
- * How far a strip's edge sample (pieces/faces rimSamples: on the wall that bounds it — the drawn
- * line) may lie from a size outline and still be that outline's line: 2.5 face cells, never under
- * 1.5 mm.
- */
-export const rimTolMm = (cellMm: number | undefined) => Math.max(1.5, 2.5 * (cellMm ?? 0.5));
-
-/** The share of points within `tol` mm of one of the outlines. */
-function onOutlines(
-  pts: readonly PtMm[],
-  outlines: readonly { outer: readonly PtMm[]; bbox: BoxMm }[],
-  tol: number,
-): number {
-  const t2 = tol * tol;
-  let on = 0;
-  for (const p of pts) {
-    let hit = false;
-    for (const o of outlines) {
-      const b = o.bbox;
-      if (p.x < b.minX - tol || p.x > b.maxX + tol || p.y < b.minY - tol || p.y > b.maxY + tol)
-        continue;
-      const q = o.outer;
-      for (let i = 0, j = q.length - 1; i < q.length && !hit; j = i++) {
-        const A = q[j];
-        const B = q[i];
-        if (
-          (p.x < A.x - tol && p.x < B.x - tol) ||
-          (p.x > A.x + tol && p.x > B.x + tol) ||
-          (p.y < A.y - tol && p.y < B.y - tol) ||
-          (p.y > A.y + tol && p.y > B.y + tol)
-        )
-          continue;
-        const dx = B.x - A.x;
-        const dy = B.y - A.y;
-        const L = dx * dx + dy * dy;
-        const u = L ? Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / L)) : 0;
-        const ex = A.x + u * dx - p.x;
-        const ey = A.y + u * dy - p.y;
-        if (ex * ex + ey * ey <= t2) hit = true;
-      }
-      if (hit) break;
-    }
-    if (hit) on++;
-  }
-  return pts.length ? on / pts.length : 0;
-}
 
 /**
  * Piece-sized outlines set aside on a guess (WEAK_ASIDE, or — when the families are given — a size
