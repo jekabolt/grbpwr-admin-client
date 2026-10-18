@@ -377,6 +377,74 @@ export function AutopilotPill({
   );
 }
 
+// ── The wizard: «skip — decide for me» ─────────────────────────────────────────────────────
+// Owner 18.10: skip answers every open question with its likely answer (ui-bits LIKELY ANSWERS).
+// D5: nothing silent — each guess is one line here, grouped by step, the step a door back.
+
+/** One guess skip took for the operator: where, what, which answer. */
+export type SkipGuess = { step: WizardStep; what: string; answer: string };
+
+/** The wizard header's «auto · N to check»: the skip guesses by step, each step a door back. */
+export function GuessesPill({
+  guesses,
+  onDoor,
+}: {
+  guesses: readonly SkipGuess[];
+  onDoor: (step: WizardStep) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!guesses.length) return null;
+  const steps = [...new Set(guesses.map((g) => g.step))];
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      className='w-[320px]'
+      triggerProps={{
+        title: 'skip answered these questions for you — open to see what',
+        className:
+          'flex items-center text-micro text-warning underline decoration-borderColor underline-offset-2 hover:opacity-70',
+        ...({ 'data-testid': 'pattern-import-guesses' } as object),
+      }}
+      openElement={`auto · ${steps.length} to check`}
+    >
+      <ul data-skip-guesses='' className='flex flex-col divide-y divide-borderColor'>
+        {steps.map((st) => (
+          <li key={st} className='flex flex-col gap-1 py-2' data-skip-step={st}>
+            <span className='flex items-baseline gap-2'>
+              <Text size='micro' component='span' className='min-w-0 flex-1'>
+                {STEP_WORD[st] ?? st}
+              </Text>
+              <button
+                type='button'
+                className={QUIET_LINK}
+                title={`back to ${STEP_WORD[st] ?? st} — change these answers there (skip stops)`}
+                onClick={() => {
+                  setOpen(false);
+                  onDoor(st);
+                }}
+              >
+                back
+              </button>
+            </span>
+            <ul className='flex flex-col gap-0.5'>
+              {guesses
+                .filter((g) => g.step === st)
+                .map((g) => (
+                  <li key={g.what}>
+                    <Text size='micro' variant='label' component='span'>
+                      {g.what} → {g.answer}
+                    </Text>
+                  </li>
+                ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </GenericPopover>
+  );
+}
+
 /** Per viewer: the files step's "autopilot" switch (localStorage, never required). */
 const PREF_KEY = 'patimport.autopilot';
 export function readAutopilotPref(): boolean {

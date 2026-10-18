@@ -45,10 +45,12 @@ import {
   NativeSelect,
   Panel,
   SplitStage,
+  SkipQuiz,
   ask,
   fmtPct,
   useAnsweredAndGo,
   useAutoAnswer,
+  useLikelySlot,
   useQuizSlot,
 } from '../ui-bits';
 import { LineSwatchView } from '../line-swatch';
@@ -169,6 +171,10 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const autoAnswer = useAutoAnswer(api);
   useEffect(() => autoMap.current?.());
   const go = useAnsweredAndGo();
+  // LIKELY ANSWERS (ui-bits): what «skip — decide for me» takes on this step
+  const likelyOrder = useLikelySlot('sizes-order');
+  const likelySus = useLikelySlot('sizes-suspects');
+  const likelyRole = useLikelySlot('sizes-role');
   // LINEFIX: the operator's own line picks (a size's warning opened, or «mark lines not needed»).
   // Kept in the wizard's slot: the step remounts while the answer's re-run works.
   const lf = useQuizSlot<LineFixSlot>('sizes-lines', () => ({
@@ -549,6 +555,26 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       .find((n) => n.length) ?? null;
   const askBox = askNest ? boxOf(chains, askNest) : null;
   const penNotes = chains.lineAssign?.notes ?? [];
+  // skip: the lines whose pen agrees with their nest (or the pen slip) move in one click
+  likelySus.current =
+    autoSus.length > 0 && !session.busy
+      ? {
+          key: 'sizes-suspects',
+          what: `${autoSus.length === 1 ? 'one line' : `${autoSus.length} lines`} in another size`,
+          answer: 'moved to the size their pen and place say',
+          sig: autoSus.join(','),
+          likely: () => {
+            lf.answers = [...lf.answers, inputs.chainAssign];
+            return autoAnswer({
+              type: 'line-assign',
+              assign: [
+                ...inputs.chainAssign,
+                ...assignEach(chains, autoSus, nests!.expected, rowKeyOf),
+              ],
+            });
+          },
+        }
+      : null;
   const picOf = (ids: readonly number[]) => {
     let m = picCache.current.get(chains);
     if (!m) picCache.current.set(chains, (m = new Map()));
@@ -594,6 +620,17 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         }
       : null;
   const drawnName = (e: SizeMapEntry) => e.source.label || `#${e.source.rank + 1}`;
+  // skip: the geometry assumption (smallest → the first card size); no geometry = no safe guess
+  likelyOrder.current =
+    orderAsked && !rowAnswered && byGeometry && !session.busy
+      ? {
+          key: 'sizes-map',
+          what: 'size order',
+          answer: `smallest (${drawnName(drawn[0])}) → ${cards[0].name}`,
+          sig: drawn.map((e) => `${e.source.rank}:${e.card?.sizeId ?? ''}`).join(','),
+          likely: () => mapInOrder(0, autoAnswer),
+        }
+      : null;
   const windowTitle = (start: number) =>
     windowOf(start)
       .map((c, i) => `${drawnName(drawn[i])} → ${c?.name ?? 'leave out'}`)
@@ -611,6 +648,17 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   // the step's first question on a line that is not a size: shown first, above the list, not
   // inside the folded «other lines» below it (owner: the blocker must be seen on first view)
   const hoisted = confirmAsk && confirmAsk.role !== 'size' ? confirmAsk : null;
+  // skip (SIZESOCG): the line keeps the role the engine read
+  likelyRole.current =
+    confirmAsk && !session.busy
+      ? {
+          key: 'sizes-confirm',
+          what: `line ${confirmAsk.sizeLabel || (ROLE_WORD[confirmAsk.role] ?? confirmAsk.role)}`,
+          answer: `kept as ${confirmAsk.role === 'size' ? 'a size' : ROLE_WORD[confirmAsk.role] ?? confirmAsk.role}`,
+          sig: legendKey(confirmAsk),
+          likely: () => autoAnswer({ type: 'legend-confirm', key: legendKey(confirmAsk) }),
+        }
+      : null;
   // the quiz's lines on the canvas, blue, the view on them: the hoisted line question (zoomed to
   // the line's piece), else the asked suspects
   const hoistPic = hoisted ? picOf(hoisted.chains) : null;
@@ -1449,6 +1497,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                       ? `the rest follow in order; the other ${span} are left out`
                       : 'the rest follow in order'}
                 </Text>
+                <SkipQuiz />
               </div>
             )}
 
@@ -2113,6 +2162,7 @@ function LineQuiz({
           </Act>
         ))}
       </span>
+      {askOn && <SkipQuiz />}
     </div>
   );
 }
