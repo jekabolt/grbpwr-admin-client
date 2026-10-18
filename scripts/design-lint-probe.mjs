@@ -182,4 +182,64 @@ tester.run('design/no-deep-ui-import', design.rules['no-deep-ui-import'], {
   ],
 });
 
-console.log('design lint probe: all 8 rules passed');
+tester.run('design/no-hand-back-link', design.rules['no-hand-back-link'], {
+  valid: [
+    { filename, code: 'const view = <BackLink to={ROUTES.orders}>orders</BackLink>;' },
+    {
+      filename,
+      code: "const view = <button aria-label='previous page' onClick={prev}>←</button>;",
+    },
+    { filename, code: 'const view = <Chip onClick={go}>← step 10</Chip>;' },
+    { filename, code: 'const view = <Text>money in ← bank</Text>;' },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const view = <Button asChild variant='secondary'><Link to={ROUTES.models}>← models</Link></Button>;",
+      errors: [{ message: /Use BackLink from 'ui'/u }],
+    },
+    {
+      filename,
+      code: "const view = <><Link to={ROUTES.orders} aria-label='back to orders'>←</Link><Button aria-label='back' onClick={up}>←</Button></>;",
+      errors: 2,
+    },
+    {
+      filename,
+      code: "const view = <button onClick={() => setStep(1)}><Text size='small'>← back to all cases</Text></button>;",
+      errors: 1,
+    },
+  ],
+});
+
+tester.run('design/no-hand-add-door', design.rules['no-hand-add-door'], {
+  valid: [
+    { filename, code: 'const view = <AddDoor afterRows onClick={add}>colour</AddDoor>;' },
+    {
+      filename,
+      code: "const view = <select className={cn(addDoorClass(), 'block')}><option>+ slot</option></select>;",
+    },
+    { filename, code: "const view = <Button variant='underline' onClick={add}>+ add</Button>;" },
+    {
+      filename,
+      code: "const view = <button className='border border-dashed'><span aria-hidden>+</span><Cap label='+ artwork' /></button>;",
+    },
+    {
+      filename,
+      code: "const view = <button className={cn('border', empty && 'border-dashed')}>{empty ? <Pictogram /> : <img />}</button>;",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const view = <button className='flex w-full border border-dashed border-borderColor px-2 py-3'>+ aspect</button>;",
+      errors: [{ message: /Use AddDoor from 'ui'/u }],
+    },
+    {
+      filename,
+      code: "const view = <><button className={cn('border border-dashed', rows && 'mt-4')}><Text>+ operation</Text></button><select className='border border-dashed'><option value=''>+ add a slot</option></select></>;",
+      errors: 2,
+    },
+  ],
+});
+
+console.log('design lint probe: all 10 rules passed');
