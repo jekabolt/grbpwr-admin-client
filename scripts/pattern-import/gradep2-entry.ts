@@ -677,6 +677,49 @@ function renderRepair(
   renderPng(file, box, strokes, marks, Math.min(6, 1800 / span), legend);
 }
 
+function renderHint(
+  file: string,
+  id: string,
+  f: PieceFamily,
+  c: PieceCandidate,
+  set: ChainSet | null,
+  labels: string[],
+) {
+  const h = c.gradeHint!;
+  const strokes: Stroke[] = [];
+  const b = bboxOf(h.pred);
+  const box = { minX: b.minX - 25, minY: b.minY - 25, maxX: b.maxX + 25, maxY: b.maxY + 60 };
+  for (const ch of set?.chains ?? []) {
+    if (ch.pts.length < 2) continue;
+    const q = bboxOf(ch.pts);
+    if (q.maxX < box.minX || q.minX > box.maxX || q.maxY < box.minY || q.minY > box.maxY) continue;
+    strokes.push({ pts: ch.pts, closed: ch.closed, color: '#bbb', width: 0.8 });
+  }
+  for (const x of f.candidates)
+    if (x.rank !== c.rank && x.outcome === 'closed')
+      strokes.push({
+        pts: x.outer,
+        closed: true,
+        color: PALETTE[x.rank % PALETTE.length],
+        width: 0.7,
+      });
+  if (c.outcome === 'closed')
+    strokes.push({ pts: c.outer, closed: true, color: '#555', width: 3, dash: '6 4' });
+  strokes.push({ pts: h.pred, closed: true, color: '#e00', width: 1.6, dash: '4 3' });
+  const L = (k: number) => labels[k] ?? String(k);
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  renderPng(file, box, strokes, [], Math.min(5, 1600 / span), [
+    {
+      color: '#000',
+      text: `${id} seed ${f.seed}: size ${L(c.rank)} ${c.outcome} — repair refused: ${h.refusals.join(', ')}`,
+    },
+    {
+      color: '#e00',
+      text: `red dashed = where the grade of ${L(h.from[0])}+${L(h.from[1])} puts it${h.extrapolated ? ' (extrapolated)' : ''}; grey dashed thick = as closed now; colours = other sizes`,
+    },
+  ]);
+}
+
 async function oneCase(id: string, png: string | null) {
   const off = await runOnce(id, true);
   const on = await runOnce(id, false);
@@ -707,8 +750,16 @@ async function oneCase(id: string, png: string | null) {
             on.set,
             on.labels,
           );
-      } else if (c.gradeHint)
-        hints.push({ seed: f.seed, rank: c.rank, refusals: c.gradeHint.refusals });
+      } else if (c.gradeHint && png)
+        renderHint(
+          resolve(png, `${id.replace(/[^\w.-]+/g, '_')}-hint-seed${f.seed}-r${c.rank}.png`),
+          id,
+          f,
+          c,
+          on.set,
+          on.labels,
+        );
+      if (c.gradeHint) hints.push({ seed: f.seed, rank: c.rank, refusals: c.gradeHint.refusals });
     }
   }
   const allClosed = (fs: PieceFamily[]) =>

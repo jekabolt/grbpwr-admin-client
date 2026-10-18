@@ -127,6 +127,49 @@ export function repairPass(
   const refuse = (why: string) => (diag.refused[why] = (diag.refused[why] ?? 0) + 1);
 
   /** One try: replaces list[i] when every check holds; returns the refusals (empty = repaired). */
+  /**
+   * The operator's question on a refused size: where the grade puts it — the repair's prediction
+   * between the anchors around it, else carried on from the two nearest trusted anchors (marked).
+   */
+  const hint = (
+    list: PieceCandidate[],
+    i: number,
+    pred0: PtMm[] | undefined,
+    from0: [number, number] | undefined,
+    trusted: readonly number[],
+    anchors: readonly PieceCandidate[],
+    why: string[],
+  ) => {
+    const c = list[i];
+    const r = c.rank;
+    let pred = pred0;
+    let from = from0;
+    let extrapolated = false;
+    if (!pred) {
+      const t = trusted.slice().sort((a, b) => Math.abs(a - r) - Math.abs(b - r));
+      if (t.length >= 2) {
+        const [a, b] = t[0] < t[1] ? [t[0], t[1]] : [t[1], t[0]];
+        const oa = outlineOf(anchors.find((x) => x.rank === a)!.outer);
+        const ob = outlineOf(anchors.find((x) => x.rank === b)!.outer);
+        const P = oa && ob ? predictPair(oa, ob, (r - a) / (b - a), b - a, 'stacked') : null;
+        if (P) {
+          pred = P.pts;
+          from = [a, b];
+          extrapolated = r < a || r > b;
+        }
+      }
+    }
+    if (pred && from)
+      list[i] = {
+        ...c,
+        gradeHint: {
+          pred: simplify([...pred, pred[0]], GRADE_P2.hintTolMm).slice(0, -1),
+          from,
+          refusals: why,
+          ...(extrapolated ? { extrapolated: true } : {}),
+        },
+      };
+  };
   /** The leaks repaired in (A), as they were (a repair resting on a size G26 holds is undone). */
   const orig = new Map<string, PieceCandidate>();
   const tryRepair = (
@@ -143,7 +186,20 @@ export function repairPass(
       .sort((a, b) => a.rank - b.rank);
     const lo = anchors.filter((x) => x.rank < r).pop();
     const hi = anchors.find((x) => x.rank > r);
-    if (!lo || !hi) return ['not-bracketed'];
+    if (!lo || !hi) {
+      // no anchor on one side: nothing to repair from — the question still shows where the grade
+      // of the two nearest anchors carries the size (marked extrapolated)
+      hint(
+        list,
+        i,
+        undefined,
+        undefined,
+        anchors.map((x) => x.rank),
+        anchors,
+        ['not-bracketed'],
+      );
+      return ['not-bracketed'];
+    }
     diag.tried++;
     const ins: GfitSizeIn[] = anchors.map((x) => ({ rank: x.rank, outer: x.outer, anchor: true }));
     // the walls near the bracketing anchors (the size lies between them)
@@ -313,33 +369,7 @@ export function repairPass(
     }
     // the operator's question: where the grade puts the size — between the anchors around it, else
     // (no anchor on one side the model trusts) carried on from the two nearest, marked so
-    let pred = rep.pred;
-    let from = rep.from;
-    let extrapolated = false;
-    if (!pred) {
-      const t = (rep.trusted ?? []).slice().sort((a, b) => Math.abs(a - r) - Math.abs(b - r));
-      if (t.length >= 2) {
-        const [a, b] = t[0] < t[1] ? [t[0], t[1]] : [t[1], t[0]];
-        const oa = outlineOf(anchors.find((x) => x.rank === a)!.outer);
-        const ob = outlineOf(anchors.find((x) => x.rank === b)!.outer);
-        const P = oa && ob ? predictPair(oa, ob, (r - a) / (b - a), b - a, 'stacked') : null;
-        if (P) {
-          pred = P.pts;
-          from = [a, b];
-          extrapolated = r < a || r > b;
-        }
-      }
-    }
-    if (pred && from)
-      list[i] = {
-        ...c,
-        gradeHint: {
-          pred: simplify([...pred, pred[0]], GRADE_P2.hintTolMm).slice(0, -1),
-          from,
-          refusals: why,
-          ...(extrapolated ? { extrapolated: true } : {}),
-        },
-      };
+    hint(list, i, rep.pred, rep.from, rep.trusted ?? [], anchors, why);
     return why;
   };
 
