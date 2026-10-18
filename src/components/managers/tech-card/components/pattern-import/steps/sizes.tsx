@@ -58,8 +58,12 @@ import {
   boxOf,
   chainsIn,
   dropStale,
+  lineInPiece,
   lineSuspects,
+  oneClick,
+  outlineArea,
   outlineCount,
+  pad,
   suspectsOf,
 } from './size-lines';
 
@@ -174,11 +178,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     answers: [],
     goAt: null,
     right: [],
+    kept: [],
   }));
   const [, bump] = useState(0);
   const touch = () => bump((x) => x + 1);
   const [hoverLine, setHoverLine] = useState<number | null>(null);
+  // lines a question's answer is about, lit while the pointer is on it
+  const [hoverIds, setHoverIds] = useState<number[] | null>(null);
   const nests = useMemo(() => (chains ? lineSuspects(chains) : null), [chains]);
+  // the quiz pictures (a line in its piece), per read: hover re-renders must not redo the search
+  const picCache = useRef(new WeakMap<object, Map<string, ReturnType<typeof lineInPiece>>>());
   // ANSWERED AND GO, once the warnings the answer was about are gone (the re-run has landed)
   const notesLeft = useRef(0);
   useEffect(() => {
@@ -205,7 +214,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       sizeLabel: row.sizeLabel,
       ...(row.sig ? { sig: row.sig } : {}),
     };
-    void api.dispatch({
+    return api.dispatch({
       type: 'legend',
       edits: [...inputs.legend.filter((e) => !mine(e)), { ...prev, ...p, classId }],
     });
@@ -229,8 +238,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
   const setRole = (c: LineClass, v: string) =>
     edit(c.id, { role: v as ChainRole, sizeLabel: v === 'size' ? c.sizeLabel ?? '' : null });
-  const confirmRow = (c: LineClass) =>
-    void api.dispatch({ type: 'legend-confirm', key: legendKey(c) });
+  const confirmRow = (c: LineClass) => api.dispatch({ type: 'legend-confirm', key: legendKey(c) });
 
   const flagged = flag != null ? flags[flag] : null;
   const pickedRow = picked != null ? chains.classes.find((c) => c.id === picked) ?? null : null;
@@ -471,7 +479,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       // the suspects when there are any (the size's own lines are drawn grey around them)
       focus: boxOf(chains, sus.length ? sus : c.chains),
     };
-    lf.sel = sus;
+    // the one-click proposal: the lines whose pen agrees with their nest (the rest are asked)
+    const one = nests ? sus.filter((id) => oneClick(nests, id)) : [];
+    lf.sel = one.length ? one : sus;
     lf.hist = [];
     touch();
   };
@@ -513,7 +523,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     void api.dispatch({ type: 'line-assign', assign: prev });
   };
   const picks = lineMode ? lf.sel : [];
-  const eachKnown = !!nests && picks.length > 0 && picks.every((id) => nests.expected.has(id));
+  const eachKnown = !!nests && picks.length > 0 && picks.every((id) => oneClick(nests, id));
   // the pick is still the step's own proposal (nothing clicked since the warning opened it)
   const suggested = eachKnown && lf.hist.length === 0 && lf.mode?.kind === 'fix';
   const answeredKeys = inputs.chainAssign.reduce((n, e) => n + e.keys.length, 0);
@@ -523,6 +533,29 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       (drawn.findIndex((e) => e.source.classId === a.id) + 1 || 99) -
       (drawn.findIndex((e) => e.source.classId === b.id) + 1 || 99),
   );
+  // ── LINEASSIGN-2: the engine's suspects. A pen that agrees with its nest (or the drawing's pen
+  // slip) moves with ONE click; a pen against its nest, or none read, is asked — one nest at a
+  // time. Our geometry guess (no pen) only feeds the size rows' warnings, as before.
+  const lineId = (id: number) => (lines?.[id]?.key ? `${lines[id].sheet}:${lines[id].key}` : null);
+  const keptLines = new Set(lf.kept);
+  const engineSus =
+    nests?.pen && !lineMode
+      ? [...nests.suspects].filter((id) => !keptLines.has(lineId(id) ?? ''))
+      : [];
+  const autoSus = engineSus.filter((id) => oneClick(nests!, id));
+  const askNest =
+    nests?.nests
+      .map((n) => n.filter((id) => engineSus.includes(id) && !oneClick(nests, id)))
+      .find((n) => n.length) ?? null;
+  const askBox = askNest ? boxOf(chains, askNest) : null;
+  const penNotes = chains.lineAssign?.notes ?? [];
+  const picOf = (ids: readonly number[]) => {
+    let m = picCache.current.get(chains);
+    if (!m) picCache.current.set(chains, (m = new Map()));
+    const k = ids.join(',');
+    if (!m.has(k)) m.set(k, lineInPiece(chains, ids));
+    return m.get(k) ?? null;
+  };
 
   const assumedOf = (e: SizeMapEntry | undefined) => {
     const i = e && assumed ? drawn.indexOf(e) : -1;
@@ -572,18 +605,27 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       ? `${firstWord} (${drawnName(drawn[0])}): is that ${cards[0].name}?`
       : '';
   const quizClass = showOrderBar ? drawn[0]?.source.classId ?? null : null;
-  // the canvas: a hovered / picked row, else the size the question asks about, else a flag
-  const hotRow = hotRow0 ?? (flagged ? null : quizClass);
-  const lit =
-    hotRow0 == null && !flagged && quizClass != null
-      ? new Set(chains.classes.find((c) => c.id === quizClass)?.chains ?? [])
-      : hot;
   // the legend row the step asks about first: a size row before the other lines
   const confirmAsk =
     asking === 'confirm' ? sizeRows.find(pending) ?? otherRows.find(pending) ?? null : null;
   // the step's first question on a line that is not a size: shown first, above the list, not
   // inside the folded «other lines» below it (owner: the blocker must be seen on first view)
   const hoisted = confirmAsk && confirmAsk.role !== 'size' ? confirmAsk : null;
+  // the quiz's lines on the canvas, blue, the view on them: the hoisted line question (zoomed to
+  // the line's piece), else the asked suspects
+  const hoistPic = hoisted ? picOf(hoisted.chains) : null;
+  const quizIds = hoisted ? hoisted.chains : askNest;
+  const quizFocus = hoisted ? hoistPic?.box ?? null : askBox ? pad(askBox) : null;
+  const quizLit = hotRow0 == null && !flagged ? hoverIds ?? quizIds : null;
+  // the canvas: a hovered / picked row, else the lines a question asks about, else the size the
+  // in-order question asks about, else a flag
+  const hotRow = hotRow0 ?? (flagged || quizLit ? null : quizClass);
+  const lit = quizLit
+    ? new Set(quizLit)
+    : hotRow0 == null && !flagged && quizClass != null
+      ? new Set(chains.classes.find((c) => c.id === quizClass)?.chains ?? [])
+      : hot;
+  const litBlue = hotRow != null || !!quizLit;
   // the row question open by the operator's click; the row the footer asks about opens by itself
   const qOpen = (key: string, active: boolean) => qOverride[key] ?? active;
   const toggleQ = (key: string, active: boolean) =>
@@ -854,7 +896,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         >
           <SheetViewport
             bbox={session.sheet.sheet.bbox}
-            focus={lineMode ? lineMode.focus : focusBox}
+            focus={lineMode ? lineMode.focus : focusBox ?? quizFocus}
             tool={lineMode?.kind === 'mark' ? 'lasso' : 'pan'}
             onPick={lineMode?.kind === 'fix' ? toggleLine : undefined}
             onLasso={lineMode?.kind === 'mark' ? lassoLines : undefined}
@@ -934,8 +976,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           <polyline
                             key={`hot-${i}`}
                             points={f32Attr(a)}
-                            stroke={hotRow != null ? SHEET_INK.blue : SHEET_INK.ink}
-                            strokeWidth={unit * (hotRow != null ? 2.4 : 1.6)}
+                            stroke={litBlue ? SHEET_INK.blue : SHEET_INK.ink}
+                            strokeWidth={unit * (litBlue ? 2.4 : 1.6)}
                           />
                         ),
                       )}
@@ -1151,12 +1193,166 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             )}
 
             {hoisted && (
-              <div className='flex flex-col'>
-                <Text component='p' className='text-labelColor'>
-                  first, one line to check
+              <LineQuiz
+                question={
+                  ROLE_QUESTION[hoisted.role] ??
+                  `is this line ${ROLE_WORD[hoisted.role] ?? hoisted.role}?`
+                }
+                picture={
+                  hoistPic && (
+                    <LinePicture
+                      chains={chains}
+                      box={hoistPic.box}
+                      lit={hoisted.chains}
+                      strong={hoistPic.piece}
+                      title='the line in blue, in its piece'
+                    />
+                  )
+                }
+                askOn={asking === 'confirm'}
+                busy={!!session.busy}
+                answers={
+                  hoisted.role === 'internal'
+                    ? [
+                        {
+                          label: 'inside a piece (dart, pocket)',
+                          title: 'yes: darts, pockets and marks drawn inside the pieces',
+                          onClick: () => go(confirmRow(hoisted)),
+                        },
+                        {
+                          label: 'a size line',
+                          title: 'no: these lines draw a size (name it or split it in its row)',
+                          onClick: () => go(setRole(hoisted, 'size')),
+                        },
+                        {
+                          label: 'not needed',
+                          title: 'no: text, a frame or marks; the lines leave the sizes',
+                          onClick: () => go(setRole(hoisted, 'ignore')),
+                        },
+                      ]
+                    : [
+                        { label: 'yes', onClick: () => go(confirmRow(hoisted)) },
+                        ...(hoisted.role !== 'ignore'
+                          ? [
+                              {
+                                label: 'not needed',
+                                title: 'text, a frame or marks: the lines leave the sizes',
+                                onClick: () => go(setRole(hoisted, 'ignore')),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: 'something else',
+                          title: 'open the line: say what it is',
+                          onClick: () => {
+                            setOtherOpen(true);
+                            setPicked(hoisted.id);
+                            setToKey(false);
+                          },
+                        },
+                      ]
+                }
+              />
+            )}
+
+            {autoSus.length > 0 && (
+              <div
+                data-testid='size-suspects-move'
+                className='flex flex-col gap-2'
+                onMouseEnter={() => setHoverIds(autoSus)}
+                onMouseLeave={() => setHoverIds(null)}
+              >
+                <Text
+                  component='p'
+                  title={autoSus.map((id) => nests!.why?.get(id) ?? '').join('\n')}
+                >
+                  {autoSus.length === 1
+                    ? 'one line sits in another size than its place and its pen say'
+                    : `${autoSus.length} lines sit in another size than their place and their pen say`}
                 </Text>
-                {otherRow(hoisted)}
+                <span>
+                  <Act
+                    primary
+                    disabled={!!session.busy}
+                    title='each line goes to the size its nest of outlines names'
+                    onClick={() => {
+                      setHoverIds(null);
+                      sendLines(
+                        assignEach(chains, autoSus, nests!.expected, rowKeyOf),
+                        askNest == null,
+                      );
+                    }}
+                  >
+                    move {autoSus.length} {autoSus.length === 1 ? 'line' : 'lines'} to their sizes
+                  </Act>
+                </span>
               </div>
+            )}
+
+            {askNest && askBox && (
+              <LineQuiz
+                testId='size-suspects-ask'
+                question={(() => {
+                  const sug = sizeRows.find((c) => c.id === nests!.expected.get(askNest[0]));
+                  const pen =
+                    nests!.pen?.get(askNest[0]) === 'against'
+                      ? 'the pen says another size'
+                      : 'no pen is read on them';
+                  const one = askNest.length === 1;
+                  return `${one ? 'this line' : `these ${askNest.length} lines`}: the place says size ${sug?.sizeLabel ?? '?'}, ${pen}. which size ${one ? 'is it' : 'are they'}?`;
+                })()}
+                title={askNest.map((id) => nests!.why?.get(id) ?? '').join('\n')}
+                picture={
+                  <LinePicture
+                    chains={chains}
+                    box={pad(askBox)}
+                    lit={askNest}
+                    title='the lines asked about, in blue'
+                  />
+                }
+                askOn={false}
+                busy={!!session.busy}
+                chips={sizeChips.map((c) => ({
+                  key: c.id,
+                  label: c.sizeLabel || '(no name)',
+                  swatch: (
+                    <LineSwatchView
+                      swatch={chains.swatches?.[c.id]}
+                      widthMm={QUIZ_SWATCH_MM}
+                      minStrokeMm={0.35}
+                      fallbackDash={motifOf(c.id)}
+                    />
+                  ),
+                  title: `the lines are size ${c.sizeLabel}`,
+                  onClick: () =>
+                    sendLines(
+                      assignTo(chains, askNest, { row: legendKey(c) }),
+                      autoSus.length === 0,
+                    ),
+                }))}
+                answers={[
+                  {
+                    label: 'not needed',
+                    title: 'the lines are no size line: they leave the sizes',
+                    onClick: () =>
+                      sendLines(assignTo(chains, askNest, { cls: 'ignore' }), autoSus.length === 0),
+                  },
+                  {
+                    label: "they're right",
+                    title: 'the lines are in the right size: do not ask again',
+                    onClick: () => {
+                      lf.kept = [
+                        ...lf.kept,
+                        ...askNest.flatMap((id) => {
+                          const k = lineId(id);
+                          return k ? [k] : [];
+                        }),
+                      ];
+                      touch();
+                    },
+                  },
+                ]}
+              />
             )}
 
             {orderFolded && (
@@ -1316,6 +1512,17 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                       drop them
                     </Act>
                   </span>
+                )}
+                {penNotes.length > 0 && (
+                  <Text
+                    component='p'
+                    className='truncate text-labelColor'
+                    title={penNotes.map((n) => n.detail).join('\n')}
+                  >
+                    {penNotes.length === 1
+                      ? 'one answer is against a pen the drawing slipped'
+                      : `${penNotes.length} answers are against a pen the drawing slipped`}
+                  </Text>
                 )}
                 <span className='flex flex-wrap items-center gap-2'>
                   {!lineMode && (
@@ -1757,25 +1964,6 @@ function RowDetail({
   );
 }
 
-/**
- * The biggest closed outline a size's lines draw, mm² (shoelace over the chain previews; a chain
- * is closed when its ends meet within 2 mm). 0 = none closed: the geometry cannot order it.
- */
-function outlineArea(chains: NonNullable<ImportSessionApi['session']['chains']>, classId: number) {
-  const c = chains.classes.find((x) => x.id === classId);
-  let best = 0;
-  for (const id of c?.chains ?? []) {
-    const a = chains.chainPreview[id];
-    if (!a || a.length < 8) continue;
-    const n = a.length;
-    if (Math.hypot(a[0] - a[n - 2], a[1] - a[n - 1]) > 2) continue;
-    let sh = 0;
-    for (let k = 0; k + 3 < n; k += 2) sh += a[k] * a[k + 3] - a[k + 2] * a[k + 1];
-    best = Math.max(best, Math.abs(sh) / 2);
-  }
-  return best;
-}
-
 /** LINEFIX state of the step, in the wizard's slot (the step remounts while a re-run works). */
 type LineFixSlot = {
   /** fix: a size's warning opened (its legend key, the view box at open) */
@@ -1790,6 +1978,8 @@ type LineFixSlot = {
   goAt: unknown;
   /** size rows the operator said are right (legend keys): their warning is hidden */
   right: string[];
+  /** suspect lines the operator said are right (`sheet:key`): no longer asked */
+  kept: string[];
 };
 
 /** The operator's size map noted before a rename: card size per size name, and the read it was on. */
@@ -1843,6 +2033,142 @@ function Act({
     >
       {children}
     </button>
+  );
+}
+
+type Chains = NonNullable<ImportSessionApi['session']['chains']>;
+
+/**
+ * A question about some lines, in the quiz's shape: the plain question, a picture of the lines in
+ * their piece, the answers in one row (the first is the one asked). One font size, no bold; the
+ * canvas beside it is zoomed to the same lines, blue.
+ */
+function LineQuiz({
+  question,
+  title,
+  picture,
+  chips,
+  answers,
+  askOn,
+  busy,
+  testId = 'size-line-quiz',
+}: {
+  question: string;
+  title?: string;
+  picture: React.ReactNode;
+  chips?: {
+    key: number;
+    label: string;
+    swatch: React.ReactNode;
+    title: string;
+    onClick: () => void;
+  }[];
+  answers: { label: string; title?: string; onClick: () => void }[];
+  askOn: boolean;
+  busy: boolean;
+  testId?: string;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      {...(askOn ? { 'data-ask-zone': '', 'data-ask-label': question } : {})}
+      className='flex flex-col gap-3'
+    >
+      <Text component='p' title={title}>
+        {question}
+      </Text>
+      {picture}
+      {chips && chips.length > 0 && (
+        <span className='flex flex-wrap items-center gap-2'>
+          {chips.map((c) => (
+            <button
+              key={c.key}
+              type='button'
+              disabled={busy}
+              title={c.title}
+              onClick={c.onClick}
+              className={cn(
+                'flex h-7 items-center gap-2 border border-borderColor bg-bgColor px-2 transition-colors hover:border-textColor',
+                FOCUS,
+                'disabled:cursor-not-allowed disabled:text-labelColor',
+              )}
+            >
+              {c.swatch}
+              <span>{c.label}</span>
+            </button>
+          ))}
+        </span>
+      )}
+      <span className='flex flex-wrap items-center gap-2'>
+        {answers.map((a, i) => (
+          <Act
+            key={a.label}
+            primary={i === 0 && !chips?.length}
+            disabled={busy}
+            title={a.title}
+            {...(i === 0 ? ask('sizes-confirm', askOn, 'say what the blue line is') : {})}
+            onClick={a.onClick}
+          >
+            {a.label}
+          </Act>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Some lines in their piece, cropped to `box` (drawing frame, mm): the lines blue, the piece's
+ * outline (`strong`) ink, every other line around light grey.
+ */
+function LinePicture({
+  chains,
+  box,
+  lit,
+  strong,
+  title,
+}: {
+  chains: Chains;
+  box: BoxMm;
+  lit: readonly number[];
+  strong?: number | null;
+  title: string;
+}) {
+  const on = new Set(lit);
+  const near: number[] = [];
+  chains.chainPreview.forEach((a, i) => {
+    if (a.length < 4) return;
+    for (let k = 0; k + 1 < a.length; k += 2)
+      if (a[k] >= box.minX && a[k] <= box.maxX && a[k + 1] >= box.minY && a[k + 1] <= box.maxY) {
+        near.push(i);
+        return;
+      }
+  });
+  const W = box.maxX - box.minX;
+  const H = box.maxY - box.minY;
+  const line = (i: number, stroke: string, w: number) => (
+    <polyline
+      key={i}
+      points={f32Attr(chains.chainPreview[i])}
+      fill='none'
+      stroke={stroke}
+      strokeWidth={w}
+      vectorEffect='non-scaling-stroke'
+    />
+  );
+  return (
+    <svg
+      viewBox={`${box.minX} ${vy(box.maxY)} ${W} ${H}`}
+      preserveAspectRatio='xMidYMid meet'
+      className='block h-[200px] w-full border border-borderColor bg-bgColor'
+      role='img'
+      aria-label={title}
+    >
+      <title>{title}</title>
+      {near.filter((i) => !on.has(i) && i !== strong).map((i) => line(i, '#d6d6d6', 0.8))}
+      {strong != null && near.includes(strong) && line(strong, SHEET_INK.ink, 1.2)}
+      {near.filter((i) => on.has(i)).map((i) => line(i, SHEET_INK.blue, 2))}
+    </svg>
   );
 }
 
