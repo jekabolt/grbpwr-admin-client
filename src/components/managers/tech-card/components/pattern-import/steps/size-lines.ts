@@ -113,11 +113,12 @@ export type LineNests = {
 /**
  * A suspect the step may move with ONE click: the engine's pen agrees with its nest, or the pen is
  * the drawing's slip (two evidences for the nest's size). `against` / `unknown` are asked. Our
- * geometry fallback reads no pen: its suspects keep the old one-click proposal.
+ * geometry fallback reads no pen — one evidence only: its suspects need the operator's size chip.
  */
 export const oneClick = (n: LineNests, id: number) => {
-  const p = n.pen?.get(id);
-  return n.pen ? p === 'agrees' || p === 'slip' : n.expected.has(id);
+  if (!n.pen) return false;
+  const p = n.pen.get(id);
+  return p === 'agrees' || p === 'slip';
 };
 
 /**
