@@ -28,7 +28,7 @@ import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';
 import { plural, useWizardPrimary } from '../stages';
 import { DroppedLabels, leftOut } from './not-in-file';
-import { AssumptionList, autopilotSummary } from '../autopilot/view';
+import { AssumptionList, AutopilotPill, autopilotSummary } from '../autopilot/view';
 
 const CUT_SYMMETRY_WORD: Record<string, string> = {
   TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'identical',
@@ -321,8 +321,14 @@ export function ApplyStep({
       </Fold>
 
       {/* A10 (D5): what the autopilot assumed stays one click away — open when any is strong */}
+      {/* owner 18.10: the guesses in plain words (the Patterns tab's pill); the raw list in debug */}
       {assumptions.length > 0 && (
-        <Fold label={autopilotSummary(assumptions)} defaultOpen={assumptions.some((x) => x.strong)}>
+        <span className='self-start'>
+          <AutopilotPill assumptions={assumptions} />
+        </span>
+      )}
+      {assumptions.length > 0 && (
+        <DebugFold label={autopilotSummary(assumptions)}>
           <AssumptionList
             bare
             assumptions={assumptions}
@@ -332,7 +338,7 @@ export function ApplyStep({
                 : (step) => void api.dispatch({ type: 'back', to: step })
             }
           />
-        </Fold>
+        </DebugFold>
       )}
 
       <DebugFold label='block → piece links'>
