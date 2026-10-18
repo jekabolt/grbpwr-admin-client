@@ -5,11 +5,7 @@
 import { useEffect, useState } from 'react';
 
 import type { SpreadMode } from 'lib/nesting/spread';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, Chip, Input, Stat, StatGrid, Text } from 'ui';
 
 import type { LayMode } from '../use-lay-mode';
 import {

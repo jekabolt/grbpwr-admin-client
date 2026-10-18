@@ -1,7 +1,7 @@
 import type { ChangeEvent, CSSProperties, JSX, ReactNode } from 'react';
 
 import { IsoPicture, type OverlayTone, type PictureData, type Point } from './iso';
-import Input from 'ui/components/input';
+import { Input } from 'ui';
 
 export type FabricColours = { face: string; back: string };
 export type PicInput = {
