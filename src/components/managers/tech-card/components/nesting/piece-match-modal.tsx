@@ -1828,7 +1828,7 @@ export function PieceMatchModal({
       );
     }
     if (blockCounts.size === 0 && mineByBlock.size === 0)
-      warnings.push('no named pieces in the file');
+      warnings.push('no named pieces');
   }
   if (foreignSizes.length > 0) {
     warnings.push(
