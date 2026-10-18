@@ -32,6 +32,7 @@ import { DebugFold, Fold, Panel, SplitStage, ask, fmtBytes } from '../ui-bits';
 import { focusFromGate, type PieceFocus } from '../piece-focus';
 import { DroppedLabels, leftOut } from './not-in-file';
 import { openGradeAsks } from './details-grade';
+import { writtenTokens } from '../write-storage';
 
 const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G1-roundtrip': { what: 'reads back through the card parser', fix: null },
@@ -399,6 +400,7 @@ export function CheckStep({
                   passes ✓
                 </Text>
               )}
+              <WriteStorageChoice api={api} scope={scope} />
               {passing.length > 0 && (
                 <Fold label={`${plural(passing.length, 'check')} pass`}>
                   <DataTable>
@@ -429,6 +431,117 @@ export function CheckStep({
         </Panel>
       }
     />
+  );
+}
+
+/**
+ * RULHOOK (RUL-SPEC §6): how the DXF is written — per size (the default) or ALSO as a base-size DXF
+ * + .rul grade table. The operator's choice only: the autopilot never sets it. Picking it writes
+ * the draft again at once (the session's `write-storage` event); the base is one of the written
+ * card sizes, the middle one unless picked. An asked base the run does not write → one quiet line
+ * (`ignored`); a scope that cannot be graded point for point → its first reason, the per-size DXF
+ * stays the file.
+ */
+function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: DraftScope }) {
+  const ws = api.writeStorage;
+  const rul = ws.storage === 'rul';
+  // STOPFIX: a re-write in flight holds the choice; a failed one says why, once, with a retry
+  const busy = !!api.session.busy || ws.rewriting;
+  const written = writtenTokens(api.session.sizes);
+  const tokens = written.length ? written : scope.manifest.sizes.map((s) => s.token);
+  const r = scope.rul;
+  // the base in force: the package's own when written, else the asked one, else the writer's middle
+  const base =
+    (r?.ok ? r.base : null) ?? ws.rulBase ?? tokens[Math.floor((tokens.length - 1) / 2)] ?? null;
+  const set = (storage: 'blocks' | 'rul', rulBase?: string) =>
+    void api.dispatch({ type: 'write-storage', storage, ...(rulBase ? { rulBase } : {}) });
+  return (
+    <div data-testid='check-storage' className='flex flex-col gap-1'>
+      <ChipRow className='-ml-1.5'>
+        <Chip
+          quiet
+          selected={!rul}
+          pressed={!rul}
+          disabled={busy}
+          title='one DXF, every size drawn as its own blocks'
+          onClick={() => rul && set('blocks')}
+          data-testid='check-storage-blocks'
+        >
+          per-size DXF
+        </Chip>
+        <Chip
+          quiet
+          selected={rul}
+          pressed={rul}
+          disabled={busy}
+          title='also a DXF of the base size + a .rul grade table (the per-size DXF stays the file)'
+          onClick={() => !rul && set('rul')}
+          data-testid='check-storage-rul'
+        >
+          base + .rul
+        </Chip>
+      </ChipRow>
+      {rul && tokens.length > 0 && (
+        <ChipRow>
+          <Text size='micro' variant='label' component='span'>
+            base
+          </Text>
+          {tokens.map((t) => (
+            <Chip
+              key={t}
+              quiet
+              selected={t === base}
+              pressed={t === base}
+              disabled={busy}
+              onClick={() => t !== base && set('rul', t)}
+              data-testid='check-storage-base'
+            >
+              {t}
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
+      {ws.rewriting && (
+        <Text size='micro' variant='label' component='p' data-testid='check-storage-writing'>
+          writing…
+        </Text>
+      )}
+      {!ws.rewriting && ws.rewriteError && (
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          className='break-words'
+          data-testid='check-storage-rewrite-error'
+        >
+          files not written for this choice: {ws.rewriteError} ·{' '}
+          <button
+            type='button'
+            className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+            onClick={() => void api.retryWrite()}
+          >
+            try again
+          </button>
+        </Text>
+      )}
+      {rul && ws.ignored && (
+        <Text size='micro' variant='label' component='p' data-testid='check-storage-ignored'>
+          {ws.ignored}
+        </Text>
+      )}
+      {rul && r && !r.ok && (
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          className='break-words'
+          title={r.reasons.slice(0, 3).join('\n')}
+          data-testid='check-storage-refused'
+        >
+          no .rul: {r.reasons[0] ?? 'not gradable'} — per-size DXF only
+        </Text>
+      )}
+    </div>
   );
 }
 

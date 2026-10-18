@@ -41,7 +41,7 @@ import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
-import { STEPS, stepIndex, useImportSession } from './use-import-session';
+import { STEPS, stepIndex, useImportSession, type ImportSessionApi } from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { autopilotApply, resolverFor } from './autopilot/run';
@@ -204,15 +204,17 @@ function WizardBody({
         : undefined,
     [client],
   );
-  const api = useImportSession({
-    client,
-    card,
-    namer,
-    buildDraft,
-    applyDraft,
-    pageRoles,
-    pinScopeKey: initialScopeKey,
-  });
+  const api = useReplayable(
+    useImportSession({
+      client,
+      card,
+      namer,
+      buildDraft,
+      applyDraft,
+      pageRoles,
+      pinScopeKey: initialScopeKey,
+    }),
+  );
   latest.current = api.session;
   const { session, blocker } = api;
   // files dropped on a pattern slot: read them once, as if picked on the files step
@@ -389,8 +391,14 @@ function WizardBody({
 
   // ── what the footer asks (D5: every stop reason stays visible — here or in the popover) ──
   const offWizard = (t: string) => /on the card first|on the BOM tab/.test(t);
-  const askText = session.error ? null : blocker ?? autopilotStop ?? api.offer ?? null;
-  const askKind: 'blocker' | 'stop' | 'offer' | null = session.error
+  // STOPFIX: a failed re-write after a storage change is said once, by the toggle on the check
+  // step (with its retry) — the footer keeps the step's own question, not a red block
+  const footerError =
+    session.error && !(session.step === 'check' && api.writeStorage.rewriteError)
+      ? session.error
+      : null;
+  const askText = footerError ? null : blocker ?? autopilotStop ?? api.offer ?? null;
+  const askKind: 'blocker' | 'stop' | 'offer' | null = footerError
     ? null
     : blocker
       ? 'blocker'
@@ -404,7 +412,7 @@ function WizardBody({
     if (i < stageAt) return STAGES[i].steps.every(byItself) ? 'auto' : 'done';
     if (session.busy) return 'working';
     if (applied) return 'done';
-    if (askKind === 'blocker' || askKind === 'stop' || session.error) return 'asks';
+    if (askKind === 'blocker' || askKind === 'stop' || footerError) return 'asks';
     return 'current';
   };
   const subSteps = STAGE_OF_STEP[session.step].steps;
@@ -499,7 +507,7 @@ function WizardBody({
       };
     if (override) return override;
     // a blocker never greys the primary out: the click coaches (shows where and how) instead
-    const blocked = !!blocker && !session.error;
+    const blocked = !!blocker && !footerError;
     if (session.step === 'apply') {
       if (card.downloadOnly)
         return {
@@ -588,6 +596,13 @@ function WizardBody({
     }
   }
 
+  // STOPFIX: the stop's own line (not a red error): the run is as it was before the move.
+  // A stop that lands between two stages (the drive disarmed, nothing to undo) still says so:
+  // the press took, the run rests where it got to, "run again" is then the step's own primary.
+  const stoppedLine =
+    !session.busy &&
+    (api.errorCode === 'cancelled' || ((!!api.stopped || api.stopPressed) && !session.error));
+
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
   // every line is a link that fixes it (ui-bits ONE-CLICK FIX): the step's marked fix, else the coach
@@ -595,7 +610,7 @@ function WizardBody({
   // of something else: an old replay miss must not click «accept residuals»)
   const fix = { label: 'fix it', onClick: () => fixOrCoach() };
   const coachOnly = { label: 'show where', onClick: () => onAsk() };
-  if (api.notice && !session.error && api.notice !== askText)
+  if (api.notice && !footerError && api.notice !== askText)
     warnings.push({ text: api.notice, action: coachOnly });
   // the footer shows the step's plain question: the session's own sentence stays visible here
   if (askText && askShown !== askText)
@@ -882,10 +897,32 @@ function WizardBody({
                 </Button>
               ) : null}
               <div className='min-w-0 flex-1'>
-                {session.error ? (
+                {stoppedLine ? (
+                  // STOPFIX: a stop is the operator's own — one quiet line, the run is kept
+                  <Text
+                    size='micro'
+                    component='p'
+                    className='text-labelColor'
+                    data-testid='pattern-import-stopped'
+                    data-stage={api.stopped?.stage ?? undefined}
+                    title={session.error ?? undefined}
+                  >
+                    stopped ·{' '}
+                    <button
+                      type='button'
+                      className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+                      title={
+                        api.stopped && api.lastMove ? `repeats: ${api.lastMove}` : primary.title
+                      }
+                      onClick={() => void api.runAgain(primary.onClick)}
+                    >
+                      run again
+                    </button>
+                  </Text>
+                ) : footerError ? (
                   <StageMessage
                     code={api.errorCode}
-                    message={session.error}
+                    message={footerError}
                     onReport={api.downloadReport}
                   />
                 ) : askText && !session.busy ? (
@@ -935,7 +972,7 @@ function WizardBody({
                   size='sm'
                   className='shrink-0'
                   data-testid='pattern-import-primary'
-                  data-coach={blocker && !session.error && !session.busy ? '' : undefined}
+                  data-coach={blocker && !footerError && !session.busy ? '' : undefined}
                   disabled={!!primary.disabled}
                   loading={!!primary.loading}
                   title={primary.title}
@@ -987,6 +1024,11 @@ function Working({
   onStop: () => void;
 }) {
   const counted = busy.total > 1;
+  // a note that counts by itself (the restore after a stop: "… · k/n") is not counted twice
+  const ownCount = !!busy.note && /\d+\s*\/\s*\d+\s*$/.test(busy.note);
+  // STOPFIX: the restore after a stop replays stages quietly — say that first, the stage second
+  const restoring = !!busy.note && /^restoring\b/.test(busy.note);
+  const stageWord = STAGE_WORD[busy.stage] ?? busy.stage;
   return (
     <div className='pointer-events-none absolute inset-0 flex items-center justify-center p-4'>
       <section
@@ -1002,7 +1044,7 @@ function Working({
             component='span'
             className='font-bold'
           >
-            {PHASE_OF[busy.stage] ?? 'working'}
+            {restoring ? 'restoring' : PHASE_OF[busy.stage] ?? 'working'}
           </Text>
           <Button
             variant='underline'
@@ -1015,9 +1057,15 @@ function Working({
           </Button>
         </span>
         <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
-          {STAGE_WORD[busy.stage] ?? busy.stage}
-          {busy.note ? ` · ${busy.note}` : ''}
-          {counted ? ` · ${busy.done} / ${busy.total}` : ''}
+          {restoring ? (
+            `${busy.note} · ${stageWord}`
+          ) : (
+            <>
+              {stageWord}
+              {busy.note ? ` · ${busy.note}` : ''}
+              {counted && !ownCount ? ` · ${busy.done} / ${busy.total}` : ''}
+            </>
+          )}
         </Text>
         {counted && <Progress value={(busy.done / busy.total) * 100} />}
       </section>
@@ -1085,4 +1133,94 @@ function StageMessage({
       </div>
     </CalloutBox>
   );
+}
+
+/** The session calls that start a move (UX-HOOKS §3): what "run again" repeats after a stop. */
+const MOVES = [
+  'dispatch',
+  'next',
+  'advance',
+  'addSeed',
+  'promoteAside',
+  'editPieces',
+  'editName',
+  'editNames',
+  'answerOutline',
+  'acceptMissing',
+  'confirmSize',
+  'setSize',
+  'drawnAnyway',
+  'setDrawnSizes',
+  'confirmShown',
+  'reviewAsides',
+  'retryWrite',
+] as const;
+type Move = (typeof MOVES)[number];
+/** Events that start no stage: never what a stop interrupted. */
+const NOT_A_MOVE = new Set(['download', 'apply', 'reset']);
+
+/**
+ * STOPFIX "run again": the session api with every move-starting call remembered when it is made
+ * while the run is idle. The first stage that starts afterwards binds it as the move in flight, so
+ * a stop (which undoes that whole move) can be followed by the same call on the same state.
+ * Stages of one move after the first (busy drops between them) keep the binding.
+ */
+function useReplayable(api: ImportSessionApi) {
+  const busyRef = useRef(api.session.busy);
+  busyRef.current = api.session.busy;
+  const pending = useRef<{ name: Move; args: unknown[] } | null>(null);
+  const [move, setMove] = useState<{ name: Move; args: unknown[] } | null>(null);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const busy = !!api.session.busy;
+    if (busy && !wasBusy.current && pending.current) {
+      setMove(pending.current);
+      pending.current = null;
+    }
+    wasBusy.current = busy;
+  }, [api.session.busy]);
+  // the operator pressed stop (button or Esc) — kept until his next move, even when the press
+  // landed between two stages and the session has nothing to report as stopped
+  const [stopPressed, setStopPressed] = useState(false);
+  // a new run (files read again, reset) forgets the old run's move and stop
+  useEffect(() => {
+    if (api.session.sessionId == null) {
+      setMove(null);
+      setStopPressed(false);
+    }
+  }, [api.session.sessionId]);
+
+  const wrapped = { ...api } as ImportSessionApi;
+  const rec = wrapped as unknown as Record<Move, (...a: unknown[]) => unknown>;
+  const raw = api as unknown as Record<Move, (...a: unknown[]) => unknown>;
+  for (const name of MOVES) {
+    const fn = raw[name];
+    if (typeof fn !== 'function') continue;
+    rec[name] = (...args: unknown[]) => {
+      const ev = name === 'dispatch' ? (args[0] as { type?: string } | undefined) : undefined;
+      if (!busyRef.current && !(ev?.type && NOT_A_MOVE.has(ev.type)))
+        pending.current = { name, args };
+      setStopPressed(false);
+      return fn(...args);
+    };
+  }
+  const describe = (m: typeof move) =>
+    !m
+      ? null
+      : m.name === 'dispatch'
+        ? String((m.args[0] as { type?: string } | undefined)?.type ?? 'event')
+        : m.name;
+  return Object.assign(wrapped, {
+    cancel: () => {
+      setStopPressed(true);
+      api.cancel();
+    },
+    stopPressed,
+    /** The call the stopped move began with (its name), null = none recorded. */
+    lastMove: describe(move),
+    /** Repeat the stopped move's call (recorded again as the new move); none → `fallback`. */
+    // only an undone move (`stopped`) is repeated: a stop that undid nothing would apply it twice
+    runAgain: (fallback: () => unknown) =>
+      api.stopped && move ? rec[move.name](...move.args) : fallback(),
+  });
 }
