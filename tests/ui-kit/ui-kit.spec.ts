@@ -54,6 +54,10 @@ test('find filters rail and blocks', async ({ page }) => {
     await find.fill(word);
     await expect(page.locator('#neighbours')).toBeVisible();
   }
+  await find.fill('header actions');
+  await expect(page.locator('#header-actions')).toBeVisible();
+  await find.fill('last');
+  await expect(page.locator('#rules')).toBeVisible();
   await find.fill('zzzz');
   await expect(page.getByText('none', { exact: true }).first()).toBeVisible();
 });

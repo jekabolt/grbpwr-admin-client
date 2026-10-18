@@ -14,7 +14,7 @@ import { formDemos, SampleForm } from './form-fields';
 import { inputDemos } from './inputs';
 import { KitEntry, KitGroup } from './kit-entry';
 import { layoutDemos } from './layout';
-import { neighboursDemo } from './neighbours';
+import { headerActionsDemo, neighboursDemo } from './neighbours';
 import { mediaDemos } from './media';
 import { overlayDemos } from './overlays';
 import { statusDemos } from './status';
@@ -27,7 +27,7 @@ import { TOKEN_BLOCKS, TOKEN_COUNT, TokenEntry, visibleTokens } from './tokens';
  * tests/ui-kit screenshots it and checks every barrel export has a block here.
  */
 const GROUPS: KitGroup[] = [
-  { label: 'layout', demos: [neighboursDemo, ...layoutDemos] },
+  { label: 'layout', demos: [neighboursDemo, headerActionsDemo, ...layoutDemos] },
   { label: 'actions', demos: actionDemos },
   { label: 'inputs', demos: inputDemos },
   { label: 'form fields', demos: formDemos, Provider: SampleForm },
@@ -64,7 +64,7 @@ export function UiKitPage() {
   );
   const groups = GROUPS.map((g) => ({
     ...g,
-    demos: g.demos.filter((d) => [...d.names, ...(d.keywords ?? [])].some(match)),
+    demos: g.demos.filter((d) => [...d.names, d.title ?? '', ...(d.keywords ?? [])].some(match)),
   })).filter((g) => g.demos.length > 0);
   const empty = tokens.length === 0 && groups.length === 0;
 
@@ -117,7 +117,7 @@ export function UiKitPage() {
                   {g.demos.map((d) => (
                     <SideRailItem
                       key={d.names[0]}
-                      label={d.names[0]}
+                      label={d.title ?? d.names[0]}
                       onClick={() => jumpTo(d.names[0])}
                     />
                   ))}
@@ -138,8 +138,8 @@ export function UiKitPage() {
             {groups.map(({ label, demos, Provider = Fragment }) => (
               <Provider key={label}>
                 <SectionStack>
-                  {demos.map(({ names, question, Demo }) => (
-                    <KitEntry key={names[0]} names={names} question={question}>
+                  {demos.map(({ names, question, title, Demo }) => (
+                    <KitEntry key={names[0]} names={names} question={question} title={title}>
                       <Demo />
                     </KitEntry>
                   ))}

@@ -200,3 +200,66 @@ export const neighboursDemo: KitDemo = {
   keywords: ['соседство', 'neighbor', 'gap', 'nest', 'divider', 'beside'],
   Demo: NeighboursDemo,
 };
+
+// A block header carries actions as underlined words only (`edit`, `+ add`, `delete`); a framed
+// or filled button belongs to the page, not to a block.
+function HeaderActionsDemo() {
+  return (
+    <KitMatrix
+      labelWidth={100}
+      cols={['do', "don't", 'code']}
+      rows={[
+        {
+          label: 'actions',
+          cells: [
+            <Ground>
+              <Section
+                title='trims'
+                action={
+                  <>
+                    <Button variant='underline' size='xs'>
+                      edit
+                    </Button>
+                    <Button variant='underline' size='xs'>
+                      + add
+                    </Button>
+                  </>
+                }
+              >
+                <Row label='label' value='woven' />
+              </Section>
+            </Ground>,
+            <Crossed>
+              <Ground>
+                <Section
+                  title='trims'
+                  action={
+                    <>
+                      <Button variant='secondary' size='sm'>
+                        edit
+                      </Button>
+                      <Button variant='main' size='sm'>
+                        add
+                      </Button>
+                    </>
+                  }
+                >
+                  <Row label='label' value='woven' />
+                </Section>
+              </Ground>
+            </Crossed>,
+            <Text component='span'>Button underline · xs</Text>,
+          ],
+        },
+      ]}
+    />
+  );
+}
+
+export const headerActionsDemo: KitDemo = {
+  names: ['header-actions'],
+  title: 'header actions',
+  question: 'DESIGN.md',
+  keywords: ['edit', 'add', 'delete'],
+  Demo: HeaderActionsDemo,
+};

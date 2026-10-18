@@ -7,6 +7,8 @@ export type KitDemo = {
   Demo: React.ComponentType;
   /** Header note when the block is not a barrel export (defaults to its import line). */
   question?: string;
+  /** Display name when it is not the id (an id cannot hold a space). */
+  title?: string;
   /** Extra words `find` matches, for blocks people look for by another name. */
   keywords?: string[];
 };
@@ -26,15 +28,17 @@ export type KitGroup = {
 export function KitEntry({
   names,
   question,
+  title,
   children,
 }: {
   names: string[];
   question?: string;
+  title?: string;
   children: React.ReactNode;
 }) {
   const [id, ...rest] = names;
   let node = (
-    <Section id={id} title={id} question={question ?? `import { ${names.join(', ')} } from 'ui'`}>
+    <Section id={id} title={title ?? id} question={question ?? `import { ${names.join(', ')} } from 'ui'`}>
       {children}
     </Section>
   );
