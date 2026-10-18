@@ -52,7 +52,11 @@ type Hooks = {
    * 'kill' = the stage starts, the operator stops it, the worker is terminated under it; 'soft' =
    * the soft cancel lands in the stage: the worker ran its invalidation, the session lives on.
    */
-  before?: (stage: StageName, sid: number, nth: number) => 'kill' | 'soft' | 'error' | void;
+  before?: (
+    stage: StageName,
+    sid: number,
+    nth: number,
+  ) => 'kill' | 'soft' | 'error' | 'half' | void;
   /** After a stage: the output to hand back (a perturbed one), or nothing. */
   after?: (stage: StageName, sid: number, out: unknown) => unknown;
 };
@@ -96,6 +100,11 @@ function killableClient() {
       t.nth.set(stage, n);
       const how = t.hooks.before?.(stage, id, n);
       if (how === 'error') throw new Error('the stage failed (probe)');
+      // a stage that fails after its invalidation ran (the worker drops what came after it)
+      if (how === 'half') {
+        (s as unknown as { invalidateAfter(x: StageName): void }).invalidateAfter(stage);
+        throw new ImportWorkerError('internal', 'the stage failed half way (probe)', stage);
+      }
       if (how === 'soft') {
         (s as unknown as { invalidateAfter(x: StageName): void }).invalidateAfter(stage);
         throw new ImportWorkerError('cancelled', 'stopped by the operator', stage);
@@ -154,6 +163,9 @@ function mount(c: Case) {
   let api!: ImportSessionApi;
   let last = Date.now();
   const restoring: Snap[] = [];
+  const self = {
+    onRender: null as null | ((api: ImportSessionApi) => void),
+  };
   mountHook(() => {
     api = useImportSession({
       client,
@@ -164,6 +176,8 @@ function mount(c: Case) {
     });
     last = Date.now();
     const s = api.session;
+    // the press lands in this very render: after one stage ended, before the next started
+    self.onRender?.(api);
     if (s.busy?.note?.startsWith('restoring'))
       restoring.push({
         step: s.step,
@@ -197,7 +211,17 @@ function mount(c: Case) {
     api.advance({ resolve });
     await idle();
   };
-  return { api: () => api, t, start, resume, restoring, resolve };
+  return {
+    api: () => api,
+    t,
+    start,
+    resume,
+    restoring,
+    resolve,
+    set onRender(f: ((api: ImportSessionApi) => void) | null) {
+      self.onRender = f;
+    },
+  };
 }
 
 /** ISO timestamps (the manifest's createdAt inside the written text) do not count. */
@@ -561,6 +585,131 @@ async function optitex(c: Case) {
       !!again && a.session.sessionId === 3 && !a.restorePending && d.length === 0,
       'files read during a restore: the new run is its own (no stale error, ends as the baseline)',
       { sid: a.session.sessionId, d, error: a.session.error },
+    );
+  }
+
+  // (9) PATTERNS: stop pressed in the gap between two stages of one move (assemble → chains):
+  // nothing in flight — the hook still stops the rest of the move, undoes it and says so
+  {
+    const w = mount(c);
+    let armed = false;
+    let fired = false;
+    w.t.hooks.after = (stage, _sid, out) => {
+      if (stage === 'assemble' && !fired) armed = true;
+      return out;
+    };
+    w.onRender = (api) => {
+      if (!armed || fired || api.session.busy) return;
+      fired = true;
+      api.cancel(); // between the assemble that ended and the chains that would start
+    };
+    await w.start();
+    const a = w.api();
+    const after = w.t.log
+      .slice(w.t.log.findIndex((x) => x.stage === 'assemble') + 1)
+      .map((x) => x.stage);
+    check(
+      fired && after.length === 0,
+      'gap stop: no stage runs after the press (chains never started)',
+      after,
+    );
+    check(
+      a.stopped?.stage === 'chains' && a.stopped.restarted === false && a.errorCode === 'cancelled',
+      'gap stop: api.stopped names the stage that would have run',
+      a.stopped,
+    );
+    check(
+      a.session.step === 'scale' && !a.session.sheet && a.restorePending,
+      'gap stop: the move is undone (back on scale, the worker restored next)',
+      [a.session.step, !!a.session.sheet],
+    );
+    await w.resume();
+    const d = diffOf(B, endOf(w.api()));
+    check(d.length === 0, 'gap stop: the resume ends as without the stop', d);
+  }
+
+  // (9b) the same between two ticks of the drive: armed, no move open, nothing in flight
+  {
+    const w = mount(c);
+    await w.api().dispatch({
+      type: 'files',
+      files: filesOf(c).map((f) => new File([f.bytes], f.name)),
+    });
+    await sleep(50);
+    for (let q = 0; q < 400 && w.api().session.busy; q++) await sleep(20);
+    const n0 = w.t.log.length;
+    const step = w.api().session.step;
+    w.api().advance({ resolve: w.resolve });
+    w.api().cancel(); // before the drive's first tick
+    await sleep(800);
+    const a = w.api();
+    check(
+      a.stopped != null &&
+        a.stopped.restarted === false &&
+        a.errorCode === 'cancelled' &&
+        w.t.log.length === n0 &&
+        a.session.step === step,
+      'gap stop between drive ticks: said (api.stopped), nothing runs, the step stays',
+      { stopped: a.stopped, ran: w.t.log.slice(n0).map((x) => x.stage), step: a.session.step },
+    );
+  }
+
+  // (10) PATTERNS: "chains: assemble the sheet first" — a stage that fails in a live worker after
+  // its invalidation (the page-remove on the sheet step: clean) left the screen on the sheet
+  // while the worker had dropped it; the next "next" ran chains on no sheet
+  {
+    const w = mount(c);
+    await w.start();
+    await w.api().dispatch({ type: 'back', to: 'sheet' });
+    const s0 = digestOf(w.api().session.sheet);
+    const p0 = w.api().session.pages[0];
+    w.t.hooks.before = (stage, _sid, n) => (stage === 'clean' && n === 2 ? 'half' : undefined);
+    await w.api().dispatch({
+      type: 'clean',
+      edits: [{ file: p0.file, page: p0.page, role: 'blank' }],
+    });
+    const a = w.api();
+    check(
+      /failed half way/.test(a.session.error ?? '') &&
+        a.session.step === 'sheet' &&
+        digestOf(a.session.sheet) === s0 &&
+        !a.inputs.cleanEdits.length &&
+        a.restorePending,
+      'failed page-remove: undone — the sheet on screen, the worker restored next',
+      [a.session.step, a.session.error, a.inputs.cleanEdits.length],
+    );
+    await w.api().next();
+    const b = w.api();
+    check(
+      b.session.step === 'sizes' && !b.session.error,
+      'failed page-remove: "next" on the sheet runs chains on the restored sheet (no out-of-order)',
+      [b.session.step, b.session.error],
+    );
+  }
+
+  // (11) Codex: chains ran (new), then sizes failed — the worker has no sizes, the screen does:
+  // undone too, so "next" never builds pieces on a worker without its size map
+  {
+    const w = mount(c);
+    await w.start();
+    await w.api().dispatch({ type: 'back', to: 'sizes' });
+    const z0 = digestOf(w.api().session.sizes);
+    let n = 0;
+    w.t.hooks.before = (stage) => (stage === 'sizes' && n++ === 0 ? 'error' : undefined);
+    await w.api().dispatch({ type: 'legend', edits: w.api().inputs.legend });
+    const a = w.api();
+    check(
+      /failed \(probe\)/.test(a.session.error ?? '') &&
+        digestOf(a.session.sizes) === z0 &&
+        a.restorePending,
+      'failed sizes after a new chains: undone, the worker restored next',
+      [a.session.error, a.restorePending],
+    );
+    await w.api().next();
+    check(
+      w.api().session.step === 'pieces' && !w.api().session.error,
+      'failed sizes after a new chains: "next" builds the pieces (no out-of-order)',
+      [w.api().session.step, w.api().session.error],
     );
   }
 

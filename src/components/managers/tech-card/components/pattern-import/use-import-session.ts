@@ -87,10 +87,13 @@ import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilo
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
 import {
+  before,
   cloneInput,
   digestOf,
+  nextStageOf,
   pruneAfter,
   RESTORE_STAGES,
+  shownStage,
   type RestoreEntry,
 } from './stop-restore';
 import type {
@@ -699,6 +702,19 @@ export function useImportSession(deps: {
         const alive = !client.alive || client.alive(id);
         // a live worker ran the stage's invalidation before it failed: the history drops the same
         if (alive) history.current = pruneAfter(history.current, stage);
+        // PATTERNS ("chains: assemble the sheet first"): the worker now holds less than the
+        // screen shows — its latest state stage (the history's frontier) comes before the latest
+        // output on screen (a page-remove whose clean failed; chains new, then sizes failed). The
+        // move is undone like a stop, so the screen never runs ahead of the worker (Codex)
+        const frontier = history.current.at(-1)?.stage ?? null;
+        if (
+          alive &&
+          move.current &&
+          importErrorCode(e) !== 'cancelled' &&
+          shownStage(sRef.current) != null &&
+          (frontier == null || before(frontier, shownStage(sRef.current)))
+        )
+          move.current.stopped = true;
         // the importer was restarted under a stop: the run is kept, the next stage restores it
         else if (importErrorCode(e) === 'cancelled') markLost(true);
       }
@@ -2678,8 +2694,21 @@ export function useImportSession(deps: {
      */
     cancel: () => {
       stopReq.current = true;
+      const armed = !!drive.current;
       disarm();
+      const idle = !sRef.current.busy;
       client.cancel();
+      // PATTERNS: pressed in the gap between two stages (of a move, or two ticks of the drive):
+      // nothing in flight to stop — the stop is said now (the stage that would have run next),
+      // and the move, when one is open, is undone when it returns
+      if (idle && (move.current || armed))
+        fail(
+          new ImportWorkerError(
+            'cancelled',
+            'stopped by the operator',
+            nextStageOf(sRef.current.step) ?? undefined,
+          ),
+        );
     },
     /**
      * STOPFIX: what the last stop stopped (`stage`), and whether the importer had to be restarted

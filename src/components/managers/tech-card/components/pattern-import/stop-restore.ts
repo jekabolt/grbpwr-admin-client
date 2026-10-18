@@ -13,7 +13,7 @@
 //
 // Every replayed output is compared with the one recorded (`digestOf`): a stage that comes out
 // different refuses the restore — the run never silently continues on another drawing.
-import type { StageIO, StageName } from 'lib/pattern-import/types';
+import type { ImportSession, StageIO, StageName, WizardStep } from 'lib/pattern-import/types';
 
 /** The worker's stage order (session.ts ORDER); a stage drops the state of every stage after it. */
 const ORDER: readonly StageName[] = [
@@ -54,6 +54,45 @@ export type RestoreEntry = {
 };
 
 const at = (s: StageName) => ORDER.indexOf(s);
+
+/**
+ * PATTERNS ("chains: assemble the sheet first"): the latest stage whose output the screen shows —
+ * a stage before it that fails in a live worker has dropped what the screen still shows.
+ */
+export function shownStage(s: ImportSession): StageName | null {
+  if (s.semantics) return 'semantics';
+  if (s.pieces) return 'pieces';
+  if (s.sizes) return 'sizes';
+  if (s.chains) return 'chains';
+  if (s.sheet) return 'assemble';
+  if (s.scale.decision) return 'scale';
+  if (s.clean) return 'clean';
+  return null;
+}
+
+/** True when stage `failed` comes before stage `shown` in the worker's order. */
+export const before = (failed: StageName, shown: StageName | null) =>
+  shown != null && at(failed) >= 0 && at(failed) < at(shown);
+
+/** The first stage "next" runs from a step (what a stop between two stages names). */
+export function nextStageOf(step: WizardStep): StageName | null {
+  switch (step) {
+    case 'scale':
+      return 'scale';
+    case 'sheet':
+      return 'chains';
+    case 'sizes':
+      return 'pieces';
+    case 'pieces':
+      return 'semantics';
+    case 'meaning':
+      return 'fabrics';
+    case 'fabrics':
+      return 'write';
+    default:
+      return null;
+  }
+}
 
 /** The history once stage `s` ran (successfully or not, in a live worker): later stages dropped. */
 export function pruneAfter(h: readonly RestoreEntry[], s: StageName): RestoreEntry[] {
