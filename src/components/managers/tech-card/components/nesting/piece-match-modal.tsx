@@ -86,6 +86,12 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
+import {
+  hasOldPieceLoss,
+  OldPiecesPanel,
+  type OldPieceDecision,
+  type OldPieceItem,
+} from './old-pieces-panel';
 
 // Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
 // «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.
@@ -203,7 +209,14 @@ type PieceFields = {
   grainline?: string;
   note?: string;
 };
-const FIELD_KEYS = ['fused', 'fusingMode', 'fusingWidthMm', 'ungraded', 'grainline', 'note'] as const;
+const FIELD_KEYS = [
+  'fused',
+  'fusingMode',
+  'fusingWidthMm',
+  'ungraded',
+  'grainline',
+  'note',
+] as const;
 
 // No width of its own: a `w-full` here beat the caller's `w-24`/`w-56` in the stylesheet and
 // squeezed the row's name to nothing (the gone-pieces rows read just «delete»).
@@ -373,10 +386,13 @@ function proposeRows(
     let fromSlot = '';
     // F6b: строка с манифестом сверяется ещё и по имени детали карточки, заявленному конвертером
     // (у пары — «FP» для FP_L и FP_R): деталь, заведённую мастером конвертации, она узнаёт сама.
-    const names = c.manifestName && c.manifestName.toLowerCase() !== block.toLowerCase()
-      ? [block, c.manifestName]
-      : [block];
-    const exact = pieceOptions.find((p) => names.some((n) => p.name.toLowerCase() === n.toLowerCase()));
+    const names =
+      c.manifestName && c.manifestName.toLowerCase() !== block.toLowerCase()
+        ? [block, c.manifestName]
+        : [block];
+    const exact = pieceOptions.find((p) =>
+      names.some((n) => p.name.toLowerCase() === n.toLowerCase()),
+    );
     const byLoose = pieceOptions.find((p) => names.some((n) => loose(p.name) === loose(n)));
     const hint = otherFabricByBlock.get(loose(block));
     if (exact) {
@@ -622,10 +638,9 @@ function planPieceUpdates(
     // обе руки пары или развёрнутый сгиб. Пара побеждает сгиб в подписи: она называет больше.
     const forced = cis
       .map((ci) => blockCounts.get(ci)?.force)
-      .reduce<'pair' | 'unfolded' | undefined>(
-        (acc, f) => (acc === 'pair' || f === 'pair' ? 'pair' : (acc ?? f)),
-        undefined,
-      );
+      .reduce<
+        'pair' | 'unfolded' | undefined
+      >((acc, f) => (acc === 'pair' || f === 'pair' ? 'pair' : acc ?? f), undefined);
     // ОДНО правило с apply импорта (piece-codes `importedCutSymmetry`); ниже — почему каждая ветка.
     const symmetry = importedCutSymmetry(current, total, forced);
     if (symmetry && forced) {
@@ -735,18 +750,12 @@ export function PieceMatchModal({
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
   const dictTokens = useDictionarySizeTokens();
-  const allPieces = useMemo(
-    () => (parse.phase === 'ready' ? parse.pieces : []),
-    [parse],
-  );
+  const allPieces = useMemo(() => (parse.phase === 'ready' ? parse.pieces : []), [parse]);
   const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
   // A block carries the piece on more than one layer (sewing line and cutting line). Only ONE of
   // them is the piece; the other must not reach the counting, or every block would be counted
   // twice and pieces_per_garment would double.
-  const layerOpts = useMemo(
-    () => layerOptions(allPieces, split.codeById),
-    [allPieces, split],
-  );
+  const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
   // Always the heuristic's answer (patterns-lite #6): the override was never persisted, and
   // nobody should have to know what a contour layer is.
   const contourLayer = defaultContourLayer(layerOpts);
@@ -760,10 +769,7 @@ export function PieceMatchModal({
     [allPieces, contourLayer],
   );
   // Долевая на листе — та же линия, по которой раскладка разворачивает деталь.
-  const grainLayer = useMemo(
-    () => defaultGrainLayer(grainLayerOptions(allPieces)),
-    [allPieces],
-  );
+  const grainLayer = useMemo(() => defaultGrainLayer(grainLayerOptions(allPieces)), [allPieces]);
   // Слои внутренней геометрии, найденные в файле: линия шва, надсечки, свёрла, вытачки. По
   // умолчанию показываются ВСЕ — деталь без них это голый силуэт, а режут именно по ним.
   const innerLayerNames = useMemo(() => {
@@ -1179,17 +1185,76 @@ export function PieceMatchModal({
     return out;
   }, [parse, parseComplete, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
 
-  // Ответ по каждому кандидату. Дефолт — «удалить», и он НЕ материализуется в карту: пустая
-  // карта уже значит «удалить всех», поэтому новый кандидат (оператор переключил список файлов)
-  // не требует ни эффекта-засева, ни синхронизации, которая молча теряла бы выбор. Переключатель
-  // секции пишет сюда `setDeleteChoice((prev) => new Map(prev).set(lineKey, v))`.
-  const [deleteChoice, setDeleteChoice] = useState<Map<string, 'delete' | 'keep'>>(new Map());
-  const deleteDecision = (lineKey: string): 'delete' | 'keep' =>
-    deleteChoice.get(lineKey) ?? 'delete';
+  // ── состав потерь ─────────────────────────────────────────────────────────────────────
+  // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
+  // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
+  // колорвеи чтение карточки не отдаёт, а их строки уедут с деталью так же. Поэтому счёт ниже
+  // подписан «в колорвеях карточки», а не выдаётся за полный.
+  const recipeHold = useMemo(() => recipeHoldersByPiece(colorways), [colorways]);
+  // Замеренные площади детали — по строке на размер. Считаются по ВСЕМ скоупам, а не по текущей
+  // ткани: сервер удаляет их одним `piece_line_key IN (…)` без оглядки на скоуп, в той же
+  // транзакции, что и саму деталь (techcard/materials.go). Считать по одному скоупу значило бы
+  // назвать оператору меньшее число, чем он потеряет.
+  const areaRowsByPiece = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of pieceAreaScopes ?? []) {
+      for (const a of s.areas ?? []) {
+        const k = (a.pieceLineKey ?? '').trim().toLowerCase();
+        if (!k) continue;
+        m.set(k, (m.get(k) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [pieceAreaScopes]);
+
+  // Ответ по каждому кандидату. Пустая карта теперь значит безопасный пресет: удалить только
+  // действительно пустые детали, а всё, что держит рецепты, нормы, площади или операции, оставить.
+  // Явный выбор материализуется только после действия оператора, поэтому новый кандидат получает
+  // тот же безопасный ответ без эффекта-засева, который мог бы затереть уже сделанный выбор.
+  const oldPieceItems = useMemo<OldPieceItem[]>(
+    () =>
+      deleteCandidates.map((candidate) => {
+        const key = candidate.lineKey.trim().toLowerCase();
+        const hold = recipeHold.get(key);
+        return {
+          lineKey: candidate.lineKey,
+          name: candidate.name?.trim() || candidate.lineKey,
+          losses: {
+            recipeRows: hold?.rows ?? 0,
+            norms: hold?.withNorm ?? 0,
+            areas: areaRowsByPiece.get(key) ?? 0,
+            operations: opsByPiece.get(key) ?? 0,
+          },
+        };
+      }),
+    [deleteCandidates, recipeHold, areaRowsByPiece, opsByPiece],
+  );
+  const oldPieceByKey = useMemo(
+    () => new Map(oldPieceItems.map((item) => [item.lineKey, item])),
+    [oldPieceItems],
+  );
+  const [deleteChoice, setDeleteChoice] = useState<Map<string, OldPieceDecision>>(new Map());
+  const [pickingOldPieces, setPickingOldPieces] = useState(false);
+  const deleteDecision = (lineKey: string): OldPieceDecision => {
+    const explicit = deleteChoice.get(lineKey);
+    if (explicit) return explicit;
+    const item = oldPieceByKey.get(lineKey);
+    return item && hasOldPieceLoss(item.losses) ? 'keep' : 'delete';
+  };
+  const setGoneDecisions = (entries: readonly (readonly [string, OldPieceDecision])[]) =>
+    setDeleteChoice((previous) => {
+      const next = new Map(previous);
+      entries.forEach(([lineKey, decision]) => next.set(lineKey, decision));
+      return next;
+    });
+  const setAllGone = (decision: OldPieceDecision) =>
+    setGoneDecisions(deleteCandidates.map((candidate) => [candidate.lineKey, decision] as const));
   // То, что реально применит apply(), — и то, по чему считается сводка исходов.
   const toDelete = useMemo(
-    () => deleteCandidates.filter((c) => deleteDecision(c.lineKey) === 'delete'),
-    [deleteCandidates, deleteChoice],
+    () => deleteCandidates.filter((candidate) => deleteDecision(candidate.lineKey) === 'delete'),
+    // oldPieceItems carries the default decision even while deleteChoice stays intentionally sparse.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deleteCandidates, deleteChoice, oldPieceItems],
   );
 
   // ── четыре исхода одного нажатия ──────────────────────────────────────────────────────
@@ -1227,29 +1292,17 @@ export function PieceMatchModal({
         .map((u) => ({ name: live[u.index]?.name ?? '', reason: u.reason! })),
     };
     // pieceEdits: withEditedNames reads it.
-  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts, parseComplete, pieceEdits]);
-
-  // ── состав потерь ─────────────────────────────────────────────────────────────────────
-  // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
-  // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
-  // колорвеи чтение карточки не отдаёт, а их строки уедут с деталью так же. Поэтому счёт ниже
-  // подписан «в колорвеях карточки», а не выдаётся за полный.
-  const recipeHold = useMemo(() => recipeHoldersByPiece(colorways), [colorways]);
-  // Замеренные площади детали — по строке на размер. Считаются по ВСЕМ скоупам, а не по текущей
-  // ткани: сервер удаляет их одним `piece_line_key IN (…)` без оглядки на скоуп, в той же
-  // транзакции, что и саму деталь (techcard/materials.go). Считать по одному скоупу значило бы
-  // назвать оператору меньшее число, чем он потеряет.
-  const areaRowsByPiece = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of pieceAreaScopes ?? []) {
-      for (const a of s.areas ?? []) {
-        const k = (a.pieceLineKey ?? '').trim().toLowerCase();
-        if (!k) continue;
-        m.set(k, (m.get(k) ?? 0) + 1);
-      }
-    }
-    return m;
-  }, [pieceAreaScopes]);
+  }, [
+    pieces,
+    toDelete,
+    mineByBlock,
+    unmapped,
+    rows,
+    draftNames,
+    blockCounts,
+    parseComplete,
+    pieceEdits,
+  ]);
 
   // Сколько деталей вообще привязано к этой ткани — знаменатель предупреждения о массовом
   // исчезновении. Считается по тем же СЫРЫМ алиасам, что и кандидаты, и только по живым деталям:
@@ -1285,9 +1338,7 @@ export function PieceMatchModal({
       entry.pieces.push(p);
       byFile.set(idx, entry);
     });
-    return [...byFile.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([index, v]) => ({ index, ...v }));
+    return [...byFile.entries()].sort((a, b) => a[0] - b[0]).map(([index, v]) => ({ index, ...v }));
   }, [parse, contourPieces]);
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
 
@@ -1316,15 +1367,13 @@ export function PieceMatchModal({
   // would open showing those two and hide everything else behind a toggle nobody would press.
   const shownSize = sizeOptions.some((o) => o.size === activeSize)
     ? (activeSize as string)
-    : (sizeOptions.reduce<{ size: string; count: number } | null>(
+    : sizeOptions.reduce<{ size: string; count: number } | null>(
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
-      )?.size ?? '');
+      )?.size ?? '';
   const sheetPieces = useMemo(
     () =>
-      sheet
-        ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize)
-        : [],
+      sheet ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize) : [],
     [sheet, split, shownSize],
   );
 
@@ -1332,10 +1381,7 @@ export function PieceMatchModal({
     () => new Map(pieceOptions.map((p) => [p.lineKey.toLowerCase(), p.name])),
     [pieceOptions],
   );
-  const rowByCi = useMemo(
-    () => new Map(rows.map((r) => [r.block.toLowerCase(), r])),
-    [rows],
-  );
+  const rowByCi = useMemo(() => new Map(rows.map((r) => [r.block.toLowerCase(), r])), [rows]);
   // A contour with no block carries no identity the alias table can hold, so it is drawn but
   // not clickable — '' is the sheet's own signal for that. Keyed on the IDENTITY, so the same
   // piece in another size is the same thing to click.
@@ -1346,7 +1392,7 @@ export function PieceMatchModal({
   const pieceName = (lineKey: string): string => {
     const k = lineKey.toLowerCase();
     const e = pieceEdits[k]?.name;
-    return e !== undefined ? e : (nameByPieceKey.get(k) ?? '');
+    return e !== undefined ? e : nameByPieceKey.get(k) ?? '';
   };
 
   // What a block IS right now, in one place: the sheet, the editor and the plan all read this.
@@ -1767,8 +1813,11 @@ export function PieceMatchModal({
     warnings.push(
       ...parse.warnings
         .filter((w) => !/units are not set in the file/.test(w))
-        .map((w): HeaderWarning =>
-          isFetchFailure(w) ? { text: w, error: true, action: { label: 'retry', onClick: reparse } } : w,
+        .map(
+          (w): HeaderWarning =>
+            isFetchFailure(w)
+              ? { text: w, error: true, action: { label: 'retry', onClick: reparse } }
+              : w,
         ),
     );
     if (!parse.complete) {
@@ -1778,7 +1827,8 @@ export function PieceMatchModal({
         }`,
       );
     }
-    if (blockCounts.size === 0 && mineByBlock.size === 0) warnings.push('no named pieces in the file');
+    if (blockCounts.size === 0 && mineByBlock.size === 0)
+      warnings.push('no named pieces in the file');
   }
   if (foreignSizes.length > 0) {
     warnings.push(
@@ -1829,8 +1879,7 @@ export function PieceMatchModal({
           ? undefined
           : {
               label: 'keep all',
-              onClick: () =>
-                setDeleteChoice(new Map(deleteCandidates.map((c) => [c.lineKey, 'keep' as const]))),
+              onClick: () => setAllGone('keep'),
             },
     });
   }
@@ -1863,93 +1912,25 @@ export function PieceMatchModal({
 
   // ── pieces gone from the file ─────────────────────────────────────────────────────────
   // ONE question, asked where the eye already is (the panel beside the sheet) when no piece is
-  // picked: which card pieces bound to this cloth to drop now that the file no longer has them.
-  // Each row names the piece and its code (the block it was bound to) — the drawing cannot show
-  // it, the block is gone. The card stores no outline, so there is no picture to draw. What the
-  // delete takes with it (recipe rows, norms, areas, operations) rides on the delete chip's title.
-  const setAllGone = (v: 'delete' | 'keep') =>
-    setDeleteChoice(new Map(deleteCandidates.map((c) => [c.lineKey, v])));
+  // picked. The card stores no outline, and a candidate is absent from the new file by definition,
+  // so the pick tiles honestly carry words only: there is no old geometry to preview on hover.
   const goneQuestion =
     deleteCandidates.length > 0 ? (
-      <div className='space-y-1'>
-        <Text
-          size='micro'
-          component='p'
-          className='border-b border-borderColor pb-0.5 uppercase'
-        >
-          {deleteCandidates.length === 1
-            ? '1 card piece not in this file'
-            : `${deleteCandidates.length} card pieces not in this file`}
-        </Text>
-        {deleteCandidates.map((c) => {
-          const decision = deleteDecision(c.lineKey);
-          const key = c.lineKey.trim().toLowerCase();
-          const hold = recipeHold.get(key);
-          const areas = areaRowsByPiece.get(key) ?? 0;
-          const ops = opsByPiece.get(key) ?? 0;
-          const losses = [
-            hold?.rows ? `recipe ${hold.rows}` : '',
-            hold?.withNorm ? `norms ${hold.withNorm}` : '',
-            areas ? `areas ${areas}` : '',
-            ops ? `operations ${ops}` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ');
-          const name = c.name?.trim() || c.lineKey;
-          const code = c.blocks.filter((b) => b.toLowerCase() !== name.toLowerCase()).join(' ');
-          return (
-            <div key={c.lineKey} className='flex items-center gap-2'>
-              <Text
-                size='micro'
-                component='span'
-                className='min-w-0 flex-1 truncate'
-                title={code ? `${name} · ${code}` : name}
-              >
-                {name}
-                {code && <span className='text-labelColor'> · {code}</span>}
-              </Text>
-              <div className='flex shrink-0 gap-1'>
-                <Chip
-                  selected={decision === 'keep'}
-                  pressed={decision === 'keep'}
-                  disabled={readOnly}
-                  aria-label={`keep ${name}`}
-                  onClick={() => setDeleteChoice((prev) => new Map(prev).set(c.lineKey, 'keep'))}
-                >
-                  keep
-                </Chip>
-                <Chip
-                  selected={decision === 'delete'}
-                  pressed={decision === 'delete'}
-                  tone={decision === 'delete' ? 'error' : 'default'}
-                  disabled={readOnly}
-                  aria-label={`delete ${name}`}
-                  title={losses ? `deletes with it: ${losses}` : undefined}
-                  onClick={() => setDeleteChoice((prev) => new Map(prev).set(c.lineKey, 'delete'))}
-                >
-                  delete
-                </Chip>
-              </div>
-            </div>
-          );
-        })}
-        {!readOnly && deleteCandidates.length > 1 && (
-          <div className='flex justify-end gap-1 pt-0.5'>
-            <Chip onClick={() => setAllGone('keep')} disabled={toDelete.length === 0}>
-              keep all
-            </Chip>
-            <Chip
-              onClick={() => setAllGone('delete')}
-              disabled={toDelete.length === deleteCandidates.length}
-            >
-              delete all
-            </Chip>
-          </div>
-        )}
-      </div>
+      <OldPiecesPanel
+        items={oldPieceItems}
+        decisionOf={deleteDecision}
+        onDecide={setGoneDecisions}
+        picking={pickingOldPieces}
+        onPickingChange={(picking) => {
+          setPickingOldPieces(picking);
+          if (picking) setSelected(null);
+        }}
+        readOnly={readOnly}
+      />
     ) : null;
 
   const editor = (() => {
+    if (pickingOldPieces && goneQuestion) return goneQuestion;
     if (!focus) {
       return (
         goneQuestion ?? (
@@ -2267,8 +2248,8 @@ export function PieceMatchModal({
         )}
 
         {parse.phase === 'ready' && sheet && (
-          <div className='flex flex-col gap-3 lg:flex-row'>
-            <div className='min-w-0 flex-1'>
+          <div className='flex flex-wrap gap-4'>
+            <div className='min-w-0' style={{ flex: '999 1 560px' }}>
               <PieceSheet
                 // Keyed by the FILE and the SIZE: zoom/pan live inside the sheet, so without a
                 // remount switching either kept the previous drawing's viewBox.
@@ -2280,7 +2261,9 @@ export function PieceMatchModal({
                 markOf={markOf}
                 labelOf={labelOf}
                 selectedKey={selected}
-                onPick={setSelected}
+                onPick={(key) => {
+                  if (!pickingOldPieces) setSelected(key);
+                }}
                 tall
                 bare
                 topLeft={
@@ -2301,7 +2284,10 @@ export function PieceMatchModal({
                 }
               />
             </div>
-            <div className='w-full shrink-0 space-y-3 lg:max-h-[60vh] lg:w-[280px] lg:overflow-y-auto'>
+            <div
+              className='min-w-0 max-w-[420px] space-y-4 lg:max-h-[60vh] lg:overflow-y-auto'
+              style={{ flex: '1 1 380px' }}
+            >
               {editor}
               {/* A piece is open: the open question stays one click away instead of vanishing. */}
               {focus && deleteCandidates.length > 0 && (
