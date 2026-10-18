@@ -101,6 +101,21 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     ...(contour ? { contour } : {}),
     // P1: closed through continuity walls — the rules, chains and anchors (G21 checks them)
     ...(b.size.continuity ? { continuity: continuityOfBlock(b.size.continuity) } : {}),
+    // GRADE P2: repaired from the grade — where the geometry comes from, never presented as drawn
+    ...(b.size.repair
+      ? {
+          grade: {
+            geometryOrigin: 'repaired' as const,
+            from: b.size.repair.fromTokens ?? [
+              String(b.size.repair.from[0]),
+              String(b.size.repair.from[1]),
+            ],
+            holes: b.size.repair.holes,
+            holesMm: r1(b.size.repair.holesMm),
+            cover: Math.round(b.size.repair.cover * 1000) / 1000,
+          },
+        }
+      : {}),
   };
 }
 

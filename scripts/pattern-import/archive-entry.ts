@@ -8,7 +8,7 @@
 // wrongPassing = a block that passes the gate and is wrong.
 //   node scripts/pattern-import/archive.mjs   (yarn patimport:archive) — this is its child
 // The archive is READ ONLY: bytes are read once, nothing is ever written next to them.
-import { readFileSync, writeSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -463,6 +463,18 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     familiesLeak: fams.filter((f) => f.candidates.some((c) => c.outcome === 'leak')).length,
     familiesRefused: fams.filter((f) => f.candidates.some((c) => c.outcome === 'refused')).length,
     candidates: outcomes,
+    /** GRADE P2: sizes repaired from the grade (by kind), and refused sizes carrying a grade hint */
+    repaired: countBy(
+      fams.flatMap((f) =>
+        f.candidates.filter((c) => c.rankFrom === 'repair').map((c) => c.repair?.kind ?? '?'),
+      ),
+    ),
+    familiesRepaired: fams.filter((f) => f.candidates.some((c) => c.rankFrom === 'repair')).length,
+    gradeHints: countBy(
+      fams.flatMap((f) =>
+        f.candidates.filter((c) => c.gradeHint).flatMap((c) => c.gradeHint!.refusals.slice(0, 3)),
+      ),
+    ),
     setAside: (s.pieces?.setAside ?? []).length,
     /** held text seeds: label → the junk its outline was read as */
     heldText: (s.pieces?.setAside ?? [])
@@ -470,6 +482,42 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       .map((a) => `${(a.seed && seedLabel(a.seed)) ?? '?'}:${a.reason}:${a.areaMm2}`),
     named: s.semantics?.pieces.length ?? null,
   };
+  // ARCHIVE_GRADEP2_PNG=<dir> (GRADE P2): a picture of every size the repair rebuilt
+  const p2dir = process.env.ARCHIVE_GRADEP2_PNG;
+  if (p2dir && S) {
+    try {
+      const labels =
+        (box.s as unknown as { run: SizeRun | null }).run?.sizes.map((z) => z.label) ?? [];
+      for (const f of fams)
+        for (const c of f.candidates)
+          if (c.gradeHint && process.env.ARCHIVE_GRADEP2_HINTS)
+            renderHintPng(
+              resolve(
+                p2dir,
+                `hint-${rel.replace(/[^\w.-]+/g, '_').slice(0, 60)}-seed${f.seed}-r${c.rank}.png`,
+              ),
+              rel,
+              f,
+              c,
+              S.wallSet ?? S.chains,
+              labels,
+            );
+          else if (c.rankFrom === 'repair' && c.repair)
+            renderRepairPng(
+              resolve(
+                p2dir,
+                `${rel.replace(/[^\w.-]+/g, '_').slice(0, 60)}-seed${f.seed}-r${c.rank}.png`,
+              ),
+              rel,
+              f,
+              c,
+              S.wallSet ?? S.chains,
+              labels,
+            );
+    } catch (e) {
+      rec.gradep2PngError = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
   // ARCHIVE_PERSIZE=1 (GRADE P0): per family per size how it closes today + the gfit grade check
   // (gfit-archive.ts); ARCHIVE_GFIT_PNG=<dir> a picture of each family the check flags
   // (ARCHIVE_GFIT_PNG_ALL=1: of every family)
@@ -987,4 +1035,169 @@ export async function main(args: string[]): Promise<number> {
     writeSync(1, `@@RESULT ${JSON.stringify(r)}\n`);
   }
   return 0;
+}
+
+/** GRADE P2 audit picture: the drawing, the other sizes, the size's own lines, the repaired outline. */
+function renderRepairPng(
+  file: string,
+  id: string,
+  fam: PieceFamily,
+  c: PieceFamily['candidates'][number],
+  set: ChainSet | null,
+  labels: string[],
+) {
+  mkdirSync(dirname(file), { recursive: true });
+  const r = c.repair!;
+  const strokes: Stroke[] = [];
+  const marks: Label[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of c.outer) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const box = { minX: minX - 25, minY: minY - 25, maxX: maxX + 25, maxY: maxY + 70 };
+  for (const ch of set?.chains ?? []) {
+    if (ch.pts.length < 2) continue;
+    if (
+      !ch.pts.some((p) => p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY)
+    )
+      continue;
+    strokes.push({ pts: ch.pts, closed: ch.closed, color: '#c8c8c8', width: 0.8 });
+  }
+  for (const x of fam.candidates)
+    if (x.rank !== c.rank && x.outcome === 'closed')
+      strokes.push({
+        pts: x.outer,
+        closed: true,
+        color: PALETTE[x.rank % PALETTE.length],
+        width: 0.7,
+      });
+  if (r.was) strokes.push({ pts: r.was, closed: true, color: '#888', width: 5, dash: '6 4' });
+  for (const w of c.walls) {
+    const ch = set?.chains[w];
+    if (ch) strokes.push({ pts: ch.pts, closed: ch.closed, color: '#06c', width: 1.3 });
+  }
+  strokes.push({ pts: c.outer, closed: true, color: '#0a0', width: 2 });
+  for (const d of c.derived ?? []) {
+    strokes.push({ pts: d.pts, color: '#e00', width: 3.5 });
+    marks.push({ at: d.pts[d.pts.length >> 1], text: 'fill', color: '#e00', size: 12 });
+  }
+  const L = (k: number) => labels[k] ?? String(k);
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  // the zoom: where the repaired outline leaves both anchors it came from (> 0.5 mm) — on a strip
+  // the end that tells the sizes apart; plus the filled holes
+  const ringsOf = r.from.map((k) => fam.candidates.find((x) => x.rank === k)?.outer ?? []);
+  const dTo = (p: PtMm, ring: PtMm[]) => {
+    let m = Infinity;
+    for (let j = 0; j < ring.length; j++) {
+      const a = ring[j];
+      const b = ring[(j + 1) % ring.length];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const L2 = dx * dx + dy * dy || 1e-9;
+      const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+      m = Math.min(m, Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy));
+    }
+    return m;
+  };
+  const step = Math.max(1, Math.floor(c.outer.length / 400));
+  const apart = c.outer.filter((p, j) => j % step === 0 && ringsOf.every((rg) => dTo(p, rg) > 0.5));
+  const focus = [...apart, ...(c.derived ?? []).flatMap((d) => d.pts)];
+  if (focus.length) {
+    let zx0 = Infinity;
+    let zy0 = Infinity;
+    let zx1 = -Infinity;
+    let zy1 = -Infinity;
+    for (const p of focus) {
+      zx0 = Math.min(zx0, p.x);
+      zy0 = Math.min(zy0, p.y);
+      zx1 = Math.max(zx1, p.x);
+      zy1 = Math.max(zy1, p.y);
+    }
+    const zb = { minX: zx0 - 30, minY: zy0 - 30, maxX: zx1 + 30, maxY: zy1 + 55 };
+    const zs = Math.max(zb.maxX - zb.minX, zb.maxY - zb.minY);
+    renderPng(file.replace(/\.png$/, '-zoom.png'), zb, strokes, marks, Math.min(12, 1400 / zs), [
+      {
+        color: '#000',
+        text: `${id.slice(0, 60)} seed ${fam.seed}: ${L(c.rank)} from ${L(r.from[0])}+${L(r.from[1])} — zoom where it leaves both`,
+      },
+      {
+        color: '#0a0',
+        text: 'green = repaired; red = filled hole; colours = other sizes; blue = its walls',
+      },
+    ]);
+  }
+  renderPng(file, box, strokes, marks, Math.min(6, 1800 / span), [
+    {
+      color: '#000',
+      text: `${id.slice(0, 70)} seed ${fam.seed}: size ${L(c.rank)} ${r.kind === 'leak' ? 'leaked' : "closed on another size's line"} -> repaired from ${L(r.from[0])}+${L(r.from[1])}`,
+    },
+    {
+      color: '#0a0',
+      text: `green = repaired outline; cover ${(r.cover * 100).toFixed(1)} %; holes ${r.holes} (${r.holesMm} mm, red); score ${r.score}; dev ${r.devMm} mm`,
+    },
+    {
+      color: '#06c',
+      text: 'blue = own/common lines it runs on; grey = the drawing; grey dashed thick = before; thin colours = other sizes',
+    },
+  ]);
+}
+
+/** GRADE P2: a refused size — where the grade puts it (dashed) over the drawing. */
+function renderHintPng(
+  file: string,
+  id: string,
+  fam: PieceFamily,
+  c: PieceFamily['candidates'][number],
+  set: ChainSet | null,
+  labels: string[],
+) {
+  mkdirSync(dirname(file), { recursive: true });
+  const h = c.gradeHint!;
+  const strokes: Stroke[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of h.pred) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const box = { minX: minX - 25, minY: minY - 25, maxX: maxX + 25, maxY: maxY + 60 };
+  for (const ch of set?.chains ?? []) {
+    if (ch.pts.length < 2) continue;
+    if (
+      !ch.pts.some((p) => p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY)
+    )
+      continue;
+    strokes.push({ pts: ch.pts, closed: ch.closed, color: '#999', width: 0.8 });
+  }
+  for (const x of fam.candidates)
+    if (x.rank !== c.rank && x.outcome === 'closed')
+      strokes.push({
+        pts: x.outer,
+        closed: true,
+        color: PALETTE[x.rank % PALETTE.length],
+        width: 0.6,
+      });
+  strokes.push({ pts: h.pred, closed: true, color: '#e00', width: 1.6, dash: '4 3' });
+  const L = (k: number) => labels[k] ?? String(k);
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  renderPng(file, box, strokes, [], Math.min(5, 1600 / span), [
+    {
+      color: '#000',
+      text: `${id.slice(0, 70)} seed ${fam.seed}: size ${L(c.rank)} ${c.outcome} — refused: ${h.refusals.join(', ')}`,
+    },
+    {
+      color: '#e00',
+      text: `red dashed = where the grade of ${L(h.from[0])}+${L(h.from[1])} puts it${h.extrapolated ? ' (extrapolated)' : ''}; grey = the drawing; colours = other sizes`,
+    },
+  ]);
 }

@@ -1149,7 +1149,21 @@ export type PieceCandidate = {
    * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
    * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair';
+  /**
+   * GRADE P2: this size was REPAIRED from the family's grade (rankFrom 'repair'): the outline runs
+   * on the size's own and common lines where the grade model of its two neighbouring anchors puts
+   * it, short holes between its own line ends filled from the model (derived 'grade-fill' edges,
+   * G15). `kind` 'leak' = the size leaked; 'neighbour' = it closed on another size's line (G26).
+   */
+  repair?: RepairRecord;
+  /**
+   * GRADE P2: a size the repair refused (a leak, or a size G26 holds on another size's line) —
+   * where the grade model of the anchors `from` puts it (`pred`, sheet mm, simplified; `extrapolated`
+   * when both anchors lie on one side) and why the drawing does not prove it there (E1–E4). For the
+   * operator's question: where the size should run. Absent = no model.
+   */
+  gradeHint?: { pred: PtMm[]; from: [number, number]; refusals: string[]; extrapolated?: boolean };
   /**
    * P1 provenance: the continuity walls this closed outline runs along — drawn lines of another
    * class or size that close this rank between its own dangling ends (R0 a chain path, R1 the
@@ -1219,7 +1233,28 @@ export type ContinuityVerdict = {
 };
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
-export type DerivedEdgeKind = 'bridge' | 'operator-bridge' | 'band-cut';
+/** 'grade-fill' (GRADE P2): a hole ≤ 15 mm in a repaired size's own line, filled from the grade. */
+export type DerivedEdgeKind = 'bridge' | 'operator-bridge' | 'band-cut' | 'grade-fill';
+
+/** GRADE P2: how a repaired size was proven (PieceCandidate.repair). */
+export type RepairRecord = {
+  kind: 'leak' | 'neighbour';
+  /** The anchor ranks (closed on their own lines) the grade model came from, below and above. */
+  from: [number, number];
+  /** The same as card size tokens (set by the semantics stage, for the manifest). */
+  fromTokens?: [string, string];
+  /** Share of the predicted perimeter on the size's own / common lines. */
+  cover: number;
+  /** Holes filled from the grade: count and total length, mm. */
+  holes: number;
+  holesMm: number;
+  /** The model's leave-one-out score of the repaired size (≤ 1 = within tolerance). */
+  score: number;
+  /** Largest excess of the repaired outline over the corridor, mm. */
+  devMm: number;
+  /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
+  was?: PtMm[];
+};
 export type DerivedEdge = {
   kind: DerivedEdgeKind;
   pts: PtMm[];
@@ -1547,6 +1582,8 @@ export type PieceSizeSpec = {
   areaMm2: Mm2;
   /** P1: this size closed through continuity walls — what, and the D3 verdict (gate G21). */
   continuity?: ContinuityRecord;
+  /** GRADE P2: this size was repaired from the grade (holes filled, not drawn — D5). */
+  repair?: RepairRecord;
   /**
    * GRADE P1: marks drawn in this size that the operator's "in no size" removed (count question
    * answered `none`), per kind — recorded (D5), counted in the manifest. Absent = none.
@@ -2172,6 +2209,22 @@ export type ManifestBlock = {
    * allowed). G21 checks it against the run and checks its rules; absent = closed on its own lines.
    */
   continuity?: ManifestContinuity;
+  /**
+   * GRADE P2: where the geometry comes from — absent = drawn. 'repaired': the size's own lines
+   * where the grade of `from` (card tokens of the anchor sizes) puts it, `holes` holes of `holesMm`
+   * in all filled from the grade (derived 'grade-fill', G15 audits them); `cover` = share on its
+   * own / common lines.
+   */
+  grade?: ManifestGrade;
+};
+
+/** GRADE P2: ManifestBlock.grade. */
+export type ManifestGrade = {
+  geometryOrigin: 'repaired';
+  from: [string, string];
+  holes: number;
+  holesMm: number;
+  cover: number;
 };
 
 /**

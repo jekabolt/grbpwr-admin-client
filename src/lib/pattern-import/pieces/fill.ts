@@ -71,6 +71,7 @@ import {
   type WallModel,
 } from './walls';
 import { rankLooks } from './identity';
+import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
 import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
@@ -125,6 +126,8 @@ export type FillDiag = {
       continuity: PieceCandidate['continuity'];
     }[];
   };
+  /** GRADE P2 (hook A): sizes repaired from their family's grade, and the refusals by reason. */
+  repair?: RepairDiag;
   ms: number;
 };
 
@@ -1398,6 +1401,30 @@ function fillOneSheet(
   if (model.mode === 'file') correspond(excl);
   // derived bridges are not the solver's lines: a graded fill closes on proven walls only
   if (opts.autoBridgeMm !== 0 && !graded?.walls) bridgePass(excl);
+  // GRADE P2 (hook A): a size that leaks between two anchors — or closed on another size's line —
+  // repaired from the grade on its own and common lines (E1–E4), before the leak mouths and before
+  // the semantics block the family. Graded sheets on F4's own walls only (never the H1 solver's)
+  if (model.mode === 'graded' && !graded?.walls && !solved && !gradeP2Off()) {
+    const live = (ids: readonly ChainId[]) => itemsOf(set, ids).filter((it) => !excl.has(it.chain));
+    diag.repair = repairPass(
+      cands,
+      {
+        set,
+        own: (r) => live(model.byRank[r] ?? []),
+        // the lines every size closes on in pass A: the common class, the LONE stretches (a shared
+        // edge drawn once, in one size's style) and the rescued 'ignore' edges (both ends on walls)
+        common: [
+          ...live([...model.common, ...rescued]),
+          ...(typeof process !== 'undefined' && process.env?.GRADE_P2_NOLONE
+            ? []
+            : lone.filter((it) => !excl.has(it.chain))),
+        ],
+        wm: model,
+        texts: textCentres,
+      },
+      new Set([...dropped, ...(graded?.skip ?? [])]),
+    );
+  }
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
   for (let r = 0; r < nRanks; r++) {
@@ -1727,7 +1754,11 @@ export type ContinuityJudgement = {
  * closure through an ignore / unclassified path needs anchors on BOTH sides. Then the survivors
  * together, the worst violator refused first. Kept closures carry their verdict and metrics.
  */
-export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJudgement {
+export function continuityVerdicts(
+  list: readonly PieceCandidate[],
+  /** GRADE P2: the anchors the judgement stands on (default: closed on their own lines alone) */
+  anchorOf: (c: PieceCandidate) => boolean = isAnchor,
+): ContinuityJudgement {
   const refused = new Map<number, string>();
   const kept = new Map<number, ContinuityVerdict>();
   const conts = list.filter((c) => c.rankFrom === 'continuity');
@@ -1744,7 +1775,7 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJ
     return v;
   };
   const kOf = (c: PieceCandidate) => perimeterOf(c.outer) / Math.sqrt(Math.max(1, c.areaMm2));
-  const anchors = list.filter(isAnchor).sort((a, b) => a.rank - b.rank);
+  const anchors = list.filter(anchorOf).sort((a, b) => a.rank - b.rank);
   type Pair = { lo: number; hi: number; h: number; hu: number; g: number };
   const pairs: Pair[] = [];
   for (let i = 1; i < anchors.length; i++) {
@@ -1919,7 +1950,7 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJ
   }
   // 2) the survivors together, worst first
   const ok = (x: PieceCandidate) =>
-    !refused.has(x.rank) && (clean.has(x.rank) ? isAnchor(x) : x.rankFrom === 'continuity');
+    !refused.has(x.rank) && (clean.has(x.rank) ? anchorOf(x) : x.rankFrom === 'continuity');
   for (let round = 0; round <= conts.length; round++) {
     const live = list
       .filter((x) => x.outcome === 'closed' && ok(x))
