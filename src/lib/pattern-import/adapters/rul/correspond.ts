@@ -245,10 +245,13 @@ export function equalizeForRul(
       if (failed) return;
       const ls = bs.map(get);
       if (ls.some((l) => !l)) return;
-      if (ls.every((l) => l!.length === ls[0]!.length)) return;
+      // every line is matched by its corners, equal counts too (Codex r1: an equal count is no
+      // correspondence); an equal-count line that cannot be matched stays as drawn (packRul's own
+      // pairing, as before) — a different count cannot be packed without the match
+      const same = ls.every((l) => l!.length === ls[0]!.length);
       const r = correspondLines(ls as PtMm[][], closed);
-      if (!r.ok) failed = `${what}: ${r.reason}`;
-      else next.forEach((b, z) => set(b, r.lines[z]));
+      if (r.ok) next.forEach((b, z) => set(b, r.lines[z]));
+      else if (!same) failed = `${what}: ${r.reason}`;
     };
     fit(
       (b) => b.cut,

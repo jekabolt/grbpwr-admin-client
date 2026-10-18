@@ -40,6 +40,8 @@ export const OPERATOR_SPAN_MM = 160;
 const NOTCH_CLEAR_MM = 10;
 /** How many vertices each side of a turn a stretch may reach. */
 const REACH_VERTS = 40;
+/** A removed turn with a majority neighbour's turn this close is that size's feature too, mm. */
+const SHARED_TURN_MM = 15;
 
 export type { KinkRecord, KinkRule };
 
@@ -136,7 +138,17 @@ export function straightenSize(
   outer0: readonly PtMm[],
   canon: readonly SizeShape[],
   tiers: readonly Tier[],
-  opts: { rank: number; notches?: readonly PtMm[]; ownLine?: KinkOpts['ownLine'] },
+  opts: {
+    rank: number;
+    notches?: readonly PtMm[];
+    ownLine?: KinkOpts['ownLine'];
+    /**
+     * Codex r1: the strong turns of the size's nearest majority sizes — a stretch whose removed
+     * turn has a same-sign turn of the same scale there (≤ SHARED_TURN_MM) is a shared feature,
+     * never straightened (the counts alone cannot tell the feature from the kink)
+     */
+    refTurns?: readonly { at: PtMm; deg: number; reach: number }[];
+  },
 ): { outer: PtMm[]; kinks: KinkDone[] } | null {
   let outer = ccw(outer0);
   let sh = shapeOfCut(outer, 0, 0);
@@ -147,7 +159,9 @@ export function straightenSize(
     const n = outer.length;
     // the strong turns of this size — the extra ones are among them
     const turns = SCALES.flatMap((sc) =>
-      turnsOf(outer, sc.reach).filter((t) => Math.abs(t.deg) > sc.strong),
+      turnsOf(outer, sc.reach)
+        .filter((t) => Math.abs(t.deg) > sc.strong)
+        .map((t) => ({ ...t, reach: sc.reach })),
     );
     type Best = { outer: PtMm[]; E: number; arc: number; rec: KinkDone };
     const hold: { best: Best | null } = { best: null };
@@ -198,6 +212,18 @@ export function straightenSize(
             const c = { x: (P.x + Q.x) / 2, y: (P.y + Q.y) / 2 };
             if ((opts.notches ?? []).some((q) => dist(q, c) <= span / 2 + NOTCH_CLEAR_MM)) continue;
             if (tier.rule === 'mark-detour' && !opts.ownLine?.(opts.rank, P, Q)) continue;
+            // a turn this stretch removes that the nearest majority sizes also have: shared
+            const shared = turns.some(
+              (u) =>
+                mid.some((q) => dist(q, u.at) < 0.05) &&
+                (opts.refTurns ?? []).some(
+                  (r) =>
+                    r.reach === u.reach &&
+                    Math.sign(r.deg) === Math.sign(u.deg) &&
+                    dist(r.at, u.at) <= SHARED_TURN_MM,
+                ),
+            );
+            if (shared) continue;
             const next: PtMm[] = [];
             for (let i = b.i; ; i = (i + 1) % n) {
               next.push(outer[i]);
@@ -276,10 +302,25 @@ export function repairMinorityKinks(lines: readonly KinkLine[], opts: KinkOpts =
         : opts.autoOff
           ? []
           : AUTO_TIERS;
+      // the two majority sizes nearest in the run: their strong turns (shared features)
+      const near = [...g]
+        .sort(
+          (x, y) =>
+            Math.abs(lines[x].rank - lines[d].rank) - Math.abs(lines[y].rank - lines[d].rank),
+        )
+        .slice(0, 2);
+      const refTurns = near.flatMap((i) =>
+        SCALES.flatMap((sc) =>
+          turnsOf(ccw(lines[i].outer), sc.reach)
+            .filter((t) => Math.abs(t.deg) > sc.strong)
+            .map((t) => ({ ...t, reach: sc.reach })),
+        ),
+      );
       const r = straightenSize(lines[d].outer, canon, tiers, {
         rank: lines[d].rank,
         notches: opts.notches,
         ownLine: opts.ownLine,
+        refTurns,
       });
       if (!r && opts.operator?.size && !opts.operator.has(lines[d].rank)) {
         // the operator's move repairs its own size; another dissenter stays as it is (still held)

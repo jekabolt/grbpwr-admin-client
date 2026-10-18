@@ -763,6 +763,29 @@ function unitCase(): CaseRes {
         want: null,
       },
     ];
+    {
+      // Codex r1: every size has a small design point (a 1.5 mm peak over 3 mm), the odd one also a
+      // kink of the same kind (1.9 mm over 4 mm) — the counts are met by removing either; the kink
+      // goes, the shared point stays (it is the nearest majority sizes' turn too)
+      const both = (k: number): PtMm[] => [
+        ...spike(k),
+        { x: 22, y: w0(k) },
+        { x: 20, y: w0(k) + 1.9 },
+        { x: 18, y: w0(k) },
+      ];
+      const tops = [spike(0), spike(1), both(2), spike(3), spike(4)];
+      const r = repairMinorityKinks(fam(tops));
+      const o = r.byRank.get(2)?.outer ?? [];
+      const keeps = o.some(
+        (q) => Math.abs(q.x - 60) < 0.01 && Math.abs(q.y - (w0(2) + 1.5)) < 0.01,
+      );
+      const noKink = !o.some((q) => Math.abs(q.x - 20) < 0.01);
+      expect(
+        'kink beside a shared design point: the kink straightened, the shared point kept',
+        r.byRank.size === 1 && keeps && noKink,
+        JSON.stringify({ ranks: [...r.byRank.keys()], o, why: r.why }),
+      );
+    }
     for (const c of kinkCases) {
       const r = repairMinorityKinks(fam(c.tops), c.opts ?? {});
       const got = [...r.byRank].map(([rank, x]) => ({

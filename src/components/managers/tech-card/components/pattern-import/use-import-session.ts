@@ -287,6 +287,8 @@ const EMPTY_INPUTS: Inputs = {
   assignment: null,
   answerCtx: null,
   autopilot: [],
+  // SHAPE-KINK (Codex r1): a new file / reset never carries the last run's one-shape moves
+  shapeFixes: {},
 };
 
 /** STOPFIX: a stage answer for a run the operator has left — it changes nothing (`fail` drops it). */
