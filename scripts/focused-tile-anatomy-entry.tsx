@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { common_MediaFull } from 'api/proto-http/admin';
-import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 
 const PIC =

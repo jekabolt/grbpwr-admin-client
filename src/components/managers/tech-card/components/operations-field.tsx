@@ -33,7 +33,7 @@ import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import {
@@ -5945,7 +5945,7 @@ function OperationEditor({
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
           saying which was which, so two cards filled them the opposite way round. */}
       <div className='mt-2'>
-        <TextareaField
+        <AiTextareaField
           name={`operations.${index}.note`}
           label='note'
           rows={2}

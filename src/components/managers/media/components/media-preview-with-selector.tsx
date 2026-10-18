@@ -2,7 +2,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { MediaViewer, useMediaViewer } from 'ui/components/media-viewer';
+import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 
 // Один кадр: заполненный — картинка с «change/remove», пустой — слот, который заполняют кликом,
 // ⌘V или броском файла. Вся механика живёт в `MediaSlot`; здесь остаётся только просмотрщик и

@@ -8,7 +8,7 @@ import { Pill } from 'ui/components/pill';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
-import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'components/shared/media-viewer/media-viewer';
 
 import { GROUP_GAP } from '../core';
 import { PictureTile } from '../picture-tile';

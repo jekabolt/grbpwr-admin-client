@@ -10,7 +10,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
-import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import { HeaderNote } from 'ui/components/section-header';

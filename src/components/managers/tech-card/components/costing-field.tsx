@@ -29,9 +29,9 @@ import GenericPopover from 'ui/components/popover';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import CurrencySelect from 'ui/form/fields/currency-select';
+import CurrencySelect from 'components/shared/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { FoldCaret } from 'ui/components/fold-caret';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
@@ -1546,7 +1546,7 @@ export function CostingField({
               </div>
             )}
             <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
-              <TextareaField
+              <AiTextareaField
                 name='costing.notes'
                 label='notes'
                 rows={2}

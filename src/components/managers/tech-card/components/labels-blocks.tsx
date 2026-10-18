@@ -3,7 +3,7 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { GroupLabel } from 'ui/components/group-label';
-import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
+import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { Section } from 'ui/components/section';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';

@@ -5,7 +5,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { DoubleEditor } from './double-editor';

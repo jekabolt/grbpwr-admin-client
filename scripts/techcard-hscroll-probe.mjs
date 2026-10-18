@@ -342,7 +342,7 @@ for (const { vp, measured } of results) {
 // ── СЦЕНАРИЙ 2 · ПЛИТКА МУДБОРДА В РЕЖИМЕ «ГРИДОМ» ──────────────────────────────────────────────
 //
 // ЧЕСТНО О ГРАНИЦАХ ЭТОГО ЗАМЕРА: здесь воспроизводится МЕХАНИЗМ, а не смонтирован живой мудборд.
-// Классы взяты дословно из `src/ui/components/focused-annotator.tsx:650` (контейнер ленты) и
+// Классы взяты дословно из `src/components/managers/tech-card/annotation/focused-annotator.tsx:650` (контейнер ленты) и
 // `:667` (плитка), высота кадра — `mood-board.tsx:255` (`grid` ⇒ 280px), стиль кадра — `:686`
 // (`frameStyle={{ height: gridRowHeight }}` + `frameClassName='w-auto'`). Стилевой файл настоящий
 // (собранный `dist/assets/index-*.css`). Подменён ровно один объект — сам снимок: вместо

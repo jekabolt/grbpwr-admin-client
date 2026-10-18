@@ -29,7 +29,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useEffect, useMemo } from 'react';
-import { PatternQR } from 'ui/components/pattern-qr';
+import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';

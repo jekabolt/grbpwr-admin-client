@@ -16,7 +16,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from 'ui/components/button';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
 import Text from 'ui/components/text';
 
 import {

@@ -7,8 +7,8 @@ import { ADMIN_GROUP, isActiveRoute, NAV_GROUPS, ROUTES } from 'constants/routes
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Button } from './button';
-import Text from './text';
+import { Button } from 'ui/components/button';
+import Text from 'ui/components/text';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);

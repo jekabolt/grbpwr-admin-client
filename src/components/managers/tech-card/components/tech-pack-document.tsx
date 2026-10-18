@@ -78,14 +78,14 @@ import {
   wireInt,
   type AnnotationForm,
 } from './schema';
-import { kindDef } from 'ui/components/annotation/kinds';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
 import {
   ArtworkImage,
   DetailInset,
   SectionInset,
   SectionLetters,
-} from 'ui/components/annotation/insets';
-import { StitchPictogram, stitchIsoOf } from 'ui/components/annotation/stitch-pictogram';
+} from 'components/managers/tech-card/annotation/insets';
+import { StitchPictogram, stitchIsoOf } from 'components/managers/tech-card/annotation/stitch-pictogram';
 import {
   artworkQuad,
   boundsOf,
@@ -93,8 +93,8 @@ import {
   purposeLabel,
   sectionLetter,
   specSummary,
-} from 'ui/components/annotation/purpose';
-import { annotationCapsFromWire } from 'ui/components/annotation/wire';
+} from 'components/managers/tech-card/annotation/purpose';
+import { annotationCapsFromWire } from 'components/managers/tech-card/annotation/wire';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -123,14 +123,14 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useResolvedMediaQuery } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
+import { ArrowMarkerDef, CalloutShape } from 'components/managers/tech-card/annotation/shapes';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
 // же код на такой же публичный вьюер, и вторая копия этой функции означала бы вторую копию правила
 // «не бери window.location.origin», из которых одну однажды поправят, а другую нет.
 import { viewerOrigin } from 'utils/viewer-origin';
-import { PatternQR } from 'ui/components/pattern-qr';
+import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
 import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';

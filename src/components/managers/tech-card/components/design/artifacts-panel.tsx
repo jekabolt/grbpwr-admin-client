@@ -19,7 +19,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import type { EditHistory } from 'ui/components/annotation/history';
+import type { EditHistory } from 'components/managers/tech-card/annotation/history';
 // ПЛИТА АРТЕФАКТА — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО ЛИСТ ЭСКИЗА И СНИМОК ШАГА СБОРКИ, а не третья
 // отрисовка «для превью». Прежняя своя рисовалка на плитке была третьим словарём видов: дуга или
 // мерка ставились в редакторе и молча пропадали на плитке, а человек читал это как «выноска не
@@ -33,11 +33,11 @@ import {
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
-} from 'ui/components/annotation/surface';
-import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
-import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation/purpose';
-import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
-import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
+} from 'components/managers/tech-card/annotation/surface';
+import { PALETTE_KINDS } from 'components/managers/tech-card/annotation/kinds';
+import { parseSpec, placePurpose, sectionLetter } from 'components/managers/tech-card/annotation/purpose';
+import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
+import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';

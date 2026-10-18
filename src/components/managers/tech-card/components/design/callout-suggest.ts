@@ -1,15 +1,15 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
-import { parseSpec, specSummary, writeSpec } from 'ui/components/annotation/purpose';
-import type { SurfaceCallout } from 'ui/components/annotation/surface';
-import { leaderTarget } from 'ui/components/annotation/geometry';
-import { kindDef } from 'ui/components/annotation/kinds';
+import { parseSpec, specSummary, writeSpec } from 'components/managers/tech-card/annotation/purpose';
+import type { SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
+import { leaderTarget } from 'components/managers/tech-card/annotation/geometry';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
 import {
   marginLayout,
   oneLine,
   type MarginItem,
   type MarginPlacement,
-} from 'ui/components/annotation/margin-layout';
-import { annotationKindFromWire, annotationKindToWire } from 'ui/components/annotation/wire';
+} from 'components/managers/tech-card/annotation/margin-layout';
+import { annotationKindFromWire, annotationKindToWire } from 'components/managers/tech-card/annotation/wire';
 import { decimalToInput } from 'utils/decimal';
 
 /**

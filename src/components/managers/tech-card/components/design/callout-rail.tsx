@@ -1,16 +1,16 @@
 import { cn } from 'lib/utility';
 import { useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { kindDef } from 'ui/components/annotation/kinds';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
 import {
   parseSpec,
   purposeTool,
   specSummary,
   type Purpose,
-} from 'ui/components/annotation/purpose';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
-import { rememberPen, type NoteArrows } from 'ui/components/annotation/surface';
+} from 'components/managers/tech-card/annotation/purpose';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { AnnotationStyleRow } from 'components/managers/tech-card/annotation/style-row';
+import { rememberPen, type NoteArrows } from 'components/managers/tech-card/annotation/surface';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';

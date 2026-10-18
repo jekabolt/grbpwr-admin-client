@@ -20,7 +20,7 @@ import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
 import { useProductSelection } from '../../hero/components/useProductSelection';
 import { ABPanel } from './ab-panel';

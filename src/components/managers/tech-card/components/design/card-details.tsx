@@ -17,7 +17,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useId, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { AiEnhance } from 'ui/components/ai-enhance';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';

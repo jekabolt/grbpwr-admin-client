@@ -13,7 +13,7 @@ import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import ToggleField from 'ui/form/fields/toggle-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 
 /**
  * Ф4 — A/B config. Enable toggle, dimension (subject|content), test %, decision

@@ -16,7 +16,7 @@ import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { TranslationField } from 'components/shared/translation/translation-field';
 import { CarrierPrices } from './components/carrier-prices';
 import { PaymentFeesEditor } from './components/payment-fees-editor';
 import {

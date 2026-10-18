@@ -1,8 +1,8 @@
+import type { ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 import Textarea, { TextareaProps } from 'ui/components/text-area';
 
-import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { cn } from 'lib/utility';
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '..';
@@ -16,13 +16,16 @@ type Props = TextareaProps & {
   showCharCount?: boolean;
   upsertButton?: boolean;
   /**
-   * `ai ✦` в углу поля (item 41: «везде», каждое свободное текстовое поле техкарты). Ключ поля —
-   * закрытый список `EnhanceField`. Без него поле прежнее. Кнопка видна, пока фокус в поле и в нём
-   * есть текст (правило `AiEnhance`), ответ пишется `setValue` с `shouldDirty`.
+   * Слот в нижнем углу поля (техкарта кладёт сюда `ai ✦` — `AiTextareaField`). Получает текущее
+   * значение и `apply`, который пишет `setValue` с `shouldDirty`. Без него поле прежнее.
    */
-  enhance?: EnhanceField;
-  /** Факты карточки для `ai ✦` (`cardFactsContext`); необязательны. */
-  enhanceContext?: string;
+  corner?: (api: TextareaCornerApi) => ReactNode;
+};
+
+export type TextareaCornerApi = {
+  value: string;
+  apply: (text: string) => void;
+  disabled: boolean;
 };
 
 export default function TextareaField({
@@ -35,8 +38,7 @@ export default function TextareaField({
   showCharCount = false,
   upsertButton = false,
   onUpsert,
-  enhance,
-  enhanceContext,
+  corner,
   ...props
 }: Props) {
   const { control, trigger, watch, setValue } = useFormContext();
@@ -65,22 +67,15 @@ export default function TextareaField({
                 value={field.value || ''}
                 maxLength={maxLength}
                 {...props}
-                className={cn(props.className, enhance && 'pb-7')}
+                className={cn(props.className, corner && 'pb-7')}
                 onBlur={onBlur}
                 onChange={field.onChange}
               />
-              {enhance && (
-                <AiEnhance
-                  field={enhance}
-                  value={field.value || ''}
-                  onApply={(text) =>
-                    setValue(name, text, { shouldDirty: true, shouldValidate: true })
-                  }
-                  context={enhanceContext}
-                  maxRunes={maxLength}
-                  disabled={loading || !!props.disabled || !!props.readOnly}
-                />
-              )}
+              {corner?.({
+                value: field.value || '',
+                apply: (text) => setValue(name, text, { shouldDirty: true, shouldValidate: true }),
+                disabled: !!loading || !!props.disabled || !!props.readOnly,
+              })}
               {upsertButton && (
                 <Button
                   variant='main'

@@ -7,7 +7,7 @@ import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';

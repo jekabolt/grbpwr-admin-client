@@ -25,7 +25,7 @@ import {
   type MediaInsert,
   type TableOp,
 } from './format-edits';
-import type { TableAlign } from 'ui/markdown/table';
+import type { TableAlign } from 'components/shared/markdown/table';
 
 /** Мак: отмена — ⌘Z; Ctrl+Z там в поле не значит ничего, и отнимать его незачем. */
 const IS_MAC =

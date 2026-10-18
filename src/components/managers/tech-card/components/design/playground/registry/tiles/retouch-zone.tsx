@@ -9,7 +9,7 @@ import {
   annotationCapsOut,
   annotationColorToWire,
   annotationKindToWire,
-} from 'ui/components/annotation/wire';
+} from 'components/managers/tech-card/annotation/wire';
 import Text from 'ui/components/text';
 import { inputToDecimal } from 'utils/decimal';
 

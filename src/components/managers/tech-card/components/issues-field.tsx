@@ -9,7 +9,7 @@ import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
@@ -146,14 +146,14 @@ function IssueEditor({
           )}
         </div>
       </div>
-      <TextareaField
+      <AiTextareaField
         name={`issues.${index}.description`}
         label='description *'
         rows={2}
         maxLength={2000}
         enhance='description'
       />
-      <TextareaField
+      <AiTextareaField
         name={`issues.${index}.resolutionNote`}
         label='resolution note'
         rows={2}

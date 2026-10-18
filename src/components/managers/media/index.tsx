@@ -12,7 +12,7 @@ import {
   mediaFullListToViewerItems,
   mediaFullViewerSrc,
   useMediaViewer,
-} from 'ui/components/media-viewer';
+} from 'components/shared/media-viewer/media-viewer';
 import { SideRailLayout } from 'ui/components/side-rail';
 import Text from 'ui/components/text';
 import { Filter } from './components/filter';

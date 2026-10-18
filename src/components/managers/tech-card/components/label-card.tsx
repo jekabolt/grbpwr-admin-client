@@ -10,7 +10,7 @@ import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
-import { AiEnhance } from 'ui/components/ai-enhance';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import Textarea from 'ui/components/text-area';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { LABEL_MEDIA_MAX } from './labels-schema';

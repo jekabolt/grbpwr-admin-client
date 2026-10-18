@@ -2,7 +2,7 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
-import type { MediaViewerItem } from 'ui/components/media-viewer';
+import type { MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 

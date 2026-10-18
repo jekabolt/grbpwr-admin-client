@@ -14,7 +14,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { useCreateArchive, useUpdateArchive } from '../../archives/components/useArchiveQuery';
 import { HeroSectionModal } from '../../hero/components/hero-section-modal';
 import { useProductSelection } from '../../hero/components/useProductSelection';

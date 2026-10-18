@@ -3,7 +3,7 @@ import { common_AddressInsert, common_OrderFull } from 'api/proto-http/frontend'
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
 import { buildOrderTrackingUrl } from 'lib/storefront-links';
 import { ReactNode } from 'react';
-import { PatternQR } from 'ui/components/pattern-qr';
+import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 
 const TD = 'border border-black px-1.5 py-1 align-top';

@@ -67,7 +67,7 @@ if (!chromium) {
 // КЛАССЫ БЕРУТСЯ ИЗ ИСХОДНИКА, а не переписываются в пробе: копия правил разошлась бы с ними на
 // первой же правке, и проба продолжала бы зеленеть, проверяя вчерашнюю раскладку.
 const here = dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(resolve(here, '../src/ui/components/annotation/surface.tsx'), 'utf8');
+const src = readFileSync(resolve(here, '../src/components/managers/tech-card/annotation/surface.tsx'), 'utf8');
 const guards = [
   ["кадр объявлен нерастягивающимся ('self-start')", /'self-start',/],
   ["ширину картинки задаёт она сама ('w-auto max-w-full')", /'block h-auto w-auto max-w-full'/],

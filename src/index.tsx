@@ -15,7 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { TooltipProvider } from 'ui/components/tooltip';
-import { Layout } from 'ui/layout';
+import { Layout } from 'components/shell/layout';
 import './global.css';
 
 // A deploy replaces every hashed chunk, so a tab that was already open asks for a file that is no

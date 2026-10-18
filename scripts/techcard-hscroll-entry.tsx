@@ -5,7 +5,7 @@
 // что предмет замера — не поле само по себе, а вылезает ли оно за коробку страницы. Цепочка
 // переписана из живых файлов один в один:
 //
-//   src/ui/layout.tsx:80                  'h-full print:h-full print:pt-0 pt-26 px-2.5'
+//   src/components/shell/layout.tsx:80                  'h-full print:h-full print:pt-0 pt-26 px-2.5'
 //   tech-card/page.tsx:44                 'flex flex-col gap-6'
 //   tech-card/components/index.tsx:1847   'grid gap-2.5 pt-3 lg:grid-cols-[150px_1fr]'
 //   tech-card/components/index.tsx:1850   <aside> рельса (150px)

@@ -1,4 +1,4 @@
-import { projectOnSegment } from 'ui/components/annotation/geometry';
+import { projectOnSegment } from 'components/managers/tech-card/annotation/geometry';
 
 import type { TraceComponent, TraceMeasurement } from './trace-types';
 import {

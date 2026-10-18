@@ -1,6 +1,6 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { annotationKindFromWire } from 'ui/components/annotation/wire';
+import { annotationKindFromWire } from 'components/managers/tech-card/annotation/wire';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';

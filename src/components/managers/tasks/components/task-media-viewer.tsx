@@ -4,8 +4,8 @@ import {
   indexOfPin,
   useAnnotationSurface,
   type AnnotationValue,
-} from 'ui/components/annotation/canvas';
-import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
+} from 'components/managers/tech-card/annotation/canvas';
+import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
 import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';

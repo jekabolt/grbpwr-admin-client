@@ -20,7 +20,7 @@ import {
   MediaViewer,
   ViewerAction,
   type MediaViewerItem,
-} from 'ui/components/media-viewer';
+} from 'components/shared/media-viewer/media-viewer';
 import GenericPopover from 'ui/components/popover';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';

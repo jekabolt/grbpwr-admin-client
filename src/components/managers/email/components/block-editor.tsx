@@ -14,7 +14,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { HeroProductPicker } from '../../hero/components/hero-product-picker';
 import { LinkField } from '../../hero/components/link-field';
 import { ReleaseDateField } from '../../hero/components/release-date-field';

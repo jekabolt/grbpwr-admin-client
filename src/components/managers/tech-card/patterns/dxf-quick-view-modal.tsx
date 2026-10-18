@@ -1,9 +1,9 @@
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useEffect, useRef, useState } from 'react';
 import { formatBytes } from 'utils/pattern';
-import { Button } from './button';
-import { ConfirmationModal } from './confirmation-modal';
-import Text from './text';
+import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import Text from 'ui/components/text';
 
 // Quick view for a DXF выкройка (§3). The browser has no native DXF renderer (unlike the
 // PDF <object>/<iframe> path), so this renders via the `dxf-viewer` WebGL package —

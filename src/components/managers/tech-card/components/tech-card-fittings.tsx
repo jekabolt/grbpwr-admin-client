@@ -11,7 +11,7 @@ import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
+import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { SectionHeader } from 'ui/components/section-header';

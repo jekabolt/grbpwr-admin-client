@@ -9,7 +9,7 @@ import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { nearestOnPolyline } from 'ui/components/annotation/geometry';
+import { nearestOnPolyline } from 'components/managers/tech-card/annotation/geometry';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';

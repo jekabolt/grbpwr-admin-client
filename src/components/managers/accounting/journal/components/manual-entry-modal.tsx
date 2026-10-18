@@ -21,7 +21,7 @@ import { inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors } from 'utils/field-errors';
 import { Form } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
-import CurrencySelect from 'ui/form/fields/currency-select';
+import CurrencySelect from 'components/shared/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import SegmentedField from 'ui/form/fields/segmented-field';
 import { Callout, CheckStrip, Verdict } from '../../components/kit';

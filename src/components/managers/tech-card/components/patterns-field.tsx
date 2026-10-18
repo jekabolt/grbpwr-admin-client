@@ -38,7 +38,7 @@ import {
 import Input from 'ui/components/input';
 import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
-import { patternNameOfFile, uploadPatternFile } from 'ui/components/pattern-upload-button';
+import { patternNameOfFile, uploadPatternFile } from 'components/managers/tech-card/patterns/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder, PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { cn } from 'lib/utility';

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
-import type { EditHistory } from 'ui/components/annotation/history';
+import type { EditHistory } from 'components/managers/tech-card/annotation/history';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';

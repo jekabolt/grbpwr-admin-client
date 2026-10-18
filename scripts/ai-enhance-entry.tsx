@@ -18,7 +18,7 @@ import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter } from 'react-router-dom';
 import { TooltipProvider } from 'ui/components/tooltip';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 
 declare global {
   interface Window {
@@ -44,7 +44,7 @@ function Card() {
           <DraftedProvider techCardId={7}>
             <DetailsEditor />
             <div data-probe-notes='' style={{ marginTop: 24 }}>
-              <TextareaField
+              <AiTextareaField
                 name='construction.notes'
                 label='notes'
                 rows={2}

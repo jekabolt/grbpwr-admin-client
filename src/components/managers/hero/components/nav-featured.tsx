@@ -6,7 +6,7 @@ import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { TranslationField } from 'components/shared/translation/translation-field';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { ArchivePicker } from './archive-picker';
 import { HeroSchema } from './schema';

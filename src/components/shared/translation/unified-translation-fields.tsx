@@ -8,7 +8,7 @@ import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { RichTextField } from 'ui/form/fields/rich-text-field';
-import { LanguageButtons } from '../../components/language-buttons';
+import { LanguageButtons } from './language-buttons';
 
 type FieldConfig = {
   name: string;

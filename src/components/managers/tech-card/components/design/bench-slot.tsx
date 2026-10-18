@@ -19,7 +19,7 @@ import Text from 'ui/components/text';
 import { useDrafted } from './drafted-contract';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
-import type { MediaViewerItem } from 'ui/components/media-viewer';
+import type { MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { PictureTile } from './picture-tile';
 import { successorStands } from './generation/edit-chain';
 import { useEditChainDoors } from './generation/edit-chain-doors';

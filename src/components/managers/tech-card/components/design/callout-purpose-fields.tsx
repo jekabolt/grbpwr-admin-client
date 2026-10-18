@@ -11,9 +11,9 @@ import {
   spiOf,
   writeSpec,
   type Spec,
-} from 'ui/components/annotation/purpose';
-import { frameAspectOf } from 'ui/components/annotation/frame-aspect';
-import { StitchPictogram, stitchBrushOf } from 'ui/components/annotation/stitch-pictogram';
+} from 'components/managers/tech-card/annotation/purpose';
+import { frameAspectOf } from 'components/managers/tech-card/annotation/frame-aspect';
+import { StitchPictogram, stitchBrushOf } from 'components/managers/tech-card/annotation/stitch-pictogram';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';

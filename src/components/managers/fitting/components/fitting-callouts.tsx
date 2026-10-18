@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { kindDef } from 'ui/components/annotation/kinds';
-import type { AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
+import type { AnnotationColorKey, AnnotationKindKey } from 'components/managers/tech-card/annotation/wire';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Select from 'ui/components/select';

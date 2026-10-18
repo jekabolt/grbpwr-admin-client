@@ -6,7 +6,7 @@ import CountryList from 'react-select-country-list';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { Care } from './care/care';
 import { ColorFields } from './color-fields';
 import { Composition } from './composition/composition';

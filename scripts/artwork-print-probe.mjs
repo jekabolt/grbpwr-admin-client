@@ -50,7 +50,7 @@ await esbuild({
   }, ...(BASE ? [{
     name: 'base',
     setup(b) {
-      b.onLoad({ filter: /src\/ui\/components\/annotation\/[^/]+\.tsx?$/ }, (a) => ({
+      b.onLoad({ filter: /src\/components\/managers\/tech-card\/annotation\/[^/]+\.tsx?$/ }, (a) => ({
         contents: execFileSync('git', ['show', `${BASE}:${a.path.slice(REPO.length + 1)}`], { cwd: REPO, encoding: 'utf8' }),
         loader: a.path.endsWith('x') ? 'tsx' : 'ts',
       }));

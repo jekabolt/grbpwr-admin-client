@@ -3,7 +3,7 @@ import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import Media from 'ui/components/media';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
+import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 import Text from 'ui/components/text';
 import { readSlotAspect } from '../utils/calculate-aspect';
 import { useMediaIntake } from '../utils/useMediaIntake';
