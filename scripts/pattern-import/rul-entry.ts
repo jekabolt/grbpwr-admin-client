@@ -31,6 +31,7 @@ import { isUnsupportedFormat, sniffFormat } from 'lib/pattern-import/adapters/sn
 import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
+import { sectionH } from './rulhook-entry';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -1140,6 +1141,14 @@ export async function main(): Promise<number> {
   await sectionD();
   await sectionE();
   await sectionF();
+  // RULHOOK: the storage choice through the real wizard hook
+  await sectionH({
+    check,
+    dxf: baseDxf(),
+    rul: SPEC_RUL,
+    sizes: SIZES,
+    kombinezon: process.env.RULHOOK_KOMBINEZON ?? resolve(CORPUS, 'rul-real/kombinezon-main.dxf'),
+  });
   // zip helper sanity (a ZIP of a DXF + a binary .rul is not a pair)
   check(
     'Z',

@@ -64,6 +64,8 @@ import type {
   SemanticsOutput,
   SizeRun,
   Unproven,
+  GradeAsk,
+  GradeCountFeature,
 } from '../types';
 import { PATIMPORT } from '../types';
 import {
@@ -81,7 +83,15 @@ import { silentRead, type SilentRead } from '../pieces/gfit/silent-inputs';
 import { silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
+import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
 import { classifyFeatures } from './features';
+import { gradeP1Off, gradeShape } from './grade-shape';
+import {
+  chordAcross,
+  notchBumpSeries,
+  type NotchBump,
+  type NotchChord,
+} from '../pieces/gfit/notch-bumps';
 import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
@@ -121,7 +131,7 @@ import {
   reflection,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
-import { cleanTracedOutline, offsetContour } from './offset';
+import { cleanTracedOutline, familyCornerKinds, offsetContour } from './offset';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
 type DxfExtra = {
@@ -173,6 +183,12 @@ export type SemanticsDetail = {
    * other disagreements warn) and whether the size draws its own line beside its outline.
    */
   gradeOf: (identity: string, rank: number) => GradeEvidence | undefined;
+  /**
+   * GRADE P1: the notches drawn AS the outline (a graded bump / dip) this identity × rank's line
+   * crosses by its chord, with the drawn bump — G3/G4 do not hold the chord against the bump's
+   * walls (same frame as `wallsOf`). undefined = none.
+   */
+  notchChordsOf: (identity: string, rank: number) => NotchChord[] | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -596,6 +612,12 @@ export function buildPieceSpecsDetailed(
   const blocked: Blocked[] = [];
   /** D3: what the drawing does not prove, per seed — see `Unproven`. */
   const unproven: Unproven[] = [];
+  /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
+  const gradeAsks: GradeAsk[] = [];
+  const gradeRefusals: Record<string, string> = {};
+  const refusedSeed = new Map<string, SeedId>();
+  /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
+  const notchChords = new Map<string, NotchChord[]>();
   const notes: Record<PieceKey, string[]> = {};
   const textById = new Map(sheet.texts.map((t) => [t.id, t]));
 
@@ -1013,11 +1035,18 @@ export function buildPieceSpecsDetailed(
     const measured = !ov.allowance ? measuredAllowance(largest, set) : null;
     const dxfSeamOuter = !!largest.dxf?.outerIsSeam;
     let A: AllowanceDecision = ov.allowance ?? fileAllowance;
-    if (!ov.allowance && dxfSeamOuter && A.meaning !== 'seam')
+    // the geometry below derives the cut from a DXF layer-14 outline whatever meaning was given:
+    // the record says so too (SILENT-TAIL, Codex: G3/G4/G8 read the drawn line by this meaning)
+    if (dxfSeamOuter && A.meaning !== 'seam')
       A = {
         ...A,
         meaning: 'seam',
-        evidence: [...A.evidence, 'the drawn outline is the graded seam line (DXF layer 14)'],
+        evidence: [
+          ...A.evidence,
+          ov.allowance
+            ? `the drawn outline is the graded seam line (DXF layer 14) — read as the seam over the given "${ov.allowance.meaning}"`
+            : 'the drawn outline is the graded seam line (DXF layer 14)',
+        ],
       };
     if (!ov.allowance && measured && !dxfSeamOuter) {
       A = {
@@ -1121,6 +1150,8 @@ export function buildPieceSpecsDetailed(
     const saysPair = p.texts.some((t) => PAIR_WORDS.test(t) && parseQuantity(t) != null);
 
     const sizes: PieceSizeSpec[] = [];
+    /** SILENT-TAIL: the drawn line each derived line was offset from, and by how much (±mm). */
+    const derivedFrom = new Map<PieceSizeSpec, { base: PtMm[]; mm: number }>();
     const wallMaps: WallMap[] = [];
     let blockedHere: { reason: BlockReason; detail: string } | null = null;
     /** 'fold-unresolved': where the answered fold fails (the details step asks again from it). */
@@ -1135,14 +1166,99 @@ export function buildPieceSpecsDetailed(
         { x: c.bbox.maxX, y: c.bbox.maxY },
       ]),
     );
-    const featOpts = { sizeCount: run.sizes.length, region: famBox };
+    // DARTS: the darts proven of this piece — each size writes its own legs on layer 8
+    const darts = (input.darts ?? []).filter((d) => d.seed === seed);
+    const featOpts = {
+      sizeCount: run.sizes.length,
+      region: famBox,
+      ...(darts.length ? { darts } : {}),
+    };
+    // SHAPE: notch marks (small closed marks centred on the line) are notches, never outline —
+    // read over every size of the family at once (semantics/notch-marks.ts)
+    const markReads =
+      traced || p.all.some(({ c }) => featuresOf(c).length)
+        ? new Map<number, MarkRead>()
+        : readNotchMarks(
+            p.all.map(({ c }) => c),
+            set,
+          );
+
+    // GRADE P1: a notch drawn AS the outline (a bump / dip of notch shape) at a grade-consistent
+    // place in ≥ 2 sizes is a notch — each size's line crosses it by the chord (pieces/gfit/notch-bumps)
+    const bumpsByRank = new Map<number, NotchBump[]>();
+    if (
+      !traced &&
+      !gradeP1Off() &&
+      !p.ungraded &&
+      p.cands.length > 1 &&
+      !p.cands.some(({ c }) => c.dxf)
+    ) {
+      const lines = p.cands.map(({ c, card }) => {
+        const mr = markReads.get(c.rank);
+        return {
+          rank: c.rank,
+          token: card.token,
+          outer: ccw(mr?.cleaned.length ? mr.outer : c.outer),
+        };
+      });
+      for (const [k, bs] of notchBumpSeries(lines)) bumpsByRank.set(lines[k].rank, bs);
+    }
 
     for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet, { ...featOpts, folds: facingOf.get(c) });
+      const feats = classifyFeatures(c, set, sheet, {
+        ...featOpts,
+        folds: facingOf.get(c),
+        ownClass: run.sizes[c.rank]?.classId ?? null,
+      });
+      const mr = markReads.get(c.rank);
+      if (mr) {
+        feats.push(...mr.notches);
+        if (mr.cleaned.length || mr.notches.length || mr.refused.length)
+          pieceNotes.push(
+            `${card.token}: ${mr.notches.length} notch mark(s) read as notches${mr.cleaned.length ? `, outline straightened across ${mr.cleaned.length}` : ''}${mr.refused.length ? `, ${mr.refused.length} on the line without a second evidence (not used)` : ''}`,
+          );
+      }
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
-      let outer = ccw(c.outer);
+      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      const nb = bumpsByRank.get(c.rank);
+      if (nb?.length) {
+        outer = chordAcross(outer, nb);
+        for (const b of nb) {
+          const d = Math.min(
+            PATIMPORT.notchMaxMm,
+            Math.max(PATIMPORT.notchMinMm, Math.abs(b.depth)),
+          );
+          // a tick drawn across the same place is the same notch — marked as crossed by the chord
+          const same = feats.find(
+            (f): f is NotchFeature =>
+              f.kind === 'notch' &&
+              Math.hypot(f.at.x - b.at.x, f.at.y - b.at.y) <= Math.abs(b.depth) + 2,
+          );
+          if (same) {
+            same.chord = true;
+            continue;
+          }
+          feats.push({
+            kind: 'notch',
+            origin: 'detected',
+            ranges: [],
+            confidence: 0.9,
+            at: b.at,
+            seg: [b.at, { x: b.at.x + b.inward.x * d, y: b.at.y + b.inward.y * d }],
+            depthMm: d,
+            chord: true,
+          });
+        }
+        notchChords.set(
+          `${seed}:${c.rank}`,
+          nb.map((b) => ({ chord: [b.p, b.q] as [PtMm, PtMm], bump: b.bump })),
+        );
+        pieceNotes.push(
+          `${card.token}: ${nb.length} notch(es) drawn as the outline (${nb.map((b) => `${b.depth > 0 ? 'bump' : 'dip'} ${Math.abs(b.depth).toFixed(1)} mm`).join(', ')}; the same place in other sizes) — the line crosses by the chord, the notch on layer 4`,
+        );
+      }
       // Every candidate outline (F4 fill, operator refill, DXF fast path) passes here before fold
       // and offset: a stretch that runs out and back along itself — a corner overshot and retraced
       // (reef HB_4XL, 0.57 mm), the fill wandering up a bundle of lines and back (kombinezon, 12
@@ -1316,11 +1432,13 @@ export function buildPieceSpecsDetailed(
       let cut: PtMm[];
       let seam: PtMm[] | null;
       let offset: OffsetReport | null = null;
+      let derived: { base: PtMm[]; mm: number } | null = null;
       if (meaning === 'seam') {
         seam = outer;
         const r = offsetContour(seam, allowMm);
         cut = r.pts;
         offset = r.report;
+        derived = { base: seam, mm: allowMm };
         pieceNotes.push(
           `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})`,
         );
@@ -1338,6 +1456,7 @@ export function buildPieceSpecsDetailed(
           const r = offsetContour(cut, -allowMm);
           seam = r.pts;
           offset = r.report;
+          derived = { base: cut, mm: -allowMm };
           pieceNotes.push(
             `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm`,
           );
@@ -1431,7 +1550,7 @@ export function buildPieceSpecsDetailed(
             confidence: foldFeat ? foldFeat.confidence : 0.6,
           } satisfies FoldFeature)
         : null;
-      sizes.push({
+      const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
         sizeToken: card.token,
@@ -1444,11 +1563,13 @@ export function buildPieceSpecsDetailed(
         internal,
         fold: fold2,
         offset,
-        walls: c.walls,
+        walls: mr?.cleaned.length ? c.walls.filter((w) => !mr.cleaned.includes(w)) : c.walls,
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
-      });
+      };
+      sizes.push(spec);
+      if (derived) derivedFrom.set(spec, derived);
       wallMaps.push({
         seed,
         rank: c.rank,
@@ -1520,6 +1641,63 @@ export function buildPieceSpecsDetailed(
           ),
         );
       continue;
+    }
+    // SILENT-TAIL: one corner, one treatment in every size — the derived lines are cut again with
+    // the family's most conservative treatment of each matched corner (offset.ts
+    // familyCornerKinds; demotion only, inside each size's own mitre). Not on a piece with a fold
+    // (its fold line is laid on the cut) or one whose sizes were not all derived the same way.
+    if (
+      sizes.length > 1 &&
+      sizes.every(
+        (s) =>
+          !s.fold && derivedFrom.has(s) && derivedFrom.get(s)!.mm === derivedFrom.get(sizes[0])!.mm,
+      )
+    ) {
+      const from = sizes.map((s) => derivedFrom.get(s)!);
+      const kinds = familyCornerKinds(
+        from.map((f) => f.base),
+        from[0].mm,
+      );
+      // all sizes or none (Codex): a size whose re-cut fails would keep a corner its neighbours cut
+      // another way — then every size keeps its own cut, as before the family pass
+      const redo = sizes.map((_, i) => {
+        const kindOf = kinds[i];
+        return kindOf ? offsetContour(from[i].base, from[i].mm, { cornerKinds: kindOf }) : null;
+      });
+      if (redo.every((r) => !r || r.report.ok))
+        sizes.forEach((s, i) => {
+          const r = redo[i];
+          if (!r) return;
+          if (from[i].mm > 0) {
+            s.cut = r.pts;
+            s.bbox = bboxOf(r.pts);
+            s.areaMm2 = areaOf(r.pts);
+          } else s.seam = r.pts;
+          s.offset = r.report;
+          pieceNotes.push(
+            `${s.sizeToken}: allowance corners cut as in the other sizes (one corner, one treatment)`,
+          );
+        });
+      else
+        pieceNotes.push(
+          'allowance corners: the family treatment did not offset cleanly in every size — each size keeps its own',
+        );
+    }
+    // GRADE P1: notches across sizes on the piece's canonical topology (a notch drawn in ≥ 2 sizes
+    // is placed where it is missing, flagged graded), and the explicit count question
+    let asksHere: GradeAsk[] = [];
+    let intendedHere: GradeCountFeature[] = [];
+    if (!p.ungraded && !traced && sizes.length > 1) {
+      const meaningHere = dxfSeamOuter || A.meaning === 'seam' ? 'seam' : 'cut';
+      const gs = gradeShape(seed, sizes, meaningHere, input.gradeAnswers ?? {});
+      sizes.splice(0, sizes.length, ...gs.sizes);
+      pieceNotes.push(...gs.notes);
+      asksHere = gs.asks;
+      for (const [k, why] of Object.entries(gs.refusals)) {
+        gradeRefusals[k] = why;
+        refusedSeed.set(k, seed);
+      }
+      intendedHere = gs.intended;
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     if (!p.ungraded && sizes.length > 1) {
@@ -1652,6 +1830,7 @@ export function buildPieceSpecsDetailed(
       fabrics: [] as string[],
       fused: ov.fused ?? false,
       ungraded: p.ungraded,
+      ...(intendedHere.length ? { gradeIntended: intendedHere } : {}),
     };
     const out: PieceSpec[] = [];
     if (mode === 'derived') {
@@ -1746,6 +1925,7 @@ export function buildPieceSpecsDetailed(
       pieces.push(s);
     }
     unproven.push(...unprovenHere);
+    gradeAsks.push(...asksHere.map((a) => ({ ...a, identity: out[0]?.identity ?? null })));
   }
   progress?.(preps.length, preps.length);
 
@@ -2012,6 +2192,21 @@ export function buildPieceSpecsDetailed(
     return silentOf().evidence(src.cand.seed, src.cand.rank);
   };
   const alongOf = bandCutSupport(set, run);
+  const notchChordsOf = (identity: string, rank: number): NotchChord[] | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src) return undefined;
+    const cs = notchChords.get(`${src.cand.seed}:${src.cand.rank}`);
+    if (!cs?.length) return undefined;
+    const out: NotchChord[] = [];
+    for (const c of cs) {
+      const ch = toFrame(src.w, [[...c.chord]]);
+      const bu = toFrame(src.w, [c.bump]);
+      ch.forEach((l, i) => {
+        if (l.length === 2 && bu[i]?.length) out.push({ chord: [l[0], l[1]], bump: bu[i] });
+      });
+    }
+    return out.length ? out : undefined;
+  };
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
     const src = sourceOf(identity, rank);
     if (!src) return undefined;
@@ -2043,6 +2238,16 @@ export function buildPieceSpecsDetailed(
       blocked,
       warnings,
       unproven: unproven.filter((u) => written.has(u.seed)),
+      ...(gradeAsks.some((a) => written.has(a.seed))
+        ? { gradeAsks: gradeAsks.filter((a) => written.has(a.seed)) }
+        : {}),
+      ...([...refusedSeed].some(([, sd]) => written.has(sd))
+        ? {
+            gradeRefusals: Object.fromEntries(
+              Object.entries(gradeRefusals).filter(([k]) => written.has(refusedSeed.get(k)!)),
+            ),
+          }
+        : {}),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
       ...(foldMisses.some((m) =>
         blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
@@ -2070,6 +2275,7 @@ export function buildPieceSpecsDetailed(
     identityOf,
     onePieceOf,
     gradeOf,
+    notchChordsOf,
     notes,
   };
 }

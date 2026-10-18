@@ -761,7 +761,32 @@ export type LineAssignReport = {
    * two size rows; 'pen' = drawn with another size row's pen, not the target's.
    */
   flags: { chain: ChainId; key: string; kind: 'two-sizes' | 'pen'; detail: string }[];
+  /**
+   * LINEASSIGN-2: answers against their pen that the graded nest explains (chains/nests.ts
+   * `penVerdict` 'slip': the pen is used twice in the line's nest — at its own size's place and at
+   * the place the answer names — and the answer's size pen draws none of the nest): two evidences
+   * against the pen, so not a flag (D3); recorded, shown quietly. Absent on an older report.
+   */
+  notes?: { chain: ChainId; key: string; kind: 'pen-slip'; detail: string }[];
 };
+
+/**
+ * LINEASSIGN-2: a nest outline that sits outside the size row its graded nest names (chains/nests.ts
+ * `lineSuspects`): `suggest` is that row; `pen` is the line's pen against it ('agrees' = a second
+ * evidence, 'against' = the pen names another size, 'slip' = the pen names another size whose own
+ * outline in the nest it already draws — the drawing's slip, 'unknown' = no pen read); `nest` an
+ * index shared by the outlines of one nest; `why` says it for people.
+ */
+export type LineSuspect = {
+  chain: ChainId;
+  suggest: ClassId;
+  why: string;
+  pen: 'agrees' | 'against' | 'slip' | 'unknown';
+  nest: number;
+};
+
+/** LINEASSIGN-2: per size row, the closed piece outlines its lines draw (chains/nests.ts). */
+export type SizeOutlines = { cls: ClassId; n: number; chains: ChainId[]; maxAreaMm2: number };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 5. Sizes — source size run → card size run (sizes/, owner F5; detection shared with F3)
@@ -936,6 +961,35 @@ export type SetAside = {
    * weakAsides); otherwise a guess, "this is a piece" one click away.
    */
   copy?: SetAsideCopy;
+  /**
+   * DARTS: the outline may be a dart of the piece it lies in, not a piece — its only label is a
+   * dart word and its face a narrow wedge (pieces/faces wedgeOf). A dart only once its mouth is
+   * proven on that piece's outline with its point inside every size (auto-advance dartOf);
+   * otherwise a question like any other aside.
+   */
+  dart?: SetAsideDart;
+};
+
+export type SetAsideDart = {
+  /** The dart word it prints («DART»). */
+  label: string;
+  /** The mouth's two corners and the point, mm. */
+  base: [PtMm, PtMm];
+  apex: PtMm;
+  lenMm: number;
+  /** The widest slice across the wedge (its mouth's opening), mm. */
+  openMm: number;
+  /** Points along its edge, on the lines that bound it (pieces/faces rimSamples), mm. */
+  rim: PtMm[];
+  /** The seed point of the outline it lies in (null when that one is not seeded). */
+  host: PtMm | null;
+  /** The face raster's cell, mm (how near a line its corners can be read). */
+  cellMm: number;
+  /**
+   * The host's closed sizes, and how many of them draw their own V there (semantics/features
+   * dartVs) — set by the session once the fill closed them; a dart only when every size does.
+   */
+  legs?: { sizes: number; drawn: number };
 };
 
 /**
@@ -1123,6 +1177,12 @@ export type PieceCandidate = {
    * source provenance and the ONLY chains that may carry it in G15 (F14e/S1, Codex round 3).
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
+  /**
+   * SHAPE (pieces/notch-marks.ts): notch marks (small closed marks centred on the line) the outline
+   * ran around and now crosses on the size's own line — taken out of `walls`, read as notches by
+   * semantics. Absent = none.
+   */
+  notchMarks?: ChainId[];
 };
 
 /**
@@ -1187,6 +1247,20 @@ export type DerivedEdge = {
  * cut). `uncertain` (D3): the label's line has no second evidence — `cutLines`, `pieces` and
  * `outlines` are empty, `why` says what is missing; nothing is cut by it.
  */
+/**
+ * One drawn copy of a model's cutting line (or of the labelled edge), sheet mm, and the size it is
+ * drawn in. `size`: the source size label (as `outlines[].size` and `SizeRun.sizes[].label` spell
+ * it) of the ONE size row the line's chain is in (its OCG layer / pen / dash — the legend's rows);
+ * null when the line is in no single size row (a line shared by every size, a line in two rows, a
+ * sheet without a size run). `offMm`: the second evidence — how far the line's farther end lies
+ * from that size's outline of the mark's piece (the nearest piece when several), 0.1 mm; ≤ 1.5 =
+ * the line sits on its own size's outline. Larger = the drawing's own line misses its size's
+ * outline (kombinezon Style A Piece 4: sizes 8–20 are drawn short / long in the source, 5.3 mm in
+ * size 10) — `size` stays the row the drawing puts it in, never the nearest outline's size. null =
+ * not checked (no size, or the piece has no closed outline in that size).
+ */
+export type VariantCutLine = { size: string | null; poly: PtMm[]; offMm: number | null };
+
 export type VariantMark = {
   /** The model ("Style A"), spelled as `variants` spells it. */
   label: string;
@@ -1195,7 +1269,8 @@ export type VariantMark = {
   /** The printed text ("Cutting line Style A - High Waisted"). */
   text: string;
   kind: 'cut' | 'edge' | 'piece';
-  cutLines: PtMm[][];
+  /** One polyline per size the line is drawn in, with that size (see VariantCutLine). */
+  cutLines: VariantCutLine[];
   pieces: SeedId[];
   outlines?: { seed: SeedId; size: string; poly: PtMm[] }[];
   uncertain?: boolean;
@@ -1302,8 +1377,25 @@ export type NotchFeature = FeatureBase & {
   at: PtMm;
   seg: [PtMm, PtMm];
   depthMm: Mm;
+  /**
+   * GRADE P1: not drawn in this size — placed from the sizes that draw it (pieces/gfit/notch-grade:
+   * ≥ 2 drawn copies at a grade-consistent place on the piece's canonical topology, or the
+   * operator's "in every size"). D5: recorded and counted (ManifestBlock.notchesGraded), never
+   * presented as drawn. Absent = drawn (or derived by an unfold).
+   */
+  graded?: { from: string[]; answered?: boolean };
+  /**
+   * GRADE P1: drawn AS the outline (a notch-shaped bump / dip, the same in ≥ 2 sizes) — the line
+   * crosses it by the chord, counted in ManifestBlock.notchesChorded (the outline there is not as drawn).
+   */
+  chord?: true;
 };
-export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
+export type DrillFeature = FeatureBase & {
+  kind: 'drill';
+  at: PtMm;
+  /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
+  graded?: { from: string[]; answered?: boolean };
+};
 /**
  * What made a grainline (G18, A8): `class` a grain-classed line, `arrowheads` short chains at an
  * end, `word` a grain word beside it, `dxf-layer` the source DXF's own grain layer, `operator` two
@@ -1354,6 +1446,8 @@ export type InternalFeature = FeatureBase & {
   pts: PtMm[];
   closed: boolean;
   label?: string; // "dart", "pocket placement"
+  /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
+  graded?: { from: string[]; answered?: boolean };
 };
 export type SeamLineFeature = FeatureBase & { kind: 'seam'; pts: PtMm[] };
 export type CutLineFeature = FeatureBase & { kind: 'cut'; pts: PtMm[] };
@@ -1428,6 +1522,11 @@ export type PieceSpec = {
   ungraded: boolean;
   /** One entry per exported size rank. */
   sizes: PieceSizeSpec[];
+  /**
+   * GRADE P1: count differences between sizes the operator answered "intended" (GradeAsk counts):
+   * the G5 count warning / SHAPE_COUNTS_HOLD hold lifts for these, the passport records the answer.
+   */
+  gradeIntended?: GradeCountFeature[];
 };
 
 export type PieceSizeSpec = {
@@ -1448,6 +1547,11 @@ export type PieceSizeSpec = {
   areaMm2: Mm2;
   /** P1: this size closed through continuity walls — what, and the D3 verdict (gate G21). */
   continuity?: ContinuityRecord;
+  /**
+   * GRADE P1: marks drawn in this size that the operator's "in no size" removed (count question
+   * answered `none`), per kind — recorded (D5), counted in the manifest. Absent = none.
+   */
+  removedByOperator?: Partial<Record<GradeCountFeature, number>>;
 };
 
 /**
@@ -1541,6 +1645,11 @@ export type SemanticsInput = {
    * (`FoldListCheck.entries`, as printed); a new unbound entry asks again. `true` = all (legacy).
    */
   foldListChecked?: boolean | string[];
+  /**
+   * GRADE P1: the operator's answers to `SemanticsOutput.gradeAsks`, by key (a key whose question
+   * is no longer asked does nothing). Never given by the autopilot.
+   */
+  gradeAnswers?: Readonly<Record<string, GradeAnswer>>;
   /** The text label of each text-seeded piece ("22", "Piece 7"), for binding the cutting list. */
   seedLabels?: Partial<Record<SeedId, string>>;
   /** MOOD Ф0 (G24): the text (TextId) each text-seeded piece was seeded from — its header. */
@@ -1549,6 +1658,17 @@ export type SemanticsInput = {
   seedAts?: Partial<Record<SeedId, PtMm>>;
   /** Text of the document's other pages (instructions, cutting list); the session fills it. */
   docTexts?: string[];
+  /**
+   * DARTS: the darts proven of a seeded piece on the pieces step (pieces/darts provenDarts): each
+   * size of that piece writes its own dart legs as internal lines labelled «dart» (layer 8).
+   */
+  darts?: readonly {
+    seed: SeedId;
+    label: string;
+    apex: PtMm;
+    base: [PtMm, PtMm];
+    lenMm: number;
+  }[];
 };
 
 /**
@@ -1608,8 +1728,52 @@ export type FoldMiss = {
   edges: FoldAsk['edges'];
 };
 
+/**
+ * GRADE P1: one piece, one shape across sizes — the questions only the operator answers (the
+ * autopilot never does, D3/D5). Non-blocking: the export goes on as drawn (the G5 count warning
+ * and the passport record it); an answer is given back as `SemanticsInput.gradeAnswers[key]`.
+ *   notch-lone — a notch drawn in ONE size of ≥ 3: "in every size / in none / only in this one";
+ *   counts     — the sizes carry different numbers of notches / drills / internal lines (buttonholes
+ *                among them): "in size S 5, in XL 7 — intended?" with every size's places to light.
+ * `key` is the question's content (piece, sizes, counts / place): a changed drawing asks again.
+ */
+export type GradeAsk =
+  | {
+      kind: 'notch-lone';
+      seed: SeedId;
+      identity: PieceKey | null;
+      key: string;
+      size: string;
+      at: PtMm;
+      question: string;
+      answer?: 'all' | 'none' | 'only';
+    }
+  | {
+      kind: 'counts';
+      seed: SeedId;
+      identity: PieceKey | null;
+      key: string;
+      feature: GradeCountFeature;
+      perSize: { size: string; n: number; at: PtMm[] }[];
+      question: string;
+      /** the operator's answer as applied; absent while open (and while refused) */
+      answer?: 'intended' | 'all' | 'none';
+      /** the operator answered `all` / `none` but it could not be applied — why (the ask stays open) */
+      refused?: string;
+    };
+export type GradeCountFeature = 'notches' | 'drills' | 'internal';
+/** GRADE P1: the operator's answer to a `GradeAsk` (by its key). */
+export type GradeAnswer = 'all' | 'none' | 'only' | 'intended';
+
 export type SemanticsOutput = {
   pieces: PieceSpec[];
+  /** GRADE P1: questions of one shape across sizes (absent = none). Never blocking. */
+  gradeAsks?: GradeAsk[];
+  /**
+   * GRADE P1: answers that could not be applied, by question key → why ("its graded place falls
+   * past the corner of its edge in size 10"). The question stays open. Absent = none.
+   */
+  gradeRefusals?: Record<string, string>;
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
   blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
@@ -1966,6 +2130,8 @@ export type ManifestPiece = {
   allowanceMm: Mm;
   nameOrigin: PieceSpec['nameOrigin'];
   aiConfidence?: number;
+  /** GRADE P1: per-size count differences the operator answered "intended" (absent = none). */
+  gradeIntended?: GradeCountFeature[];
 };
 
 export type ManifestBlock = {
@@ -1977,6 +2143,17 @@ export type ManifestBlock = {
   areaMm2: Mm2;
   hasGrain: boolean;
   notches: number;
+  /** GRADE P1: of `notches`, how many are not drawn in this size but graded from the others. */
+  notchesGraded?: number;
+  /** GRADE P1: of `notches`, how many were drawn as the outline and are crossed by the chord. */
+  notchesChorded?: number;
+  /** GRADE P1: drills / internal lines not drawn in this size, placed by the operator's "in every size" */
+  drillsGraded?: number;
+  internalGraded?: number;
+  /** GRADE P1: marks drawn in this size that the operator's "in no size" removed (D5) */
+  notchesRemoved?: number;
+  drillsRemoved?: number;
+  internalRemoved?: number;
   drills: number;
   internal: number;
   hasSeam: boolean;
@@ -2322,6 +2499,12 @@ export type GateExpectation = {
    * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
    */
   derivedByBlock?: Record<string, DerivedEdge[]>;
+  /**
+   * GRADE P1: per block, the notches drawn AS the outline that its line crosses by the chord, with
+   * the drawn bump, written frame — G3 does not count the bump's walls as off the line, G4 does not
+   * measure the chord against them (the notch is on layer 4). Absent = none.
+   */
+  notchChordsByBlock?: Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]>;
   /** P1 (G21): per block closed through continuity walls, the used stretches and their chains. */
   continuityByBlock?: Record<string, ContinuityGeometry>;
   /**
@@ -2608,6 +2791,14 @@ export type StageIO = {
       chainLines?: { key: string; sheet: number; style: StyleId }[];
       /** LINEFIX: how `chainAssign` landed (absent = none given). */
       lineAssign?: LineAssignReport;
+      /**
+       * LINEASSIGN-2: nest outlines outside the size row their graded nest names, on the set as
+       * answered (operator-answered lines are never suspects). [] = none; absent on the DXF fast
+       * path.
+       */
+      suspects?: LineSuspect[];
+      /** LINEASSIGN-2: closed outlines per size row (ends ≤ 2 mm, ≥ 200 mm); absent on the fast path. */
+      outlines?: SizeOutlines[];
     };
   };
   sizes: {
@@ -2745,6 +2936,13 @@ export type StageIO = {
 };
 
 /**
+ * RULHOOK: the operator's storage choice for the write (`Inputs.writeStorage`, event
+ * `write-storage`). Absent = 'blocks' (per-size DXF only). `rulBase` is checked against the sizes
+ * the run writes (an unknown one is ignored, with a reason) — see `writeStorageFor`.
+ */
+export type WriteStorage = { storage: 'blocks' | 'rul'; rulBase?: string };
+
+/**
  * Why a worker request failed, so the wizard can say what to do (the message is for the operator):
  * `stage-unavailable` — that stage's module has not landed yet (honest placeholder, no fake data);
  * `unsupported-format` / `corrupt` — the file itself; `cancelled` — the operator stopped it;
@@ -2856,6 +3054,12 @@ export type WizardEvent =
   | { type: 'fabrics'; assignment: FabricAssignment }
   /** A10: an autopilot run hands its assumptions to the written manifests. */
   | { type: 'write'; autopilot?: AutopilotRecord }
+  /**
+   * RULHOOK: how the write stores the sizes (`Inputs.writeStorage`, RUL-SPEC.md §6) — 'rul' also
+   * packs base DXF + .rul. The operator's choice only (never an autopilot answer); on the check
+   * step it writes again.
+   */
+  | ({ type: 'write-storage' } & WriteStorage)
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
   | { type: 'apply'; token?: number }
   | { type: 'download' }
@@ -3087,6 +3291,15 @@ export type CleanOutput = {
      * holds line work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
      */
     aiAside?: boolean;
+    /**
+     * STOPS (clean/page-ink.ts): the page's line work read WITHOUT the AI, on a file with a tile
+     * sheet. `explained` = every long / piece-sized line is a table rule, a frame, a test square,
+     * one of the file's tile pieces reduced, or a small drawing in a pen the tiles do not use — in
+     * words ("12 table rules / separators, 3 frames, 1 test square"); the autopilot takes it as the
+     * second evidence beside the classifier's text-led role. `unexplained` = the first line nothing
+     * explains (the page stays the question, and says what that line is).
+     */
+    ink?: { explained?: string; unexplained?: string };
   }[];
   /** A9: per file, the tile chrome the page stats test a page against (`PageStats.hasTileMarks`). */
   tileMarks?: { file: FileId; tile: { widthMm: Mm; heightMm: Mm }; sigs: TileMarkSig[] }[];

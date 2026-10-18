@@ -700,10 +700,23 @@ async function writeCase(
   );
   const g = w.gate[MAIN.scopeKey];
   const blocking = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
+  // SHAPE (16.10): a G5 block whose every finding is the one-shape family rule (the sizes of a
+  // piece differ in notches / drills / outline turns — a source or detection inconsistency the
+  // gate now holds on purpose) is reported, not counted against the worker's own write path
+  const shapeOnly = (c: (typeof blocking)[number]) =>
+    c.id === 'G5-features' &&
+    (c.note ?? '')
+      .split('; ')
+      .filter((x) => !x.startsWith('grain verified'))
+      .every((x) => x.includes('one piece, one shape across sizes'));
+  const held = blocking.filter(shapeOnly);
+  if (held.length)
+    console.log(`      ${name}: held by the one-shape rule — ${held[0].note?.split('; ')[0]}`);
+  const hard = blocking.filter((c) => !shapeOnly(c));
   check(
     name,
     opt.mustPass ? 'write + gate: no blocking check' : 'write + gate: a real report',
-    !!g && w.scopes.length === 1 && (!opt.mustPass || !blocking.length),
+    !!g && w.scopes.length === 1 && (!opt.mustPass || !hard.length),
     g
       ? `${w.scopes[0]?.identities.length} identities · ${g.checks.filter((c) => c.ok).length}/${g.checks.length} ok${blocking.length ? ` · BLOCK ${blocking.map((c) => `${c.id}[${c.blocks.slice(0, 4).join(',')}] ${c.note ?? ''}`).join(' | ')}` : ''}`
       : 'no report',
@@ -899,19 +912,34 @@ async function operatorBridgeGateCase() {
   // not exported) — its seam runs the 72 cap, the 72 underarm tip and ~20 mm of the 72 underarm
   // line before crossing to its own, while its own cap line is drawn and unused (a W at the tip;
   // tmp/plans/pdf-to-dxf/auto/fixfix/palto-SL.png, palto-SL-bottom.png). SILENT's G26 neighbour
-  // rule (in G22) holds SL_76 for it, and G8's perimeter band holds the SL run (80 under 76 is
-  // that same defect; 88 under 84 is the 60 mm mitre spike at the acute cap/underarm tip in
-  // 76–84 against a bevelled tip in 88 — the seam lines grow 1312 → 1321 → 1333). The bridge
-  // itself is not what blocks: the rest of the export must stay clean.
+  // rule (in G22) holds SL_76 for it. SILENT-TAIL 17.10: G8 measures the run on the drawn (seam)
+  // line now — the seams grow 1312 → 1321 → 1333 and the cut's corner treatment (a 60 mm mitre
+  // spike at the underarm tip in 76–84, a bevel in 88) no longer reads as "88 under 84"; with one
+  // corner treatment per family the SL cut lines no longer differ in turns either (SHAPE held SL
+  // 76/80 for that artefact on batch2). What SHAPE (G5 one-shape) still holds is FP: the drawn
+  // armhole of 76/80/84 ends in a horizontal step onto the common side line (≈ 10 / 8 / 4 mm, 80
+  // with a small loop), 88 runs straight — a real outline difference, not the allowance
+  // (auto/silent-tail/palto-FP_L-armhole-step.png). The bridge itself must not block.
   const w = await writeCase(name, run, sem, sz.map, { mustPass: false });
   const g = w.gate[MAIN.scopeKey];
   const holds = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   const g22 = holds.find((c) => c.id === 'G22-identity');
   const g8h = holds.find((c) => c.id === 'G8-monotone');
+  const shapeOnlyHold = (c: (typeof holds)[number]) =>
+    c.id === 'G5-features' &&
+    (c.note ?? '')
+      .split('; ')
+      .filter((x) => !x.startsWith('grain verified'))
+      .every((x) => x.includes('one piece, one shape across sizes'));
   check(
     name,
-    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and G8 (SL run) only",
-    holds.every((c) => c.id === 'G22-identity' || c.id === 'G8-monotone') &&
+    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and the one-shape rule on FP only",
+    holds.every(
+      (c) =>
+        c.id === 'G22-identity' ||
+        c.id === 'G8-monotone' ||
+        (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
+    ) &&
       !!g22 &&
       g22.blocks.length > 0 &&
       g22.blocks.every((b) => /^SL_[LR]_76$/.test(b)) &&

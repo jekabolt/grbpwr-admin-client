@@ -16,6 +16,10 @@
 // ~5 mm hump). A corner whose mitre would reach further than MITER_LIMIT × allowance from the seam
 // corner (a sharp tip) is square-cut there, perpendicular to the bisector. Along curves the vertices
 // turn by a few degrees and the mitre is the parallel (10 mm at 10° → 0.04 mm out).
+// SILENT-TAIL (17.10) — one corner, one treatment in every size: two corners closer than
+// CORNER_FLAT_MM are ONE corner (a sleeve's cap/underarm tip drawn sharp in 76–84 and with a 0.9 mm
+// flat in 88 was mitred to a 60 mm spike in three sizes and bevelled to 16 mm in the fourth), and the
+// limit is 2 × allowance (was 4): what real CAD does at a sharp tip (MITER_LIMIT below).
 // The morphological opening of traced outlines (below) keeps the round join: it is a disk, not a cut.
 //
 // The result is the d-level set of the distance to the source along the sides; at a convex corner it
@@ -53,9 +57,16 @@ export const HULL_SOURCE_CONCAVE_MAX = 0.99;
 export const MAX_DEVIATION_MM = 0.2;
 /**
  * W2: a mitred allowance corner reaches at most this many × the allowance from the seam corner;
- * a sharper corner is square-cut at that distance, perpendicular to the corner's bisector.
+ * a sharper corner (turn past 120°) is square-cut at that distance, perpendicular to the corner's
+ * bisector. SILENT-TAIL (17.10) measured real CAD cut lines against their seams (corpus/dxf-clo,
+ * tmp/plans/pdf-to-dxf/auto/silent-tail/): CLO mitres every corner up to a 111° turn exactly (cut /
+ * mitre 1.00, 200+ corners in summer men, its Gerber target, allsizes, ALLSIZES_DXF, blazer) and
+ * stops well short of the mitre past that — blazer's 127–146° tips reach 1.25–2.23 × the allowance
+ * (0.49–0.90 of the mitre), never more. Clipper's own MiterLimit default is 2 (× delta), SVG's
+ * miterlimit 4 is the same 2 × the half-width, lib/nesting's offset uses 2. 4 drew 60 mm spikes
+ * at a 15 mm allowance (palto SL), past anything CAD writes.
  */
-export const MITER_LIMIT = 4;
+export const MITER_LIMIT = 2;
 export type OffsetJoin = 'round' | 'miter';
 
 const toPath = (pts: readonly PtMm[]): Path64 => {
@@ -125,6 +136,34 @@ function miterJoin(P: PtMm, nk: Vec, nj: Vec, d: number, limit: number): PtMm[] 
 export const CORNER_MIN_TURN_DEG = 15;
 /** …and at most this much: a sharper reversal is a needle (a fill artefact), never extended. */
 export const CORNER_MAX_TURN_DEG = 175;
+/**
+ * SILENT-TAIL: corners joined by sides this short (summed, mm) are ONE corner, mitred between the
+ * outer sides as if drawn sharp. A traced or filled tip often ends in a sub-millimetre flat in one
+ * size and not in the next (palto SL 88: 87.8° + 63.5° over a 0.91 mm flat, 76–84 one 150–154°
+ * vertex); mitring each half on its own made a bevel there and a spike in the other sizes — one
+ * corner cut two ways in one family. Well under any drawn bevel (a blunted collar point, ≥ 3 mm).
+ */
+export const CORNER_FLAT_MM = 1.5;
+
+/** One allowance corner: vertices first…last (one vertex, or a sharp tip split by a micro-flat). */
+type CornerJoin = { first: number; last: number; pts: PtMm[] };
+/**
+ * How an allowance corner is cut: 'mitre' (sides extended to their meeting point), 'square' (the
+ * mitre would reach past MITER_LIMIT × allowance: cut there, perpendicular to the bisector),
+ * 'step' (a jog smaller than the allowance next to it: kept round, the exact parallel).
+ */
+export type CornerKind = 'mitre' | 'square' | 'step';
+/** A corner of the source line: where it is (the tip as drawn sharp), its turn, its mitre / d. */
+export type CornerInfo = { at: PtMm; turnDeg: number; ratio: number; kind: CornerKind };
+type CornerRun = CornerInfo & { first: number; last: number };
+
+/** Where the lines through `a` along `ea` and through `b` along `eb` meet (null: parallel). */
+function meet(a: PtMm, ea: Vec, b: PtMm, eb: Vec): PtMm | null {
+  const den = ea.x * eb.y - ea.y * eb.x;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((b.x - a.x) * eb.y - (b.y - a.y) * eb.x) / den;
+  return { x: a.x + t * ea.x, y: a.y + t * ea.y };
+}
 
 /**
  * W2: the vertices whose allowance corner is MITRED, with their join points (the mitre point, or
@@ -134,15 +173,17 @@ export const CORNER_MAX_TURN_DEG = 175;
  * close together) is not a corner — mitring it would push a spike of up to (√2 − 1)·d past the
  * neighbouring sides (a 1–3 mm jog of a fill became a 4–6 mm bump on Ulmus), so it keeps the
  * exact parallel (round). Curves (turns under the minimum) keep the exact parallel too: the cut
- * line changes at corners only.
+ * line changes at corners only. Corner vertices joined by sides summing ≤ CORNER_FLAT_MM are one
+ * corner (keyed by its first vertex): mitred between the side into the first and the side out of
+ * the last, at the point where those two sides meet, as if the tip were drawn sharp.
  */
-function cornerJoins(
+function cornerRuns(
   src: readonly PtMm[],
   d: number,
   limit: number,
   /** Every convex turn in range may be mitred (no step rule): the gate's lenient reading. */
   anyConvex = false,
-): Map<number, PtMm[]> {
+): CornerRun[] {
   const n = src.length;
   const nrm = edgeNormals(src);
   const ad = Math.abs(d);
@@ -172,15 +213,124 @@ function cornerJoins(
     }
     return false;
   };
-  const out = new Map<number, PtMm[]>();
-  for (let j = 0; j < n; j++) {
-    const t = turn[j];
-    if (t < minT || t > maxT) continue;
-    if (!anyConvex && (concaveNear(j, 1) || concaveNear(j, -1))) continue;
-    const m = miterJoin(src[j], nrm[(j - 1 + n) % n], nrm[j], d, limit);
-    if (m) out.set(j, m);
+  // runs of corner vertices (each turning ≥ the minimum, convex) along sides ≤ CORNER_FLAT_MM
+  const isCorner = (j: number) => turn[j] >= minT;
+  const used = new Uint8Array(n);
+  const runs: { first: number; last: number; turn: number }[] = [];
+  const order = [...Array(n).keys()].filter(isCorner).sort((a, b) => turn[b] - turn[a]);
+  for (const j of order) {
+    if (used[j]) continue;
+    let first = j;
+    let last = j;
+    let flat = 0;
+    let sum = turn[j];
+    used[j] = 1;
+    for (;;) {
+      const p = (first - 1 + n) % n;
+      const q = (last + 1) % n;
+      const lp = edgeLen(p);
+      const lq = edgeLen(last);
+      const canP = p !== last && !used[p] && isCorner(p) && flat + lp <= CORNER_FLAT_MM;
+      const canQ = q !== first && !used[q] && isCorner(q) && flat + lq <= CORNER_FLAT_MM;
+      if (!canP && !canQ) break;
+      if (canP && (!canQ || lp <= lq)) {
+        first = p;
+        flat += lp;
+        sum += turn[p];
+        used[p] = 1;
+      } else {
+        last = q;
+        flat += lq;
+        sum += turn[q];
+        used[q] = 1;
+      }
+    }
+    runs.push({ first, last, turn: sum });
+  }
+  const out: CornerRun[] = [];
+  const add = (first: number, last: number, P: PtMm, t: number, step: boolean) => {
+    const nk = nrm[(first - 1 + n) % n];
+    const nj = nrm[last];
+    const cosHalf = Math.hypot(nk.x + nj.x, nk.y + nj.y) / 2;
+    const ratio = cosHalf > 1e-9 ? 1 / cosHalf : Infinity;
+    out.push({
+      first,
+      last,
+      at: P,
+      turnDeg: (t * 180) / Math.PI,
+      ratio,
+      kind: step ? 'step' : ratio > limit ? 'square' : 'mitre',
+    });
+  };
+  for (const r of runs) {
+    if (r.turn > maxT) continue;
+    // the step rule (a jog smaller than the allowance): kept round — a 'step' corner
+    const step = !anyConvex && (concaveNear(r.last, 1) || concaveNear(r.first, -1));
+    if (r.last === r.first) {
+      add(r.first, r.last, src[r.first], r.turn, step);
+      continue;
+    }
+    // the tip as drawn sharp: where the side into `first` meets the side out of `last`
+    const nk = nrm[(r.first - 1 + n) % n];
+    const nj = nrm[r.last];
+    const P = meet(src[r.first], { x: -nk.y, y: nk.x }, src[r.last], { x: -nj.y, y: nj.x });
+    if (P && Math.hypot(P.x - src[r.first].x, P.y - src[r.first].y) <= 4 * CORNER_FLAT_MM) {
+      add(r.first, r.last, P, r.turn, step);
+      continue;
+    }
+    // not a tip after all: each vertex on its own, as before
+    for (let j = r.first; ; j = (j + 1) % n) {
+      if (turn[j] <= maxT) add(j, j, src[j], turn[j], step);
+      if (j === r.last) break;
+    }
   }
   return out;
+}
+
+/**
+ * The joins of the mitred corners (`cornerRuns` less the step corners), keyed by first vertex.
+ * `kindOf` may DEMOTE a corner — mitre → square (cut at min(limit, 0.97 × its own mitre): the same
+ * two-point cut as its neighbours in the family) or → step (round) — never promote one: whatever
+ * it picks lies inside the corner's own mitre, so the deviation report and G6 read it as before.
+ */
+function cornerJoins(
+  src: readonly PtMm[],
+  d: number,
+  limit: number,
+  anyConvex = false,
+  kindOf?: (c: CornerInfo) => CornerKind | null,
+  /** SHAPE comparison only (never written): read these square corners as their mitre point. */
+  fullMitre?: (c: CornerInfo) => boolean,
+): Map<number, CornerJoin> {
+  const n = src.length;
+  const nrm = edgeNormals(src);
+  const rank = { mitre: 0, square: 1, step: 2 } as const;
+  const out = new Map<number, CornerJoin>();
+  for (const r of cornerRuns(src, d, limit, anyConvex)) {
+    const want = kindOf?.(r) ?? null;
+    const kind = want && rank[want] > rank[r.kind] ? want : r.kind;
+    if (kind === 'step') continue;
+    const lim =
+      kind === 'square' && fullMitre?.(r)
+        ? Infinity
+        : kind === 'square' && r.kind === 'mitre'
+          ? Math.min(limit, 0.97 * r.ratio)
+          : limit;
+    const m = miterJoin(r.at, nrm[(r.first - 1 + n) % n], nrm[r.last], d, lim);
+    if (m) out.set(r.first, { first: r.first, last: r.last, pts: m });
+  }
+  return out;
+}
+
+/** The vertices a merged corner covers after its first (the offset skips them). */
+function coveredBy(corners: ReadonlyMap<number, CornerJoin>, n: number): Set<number> {
+  const s = new Set<number>();
+  for (const c of corners.values())
+    for (let j = c.first; j !== c.last; ) {
+      j = (j + 1) % n;
+      s.add(j);
+    }
+  return s;
 }
 
 /** Raw (self-overlapping) offset of a CCW loop by signed d (d > 0 = outward). */
@@ -190,21 +340,28 @@ function rawOffset(
   arcTol: number,
   join: OffsetJoin = 'round',
   limit = MITER_LIMIT,
+  kindOf?: (c: CornerInfo) => CornerKind | null,
+  fullMitre?: (c: CornerInfo) => boolean,
 ): PtMm[] {
   const n = src.length;
   const nrm = edgeNormals(src);
   const ad = Math.abs(d);
   const stepAng = 2 * Math.acos(Math.max(-1, 1 - Math.min(arcTol, ad) / ad));
-  const corners = join === 'miter' ? cornerJoins(src, d, limit) : new Map<number, PtMm[]>();
+  const corners =
+    join === 'miter'
+      ? cornerJoins(src, d, limit, false, kindOf, fullMitre)
+      : new Map<number, CornerJoin>();
+  const skip = coveredBy(corners, n);
   const out: PtMm[] = [];
   for (let j = 0; j < n; j++) {
+    if (skip.has(j)) continue;
     const k = (j - 1 + n) % n;
     const nk = nrm[k];
     const nj = nrm[j];
     const P = src[j];
     const corner = corners.get(j);
     if (corner) {
-      out.push(...corner);
+      out.push(...corner.pts);
       continue;
     }
     const sinA = nk.x * nj.y - nk.y * nj.x;
@@ -246,15 +403,20 @@ function joinWedges(
   const n = src.length;
   const nrm = edgeNormals(src);
   const out: { p: PtMm; r: number; poly: PtMm[] }[] = [];
-  for (const [j, m] of cornerJoins(src, d, limit, anyConvex)) {
-    const P = src[j];
-    const nk = nrm[(j - 1 + n) % n];
-    const nj = nrm[j];
+  for (const c of cornerJoins(src, d, limit, anyConvex).values()) {
+    const P = src[c.first];
+    const Q = src[c.last];
+    const nk = nrm[(c.first - 1 + n) % n];
+    const nj = nrm[c.last];
+    // a merged tip: back from the last vertex along its micro-flat to the first
+    const flat: PtMm[] = [];
+    for (let j = c.last; j !== c.first; j = (j - 1 + n) % n) flat.push(src[j]);
     const poly = [
       P,
       { x: P.x + d * nk.x, y: P.y + d * nk.y },
-      ...m,
-      { x: P.x + d * nj.x, y: P.y + d * nj.y },
+      ...c.pts,
+      { x: Q.x + d * nj.x, y: Q.y + d * nj.y },
+      ...flat,
     ];
     out.push({ p: P, r: Math.max(...poly.map((q) => Math.hypot(q.x - P.x, q.y - P.y))), poly });
   }
@@ -337,6 +499,160 @@ export function parallelDeviation(
 
 export type OffsetResult = { pts: PtMm[]; report: OffsetReport; sourceHullRatio: number };
 
+/** The allowance corners `offsetContour(pts, mm)` would cut, with how it would cut each. */
+export function cornersOf(pts: readonly PtMm[], mm: number, limit = MITER_LIMIT): CornerInfo[] {
+  const src = ccw(dedupe(pts, true, 1e-4));
+  if (src.length < 3 || Math.abs(mm) < 1e-9) return [];
+  return cornerRuns(src, mm, limit).map(({ at, turnDeg, ratio, kind }) => ({
+    at,
+    turnDeg,
+    ratio,
+    kind,
+  }));
+}
+
+/**
+ * SILENT-TAIL — one corner, one treatment across a family's sizes. A graded corner's angle and
+ * the jog beside it change a little from size to size; each size alone crosses the mitre limit or
+ * the step rule's allowance at its own size (palto SL: a 9.2 / 13.8 / 16.9 mm step at the hem
+ * corner of 80 / 84 / 88 against a 15 mm allowance — round, round, mitred). Corners are matched
+ * across sizes by where they sit in the outline's box (within FAMILY_CORNER_MATCH of the box,
+ * turning the same way within FAMILY_CORNER_TURN_DEG), and every size of a matched corner takes
+ * the most conservative treatment any size needs: step (round) over square over mitre. Demotion
+ * only: the result lies inside every size's own mitre, so G6 reads it as before. Returns, per
+ * size (same order as `lines`), the override for `offsetContour`'s `cornerKinds`, or null where
+ * nothing changes.
+ */
+export const FAMILY_CORNER_MATCH = 0.06;
+export const FAMILY_CORNER_TURN_DEG = 75;
+export function familyCornerKinds(
+  lines: readonly (readonly PtMm[])[],
+  mm: number,
+  limit = MITER_LIMIT,
+): (((c: CornerInfo) => CornerKind | null) | null)[] {
+  const rank = { mitre: 0, square: 1, step: 2 } as const;
+  const per = lines.map((l) => {
+    const b = l.reduce(
+      (a, q) => ({
+        minX: Math.min(a.minX, q.x),
+        minY: Math.min(a.minY, q.y),
+        maxX: Math.max(a.maxX, q.x),
+        maxY: Math.max(a.maxY, q.y),
+      }),
+      { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+    );
+    const W = Math.max(1e-6, b.maxX - b.minX);
+    const H = Math.max(1e-6, b.maxY - b.minY);
+    return cornersOf(l, mm, limit).map((c) => ({
+      c,
+      u: (c.at.x - b.minX) / W,
+      v: (c.at.y - b.minY) / H,
+    }));
+  });
+  type P = (typeof per)[number][number];
+  const near = (a: P, b: P) =>
+    Math.hypot(a.u - b.u, a.v - b.v) <= FAMILY_CORNER_MATCH &&
+    Math.abs(a.c.turnDeg - b.c.turnDeg) <= FAMILY_CORNER_TURN_DEG;
+  const nearest = (a: P, list: readonly P[]) => {
+    let best: P | null = null;
+    let bd = Infinity;
+    for (const b of list) {
+      if (!near(a, b)) continue;
+      const dd = Math.hypot(a.u - b.u, a.v - b.v);
+      if (dd < bd) {
+        bd = dd;
+        best = b;
+      }
+    }
+    return best;
+  };
+  // groups: each corner joined with its mutual nearest in every other size (union–find)
+  const all = per.flat();
+  const parent = new Map<P, P>(all.map((x) => [x, x]));
+  const find = (x: P): P => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(x, r);
+    return r;
+  };
+  for (let i = 0; i < per.length; i++)
+    for (let j = i + 1; j < per.length; j++)
+      for (const a of per[i]) {
+        const b = nearest(a, per[j]);
+        if (b && nearest(b, per[i]) === a) parent.set(find(a), find(b));
+      }
+  const worst = new Map<P, CornerKind>();
+  for (const x of all) {
+    const r = find(x);
+    const w = worst.get(r);
+    if (!w || rank[x.c.kind] > rank[w]) worst.set(r, x.c.kind);
+  }
+  return per.map((list) => {
+    const demote = list.filter((x) => rank[worst.get(find(x))!] > rank[x.c.kind]);
+    if (!demote.length) return null;
+    return (c: CornerInfo) => {
+      const hit = demote.find((x) => Math.hypot(x.c.at.x - c.at.x, x.c.at.y - c.at.y) < 1e-6);
+      return hit ? worst.get(find(hit))! : null;
+    };
+  });
+}
+
+/**
+ * SILENT-TAIL (SHAPE): per size, the corners the family square-cuts in EVERY size — one matched
+ * corner present in all of them (`familyCornerKinds`' groups), square in all after the family's
+ * treatment. Their flats are construction (their length grows along the run with the corner's
+ * angle), so the one-shape comparison may read them as the mitre point they cut off; a square
+ * corner that only some sizes have is a shape difference and is never read so.
+ */
+export function familySharedSquares(
+  lines: readonly (readonly PtMm[])[],
+  mm: number,
+  limit = MITER_LIMIT,
+): ((c: CornerInfo) => boolean)[] {
+  const kinds = familyCornerKinds(lines, mm, limit);
+  const per = lines.map((l) => cornersOf(l, mm, limit));
+  const eff = per.map((list, i) => list.map((c) => kinds[i]?.(c) ?? c.kind));
+  const W = lines.map((l) => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const q of l) {
+      minX = Math.min(minX, q.x);
+      minY = Math.min(minY, q.y);
+      maxX = Math.max(maxX, q.x);
+      maxY = Math.max(maxY, q.y);
+    }
+    return { minX, minY, w: Math.max(1e-6, maxX - minX), h: Math.max(1e-6, maxY - minY) };
+  });
+  const uv = (i: number, c: CornerInfo) => ({
+    u: (c.at.x - W[i].minX) / W[i].w,
+    v: (c.at.y - W[i].minY) / W[i].h,
+  });
+  // a square corner of size i is shared when every other size has a square corner at its place
+  // (the same match as the family pass: box position and turn)
+  return per.map((list, i) => {
+    const shared = list.filter((c, k) => {
+      if (eff[i][k] !== 'square') return false;
+      const a = uv(i, c);
+      return per.every(
+        (other, j) =>
+          j === i ||
+          other.some((o, m) => {
+            if (eff[j][m] !== 'square') return false;
+            const b = uv(j, o);
+            return (
+              Math.hypot(a.u - b.u, a.v - b.v) <= FAMILY_CORNER_MATCH &&
+              Math.abs(c.turnDeg - o.turnDeg) <= FAMILY_CORNER_TURN_DEG
+            );
+          }),
+      );
+    });
+    return (c: CornerInfo) =>
+      shared.some((x) => Math.hypot(x.at.x - c.at.x, x.at.y - c.at.y) < 1e-6);
+  });
+}
+
 /**
  * Parallel curve of a closed outline: `mm > 0` outward (seam → cut), `mm < 0` inward (cut → seam).
  * The report is what gate G6 reads; `report.ok === false` must BLOCK the piece (Codex C4).
@@ -344,7 +660,15 @@ export type OffsetResult = { pts: PtMm[]; report: OffsetReport; sourceHullRatio:
 export function offsetContour(
   pts: readonly PtMm[],
   mm: number,
-  opts: { arcTolMm?: number; join?: OffsetJoin; miterLimit?: number } = {},
+  opts: {
+    arcTolMm?: number;
+    join?: OffsetJoin;
+    miterLimit?: number;
+    /** SILENT-TAIL: the family's treatment of a corner (`familyCornerKinds`); may only demote. */
+    cornerKinds?: (c: CornerInfo) => CornerKind | null;
+    /** SHAPE comparison only: these square corners as their full mitre (not a cut line). */
+    fullMitre?: (c: CornerInfo) => boolean;
+  } = {},
 ): OffsetResult {
   const join = opts.join ?? 'miter';
   const limit = opts.miterLimit ?? MITER_LIMIT;
@@ -377,7 +701,15 @@ export function offsetContour(
       },
     };
   }
-  const raw = rawOffset(src, mm, opts.arcTolMm ?? ARC_TOL_MM, join, limit);
+  const raw = rawOffset(
+    src,
+    mm,
+    opts.arcTolMm ?? ARC_TOL_MM,
+    join,
+    limit,
+    opts.cornerKinds,
+    opts.fullMitre,
+  );
   const solution: Paths64 = Clipper.Union([toPath(raw)], undefined, FillRule.Positive);
   const loops: PtMm[][] = [];
   let holes = 0;

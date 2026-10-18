@@ -59,7 +59,13 @@ import {
   readPassport,
   type BindPiece,
 } from '../passport';
-import { applyScale, detectScale, detectScaleSet, extractPdfWith, isOversizedScan } from '../adapters/pdf';
+import {
+  applyScale,
+  detectScale,
+  detectScaleSet,
+  extractPdfWith,
+  isOversizedScan,
+} from '../adapters/pdf';
 import {
   dxfFastPath,
   dxfScaleCandidates,
@@ -104,6 +110,7 @@ import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { assignChains, lineKeys } from '../chains/assign';
+import { lineSuspects, sizeOutlines } from '../chains/nests';
 import { detectSizeRun } from '../sizes';
 import {
   blobShapes,
@@ -138,8 +145,10 @@ import {
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { dartLegsDrawn, provenDarts } from '../pieces/darts';
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
+import { cleanNotchMarks } from '../pieces/notch-marks';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
@@ -408,6 +417,8 @@ export class Session {
   private modelClaims = new Map<SeedId, { label: string; piece: string; evidence: string }>();
   /** The model the last pieces run was filled for (null = none chosen). */
   private pieceVariant: string | null = null;
+  /** DARTS: the outlines the pieces stage set aside (the proven darts are read off them). */
+  private setAside: SetAside[] = [];
   private semantics: SemanticsOutput | null = null;
   /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
   private passport: GarmentPassport | null = null;
@@ -416,6 +427,7 @@ export class Session {
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
+  private notchChordsOf: SemanticsDetail['notchChordsOf'] | null = null;
   private continuityOf: SemanticsDetail['continuityOf'] | null = null;
   private identityOf: SemanticsDetail['identityOf'] | null = null;
   private onePieceOf: SemanticsDetail['onePieceOf'] | null = null;
@@ -542,6 +554,7 @@ export class Session {
       this.seeds = null;
       this.faces = null;
       this.families = null;
+      this.setAside = [];
       this.wallSet = null;
       this.pieceSession = null;
       this.pieceWallEdits = [];
@@ -555,6 +568,7 @@ export class Session {
       this.semantics = null;
       this.wallsOf = null;
       this.derivedOf = null;
+      this.notchChordsOf = null;
       this.continuityOf = null;
       this.identityOf = null;
       this.onePieceOf = null;
@@ -1225,6 +1239,7 @@ export class Session {
         lineAssign = {
           applied: [],
           flags: [],
+          notes: [],
           stale: input.chainAssign.flatMap((e, entry) =>
             e.keys.map((key) => ({
               entry,
@@ -1250,6 +1265,9 @@ export class Session {
       ambiguities: set.ambiguities ?? [],
       ...(this.fast ? {} : legendSwatches(sheet, set)),
       ...(this.fast ? {} : { chainLines: lineKeys(set, sheet.styles, sheet.parts, sheet.id) }),
+      ...(this.fast
+        ? {}
+        : { suspects: lineSuspects(set, sheet.styles), outlines: sizeOutlines(set) }),
       ...(lineAssign ? { lineAssign } : {}),
     };
   }
@@ -1451,6 +1469,7 @@ export class Session {
       }));
       this.seeds = this.fast.seeds;
       this.families = families;
+      this.setAside = [];
       this.run = this.run ?? this.fast.run;
       this.wallSet = this.fast.chains;
       return { seeds: this.fast.seeds, families };
@@ -1585,6 +1604,8 @@ export class Session {
     families = exceptNested(families);
     // UXHOOKS (D3): no piece closes across a missing page accepted as blank
     families = holeGuard(families, set, sheet.holes);
+    // SHAPE: a notch mark on the line is a notch, never outline (pieces/notch-marks.ts)
+    families = cleanNotchMarks(families, set);
     // VARIANTS: the pieces a model's own label block claims (D3: inside exactly one piece AND
     // beside its texts), read afresh on this run's fill — a claimed piece is left out of another
     // model's run. A seed with a model of its own (the operator's, or a label by its number) or a
@@ -1621,10 +1642,17 @@ export class Session {
       if (x.aside != null) taken.add(x.aside);
       if (held.has(x.id)) taken.add(-1 - x.id);
     }
-    const setAside = faces.asides.filter((a) => !taken.has(a.id));
+    // DARTS: a possible dart is a dart of its piece only where every closed size of that piece
+    // draws its own V there (pieces/darts provenDart reads `legs`)
+    const kept = faces.asides.filter((a) => !taken.has(a.id));
+    const legs = dartLegsDrawn(kept, families, shown, set, run);
+    const setAside = kept.map((a) =>
+      a.dart ? { ...a, dart: { ...a.dart, legs: legs.get(a.id) ?? { sizes: 0, drawn: 0 } } } : a,
+    );
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
+    this.setAside = setAside;
     // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
     this.sheetAnswers = input.sheetAnswers ?? {};
     this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
@@ -1794,6 +1822,8 @@ export class Session {
           ),
         ),
         seedAts: Object.fromEntries((this.seeds ?? []).map((sd) => [sd.id, sd.at])),
+        // DARTS: the darts proven of a seeded piece write their legs on layer 8
+        darts: provenDarts(this.setAside, this.families ?? [], this.seeds ?? []),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
@@ -1815,6 +1845,7 @@ export class Session {
     this.semantics = output;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
+    this.notchChordsOf = detail.notchChordsOf;
     this.continuityOf = detail.continuityOf;
     this.identityOf = detail.identityOf;
     this.onePieceOf = detail.onePieceOf;
@@ -2057,6 +2088,7 @@ export class Session {
     // own blocks.
     const rawWalls = this.wallsOf;
     const derived = this.derivedOf;
+    const chords = this.notchChordsOf;
     const continuity = this.continuityOf;
     const identity = this.identityOf;
     // G24's face evidence (another piece's header in the face, two outlines of one size overlapping)
@@ -2140,6 +2172,7 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          notchChordsOf: chords ? (id, rank) => chords(sp.sourceOf[id] ?? id, rank) : undefined,
           continuityOf: continuity
             ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
             : undefined,

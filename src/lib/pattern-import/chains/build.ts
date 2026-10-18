@@ -207,7 +207,11 @@ function toChainSet(
       confidence: 0.5,
     });
   const byWhy = new Map<string, number[]>();
+  // one row per line: a line given two reasons keeps the first (LINEASSIGN-2)
+  const ignored = new Set<number>();
   for (const { id, why } of rec.ignore) {
+    if (ignored.has(id)) continue;
+    ignored.add(id);
     const key = why.replace(/\d+/g, '#');
     const a = byWhy.get(key);
     if (a) a.push(id);

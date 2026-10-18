@@ -314,6 +314,8 @@ const ON_OUTLINE_MM = 1.5;
  * size's line is worse than none. Smaller sizes' lines sharing the fold end still pass; the caller
  * keeps the longest.
  */
+/** VARIANTS-2: a cut line this far off its outline was drawn so in the PDF (`offMm`). */
+const CUT_OFF_MM = 1.5;
 const lineOn = (l: readonly PtMm[], poly: readonly PtMm[]) =>
   l.length > 1 &&
   poly.length > 2 &&
@@ -354,15 +356,29 @@ function garmentPicture(
     )?.outer ?? [];
   const shapes = fams.map((f) => own.get(f.seed) ?? drawn(f));
   const cutLines: PtMm[][] = [];
+  const cutOff: boolean[] = [];
   for (const m of mine) {
     if (m.kind === 'piece') continue;
+    // VARIANTS-2: a line carries its size (legend row / PDF layer / pen — never the nearest
+    // outline): the size shown takes exactly its own lines. `offMm > 1.5`: the PDF itself drew
+    // that line off its outline — drawn, but dashed and said so.
+    const sized = m.cutLines.filter((l) => l.size != null && at.rankOfSize(l.size) === rank);
+    for (const l of sized) {
+      cutLines.push(l.poly);
+      cutOff.push((l.offMm ?? 0) > CUT_OFF_MM);
+    }
+    // an unsized line (no evidence of its size): only by its ends on this size's outline, the
+    // longest per piece — no nearest fallback, a wrong size's line is worse than none
+    const bare = m.cutLines.filter((l) => l.size == null);
+    if (!bare.length) continue;
     for (const sd of m.pieces) {
       const i = fams.findIndex((f) => f.seed === sd);
       if (i < 0) continue;
-      // the size's own line spans the whole edge; a smaller size's line (same fold / CF end)
-      // lies on this outline too, as a part of it — so: the LONGEST line on the outline, one
-      const on = m.cutLines.filter((l) => lineOn(l, shapes[i]));
-      if (on.length) cutLines.push(on.reduce((x, y) => (polyLen(y) > polyLen(x) ? y : x)));
+      const on = bare.filter((l) => lineOn(l.poly, shapes[i]));
+      if (on.length) {
+        cutLines.push(on.reduce((x, y) => (polyLen(y.poly) > polyLen(x.poly) ? y : x)).poly);
+        cutOff.push(false);
+      }
     }
   }
   return {
@@ -370,6 +386,7 @@ function garmentPicture(
     outlines: shapes,
     tinted: fams.map((f) => touched.has(f.seed)),
     cutLines,
+    cutOff,
   };
 }
 
@@ -1938,10 +1955,10 @@ export function PiecesStep({
   }));
   const hotGarment = hot?.kind === 'garment' ? garments.find((g) => g.v === hot.v) : undefined;
   /** The garment under the pointer: its cutting lines on the sheet, in the size on screen. */
-  const hotGarmentLines = hotGarment
+  const hotGarmentPic = hotGarment
     ? garmentPicture(hotGarment.v, hotGarment.fams, marks, { rank, rankOfSize, own: false })
-        .cutLines
-    : [];
+    : null;
+  const hotGarmentLines = hotGarmentPic?.cutLines ?? [];
   const hotSeeds =
     hot?.kind === 'piece'
       ? new Set([hot.seed])
@@ -2574,7 +2591,17 @@ export function PiecesStep({
                       pointerEvents='none'
                     >
                       {hotGarmentLines.map((l, i) => (
-                        <polyline key={`gl${i}`} points={ptsAttr(l)} />
+                        <polyline
+                          key={`gl${i}`}
+                          points={ptsAttr(l)}
+                          strokeDasharray={
+                            hotGarmentPic?.cutOff[i] ? `${unit * 6} ${unit * 4}` : undefined
+                          }
+                        >
+                          {hotGarmentPic?.cutOff[i] && (
+                            <title>drawn off its outline in the PDF</title>
+                          )}
+                        </polyline>
                       ))}
                     </g>
                   )}
@@ -3030,6 +3057,7 @@ export function PiecesStep({
                           outlines={pic.outlines}
                           tinted={pic.tinted}
                           cutLines={pic.cutLines}
+                          cutOff={pic.cutOff}
                           hot={on}
                           className='w-full'
                           style={{ height: 240 }}

@@ -36,6 +36,7 @@ import { closeCorners, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
+import { ladderMarkMoves, ocgLookMoves, type OcgLookMove } from './ocg-ladder';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
 
 export type RecoverInput = {
@@ -869,6 +870,50 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     chains.forEach((_, i) => {
       if (unit[i] >= 0 && unitRank[unit[i]] >= 0) rankOf.set(i, unitRank[unit[i]]);
     });
+    // SIZESOCG (sizes/ocg-ladder.ts): a layer holding a nest of outlines drawn in other sizes' own
+    // looks is no size evidence there — each outline goes where its look AND its nesting place
+    // name (or nesting + elimination), its marks with it; the class reads the look's layer
+    if (encoding === 'ocg' && !debugFlag('SIZESOCG_OFF') && !debugFlag('SIZESOCG_LOOK_OFF')) {
+      const lk = ocgLookMoves(chains, cand, unit, unitRank, styles);
+      const unitOfRank = new Map<number, number>();
+      unitRank.forEach((r, u) => r >= 0 && unitOfRank.set(r, u));
+      const moved = new Map<number, number>();
+      const apply = (ms: OcgLookMove[]) => {
+        for (const m of ms) {
+          rankOf.set(m.chain, m.to);
+          moved.set(m.chain, m.to);
+          unit[m.chain] = unitOfRank.get(m.to) ?? unit[m.chain];
+        }
+      };
+      apply(lk.moves);
+      // a ladder member neither look + nesting nor elimination placed stays on its layer, whose
+      // read the ladder disproved: said, never silent (the sizes step shows it as a flag)
+      for (const l of lk.ladders) {
+        const left = l.members.filter((_, a) => l.ranks[a] < 0);
+        if (left.length)
+          ambiguities.push({
+            kind: 'class-split',
+            message: `${left.length} of ${l.members.length} nested outlines on layer "${unitNames[l.unit]}" (a layer drawn in other sizes' looks) could not be placed by look and nesting: left in ${unitNames[l.unit]} — confirm`,
+            classes: [],
+            chains: left,
+            at: chains[left[0]].pts[0],
+          });
+      }
+      const marks = ladderMarkMoves(chains, cand, unit, rankOf, lk.ladders, moved);
+      apply(marks);
+      if (lk.ladders.length)
+        diag.ocgLadders = lk.ladders.map(
+          (l) =>
+            `layer ${unitNames[l.unit]}: ${l.members.length} nested outlines in ${l.foreignLooks} other sizes' looks → ${l.members
+              .map((c, a) => `#${c}:${l.ranks[a] >= 0 ? labels[l.ranks[a]] ?? l.ranks[a] : '?'}`)
+              .join(' ')}; moved ${
+              lk.moves
+                .filter((m) => l.members.includes(m.chain))
+                .map((m) => `#${m.chain}${m.by === 'elimination' ? ' (elimination)' : ''}`)
+                .join(' ') || '-'
+            }; marks ${marks.length}`,
+        );
+    }
     // cross-check: does the nesting order agree with the label order? (inside vote, informational)
     let agree = 0;
     let against = 0;
@@ -1629,6 +1674,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   }
   splitShared(chains, rankOf, sharedFrom, landings, sectioned, sepMm);
   diag.bridges = joined.size;
+  if (debugFlag('SIZESOCG_DIAG'))
+    console.error(
+      `SIZESOCG ${JSON.stringify({ ladders: diag.ocgLadders, dup: diag.ocgDuplicates })}`,
+    );
   diag.landings = landings.length;
 
   // ── classify the rest ───────────────────────────────────────────────────────────────────────
@@ -2540,6 +2589,36 @@ function sliceByArc(pts: PtMm[], a: number, b: number): PtMm[] {
   return out;
 }
 
+/** SIZESOCG: a stretch of one outline this long (mm) off the other's line: not a copy of it. */
+const COPY_GAP_MM = 10;
+
+/** Every stretch of each line lies on the other (within 0.3 mm), but for gaps < COPY_GAP_MM. */
+function copyEndToEnd(a: Chain, b: Chain): boolean {
+  const loop = (c: Chain) => (c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts);
+  const off = (x: Chain, y: Chain) => {
+    const q = loop(y);
+    const g = new SegGrid(4);
+    g.addPolyline(0, q);
+    let run = 0;
+    let worst = 0;
+    let lead = -1;
+    let prev: number | null = null;
+    for (const sp of resample(loop(x), 1)) {
+      let on = false;
+      g.near(sp.p, 0.35, (_, si) => {
+        if (!on && segNearest(sp.p, q[si], q[si + 1]).d <= 0.3) on = true;
+      });
+      if (on && lead < 0) lead = run;
+      run = on ? 0 : run + (prev == null ? 0 : sp.s - prev);
+      prev = sp.s;
+      worst = Math.max(worst, run);
+    }
+    // a closed outline's gap may run over its seam
+    return x.closed && lead > 0 ? Math.max(worst, lead + run) : worst;
+  };
+  return off(a, b) < COPY_GAP_MM && off(b, a) < COPY_GAP_MM;
+}
+
 /** OCG: chains of different size layers that coincide (≤ 0.2 mm everywhere) → [keep, drop[]]. */
 function duplicatesAcrossRanks(
   chains: Chain[],
@@ -2550,6 +2629,7 @@ function duplicatesAcrossRanks(
   const grid = new SegGrid(8);
   for (const i of ids) grid.addPolyline(i, chains[i].pts);
   const groupOf = new Map<number, number>();
+  const endToEnd = !debugFlag('SIZESOCG_OFF');
   const out: [number, number[]][] = [];
   for (const i of ids) {
     if (groupOf.has(i)) continue;
@@ -2569,14 +2649,27 @@ function duplicatesAcrossRanks(
       .filter(
         ([j, k]) =>
           k >= 0.9 * smp.length &&
-          Math.abs(chains[j].lengthMm - chains[i].lengthMm) < 0.1 * chains[i].lengthMm + 2,
+          Math.abs(chains[j].lengthMm - chains[i].lengthMm) < 0.1 * chains[i].lengthMm + 2 &&
+          // SIZESOCG: a closed outline is a copy only end to end — nested strip outlines share
+          // three sides and differ at their end (kombinezon's waistbands): each size's own,
+          // never one size's outline made common and the others' dropped, own ends and all
+          !(
+            endToEnd &&
+            (chains[i].closed || chains[j].closed) &&
+            !copyEndToEnd(chains[i], chains[j])
+          ),
       )
       .map(([j]) => j);
     const ranks = new Set([rankOf.get(i)!, ...dups.map((j) => rankOf.get(j)!)]);
     if (ranks.size >= Math.max(2, Math.ceil(n / 2))) {
-      for (const j of dups) groupOf.set(j, i);
+      // LINEASSIGN-2: a line already in an earlier group (a copy of two kept lines, or an earlier
+      // group's kept line) stays where that group put it — dropped twice it sat twice in the
+      // ignore row (kombinezon #598/#602; #110 before SIZESOCG), a kept line dropped too sat in
+      // common and in ignore
+      const fresh = dups.filter((j) => !groupOf.has(j));
+      for (const j of fresh) groupOf.set(j, i);
       groupOf.set(i, i);
-      out.push([i, dups]);
+      out.push([i, fresh]);
     }
   }
   return out;

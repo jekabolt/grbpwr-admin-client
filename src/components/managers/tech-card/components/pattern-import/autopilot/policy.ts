@@ -65,7 +65,7 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
+import { PAGE_SURE, dartOf, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
 import { heldCells, holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import { fallbackGrain } from './grain';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
@@ -658,6 +658,17 @@ const NOT_PATTERN_WORDS =
 /** Line work (m) a picture-led page stays under; a text-led one gets this per 100 text items. */
 const INK_LINES_MAX_M = 1;
 
+/**
+ * The classifier's roles the page-ink evidence pairs with: text-led instructions, a cover led by
+ * pictures or text — never a cover that is only "page 1", never an overview (its role IS the tile
+ * lattice the ink reading explains as rules and frames: one geometric fact counted twice — Codex
+ * review; an overview passes on its reduced copy above).
+ */
+function inkRole(c: ImportSession['pages'][number]): boolean {
+  if (c.cls === 'instructions') return true;
+  return c.cls === 'cover' && !!c.ink && (c.ink.raster >= 0.3 || c.ink.texts >= 10);
+}
+
 function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
@@ -680,6 +691,13 @@ function notPatternEvidence(
   // whole pieces at a smaller scale (a shape match, not the classifier's lattice; Codex final #5)
   if (c && c.cls === 'overview' && c.confidence >= 0.7 && d.reducedCopy)
     return `overview ${c.confidence.toFixed(2)} + ${d.reducedCopy.matches} of its ${d.reducedCopy.of} outlines are tile pieces at 1:${Math.round(1 / d.reducedCopy.scale)} (shape match)`;
+  // STOPS: the classifier's role (text-led instructions, a picture- or text-led cover) AND the
+  // page's own line work, every long / piece-sized line of it explained against the file's tile
+  // sheet (clean/page-ink.ts) — rules, frames, the test square, tile pieces reduced,
+  // small drawings in a pen the tiles do not use. A curve at 1:1 in the pattern's pen is never
+  // explained: that page stays the question.
+  if (c && d.ink?.explained && c.confidence >= 0.7 && inkRole(c))
+    return `${c.cls} ${c.confidence.toFixed(2)} (${c.why}) + every line on it is explained: ${d.ink.explained}`;
   const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;
@@ -719,7 +737,7 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
         : '';
     return stopAt(
       'files',
-      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?${ai}`,
+      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''}${blind.ink?.unexplained ? ` — not a table, frame, test square, reduced tile piece or small drawing: ${blind.ink.unexplained}` : ''} — is it a pattern page?${ai}`,
     );
   }
   const roleSet = new Set(
@@ -1436,6 +1454,9 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const why = weak.map((a) => {
     // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
     if (a.layerLoop) return { a, ev: a.layerLoop };
+    // DARTS: a dart word and a wedge whose mouth is on its seeded piece's outline (dartOf)
+    const dart = dartOf(a, fams, s.pieces?.seeds);
+    if (dart) return { a, ev: dart };
     if (a.reason === 'other-pen')
       return { a, ev: 'drawn inside a seeded piece in another pen or short strokes (a mark)' };
     const h = host(a.box);

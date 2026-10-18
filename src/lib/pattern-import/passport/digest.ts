@@ -92,6 +92,32 @@ export function passportDigest(p: GarmentPassport): PassportDigest {
   return d;
 }
 
+/**
+ * SHAPE soft rule: the digest with the pieces whose written sizes carry different notch / drill
+ * counts (from the manifest's blocks — what the file holds). Kept within the budget: the list is
+ * cut from its tail (`truncated`), and dropped only when even one entry does not fit.
+ */
+export function withShapeNotes(
+  d: PassportDigest,
+  notes: readonly { identity: string; note: string }[],
+): PassportDigest {
+  const rest: PassportDigest = { ...d };
+  delete rest.shape;
+  if (!notes.length) return rest;
+  const out: PassportDigest = {
+    ...rest,
+    shape: notes
+      .slice(0, LIST_MAX)
+      .map((x) => ({ identity: clip(x.identity, 32), note: clip(x.note, 160) })),
+  };
+  while (out.shape!.length && JSON.stringify(out).length > PASSPORT_DIGEST_MAX) {
+    out.shape!.pop();
+    out.truncated = true;
+  }
+  if (!out.shape!.length) delete out.shape;
+  return out;
+}
+
 const isObj = (x: unknown): x is Record<string, unknown> =>
   typeof x === 'object' && x !== null && !Array.isArray(x);
 const str = (x: unknown, n: number): string | null =>
@@ -180,6 +206,16 @@ export function readPassportDigest(x: unknown): PassportDigest | undefined {
     }),
     missing: listOf(x.missing, (y) => str(y, 8)),
     extra: listOf(x.extra, (y) => str(y, 32)),
+    ...(Array.isArray(x.shape)
+      ? {
+          shape: listOf(x.shape, (y) => {
+            if (!isObj(y)) return null;
+            const identity = str(y.identity, 32);
+            const note = str(y.note, 160);
+            return identity && note ? { identity, note } : null;
+          }),
+        }
+      : {}),
     ...(x.truncated === true ? { truncated: true } : {}),
   };
 }

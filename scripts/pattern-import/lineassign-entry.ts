@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
 import { assignChains, lineKeys, parseLineKey } from 'lib/pattern-import/chains/assign';
+import { lineNests, lineSuspects, sizeOutlines } from 'lib/pattern-import/chains/nests';
 import { penLines, rankGuard } from 'lib/pattern-import/pieces/identity';
 import {
   continuityWalls,
@@ -606,6 +607,248 @@ function walls() {
   );
 }
 
+// ── 1b · LINEASSIGN-2: graded nests → suspects, pen slip, outlines per size, no line twice ──────
+
+/** Pens of four sizes: 6, 8, 10 by declared dash, 12 its own dash. */
+const ST2: Style[] = [
+  [1, 1, 1, 3],
+  [3.6, 3.6],
+  [0.3, 1.8],
+  [4.2, 2.1, 0.35, 2.1],
+].map((dash, id) => ({
+  id,
+  strokeRgb: [0, 0, 0] as [number, number, number],
+  widthMm: 0.3,
+  dash,
+  layer: '6',
+  fill: false,
+  clip: 'a',
+}));
+const DASH = ST2.map((s) => s.dash!);
+
+/**
+ * A strip nest of four sizes (60 mm wide, 400 + 20·k long: areas step evenly by 1200 mm²) plus
+ * one size-12 line of its own pen (the row's pen). `pens[k]` = the style of size k's outline,
+ * `rows[k]` = the size row (0…3) it is read in.
+ */
+function nestSet(pens: number[], rows: number[], heights = [400, 420, 440, 460]): ChainSet {
+  const chains = heights.map((h, k) => ch(k, rect(0, 0, 60, h), pens[k], true));
+  chains.push(
+    ch(
+      4,
+      [
+        { x: 200, y: 0 },
+        { x: 200, y: 300 },
+      ],
+      3,
+    ),
+  );
+  const ids = (r: number) => [
+    ...rows.flatMap((x, k) => (x === r ? [k] : [])),
+    ...(r === 3 ? [4] : []),
+  ];
+  return {
+    chains,
+    classes: ['6', '8', '10', '12'].map((l, r) => row(r, l, r, ids(r), DASH[r])),
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+}
+
+function nestsCrafted() {
+  console.log('── nests (LINEASSIGN-2) ──');
+  // a misread: size 8's outline (its own pen) read in row 6
+  const mis = nestSet([0, 1, 2, 3], [0, 0, 2, 3]);
+  const n = lineNests(mis);
+  check(
+    'nest: four outlines sharing a corner, even area steps → one nest, levels by area',
+    n.nests.length === 1 && n.nests[0].levels.map((l) => l.join()).join('|') === '0|1|2|3',
+  );
+  const sm = lineSuspects(mis, ST2);
+  check(
+    'suspect: the outline outside the row its place names → suggest that row, pen agrees',
+    sm.length === 1 && sm[0].chain === 1 && sm[0].suggest === 1 && sm[0].pen === 'agrees',
+    JSON.stringify(sm),
+  );
+  check(
+    'suspect why: names the place and the row it is in',
+    /2nd by area/.test(sm[0]?.why ?? '') && /now in size 6/.test(sm[0]?.why ?? ''),
+  );
+  check(
+    'no suspect on a read that agrees with every place',
+    !lineSuspects(nestSet([0, 1, 2, 3], [0, 1, 2, 3]), ST2).length,
+  );
+  check(
+    'mutation: uneven area steps (×7) → no nest, no suspect',
+    !lineSuspects(nestSet([0, 1, 2, 3], [0, 0, 2, 3], [400, 405, 440, 445]), ST2).length,
+  );
+  const ans = assignChains(mis, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(mis, ST2, undefined, 0)[1].key], to: { rank: 0 } },
+  ]).set;
+  check(
+    'an answered line is never a suspect (the operator is the authority)',
+    !lineSuspects(ans, ST2).length,
+  );
+
+  // Codex r1: a group must hold together WHOLE, ranks must order, piles are no nest
+  const chainLink = nestSet([0, 1, 2, 3], [0, 0, 2, 3], [400, 600, 900, 1350]);
+  check(
+    'mutation: areas linked only pairwise (ratio 0.6 each, whole 0.3) → no nest',
+    !lineNests(chainLink).nests.length,
+  );
+  const drift: ChainSet = {
+    ...mis,
+    chains: mis.chains.map((c, k) =>
+      k < 4 ? { ...c, pts: c.pts.map((p) => ({ x: p.x + k * 1.2, y: p.y + k * 1.2 })) } : c,
+    ),
+  };
+  check(
+    'mutation: corners drifting 1.2 mm per size (3.6 mm overall) → no nest',
+    !lineNests(drift).nests.length,
+  );
+  const sameRank: ChainSet = {
+    ...mis,
+    classes: mis.classes.map((c) =>
+      c.id === 2
+        ? {
+            ...c,
+            evidence: c.evidence.map((e) => (e.kind === 'nesting-order' ? { ...e, rank: 1 } : e)),
+          }
+        : c,
+    ),
+  };
+  check(
+    'mutation: two size rows of one rank → no order, no nest, no suspect',
+    !lineNests(sameRank).nests.length && !lineSuspects(sameRank, ST2).length,
+  );
+  check(
+    'mutation: whole spread 0.5 (areas 100/130/200 per 60 mm: steps 30/70) → no nest',
+    !lineNests(nestSet([0, 1, 2, 3], [0, 0, 2, 3], [400, 520, 650, 800])).nests.length,
+  );
+  const r8x = assignChains(sameRank, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(sameRank, ST2, undefined, 0)[1].key], to: { row: '6#0' } },
+  ]).report;
+  check(
+    "mutation: no rank order → a line in size 8's pen put in 6 is still flagged",
+    r8x.flags.some((f) => f.kind === 'pen' && f.chain === 1),
+    JSON.stringify(r8x.flags),
+  );
+  const pile: ChainSet = {
+    ...mis,
+    chains: [
+      ...mis.chains,
+      ...Array.from({ length: 40 }, (_, k) => ch(5 + k, rect(0, 0, 60, 400), 0, true)),
+    ],
+  };
+  check(
+    'mutation: 40 copies piled on the nest corner → no nest read off the pile',
+    !lineNests(pile).nests.length,
+  );
+  // the slip: size 12's outline drawn with size 8's pen (kombinezon #448), the reader put it in 8
+  const slip = nestSet([0, 1, 2, 1], [0, 1, 2, 1]);
+  const ss = lineSuspects(slip, ST2);
+  check(
+    "suspect: size 12's place drawn in pen 8, whose own place holds pen 8 too → suggest 12, pen slip",
+    ss.length === 1 && ss[0].chain === 3 && ss[0].suggest === 3 && ss[0].pen === 'slip',
+    JSON.stringify(ss),
+  );
+  const k3 = lineKeys(slip, ST2, undefined, 0)[3].key;
+  const r12 = assignChains(slip, ST2, undefined, 0, [
+    { sheet: 0, keys: [k3], to: { rank: 3 } },
+  ]).report;
+  check(
+    'answer on the slip: no pen flag, one pen-slip note',
+    !r12.flags.length && r12.notes?.length === 1 && r12.notes[0].kind === 'pen-slip',
+    JSON.stringify(r12.flags) + JSON.stringify(r12.notes),
+  );
+  const rec12 = lineAssignAnswers([{ sheet: 0, keys: [k3], to: { rank: 3 } }], {
+    classes: slip.classes,
+    lineAssign: r12,
+  } as unknown as Parameters<typeof lineAssignAnswers>[1]);
+  check(
+    'provenance: the note in the replay record (D5), not counted as against its pen',
+    rec12.length === 1 &&
+      (rec12[0].value.notes as unknown[] | undefined)?.length === 1 &&
+      /slipped/.test(rec12[0].subject) &&
+      !/against its pen/.test(rec12[0].subject),
+    rec12[0]?.subject,
+  );
+  // mutation: pen 8's own place NOT drawn in pen 8 → nothing explains the pen: a flag
+  const own = nestSet([0, 2, 2, 1], [0, 2, 2, 1]);
+  const ro = assignChains(own, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(own, ST2, undefined, 0)[3].key], to: { rank: 3 } },
+  ]).report;
+  check(
+    "mutation: the pen's own place drawn in another pen → pen flag, no note",
+    ro.flags.some((f) => f.kind === 'pen' && f.chain === 3) && !ro.notes?.length,
+    JSON.stringify(ro.flags),
+  );
+  // mutation: the answer's size pen draws an outline of the nest → two claims for 12: a flag
+  const drawn = nestSet([3, 1, 2, 1], [3, 1, 2, 1]);
+  const rd = assignChains(drawn, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(drawn, ST2, undefined, 0)[3].key], to: { rank: 3 } },
+  ]).report;
+  check(
+    "mutation: size 12's own pen draws another outline of the nest → pen flag, no note",
+    rd.flags.some((f) => f.kind === 'pen' && f.chain === 3) && !rd.notes?.length,
+  );
+  // mutation: the answer against the nest's place (size 8's outline put in 12) → flag
+  const r8 = assignChains(slip, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(slip, ST2, undefined, 0)[1].key], to: { rank: 3 } },
+  ]).report;
+  check(
+    "mutation: size 8's outline (place 8, pen 8) put in 12 → pen flag",
+    r8.flags.some((f) => f.kind === 'pen' && f.chain === 1) && !r8.notes?.length,
+  );
+  // two sizes only: no nest (no grading evidence in one step)
+  const two: ChainSet = {
+    chains: [ch(0, rect(0, 0, 60, 400), 0, true), ch(1, rect(0, 0, 60, 420), 1, true)],
+    classes: [row(0, '6', 0, [0, 0 + 1], DASH[0]), row(1, '8', 1, [], DASH[1])],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  check(
+    'two sizes: no nest, no suspect',
+    !lineNests(two).nests.length && !lineSuspects(two, ST2).length,
+  );
+
+  // outlines per size: closed ≥ 200 mm, ends within 2 mm; a short ring and an open line are none
+  const ol: ChainSet = {
+    ...mis,
+    chains: [
+      ...mis.chains,
+      ch(5, rect(300, 0, 20, 20), 1, true), // 80 mm round: too short
+      ch(6, [...rect(400, 0, 100, 100), { x: 401, y: 1 }], 1), // open, ends 1.4 mm apart
+      ch(7, [...rect(600, 0, 100, 100), { x: 610, y: 0 }], 1), // open, ends 10 mm apart
+    ],
+    classes: mis.classes.map((c) => (c.id === 1 ? { ...c, chains: [5, 6, 7] } : c)),
+  };
+  const so = sizeOutlines(ol);
+  check(
+    'outlines per size: 6 → 2 (its own + the misread 8), 8 → 1 (the near-closed one), 10 → 1, 12 → 1',
+    so.map((o) => o.n).join() === '2,1,1,1' && so[1].chains.join() === '6',
+    JSON.stringify(so.map((o) => [o.cls, o.n, o.chains])),
+  );
+  check('outlines: the biggest outline area per size', so[0].maxAreaMm2 === 60 * 420);
+
+  // no line twice in a row: a row handed over with a line twice keeps it once after an answer
+  const dup: ChainSet = {
+    ...mis,
+    classes: [...mis.classes, { ...row(4, null, null, [4, 4]), role: 'ignore', sig: 'x' }],
+  };
+  const da = assignChains(dup, ST2, undefined, 0, [
+    { sheet: 0, keys: [lineKeys(dup, ST2, undefined, 0)[0].key], to: { cls: 'ignore' } },
+  ]).set;
+  const twice = da.classes.filter((c) => new Set(c.chains).size !== c.chains.length);
+  check(
+    'dedupe: no row lists a line twice after an answer',
+    !twice.length,
+    JSON.stringify(twice.map((c) => c.chains)),
+  );
+}
+
 // ── 2 · kombinezon ──────────────────────────────────────────────────────────────────────────────
 
 const ctx = (): StageCtx => ({ checkCancel: () => {}, progress: () => {} });
@@ -732,11 +975,28 @@ async function kombinezon() {
       if (rowOf(set0, c.id) !== sizeRow(k)?.sizeLabel) wrong.push({ id: c.id, k });
     }
   });
+  // SIZESOCG (sizes/ocg-ladder.ts + the end-to-end OCG duplicate test): the read now puts every
+  // strip outline in its own size — the owner's report is fixed without an answer. The answers
+  // below still run, on the 6 / 8 outlines as their own rows (an answer that agrees with the read),
+  // after the old misread is put back by an answer and taken out again.
   check(
-    "the owner's report reproduced: strip outlines of 6 / 8 read in another row",
-    wrong.length > 0,
-    wrong.map((w) => `#${w.id}→${CARD[w.k].token}`).join(' '),
+    'SIZESOCG: every strip outline of 6 / 8 in its own row without an answer',
+    wrong.length === 0,
+    wrong.map((w) => `#${w.id}:${rowOf(set0, w.id)}→${CARD[w.k].token}`).join(' '),
   );
+  if (!wrong.length) {
+    const c8 = nests[nests.length - 1][1];
+    const misread = await run('chains', {
+      opts: OPTS,
+      chainAssign: [{ sheet: lines0[c8.id].sheet, keys: [lines0[c8.id].key], to: { rank: 0 } }],
+    });
+    check(
+      "the old misread put back by an answer: 8's strip outline in row 6",
+      misread.lineAssign?.applied.length === 1 && rowOf(setOf(), c8.id) === sizeRow(0)?.sizeLabel,
+      `#${c8.id}:${rowOf(setOf(), c8.id)}`,
+    );
+    for (const nest of nests) for (const k of [0, 1]) wrong.push({ id: nest[k].id, k });
+  }
   for (const k of [0, 1]) {
     const ids = wrong.filter((w) => w.k === k).map((w) => w.id);
     if (ids.length)
@@ -861,11 +1121,146 @@ async function kombinezon() {
     'ChainSet.assigned kept through the sizes and pieces stages',
     (set2.assigned?.length ?? 0) === wrong.length,
   );
+
+  // ── LINEASSIGN-2 on kombinezon ──
+  const twice = (cs: { classes: LineClass[] }) =>
+    cs.classes
+      .filter((c) => new Set(c.chains).size !== c.chains.length)
+      .map((c) => `#${c.id} ${c.role}: ${c.chains.filter((x, i) => c.chains.indexOf(x) !== i)}`);
+  check(
+    'no row lists a line twice (OCG copies of two kept lines)',
+    !twice(ch0).length,
+    twice(ch0).join('; '),
+  );
+  check(
+    'suspects: none on a read where every nest outline sits in its place',
+    ch0.suspects?.length === 0,
+    JSON.stringify(ch0.suspects?.slice(0, 3)),
+  );
+  const per = (o: StageIO['chains']['out']) => (o.outlines ?? []).map((x) => x.n);
+  check(
+    'outlines: every size row closes as many outlines as the next (kombinezon 7)',
+    per(ch0).length === 8 && per(ch0).every((x) => x === per(ch0)[0] && x >= nests.length),
+    per(ch0).join(','),
+  );
+  // the layer-6 strip nest: size 18's outline drawn with size 8's dash (printed "18" on the page)
+  const penOf = (id: number) => parseLineKey(lines0[id].key)?.pen;
+  const l6 = nests.find((ns) => penOf(ns[6].id) === penOf(ns[1].id));
+  check("kombinezon: the strip nest whose size-18 outline is drawn in size 8's pen", !!l6);
+  if (l6) {
+    const c18 = l6[6].id;
+    const own = await run('chains', {
+      opts: OPTS,
+      chainAssign: [{ sheet: lines0[c18].sheet, keys: [lines0[c18].key], to: { rank: 6 } }],
+    });
+    const ra = own.lineAssign!;
+    console.log(
+      `   #${c18} → 18: flags ${JSON.stringify(ra.flags)} notes ${ra.notes?.map((x) => x.detail)}`,
+    );
+    check(
+      `#${c18} answered into 18: no pen flag, one pen-slip note (nest place + the pen's own size-8 outline #${l6[1].id})`,
+      ra.applied.length === 1 &&
+        !ra.flags.length &&
+        ra.notes?.length === 1 &&
+        ra.notes[0].kind === 'pen-slip',
+    );
+    const ra8 = (
+      await run('chains', {
+        opts: OPTS,
+        chainAssign: [
+          { sheet: lines0[l6[1].id].sheet, keys: [lines0[l6[1].id].key], to: { rank: 6 } },
+        ],
+      })
+    ).lineAssign!;
+    check(
+      `mutation: size 8's outline #${l6[1].id} answered into 18 → pen flag, no note`,
+      ra8.flags.some((f) => f.kind === 'pen') && !ra8.notes?.length,
+      JSON.stringify(ra8.flags),
+    );
+  }
+  // the read before SIZESOCG (what the PATTERNS UI saw on int/batch1): strips in the wrong rows
+  process.env.SIZESOCG_OFF = '1';
+  let old: StageIO['chains']['out'];
+  try {
+    old = await run('chains', { opts: OPTS });
+  } finally {
+    delete process.env.SIZESOCG_OFF;
+  }
+  const oldSet = setOf();
+  check(
+    'pre-SIZESOCG read: no row lists a line twice (was #110 twice in ignore)',
+    !twice(old).length,
+    twice(old).join('; '),
+  );
+  const sus = old.suspects ?? [];
+  const placeOf = new Map(nests.flatMap((ns) => ns.map((c, k) => [c.id, k] as const)));
+  const rankRow = (k: number) =>
+    old.classes.find(
+      (c) =>
+        c.role === 'size' && c.evidence.some((e) => e.kind === 'nesting-order' && e.rank === k),
+    )?.id;
+  console.log(
+    `   pre-SIZESOCG suspects ${sus.length}: ${sus.map((x) => `#${x.chain}→${x.suggest}:${x.pen}`).join(' ')}`,
+  );
+  check(
+    "pre-SIZESOCG: 14 suspects, each a strip outline, suggested its nest place's size",
+    sus.length === 14 &&
+      sus.every((x) => placeOf.has(x.chain) && x.suggest === rankRow(placeOf.get(x.chain)!)),
+  );
+  check(
+    "pre-SIZESOCG: the size-18 outline in size 8's pen is a 'slip', no suspect's pen is 'against'",
+    !!l6 &&
+      sus.find((x) => x.chain === l6[6].id)?.pen === 'slip' &&
+      !sus.some((x) => x.pen === 'against'),
+  );
+  check(
+    'pre-SIZESOCG: outlines per size uneven before the answers',
+    new Set(per(old)).size > 1,
+    per(old).join(','),
+  );
+  // the one click: every suspect into its suggestion
+  const byRow = new Map<number, number[]>();
+  for (const x of sus) byRow.set(x.suggest, [...(byRow.get(x.suggest) ?? []), x.chain]);
+  const keyOfRow = (id: number) => {
+    const c = old.classes.find((r) => r.id === id)!;
+    return c.sig ?? `#${c.id}`;
+  };
+  const click: ChainAssign[] = [...byRow].map(([r, ids]) => ({
+    sheet: old.chainLines![ids[0]].sheet,
+    keys: ids.map((i) => old.chainLines![i].key),
+    to: { row: keyOfRow(r) },
+  }));
+  process.env.SIZESOCG_OFF = '1';
+  let fixed: StageIO['chains']['out'];
+  try {
+    fixed = await run('chains', { opts: OPTS, chainAssign: click });
+  } finally {
+    delete process.env.SIZESOCG_OFF;
+  }
+  const fr = fixed.lineAssign!;
+  console.log(
+    `   one click: applied ${fr.applied.length}, flags ${fr.flags.map((f) => f.detail)}, notes ${fr.notes?.map((x) => x.detail)}; outlines ${per(fixed)}`,
+  );
+  check(
+    'one click: 14 applied, no pen flag, one pen-slip note (the size-18 outline)',
+    fr.applied.length === 14 &&
+      !fr.flags.length &&
+      fr.notes?.length === 1 &&
+      fr.notes[0].chain === l6?.[6].id,
+  );
+  check('one click: no suspect left', fixed.suspects?.length === 0);
+  check(
+    'one click: every size closes as many outlines (7)',
+    per(fixed).every((x) => x === per(ch0)[0]),
+    per(fixed).join(','),
+  );
+  void oldSet;
 }
 
 export async function main(): Promise<boolean> {
   crafted();
   walls();
+  nestsCrafted();
   if (!process.env.LA_CRAFTED_ONLY) await kombinezon();
   console.log(fails ? `\n${fails} FAIL` : '\nall PASS');
   return fails > 0;

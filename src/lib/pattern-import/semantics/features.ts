@@ -31,6 +31,7 @@ import type {
   PathRange,
   PieceCandidate,
   PtMm,
+  SemanticsInput,
   Sheet,
   Style,
 } from '../types';
@@ -94,6 +95,10 @@ export type FeatureOpts = {
   region?: BoxMm;
   /** MOOD Ф3.3: this size's facing fold, as the family's check proved it (build.ts) — layer 8. */
   folds?: readonly FoldChord[];
+  /** DARTS: the darts proven of this piece (SemanticsInput.darts) — their legs go to layer 8. */
+  darts?: SemanticsInput['darts'];
+  /** DARTS: this size's own size class (SizeRun) — its dart legs are drawn in it. */
+  ownClass?: number | null;
 };
 
 const GRAIN_WORDS =
@@ -160,6 +165,123 @@ export function notchFrom(seg: [PtMm, PtMm], outer: readonly PtMm[]): NotchFeatu
   };
 }
 
+/** A dart leg may stop this far short of the cut line (drawn to the seam line: ⅝" allowance), mm. */
+const DART_MOUTH_GAP_MM = 16;
+
+/**
+ * DARTS: this size's own dart legs for each dart proven of the piece (FeatureOpts.darts). The
+ * proven face is where the sizes' legs cross; each size draws its own V: two straight lines of its
+ * own size class, each from this size's outline (its mouth on it, or stopping on the seam line
+ * short of it: ≤ DART_MOUTH_GAP_MM) into the piece, meeting
+ * (≤ 2 mm) at a point inside it (≥ 5 mm from the outline). Of those Vs, the one whose point is
+ * nearest the proven dart's point, within max(30 mm, its length), opening along the dart's axis
+ * (each leg within 35° of point → mouth, its two mouths on either side of the axis), each leg
+ * ×0.4…×2.5 the dart's length; a V two darts both pick is neither's. A V drawn as one
+ * polyline (mouth – point – mouth) is split at its point. The legs' chains, per dart.
+ */
+export function dartVs(
+  cand: PieceCandidate,
+  set: ChainSet,
+  darts: NonNullable<FeatureOpts['darts']>,
+  ownClass?: number | null,
+): ({ legs: Chain[]; pts: PtMm[][] } | null)[] {
+  const clsOf = new Map<number, (typeof set.classes)[number]>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
+  const walls = new Set(cand.walls);
+  const wallCls = new Set(cand.walls.map((w) => clsOf.get(w)?.id));
+  const bb = bboxOf(cand.outer);
+  // this size's own lines: its own size class when the run names it (an outline that borrowed a
+  // neighbour size's stretch carries that class among its walls too), else its walls' size classes
+  const own = set.chains.filter((ch) => {
+    const k = clsOf.get(ch.id);
+    if (k?.role !== 'size' || walls.has(ch.id)) return false;
+    if (ownClass != null ? k.id !== ownClass : !wallCls.has(k.id)) return false;
+    const q = bboxOf(ch.pts);
+    return q.minX <= bb.maxX && q.maxX >= bb.minX && q.minY <= bb.maxY && q.maxY >= bb.minY;
+  });
+  const gap = (p: PtMm) => closestOnPolyline(p, cand.outer, true).d;
+  const onOutline = (p: PtMm) => gap(p) <= DART_MOUTH_GAP_MM;
+  const inside = (p: PtMm) => pointInPolygon(p, cand.outer) && gap(p) >= 5;
+  type Leg = { ch: Chain; mouth: PtMm; tip: PtMm; pts: PtMm[] };
+  const legs: Leg[] = [];
+  for (const ch of own) {
+    if (ch.closed || ch.pts.length < 2) continue;
+    const e0 = ch.pts[0];
+    const e1 = ch.pts[ch.pts.length - 1];
+    const on0 = onOutline(e0);
+    const on1 = onOutline(e1);
+    // a leg: its mouth end the nearer the outline, its point inside
+    const [mouth, tip] = gap(e0) <= gap(e1) ? [e0, e1] : [e1, e0];
+    if ((on0 || on1) && inside(tip) && straightness(ch.pts) <= 2) {
+      legs.push({ ch, mouth, tip, pts: ch.pts });
+    } else if (on0 && on1 && ch.pts.length >= 3) {
+      // one polyline mouth – point – mouth: split at the vertex farthest from the chord
+      let k = -1;
+      let far = 0;
+      for (let i = 1; i < ch.pts.length - 1; i++) {
+        const d = footOnSegment(ch.pts[i], e0, e1).d;
+        if (d > far) {
+          far = d;
+          k = i;
+        }
+      }
+      if (k < 0 || !inside(ch.pts[k])) continue;
+      const a = ch.pts.slice(0, k + 1);
+      const b = ch.pts.slice(k).reverse();
+      if (straightness(a) > 2 || straightness(b) > 2) continue;
+      legs.push(
+        { ch, mouth: e0, tip: ch.pts[k], pts: a },
+        { ch, mouth: e1, tip: ch.pts[k], pts: b },
+      );
+    }
+  }
+  const angle = (from: PtMm, to: PtMm) => Math.atan2(to.y - from.y, to.x - from.x);
+  const off = (a: number, b: number) => {
+    let d = Math.abs(a - b) % (2 * Math.PI);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    return d;
+  };
+  const picks: ({ a: Leg; b: Leg } | null)[] = [];
+  for (const d of darts) {
+    const mid = { x: (d.base[0].x + d.base[1].x) / 2, y: (d.base[0].y + d.base[1].y) / 2 };
+    const ax = angle(d.apex, mid);
+    // which side of the V's axis a mouth lies on (its two mouths on either side)
+    const side = (tip: PtMm, p: PtMm) =>
+      Math.sign(Math.cos(ax) * (p.y - tip.y) - Math.sin(ax) * (p.x - tip.x));
+    const fits = (l: Leg) => {
+      const len = dist(l.tip, l.mouth);
+      return (
+        len >= 0.4 * d.lenMm &&
+        len <= 2.5 * d.lenMm &&
+        off(angle(l.tip, l.mouth), ax) <= Math.PI * (35 / 180)
+      );
+    };
+    let best: { a: Leg; b: Leg; r: number } | null = null;
+    for (let i = 0; i < legs.length; i++)
+      for (let j = i + 1; j < legs.length; j++) {
+        const a = legs[i];
+        const b = legs[j];
+        if (dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
+        if (side(a.tip, a.mouth) * side(a.tip, b.mouth) >= 0) continue;
+        const r = dist(a.tip, d.apex);
+        if (r > Math.max(30, d.lenMm)) continue;
+        if (!best || r < best.r) best = { a, b, r };
+      }
+    picks.push(best ? { a: best.a, b: best.b } : null);
+  }
+  // each dart its nearest V; a leg two darts both pick belongs to neither (Codex r2: the answer
+  // must not hang on the order or on which of the darts are passed — the pieces step counts with
+  // every possible dart of the piece, the semantics with the proven ones)
+  const pickedBy = new Map<Leg, number>();
+  for (const p of picks)
+    if (p) for (const l of [p.a, p.b]) pickedBy.set(l, (pickedBy.get(l) ?? 0) + 1);
+  return picks.map((p) =>
+    p && pickedBy.get(p.a) === 1 && pickedBy.get(p.b) === 1
+      ? { legs: [p.a.ch, p.b.ch], pts: [p.a.pts, p.b.pts] }
+      : null,
+  );
+}
+
 /**
  * Classify the chains around one candidate into features (PDF path). The DXF fast path's own
  * features win when present: they are read from typed layers, not guessed.
@@ -214,6 +336,20 @@ export function classifyFeatures(
     if (role === 'ignore' || role === 'seam') continue;
     if (role === 'size') continue; // own size, inner loop = seam measurement, not a feature
     inner.push(ch);
+  }
+  // DARTS: this size's own legs of each dart proven of the piece — internal lines, «dart»
+  if (opts.darts?.length) {
+    for (const v of dartVs(cand, set, opts.darts, opts.ownClass))
+      for (let i = 0; i < (v?.legs.length ?? 0); i++)
+        out.push({
+          kind: 'internal',
+          pts: v!.pts[i],
+          closed: false,
+          origin: 'detected',
+          ranges: v!.legs[i].ranges,
+          confidence: 0.9,
+          label: 'dart',
+        } satisfies InternalFeature);
   }
 
   const grain = bestGrain(cand, set, sheet, inner, clsOf, opts);

@@ -64,7 +64,8 @@ import {
   tileGridTester,
   tileMarkSigs,
 } from './page-roles';
-import { REDUCED_COPY, reducedCopy, shapesOf } from './reduced-copy';
+import { REDUCED_COPY, reducedCopy, shapesOf, type Shape } from './reduced-copy';
+import { pageInk, tilePensOf, type Pen } from './page-ink';
 import { SegGrid } from '../chains/geom';
 import { DEFAULT_CHAIN_OPTS } from '../chains/build';
 import { makeChains } from '../chains/make';
@@ -282,7 +283,14 @@ export function cleanPages(
     // A9: the file's tile chrome (what a page set aside is tested against) and its tile format
     tilePcs.set(
       doc.file.id,
-      pcs.map((pc) => ({ pc, sheet: roleOf.get(pageKey(doc.file.id, pc.page.page))?.sheet })),
+      pcs.map((pc, k) => ({
+        pc,
+        sheet: roleOf.get(pageKey(doc.file.id, pc.page.page))?.sheet,
+        furniture: new Set(
+          // tile chrome stays chrome when a garment line ends on it (offered, not applied)
+          foundOf[k].filter((f) => f.repeated || f.proof || f.chrome).flatMap((f) => f.chains),
+        ),
+      })),
     );
     if (tiles.length) {
       const fmts = new Map<string, { widthMm: number; heightMm: number; n: number }>();
@@ -358,6 +366,7 @@ export function cleanPages(
         });
     }
   }
+  inkPass(dropped, docPage, pcOf, tilePcs);
   aiPass(dropped, pages, roles, input, edited, docPage, pcOf, tileMarks, tilePcs, notes);
   pages.sort((a, b) => Number(a.file) - Number(b.file) || a.page - b.page);
   const { summary, offered } = countsOf(pages.flatMap((p) => p.items));
@@ -381,7 +390,13 @@ export function cleanPages(
  * touched (the AI's word on a tile is a note). The operator's role edits are their own answer.
  */
 /** A tile page's line work, its sheet, and its piece shapes (computed once, when a rule asks). */
-type TilePc = { pc: PageChains; sheet?: number; shapes?: ReturnType<typeof shapesOf> };
+type TilePc = {
+  pc: PageChains;
+  sheet?: number;
+  shapes?: ReturnType<typeof shapesOf>;
+  /** STOPS: the chains proven page furniture (repeated, proof, tile chrome) — no pattern pen. */
+  furniture?: ReadonlySet<number>;
+};
 
 function aiPass(
   dropped: CleanOutput['dropped'],
@@ -461,6 +476,44 @@ function aiPass(
     d.aiAside = true;
     const m = pages.find((p) => p.file === d.file && p.page === d.page);
     if (m) m.status = 'auto';
+  }
+}
+
+/**
+ * STOPS (clean/page-ink.ts): every page set aside that holds line work, read without the AI against
+ * its file's tile sheet — each long / piece-sized line a rule, a frame, a test square, a reduced
+ * tile piece or a small drawing in a foreign pen (`ink.explained`), or the first that is none.
+ */
+function inkPass(
+  dropped: CleanOutput['dropped'],
+  docPage: ReadonlyMap<string, IRPage>,
+  pcOf: (pg: IRPage) => PageChains,
+  tilePcs: ReadonlyMap<string, TilePc[]>,
+) {
+  const perFile = new Map<string, { pens: Pen[]; shapes: Shape[] }>();
+  for (const d of dropped) {
+    if (d.status !== 'suggest') continue;
+    const tiles = tilePcs.get(d.file) ?? [];
+    const pg = docPage.get(pageKey(d.file, d.page));
+    if (!tiles.length || !pg) continue;
+    let f = perFile.get(d.file);
+    if (!f) {
+      f = {
+        pens: tilePensOf(
+          tiles.map((t) => t.pc),
+          tiles.map((t) => t.furniture),
+        ),
+        shapes: tiles.flatMap(
+          (t) => (t.shapes ??= shapesOf(t.pc.chains, PATIMPORT.minPieceAreaMm2)),
+        ),
+      };
+      perFile.set(d.file, f);
+    }
+    const r = pageInk(pcOf(pg), f.pens, f.shapes, pg);
+    d.ink = {
+      ...(r.explained ? { explained: r.explained } : {}),
+      ...(r.unexplained ? { unexplained: r.unexplained } : {}),
+    };
   }
 }
 

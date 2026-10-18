@@ -41,6 +41,8 @@ export function manifestPiece(p: PieceSpec): ManifestPiece {
   // Optional key only when present: an `undefined` value would not survive the JSON round trip
   // and G9's deep-equal would read that as a difference.
   if (p.aiConfidence != null) m.aiConfidence = p.aiConfidence;
+  // GRADE P1: count differences the operator answered "intended"
+  if (p.gradeIntended?.length) m.gradeIntended = [...p.gradeIntended];
   return m;
 }
 
@@ -65,6 +67,28 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     areaMm2: r0(b.size.areaMm2),
     hasGrain: !!b.grain,
     notches: b.notches.length,
+    // GRADE P1: notches not drawn in this size, graded from the sizes that draw them (D5)
+    ...(b.size.notches.some((n) => n.graded)
+      ? { notchesGraded: b.size.notches.filter((n) => n.graded).length }
+      : {}),
+    // GRADE P1: the operator's "in every size" (graded drills / internal lines) and "in no size"
+    ...(b.size.drills.some((d) => d.graded)
+      ? { drillsGraded: b.size.drills.filter((d) => d.graded).length }
+      : {}),
+    ...(b.size.internal.some((l) => l.graded)
+      ? { internalGraded: b.size.internal.filter((l) => l.graded).length }
+      : {}),
+    ...(b.size.removedByOperator?.notches
+      ? { notchesRemoved: b.size.removedByOperator.notches }
+      : {}),
+    ...(b.size.removedByOperator?.drills ? { drillsRemoved: b.size.removedByOperator.drills } : {}),
+    ...(b.size.removedByOperator?.internal
+      ? { internalRemoved: b.size.removedByOperator.internal }
+      : {}),
+    // GRADE P1: notches drawn as the outline, the line crossing them by the chord (not as drawn)
+    ...(b.size.notches.some((n) => n.chord)
+      ? { notchesChorded: b.size.notches.filter((n) => n.chord).length }
+      : {}),
     drills: b.drills.length,
     internal: b.internal.length,
     hasSeam: !!b.seam,

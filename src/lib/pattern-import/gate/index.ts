@@ -62,6 +62,10 @@ import {
   g9,
   sameManifest,
 } from './checks';
+import { g5ShapeCounts } from './shape';
+import { withShapeNotes } from '../passport/digest';
+import { countNotesOfBlocks } from '../semantics/shape-check';
+import { UNI_TOKEN } from '../write/plan';
 import { readRawDxf } from './reader';
 import { contourMm, roundTrip } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -206,6 +210,7 @@ export function createRunGate(
       await squareProbe(),
       ...g3g4(ctx, derived.ok),
       g5(ctx),
+      ...g5ShapeCounts(ctx),
       g6(ctx),
       g7(ctx),
       g8(ctx),
@@ -266,6 +271,27 @@ export function derivedByBlockFor(
       kind: e.kind,
       pts: map(e.pts),
       ...(e.along ? { along: e.along.map(map) } : {}),
+    }));
+  }
+  return out;
+}
+
+/** GRADE P1: the notch bumps crossed by their chord (source frame) → written frame (G3/G4). */
+export function notchChordsByBlockFor(
+  detail: WriteDetail,
+  chordsOf: (
+    sourceIdentity: string,
+    rank: number,
+  ) => { chord: [PtMm, PtMm]; bump: PtMm[] }[] | undefined,
+): Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]> {
+  const out: Record<string, { chord: [PtMm, PtMm]; bump: PtMm[] }[]> = {};
+  for (const b of detail.plan.blocks) {
+    const cs = chordsOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!cs?.length) continue;
+    const T = detail.transforms[b.name];
+    out[b.name] = cs.map((c) => ({
+      chord: [applyAffine(T, c.chord[0]), applyAffine(T, c.chord[1])],
+      bump: c.bump.map((p) => applyAffine(T, p)),
     }));
   }
   return out;
@@ -387,6 +413,11 @@ export type WriteAndGateCtx = {
    * `wallsOf` — G15 checks them; G3/G4 never use them as walls (F14b, Codex C1).
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
+  /** GRADE P1: the notch bumps a size's line crosses by the chord (same frame as `wallsOf`). */
+  notchChordsOf?: (
+    sourceIdentity: string,
+    rank: number,
+  ) => { chord: [PtMm, PtMm]; bump: PtMm[] }[] | undefined;
   /** P1 (G21): the continuity stretches of a size closed through them (same frame). */
   continuityOf?: (sourceIdentity: string, rank: number) => ContinuityGeometry | undefined;
   /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
@@ -423,7 +454,25 @@ export async function writeAndGate(
 ): Promise<{ detail: WriteDetail; dxfText: string; report: GateReport; expect: GateExpectation }> {
   const embed = ctx.embed ?? embedManifestLocal;
   const read = ctx.read ?? readManifestLocal;
-  const detail = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  const detail0 = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  // SHAPE soft rule: the passport digest records the pieces whose WRITTEN sizes carry different
+  // notch / drill counts (from the manifest's blocks, i.e. what the file holds)
+  const detail = detail0.manifest.passport
+    ? {
+        ...detail0,
+        manifest: {
+          ...detail0.manifest,
+          passport: withShapeNotes(
+            detail0.manifest.passport,
+            countNotesOfBlocks(
+              detail0.manifest.blocks,
+              UNI_TOKEN,
+              (id) => detail0.manifest.pieces.find((p) => p.identity === id)?.gradeIntended,
+            ),
+          ),
+        },
+      }
+    : detail0;
   const m0 = detail.manifest;
   const text0 = embed(detail.bareText, m0);
   const expect: GateExpectation = {
@@ -433,6 +482,9 @@ export async function writeAndGate(
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
     coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
     derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
+    ...(ctx.notchChordsOf
+      ? { notchChordsByBlock: notchChordsByBlockFor(detail, ctx.notchChordsOf) }
+      : {}),
     continuityByBlock: ctx.continuityOf
       ? continuityByBlockFor(detail, ctx.continuityOf)
       : undefined,

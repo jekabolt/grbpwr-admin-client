@@ -112,6 +112,34 @@ export function auditOnly<I>(patch: Partial<I> | undefined): Partial<I> | null {
   return { autopilot: rec } as unknown as Partial<I>;
 }
 
+/**
+ * A forward move that did not move: never a stop without words (archive: 20 files stopped on scale
+ * as "not-moved" with an empty reason — the move had FAILED, "no pattern tiles — the pages were
+ * read as cover / instructions only", and the session's error was lost). A move that failed is the
+ * error stop with the session's words; one that neither failed nor moved says so, with the
+ * question it answered, if any.
+ */
+function notMoved<I>(c: DriveCtx<I>, step: WizardStep, question?: string): DriveTick {
+  const err = c.current().session.error;
+  if (c.failed() || err)
+    return {
+      kind: 'stopped',
+      why: 'error',
+      step,
+      ...(question ? { question } : {}),
+      reason: err || `the ${step} step failed`,
+    };
+  return {
+    kind: 'stopped',
+    why: 'not-moved',
+    step,
+    ...(question ? { question } : {}),
+    reason: question
+      ? `the answer to "${question}" was taken but the ${step} step did not move on`
+      : `the ${step} step asks nothing and blocks nothing, yet did not move on`,
+  };
+}
+
 /** One tick of the drive (see the header). The caller disarms on 'stopped'. */
 export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<DriveTick> {
   const s = c.session;
@@ -126,7 +154,7 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
     const pre = c.prefill ? await prefillTick(st, c, step) : null;
     if (pre) return pre;
     const moved = await c.forward();
-    return moved ? { kind: 'moved', from: step } : { kind: 'stopped', why: 'not-moved', step };
+    return moved ? { kind: 'moved', from: step } : notMoved(c, step);
   }
   if (!c.resolve) return { kind: 'stopped', why: 'no-resolver', step, question };
   const key = `${step}|${question}|${outputsRev(st, s)}`;
@@ -188,7 +216,7 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
   }
   if (a.proceed && c.live() && !c.failed()) {
     const moved = await c.forward();
-    if (!moved) return { kind: 'stopped', why: 'not-moved', step, question };
+    if (!moved) return notMoved(c, step, question);
   }
   return { kind: 'answered', step, question };
 }

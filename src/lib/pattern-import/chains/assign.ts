@@ -41,7 +41,8 @@ import type {
   Style,
 } from 'lib/pattern-import/types';
 
-import { chainLook, classLooks, onPen, sameLook, type Look } from '../pieces/identity';
+import { chainLook } from '../pieces/identity';
+import { lineNests, penVerdict, rowPen } from './nests';
 
 export const LINE_KEY_V = 'L1';
 const Q = 0.5;
@@ -191,26 +192,6 @@ function rankOf(c: LineClass): number | null {
   return null;
 }
 
-/** A size row's pen: its declared / recovered look, else the one look of ≥ 60 % of its length. */
-function rowPen(set: ChainSet, c: LineClass, styles: ReadonlyMap<number, Style>): Look[] {
-  const l = classLooks(c);
-  if (l.length) return l;
-  const groups: { l: Look; len: number }[] = [];
-  let total = 0;
-  for (const id of c.chains) {
-    const ch = set.chains[id];
-    if (!ch) continue;
-    total += ch.lengthMm;
-    const cl = chainLook(ch, styles);
-    if (!cl) continue;
-    const g = groups.find((x) => sameLook(x.l, cl));
-    if (g) g.len += ch.lengthMm;
-    else groups.push({ l: cl, len: ch.lengthMm });
-  }
-  const best = groups.sort((a, b) => b.len - a.len)[0];
-  return best && best.len >= 0.6 * total ? [best.l] : [];
-}
-
 /**
  * Applies the operator's per-line answers to a chain set (after the legend). Pure: a new set, the
  * input untouched; `report` says what landed, what is stale and what is flagged.
@@ -222,7 +203,7 @@ export function assignChains(
   sheetId: number,
   entries: readonly ChainAssign[],
 ): { set: ChainSet; report: LineAssignReport } {
-  const report: LineAssignReport = { applied: [], stale: [], flags: [] };
+  const report: LineAssignReport = { applied: [], stale: [], flags: [], notes: [] };
   if (!entries.length) return { set, report };
   const { info, geom } = linesOf(set, styles, parts, sheetId);
   const byKey = new Map<string, ChainId[]>();
@@ -320,6 +301,8 @@ export function assignChains(
   const styleMap = new Map(styles.map((s) => [s.id, s]));
   const sizeRows = set.classes.filter((c) => c.role === 'size');
   const pens = new Map(sizeRows.map((c) => [c.id, rowPen(set, c, styleMap)]));
+  const byId = new Map(set.classes.map((c) => [c.id, c]));
+  let nests: ReturnType<typeof lineNests> | undefined;
   const label = (c: LineClass) =>
     c.role === 'size' ? `size ${c.sizeLabel ?? `#${c.id}`}` : c.role;
   for (const [id, t] of targets) {
@@ -331,18 +314,25 @@ export function assignChains(
         kind: 'two-sizes',
         detail: `in ${sizes.map(label).join(' and ')}`,
       });
-    const look = set.chains[id] ? chainLook(set.chains[id], styleMap) : null;
-    if (!look) continue;
+    if (!set.chains[id] || !chainLook(set.chains[id], styleMap)) continue;
     for (const r of sizes) {
-      const own = pens.get(r.id) ?? [];
-      if (!own.length || onPen(look, own)) continue;
-      const other = sizeRows.find((o) => o !== r && onPen(look, pens.get(o.id) ?? []));
-      if (other)
+      // LINEASSIGN-2: the graded nest weighs the pen (chains/nests.ts) — a pen used twice in one
+      // nest, at its own size's place and at the place the answer names, is the drawing's slip:
+      // two evidences against the pen (D3), noted, not flagged
+      const v = penVerdict(set, nests ?? (nests = lineNests(set)), id, r.id, pens, styleMap);
+      if (v.pen === 'against')
         report.flags.push({
           chain: id,
           key: t.key,
           kind: 'pen',
-          detail: `drawn with the pen of ${label(other)}, put in ${label(r)}`,
+          detail: `drawn with the pen of ${label(byId.get(v.says)!)}, put in ${label(r)}`,
+        });
+      else if (v.pen === 'slip')
+        report.notes!.push({
+          chain: id,
+          key: t.key,
+          kind: 'pen-slip',
+          detail: `drawn with the pen of ${label(byId.get(v.says)!)}, put in ${label(r)}: its nest's place says ${label(r)}, and the pen's own ${label(byId.get(v.says)!)} outline in that nest (#${v.own.join(', #')}) is drawn with it too — the drawing's pen slip`,
         });
     }
   }
@@ -357,7 +347,8 @@ export function assignChains(
   const fresh = [...opRows.values()].filter((r) => !set.classes.includes(r) && into.has(r.id));
   const rows = [...set.classes, ...fresh];
   const classes: LineClass[] = rows.map((c) => {
-    const keep = c.chains.filter((id) => !moved.has(id));
+    // a row the reader handed over with a line twice leaves here with it once
+    const keep = [...new Set(c.chains.filter((id) => !moved.has(id)))];
     const add = into.get(c.id) ?? [];
     if (keep.length === c.chains.length && !add.length) return c;
     const chains = [...keep, ...add.filter((id) => !keep.includes(id))];
