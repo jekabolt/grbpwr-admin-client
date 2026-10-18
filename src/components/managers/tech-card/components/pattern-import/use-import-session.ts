@@ -299,6 +299,18 @@ class StaleRun extends Error {
   }
 }
 
+/** SHAPE-KINK: the events after which the operator's one-shape moves still name the same pieces. */
+const SHAPE_FIX_KEEPS = new Set<WizardEvent['type']>([
+  'shape-fix',
+  'write',
+  'write-storage',
+  'fabrics',
+  'apply',
+  'download',
+  'names',
+  'semantics',
+  'back',
+]);
 /** RULHOOK × STOPFIX: the apply-lock token of a draft the storage re-write holds. */
 const REWRITE = -2;
 
@@ -927,6 +939,12 @@ export function useImportSession(deps: {
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
   async function dispatchRaw(ev: WizardEvent): Promise<void> {
+    // SHAPE-KINK (Codex r2): a one-shape move is bound to the pieces it was made on — any event
+    // that may change the sheet, the sizes or the pieces drops every move (asked again on check)
+    if (!SHAPE_FIX_KEEPS.has(ev.type) && Object.keys(iRef.current.shapeFixes ?? {}).length) {
+      iRef.current = { ...iRef.current, shapeFixes: {} };
+      patchInputs({ shapeFixes: {} });
+    }
     try {
       switch (ev.type) {
         case 'files': {

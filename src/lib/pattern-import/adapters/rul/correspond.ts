@@ -141,6 +141,8 @@ export function correspondLines(
       break;
     }
   }
+  // an open line whose sizes turn differently (a near-straight internal line): end to end
+  if (!cs && !closed) cs = ls.map((l) => [0, l.length - 1]);
   if (!cs) return { ok: false, reason: 'its corners differ in number between sizes' };
   const K = cs[0].length;
   // closed: the cyclic shift of each size's corners onto the base's
@@ -215,6 +217,20 @@ export function correspondLines(
 }
 
 /**
+ * Every size's line is the base line point for point moved by one translation (≤ 0.01 mm apart):
+ * the pairing by index is proven — nothing to match (an ungraded mark, a label box).
+ */
+function rigidCopies(ls: readonly PtMm[][]): boolean {
+  const b = ls[0];
+  return ls.every((l) => {
+    if (l.length !== b.length) return false;
+    const dx = l[0].x - b[0].x;
+    const dy = l[0].y - b[0].y;
+    return l.every((p, k) => Math.hypot(p.x - b[k].x - dx, p.y - b[k].y - dy) <= 0.01);
+  });
+}
+
+/**
  * Every graded piece's lines (cut, seam, internal) brought to one point list per size, the base
  * size's first. Pieces whose lines already match point for point are left as they are; a line that
  * cannot be matched leaves its piece as it is and says why (packRul then refuses it as before).
@@ -245,13 +261,13 @@ export function equalizeForRul(
       if (failed) return;
       const ls = bs.map(get);
       if (ls.some((l) => !l)) return;
-      // every line is matched by its corners, equal counts too (Codex r1: an equal count is no
-      // correspondence); an equal-count line that cannot be matched stays as drawn (packRul's own
-      // pairing, as before) — a different count cannot be packed without the match
-      const same = ls.every((l) => l!.length === ls[0]!.length);
+      // every line is matched by its corners, equal counts too (Codex r1/r2: an equal count is no
+      // correspondence, and packRul's proof cannot tell a wrong pairing) — unmatched = refused
+      // the same line moved whole (an ungraded mark copied into every size): point k is point k
+      if (rigidCopies(ls as PtMm[][])) return;
       const r = correspondLines(ls as PtMm[][], closed);
       if (r.ok) next.forEach((b, z) => set(b, r.lines[z]));
-      else if (!same) failed = `${what}: ${r.reason}`;
+      else failed = `${what}: ${r.reason}`;
     };
     fit(
       (b) => b.cut,

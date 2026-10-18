@@ -2245,10 +2245,10 @@ function rulPackageOf(
     name: styleName,
     ...(pickRe ? { pick: (piece: string) => pickRe.test(piece) } : {}),
   });
-  if (!pack.ok)
-    return eq.notes.length
-      ? { ...pack, reasons: [...pack.reasons, ...eq.notes.map((n) => `not matched: ${n}`)] }
-      : pack;
+  // a line not matched point for point is never packed (its pairing would be unproven)
+  const unmatched = eq.notes.map((n) => `not matched: ${n}`);
+  if (!pack.ok) return { ...pack, reasons: [...pack.reasons, ...unmatched] };
+  if (unmatched.length) return { ok: false, reasons: unmatched };
   const stem = filename.replace(/\.dxf$/i, '');
   return {
     ok: true,

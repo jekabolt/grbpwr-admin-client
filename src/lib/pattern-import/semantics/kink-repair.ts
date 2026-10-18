@@ -100,8 +100,8 @@ export type KinkResult = {
 };
 
 const SCALES = [
-  { reach: 1.5, strong: 60 },
-  { reach: 6, strong: 45 },
+  { reach: 1.5, strong: 60, weak: 25 },
+  { reach: 6, strong: 45, weak: 20 },
 ] as const;
 
 /** How far the size is from agreeing with every canonical size (0 = agrees with all). */
@@ -311,8 +311,9 @@ export function repairMinorityKinks(lines: readonly KinkLine[], opts: KinkOpts =
         .slice(0, 2);
       const refTurns = near.flatMap((i) =>
         SCALES.flatMap((sc) =>
+          // Codex r2: a majority turn above the WEAK threshold already matches a strong one
           turnsOf(ccw(lines[i].outer), sc.reach)
-            .filter((t) => Math.abs(t.deg) > sc.strong)
+            .filter((t) => Math.abs(t.deg) > sc.weak)
             .map((t) => ({ ...t, reach: sc.reach })),
         ),
       );
