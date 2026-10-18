@@ -511,7 +511,7 @@ export async function sectionShapeKink(o: { check: Check; pdf: string | null }) 
     { cl, issues: shapeCheck()?.shapeIssues },
   );
   const why = answerProblem('meaning', {
-    events: [{ type: 'semantics', input: { ...({} as never), shapeFixes: { '0:6': 'drop' } } }],
+    events: [{ type: 'semantics', input: { shapeFixes: { '0:6': 'drop' } } }],
   } as never);
   check(
     'K',
