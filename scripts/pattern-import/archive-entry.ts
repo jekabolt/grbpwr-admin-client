@@ -490,7 +490,19 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
         (box.s as unknown as { run: SizeRun | null }).run?.sizes.map((z) => z.label) ?? [];
       for (const f of fams)
         for (const c of f.candidates)
-          if (c.rankFrom === 'repair' && c.repair)
+          if (c.gradeHint && process.env.ARCHIVE_GRADEP2_HINTS)
+            renderHintPng(
+              resolve(
+                p2dir,
+                `hint-${rel.replace(/[^\w.-]+/g, '_').slice(0, 60)}-seed${f.seed}-r${c.rank}.png`,
+              ),
+              rel,
+              f,
+              c,
+              S.wallSet ?? S.chains,
+              labels,
+            );
+          else if (c.rankFrom === 'repair' && c.repair)
             renderRepairPng(
               resolve(
                 p2dir,
@@ -1089,6 +1101,60 @@ function renderRepairPng(
     {
       color: '#06c',
       text: 'blue = own/common lines it runs on; grey = the drawing; grey dashed thick = before; thin colours = other sizes',
+    },
+  ]);
+}
+
+/** GRADE P2: a refused size — where the grade puts it (dashed) over the drawing. */
+function renderHintPng(
+  file: string,
+  id: string,
+  fam: PieceFamily,
+  c: PieceFamily['candidates'][number],
+  set: ChainSet | null,
+  labels: string[],
+) {
+  mkdirSync(dirname(file), { recursive: true });
+  const h = c.gradeHint!;
+  const strokes: Stroke[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of h.pred) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const box = { minX: minX - 25, minY: minY - 25, maxX: maxX + 25, maxY: maxY + 60 };
+  for (const ch of set?.chains ?? []) {
+    if (ch.pts.length < 2) continue;
+    if (
+      !ch.pts.some((p) => p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY)
+    )
+      continue;
+    strokes.push({ pts: ch.pts, closed: ch.closed, color: '#999', width: 0.8 });
+  }
+  for (const x of fam.candidates)
+    if (x.rank !== c.rank && x.outcome === 'closed')
+      strokes.push({
+        pts: x.outer,
+        closed: true,
+        color: PALETTE[x.rank % PALETTE.length],
+        width: 0.6,
+      });
+  strokes.push({ pts: h.pred, closed: true, color: '#e00', width: 1.6, dash: '4 3' });
+  const L = (k: number) => labels[k] ?? String(k);
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  renderPng(file, box, strokes, [], Math.min(5, 1600 / span), [
+    {
+      color: '#000',
+      text: `${id.slice(0, 70)} seed ${fam.seed}: size ${L(c.rank)} ${c.outcome} — refused: ${h.refusals.join(', ')}`,
+    },
+    {
+      color: '#e00',
+      text: `red dashed = where the grade of ${L(h.from[0])}+${L(h.from[1])} puts it${h.extrapolated ? ' (extrapolated)' : ''}; grey = the drawing; colours = other sizes`,
     },
   ]);
 }

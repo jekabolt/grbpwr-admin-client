@@ -160,6 +160,16 @@ export function repairPass(
         ws.push({ pts: w.pts, kind: 'common', closed: !!w.closed });
         chainOf.push(w.chain);
       }
+    // overlay: the lines the anchors themselves close on (another size's pen, an orphan) — cover
+    // only where both bracketing anchors run on them (repairSize)
+    // (a whole chain already a wall; a lone PORTION of a chain leaves the rest of it to the overlay)
+    const taken = new Set(chainOf.filter((id, k) => ws[k].pts === ctx.set.chains[id]?.pts));
+    for (const id of new Set(anchors.flatMap((x) => x.walls))) {
+      const ch = ctx.set.chains[id];
+      if (taken.has(id) || !ch || ch.pts.length < 2 || !meets(bboxOf(ch.pts), box)) continue;
+      ws.push({ pts: ch.pts, kind: 'overlay', closed: ch.closed });
+      chainOf.push(id);
+    }
     const rep = repairSize(ins, r, ws, { tol: GFIT_TOL_P0, frame: 'stacked' });
     const why: string[] = rep.refusals.map((w) =>
       w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
@@ -245,6 +255,58 @@ export function repairPass(
       console.log(
         `GRADEP2 seed ${c.seed} r${r} ${kind} REFUSED ${why.join(',')} trusted ${rep.trusted?.join('/')} of ${ins.map((x) => x.rank).join('/')} cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')} offRun ${rep.offRunMm.toFixed(1)} dev ${rep.devMm?.toFixed(2)} score ${rep.score?.toFixed(2)}`,
       );
+    if (DEBUG && rep.holes.length) {
+      // what is drawn under each hole: the nearest chain within 1.5 mm and how the model files it
+      const rankOf = new Map<ChainId, number[]>();
+      ctx.wm.byRank.forEach((ids, k) =>
+        ids.forEach((id) => rankOf.set(id, [...(rankOf.get(id) ?? []), k])),
+      );
+      const commonS = new Set(ctx.wm.common);
+      for (const h of rep.holes.slice(0, 6)) {
+        let best: { id: ChainId; d: number } | null = null;
+        for (const ch of ctx.set.chains)
+          for (let j = 1; j < ch.pts.length; j++) {
+            const a = ch.pts[j - 1];
+            const b = ch.pts[j];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const L2 = dx * dx + dy * dy || 1e-9;
+            const u = Math.max(0, Math.min(1, ((h.at.x - a.x) * dx + (h.at.y - a.y) * dy) / L2));
+            const d = Math.hypot(h.at.x - a.x - u * dx, h.at.y - a.y - u * dy);
+            if (d < 1.5 && (!best || d < best.d)) best = { id: ch.id, d };
+          }
+        const cls = best
+          ? commonS.has(best.id)
+            ? 'common'
+            : rankOf.has(best.id)
+              ? `rank ${rankOf.get(best.id)!.join('/')}`
+              : `unranked (${
+                  ctx.set.classes.find((k) => k.chains.includes(best!.id))?.role ??
+                  (ctx.set.orphans.includes(best.id) ? 'orphan' : '?')
+                })`
+          : 'nothing drawn';
+        const dRing = (rk: number) => {
+          const o = anchors.find((x) => x.rank === rk)?.outer ?? [];
+          let m = Infinity;
+          for (let j = 0; j < o.length; j++) {
+            const a = o[j];
+            const b = o[(j + 1) % o.length];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const L2 = dx * dx + dy * dy || 1e-9;
+            const u = Math.max(0, Math.min(1, ((h.at.x - a.x) * dx + (h.at.y - a.y) * dy) / L2));
+            m = Math.min(m, Math.hypot(h.at.x - a.x - u * dx, h.at.y - a.y - u * dy));
+          }
+          return m.toFixed(2);
+        };
+        console.log(
+          `GRADEP2   hole lo r${rep.from?.[0]} ${rep.from ? dRing(rep.from[0]) : '-'} hi r${rep.from?.[1]} ${rep.from ? dRing(rep.from[1]) : '-'} overlayCand ${best ? chainOf.includes(best.id) : '-'}`,
+        );
+        console.log(
+          `GRADEP2   hole ${h.lenMm.toFixed(1)} mm at ${h.at.x.toFixed(0)},${h.at.y.toFixed(0)}: ${cls}${best ? ` c${best.id} ${best.d.toFixed(2)} mm` : ''}`,
+        );
+      }
+    }
     // the operator's question: where the grade puts the size — between the anchors around it, else
     // (no anchor on one side the model trusts) carried on from the two nearest, marked so
     let pred = rep.pred;

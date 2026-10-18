@@ -20,6 +20,12 @@ import { canonTopology, chordBumps, outlineOf, predictPair, selfIntersects } fro
 import { fitFamily, GFIT_TOL_P0, type GfitSizeIn, type GfitTol } from './fit';
 import { analyseOutline, ringOf } from './outline';
 
+/**
+ * own = the size's own lines; common = lines every size closes on; overlay = another size's (or an
+ * unranked) line the size may run on only where BOTH bracketing anchors' outlines run on it too
+ * (within `overlayMm`): the sizes coincide there, the drawing draws the edge once (a shared stretch
+ * in one size's pen) — the grade puts this size between them, on it.
+ */
 export type GfitWallKind = 'own' | 'common' | 'overlay';
 export type GfitWall = { pts: readonly PtMm[]; kind: GfitWallKind; closed?: boolean };
 
@@ -41,6 +47,8 @@ export const GFIT_REPAIR = {
   /** A hole end is a wall end when the wall stops within this (+ the corridor) of the snap. */
   endMm: 1.0,
   offRunMm: 10,
+  /** An overlay wall covers a sample only where both bracketing anchors lie within this, mm. */
+  overlayMm: 0.5,
   /** Notch excursion of a wall (exempt from E4): path, mouth, depth, mm. */
   notchPathMm: 24,
   notchMouthMm: 15,
@@ -167,6 +175,20 @@ export function repairSize(
     return res;
   }
   res.from = [r1, r2];
+  // the bracketing anchors' outlines (overlay walls are cover only where both run on them)
+  const ring1 = ins.find((x) => x.rank === r1)!.outer;
+  const ring2 = ins.find((x) => x.rank === r2)!.outer;
+  const g1 = new SegGrid(3);
+  g1.addPolyline(0, ring1, true);
+  const g2 = new SegGrid(3);
+  g2.addPolyline(0, ring2, true);
+  const onRing = (g: SegGrid, ring: readonly PtMm[], q: PtMm) => {
+    let hit = false;
+    g.near(q, C.overlayMm, (_o, i) => {
+      if (!hit && segNearest(q, ring[i], ring[(i + 1) % ring.length]).d <= C.overlayMm) hit = true;
+    });
+    return hit;
+  };
   const pts = P.pts;
   const n = pts.length;
   const cor = P.stepN.map((s) =>
@@ -203,6 +225,7 @@ export function repairSize(
       const w = W[sn.w];
       const atEnd = !w.closed && (sn.arc <= 1e-6 || sn.arc >= w.L - 1e-6);
       if (sn.d > r || (atEnd && sn.d > C.corridorMm)) continue;
+      if (w.kind === 'overlay' && !(onRing(g1, ring1, sn.q) && onRing(g2, ring2, sn.q))) continue;
       if (!best || sn.d < best.d) best = sn;
     }
     return best;
@@ -276,8 +299,11 @@ export function repairSize(
     const sn = snaps[iNext]!;
     let gapL = segLen(iPrev);
     for (let j = k; j < k2; j++) gapL += segLen((start + j) % n);
+    // (an overlay wall proves only where the anchors run on it: never followed through a gap)
     const sameWall =
-      sp.w === sn.w && wallArcGap(sp.w, sp.arc, sn.arc) <= 1.5 * gapL + C.notchPathMm;
+      sp.w === sn.w &&
+      W[sp.w].kind !== 'overlay' &&
+      wallArcGap(sp.w, sp.arc, sn.arc) <= 1.5 * gapL + C.notchPathMm;
     if (sameWall) {
       // drawn: the wall runs on between both sides
       for (const q of wallPath(sp.w, sp.arc, sn.arc)) {

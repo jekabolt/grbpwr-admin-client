@@ -1411,7 +1411,14 @@ function fillOneSheet(
       {
         set,
         own: (r) => live(model.byRank[r] ?? []),
-        common: live(model.common),
+        // the lines every size closes on in pass A: the common class, the LONE stretches (a shared
+        // edge drawn once, in one size's style) and the rescued 'ignore' edges (both ends on walls)
+        common: [
+          ...live([...model.common, ...rescued]),
+          ...(typeof process !== 'undefined' && process.env?.GRADE_P2_NOLONE
+            ? []
+            : lone.filter((it) => !excl.has(it.chain))),
+        ],
         wm: model,
         texts: textCentres,
       },
