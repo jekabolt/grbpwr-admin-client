@@ -51,7 +51,8 @@ import {
   withAiNames,
 } from 'lib/pattern-import/ai/dxf-names';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
-import { PATIMPORT } from 'lib/pattern-import/types';
+import { PATIMPORT, shapeFixKey, type ShapeFixAction } from 'lib/pattern-import/types';
+import { shapeIssueOf, shapeSeedOf, type ShapeMoveResult } from './shape-moves';
 import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import {
   crossKindQuestion,
@@ -227,6 +228,12 @@ export type Inputs = {
    * only: the autopilot never sets it (D3/D5). Absent = none.
    */
   gradeAnswers?: Record<string, GradeAnswer>;
+  /**
+   * SHAPE-KINK: the operator's one-shape moves on the check step, keyed `${seed}:${sizeToken}`
+   * (shapeFixKey) — 'straighten' (api.fixShape) / 'drop' (api.dropSize). The operator's only: the
+   * autopilot never sets it (D3/D5). Absent = none.
+   */
+  shapeFixes?: Record<string, ShapeFixAction>;
   assignment: FabricAssignment | null;
   /**
    * S3: the fingerprint (sheet, grid, model, each piece's outline) the answers above were given
@@ -910,6 +917,8 @@ export function useImportSession(deps: {
     ...(i.gradeAnswers && Object.keys(i.gradeAnswers).length
       ? { gradeAnswers: i.gradeAnswers }
       : {}),
+    // SHAPE-KINK: the operator's fixShape / dropSize (never the autopilot's)
+    ...(i.shapeFixes && Object.keys(i.shapeFixes).length ? { shapeFixes: i.shapeFixes } : {}),
     // the AI read "on fold" off the drawing (the sheet's words may be curves): asked, not unfolded
     foldHints: sRef.current.names.filter((n) => n.suggestion?.onFold).map((n) => n.seed),
   });
@@ -1229,6 +1238,7 @@ export function useImportSession(deps: {
             gradeAnswers: ev.input.gradeAnswers
               ? { ...ev.input.gradeAnswers }
               : iRef.current.gradeAnswers,
+            shapeFixes: ev.input.shapeFixes ? { ...ev.input.shapeFixes } : iRef.current.shapeFixes,
           });
           const out = await run('semantics', ev.input);
           patch({ semantics: out });
@@ -1238,6 +1248,29 @@ export function useImportSession(deps: {
           patchInputs({ assignment: ev.assignment });
           patch({ fabrics: ev.assignment });
           return;
+        case 'shape-fix': {
+          // SHAPE-KINK: the operator's one-shape move — recorded in the inputs, then (on the check
+          // step) semantics and the write run again; an apply-held draft is not written over
+          const seed = shapeSeedOf(sRef.current, ev.identity, ev.size);
+          if (seed == null) return;
+          const key = shapeFixKey(seed, ev.size);
+          const shapeFixes = { ...(iRef.current.shapeFixes ?? {}) };
+          if (ev.action === 'clear') delete shapeFixes[key];
+          else shapeFixes[key] = ev.action;
+          iRef.current = { ...iRef.current, shapeFixes };
+          patchInputs({ shapeFixes });
+          const s = sRef.current;
+          const held = applyLock.current;
+          const free = !held || held.draft !== s.draft || held.token === REWRITE;
+          if (s.step !== 'check' || !s.draft || !free) return;
+          if (rewriting.current) {
+            rewriteAgain.current = true;
+            return;
+          }
+          applyLock.current = { draft: s.draft, token: REWRITE, used: true };
+          await rewrite();
+          return;
+        }
         case 'write-storage': {
           // RULHOOK: the operator's storage choice; an unknown storage changes nothing
           const writeStorage = normWriteStorage(ev);
@@ -2232,6 +2265,30 @@ export function useImportSession(deps: {
     patchInputs({ asideReviewed });
   }
 
+  /**
+   * SHAPE-KINK: one operator one-shape move (`shape-fix`). Refused (nothing changes) when the
+   * check names no such held size, or — fixShape — when the gate says it cannot be straightened.
+   */
+  async function shapeMove(
+    identity: string,
+    size: string,
+    action: ShapeFixAction | 'clear',
+  ): Promise<ShapeMoveResult> {
+    const issue = shapeIssueOf(sRef.current, identity, size);
+    const asked = shapeSeedOf(sRef.current, identity, size);
+    if (action === 'clear') {
+      if (asked == null || !iRef.current.shapeFixes?.[shapeFixKey(asked, size)])
+        return { ok: false, reason: `no fix or drop asked for ${identity} ${size}` };
+    } else if (!issue)
+      return { ok: false, reason: `${identity} ${size} is not held by the shape check` };
+    else if (action === 'straighten' && !issue.fixable)
+      return { ok: false, reason: issue.why || 'not fixable' };
+    if (asked == null) return { ok: false, reason: `${identity}: no such piece in this run` };
+    await dispatch({ type: 'shape-fix', identity, size, action });
+    const err = sRef.current.error;
+    return err ? { ok: false, reason: err } : { ok: true, reason: null };
+  }
+
   /** The operator's "next": this step, then on through every step that asks nothing. */
   async function next(): Promise<void> {
     operatorActs();
@@ -2624,6 +2681,19 @@ export function useImportSession(deps: {
       /** A re-write is running. */
       rewriting: rewriting.current,
     },
+    /**
+     * SHAPE-KINK (UX-HOOKS §5): straighten `size`'s offending turns of `identity` onto the shape the
+     * other sizes share (≤ 6 mm, recorded in the manifest + passport); refused with the reason when
+     * the gate's issue says it is not fixable. One move (STOPFIX: a stop undoes it); the draft is
+     * written again. `clearShapeFix` takes the move back.
+     */
+    fixShape: (identity: string, size: string) => shapeMove(identity, size, 'straighten'),
+    /** SHAPE-KINK: export `identity` without `size` (explicit, recorded). One move. */
+    dropSize: (identity: string, size: string) => shapeMove(identity, size, 'drop'),
+    /** SHAPE-KINK: take a fixShape / dropSize back (the size as drawn). One move. */
+    clearShapeFix: (identity: string, size: string) => shapeMove(identity, size, 'clear'),
+    /** SHAPE-KINK: the one-shape moves asked, `${seed}:${size}` → action. */
+    shapeFixes: inputs.shapeFixes ?? {},
     /** STOPFIX: write the check step's draft again with the storage chosen (after a failed one). */
     retryWrite: () =>
       dispatch({ type: 'write-storage', ...(iRef.current.writeStorage ?? { storage: 'blocks' }) }),
