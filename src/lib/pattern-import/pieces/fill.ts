@@ -1754,7 +1754,11 @@ export type ContinuityJudgement = {
  * closure through an ignore / unclassified path needs anchors on BOTH sides. Then the survivors
  * together, the worst violator refused first. Kept closures carry their verdict and metrics.
  */
-export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJudgement {
+export function continuityVerdicts(
+  list: readonly PieceCandidate[],
+  /** GRADE P2: the anchors the judgement stands on (default: closed on their own lines alone) */
+  anchorOf: (c: PieceCandidate) => boolean = isAnchor,
+): ContinuityJudgement {
   const refused = new Map<number, string>();
   const kept = new Map<number, ContinuityVerdict>();
   const conts = list.filter((c) => c.rankFrom === 'continuity');
@@ -1771,7 +1775,7 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJ
     return v;
   };
   const kOf = (c: PieceCandidate) => perimeterOf(c.outer) / Math.sqrt(Math.max(1, c.areaMm2));
-  const anchors = list.filter(isAnchor).sort((a, b) => a.rank - b.rank);
+  const anchors = list.filter(anchorOf).sort((a, b) => a.rank - b.rank);
   type Pair = { lo: number; hi: number; h: number; hu: number; g: number };
   const pairs: Pair[] = [];
   for (let i = 1; i < anchors.length; i++) {
@@ -1946,7 +1950,7 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJ
   }
   // 2) the survivors together, worst first
   const ok = (x: PieceCandidate) =>
-    !refused.has(x.rank) && (clean.has(x.rank) ? isAnchor(x) : x.rankFrom === 'continuity');
+    !refused.has(x.rank) && (clean.has(x.rank) ? anchorOf(x) : x.rankFrom === 'continuity');
   for (let round = 0; round <= conts.length; round++) {
     const live = list
       .filter((x) => x.outcome === 'closed' && ok(x))

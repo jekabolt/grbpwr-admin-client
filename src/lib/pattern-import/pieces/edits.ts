@@ -212,7 +212,13 @@ export const applyPieceEdits: ApplyPieceEditsFn = (families, edits, ctx) => {
           cands.push({ ...refused, seed: head.seed });
           continue;
         }
-        if (cs.some((c) => !c || c.outer.length < 3 || c.outcome === 'leak')) {
+        // GRADE P2: a size repaired from its own family's grade is proven for that piece only — the
+        // union would carry its filled holes unmarked: the merged size is open again
+        if (
+          cs.some(
+            (c) => !c || c.outer.length < 3 || c.outcome === 'leak' || c.rankFrom === 'repair',
+          )
+        ) {
           cands.push({ ...base, seed: head.seed, outcome: 'leak', outer: [] });
           continue;
         }

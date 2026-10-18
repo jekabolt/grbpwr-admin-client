@@ -208,6 +208,8 @@ export function repairSize(
     });
   const grid = new SegGrid(3);
   W.forEach((w, k) => grid.addPolyline(k, w.p));
+  /** Own walls that come within the corridor somewhere (E4 audits them all — Codex r1). */
+  const touched = new Set<number>();
   const snapAt = (p: PtMm, r: number): Snap | null => {
     // per wall the TRUE nearest point (over all its segments); a nearest point at a wall's END is
     // no cover beyond the base corridor — past the end the line is not drawn (else the hole shrinks
@@ -222,6 +224,8 @@ export function repairSize(
     });
     let best: Snap | null = null;
     for (const sn of per.values()) {
+      // every own wall that reaches the corridor is audited by E4, chosen here or not
+      if (sn.d <= r && W[sn.w].kind === 'own') touched.add(sn.w);
       const w = W[sn.w];
       const atEnd = !w.closed && (sn.arc <= 1e-6 || sn.arc >= w.L - 1e-6);
       if (sn.d > r || (atEnd && sn.d > C.corridorMm)) continue;
@@ -377,7 +381,7 @@ export function repairSize(
   };
   const used = new Set(snaps.filter((s): s is Snap => !!s).map((s) => s.w));
   res.usedWalls = [...used].sort((a, b) => a - b);
-  for (const k of used) {
+  for (const k of new Set([...used, ...touched])) {
     const w = W[k];
     if (w.kind !== 'own') continue;
     const rs = ringOrLine(w.p, w.closed);
