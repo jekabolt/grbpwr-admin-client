@@ -8,7 +8,7 @@
 // against the grainlines the sheets DO draw (A1 'detected').
 //   node scripts/pattern-import/autopilot.mjs [case…] [--mutate=qty|size]
 //   (yarn patimport:autopilot · yarn patimport:e2e --autopilot)
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
@@ -1073,6 +1073,12 @@ export async function runCase(c: Case, mutate: string | null) {
 
   // the written files: gate, manifest round trip (the assumptions ride in every manifest)
   const wr = outs.write as StageIO['write']['out'] | undefined;
+  // golden harness: env AUTOPILOT_DXF_OUT = keep every written scope's DXF on disk (one per scope)
+  if (wr && process.env.AUTOPILOT_DXF_OUT) {
+    mkdirSync(process.env.AUTOPILOT_DXF_OUT, { recursive: true });
+    for (const sc of wr.scopes)
+      writeFileSync(resolve(process.env.AUTOPILOT_DXF_OUT, `${sc.target.label}.dxf`), sc.dxfText);
+  }
   if (wr && s.step !== 'fabrics') {
     const want = autopilotRecordOf(as, new Set((s.semantics?.pieces ?? []).map((p) => p.seed)))
       .assumptions.length;
