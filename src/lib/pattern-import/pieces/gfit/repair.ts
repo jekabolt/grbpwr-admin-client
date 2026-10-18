@@ -100,6 +100,8 @@ export type GfitRepair = {
   usedWalls: number[];
   /** The anchors the grade model trusts (after the robust fit). */
   trusted?: number[];
+  /** Why there is no model ('inconsistent', 'anchors<2', … — fitFamily; 'no-pair-match'). */
+  modelWhy?: string;
 };
 
 export type RepairOpts = {
@@ -142,6 +144,7 @@ export function repairSize(
   const ins = others.filter((s) => s.rank !== rank);
   const fam = fitFamily(ins, { tol, ...(opts.frame ? { frame: opts.frame } : {}) });
   if (!fam.model || fam.why === 'inconsistent') {
+    res.modelWhy = fam.why ?? 'no-model';
     refuse('no-model');
     return res;
   }
@@ -159,6 +162,7 @@ export function repairSize(
   const o2 = outlineOf(ins.find((x) => x.rank === r2)!.outer);
   const P = o1 && o2 ? predictPair(o1, o2, (rank - r1) / (r2 - r1), r2 - r1, fam.frame) : null;
   if (!P) {
+    res.modelWhy = 'no-pair-match';
     refuse('no-model');
     return res;
   }

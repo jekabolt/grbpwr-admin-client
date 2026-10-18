@@ -161,7 +161,9 @@ export function repairPass(
         chainOf.push(w.chain);
       }
     const rep = repairSize(ins, r, ws, { tol: GFIT_TOL_P0, frame: 'stacked' });
-    const why: string[] = [...rep.refusals];
+    const why: string[] = rep.refusals.map((w) =>
+      w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
+    );
     const holesMm = rep.holes.reduce((a, h) => a + h.lenMm, 0);
     // G15: a repaired block must pass the derived-edge audit as written
     if (rep.holes.length > GRADE_P2.maxHoles) why.push('G15-holes');
