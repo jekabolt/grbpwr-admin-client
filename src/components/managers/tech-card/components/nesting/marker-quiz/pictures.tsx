@@ -1,6 +1,7 @@
 import type { ChangeEvent, CSSProperties, JSX, ReactNode } from 'react';
 
 import { IsoPicture, type OverlayTone, type PictureData, type Point } from './iso';
+import Input from 'ui/components/input';
 
 export type FabricColours = { face: string; back: string };
 export type PicInput = {
@@ -20,6 +21,8 @@ const TABLE_LEG = 'var(--color-labelColor)';
 const STEEL = 'color-mix(in srgb, var(--color-labelColor) 45%, var(--color-bgColor))';
 const STEEL_DARK = 'color-mix(in srgb, var(--color-labelColor) 75%, var(--color-bgColor))';
 const PIECE = 'rgba(255,255,255,0.9)';
+const NEUTRAL_FACE = 'var(--color-labelColor)';
+const NEUTRAL_BACK = 'color-mix(in srgb, var(--color-labelColor) 50%, var(--color-bgColor))';
 const WASTE = 'color-mix(in srgb, var(--color-error) 28%, transparent)';
 
 const overlayClass: Record<OverlayTone, string> = {
@@ -94,9 +97,9 @@ function NumberInput({ input }: { input: PicInput }) {
 
   return (
     <span className='pointer-events-auto inline-flex items-baseline gap-1 border border-blue bg-bgColor px-1.5 py-0.5 text-blue focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue'>
-      <input
+      <Input
         aria-label={input.label}
-        className='w-[4.2ch] border-0 bg-transparent text-right text-lg font-bold text-blue outline-none tabular-nums'
+        className='min-h-0 w-[4.2ch] border-0 bg-transparent p-0 text-right text-lg font-bold text-blue tabular-nums focus:border-0'
         inputMode='decimal'
         onChange={change}
         type='text'
@@ -778,7 +781,7 @@ function expandHex(hex: string) {
 
 function lighterHex(hex: string) {
   const expanded = expandHex(hex);
-  if (!expanded) return '#bbbbbb';
+  if (!expanded) return NEUTRAL_BACK;
   const mixed = [1, 3, 5]
     .map((index) => {
       const channel = Number.parseInt(expanded.slice(index, index + 2), 16);
@@ -792,6 +795,6 @@ function lighterHex(hex: string) {
 
 export function fabricColours(hex: string | null | undefined): FabricColours {
   const candidate = hex?.trim() ?? '';
-  const face = expandHex(candidate) ? candidate : '#777777';
-  return { face, back: lighterHex(face) };
+  if (!expandHex(candidate)) return { face: NEUTRAL_FACE, back: NEUTRAL_BACK };
+  return { face: candidate, back: lighterHex(candidate) };
 }
