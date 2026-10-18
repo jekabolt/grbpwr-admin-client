@@ -22,18 +22,6 @@ export type QuizStep = 'spread' | 'confirm' | 'size' | 'knife' | 'what' | 'layer
 
 const ORDER: QuizStep[] = ['spread', 'confirm', 'size', 'knife', 'what', 'layers', 'ends', 'run'];
 
-// Имя шага в шапке: «confirm» и «size» — один шаг «table» с двумя экранами.
-const CHIP: Record<QuizStep, string> = {
-  spread: 'spread',
-  confirm: 'table',
-  size: 'table',
-  knife: 'knife',
-  what: 'what',
-  layers: 'layers',
-  ends: 'ends',
-  run: 'run',
-};
-
 const QUESTION: Record<QuizStep, string> = {
   spread: 'How do you spread the fabric?',
   confirm: 'Is this your cutting table?',
@@ -144,32 +132,6 @@ const ONE_SIZE = 'text-textBaseSize';
 const FRAMED = 'px-2.5 py-1 uppercase tracking-label';
 // Одна высота у всех контролов ряда: поле, сегменты.
 const CTRL_H = 'h-8';
-
-/** Шаги в шапке модалки: текущий залит, пройденные кликабельны. */
-export function QuizChips({ quiz }: { quiz: MarkerQuizState }) {
-  const names = [...new Set(quiz.flow.map((s) => CHIP[s]))];
-  const current = names.indexOf(CHIP[quiz.step]);
-  return (
-    <div className='flex flex-wrap items-center gap-1'>
-      {names.map((name, i) => {
-        const first = quiz.flow.find((s) => CHIP[s] === name) ?? quiz.step;
-        return i === current ? (
-          <Chip key={name} selected className={ONE_SIZE}>
-            {name}
-          </Chip>
-        ) : i < current ? (
-          <Chip key={name} className={ONE_SIZE} onClick={() => quiz.go(first)}>
-            {name}
-          </Chip>
-        ) : (
-          <Chip key={name} className={ONE_SIZE}>
-            {name}
-          </Chip>
-        );
-      })}
-    </div>
-  );
-}
 
 // Число из поля: пустое и мусор — null (поле держит строку, пока в фокусе).
 const parseNum = (raw: string, decimal: boolean): number | null => {
@@ -549,7 +511,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
               faceToFace={faceToFace}
             />
             <Text component='p' className='text-center tabular-nums'>
-              {p.plies} layers × ({parts || '—'}) = {p.cutTotal + p.extraTotal}
+              {p.plies} {p.plies === 1 ? 'layer' : 'layers'} × ({parts || '—'}) = {p.cutTotal + p.extraTotal}
               {p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal} extra</span>}
             </Text>
             <Boxes count={askThickness ? 3 : 2}>

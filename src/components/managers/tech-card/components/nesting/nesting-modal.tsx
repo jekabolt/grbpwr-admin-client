@@ -125,7 +125,6 @@ import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 import {
   MarkerQuiz,
-  QuizChips,
   QuizSummary,
   useMarkerQuiz,
   type QuizRow,
@@ -3681,7 +3680,6 @@ export function NestingModal({
       }
       width='lg'
       hideActions
-      headerActions={quizOpen ? <QuizChips quiz={quiz} /> : undefined}
     >
       {quizOpen ? (
         <MarkerQuiz
