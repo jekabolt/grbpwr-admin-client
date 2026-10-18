@@ -1,800 +1,717 @@
-import type { ChangeEvent, CSSProperties, JSX, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 
-import { IsoPicture, type OverlayTone, type PictureData, type Point } from './iso';
-import { Input } from 'ui';
-
-export type FabricColours = { face: string; back: string };
-export type PicInput = {
-  value: number;
-  onChange: (v: number) => void;
-  unit: string;
-  label: string;
-};
+import { Text } from 'ui';
 
 const INK = 'var(--color-textColor)';
-const BLUE = 'var(--color-blue)';
-const RED = 'var(--color-error)';
-const TABLE_TOP = 'var(--color-bgSecondary)';
-const TABLE_SIDE = 'color-mix(in srgb, var(--color-borderColor) 72%, var(--color-bgColor))';
-const TABLE_END = 'var(--color-borderColor)';
-const TABLE_LEG = 'var(--color-labelColor)';
-const STEEL = 'color-mix(in srgb, var(--color-labelColor) 45%, var(--color-bgColor))';
-const STEEL_DARK = 'color-mix(in srgb, var(--color-labelColor) 75%, var(--color-bgColor))';
-const PIECE = 'rgba(255,255,255,0.9)';
-const NEUTRAL_FACE = 'var(--color-labelColor)';
-const NEUTRAL_BACK = 'color-mix(in srgb, var(--color-labelColor) 50%, var(--color-bgColor))';
-const WASTE = 'color-mix(in srgb, var(--color-error) 28%, transparent)';
+const LABEL = 'var(--color-labelColor)';
+const ERROR = 'var(--color-error)';
 
-const overlayClass: Record<OverlayTone, string> = {
-  plain: '',
-  dimension: 'bg-bgColor px-1 py-px font-bold text-blue',
-  danger: 'bg-bgColor px-1 py-px font-bold text-error',
-  size: 'bg-white/90 px-1 text-micro font-bold text-black',
-  large: 'text-statBig',
-  muted: 'text-labelColor',
+const TABLE_LENGTH = 300;
+const TABLE_Y = 150;
+const GROUND_Y = 204;
+const MAX_PICTURE_HEIGHT = 240;
+
+type Tone = 'ink' | 'label' | 'error';
+type Anchor = 'left' | 'centre' | 'right';
+type ViewBox = readonly [x: number, y: number, width: number, height: number];
+
+type LabelOverlay = {
+  key: string;
+  x: number;
+  y: number;
+  content: ReactNode;
+  tone?: Tone;
+  anchor?: Anchor;
+  backed?: boolean;
 };
 
-function PictureFrame({ data }: { data: PictureData }) {
-  const [, , viewWidth, viewHeight] = data.viewBox;
-  const style: CSSProperties = {
-    aspectRatio: `${viewWidth} / ${viewHeight}`,
-    width: `min(100%, ${data.widthPx}px)`,
+const toneColour: Record<Tone, string> = {
+  ink: INK,
+  label: LABEL,
+  error: ERROR,
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function positive(value: number, fallback: number) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function nonNegative(value: number) {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function formatNumber(value: number) {
+  if (!Number.isFinite(value)) return '0';
+  return (Math.round(value * 10) / 10).toString();
+}
+
+function withMargin(
+  bounds: { left: number; top: number; right: number; bottom: number },
+  margin = 12,
+): ViewBox {
+  return [
+    bounds.left - margin,
+    bounds.top - margin,
+    Math.max(1, bounds.right - bounds.left + margin * 2),
+    Math.max(1, bounds.bottom - bounds.top + margin * 2),
+  ];
+}
+
+function pointInViewBox(value: number, start: number, length: number) {
+  return ((value - start) / length) * 100;
+}
+
+function SketchFrame({
+  viewBox,
+  overlays = [],
+  children,
+}: {
+  viewBox: ViewBox;
+  overlays?: LabelOverlay[];
+  children: ReactNode;
+}) {
+  const [, , width, height] = viewBox;
+  const renderedWidth = Math.min(720, Math.round((MAX_PICTURE_HEIGHT * width) / height));
+  const frameStyle: CSSProperties = {
+    aspectRatio: `${width} / ${height}`,
+    width: `min(100%, ${renderedWidth}px)`,
   };
 
   return (
-    <div className='relative mx-auto max-w-full' data-marker-picture='' style={style}>
+    <div className='relative mx-auto max-w-full' data-marker-picture='' style={frameStyle}>
       <svg
         aria-hidden='true'
         className='absolute inset-0 size-full overflow-visible'
         preserveAspectRatio='xMidYMid meet'
-        viewBox={data.viewBox.join(' ')}
+        viewBox={viewBox.join(' ')}
       >
-        {data.shapes.map((shape) =>
-          shape.kind === 'polygon' ? (
-            <polygon
-              key={shape.key}
-              fill={shape.fill}
-              points={shape.points}
-              stroke={shape.stroke}
-              strokeLinejoin='round'
-              strokeWidth={shape.strokeWidth}
-              vectorEffect='non-scaling-stroke'
-            />
-          ) : (
-            <line
-              key={shape.key}
-              x1={shape.x1}
-              x2={shape.x2}
-              y1={shape.y1}
-              y2={shape.y2}
-              stroke={shape.stroke}
-              strokeDasharray={shape.dash}
-              strokeLinecap='round'
-              strokeWidth={shape.strokeWidth}
-              vectorEffect='non-scaling-stroke'
-            />
-          ),
-        )}
+        {children}
       </svg>
-      {data.overlays.map((overlay) => (
-        <div
-          key={overlay.key}
-          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-textBaseSize ${overlayClass[overlay.tone]}`}
-          style={{ left: `${overlay.x}%`, top: `${overlay.y}%` }}
-        >
-          {overlay.content}
-        </div>
-      ))}
+      {overlays.map((overlay) => {
+        const anchorClass =
+          overlay.anchor === 'left'
+            ? ''
+            : overlay.anchor === 'right'
+              ? '-translate-x-full'
+              : '-translate-x-1/2';
+        const overlayStyle: CSSProperties = {
+          color: toneColour[overlay.tone ?? 'ink'],
+          left: `${pointInViewBox(overlay.x, viewBox[0], viewBox[2])}%`,
+          top: `${pointInViewBox(overlay.y, viewBox[1], viewBox[3])}%`,
+        };
+
+        return (
+          <Text
+            key={overlay.key}
+            component='span'
+            variant='uppercase'
+            className={`pointer-events-none absolute -translate-y-1/2 whitespace-nowrap ${anchorClass} ${
+              overlay.backed ? 'bg-bgColor px-1' : ''
+            }`}
+            style={overlayStyle}
+          >
+            {overlay.content}
+          </Text>
+        );
+      })}
     </div>
   );
 }
 
-function NumberInput({ input }: { input: PicInput }) {
-  const change = (event: ChangeEvent<HTMLInputElement>) => {
-    const next = Number.parseFloat(event.currentTarget.value.replace(',', '.'));
-    if (Number.isFinite(next)) input.onChange(next);
-  };
+function TableSketch({
+  x,
+  y,
+  length,
+  groundY,
+}: {
+  x: number;
+  y: number;
+  length: number;
+  groundY: number;
+}) {
+  const leftLeg = x + Math.min(12, length / 4);
+  const rightLeg = x + length - Math.min(12, length / 4);
 
   return (
-    <span className='pointer-events-auto inline-flex items-baseline gap-1 border border-blue bg-bgColor px-1.5 py-0.5 text-blue focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue'>
-      <Input
-        aria-label={input.label}
-        className='min-h-0 w-[4.2ch] border-0 bg-transparent p-0 text-right text-lg font-bold text-blue tabular-nums focus:border-0'
-        inputMode='decimal'
-        onChange={change}
-        type='text'
-        value={Number.isFinite(input.value) ? input.value : ''}
+    <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+      <line x1={x - 6} y1={y} x2={x + length + 6} y2={y} vectorEffect='non-scaling-stroke' />
+      <line
+        x1={x - 6}
+        y1={y + 4}
+        x2={x + length + 6}
+        y2={y + 4}
+        vectorEffect='non-scaling-stroke'
       />
-      {input.unit}
-    </span>
+      <line x1={leftLeg} y1={y + 4} x2={leftLeg} y2={groundY} vectorEffect='non-scaling-stroke' />
+      <line x1={rightLeg} y1={y + 4} x2={rightLeg} y2={groundY} vectorEffect='non-scaling-stroke' />
+      <line
+        x1={x - 20}
+        y1={groundY}
+        x2={x + length + 20}
+        y2={groundY}
+        stroke={LABEL}
+        vectorEffect='non-scaling-stroke'
+      />
+    </g>
   );
 }
 
-const pointValue = (point: Point, index: number) => point[index] ?? 0;
-
-function addPoints(a: Point, b: Point): [number, number, number] {
-  return [
-    pointValue(a, 0) + pointValue(b, 0),
-    pointValue(a, 1) + pointValue(b, 1),
-    pointValue(a, 2) + pointValue(b, 2),
-  ];
-}
-
-function midpoint(a: Point, b: Point): [number, number, number] {
-  return [
-    (pointValue(a, 0) + pointValue(b, 0)) / 2,
-    (pointValue(a, 1) + pointValue(b, 1)) / 2,
-    (pointValue(a, 2) + pointValue(b, 2)) / 2,
-  ];
-}
-
-function scaledPoint(point: Point, scale: number): [number, number, number] {
-  return [pointValue(point, 0) * scale, pointValue(point, 1) * scale, pointValue(point, 2) * scale];
-}
-
-function finitePositive(value: number, fallback = 1) {
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function formatOne(value: number) {
-  return (Math.round(value * 10) / 10).toString();
-}
-
-function formatMetres(cm: number) {
-  return (Math.round(cm) / 100).toFixed(2);
-}
-
-function drawTable(picture: IsoPicture, length: number, width: number, legHeight = 75) {
-  const thickness = 4;
-  const inset = Math.min(6, length / 4, width / 4);
-  const legs: ReadonlyArray<readonly [number, number]> = [
-    [inset, inset],
-    [length - inset, inset],
-    [length - inset, width - inset],
-    [inset, width - inset],
-  ];
-
-  for (const [x, y] of legs) {
-    picture.line([x, y, -thickness], [x, y, -legHeight], TABLE_LEG, 3);
-  }
-  picture.polygon(
-    [
-      [0, 0, 0],
-      [length, 0, 0],
-      [length, width, 0],
-      [0, width, 0],
-    ],
-    TABLE_TOP,
-  );
-  picture.polygon(
-    [
-      [0, width, 0],
-      [length, width, 0],
-      [length, width, -thickness],
-      [0, width, -thickness],
-    ],
-    TABLE_SIDE,
-  );
-  picture.polygon(
-    [
-      [length, 0, 0],
-      [length, width, 0],
-      [length, width, -thickness],
-      [length, 0, -thickness],
-    ],
-    TABLE_END,
+function SlashTick({ x, y, tone = 'ink' }: { x: number; y: number; tone?: Tone }) {
+  return (
+    <line
+      x1={x - 4}
+      y1={y + 4}
+      x2={x + 4}
+      y2={y - 4}
+      stroke={toneColour[tone]}
+      strokeWidth={1}
+      vectorEffect='non-scaling-stroke'
+    />
   );
 }
 
-function drawSheets(
-  picture: IsoPicture,
-  p: {
-    x: number;
-    length: number;
-    y: number;
-    width: number;
-    count: number;
-    height: number;
-    colour: (index: number) => string;
-  },
-) {
-  const count = Math.max(1, Math.min(12, Math.round(p.count)));
-  const height = Math.min(p.height, 16 / count);
+function HorizontalDimension({
+  x1,
+  x2,
+  y,
+  extensionY,
+  tone = 'ink',
+}: {
+  x1: number;
+  x2: number;
+  y: number;
+  extensionY?: number;
+  tone?: Tone;
+}) {
+  const colour = toneColour[tone];
 
-  for (let index = 0; index < count; index += 1) {
-    const z = index * height;
-    const colour = p.colour(index);
-    picture.polygon(
-      [
-        [p.x, p.y + p.width, z],
-        [p.x + p.length, p.y + p.width, z],
-        [p.x + p.length, p.y + p.width, z + height],
-        [p.x, p.y + p.width, z + height],
-      ],
-      colour,
-      INK,
-      0.6,
-    );
-    picture.polygon(
-      [
-        [p.x + p.length, p.y, z],
-        [p.x + p.length, p.y + p.width, z],
-        [p.x + p.length, p.y + p.width, z + height],
-        [p.x + p.length, p.y, z + height],
-      ],
-      colour,
-      INK,
-      0.6,
-    );
-  }
-
-  const z = count * height;
-  picture.polygon(
-    [
-      [p.x, p.y, z],
-      [p.x + p.length, p.y, z],
-      [p.x + p.length, p.y + p.width, z],
-      [p.x, p.y + p.width, z],
-    ],
-    p.colour(count - 1),
+  return (
+    <g fill='none' stroke={colour} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+      {extensionY != null && (
+        <>
+          <line
+            x1={x1}
+            y1={y + 5}
+            x2={x1}
+            y2={extensionY}
+            strokeDasharray='3 3'
+            vectorEffect='non-scaling-stroke'
+          />
+          <line
+            x1={x2}
+            y1={y + 5}
+            x2={x2}
+            y2={extensionY}
+            strokeDasharray='3 3'
+            vectorEffect='non-scaling-stroke'
+          />
+        </>
+      )}
+      <line x1={x1} y1={y} x2={x2} y2={y} vectorEffect='non-scaling-stroke' />
+      <SlashTick x={x1} y={y} tone={tone} />
+      <SlashTick x={x2} y={y} tone={tone} />
+    </g>
   );
-  return z;
 }
 
-function drawPieces(
-  picture: IsoPicture,
-  p: {
-    x: number;
-    length: number;
-    y: number;
-    width: number;
-    z: number;
-    sizes: string[];
-    labels?: boolean;
-  },
-) {
-  if (!p.sizes.length || p.length <= 0 || p.width <= 0) return;
-  const slotWidth = p.length / p.sizes.length;
+function VerticalDimension({
+  x,
+  y1,
+  y2,
+  extensionX,
+  tone = 'ink',
+}: {
+  x: number;
+  y1: number;
+  y2: number;
+  extensionX?: number;
+  tone?: Tone;
+}) {
+  const colour = toneColour[tone];
 
-  p.sizes.forEach((size, index) => {
-    const x = p.x + index * slotWidth;
-    const rectangle = (x1: number, x2: number, y1: number, y2: number) => {
-      picture.polygon(
-        [
-          [x + x1 * slotWidth, p.y + y1 * p.width, p.z],
-          [x + x2 * slotWidth, p.y + y1 * p.width, p.z],
-          [x + x2 * slotWidth, p.y + y2 * p.width, p.z],
-          [x + x1 * slotWidth, p.y + y2 * p.width, p.z],
-        ],
-        PIECE,
-        INK,
-        0.8,
-      );
-    };
-
-    rectangle(0.06, 0.6, 0.05, 0.47);
-    rectangle(0.06, 0.6, 0.53, 0.95);
-    rectangle(0.66, 0.94, 0.05, 0.33);
-    rectangle(0.66, 0.94, 0.39, 0.67);
-    if (p.labels !== false) {
-      picture.label(
-        `piece-${index}`,
-        [x + 0.33 * slotWidth, p.y + 0.5 * p.width, p.z],
-        size,
-        'size',
-      );
-    }
-  });
+  return (
+    <g fill='none' stroke={colour} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+      {extensionX != null && (
+        <>
+          <line
+            x1={extensionX}
+            y1={y1}
+            x2={x - 5}
+            y2={y1}
+            strokeDasharray='3 3'
+            vectorEffect='non-scaling-stroke'
+          />
+          <line
+            x1={extensionX}
+            y1={y2}
+            x2={x - 5}
+            y2={y2}
+            strokeDasharray='3 3'
+            vectorEffect='non-scaling-stroke'
+          />
+        </>
+      )}
+      <line x1={x} y1={y1} x2={x} y2={y2} vectorEffect='non-scaling-stroke' />
+      <SlashTick x={x} y={y1} tone={tone} />
+      <SlashTick x={x} y={y2} tone={tone} />
+    </g>
+  );
 }
 
-function drawKnife(picture: IsoPicture, x: number, y: number, stackTop: number) {
-  const bodyTop = stackTop + 14;
-  picture.polygon(
-    [
-      [x, y - 5, -2],
-      [x, y + 5, -2],
-      [x, y + 5, bodyTop],
-      [x, y - 5, bodyTop],
-    ],
-    STEEL,
-    INK,
-    1,
+function StackLines({
+  x,
+  y,
+  length,
+  count,
+  height,
+  faceToFace = false,
+  errorFrom,
+}: {
+  x: number;
+  y: number;
+  length: number;
+  count: number;
+  height: number;
+  faceToFace?: boolean;
+  errorFrom?: number;
+}) {
+  const shown = clamp(Math.round(count), 1, 12);
+  const gap = shown === 1 ? 0 : height / (shown - 1);
+  const end = x + length;
+  const safeEnd = errorFrom == null ? end : clamp(errorFrom, x, end);
+
+  return (
+    <g fill='none' strokeWidth={1} vectorEffect='non-scaling-stroke'>
+      {Array.from({ length: shown }, (_, index) => {
+        const lineY = y - 1 - index * gap;
+        const colour = faceToFace && index % 2 === 1 ? LABEL : INK;
+        return (
+          <g key={index}>
+            {safeEnd > x && (
+              <line
+                x1={x}
+                y1={lineY}
+                x2={safeEnd}
+                y2={lineY}
+                stroke={colour}
+                vectorEffect='non-scaling-stroke'
+              />
+            )}
+            {errorFrom != null && end > safeEnd && (
+              <line
+                x1={safeEnd}
+                y1={lineY}
+                x2={end}
+                y2={lineY}
+                stroke={ERROR}
+                vectorEffect='non-scaling-stroke'
+              />
+            )}
+          </g>
+        );
+      })}
+    </g>
   );
-  const left = x - 8;
-  const right = x + 8;
-  const front = y - 10;
-  const back = y + 10;
-  const headTop = bodyTop + 18;
-  picture.polygon(
-    [
-      [left, back, bodyTop],
-      [right, back, bodyTop],
-      [right, back, headTop],
-      [left, back, headTop],
-    ],
-    STEEL_DARK,
-  );
-  picture.polygon(
-    [
-      [right, front, bodyTop],
-      [right, back, bodyTop],
-      [right, back, headTop],
-      [right, front, headTop],
-    ],
-    STEEL,
-  );
-  picture.polygon(
-    [
-      [left, front, headTop],
-      [right, front, headTop],
-      [right, back, headTop],
-      [left, back, headTop],
-    ],
-    STEEL,
-  );
-  picture.line([x, y, headTop], [x - 6, y - 14, headTop + 14], INK, 3);
 }
 
-function dimension(
-  picture: IsoPicture,
-  key: string,
-  from: Point,
-  to: Point,
-  offset: Point,
-  label: ReactNode,
-  tone: OverlayTone = 'dimension',
-) {
-  const start = addPoints(from, offset);
-  const end = addPoints(to, offset);
-  picture.line(start, end, BLUE, 1.4);
-  picture.line(from, addPoints(from, scaledPoint(offset, 1.15)), BLUE, 0.8, '2 3');
-  picture.line(to, addPoints(to, scaledPoint(offset, 1.15)), BLUE, 0.8, '2 3');
-  picture.label(key, midpoint(start, end), label, tone);
+function stackHeight(stackCm: number, plies: number) {
+  const byThickness = nonNegative(stackCm) * 10;
+  const byLines = Math.max(0, Math.min(11, Math.round(plies) - 1)) * 3.2;
+  return clamp(Math.max(byThickness, byLines, 2), 2, 42);
 }
 
-function layerColour(fabric: FabricColours, faceToFace: boolean) {
-  return (index: number) => (!faceToFace || index % 2 ? fabric.face : fabric.back);
+function scaledLength(value: number, tableLength: number, pixels = TABLE_LENGTH) {
+  return (nonNegative(value) / positive(tableLength, 1)) * pixels;
 }
 
-export function SpreadChoicePicture(p: {
-  kind: 'single' | 'table';
-  fabric: FabricColours;
-}): JSX.Element {
-  const picture = new IsoPicture();
-  const length = 220;
-  const width = 120;
-  const clothWidth = 96;
-  const clothY = 12;
-  drawTable(picture, length, width, 60);
+export function SpreadChoicePicture(p: { kind: 'single' | 'table' }): JSX.Element {
+  const x = 30;
+  const y = 110;
+  const length = 210;
+  const groundY = 162;
   const count = p.kind === 'single' ? 1 : 8;
-  const sheetHeight = p.kind === 'single' ? 2 : 3.2;
-  const top = drawSheets(picture, {
-    x: 20,
-    length: 180,
-    y: clothY,
-    width: clothWidth,
-    count,
-    height: sheetHeight,
-    colour: () => p.fabric.face,
-  });
-  drawPieces(picture, {
-    x: 20,
-    length: 180,
-    y: clothY,
-    width: clothWidth,
-    z: top,
-    sizes: ['', '', '', ''],
-    labels: false,
+  const height = p.kind === 'single' ? 2 : 24;
+  const viewBox = withMargin({
+    left: x - 20,
+    top: y - height - 2,
+    right: x + length + 20,
+    bottom: groundY,
   });
 
-  if (p.kind === 'single') {
-    picture.label('scissors', [120, clothY + clothWidth + 18, top], '✂', 'large');
-  } else {
-    drawKnife(picture, 150, clothY + clothWidth * 0.8, top);
-    picture.label('layers', [0, clothY + clothWidth + 20, top], '8 layers', 'dimension');
-  }
-
-  return <PictureFrame data={picture.finish(200, 0.06)} />;
+  return (
+    <SketchFrame viewBox={viewBox}>
+      <TableSketch x={x} y={y} length={length} groundY={groundY} />
+      <StackLines x={x + 8} y={y} length={length - 16} count={count} height={height} />
+    </SketchFrame>
+  );
 }
 
 export function TablePicture(p: {
   lengthCm: number;
-  widthCm: number;
+  widthCm: number | null;
   maxStackCm?: number | null;
-  length?: PicInput;
-  width?: PicInput;
 }): JSX.Element {
-  const picture = new IsoPicture();
-  const length = Math.max(20, finitePositive(p.lengthCm, 20));
-  const width = Math.max(20, finitePositive(p.widthCm, 20));
-  drawTable(picture, length, width);
-  dimension(
-    picture,
-    'length',
-    [0, 0, 0],
-    [length, 0, 0],
-    [0, p.length ? -28 : -26, 0],
-    p.length ? <NumberInput input={p.length} /> : `${formatOne(p.lengthCm)} cm`,
-  );
-  dimension(
-    picture,
-    'width',
-    [length, 0, 0],
-    [length, width, 0],
-    [p.width ? 30 : 26, 0, 0],
-    p.width ? <NumberInput input={p.width} /> : `${formatOne(p.widthCm)} cm`,
-  );
-  if (p.maxStackCm != null) {
-    picture.label(
-      'stack-limit',
-      [length * 0.45, width * 0.5, 0],
-      `stack ≤ ${formatOne(p.maxStackCm)} cm`,
-      'muted',
-    );
+  const x = 30;
+  const length = 280;
+  const dimensionY = 94;
+  const width = p.widthCm != null && p.widthCm > 0 ? p.widthCm : null;
+  const insetLength = width == null ? 0 : clamp(scaledLength(width, p.lengthCm, length), 64, 100);
+  const insetX = x + length + 50;
+  const right = width == null ? x + length + 20 : insetX + insetLength + 20;
+  const viewBox = withMargin({ left: x - 20, top: dimensionY - 12, right, bottom: GROUND_Y });
+  const overlays: LabelOverlay[] = [
+    {
+      key: 'length',
+      x: x + length / 2,
+      y: dimensionY,
+      content: `length ${formatNumber(p.lengthCm)} cm`,
+      backed: true,
+    },
+  ];
+
+  if (width != null) {
+    overlays.push({
+      key: 'width',
+      x: insetX + insetLength / 2,
+      y: dimensionY,
+      content: `width ${formatNumber(width)} cm`,
+      backed: true,
+    });
   }
 
-  return <PictureFrame data={picture.finish()} />;
-}
-
-export function KnifePicture(p: { maxStackCm: PicInput; fabric: FabricColours }): JSX.Element {
-  const picture = new IsoPicture(false);
-  const stackHeight = Math.max(24, Math.min(96, finitePositive(p.maxStackCm.value) * 6));
-  picture.polygon(
-    [
-      [-20, 0],
-      [220, 0],
-      [220, -6],
-      [-20, -6],
-    ],
-    TABLE_SIDE,
-  );
-  picture.line([0, -6], [0, -70], TABLE_LEG, 3);
-  picture.line([200, -6], [200, -70], TABLE_LEG, 3);
-
-  const sheetCount = Math.max(4, Math.min(12, Math.round(stackHeight / 4)));
-  for (let index = 0; index < sheetCount; index += 1) {
-    const bottom = (index * stackHeight) / sheetCount;
-    const top = ((index + 1) * stackHeight) / sheetCount;
-    picture.polygon(
-      [
-        [10, bottom],
-        [150, bottom],
-        [150, top],
-        [10, top],
-      ],
-      index % 2 ? p.fabric.face : p.fabric.back,
-      INK,
-      0.4,
-    );
-  }
-  picture.polygon(
-    [
-      [160, 0],
-      [166, 0],
-      [166, stackHeight + 4],
-      [160, stackHeight + 4],
-    ],
-    STEEL,
-  );
-  picture.polygon(
-    [
-      [150, stackHeight + 4],
-      [176, stackHeight + 4],
-      [176, stackHeight + 28],
-      [150, stackHeight + 28],
-    ],
-    STEEL_DARK,
-  );
-  picture.line([176, stackHeight + 28], [196, stackHeight + 44], INK, 3);
-  picture.polygon(
-    [
-      [146, 0],
-      [180, 0],
-      [180, 2],
-      [146, 2],
-    ],
-    STEEL_DARK,
-  );
-  picture.line([190, 0], [190, stackHeight], BLUE, 1.4);
-  picture.line([182, stackHeight], [198, stackHeight], BLUE, 1.4);
-  picture.line([182, 0], [198, 0], BLUE, 1.4);
-  picture.label('max-stack', [214, stackHeight / 2], <NumberInput input={p.maxStackCm} />);
-  picture.label('fabric-stack', [80, stackHeight / 2], 'fabric stack', 'size');
-  picture.label('knife', [163, stackHeight + 50], 'knife', 'muted');
-  picture.label('side-view', [80, -50], 'side view', 'muted');
-
-  return <PictureFrame data={picture.finish(320, 0.1)} />;
-}
-
-export function GarmentPile(p: { colour: string; qty: number }): JSX.Element {
-  const count = Math.min(5, Math.max(1, Math.ceil(Math.max(0, p.qty) / 5)));
-  const shirts = Array.from({ length: count }, (_, index) => count - index - 1);
   return (
-    <svg aria-hidden='true' height='70' viewBox='-2 -20 62 62' width='70'>
-      {shirts.map((index) => (
-        <path
-          key={index}
-          d='M12 4 L4 9 L1 18 L8 20 L9 14 L9 38 L31 38 L31 14 L32 20 L39 18 L36 9 L28 4 Q20 9 12 4 Z'
-          fill={p.colour}
-          stroke={INK}
-          strokeWidth={1}
-          transform={`translate(${index * 4},${-index * 4})`}
+    <SketchFrame viewBox={viewBox} overlays={overlays}>
+      <TableSketch x={x} y={TABLE_Y} length={length} groundY={GROUND_Y} />
+      <HorizontalDimension x1={x - 6} x2={x + length + 6} y={dimensionY} extensionY={TABLE_Y - 6} />
+      {width != null && (
+        <>
+          <TableSketch x={insetX} y={TABLE_Y} length={insetLength} groundY={GROUND_Y} />
+          <HorizontalDimension
+            x1={insetX - 6}
+            x2={insetX + insetLength + 6}
+            y={dimensionY}
+            extensionY={TABLE_Y - 6}
+          />
+        </>
+      )}
+    </SketchFrame>
+  );
+}
+
+export function KnifePicture(p: { maxStackCm: number; stackCm?: number }): JSX.Element {
+  const x = 30;
+  const stackX = x + 20;
+  const stackLength = 210;
+  const limitHeight = 70;
+  const limitY = TABLE_Y - limitHeight;
+  const shownStackHeight = clamp(
+    p.stackCm == null ? 24 : (nonNegative(p.stackCm) / positive(p.maxStackCm, 30)) * limitHeight,
+    10,
+    limitHeight - 10,
+  );
+  const knifeX = stackX + stackLength + 16;
+  const dimensionX = x + TABLE_LENGTH + 24;
+  const labelX = dimensionX + 12;
+  const viewBox = withMargin({
+    left: x - 20,
+    top: limitY - 20,
+    right: labelX + 112,
+    bottom: GROUND_Y,
+  });
+
+  return (
+    <SketchFrame
+      viewBox={viewBox}
+      overlays={[
+        {
+          key: 'maximum',
+          x: labelX,
+          y: (limitY + TABLE_Y) / 2,
+          content: `max ${formatNumber(p.maxStackCm)} cm`,
+          anchor: 'left',
+        },
+      ]}
+    >
+      <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
+      <StackLines x={stackX} y={TABLE_Y} length={stackLength} count={8} height={shownStackHeight} />
+      <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+        <rect
+          x={knifeX - 7}
+          y={limitY - 18}
+          width={14}
+          height={18}
           vectorEffect='non-scaling-stroke'
         />
-      ))}
+        <line
+          x1={knifeX - 12}
+          y1={limitY - 18}
+          x2={knifeX + 12}
+          y2={limitY - 18}
+          vectorEffect='non-scaling-stroke'
+        />
+        <line
+          x1={knifeX - 1}
+          y1={limitY}
+          x2={knifeX - 1}
+          y2={TABLE_Y}
+          vectorEffect='non-scaling-stroke'
+        />
+        <line
+          x1={knifeX + 1}
+          y1={limitY}
+          x2={knifeX + 1}
+          y2={TABLE_Y}
+          vectorEffect='non-scaling-stroke'
+        />
+      </g>
+      <VerticalDimension x={dimensionX} y1={limitY} y2={TABLE_Y} extensionX={knifeX + 10} />
+    </SketchFrame>
+  );
+}
+
+export function GarmentPile(p: { qty: number }): JSX.Element {
+  return (
+    <svg
+      aria-hidden='true'
+      className='h-auto w-full'
+      style={{ maxHeight: 90, maxWidth: 80 }}
+      viewBox='0 0 48 52'
+    >
+      <path
+        d='M15 5 L6 10 L2 21 L10 24 L12 17 L12 47 L36 47 L36 17 L38 24 L46 21 L42 10 L33 5 Q24 12 15 5 Z'
+        fill='none'
+        stroke={p.qty === 0 ? LABEL : INK}
+        strokeLinejoin='miter'
+        strokeWidth={1}
+        vectorEffect='non-scaling-stroke'
+      />
     </svg>
   );
 }
 
 export function LayersPicture(p: {
   tableLengthCm: number;
-  tableWidthCm: number;
-  clothWidthCm: number;
   layCm: number;
-  endLossCm: number;
   plies: number;
   plySizes: string[];
-  faceToFace: boolean;
-  fabric: FabricColours;
   stackCm: number;
   stackOk: boolean;
+  faceToFace: boolean;
 }): JSX.Element {
-  const picture = new IsoPicture();
-  const tableLength = finitePositive(p.tableLengthCm, 20);
-  const tableWidth = finitePositive(p.tableWidthCm, 20);
-  const clothWidth = Math.max(
-    1,
-    Math.min(finitePositive(p.clothWidthCm), Math.max(1, tableWidth - 10)),
-  );
-  const clothY = (tableWidth - clothWidth) / 2;
-  const endLoss = Math.max(0, p.endLossCm);
-  const sheetX = endLoss + 4;
-  const sheetLength = Math.max(1, Math.min(finitePositive(p.layCm), tableLength + 80));
-  drawTable(picture, tableLength, tableWidth);
-  const top = drawSheets(picture, {
-    x: sheetX,
-    length: sheetLength,
-    y: clothY,
-    width: clothWidth,
-    count: p.plies,
-    height: 3,
-    colour: layerColour(p.fabric, p.faceToFace),
-  });
-  drawPieces(picture, {
-    x: sheetX + endLoss,
-    length: Math.max(1, sheetLength - endLoss * 2),
-    y: clothY,
-    width: clothWidth,
-    z: top,
-    sizes: p.plySizes,
-  });
-  drawKnife(picture, sheetX + sheetLength * 0.85, clothY + clothWidth + 16, top);
-  picture.label(
-    'layers',
-    [sheetX, clothY + clothWidth + 10, top / 2],
-    `${p.plies} layers`,
-    'dimension',
-  );
-  picture.label(
-    'stack-height',
-    [sheetX + sheetLength, clothY + clothWidth + 30, top / 2],
-    `${formatOne(p.stackCm)} cm high`,
-    p.stackOk ? 'muted' : 'danger',
-  );
+  const x = 30;
+  const stackX = x + 20;
+  const length = clamp(scaledLength(p.layCm, p.tableLengthCm), 28, TABLE_LENGTH * 1.3);
+  const height = stackHeight(p.stackCm, p.plies);
+  const stackTop = TABLE_Y - 1 - height;
+  const dimensionX = stackX + length + 10;
+  const dimensionTone: Tone = p.stackOk ? 'ink' : 'error';
+  const sizes = [...new Set(p.plySizes.map((size) => size.trim()).filter(Boolean))].join(' · ');
+  const sizeY = stackTop - 20;
+  const labelX = dimensionX + 11;
+  const right = Math.max(x + TABLE_LENGTH + 20, labelX + 155);
+  const viewBox = withMargin({ left: x - 20, top: sizeY - 10, right, bottom: GROUND_Y });
+  const overlays: LabelOverlay[] = [
+    {
+      key: 'layers',
+      x: labelX,
+      y: (stackTop + TABLE_Y - 1) / 2,
+      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'} · ${formatNumber(p.stackCm)} cm`,
+      tone: dimensionTone,
+      anchor: 'left',
+    },
+  ];
 
-  return <PictureFrame data={picture.finish()} />;
+  if (sizes) {
+    overlays.push({
+      key: 'sizes',
+      x: stackX + length / 2,
+      y: sizeY,
+      content: sizes,
+      tone: 'label',
+      backed: true,
+    });
+  }
+
+  return (
+    <SketchFrame viewBox={viewBox} overlays={overlays}>
+      <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
+      <StackLines
+        x={stackX}
+        y={TABLE_Y}
+        length={length}
+        count={p.plies}
+        height={height}
+        faceToFace={p.faceToFace}
+      />
+      <VerticalDimension
+        x={dimensionX}
+        y1={stackTop}
+        y2={TABLE_Y - 1}
+        extensionX={stackX + length}
+        tone={dimensionTone}
+      />
+    </SketchFrame>
+  );
 }
 
-export function EndsPicture(p: { endLoss: PicInput; fabric: FabricColours }): JSX.Element {
-  const picture = new IsoPicture();
-  const length = 200;
-  const width = 150;
-  const clothWidth = 120;
-  const clothY = 15;
-  const wasteWidth = Math.max(6, Math.min(70, Math.max(0, p.endLoss.value) * 5));
-  drawTable(picture, length, width);
-  const top = drawSheets(picture, {
-    x: 10,
-    length: 180,
-    y: clothY,
-    width: clothWidth,
-    count: 1,
-    height: 2,
-    colour: () => p.fabric.face,
+export function EndsPicture(p: {
+  endLossCm: number;
+  layCm: number;
+  tableLengthCm: number;
+}): JSX.Element {
+  const x = 30;
+  const stackX = x + 20;
+  const length = clamp(scaledLength(p.layCm, p.tableLengthCm), 36, TABLE_LENGTH * 1.3);
+  const height = 24;
+  const stackTop = TABLE_Y - 1 - height;
+  const rawEndWidth = scaledLength(p.endLossCm, p.tableLengthCm);
+  const endWidth = p.endLossCm > 0 ? clamp(rawEndWidth * 4, 8, length / 4) : 0;
+  const dimensionY = stackTop - 14;
+  const labelX = stackX + Math.max(endWidth, 4) + 10;
+  const viewBox = withMargin({
+    left: x - 20,
+    top: dimensionY - 10,
+    right: Math.max(x + TABLE_LENGTH + 20, labelX + 120),
+    bottom: GROUND_Y,
   });
-  picture.polygon(
-    [
-      [10, clothY, top],
-      [10 + wasteWidth, clothY, top],
-      [10 + wasteWidth, clothY + clothWidth, top],
-      [10, clothY + clothWidth, top],
-    ],
-    WASTE,
-    RED,
-    1,
-  );
-  picture.polygon(
-    [
-      [190 - wasteWidth, clothY, top],
-      [190, clothY, top],
-      [190, clothY + clothWidth, top],
-      [190 - wasteWidth, clothY + clothWidth, top],
-    ],
-    WASTE,
-    RED,
-    1,
-  );
-  drawPieces(picture, {
-    x: 10 + wasteWidth,
-    length: 180 - wasteWidth * 2,
-    y: clothY,
-    width: clothWidth,
-    z: top,
-    sizes: ['', '', ''],
-    labels: false,
-  });
-  picture.label(
-    'end-loss-input',
-    [10 + wasteWidth / 2, clothY + clothWidth + 22, top],
-    <NumberInput input={p.endLoss} />,
-  );
-  picture.label(
-    'end-loss-value',
-    [190 - wasteWidth / 2, clothY + clothWidth + 22, top],
-    `${formatOne(p.endLoss.value)} cm`,
-    'danger',
-  );
-  picture.label('waste-caption', [100, -40, top], 'cut off, thrown away', 'muted');
 
-  return <PictureFrame data={picture.finish()} />;
+  return (
+    <SketchFrame
+      viewBox={viewBox}
+      overlays={[
+        {
+          key: 'end-loss',
+          x: labelX,
+          y: dimensionY,
+          content: `${formatNumber(p.endLossCm)} cm each end`,
+          tone: 'error',
+          anchor: 'left',
+          backed: true,
+        },
+      ]}
+    >
+      <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
+      <StackLines x={stackX} y={TABLE_Y} length={length} count={8} height={height} />
+      {endWidth > 0 && (
+        <>
+          <rect
+            x={stackX}
+            y={stackTop}
+            width={endWidth}
+            height={height + 1}
+            fill={ERROR}
+            fillOpacity={0.85}
+          />
+          <rect
+            x={stackX + length - endWidth}
+            y={stackTop}
+            width={endWidth}
+            height={height + 1}
+            fill={ERROR}
+            fillOpacity={0.85}
+          />
+          <HorizontalDimension
+            x1={stackX}
+            x2={stackX + endWidth}
+            y={dimensionY}
+            extensionY={stackTop - 3}
+            tone='error'
+          />
+        </>
+      )}
+    </SketchFrame>
+  );
 }
 
 export function LayOnTablePicture(p: {
   mode: 'single' | 'table';
   tableLengthCm: number;
-  tableWidthCm: number;
-  clothWidthCm: number;
   markerLengthCm: number;
-  endLossCm: number;
   plies: number;
-  plySizes: string[];
-  faceToFace: boolean;
-  fabric: FabricColours;
   fits: boolean;
 }): JSX.Element {
-  const picture = new IsoPicture();
-  const markerLength = finitePositive(p.markerLengthCm);
-  const clothWidth = Math.max(1, Math.min(finitePositive(p.clothWidthCm), 140));
-  const colour = layerColour(p.fabric, p.faceToFace);
+  const x = 30;
 
   if (p.mode === 'single') {
-    const shownLength = Math.min(markerLength, 520);
-    const top = drawSheets(picture, {
-      x: 0,
-      length: shownLength,
-      y: 0,
-      width: clothWidth,
-      count: 1,
-      height: 2,
-      colour,
+    const naturalLength = Math.max(100, nonNegative(p.markerLengthCm) * 0.5);
+    const markerLength = Math.min(naturalLength, 340);
+    const tableLength = markerLength + 40;
+    const markerX = x + 20;
+    const dimensionY = 108;
+    const viewBox = withMargin({
+      left: x - 20,
+      top: dimensionY - 10,
+      right: x + tableLength + 20,
+      bottom: GROUND_Y,
     });
-    const visibleCount = Math.max(
-      1,
-      Math.min(p.plySizes.length, Math.floor((p.plySizes.length * shownLength) / markerLength)),
+
+    return (
+      <SketchFrame
+        viewBox={viewBox}
+        overlays={[
+          {
+            key: 'marker',
+            x: markerX + markerLength / 2,
+            y: dimensionY,
+            content: `marker ${formatNumber(p.markerLengthCm)} cm`,
+            backed: true,
+          },
+        ]}
+      >
+        <TableSketch x={x} y={TABLE_Y} length={tableLength} groundY={GROUND_Y} />
+        <StackLines x={markerX} y={TABLE_Y} length={markerLength} count={1} height={2} />
+        <HorizontalDimension
+          x1={markerX}
+          x2={markerX + markerLength}
+          y={dimensionY}
+          extensionY={TABLE_Y - 6}
+        />
+      </SketchFrame>
     );
-    drawPieces(picture, {
-      x: 0,
-      length: shownLength,
-      y: 0,
-      width: clothWidth,
-      z: top,
-      sizes: p.plySizes.slice(0, visibleCount),
-    });
-    dimension(
-      picture,
-      'marker-length',
-      [0, 0, top],
-      [shownLength, 0, top],
-      [0, -30, 0],
-      `≈ ${formatMetres(p.markerLengthCm)} m${shownLength < markerLength ? ' (cut short)' : ''}`,
-    );
-    dimension(
-      picture,
-      'cloth-width',
-      [shownLength, 0, top],
-      [shownLength, clothWidth, top],
-      [30, 0, 0],
-      `${formatOne(p.clothWidthCm)} cm`,
-    );
-    return <PictureFrame data={picture.finish()} />;
   }
 
-  const tableLength = finitePositive(p.tableLengthCm, 20);
-  const tableWidth = finitePositive(p.tableWidthCm, 20);
-  const tableClothWidth = clothWidth;
-  const clothY = (tableWidth - tableClothWidth) / 2;
-  const sheetX = 4;
-  const endLoss = Math.max(0, p.endLossCm);
-  const layLength = markerLength + endLoss * 2;
-  drawTable(picture, tableLength, tableWidth);
-  const top = drawSheets(picture, {
-    x: sheetX,
-    length: layLength,
-    y: clothY,
-    width: tableClothWidth,
-    count: p.plies,
-    height: 3,
-    colour,
-  });
-  if (!p.fits && sheetX + layLength > tableLength) {
-    picture.polygon(
-      [
-        [tableLength, clothY, top + 0.5],
-        [sheetX + layLength, clothY, top + 0.5],
-        [sheetX + layLength, clothY + tableClothWidth, top + 0.5],
-        [tableLength, clothY + tableClothWidth, top + 0.5],
-      ],
-      WASTE,
-      RED,
-      1.4,
-    );
-  }
-  drawPieces(picture, {
-    x: sheetX + endLoss,
-    length: markerLength,
-    y: clothY,
-    width: tableClothWidth,
-    z: top,
-    sizes: p.plySizes,
-  });
-  dimension(
-    picture,
-    'table-length',
-    [0, 0, 0],
-    [tableLength, 0, 0],
-    [0, -60, 0],
-    `table ${formatMetres(p.tableLengthCm)} m`,
+  const markerX = x + 20;
+  const usableLength = TABLE_LENGTH - 40;
+  const scaledMarker = scaledLength(p.markerLengthCm, p.tableLengthCm, usableLength);
+  const markerLength = clamp(
+    p.fits ? scaledMarker : Math.max(scaledMarker, TABLE_LENGTH),
+    36,
+    TABLE_LENGTH * 1.45,
   );
-  dimension(
-    picture,
-    'marker-length',
-    [sheetX, clothY + tableClothWidth, top],
-    [sheetX + layLength, clothY + tableClothWidth, top],
-    [0, 32, 0],
-    `marker ${formatMetres(layLength)} m`,
-    p.fits ? 'dimension' : 'danger',
+  const height = stackHeight(0, p.plies);
+  const stackTop = TABLE_Y - 1 - height;
+  const dimensionY = stackTop - 22;
+  const tableEnd = x + TABLE_LENGTH;
+  const markerEnd = markerX + markerLength;
+  const right = Math.max(tableEnd + 20, markerEnd + 20);
+  const viewBox = withMargin({ left: x - 20, top: dimensionY - 10, right, bottom: GROUND_Y });
+
+  return (
+    <SketchFrame
+      viewBox={viewBox}
+      overlays={[
+        {
+          key: 'marker',
+          x: markerX + markerLength / 2,
+          y: dimensionY,
+          content: `marker ${formatNumber(p.markerLengthCm)} cm`,
+          backed: true,
+        },
+      ]}
+    >
+      <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
+      <StackLines
+        x={markerX}
+        y={TABLE_Y}
+        length={markerLength}
+        count={p.plies}
+        height={height}
+        errorFrom={!p.fits ? tableEnd : undefined}
+      />
+      <HorizontalDimension x1={markerX} x2={markerEnd} y={dimensionY} extensionY={stackTop - 5} />
+    </SketchFrame>
   );
-
-  return <PictureFrame data={picture.finish()} />;
-}
-
-function expandHex(hex: string) {
-  if (/^#[\da-f]{3}$/i.test(hex)) {
-    return `#${hex
-      .slice(1)
-      .split('')
-      .map((digit) => digit + digit)
-      .join('')}`;
-  }
-  return /^#[\da-f]{6}$/i.test(hex) ? hex : null;
-}
-
-function lighterHex(hex: string) {
-  const expanded = expandHex(hex);
-  if (!expanded) return NEUTRAL_BACK;
-  const mixed = [1, 3, 5]
-    .map((index) => {
-      const channel = Number.parseInt(expanded.slice(index, index + 2), 16);
-      return Math.round(channel * 0.5 + 255 * 0.5)
-        .toString(16)
-        .padStart(2, '0');
-    })
-    .join('');
-  return `#${mixed}`;
-}
-
-export function fabricColours(hex: string | null | undefined): FabricColours {
-  const candidate = hex?.trim() ?? '';
-  if (!expandHex(candidate)) return { face: NEUTRAL_FACE, back: NEUTRAL_BACK };
-  return { face: candidate, back: lighterHex(candidate) };
 }
