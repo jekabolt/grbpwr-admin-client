@@ -36,9 +36,31 @@ function declarations(body, namespace) {
   return values;
 }
 
+/**
+ * Parse every @theme namespace that is mirrored into DESIGN.md.
+ *
+ * Keep this as the single parser for Tailwind theme declarations: both the design
+ * linter and the documentation sync consume it, so they cannot disagree about
+ * what the source of truth contains.
+ */
+export function parseThemeTokenGroups(css) {
+  const theme = atRuleBody(css, 'theme');
+
+  return {
+    colors: declarations(theme, 'color'),
+    fontSizes: declarations(theme, 'text'),
+    fontFamilies: declarations(theme, 'font-family'),
+    fontWeights: declarations(theme, 'font-weight'),
+    letterSpacing: declarations(theme, 'tracking'),
+    lineHeights: declarations(theme, 'leading'),
+    spacing: declarations(theme, 'spacing'),
+    rounded: declarations(theme, 'radius'),
+  };
+}
+
 /** Parse the source of truth used by Tailwind 4. Called by design-lint.config.mjs at load time. */
 export function parseThemeTokens(css) {
-  const theme = atRuleBody(css, 'theme');
+  const themeTokens = parseThemeTokenGroups(css);
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//gu, '');
   const customClasses = new Set();
 
@@ -50,8 +72,8 @@ export function parseThemeTokens(css) {
   }
 
   return {
-    colors: declarations(theme, 'color').map(({ name }) => name),
-    fontSizes: declarations(theme, 'text'),
+    colors: themeTokens.colors.map(({ name }) => name),
+    fontSizes: themeTokens.fontSizes,
     customClasses: [...customClasses].sort(),
   };
 }
