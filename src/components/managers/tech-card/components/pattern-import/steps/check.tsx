@@ -143,7 +143,12 @@ export function CheckStep({
   const order = [...seen.values()].filter((q) => q.kind === 'grade' || q.scopeKey === scopeKey);
   const isDone = (q: CheckQ) => !openKeys.has(q.key);
   const answered = order.filter(isDone).length;
-  const revisited = revisit ? order.find((q) => q.key === revisit) ?? null : null;
+  // only a reversible answer (shape move, grade answer) is opened again, and only while nothing
+  // blocks: a blocking question stays the coach's and the footer primary's target (open[0])
+  const blocked = open.some((q) => q.kind !== 'grade');
+  const canRevisit = (q: CheckQ) => q.kind !== 'check' && !blocked;
+  const revisited = revisit ? order.find((q) => q.key === revisit && canRevisit(q)) ?? null : null;
+  const firstReversible = order.find(canRevisit) ?? null;
   const current = revisited ?? open[0] ?? null;
   const qKey = current?.key ?? null;
   // a revisit whose question vanished from the list falls back to the open ones
@@ -471,6 +476,7 @@ export function CheckStep({
           type='button'
           aria-label={isDone(q) ? 'answered' : 'open'}
           aria-current={q.key === qKey ? 'step' : undefined}
+          disabled={!canRevisit(q) && q.key !== open[0]?.key}
           className={cn(
             'size-2 rounded-full border border-textColor',
             isDone(q) && 'bg-textColor',
@@ -622,12 +628,12 @@ export function CheckStep({
                       </DataTable>
                     </Fold>
                   )}
-                  {answered > 0 && (
+                  {answered > 0 && firstReversible && (
                     <button
                       type='button'
                       data-testid='check-change'
                       className='self-start text-left'
-                      onClick={() => setRevisit(order[0]?.key ?? null)}
+                      onClick={() => setRevisit(firstReversible.key)}
                     >
                       <Text size='micro' variant='label' component='span' className='underline'>
                         {plural(answered, 'answer')} · change
