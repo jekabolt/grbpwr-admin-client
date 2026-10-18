@@ -11,7 +11,8 @@
 //
 //   W · тело запроса: ровно прежнее — те же поля в том же порядке, снимка в нём нет;
 //   A · тот же запрос после потерянного ответа — тот же id, оплата одна; после успеха — новый id;
-//       на текущей beta принятый id держится до появления прогона в band;
+//       на текущей beta потерянный ответ сначала повторяется один раз тем же id, а принятый id
+//       держится до появления прогона в band;
 //   H · отпечаток канонический: тот же запрос с другим порядком ключей и пробелами по краям (и в
 //       params, и в снимке) — тот же id; другие слова снимка, другой порядок видов, другой реран —
 //       другой id;
@@ -392,6 +393,14 @@ const bodies = () =>
     window.__flCalls.filter((c) => c.method === 'StartDesignRun').map((c) => c.body),
   );
 const paid = () => page.evaluate(() => window.__flBooked.size);
+/** Wait for beta's one automatic retry after an ambiguous answer (no status / 408 / 499 / 5xx). */
+const waitForAutomaticRetry = async (callsBefore) => {
+  await page.waitForFunction(
+    (before) => window.__flCalls.filter((c) => c.method === 'StartDesignRun').length > before,
+    callsBefore,
+  );
+  await settle();
+};
 /** Answer the OLDEST outstanding start; accepted rows are shown in the band unless asked not to. */
 const answer = async (how, visible = true) => {
   const runId = await page.evaluate((how) => {
@@ -476,6 +485,16 @@ try {
   await boot();
   await press(FLAT);
   const first = await lastId();
+  const beforeRetry = (await ids()).length;
+  await answer('lost');
+  await waitForAutomaticRetry(beforeRetry);
+  ck(
+    (await lastId()) === first,
+    'автоповтор после потерянного ответа несёт ТОТ ЖЕ id',
+    `${first} → ${await lastId()}`,
+  );
+  // `useGenerationWrites` retries an ambiguous transport answer once. Only the result of the whole
+  // mutation reaches `useStartRun`, so the caller sees a refusal after this second lost answer.
   await answer('lost');
   await press(FLAT);
   ck(
@@ -590,9 +609,18 @@ try {
   await press(FLAT);
   const b = await lastId();
   ck(b !== a, '4xx — следующее нажатие несёт НОВЫЙ id (сервер этот ключ отверг)');
+  const before5xxRetry = (await ids()).length;
+  await answer(502);
+  await waitForAutomaticRetry(before5xxRetry);
+  ck((await lastId()) === b, 'автоповтор после 5xx несёт ТОТ ЖЕ id');
+  // Exhaust beta's single automatic retry so 502 becomes the caller-visible final result.
   await answer(502);
   await press(FLAT);
   ck((await lastId()) === b, '5xx — ключ держится (прогон мог быть заведён)');
+  const beforeLostRetry = (await ids()).length;
+  await answer('lost');
+  await waitForAutomaticRetry(beforeLostRetry);
+  ck((await lastId()) === b, 'автоповтор после тишины несёт ТОТ ЖЕ id');
   await answer('lost');
   await press(FLAT);
   ck((await lastId()) === b, 'тишина — ключ держится');
@@ -609,8 +637,13 @@ try {
   ck((await paid()) === 1, 'за всю серию — один прогон', String(await paid()));
   const refusals = await page.evaluate(() => window.__fl.settled);
   ck(
-    refusals[0]?.status === 400 && refusals[1]?.status === 502 && refusals.at(-1) === null,
-    'отказ с кодом отдан вызывающему как есть',
+    refusals.length === 5 &&
+      refusals[0]?.status === 400 &&
+      refusals[1]?.status === 502 &&
+      refusals[2]?.status === null &&
+      refusals[3]?.status === 412 &&
+      refusals[4] === null,
+    'финальный ответ каждой мутации отдан вызывающему как есть',
     JSON.stringify(refusals),
   );
 } catch (e) {

@@ -25,7 +25,7 @@ function Door() {
 
 type Probe = {
   mount: () => void;
-  /** Press GENERATE; the answer lands in `settled` whenever the probe lets the server answer. */
+  /** Press GENERATE; its final result (after beta's automatic retry, if any) lands in `settled`. */
   press: (input: StartRunInput) => void;
   /** Make an accepted run observable in the band, which releases beta's acceptance hold. */
   show: (runId: number) => void;
