@@ -439,12 +439,15 @@ export function g3g4(
  *                     outline the source does not draw, which only a drawn line ("use a line") may
  *                     supply, never a straight chord the operator invents;
  *   band-cut        — a size tick carried across its band where it stops short (reef's L: 8.5 mm):
- *                     the same 30 mm bound.
+ *                     the same 30 mm bound;
+ *   grade-fill      — GRADE P2: a hole in a repaired size's own line filled from the grade model of its
+ *                     two neighbouring anchors (E2: ≤ 15 mm, both ends ends of its own line).
  */
 export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
   bridge: 3,
   'operator-bridge': 30,
   'band-cut': 30,
+  'grade-fill': 15,
 };
 /** An end lands when the edge comes within `snapMm` of one of the piece's walls this close to that
  * end, mm (operator bridges overshoot their landing by 0.6 mm, pieces/operator.ts). */
@@ -465,6 +468,7 @@ export const DERIVED_LEN_MAX_MM: Record<DerivedEdgeKind, number> = {
   bridge: DERIVED_OFF_MAX_MM.bridge + 2 * DERIVED_LAND_REACH_MM,
   'operator-bridge': DERIVED_OFF_MAX_MM['operator-bridge'] + 2 * DERIVED_LAND_REACH_MM,
   'band-cut': DERIVED_OFF_MAX_MM['band-cut'] + 2 * DERIVED_LAND_REACH_MM,
+  'grade-fill': DERIVED_OFF_MAX_MM['grade-fill'] + 2 * DERIVED_LAND_REACH_MM,
 };
 export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
 /**

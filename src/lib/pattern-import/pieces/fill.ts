@@ -71,6 +71,7 @@ import {
   type WallModel,
 } from './walls';
 import { rankLooks } from './identity';
+import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
 import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
@@ -125,6 +126,8 @@ export type FillDiag = {
       continuity: PieceCandidate['continuity'];
     }[];
   };
+  /** GRADE P2 (hook A): sizes repaired from their family's grade, and the refusals by reason. */
+  repair?: RepairDiag;
   ms: number;
 };
 
@@ -1398,6 +1401,23 @@ function fillOneSheet(
   if (model.mode === 'file') correspond(excl);
   // derived bridges are not the solver's lines: a graded fill closes on proven walls only
   if (opts.autoBridgeMm !== 0 && !graded?.walls) bridgePass(excl);
+  // GRADE P2 (hook A): a size that leaks between two anchors — or closed on another size's line —
+  // repaired from the grade on its own and common lines (E1–E4), before the leak mouths and before
+  // the semantics block the family. Graded sheets on F4's own walls only (never the H1 solver's)
+  if (model.mode === 'graded' && !graded?.walls && !solved && !gradeP2Off()) {
+    const live = (ids: readonly ChainId[]) => itemsOf(set, ids).filter((it) => !excl.has(it.chain));
+    diag.repair = repairPass(
+      cands,
+      {
+        set,
+        own: (r) => live(model.byRank[r] ?? []),
+        common: live(model.common),
+        wm: model,
+        texts: textCentres,
+      },
+      new Set([...dropped, ...(graded?.skip ?? [])]),
+    );
+  }
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
   for (let r = 0; r < nRanks; r++) {

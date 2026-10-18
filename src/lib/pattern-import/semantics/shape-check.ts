@@ -308,6 +308,8 @@ export function countNotesOfBlocks(
     notchesRemoved?: number;
     drillsRemoved?: number;
     internalRemoved?: number;
+    /** GRADE P2: the size was repaired from the grade */
+    grade?: { geometryOrigin: string; from: readonly string[]; holesMm: number };
   }[],
   uniToken = 'UNI',
   /** GRADE P1: per identity, the count kinds the operator answered "intended" */
@@ -362,6 +364,15 @@ export function countNotesOfBlocks(
       out.push({
         identity,
         note: `notches graded (not drawn): ${g.map((b) => `${b.sizeToken} ${b.notchesGraded}`).join(', ')}`,
+      });
+    // GRADE P2 (D5): sizes whose outline was repaired from the grade of two drawn sizes
+    const rp = bs.filter((b) => b.grade?.geometryOrigin === 'repaired');
+    if (rp.length)
+      out.push({
+        identity,
+        note: `sizes repaired from the grade on their own lines (holes not drawn): ${rp
+          .map((b) => `${b.sizeToken} from ${b.grade!.from.join('+')}, ${b.grade!.holesMm} mm`)
+          .join('; ')}`,
       });
   }
   return out;

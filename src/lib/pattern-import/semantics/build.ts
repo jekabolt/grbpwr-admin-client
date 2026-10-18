@@ -624,6 +624,8 @@ export function buildPieceSpecsDetailed(
   // ── sizes ───────────────────────────────────────────────────────────────────────────────
   const cardOfRank = new Map<number, CardSize | null>();
   for (const e of sizeMap.entries) cardOfRank.set(e.source.rank, e.card);
+  /** GRADE P2: a source rank's card token (the anchors a repaired size came from). */
+  const tokOfRank = (r: number) => cardOfRank.get(r)?.token ?? run.sizes[r]?.label ?? `#${r}`;
   const cardTokens = [
     ...sizeMap.entries.flatMap((e) => (e.card ? [e.card.token] : [])),
     ...sizeMap.unmapped.map((c) => c.token),
@@ -1567,8 +1569,26 @@ export function buildPieceSpecsDetailed(
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
+        ...(c.rankFrom === 'repair' && c.repair
+          ? {
+              repair: {
+                ...c.repair,
+                fromTokens: [tokOfRank(c.repair.from[0]), tokOfRank(c.repair.from[1])],
+              },
+            }
+          : {}),
       };
       sizes.push(spec);
+      // GRADE P2 (D5): a size repaired from the grade is recorded, never presented as drawn
+      if (c.rankFrom === 'repair' && c.repair) {
+        const tok = tokOfRank;
+        const rp = c.repair;
+        pieceNotes.push(
+          `size ${card.token} repaired from the grade of ${tok(rp.from[0])} and ${tok(rp.from[1])} on its own lines (${Math.round(rp.cover * 100)} %)${
+            rp.kind === 'neighbour' ? " — it had closed on another size's line" : ''
+          }${rp.holes ? ` — ${rp.holesMm} mm in ${rp.holes} hole${rp.holes > 1 ? 's' : ''} not drawn, filled from the grade (D5)` : ''}`,
+        );
+      }
       if (derived) derivedFrom.set(spec, derived);
       wallMaps.push({
         seed,

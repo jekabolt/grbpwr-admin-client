@@ -327,6 +327,7 @@ const DERIVED_KINDS = new Set<string>([
   'bridge',
   'operator-bridge',
   'band-cut',
+  'grade-fill',
 ] satisfies DerivedEdgeKind[]);
 const isPair = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every(isNum);
@@ -857,6 +858,28 @@ export function validateManifest(x: unknown): ConversionManifest {
         `${p}.continuity`,
         'needs edges (rule R0–R2, chain ids, roles) and a D3 verdict or null',
       );
+    // GRADE P2: optional — the size was repaired from the grade (holes ≤ the G15 bounds)
+    const gr = b.grade;
+    if (
+      gr !== undefined &&
+      !(
+        isObj(gr) &&
+        gr.geometryOrigin === 'repaired' &&
+        Array.isArray(gr.from) &&
+        gr.from.length === 2 &&
+        gr.from.every((t) => isBoundedStr(t, 32)) &&
+        isInt(gr.holes) &&
+        (gr.holes as number) >= 0 &&
+        (gr.holes as number) <= 16 &&
+        isNum(gr.holesMm) &&
+        (gr.holesMm as number) >= 0 &&
+        (gr.holesMm as number) <= 1000 &&
+        isNum(gr.cover) &&
+        (gr.cover as number) >= 0 &&
+        (gr.cover as number) <= 1
+      )
+    )
+      fail(`${p}.grade`, "needs geometryOrigin 'repaired', two anchor tokens, holes and cover");
     const ci = b.block.trim().toLowerCase();
     if (blockNames.has(ci)) fail(`${p}.block`, `duplicate "${b.block}"`);
     blockNames.add(ci);
@@ -905,6 +928,20 @@ export function validateManifest(x: unknown): ConversionManifest {
         : {}),
       ...(isObj(cont)
         ? { continuity: continuityOfBlock(cont as unknown as ManifestContinuity) }
+        : {}),
+      ...(isObj(gr)
+        ? {
+            grade: {
+              geometryOrigin: 'repaired' as const,
+              from: [String((gr.from as unknown[])[0]), String((gr.from as unknown[])[1])] as [
+                string,
+                string,
+              ],
+              holes: gr.holes as number,
+              holesMm: gr.holesMm as number,
+              cover: gr.cover as number,
+            },
+          }
         : {}),
     };
   });

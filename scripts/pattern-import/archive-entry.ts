@@ -463,6 +463,18 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     familiesLeak: fams.filter((f) => f.candidates.some((c) => c.outcome === 'leak')).length,
     familiesRefused: fams.filter((f) => f.candidates.some((c) => c.outcome === 'refused')).length,
     candidates: outcomes,
+    /** GRADE P2: sizes repaired from the grade (by kind), and refused sizes carrying a grade hint */
+    repaired: countBy(
+      fams.flatMap((f) =>
+        f.candidates.filter((c) => c.rankFrom === 'repair').map((c) => c.repair?.kind ?? '?'),
+      ),
+    ),
+    familiesRepaired: fams.filter((f) => f.candidates.some((c) => c.rankFrom === 'repair')).length,
+    gradeHints: countBy(
+      fams.flatMap((f) =>
+        f.candidates.filter((c) => c.gradeHint).flatMap((c) => c.gradeHint!.refusals.slice(0, 3)),
+      ),
+    ),
     setAside: (s.pieces?.setAside ?? []).length,
     /** held text seeds: label → the junk its outline was read as */
     heldText: (s.pieces?.setAside ?? [])
