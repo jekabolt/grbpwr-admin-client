@@ -218,7 +218,23 @@ export function CheckStep({
 
   const activeFix = active ? CHECK[active.id].fix : null;
   const gradeOpen = session.semantics ? openGradeAsks(session.semantics).length : 0;
-  const question = active ? `${active.id.split('-')[0]} fails: ${CHECK[active.id].what}` : null;
+  // SHAPE-KINK (engine batch5): the structured issue and its one-click moves, when the engine has them
+  const shape = (active as ShapeCheck | null)?.shapeIssues?.[0] ?? null;
+  const moves = api as ShapeMoves;
+  const kink = shape
+    ? {
+        piece: shape.identity.replace(/_[LR]$/, ''),
+        size: shape.size,
+        mm: String(Math.round(shape.mm * 10) / 10),
+      }
+    : active
+      ? shapeKink(active)
+      : null;
+  const question = kink
+    ? `piece ${kink.piece}: size ${kink.size} runs ${kink.mm} mm off the line the other sizes share`
+    : active
+      ? `${active.id.split('-')[0]} fails: ${CHECK[active.id].what}`
+      : null;
 
   return (
     <SplitStage
@@ -311,9 +327,11 @@ export function CheckStep({
             <>
               {active && question ? (
                 <>
-                  <Text size='micro' variant='label' component='p'>
-                    question {Math.min(at, failing.length - 1) + 1} of {failing.length}
-                  </Text>
+                  {failing.length > 1 && (
+                    <Text size='micro' variant='label' component='p'>
+                      question {Math.min(at, failing.length - 1) + 1} of {failing.length}
+                    </Text>
+                  )}
                   {/* the failing check and its doors: the coach's zone */}
                   <div
                     data-ask-zone=''
@@ -330,6 +348,44 @@ export function CheckStep({
                     >
                       {question}
                     </Text>
+                    {kink && shape && (moves.fixShape || moves.dropSize) ? (
+                      <span className='flex flex-col items-stretch gap-1.5'>
+                        {shape.fixable && moves.fixShape && (
+                          <Button
+                            {...ask('check-shape-fix', true, 'straighten it like the other sizes')}
+                            variant='secondary'
+                            size='xs'
+                            data-suggested
+                            className='border-textColor'
+                            disabled={!!api.session.busy}
+                            onClick={() => void moves.fixShape!(shape.identity, shape.size)}
+                          >
+                            straighten {kink.size} like the other sizes
+                          </Button>
+                        )}
+                        {moves.dropSize && (
+                          <Button
+                            {...ask('check-shape-drop', !shape.fixable, 'export without this size')}
+                            variant='secondary'
+                            size='xs'
+                            disabled={!!api.session.busy}
+                            onClick={() => void moves.dropSize!(shape.identity, shape.size)}
+                          >
+                            leave {kink.size} out of piece {kink.piece}
+                          </Button>
+                        )}
+                        {!shape.fixable && shape.why && (
+                          <Text size='micro' variant='label' component='p'>
+                            {shape.why}
+                          </Text>
+                        )}
+                      </span>
+                    ) : kink ? (
+                      <Text size='micro' variant='label' component='p'>
+                        the other sizes are fine; no step here fixes it yet, the importer will
+                        straighten it on its own
+                      </Text>
+                    ) : null}
                     {active.blocks.length > 0 && (
                       <span className='flex flex-wrap gap-1'>
                         {active.blocks.map((b) => (
@@ -350,7 +406,7 @@ export function CheckStep({
                       </span>
                     )}
                     <span className='flex flex-col items-stretch gap-1.5'>
-                      {activeFix && (
+                      {activeFix && !kink && (active as { door?: string }).door !== 'check' && (
                         // a door back, not a fix: the answer is given on that step (coached)
                         <Button
                           {...ask('check-fix', 'open the step that fixes it')}
@@ -538,7 +594,7 @@ function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: Draf
           title={r.reasons.slice(0, 3).join('\n')}
           data-testid='check-storage-refused'
         >
-          no .rul: {r.reasons[0] ?? 'not gradable'} — per-size DXF only
+          {plainRul(r.reasons[0])}
         </Text>
       )}
     </div>
@@ -653,3 +709,43 @@ function piecesForCard(specs: PieceSpec[], token: string): PieceDTO[] {
   });
   return out;
 }
+
+/**
+ * The SHAPE note of G5 in plain words: «FP_L: one piece, one shape across sizes — XS's cut line
+ * turns where S's does not (1.5mm convex …)» → piece FP, size XS, 1.5 mm.
+ */
+function shapeKink(c: GateCheck): { piece: string; size: string; mm: string } | null {
+  if (c.id !== 'G5-features' || !c.note) return null;
+  const m =
+    /(\w+?)(?:_[LR])?: one piece, one shape across sizes \S+ (\w+)'s cut line turns where \w+'s does not \(([\d.]+) ?mm/.exec(
+      c.note,
+    );
+  return m ? { piece: m[1], size: m[2], mm: m[3] } : null;
+}
+
+/** «FP_L: POLYLINE on layer 14 (closed) has 50 points in M but 52 in XS …» in plain words. */
+function plainRul(reason: string | undefined) {
+  const m =
+    reason && /^(\w+?)(?:_[LR])?: .* has (\d+) points in (\w+) but (\d+) in (\w+)/.exec(reason);
+  if (m)
+    return `no grading table: piece ${m[1]} is drawn differently in size ${m[5]} than in ${m[3]}; the per-size DXF is the file`;
+  return `no grading table: ${reason ?? 'the sizes do not match point for point'}; the per-size DXF is the file`;
+}
+
+/** SHAPE-KINK fields until the engine's types land on this branch (batch5). */
+type ShapeCheck = GateCheck & {
+  shapeIssues?: {
+    identity: string;
+    seed: number;
+    size: string;
+    at: { x: number; y: number };
+    mm: number;
+    kind: 'extra-turn' | 'missing-turn';
+    fixable: boolean;
+    why?: string;
+  }[];
+};
+type ShapeMoves = {
+  fixShape?: (identity: string, size: string) => unknown;
+  dropSize?: (identity: string, size: string) => unknown;
+};
