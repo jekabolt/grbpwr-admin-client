@@ -27,10 +27,11 @@ const RULES = [
   { label: 'outline', cls: 'border border-borderColor', owner: 'Section' },
   { label: 'hairline', cls: 'border-b border-hairline', owner: 'Row' },
   { label: 'total rule', cls: 'border-t border-textColor', owner: 'RowTotal' },
+  { label: 'last item', cls: 'border-b-0', owner: 'Row · DataTable · Accordion · StatGrid' },
   { label: 'gap', cls: 'gap-gutter', owner: 'SectionStack' },
 ];
 // Words people search when they look for these, though none of them is a token name.
-const RULE_WORDS = ['divider', 'separator', 'rule', 'line', 'border', 'gap'];
+const RULE_WORDS = ['divider', 'separator', 'rule', 'line', 'border', 'gap', 'last'];
 
 TOKEN_BLOCKS.push({ id: 'rules', tokens: RULES.map((r) => r.label) });
 
@@ -121,11 +122,11 @@ function SpacingBody({ names }: { names: string[] }) {
   );
 }
 
-function RuleSample({ owner }: { owner: string }) {
-  switch (owner) {
-    case 'SectionHeader':
+function RuleSample({ label }: { label: string }) {
+  switch (label) {
+    case 'header rule':
       return <SectionHeader title='title' className='w-full' />;
-    case 'Section':
+    case 'outline':
       return (
         <div className='w-full bg-pageBg p-2.5'>
           <Section>
@@ -133,18 +134,28 @@ function RuleSample({ owner }: { owner: string }) {
           </Section>
         </div>
       );
-    case 'Row':
+    case 'hairline':
       return (
         <div className='w-full'>
           <Row label='wool 420' value='€ 58.80' />
           <Row label='cupro' value='€ 14.40' />
         </div>
       );
-    case 'RowTotal':
+    case 'total rule':
       return (
         <div className='w-full'>
           <Row label='cupro' value='€ 14.40' />
           <RowTotal label='total' value='€ 73.20' />
+        </div>
+      );
+    case 'last item':
+      // The last row ends in air; the block's own outline closes the list.
+      return (
+        <div className='w-full bg-pageBg p-2.5'>
+          <Section>
+            <Row label='wool 420' value='€ 58.80' />
+            <Row label='cupro' value='€ 14.40' />
+          </Section>
         </div>
       );
     default:
@@ -170,7 +181,7 @@ function RulesBody({ names }: { names: string[] }) {
       rows={RULES.filter((r) => names.includes(r.label)).map((r) => ({
         label: r.label,
         cells: [
-          <RuleSample owner={r.owner} />,
+          <RuleSample label={r.label} />,
           <Text component='span'>{r.cls}</Text>,
           <Text component='span'>{r.owner}</Text>,
         ],
