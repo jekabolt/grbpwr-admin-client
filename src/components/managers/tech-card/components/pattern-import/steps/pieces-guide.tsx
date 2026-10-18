@@ -936,12 +936,14 @@ export function findGap(
   previews: readonly Float32Array[],
   skip: ReadonlySet<number> = new Set(),
   reach = 40,
+  /** Only the ends of these lines (the leaking outline's own walls). */
+  only?: ReadonlySet<number>,
 ): GapGuess | null {
   const bx = chainBoxes(previews);
   type End = { p: PtMm; d: PtMm; chain: number };
   const ends: End[] = [];
   previews.forEach((a, i) => {
-    if (skip.has(i) || a.length < 4) return;
+    if (skip.has(i) || a.length < 4 || (only && !only.has(i))) return;
     if (bx[i * 4] > at.x + reach || bx[i * 4 + 2] < at.x - reach) return;
     if (bx[i * 4 + 1] > at.y + reach || bx[i * 4 + 3] < at.y - reach) return;
     const n = a.length;
