@@ -1089,6 +1089,49 @@ function renderRepairPng(
   }
   const L = (k: number) => labels[k] ?? String(k);
   const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  // the zoom: where the repaired outline leaves both anchors it came from (> 0.5 mm) — on a strip
+  // the end that tells the sizes apart; plus the filled holes
+  const ringsOf = r.from.map((k) => fam.candidates.find((x) => x.rank === k)?.outer ?? []);
+  const dTo = (p: PtMm, ring: PtMm[]) => {
+    let m = Infinity;
+    for (let j = 0; j < ring.length; j++) {
+      const a = ring[j];
+      const b = ring[(j + 1) % ring.length];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const L2 = dx * dx + dy * dy || 1e-9;
+      const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+      m = Math.min(m, Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy));
+    }
+    return m;
+  };
+  const step = Math.max(1, Math.floor(c.outer.length / 400));
+  const apart = c.outer.filter((p, j) => j % step === 0 && ringsOf.every((rg) => dTo(p, rg) > 0.5));
+  const focus = [...apart, ...(c.derived ?? []).flatMap((d) => d.pts)];
+  if (focus.length) {
+    let zx0 = Infinity;
+    let zy0 = Infinity;
+    let zx1 = -Infinity;
+    let zy1 = -Infinity;
+    for (const p of focus) {
+      zx0 = Math.min(zx0, p.x);
+      zy0 = Math.min(zy0, p.y);
+      zx1 = Math.max(zx1, p.x);
+      zy1 = Math.max(zy1, p.y);
+    }
+    const zb = { minX: zx0 - 30, minY: zy0 - 30, maxX: zx1 + 30, maxY: zy1 + 55 };
+    const zs = Math.max(zb.maxX - zb.minX, zb.maxY - zb.minY);
+    renderPng(file.replace(/\.png$/, '-zoom.png'), zb, strokes, marks, Math.min(12, 1400 / zs), [
+      {
+        color: '#000',
+        text: `${id.slice(0, 60)} seed ${fam.seed}: ${L(c.rank)} from ${L(r.from[0])}+${L(r.from[1])} — zoom where it leaves both`,
+      },
+      {
+        color: '#0a0',
+        text: 'green = repaired; red = filled hole; colours = other sizes; blue = its walls',
+      },
+    ]);
+  }
   renderPng(file, box, strokes, marks, Math.min(6, 1800 / span), [
     {
       color: '#000',

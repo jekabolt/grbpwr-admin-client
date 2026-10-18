@@ -561,6 +561,8 @@ type CaseRun = {
   verdict: string;
   reason: string;
   families: PieceFamily[];
+  /** The automatic pieces run (before the operator's answers drop open families). */
+  auto: PieceFamily[];
   set: ChainSet | null;
   labels: string[];
 };
@@ -593,12 +595,20 @@ async function runOnce(id: string, off: boolean): Promise<CaseRun | null> {
     set = x.wallSet ?? null;
     labels = x.run?.sizes?.map((z) => z.label) ?? [];
   };
-  const rec = await runCase(c, { onPieces: grab, onAutoPieces: (s) => grab(s) });
+  let auto: PieceFamily[] = [];
+  const rec = await runCase(c, {
+    onPieces: grab,
+    onAutoPieces: (s) => {
+      grab(s);
+      auto = families;
+    },
+  });
   delete process.env.GRADE_P2_OFF;
   return {
     verdict: String(rec.verdict),
     reason: String(rec.reason ?? '').slice(0, 240),
     families,
+    auto,
     set,
     labels,
   };
@@ -762,6 +772,25 @@ async function oneCase(id: string, png: string | null) {
       if (c.gradeHint) hints.push({ seed: f.seed, rank: c.rank, refusals: c.gradeHint.refusals });
     }
   }
+  // families the run dropped later (open ones answered "not a piece"): their hints from the auto run
+  for (const f of on.auto)
+    if (!on.families.some((x) => x.seed === f.seed))
+      for (const c of f.candidates)
+        if (c.gradeHint) {
+          hints.push({ seed: f.seed, rank: c.rank, refusals: c.gradeHint.refusals });
+          if (png)
+            renderHint(
+              resolve(
+                png,
+                `${id.replace(/[^\w.-]+/g, '_')}-auto-hint-seed${f.seed}-r${c.rank}.png`,
+              ),
+              id,
+              f,
+              c,
+              on.set,
+              on.labels,
+            );
+        }
   const allClosed = (fs: PieceFamily[]) =>
     fs.filter(
       (f) =>
