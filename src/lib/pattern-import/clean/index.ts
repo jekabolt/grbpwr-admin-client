@@ -1083,7 +1083,9 @@ export function cleanSheet(
   // LEAKS-2 (off: LEAKS2_WM_OFF=1): the row takes only the rest of its own lettering — letter-sized
   // parts within its band, in the pen its regular letters are printed in. Before, every cluster in
   // the row's (creeping) box joined it: the dashes and beads of the size lines through a 117 mm
-  // watermark were masked with it (Memoir C: 1 515 size lines).
+  // watermark were masked with it (Memoir C: 1 515 size lines). And a row is lettering only when its
+  // glyphs are mostly closed outlines (detect.ts `outlined`): pieces of size lines cut at the tile
+  // seams line up like letters but leave their ends open.
   const wmFix = !(typeof process !== 'undefined' && process.env?.LEAKS2_WM_OFF);
   const rows = !CLEAN.on.watermark
     ? []
@@ -1097,7 +1099,7 @@ export function cleanSheet(
           maxGap: CLEAN.markMaxGap,
           maxAspect: CLEAN.markMaxAspect,
           endsOnly: true,
-          ...(wmFix ? { growMinFrac: 0.2 } : {}),
+          ...(wmFix ? { growMinFrac: 0.2, closed: (i: number) => chains[i].closed } : {}),
         },
         live,
       );
