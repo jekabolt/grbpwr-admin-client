@@ -381,14 +381,18 @@ export function repairSize(
   };
   const used = new Set(snaps.filter((s): s is Snap => !!s).map((s) => s.w));
   res.usedWalls = [...used].sort((a, b) => a - b);
-  for (const k of new Set([...used, ...touched])) {
+  // every own wall given (the hook passes those near the anchors) that comes within the corridor
+  // anywhere — on its own ≤ 0.5 mm samples, half a sample of slack — is audited, used or not (Codex
+  // r1/r2: a branch losing the snap tie, or touching between two prediction samples, was unseen)
+  for (let k = 0; k < W.length; k++) {
     const w = W[k];
     if (w.kind !== 'own') continue;
     const rs = ringOrLine(w.p, w.closed);
     const off = rs.map((p) => {
       const x = distPred(p);
-      return { off: x.d > x.c, d: x.d };
+      return { off: x.d > x.c, d: x.d, near: x.d <= x.c + 0.25 };
     });
+    if (!used.has(k) && !touched.has(k) && !off.some((o) => o.near)) continue;
     const m = rs.length;
     // runs of off samples (cyclic for a closed wall)
     const runs: { a: number; b: number }[] = [];
@@ -406,8 +410,13 @@ export function repairSize(
       const last = runs.pop()!;
       runs[0] = { a: last.a - m, b: runs[0].b };
     }
+    const at = (j: number) => rs[((j % m) + m) % m];
     for (const r of runs) {
-      const len = (r.b - r.a + 1) * 0.5;
+      // measured along the wall, from the last sample in the corridor to the next (upper bound)
+      let len = 0;
+      const j0 = w.closed || r.a > 0 ? r.a - 1 : r.a;
+      const j1 = w.closed || r.b < m - 1 ? r.b + 1 : r.b;
+      for (let j = j0; j < j1; j++) len += hyp(at(j), at(j + 1));
       const atEnd = !w.closed && (r.a <= 0 || r.b >= m - 1);
       let notch = false;
       if (!atEnd && len <= C.notchPathMm) {
@@ -472,7 +481,7 @@ function ringOrLine(p: readonly PtMm[], closed: boolean): PtMm[] {
     const a = p[i - 1];
     const b = p[i];
     const L = hyp(a, b);
-    const m = Math.max(1, Math.round(L / 0.5));
+    const m = Math.max(1, Math.ceil(L / 0.5));
     for (let j = 1; j <= m; j++)
       out.push({ x: a.x + ((b.x - a.x) * j) / m, y: a.y + ((b.y - a.y) * j) / m });
   }
