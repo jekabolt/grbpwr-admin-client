@@ -127,7 +127,8 @@ function EmailRichTextEditor({
   // UnifiedTranslationFields, copy-to-all) into the editor without echoing an
   // update back out (emitUpdate:false) — the guard prevents cursor-jump loops.
   useEffect(() => {
-    if (!editor) return;
+    // StrictMode's remount hands this effect the instance tiptap just destroyed (schema null).
+    if (!editor || editor.isDestroyed) return;
     const next = value || '';
     if (next !== readHtml(editor)) {
       editor.commands.setContent(next, { emitUpdate: false });
@@ -135,7 +136,7 @@ function EmailRichTextEditor({
   }, [value, editor]);
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled);
   }, [disabled, editor]);
 
   if (!editor) return null;
