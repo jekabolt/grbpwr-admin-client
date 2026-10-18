@@ -31,11 +31,11 @@ function containsJsx(root) {
 
 function recommendation(suffix) {
   if (['Section', 'Panel', 'Card', 'Block'].includes(suffix)) {
-    return 'Use Section or SectionStack from src/ui/components/section.';
+    return "Use Section or SectionStack from 'ui'.";
   }
-  if (suffix === 'Chip') return 'Use Chip from src/ui/components/chip.';
-  if (suffix === 'Button') return 'Use Button from src/ui/components/button.';
-  return 'Use Pill from src/ui/components/pill.';
+  if (suffix === 'Chip') return "Use Chip from 'ui'.";
+  if (suffix === 'Button') return "Use Button from 'ui'.";
+  return "Use Pill from 'ui'.";
 }
 
 function report(context, node, name) {

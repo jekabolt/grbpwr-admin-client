@@ -41,9 +41,9 @@ function alternative(key) {
     return 'Use named spacing classes such as p-block, gap-stack, or gap-gutter.';
   }
   if (/^(?:font|lineHeight|letterSpacing)/u.test(key)) {
-    return 'Use Text from src/ui/components/text or a named typography class.';
+    return "Use Text from 'ui' or a named typography class.";
   }
-  return 'Use the matching src/ui primitive or named border/elevation token.';
+  return "Use the matching primitive from 'ui' or a named border/elevation token.";
 }
 
 export default {

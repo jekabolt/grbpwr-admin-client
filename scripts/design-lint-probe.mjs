@@ -27,21 +27,11 @@ tester.run('design/no-raw-control', design.rules['no-raw-control'], {
       filename,
       code: "const view = <><button>save</button><input type='checkbox' /><input type='checkbox' role='switch' /><select /><textarea /></>;",
       errors: [
-        { message: 'Use Button from src/ui/components/button instead of raw <button>.' },
-        {
-          message: 'Use Checkbox from src/ui/components/checkbox instead of raw checkbox input.',
-        },
-        {
-          message:
-            'Use ToggleSwitch from src/ui/components/toggle-switch instead of raw checkbox switch.',
-        },
-        {
-          message:
-            'Use Select, Selector, or Combobox from src/ui/components instead of raw <select>.',
-        },
-        {
-          message: 'Use Textarea from src/ui/components/text-area instead of raw <textarea>.',
-        },
+        { message: "Use Button from 'ui' instead of raw <button>." },
+        { message: "Use CheckboxCommon from 'ui' instead of raw checkbox input." },
+        { message: "Use ToggleSwitch from 'ui' instead of raw checkbox switch." },
+        { message: "Use Select, Selector, or Combobox from 'ui' instead of raw <select>." },
+        { message: "Use Textarea from 'ui' instead of raw <textarea>." },
       ],
     },
   ],
@@ -151,4 +141,45 @@ tester.run('design/no-non-token-class', design.rules['no-non-token-class'], {
   ],
 });
 
-console.log('design lint probe: all 7 rules passed');
+tester.run('design/no-deep-ui-import', design.rules['no-deep-ui-import'], {
+  valid: [
+    { filename, code: "import { Button, Text } from 'ui';" },
+    { filename, code: "import type { InputProps } from 'ui';" },
+    { filename, code: "import markTsx from 'ui/icons/grbpwr-mark.tsx?raw';" },
+    { filename, code: "import { Section } from 'components/managers/ui-kit/section';" },
+    { filename, code: "import { x } from './ui/helpers';" },
+    // inside src/ui files import each other by relative path
+    { filename: 'src/ui/components/section.tsx', code: "import Text from './text';" },
+    {
+      filename: '/repo/src/ui/form/fields/input-field.tsx',
+      code: "import Input from '../../components/input';",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "import Text from 'ui/components/text';",
+      errors: [{ message: "import from 'ui', not ui/components/text" }],
+    },
+    {
+      filename,
+      code: "import InputField from 'ui/form/fields/input-field'; import { Arrow } from 'ui/icons/arrow';",
+      errors: 2,
+    },
+    {
+      filename: '/repo/src/components/managers/hero/components/picker.tsx',
+      code: "import { Button } from '../../../../ui/components/button'; export { default } from '@/ui/components/media';",
+      errors: [
+        { message: "import from 'ui', not ../../../../ui/components/button" },
+        { message: "import from 'ui', not @/ui/components/media" },
+      ],
+    },
+    {
+      filename,
+      code: "const m = import('ui/components/media');",
+      errors: 1,
+    },
+  ],
+});
+
+console.log('design lint probe: all 8 rules passed');

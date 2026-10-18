@@ -1,10 +1,10 @@
 const CONTROL_MESSAGES = {
-  button: 'Use Button from src/ui/components/button instead of raw <button>.',
-  input: 'Use Input from src/ui/components/input instead of raw <input>.',
-  checkbox: 'Use Checkbox from src/ui/components/checkbox instead of raw checkbox input.',
-  switch: 'Use ToggleSwitch from src/ui/components/toggle-switch instead of raw checkbox switch.',
-  select: 'Use Select, Selector, or Combobox from src/ui/components instead of raw <select>.',
-  textarea: 'Use Textarea from src/ui/components/text-area instead of raw <textarea>.',
+  button: "Use Button from 'ui' instead of raw <button>.",
+  input: "Use Input from 'ui' instead of raw <input>.",
+  checkbox: "Use CheckboxCommon from 'ui' instead of raw checkbox input.",
+  switch: "Use ToggleSwitch from 'ui' instead of raw checkbox switch.",
+  select: "Use Select, Selector, or Combobox from 'ui' instead of raw <select>.",
+  textarea: "Use Textarea from 'ui' instead of raw <textarea>.",
 };
 
 function elementName(node) {
