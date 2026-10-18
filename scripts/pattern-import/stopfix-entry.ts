@@ -52,7 +52,7 @@ type Hooks = {
    * 'kill' = the stage starts, the operator stops it, the worker is terminated under it; 'soft' =
    * the soft cancel lands in the stage: the worker ran its invalidation, the session lives on.
    */
-  before?: (stage: StageName, sid: number, nth: number) => 'kill' | 'soft' | void;
+  before?: (stage: StageName, sid: number, nth: number) => 'kill' | 'soft' | 'error' | void;
   /** After a stage: the output to hand back (a perturbed one), or nothing. */
   after?: (stage: StageName, sid: number, out: unknown) => unknown;
 };
@@ -95,6 +95,7 @@ function killableClient() {
       const n = (t.nth.get(stage) ?? 0) + 1;
       t.nth.set(stage, n);
       const how = t.hooks.before?.(stage, id, n);
+      if (how === 'error') throw new Error('the stage failed (probe)');
       if (how === 'soft') {
         (s as unknown as { invalidateAfter(x: StageName): void }).invalidateAfter(stage);
         throw new ImportWorkerError('cancelled', 'stopped by the operator', stage);
@@ -326,6 +327,22 @@ async function optitex(c: Case) {
   check(base.api().session.step === 'check', 'baseline reaches check', base.api().session.step);
   const baseRuns = base.t.log.map((x) => x.stage);
   console.log(`    baseline stages: ${baseRuns.join(' ')}`);
+
+  // PROMOTE-BATCH: an id that is not set aside is skipped with its reason — nothing runs
+  {
+    const n0 = base.t.log.length;
+    const r = await base.api().promoteAsides([424242]);
+    check(
+      !!r &&
+        !Object.keys(r.seeds).length &&
+        r.skipped.length === 1 &&
+        /not set aside/.test(r.skipped[0].why) &&
+        base.t.log.length === n0 &&
+        !base.api().session.error,
+      'promote-asides: an unknown id is skipped with its reason, no run, no error',
+      r,
+    );
+  }
 
   // (1) hard kill at the latest stage (write), then resume
   {
@@ -711,6 +728,96 @@ async function kombinezon(c: Case) {
     d.length === 0,
     'kombinezon kill@pieces: the resumed run ends as the run without the stop',
     d,
+  );
+
+  // ── PROMOTE-BATCH: two outlines set aside on a guess brought back (PATTERNS' kombinezon) ──
+  console.log(`\n· ${c.id} · promote-asides`);
+  const pick = [...(base.api().session.pieces?.setAside ?? [])]
+    .filter((x) => x.areaMm2 > 0)
+    .sort((x, y) => y.areaMm2 - x.areaMm2)
+    .slice(0, 2)
+    .map((x) => x.id);
+  check(pick.length === 2, 'promote: two outlines set aside to bring back', pick);
+  // before: one promote after the other (one pieces run each)
+  t0 = Date.now();
+  for (const id of pick) {
+    const x = base.api().session.pieces?.setAside?.find((y) => y.id === id);
+    if (x) await base.api().promoteAside(x);
+  }
+  const seqMs = Date.now() - t0;
+  const S = endOf(base.api());
+  const seqSeeds = Object.fromEntries(
+    base.api().inputs.clickSeeds.flatMap((x) => (x.aside != null ? [[x.aside, x.id]] : [])),
+  );
+  const ask = [...pick, 999999, pick[0]];
+  // Codex: a failure (not a stop) in the batch's run undoes it too — nothing left "promoted"
+  let failing = true;
+  w.t.hooks.before = (stage) => {
+    if (stage !== 'pieces' || !failing) return;
+    failing = false;
+    return 'error';
+  };
+  const rf = await w.api().promoteAsides(ask);
+  await sleep(50);
+  check(
+    rf === null &&
+      w.api().inputs.clickSeeds.length === 0 &&
+      digestOf(w.api().session.pieces) === B.parts.pieces &&
+      /failed \(probe\)/.test(w.api().session.error ?? ''),
+    'promote: a failed batch is undone (no seed kept, the pieces as before, the error said)',
+    { rf, error: w.api().session.error },
+  );
+  // a stop in the batch's pieces run: the whole batch undone
+  let armed = true;
+  w.t.hooks.before = (stage) => {
+    if (stage !== 'pieces' || !armed) return;
+    armed = false;
+    w.api().cancel();
+    return 'kill';
+  };
+  const runs0 = w.t.log.filter((x) => x.stage === 'pieces').length;
+  const r0 = await w.api().promoteAsides(ask);
+  await sleep(50);
+  const wa = w.api();
+  check(
+    r0 === null &&
+      wa.inputs.clickSeeds.length === 0 &&
+      digestOf(wa.session.pieces) === B.parts.pieces &&
+      wa.restorePending &&
+      wa.errorCode === 'cancelled',
+    'promote: a stop in the batch undoes all of it (no seed kept, the pieces as before)',
+    { r0, seeds: wa.inputs.clickSeeds.length },
+  );
+  t0 = Date.now();
+  const r1 = await w.api().promoteAsides(ask);
+  const restoredMs = Date.now() - t0;
+  const runs1 = w.t.log.filter((x) => x.stage === 'pieces').length - runs0;
+  check(
+    !!r1 &&
+      JSON.stringify(r1.seeds) === JSON.stringify(seqSeeds) &&
+      r1.skipped.map((x) => `${x.id}:${x.why}`).join() ===
+        `999999:not set aside now (the pieces were read again, or it is a piece already),${pick[0]}:given twice`,
+    'promote: the seeds are the ones sequential promotes give; unknown and repeated ids skipped with their reason',
+    r1,
+  );
+  const dW = diffOf(S, endOf(w.api()));
+  check(dW.length === 0, 'promote after a stop: restored, ends as the sequential promotes', dW);
+  // after: the batch on a fresh run (one pieces run)
+  const x = mount(c);
+  await x.start();
+  const p0 = x.t.log.filter((y) => y.stage === 'pieces').length;
+  t0 = Date.now();
+  const r2 = await x.api().promoteAsides(pick);
+  const batchMs = Date.now() - t0;
+  const p1 = x.t.log.filter((y) => y.stage === 'pieces').length - p0;
+  const dX = diffOf(S, endOf(x.api()));
+  check(
+    !!r2 && p1 === 1 && dX.length === 0,
+    'promote: the batch is ONE pieces run and ends output for output as the sequential promotes',
+    { runs: p1, d: dX },
+  );
+  console.log(
+    `    kombinezon, 2 outlines: sequential ${(seqMs / 1000).toFixed(1)}s (2 pieces runs) → batch ${(batchMs / 1000).toFixed(1)}s (1 run); after a stop: restore + batch ${(restoredMs / 1000).toFixed(1)}s (${runs1} pieces runs: replayed + the batch)`,
   );
 }
 

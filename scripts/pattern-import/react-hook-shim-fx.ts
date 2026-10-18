@@ -1,95 +1,116 @@
 // STOPFIX: the one-component React stand-in (react-hook-shim.ts) WITH effects — the wizard hook's
 // drive (auto-advance) is an effect, and the stop probe needs the real one. State and refs by call
 // order, a re-render batched to the end of the microtask; an effect runs after the render that
-// changed its deps, as a macrotask (React's passive effects), its cleanup before it runs again.
-// Nothing unmounts. Used only by stopfix.mjs (the other probes keep the effect-less shim).
-let slots: unknown[] = [];
-let at = 0;
-let scheduled = false;
-let render: (() => void) | null = null;
-let pending: (() => void)[] = [];
-
+// changed its deps, as a macrotask (React's passive effects), its cleanup before it runs again, and
+// a render's effects are flushed before the next render of the same component (as React does).
+// Each `mountHook` is its own component: several can live side by side (a baseline and a stopped
+// run compared). Nothing unmounts. Used only by stopfix.mjs.
 type Eff = { deps?: readonly unknown[]; cleanup?: void | (() => void) };
+type Inst = {
+  slots: unknown[];
+  at: number;
+  scheduled: boolean;
+  pending: (() => void)[];
+  due: (() => void)[];
+  render: () => void;
+};
 
-/** The effects of the last render not run yet — flushed before the next render, as React does. */
-let due: (() => void)[] = [];
-const flush = () => {
-  const run = due;
-  due = [];
+/** The component being rendered (hooks read their slots from it). */
+let cur: Inst | null = null;
+let last: Inst | null = null;
+
+const flush = (i: Inst) => {
+  const run = i.due;
+  i.due = [];
   run.forEach((f) => f());
 };
 
 export function mountHook(fn: () => void) {
-  slots = [];
-  due = [];
-  render = () => {
-    // React runs a render's passive effects before it commits the next one: an effect never
-    // runs with the closure of a render that a newer one has replaced
-    flush();
-    at = 0;
-    pending = [];
-    fn();
-    due = pending;
-    pending = [];
-    if (due.length) setTimeout(flush, 0);
+  const inst: Inst = {
+    slots: [],
+    at: 0,
+    scheduled: false,
+    pending: [],
+    due: [],
+    render: () => {
+      flush(inst);
+      const prev = cur;
+      cur = inst;
+      inst.at = 0;
+      inst.pending = [];
+      try {
+        fn();
+      } finally {
+        cur = prev;
+      }
+      inst.due = inst.pending;
+      inst.pending = [];
+      if (inst.due.length) setTimeout(() => flush(inst), 0);
+    },
   };
-  render();
+  last = inst;
+  inst.render();
 }
 
-/** Render now (after an awaited transition, so the refs read the latest state). */
+/** Render the last mounted component now. */
 export function rerender() {
-  render?.();
+  last?.render();
 }
 
-function schedule() {
-  if (scheduled) return;
-  scheduled = true;
-  queueMicrotask(() => {
-    scheduled = false;
-    render?.();
-  });
-}
+const me = (): Inst => {
+  if (!cur) throw new Error('a hook called outside a render');
+  return cur;
+};
 
 export function useState<T>(init: T | (() => T)): [T, (v: T | ((p: T) => T)) => void] {
-  const i = at++;
-  if (slots.length <= i) slots[i] = typeof init === 'function' ? (init as () => T)() : init;
+  const inst = me();
+  const i = inst.at++;
+  if (inst.slots.length <= i)
+    inst.slots[i] = typeof init === 'function' ? (init as () => T)() : init;
   const set = (v: T | ((p: T) => T)) => {
-    slots[i] = typeof v === 'function' ? (v as (p: T) => T)(slots[i] as T) : v;
-    schedule();
+    inst.slots[i] = typeof v === 'function' ? (v as (p: T) => T)(inst.slots[i] as T) : v;
+    if (inst.scheduled) return;
+    inst.scheduled = true;
+    queueMicrotask(() => {
+      inst.scheduled = false;
+      inst.render();
+    });
   };
-  return [slots[i] as T, set];
+  return [inst.slots[i] as T, set];
 }
 
 export function useRef<T>(init: T): { current: T } {
-  const i = at++;
-  if (slots.length <= i) slots[i] = { current: init };
-  return slots[i] as { current: T };
+  const inst = me();
+  const i = inst.at++;
+  if (inst.slots.length <= i) inst.slots[i] = { current: init };
+  return inst.slots[i] as { current: T };
 }
 
 export function useMemo<T>(f: () => T): T {
-  at++;
+  me().at++;
   return f();
 }
 
 export function useCallback<T>(f: T): T {
-  at++;
+  me().at++;
   return f;
 }
 
 export function useEffect(f: () => void | (() => void), deps?: readonly unknown[]) {
-  const i = at++;
-  const prev = slots[i] as Eff | undefined;
+  const inst = me();
+  const i = inst.at++;
+  const prev = inst.slots[i] as Eff | undefined;
   const changed =
     !prev ||
     !deps ||
     !prev.deps ||
     deps.length !== prev.deps.length ||
     deps.some((d, k) => !Object.is(d, prev.deps![k]));
-  if (!prev) slots[i] = {} as Eff;
+  if (!prev) inst.slots[i] = {} as Eff;
   if (!changed) return;
-  const e = slots[i] as Eff;
+  const e = inst.slots[i] as Eff;
   e.deps = deps;
-  pending.push(() => {
+  inst.pending.push(() => {
     if (typeof e.cleanup === 'function') e.cleanup();
     e.cleanup = f();
   });

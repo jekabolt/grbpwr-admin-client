@@ -2260,6 +2260,112 @@ export function useImportSession(deps: {
     return addSeed(a.at, a);
   }
 
+  /**
+   * PROMOTE-BATCH (Codex): the next free seed id — above every seed the worker may hold: the first
+   * run's, the clicks, the seeds on screen and the text seeds held back with a set-aside outline
+   * (one of those taken again by a click would promote the wrong outline).
+   */
+  const nextSeedId = (i: Inputs, extra: readonly Seed[] = []) =>
+    Math.max(
+      0,
+      ...(baseSeeds.current ?? []).map((x) => x.id),
+      ...i.clickSeeds.map((x) => x.id),
+      ...(sRef.current.pieces?.seeds ?? []).map((x) => x.id),
+      ...(sRef.current.pieces?.setAside ?? []).flatMap((a) => (a.seed ? [a.seed.id] : [])),
+      ...extra.map((x) => x.id),
+    ) + 1;
+
+  /**
+   * PROMOTE-BATCH: "these are pieces" on several set-aside outlines at once — the seeds that
+   * `promoteAside` gives each, in the order given, with ONE pieces run. One move: a stop — or any
+   * failure — undoes the whole batch. An id that is not among the outlines set aside now (read
+   * again, a piece already, given twice) is skipped with its reason, never a failure. Returns the
+   * seed each promoted aside became (a following piece-edits names them) — only seeds the fill made
+   * a piece of; a seed the fill dropped is reported skipped. null = the batch was undone.
+   */
+  async function promoteAsides(ids: readonly number[]): Promise<PromoteResult | null> {
+    operatorActs();
+    return asMove(async () => {
+      try {
+        const i = iRef.current;
+        const shown = new Map((sRef.current.pieces?.setAside ?? []).map((a) => [a.id, a]));
+        const added: Seed[] = [];
+        const want = new Map<number, SeedId>();
+        const res: PromoteResult = { seeds: {}, skipped: [] };
+        for (const id of ids) {
+          const a = shown.get(id);
+          if (want.has(id) || !a) {
+            res.skipped.push({
+              id,
+              why: want.has(id)
+                ? 'given twice'
+                : 'not set aside now (the pieces were read again, or it is a piece already)',
+            });
+            continue;
+          }
+          // a seed already given for it that the fill has not taken: used again, not doubled
+          const own = [...i.clickSeeds, ...added].find(
+            (x) => x.aside === id || (!!a.seed && x.id === a.seed.id),
+          );
+          const seed: Seed = own ??
+            a.seed ?? {
+              id: nextSeedId(i, added),
+              at: a.at,
+              origin: 'click',
+              variant: i.variant,
+              aside: a.id,
+            };
+          if (!own) added.push(seed);
+          want.set(id, seed.id);
+        }
+        if (!want.size) return res;
+        // Codex: the fill judges a not-a-piece seed against the pieces of the run before
+        // (`separator`): with one of those edits, several promotes run one after the other (the
+        // runs the clicks make), so the batch never draws what the clicks would not
+        const oneByOne = want.size > 1 && i.edits.some((e) => e.kind === 'not-a-piece');
+        const fill = async (clicks: readonly Seed[], seeds: readonly Seed[]) => {
+          let out: StageIO['pieces']['out'] | null = null;
+          for (let k = oneByOne ? Math.min(1, seeds.length) : seeds.length; ; k++) {
+            const step = { ...i, clickSeeds: [...clicks, ...seeds.slice(0, k)] };
+            iRef.current = step;
+            patchInputs({ clickSeeds: step.clickSeeds });
+            out = await run('pieces', piecesInput(step));
+            patch({ pieces: out });
+            settleToPieces();
+            if (k >= seeds.length) break;
+          }
+          return new Set((out?.families ?? []).map((f) => f.seed));
+        };
+        let made = await fill(i.clickSeeds, added);
+        // Codex: a seed the fill made no piece of (another model's held seed, a duplicate label)
+        // is taken back and the fill runs once more without it — its outline stays set aside
+        const dropped = [...want].filter(([, sd]) => !made.has(sd));
+        if (dropped.length) {
+          const gone = new Set(dropped.map(([, sd]) => sd));
+          made = await fill(
+            i.clickSeeds.filter((x) => !gone.has(x.id)),
+            added.filter((x) => !gone.has(x.id)),
+          );
+          for (const [id] of dropped) {
+            res.skipped.push({ id, why: 'the fill made no piece of it — left set aside' });
+            want.delete(id);
+          }
+        }
+        for (const [id, sd] of want) {
+          // still none: the batch is undone rather than handing back a seed with no piece
+          if (!made.has(sd)) throw new Error(`promote-asides: no piece came of outline ${id}`);
+          res.seeds[id] = sd;
+        }
+        return res;
+      } catch (e) {
+        // Codex: any failure undoes the batch (inputs never say "promoted" over pieces that do not)
+        if (move.current) move.current.stopped = true;
+        fail(e);
+        return null;
+      }
+    });
+  }
+
   /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
   async function addSeed(at: PtMm, aside?: SetAside) {
     operatorActs();
@@ -2268,8 +2374,7 @@ export function useImportSession(deps: {
   async function addSeedMove(at: PtMm, aside?: SetAside) {
     try {
       const i = iRef.current;
-      const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
-      const id = Math.max(0, ...all.map((s) => s.id)) + 1;
+      const id = nextSeedId(i);
       const seed: Seed = aside?.seed
         ? aside.seed
         : aside
@@ -2545,6 +2650,8 @@ export function useImportSession(deps: {
     next,
     addSeed,
     promoteAside,
+    /** PROMOTE-BATCH: several set-aside outlines are pieces — one pieces run (UX-HOOKS §4). */
+    promoteAsides,
     editPieces,
     editName,
     editNames,
@@ -2618,6 +2725,12 @@ export function useImportSession(deps: {
 }
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
+
+/** PROMOTE-BATCH: per promoted aside id, the seed id it became; what was skipped and why. */
+export type PromoteResult = {
+  seeds: Record<number, SeedId>;
+  skipped: { id: number; why: string }[];
+};
 
 /** Where a name came from, as the manifest records it (lib: ai/dxf-names.ts). */
 export { nameOriginOf };
