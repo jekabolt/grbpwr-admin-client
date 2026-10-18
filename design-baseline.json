@@ -1306,7 +1306,7 @@
   },
   "src/components/managers/tech-card/components/nesting/piece-sheet.tsx": {
     "design/no-arbitrary-px": 1,
-    "design/no-hex-color": 16,
+    "design/no-hex-color": 14,
     "design/no-non-token-class": 1,
     "design/no-raw-control": 3
   },

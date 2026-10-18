@@ -88,7 +88,7 @@ import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
 import {
   hasOldPieceLoss,
-  OldPiecesPanel,
+  OldPiecesDecision,
   type OldPieceDecision,
   type OldPieceItem,
 } from './old-pieces-panel';
@@ -1827,8 +1827,7 @@ export function PieceMatchModal({
         }`,
       );
     }
-    if (blockCounts.size === 0 && mineByBlock.size === 0)
-      warnings.push('no named pieces');
+    if (blockCounts.size === 0 && mineByBlock.size === 0) warnings.push('no named pieces');
   }
   if (foreignSizes.length > 0) {
     warnings.push(
@@ -1916,7 +1915,7 @@ export function PieceMatchModal({
   // so the pick tiles honestly carry words only: there is no old geometry to preview on hover.
   const goneQuestion =
     deleteCandidates.length > 0 ? (
-      <OldPiecesPanel
+      <OldPiecesDecision
         items={oldPieceItems}
         decisionOf={deleteDecision}
         onDecide={setGoneDecisions}

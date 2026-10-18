@@ -501,14 +501,13 @@ export function CheckStep({
   const dots = order.length > 0 && (
     <span className='flex items-center gap-1.5' data-testid='check-dots'>
       {order.map((q) => (
-        <button
+        <Button
           key={q.key}
-          type='button'
           aria-label={isDone(q) ? 'answered' : 'open'}
           aria-current={q.key === qKey ? 'step' : undefined}
           disabled={!canRevisit(q) && q.key !== open[0]?.key}
           className={cn(
-            'size-2 rounded-full border border-textColor',
+            'size-2 border border-textColor',
             isDone(q) && 'bg-textColor',
             q.key === qKey && 'outline outline-1 outline-offset-2 outline-textColor',
           )}
@@ -516,7 +515,9 @@ export function CheckStep({
             setMoveErr(null);
             setRevisit(q.key === open[0]?.key ? null : q.key);
           }}
-        />
+        >
+          {null}
+        </Button>
       ))}
     </span>
   );

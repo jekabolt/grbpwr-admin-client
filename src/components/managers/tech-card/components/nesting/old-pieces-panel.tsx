@@ -62,7 +62,7 @@ function keptLosses(items: readonly OldPieceItem[]): string {
     .join(', ');
 }
 
-function DecisionButton({
+function Decision({
   children,
   selected,
   disabled,
@@ -103,30 +103,31 @@ function PieceTile({
   const next = decision === 'keep' ? 'delete' : 'keep';
   const losses = itemLosses(item.losses);
   return (
-    <button
-      type='button'
+    <Button
+      size='sm'
       aria-label={`${next} ${label}`}
       title={item.name}
       disabled={disabled}
       onClick={onMove}
       className={cn(
-        'flex min-h-[72px] items-center border bg-bgColor px-3 text-left text-micro uppercase tracking-pill',
-        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-        'disabled:cursor-not-allowed disabled:bg-bgColor disabled:text-textInactiveColor',
+        'w-full border bg-bgColor text-left',
+        'disabled:bg-bgColor disabled:text-textInactiveColor',
         decision === 'keep'
           ? 'border-textColor text-textColor hover:bg-bgZebra'
-          : 'border-hairline text-[#999999] hover:border-borderColor hover:text-labelColor',
+          : 'border-hairline text-labelColor hover:border-borderColor',
       )}
     >
-      <span className='min-w-0'>
-        <span className='block truncate'>piece {label}</span>
-        {losses && <span className='mt-1 block text-current'>{losses}</span>}
+      <span className='flex min-h-18 min-w-0 items-center'>
+        <span className='min-w-0'>
+          <span className='block truncate'>piece {label}</span>
+          {losses && <span className='mt-1 block text-current'>{losses}</span>}
+        </span>
       </span>
-    </button>
+    </Button>
   );
 }
 
-export function OldPiecesPanel({
+export function OldPiecesDecision({
   items,
   decisionOf,
   onDecide,
@@ -233,38 +234,34 @@ export function OldPiecesPanel({
 
       <div className='space-y-2'>
         {empty.length === sorted.length ? (
-          <DecisionButton
+          <Decision
             selected={deleteAllSelected}
             disabled={readOnly}
             onClick={() => decideAll('delete')}
           >
             delete all {sorted.length}
-          </DecisionButton>
+          </Decision>
         ) : (
           <>
-            <DecisionButton
+            <Decision
               selected={defaultSelected}
               disabled={readOnly}
               onClick={empty.length === 0 ? () => decideAll('keep') : decideSafe}
             >
               {empty.length === 0 ? 'keep all' : `delete ${empty.length} empty`}
-            </DecisionButton>
-            <DecisionButton
+            </Decision>
+            <Decision
               selected={deleteAllSelected}
               disabled={readOnly}
               onClick={() => decideAll('delete')}
             >
               delete all {sorted.length}
-            </DecisionButton>
+            </Decision>
           </>
         )}
-        <DecisionButton
-          selected={pickSelected}
-          disabled={readOnly}
-          onClick={() => onPickingChange(true)}
-        >
+        <Decision selected={pickSelected} disabled={readOnly} onClick={() => onPickingChange(true)}>
           pick
-        </DecisionButton>
+        </Decision>
       </div>
 
       {kept.length > 0 && (

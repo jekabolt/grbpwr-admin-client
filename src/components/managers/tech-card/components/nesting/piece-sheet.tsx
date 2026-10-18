@@ -25,6 +25,8 @@ export type PieceMark = 'open' | 'staged' | 'mapped' | 'dropped' | 'unnamed';
 // Вид листа (владелец, patterns-lite r3): синяя заливка 12 % и синяя обводка 1px — деталь
 // «есть и связана»; остальные состояния отличаются от неё обводкой/пунктиром, как раньше.
 const BLUE = '#2323ff';
+// «связь снимается» — один красный на весь лист: заливка состояния, линия шва, засечки, рамка фокуса.
+const DROP_RED = '#c22222';
 type PieceStyle = {
   fill: string;
   fillOpacity: number;
@@ -40,7 +42,7 @@ const STYLE: Record<PieceMark, PieceStyle> = {
   // связь уже лежит на сервере
   mapped: { fill: BLUE, fillOpacity: 0.12, stroke: BLUE, strokeOpacity: 0.8, dash: false },
   // помечена «снять» — связь уйдёт при сохранении
-  dropped: { fill: '#ffffff', fillOpacity: 1, stroke: '#c22222', strokeOpacity: 1, dash: true },
+  dropped: { fill: '#ffffff', fillOpacity: 1, stroke: DROP_RED, strokeOpacity: 1, dash: true },
   // в файле у контура нет имени блока, привязать не к чему (приглушена)
   unnamed: { fill: '#f2f2f2', fillOpacity: 1, stroke: '#d5d5d5', strokeOpacity: 1, dash: false },
 };
@@ -645,7 +647,7 @@ export function PieceSheet({
                       y1={vy(a.y)}
                       x2={b.x}
                       y2={vy(b.y)}
-                      stroke='#c22222'
+                      stroke={DROP_RED}
                       strokeWidth={box.w / 400 || 0.01}
                     />
                     {/* Засечки на концах: без них короткая линия читается как случайный штрих. */}
@@ -655,7 +657,7 @@ export function PieceSheet({
                         cx={pt.x}
                         cy={vy(pt.y)}
                         r={box.w / 300 || 0.01}
-                        fill='#c22222'
+                        fill={DROP_RED}
                       />
                     ))}
                   </g>
@@ -736,7 +738,7 @@ export function PieceSheet({
               cy={vy(focusMark.y / 10)}
               r={focusMark.r / 10}
               fill='none'
-              stroke='#c22222'
+              stroke={DROP_RED}
               strokeWidth={1}
               vectorEffect='non-scaling-stroke'
             />
