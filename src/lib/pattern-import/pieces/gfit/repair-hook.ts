@@ -239,6 +239,7 @@ export function repairPass(
       );
       const verdict = continuityVerdicts(probe).refused.get(r);
       if (verdict) why.push('E3-family');
+      if (verdict && DEBUG) console.log(`GRADEP2   E3-family: ${verdict}`);
     }
     if (!why.length && cand) {
       if (DEBUG)
