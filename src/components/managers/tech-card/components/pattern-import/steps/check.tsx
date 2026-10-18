@@ -445,7 +445,8 @@ export function CheckStep({
 function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: DraftScope }) {
   const ws = api.writeStorage;
   const rul = ws.storage === 'rul';
-  const busy = !!api.session.busy;
+  // STOPFIX: a re-write in flight holds the choice; a failed one says why, once, with a retry
+  const busy = !!api.session.busy || ws.rewriting;
   const written = writtenTokens(api.session.sizes);
   const tokens = written.length ? written : scope.manifest.sizes.map((s) => s.token);
   const r = scope.rul;
@@ -499,6 +500,29 @@ function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: Draf
             </Chip>
           ))}
         </ChipRow>
+      )}
+      {ws.rewriting && (
+        <Text size='micro' variant='label' component='p' data-testid='check-storage-writing'>
+          writing…
+        </Text>
+      )}
+      {!ws.rewriting && ws.rewriteError && (
+        <Text
+          size='micro'
+          variant='label'
+          component='p'
+          className='break-words'
+          data-testid='check-storage-rewrite-error'
+        >
+          files not written for this choice: {ws.rewriteError} ·{' '}
+          <button
+            type='button'
+            className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+            onClick={() => void api.retryWrite()}
+          >
+            try again
+          </button>
+        </Text>
       )}
       {rul && ws.ignored && (
         <Text size='micro' variant='label' component='p' data-testid='check-storage-ignored'>
