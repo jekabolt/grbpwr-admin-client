@@ -678,6 +678,8 @@ function cleanCompactMarks(f: PieceFamily, set: ChainSet): PieceFamily {
 }
 
 export function cleanPlacementMarks(f: PieceFamily, set: ChainSet): PieceFamily {
+  // probe switch (node only): PLACE_MARKS_OFF=1 — placement marks stay walls (the "before")
+  if (typeof process !== 'undefined' && process.env?.PLACE_MARKS_OFF) return f;
   const live = f.candidates.filter((c) => c.outer.length >= 3 && !c.features?.length);
   // a majority needs ≥ 3 sizes
   if (live.length < 3) return f;

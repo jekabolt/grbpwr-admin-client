@@ -1233,7 +1233,6 @@ export function buildPieceSpecsDetailed(
     const kept = p.cands.filter(({ card }) => fixOf(card.token) !== 'drop');
     if (
       !traced &&
-      !kinkRepairOff() &&
       !p.ungraded &&
       kept.length >= 3 &&
       !kept.some(({ c }) => c.dxf || c.features?.length)
@@ -1262,6 +1261,7 @@ export function buildPieceSpecsDetailed(
           return !!c && ownLineOn(c, set, run.sizes[rank]?.classId ?? null, a, b);
         },
         operator,
+        autoOff: kinkRepairOff(),
       });
       for (const [r, x] of res.byRank) kinkByRank.set(r, x);
       for (const { c, card } of kept)

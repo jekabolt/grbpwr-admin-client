@@ -408,14 +408,116 @@ export async function sectionH(o: {
   const rK = rulOf(wK);
   check(
     'H',
-    'kombinezon: the write gets storage rul → not ok, FP_L named with its point counts',
+    // SHAPE-KINK: lines are matched by their corners and resampled before packing (correspond.ts)
+    // — the package is either made and proved, or refused naming the pieces that differ
+    'kombinezon: the write gets storage rul → a proved package, or a refusal naming the pieces',
     stopK === null &&
       wK?.in.storage === 'rul' &&
       !!rK &&
-      !rK.ok &&
-      rK.reasons.some((x) => /^FP_L\b.*points in/.test(x)),
+      (rK.ok ? rK.maxErrMm <= 0.1 : rK.reasons.some((x) => /^(not matched: )?[A-Z]\w*\b/.test(x))),
     stopK ?? say(rK),
   );
   if (rK && !rK.ok) for (const x of rK.reasons.slice(0, 6)) console.log(`      - ${x}`);
+  k.close();
+}
+
+/**
+ * SHAPE-KINK (UX-HOOKS §5): the check step's one-shape moves through the REAL hook — kombinezon
+ * Style A with the automatic repairs off (PLACE_MARKS_OFF + SHAPE_KINK_OFF, set by the caller):
+ * FP_L / FP_R size 6 are held by G5 with a structured, fixable issue; api.fixShape straightens it
+ * (recorded: manifest piece shapeFixes + block kinkStraightened 'operator'), api.dropSize leaves
+ * the size out (recorded), api.clearShapeFix takes it back, a not-held size is refused, and no
+ * resolver may send shapeFixes.
+ */
+export async function sectionShapeKink(o: { check: Check; pdf: string | null }) {
+  const { check } = o;
+  if (!o.pdf || !existsSync(o.pdf)) {
+    console.log(`SKIP  K · shape moves: no file (${o.pdf ?? 'unset'})`);
+    return;
+  }
+  const kb = readFileSync(o.pdf);
+  const k = mount(['6', '8', '10', '12', '14', '16', '18', '20']);
+  const stop = await k.drive([
+    {
+      name: basename(o.pdf),
+      bytes: kb.buffer.slice(kb.byteOffset, kb.byteOffset + kb.byteLength) as ArrayBuffer,
+    },
+  ]);
+  const api = () => k.get();
+  const shapeCheck = () =>
+    Object.values(api().session.gate)
+      .flatMap((g) => g.checks)
+      .find((c) => !c.ok && c.severity === 'block' && c.shapeIssues?.length);
+  const blocks = () => api().session.draft?.scopes.flatMap((s) => s.manifest.blocks) ?? [];
+  const piece = (id: string) =>
+    api()
+      .session.draft?.scopes.flatMap((s) => s.manifest.pieces)
+      .find((p) => p.identity === id);
+  const c0 = shapeCheck();
+  const i0 = c0?.shapeIssues?.find((x) => x.identity === 'FP_L' && x.size === '6');
+  check(
+    'K',
+    'kombinezon A (auto repair off): on check, G5 holds FP_L 6 with a fixable extra-turn issue, door check',
+    api().session.step === 'check' &&
+      !!i0 &&
+      i0.fixable &&
+      i0.kind === 'extra-turn' &&
+      c0?.door === 'check',
+    { stop, issues: c0?.shapeIssues, door: c0?.door },
+  );
+  const no = await api().fixShape('FP_L', '10');
+  check(
+    'K',
+    'fixShape on a size the check does not hold: refused with the reason',
+    !no.ok && !!no.reason,
+    no,
+  );
+  const fx = await api().fixShape('FP_L', '6');
+  await k.settle();
+  const b6 = blocks().find((b) => b.block === 'FP_L_6');
+  const left = shapeCheck()?.shapeIssues?.filter((x) => x.identity === 'FP_L') ?? [];
+  check(
+    'K',
+    'fixShape FP_L 6: written again, FP_L no longer held, recorded (piece shapeFixes + block kinkStraightened operator)',
+    fx.ok &&
+      !left.length &&
+      !!piece('FP_L')?.shapeFixes?.some((f) => f.size === '6' && f.action === 'straighten') &&
+      !!b6?.kinkStraightened?.some((x) => x.rule === 'operator'),
+    { fx, left, fixes: piece('FP_L')?.shapeFixes, kinks: b6?.kinkStraightened },
+  );
+  const dr = await api().dropSize('FP_R', '6');
+  await k.settle();
+  check(
+    'K',
+    'dropSize FP_R 6: FP_R written without size 6, recorded',
+    dr.ok &&
+      !blocks().some((b) => b.block === 'FP_R_6') &&
+      blocks().some((b) => b.block === 'FP_R_8') &&
+      !!piece('FP_R')?.shapeFixes?.some((f) => f.size === '6' && f.action === 'drop'),
+    { dr, fixes: piece('FP_R')?.shapeFixes },
+  );
+  check(
+    'K',
+    'after both moves the shape check holds nothing of FP',
+    !(shapeCheck()?.shapeIssues ?? []).some((x) => x.identity.startsWith('FP_')),
+    shapeCheck()?.shapeIssues,
+  );
+  const cl = await api().clearShapeFix('FP_L', '6');
+  await k.settle();
+  check(
+    'K',
+    'clearShapeFix FP_L 6: the size as drawn again — held again',
+    cl.ok && !!shapeCheck()?.shapeIssues?.some((x) => x.identity === 'FP_L' && x.size === '6'),
+    { cl, issues: shapeCheck()?.shapeIssues },
+  );
+  const why = answerProblem('meaning', {
+    events: [{ type: 'semantics', input: { ...({} as never), shapeFixes: { '0:6': 'drop' } } }],
+  } as never);
+  check(
+    'K',
+    'no resolver may send shapeFixes (operator only)',
+    !!why && /shapeFixes/.test(why),
+    why,
+  );
   k.close();
 }

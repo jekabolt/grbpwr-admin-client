@@ -47,7 +47,8 @@ export type KinkLine = { rank: number; token: string; outer: PtMm[] };
 /** A straightening with its geometry (sheet frame): the chord and the stretch it replaced. */
 export type KinkDone = KinkRecord & { chord: [PtMm, PtMm]; removed: PtMm[] };
 
-/** probe switch (node only): SHAPE_KINK_OFF=1 — no family straightening (the "before" column) */
+/** probe switch (node only): SHAPE_KINK_OFF=1 — no AUTOMATIC straightening (the operator's
+ * fixShape still applies) */
 export function kinkRepairOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.SHAPE_KINK_OFF;
 }
@@ -85,6 +86,8 @@ export type KinkOpts = {
   ownLine?: (rank: number, a: PtMm, b: PtMm) => boolean;
   /** ranks the operator asked to straighten ('operator' tier allowed for them) */
   operator?: ReadonlySet<number>;
+  /** no automatic straightening: only the operator's sizes are repaired (SHAPE_KINK_OFF) */
+  autoOff?: boolean;
 };
 
 export type KinkResult = {
@@ -268,7 +271,11 @@ export function repairMinorityKinks(lines: readonly KinkLine[], opts: KinkOpts =
     let ok = true;
     for (let d = 0; d < n && ok; d++) {
       if (inG.has(d)) continue;
-      const tiers = opts.operator?.has(lines[d].rank) ? OPERATOR_TIERS : AUTO_TIERS;
+      const tiers = opts.operator?.has(lines[d].rank)
+        ? OPERATOR_TIERS
+        : opts.autoOff
+          ? []
+          : AUTO_TIERS;
       const r = straightenSize(lines[d].outer, canon, tiers, {
         rank: lines[d].rank,
         notches: opts.notches,
