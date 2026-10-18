@@ -1,12 +1,7 @@
 import { cn } from 'lib/utility';
 import type React from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, GroupLabel, Input, Select, Text } from 'ui';
 
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';

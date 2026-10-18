@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Link, useNavigate } from 'react-router-dom';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
 import { useInfiniteFittings } from './useFittingQuery';
 import { formatFittingDate, statusLabel, verdictLabel } from './utils';
 

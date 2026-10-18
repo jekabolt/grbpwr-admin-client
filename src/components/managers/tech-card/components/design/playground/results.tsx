@@ -5,13 +5,11 @@ import type {
 } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import { CalloutBox, Pill, Section, HeaderCount, Text, Tiles } from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import {
   cardOutputRows,

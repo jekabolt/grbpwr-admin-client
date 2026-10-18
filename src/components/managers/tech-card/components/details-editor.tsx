@@ -5,16 +5,8 @@ import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery'
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
+import { Button, Chip, Input, Media, Pill, Section, Text, Textarea, Toolbar } from 'ui';
 import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
-import { Toolbar } from 'ui/components/toolbar';
 import { InertDoor } from './design/bench-slot';
 import { cardFactsContext } from './design/core/card-facts';
 import { isBoardRow } from './design/core/mood-gate';

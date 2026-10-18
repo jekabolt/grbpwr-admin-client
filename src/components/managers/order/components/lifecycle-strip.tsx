@@ -1,9 +1,6 @@
 import type { common_OrderFull, common_OrderStatusEnum } from 'api/proto-http/frontend';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { Pill } from 'ui/components/pill';
-import { Stepper, type Step } from 'ui/components/stepper';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { Pill, Stepper, type Step, Text, Toolbar, ToolbarSpacer } from 'ui';
 
 // The happy path every order walks. Anything else (cancelled, the refund states) is
 // appended only once it has actually happened, so a normal order never renders a rail

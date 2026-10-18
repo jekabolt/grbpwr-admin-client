@@ -15,14 +15,7 @@ import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import
 import type { DraftScope } from 'lib/pattern-import/types';
 import { useContext, useState } from 'react';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Chip, ChipRow, DataTable, GroupLabel, Pill, Row, Text } from 'ui';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';

@@ -1,7 +1,5 @@
 import type { JSX, ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Text } from 'ui';
 
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';

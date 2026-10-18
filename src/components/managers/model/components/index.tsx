@@ -11,13 +11,16 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import {
+  Button,
+  Section,
+  SectionStack,
+  Text,
+  Form,
+  InputField,
+  SelectField,
+  TextareaField,
+} from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields } from './measurements-fields';
 import { ModelMedia } from './model-media';

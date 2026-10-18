@@ -1,6 +1,4 @@
-import { BarRow } from 'ui/components/bar-row';
-import { GroupLabel } from 'ui/components/group-label';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
+import { BarRow, GroupLabel, Stat, StatGrid } from 'ui';
 import { money, opexCategoryLabel, OpexSummary } from '../utils/options';
 
 // opxKpi v1 (keep) — the month reads at a glance as three equal-weight tiles (total / one-off /

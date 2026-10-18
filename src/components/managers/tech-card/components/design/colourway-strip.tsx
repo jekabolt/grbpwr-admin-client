@@ -1,8 +1,7 @@
 import type { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSyncExternalStore, type JSX } from 'react';
-import { HATCH } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import { HATCH, Text } from 'ui';
 
 import { findPantone, pantoneVersion, subscribePantone } from '../pantone-swatches';
 import { archivedRef, colorwayLabel } from './colorway-picker';

@@ -2,10 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import Text from 'ui/components/text';
+import { Button, Chip, Combobox, type ComboboxGroup, Text } from 'ui';
 
 import { KIND_BY_WORK_TOKEN } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';

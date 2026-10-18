@@ -1,8 +1,6 @@
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { ChecklistEditor } from 'ui/components/checklist-editor';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { ChecklistEditor, Chip, ChipRow, Text } from 'ui';
 import { FulfillmentChecklistItem } from '../api/types';
 import {
   useAddFulfillmentChecklistItem,

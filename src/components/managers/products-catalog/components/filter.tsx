@@ -1,7 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Overlay } from 'ui/components/overlay';
-import Text from 'ui/components/text';
+import { Button, Overlay, Text } from 'ui';
 import Color from './color';
 import FromTo from './from-to';
 import Gender from './gender';

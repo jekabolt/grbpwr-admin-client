@@ -2,7 +2,7 @@ import { cn } from 'lib/utility';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { cutPiecesWord } from './composite';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { FoldCaret } from 'ui';
 
 /**
  * ═══ THE CROP DECK — A SHEET WITH ITS CUT PIECES FANNED OUT BEHIND IT (H-10, J-2) ═════════════

@@ -2,7 +2,7 @@ import { ADMIN_GROUP, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 import { LeftSideNavMenu } from './left-side-nav-menu';
 import { NavDropdownMenu } from './nav-dropdown-menu';
 import { SnackBar } from './snackbar';

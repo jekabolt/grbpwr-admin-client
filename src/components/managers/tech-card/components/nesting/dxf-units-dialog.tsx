@@ -1,8 +1,6 @@
 import { sheetHint, type DxfLinearUnit, type Extents } from 'lib/nesting/dxf/insunits';
 import { useLayoutEffect, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 
 /** One DXF whose header carries no $INSUNITS. */
 export type UnitsItem = { key: string; name: string; extents: Extents | null };

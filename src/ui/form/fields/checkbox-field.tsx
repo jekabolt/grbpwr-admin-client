@@ -1,7 +1,7 @@
 import { useFormContext } from 'react-hook-form';
 
 import { cn } from 'lib/utility';
-import Checkbox from 'ui/components/checkbox';
+import Checkbox from '../../components/checkbox';
 
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 

@@ -1,9 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
-import { Chip } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Chip, Pill, Text } from 'ui';
 import { Task, TaskPriority } from '../api/types';
 import { taskLinkCount } from '../utils/links';
 import { dueMeta, PRIORITY_LABEL } from '../utils/meta';

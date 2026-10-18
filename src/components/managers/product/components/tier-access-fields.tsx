@@ -1,6 +1,5 @@
 import { useWatch } from 'react-hook-form';
-import FieldsGroupContainer from 'ui/components/fields-group';
-import SelectField from 'ui/form/fields/select-field';
+import { FieldsGroupContainer, SelectField } from 'ui';
 
 // Per-product tier gating: minimum loyalty tier required to buy (product.proto min_tier).
 const MIN_TIER_OPTIONS = [

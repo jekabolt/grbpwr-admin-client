@@ -1,12 +1,7 @@
 import { PackagingRecipeItem, PackagingRecipeLine } from 'api/proto-http/admin';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Placeholder } from 'ui/components/placeholder';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Input, Placeholder, Pill, Text } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,

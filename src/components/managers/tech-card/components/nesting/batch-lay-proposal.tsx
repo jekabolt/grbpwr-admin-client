@@ -39,10 +39,7 @@ import {
   layVerdict,
 } from 'components/managers/production-runs/components/useLays';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Row, Text } from 'ui';
 import type { BatchCell, JobSizeRow, MarkerJob } from './batch-marker-plan';
 import { decNum } from './marker-io';
 import { wireInt } from '../schema';

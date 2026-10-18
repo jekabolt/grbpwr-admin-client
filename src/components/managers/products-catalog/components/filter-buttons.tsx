@@ -2,8 +2,7 @@
 
 import { common_Collection, common_Size } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 export function formatSizeName(name: string): string {
   const match = name.match(/_(\d+)(?:ta|bo)_[mf]$/);

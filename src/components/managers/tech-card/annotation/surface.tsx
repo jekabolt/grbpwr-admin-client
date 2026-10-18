@@ -1,8 +1,7 @@
 'use client';
 
 import { cn } from 'lib/utility';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Text } from 'ui';
 import {
   Fragment,
   useCallback,

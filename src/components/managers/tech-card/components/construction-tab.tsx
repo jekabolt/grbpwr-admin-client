@@ -4,14 +4,19 @@ import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSet
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Canvas, Pin } from 'ui/components/canvas';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Section } from 'ui/components/section';
-import { HeaderWarnings } from 'ui/components/header-warnings';
-import { HeaderNote } from 'ui/components/section-header';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import DecimalField from 'ui/form/fields/decimal-field';
+import {
+  Canvas,
+  Pin,
+  Chip,
+  ChipRow,
+  Section,
+  HeaderWarnings,
+  HeaderNote,
+  Stat,
+  StatGrid,
+  Text,
+  DecimalField,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';

@@ -1,9 +1,6 @@
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, PLACEHOLDER_SURFACE, placeholderClass, Text } from 'ui';
 import { usePendingFiles } from '../utils/usePendingFiles';
 
 export function DragDropArea({

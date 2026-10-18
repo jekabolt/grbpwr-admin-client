@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 const OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'all' },

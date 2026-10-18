@@ -35,20 +35,28 @@ import {
   type SurfaceCallout,
 } from 'components/managers/tech-card/annotation/surface';
 import { PALETTE_KINDS } from 'components/managers/tech-card/annotation/kinds';
-import { parseSpec, placePurpose, sectionLetter } from 'components/managers/tech-card/annotation/purpose';
+import {
+  parseSpec,
+  placePurpose,
+  sectionLetter,
+} from 'components/managers/tech-card/annotation/purpose';
 import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
 import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Toolbar } from 'ui/components/toolbar';
-import { Pill } from 'ui/components/pill';
-import { Section, SectionStack } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { ViewSwitch } from 'ui/components/view-switch';
+import {
+  Button,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  Toolbar,
+  Pill,
+  Section,
+  SectionStack,
+  HeaderNote,
+  Text,
+  TILE_CORNER,
+  TILE_QUIET,
+  ViewSwitch,
+} from 'ui';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';

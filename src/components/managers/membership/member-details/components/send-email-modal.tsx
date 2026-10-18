@@ -1,8 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { useSendMemberEmail } from '../../utils/hooks';
 
 interface SendEmailModalProps {

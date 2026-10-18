@@ -34,8 +34,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
 import { mmToEngineCm } from './nesting/allowance-units';

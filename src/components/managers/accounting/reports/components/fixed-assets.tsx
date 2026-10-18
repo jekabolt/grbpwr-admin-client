@@ -3,13 +3,7 @@ import { FixedAsset, googletype_Decimal } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import DecimalField from 'ui/form/fields/decimal-field';
-import InputField from 'ui/form/fields/input-field';
+import { Button, ConfirmationModal, Section, Text, Form, DecimalField, InputField } from 'ui';
 import { inputToDecimal, normalizeDecimalInput } from 'utils/decimal';
 import { z } from 'zod';
 import {

@@ -12,12 +12,7 @@ import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, Chip, ChipRow, ConfirmationModal, Select, Text } from 'ui';
 
 const BOOKLET_LABELS: Record<BookletId, string> = {
   cover: 'route sheet',

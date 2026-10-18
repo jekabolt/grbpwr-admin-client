@@ -1,11 +1,7 @@
 import { AdminRef, common_TechCardRole, common_TechCardRoleAssignment } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Input, Pill, GenericPopover, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { Counter } from './design/core';
 import { useAdmins, useAssignRole, useRemoveRoleAssignment } from './useRoles';

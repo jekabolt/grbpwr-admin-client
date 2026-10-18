@@ -3,8 +3,7 @@
 // оно берётся; у переопределённого значения там же — ЕДИНСТВЕННЫЙ его сброс «↺ use derived».
 import { isBlocking, type Hole } from '../../care-labels/holes';
 import { cn } from 'lib/utility';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 import { SWAP } from './editable';
 import type { LineKey } from './label-lines';
 

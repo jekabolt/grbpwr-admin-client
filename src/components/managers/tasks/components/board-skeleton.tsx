@@ -1,4 +1,4 @@
-import { SkeletonBlocks, SkeletonLine } from 'ui/components/skeleton';
+import { SkeletonBlocks, SkeletonLine } from 'ui';
 import { STATUSES } from '../utils/meta';
 
 // The board's loading state keeps the SHAPE of the answer (a hatched header + a

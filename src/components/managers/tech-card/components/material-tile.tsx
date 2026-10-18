@@ -2,8 +2,7 @@ import { common_Material } from 'api/proto-http/admin';
 import { materialSpec } from 'components/managers/materials/components/material-code';
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { cn } from 'lib/utility';
-import Media from 'ui/components/media';
-import { Tile } from 'ui/components/tiles';
+import { Media, Tile } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // A material is chosen by looking at it (owner 16.10: «by the name it's hard to understand what the

@@ -1,5 +1,4 @@
-import { AvatarPicker } from 'ui/components/avatar';
-import { Chip, ChipRow } from 'ui/components/chip';
+import { AvatarPicker, Chip, ChipRow } from 'ui';
 import { Task, TaskPriority } from '../api/types';
 import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
 

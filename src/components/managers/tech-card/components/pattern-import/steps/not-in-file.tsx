@@ -3,9 +3,8 @@
 // run may well be right to leave a region out (a label box, a page number), but it must be seen.
 import { createContext, useContext } from 'react';
 import type { SeedId, WizardStep } from 'lib/pattern-import/types';
-import { CalloutBox } from 'ui/components/callout-box';
-import type { HeaderWarning } from 'ui/components/header-warnings';
-import Text from 'ui/components/text';
+import { CalloutBox, Text } from 'ui';
+import type { HeaderWarning } from 'ui';
 import type { ImportSessionApi } from '../use-import-session';
 
 /**

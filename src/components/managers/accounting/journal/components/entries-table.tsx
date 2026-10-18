@@ -2,7 +2,7 @@ import { AcctJournalEntry } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { AmountCell } from '../../components/amount-cell';
 import { CaveatBadge } from '../../components/caveat-badge';
 import { Pill } from '../../components/kit';

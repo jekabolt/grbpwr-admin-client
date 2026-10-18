@@ -1,7 +1,6 @@
 import { cn } from 'lib/utility';
 import { Fragment, useMemo } from 'react';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 import { autolinkNodes } from 'components/shared/markdown/autolink';
 import type { TaskMedia } from '../api/types';
 

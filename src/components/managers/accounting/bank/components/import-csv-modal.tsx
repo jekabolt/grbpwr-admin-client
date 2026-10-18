@@ -1,8 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { useImportBankCsv } from '../../utils/hooks';
 
 // Parsers the backend accepts (PostBankTxnRequest.source; empty = revolut). Revolut is the only one

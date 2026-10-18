@@ -1,9 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useFormContext } from 'react-hook-form';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { FormField, FormItem, FormLabel } from 'ui/form';
+import { Select, Text, FormField, FormItem, FormLabel } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { DraftedField, DraftedPill } from './core/drafted-field';

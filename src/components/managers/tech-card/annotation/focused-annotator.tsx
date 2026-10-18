@@ -20,15 +20,20 @@ import {
 } from './surface';
 import { AnnotationToolbar } from './toolbar';
 import { AnnotationZoomDialog } from './zoom-dialog';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Pill,
+  PLACEHOLDER_SURFACE,
+  Text,
+  TILE_CORNER,
+  TILE_QUIET,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { PictureBusy, type PictureBusyKind } from './picture-busy';
-import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import { SpotRings, type SpotRing } from './spot-rings';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
 //

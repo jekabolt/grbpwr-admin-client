@@ -1,8 +1,6 @@
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, Text } from 'ui';
 import { ARCHIVE_PREVIEW } from './preview-contract';
 import { useArchivePreview } from './use-archive-preview';
 

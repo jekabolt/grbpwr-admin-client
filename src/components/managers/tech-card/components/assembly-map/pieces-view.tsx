@@ -3,8 +3,7 @@
 import { isJoin, pieceFamilies } from 'lib/assembly-skeleton/map';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { PieceMapShape } from './piece-map-shape';
 import { seamSignature, sewnWords, type SewnTile } from './sewn';
 import { SewnGlyph } from './sewn-strip';

@@ -1,7 +1,4 @@
-import { Accordion } from 'ui/components/accordion';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Accordion, GroupLabel, Row, Text } from 'ui';
 import { pieceBaseCodes, pieceModifiers } from './piece-codes';
 
 // Collapsible glossary of the pattern-piece abbreviation system, so codes written on the

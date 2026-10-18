@@ -14,10 +14,7 @@
 // Мобильный вид первичен: одна колонка, тач-мишени ≥44px, таблицы скроллятся внутри себя.
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Section, SectionStack, Text } from 'ui';
 import { CutBlockers, CutList } from './components/cut-list';
 import { Lays, MaterialBlockers } from './components/lays';
 import { LinesMatrix } from './components/lines-matrix';

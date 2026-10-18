@@ -1,5 +1,5 @@
 import { FC, ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 export interface ShareBarRow {
   label: string;

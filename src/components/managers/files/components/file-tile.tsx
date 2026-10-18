@@ -1,8 +1,6 @@
 import type { LibraryFile } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Avatar, Pill, Text } from 'ui';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 import { isMarkdownNote } from '../utils/reader-find';

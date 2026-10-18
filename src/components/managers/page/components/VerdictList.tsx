@@ -1,6 +1,5 @@
 import { FC, ReactNode } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
+import { GroupLabel, Pill } from 'ui';
 
 /** Column header for the two-up verdict lists (stub `.col-h`): 11px uppercase, underlined;
  *  red when it flags a problem (losing margin / sold-out sizes). */

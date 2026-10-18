@@ -5,11 +5,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { ConfirmationModal, Input, Select, Text, FormLabel } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { TechCardFormData } from './schema';
 

@@ -9,11 +9,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text } from 'ui';
 import {
   archiveCollection,
   archiveColor,

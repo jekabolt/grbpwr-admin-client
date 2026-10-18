@@ -1,8 +1,5 @@
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { GroupLabel, Media, Text, Tile, Tiles } from 'ui';
 import { cn } from 'lib/utility';
 import { CARE_ARTWORK } from './care-artwork';
 import { CareGroup, CareSymbolView } from './care-codes';

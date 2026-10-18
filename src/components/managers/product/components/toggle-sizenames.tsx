@@ -1,6 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { Text, ToggleSwitch } from 'ui';
 import { MeasurementsToggleState } from '../utility/useSizeMeasurementsToggle';
 
 export function ToggleSizeNames({

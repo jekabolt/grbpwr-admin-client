@@ -3,8 +3,7 @@
 
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { StoredSeamDirection } from 'lib/seams';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { GROUPS, type ReviewItem, type SeamGroup } from './review-model';
 import { SeamRow, type RowDoors } from './seam-row';
 import type { RoleWords } from './words';

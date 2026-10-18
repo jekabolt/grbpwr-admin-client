@@ -9,10 +9,7 @@
 // Серый ground уже на body (global.css), блоки — Section/SectionStack по DESIGN.md.
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { CalloutBox, Button, Section, SectionStack, Text } from 'ui';
 import { sizeTokensOf } from 'components/managers/tech-card/components/nesting/block-code';
 import { GroupSelect, groupLabel } from './components/group-select';
 import { SheetList } from './components/sheet-list';

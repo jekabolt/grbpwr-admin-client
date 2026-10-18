@@ -1,5 +1,5 @@
 import { common_Colorway } from 'api/proto-http/admin';
-import { Tiles } from 'ui/components/tiles';
+import { Tiles } from 'ui';
 import { ProductItem } from './product-item';
 
 export function ProductGrid({

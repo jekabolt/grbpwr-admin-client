@@ -30,7 +30,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useEffect, useMemo } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
+import { GrbpwrMark } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
 import { cmToM } from './lay-card';

@@ -3,8 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,

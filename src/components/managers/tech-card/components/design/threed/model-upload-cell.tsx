@@ -3,14 +3,18 @@ import { getBase64File } from 'lib/features/getBase64';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+  TILE_CORNER,
+  TILE_QUIET,
+} from 'ui';
 import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 
 import { InertDoor } from '../bench-slot';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
 import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage } from './model-file';

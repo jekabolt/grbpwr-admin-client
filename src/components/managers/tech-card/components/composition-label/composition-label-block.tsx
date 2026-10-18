@@ -17,14 +17,18 @@ import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
-import Tooltip from 'ui/components/tooltip';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  Section,
+  Select,
+  Text,
+  Tooltip,
+  FoldCaret,
+} from 'ui';
 import { colorwayFullKey } from '../../care-labels/adapter';
 import { overrideRowsOf } from '../../care-labels/composition-override';
 import { isBlocking, type Hole } from '../../care-labels/holes';
@@ -62,7 +66,6 @@ import {
 } from './regions';
 import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
 import { useCompositionLabel, useShaper } from './use-composition-label';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 const EMPTY_PICKS: ReadonlyMap<number, string> = new Map();
 
@@ -916,7 +919,7 @@ export function CompositionLabelBlock({
                 >
                   colourway
                 </Text>
-                <SelectComponent
+                <Select
                   name='composition-colourway'
                   className='min-w-[200px]'
                   value={String(cw?.id ?? '')}
@@ -937,7 +940,7 @@ export function CompositionLabelBlock({
                   >
                     size
                   </Text>
-                  <SelectComponent
+                  <Select
                     name='composition-size'
                     className='min-w-[96px]'
                     value={String(size?.id ?? '')}

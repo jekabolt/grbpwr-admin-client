@@ -6,10 +6,7 @@ import type { EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/typ
 import type { StoredSeamDirection } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Input, Pill, Text } from 'ui';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { sideOfCandidate, type ReviewItem } from './review-model';
 import {

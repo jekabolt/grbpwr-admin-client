@@ -1,9 +1,7 @@
 import type { JSX } from 'react';
 
 import { cn } from 'lib/utility';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
-import { Tile } from 'ui/components/tiles';
+import { RatioGlyph, Text, Tile } from 'ui';
 
 /**
  * ═══ FORMAT — THE ASPECT OF THE PICTURE A RUN RETURNS (C-02, owner refs 3.png / 11.png) ══════════

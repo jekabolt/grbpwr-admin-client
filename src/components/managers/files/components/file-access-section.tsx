@@ -5,15 +5,17 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { publicFilePageUrl, shareTokenOf } from 'components/file-share-viewer/link';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Avatar,
+  Button,
+  CalloutBox,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Pill,
+  Text,
+} from 'ui';
 import {
   ACCESS_LEVEL_BADGE,
   ACCESS_LEVEL_HINT,

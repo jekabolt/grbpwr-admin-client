@@ -5,11 +5,7 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useForm } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text } from 'ui';
 import { PromoCreateRow } from './promo-create-row';
 import { PromoEditRow } from './promo-edit-row';
 import { emptyPromoDraft, promoDraftSchema, type PromoDraftSchema } from './schema';

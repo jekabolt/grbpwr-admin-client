@@ -4,8 +4,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 import { epochSecondsToRfc3339 } from './map-schema-to-campaign';
 import { useDeleteCampaign } from './useCampaign';
 

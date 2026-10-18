@@ -1,7 +1,7 @@
 import { cva, VariantProps } from 'class-variance-authority';
 
 import { cn } from 'lib/utility';
-import { HEADER_TEXT } from 'ui/components/section-header';
+import { HEADER_TEXT } from './section-header';
 
 /**
  * Interactive counterpart of `Pill` — filters, toggles, removable selections.

@@ -1,8 +1,7 @@
 // ДЫРЫ — нижняя зона экрана составников (дизайн §4, план §9.5). Блоки сверху, затем предупреждения
 // и подсказки; у каждой строки — адрес (колорвей, часть, волокно, язык) и дверь туда, где чинят.
 // Предупреждения уходят и в README.txt архива — строка здесь говорит об этом.
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 import type { CareLabelColorway } from './adapter';
 import type { Hole } from './holes';
 import { holeDoor, type Readiness } from './readiness';

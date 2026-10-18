@@ -1,10 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES } from 'constants/routes';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import { CalloutBox, SectionStack, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { useAiConfig } from './utils/hooks';
 import { ProvidersView } from './views/providers';
 import { RoutesView } from './views/routes';

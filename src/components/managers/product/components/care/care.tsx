@@ -1,5 +1,5 @@
 import { useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { ReadOnlyField } from '../read-only-field';
 import { CareSymbol } from './care-card';
 import { careCodes } from './care-codes';

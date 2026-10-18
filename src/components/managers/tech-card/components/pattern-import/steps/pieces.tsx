@@ -18,14 +18,8 @@ import type {
   VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
-import { Button } from 'ui/components/button';
+import { Button, CalloutBox, Chip, ChipRow, FoldCaret, HeaderWarnings, Row, Text } from 'ui';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings } from 'ui/components/header-warnings';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';

@@ -5,8 +5,7 @@ import { AnnotationEditor } from 'components/managers/tech-card/annotation/edito
 import { useEditHistory } from 'components/managers/tech-card/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
 import type { AnnotationCapsKey, AnnotationColorKey, AnnotationKindKey } from 'components/managers/tech-card/annotation/wire';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { demoteCalloutToPin, hasDrawnGeometry } from './callout-geometry';
 import { FittingFormData } from './schema';

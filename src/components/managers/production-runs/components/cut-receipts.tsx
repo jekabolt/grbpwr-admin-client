@@ -10,14 +10,18 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  TotalRow,
+  GroupLabel,
+  Input,
+  Section,
+  Text,
+} from 'ui';
 import {
   ClothReport,
   buildClothReport,

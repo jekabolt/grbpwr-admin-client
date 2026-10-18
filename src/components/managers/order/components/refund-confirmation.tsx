@@ -3,11 +3,7 @@ import { normalizeStatusName } from 'components/managers/orders-catalog/componen
 import { REASONS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Checkbox from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, ConfirmationModal, Pill, Text } from 'ui';
 import { money, toNum } from '../money';
 import { lineUnits, refundedUnitsByItemId } from './order-items';
 
@@ -287,7 +283,7 @@ export function RefundConfirmation({
         {canChooseShipping && (
           <div className='flex flex-col gap-1'>
             <label htmlFor='refund-shipping' className='flex items-center gap-2 cursor-pointer'>
-              <Checkbox
+              <CheckboxCommon
                 name='refund-shipping'
                 checked={refundShipping}
                 onCheckedChange={(checked: boolean | 'indeterminate') =>

@@ -1,9 +1,5 @@
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { BoardCard } from 'ui/components/board';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { BoardCard, Button, Pill, Placeholder, Text } from 'ui';
 import { FulfillmentCard as FulfillmentCardModel } from '../api/types';
 import { CardAssignee } from './card-assignee';
 import { cardAgeDays, COLUMN_ACTION, formatMoney, isOverdue } from '../utils/meta';

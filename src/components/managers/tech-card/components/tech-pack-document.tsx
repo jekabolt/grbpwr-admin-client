@@ -85,7 +85,10 @@ import {
   SectionInset,
   SectionLetters,
 } from 'components/managers/tech-card/annotation/insets';
-import { StitchPictogram, stitchIsoOf } from 'components/managers/tech-card/annotation/stitch-pictogram';
+import {
+  StitchPictogram,
+  stitchIsoOf,
+} from 'components/managers/tech-card/annotation/stitch-pictogram';
 import {
   artworkQuad,
   boundsOf,
@@ -131,7 +134,7 @@ import { decimalToInput } from 'utils/decimal';
 // «не бери window.location.origin», из которых одну однажды поправят, а другую нет.
 import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
+import { GrbpwrMark } from 'ui';
 import { detailKeyLabel } from './tech-card-options';
 import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
 import { labelMediaOf } from '../care-labels/label-media';

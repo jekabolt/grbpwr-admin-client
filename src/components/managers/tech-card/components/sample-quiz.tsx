@@ -3,11 +3,7 @@ import { MaterialPickerDialog } from 'components/managers/materials/components/m
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState, useSyncExternalStore } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Section } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Button, Chip, ChipRow, Section, HeaderNote, Tile, Tiles } from 'ui';
 import { colorwayLabel } from './design/colorway-picker';
 import { MaterialTile } from './material-tile';
 import { findPantone, pantoneVersion, subscribePantone } from './pantone-swatches';

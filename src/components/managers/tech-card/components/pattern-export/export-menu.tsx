@@ -5,8 +5,7 @@ import { EXPORT_FORMATS, type ExportFormatId } from 'lib/pattern-export/formats'
 import type { PlotDrawing } from 'lib/pattern-export/hpgl';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import GenericPopover from 'ui/components/popover';
+import { Button, GenericPopover } from 'ui';
 import { downloadPatternExport, downloadPlotExport } from './download';
 
 /** The plotter input (pens per role, plotter-sized labels) and the file's name, built on demand. */

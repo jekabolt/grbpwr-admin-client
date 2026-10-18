@@ -1,10 +1,6 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Pill, RatioGlyph, Text } from 'ui';
 import {
   calculateAspectRatio,
   cropLoss,

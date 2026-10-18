@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { Button, Input, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { useLibraryFile } from '../hooks/useFiles';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { extensionOf } from '../utils/format';

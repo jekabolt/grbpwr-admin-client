@@ -5,8 +5,7 @@ import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { runStatusLabel, runStatusOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';

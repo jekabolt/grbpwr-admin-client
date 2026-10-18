@@ -1,8 +1,8 @@
 import { useState } from 'react';
 
-import { HEADER_TEXT } from 'ui/components/section-header';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { HEADER_TEXT } from './section-header';
+import GenericPopover from './popover';
+import Text from './text';
 import { cn } from 'lib/utility';
 
 /**

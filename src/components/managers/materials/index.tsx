@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { cn } from 'lib/utility';
 import { CatalogTab } from './components/catalog-tab';
 import { PackagingBomTab } from './components/packaging-bom-tab';

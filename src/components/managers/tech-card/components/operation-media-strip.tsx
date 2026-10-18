@@ -5,9 +5,7 @@ import { cn } from 'lib/utility';
 import { useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Placeholder, Text } from 'ui';
 
 import { AnnotationCanvas } from './annotation-canvas';
 import {

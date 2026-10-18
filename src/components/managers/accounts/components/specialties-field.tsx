@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Input, Text } from 'ui';
 import { useSetAccountSpecialties } from '../utils/hooks';
 
 /**

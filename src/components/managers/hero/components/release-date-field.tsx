@@ -1,6 +1,6 @@
 import { ChangeEvent } from 'react';
 import { useFormContext } from 'react-hook-form';
-import InputField from 'ui/form/fields/input-field';
+import { InputField } from 'ui';
 
 // The form stores releaseAt as an RFC3339 string (the contract's Timestamp).
 // <input type="datetime-local"> speaks local "YYYY-MM-DDTHH:mm", so convert on

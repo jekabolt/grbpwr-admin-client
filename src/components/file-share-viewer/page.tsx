@@ -42,10 +42,7 @@ import { useParams } from 'react-router-dom';
 // этот импорт нужно будет разорвать копией, а не оставлять.
 import { formatBytes, kindWord } from 'components/managers/files/utils/format';
 import { MarkdownDoc, parse as parseMarkdown } from 'components/shared/markdown/doc';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Section, SectionStack, Text } from 'ui';
 import {
   downloadEndpoint,
   fetchShareMeta,

@@ -12,14 +12,22 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { useSnackBarStore } from 'lib/stores/store';
 import { extractFieldViolations } from 'utils/field-errors';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Selector from 'ui/components/selector';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CheckboxCommon,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Selector,
+  Stat,
+  StatGrid,
+  Text,
+  HeaderWarnings,
+  type HeaderWarning,
+  type HeaderWarningAction,
+  GenericPopover,
+  Progress,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { ROUTES, SECTION } from 'constants/routes';
 import {
@@ -104,13 +112,6 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import {
-  HeaderWarnings,
-  type HeaderWarning,
-  type HeaderWarningAction,
-} from 'ui/components/header-warnings';
-import GenericPopover from 'ui/components/popover';
-import { Progress } from 'ui/components/progress';
 import { uniConflictReason } from './block-code';
 import {
   dedupeUniPieces,

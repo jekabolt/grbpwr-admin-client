@@ -1,10 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DatePicker } from 'ui/components/date-picker';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { ConfirmationModal, DatePicker, Input, Select, Text } from 'ui';
 import { orderedMedia } from '../api/tasksService';
 import { TaskFormValues } from '../api/types';
 import {
@@ -221,7 +217,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 control={control}
                 name='priority'
                 render={({ field }) => (
-                  <SelectComponent
+                  <Select
                     name='priority'
                     items={priorityOptions}
                     value={field.value}
@@ -268,7 +264,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   control={control}
                   name='board'
                   render={({ field }) => (
-                    <SelectComponent
+                    <Select
                       name='board'
                       items={boardOptions}
                       value={field.value}
@@ -284,7 +280,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   control={control}
                   name='status'
                   render={({ field }) => (
-                    <SelectComponent
+                    <Select
                       name='status'
                       items={statusOptions}
                       value={field.value}

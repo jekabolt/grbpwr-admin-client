@@ -14,8 +14,7 @@
 // расхождения.
 import { lazy, Suspense, useState } from 'react';
 import { type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import type { WeightBasisResolution } from './nesting/fabric-weight';
 import type { TechCardFormData } from './schema';
 import { useFabricDxfPieces, type RecipePieceLink } from './use-fabric-dxf-pieces';

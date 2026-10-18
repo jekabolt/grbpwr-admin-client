@@ -24,15 +24,22 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import GenericPopover from 'ui/components/popover';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import { Section, SectionStack } from 'ui/components/section';
-import { HEADER_TEXT, HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import {
+  Chip,
+  ChipRow,
+  HeaderWarnings,
+  type HeaderWarning,
+  GenericPopover,
+  Pill,
+  Placeholder,
+  Section,
+  SectionStack,
+  HEADER_TEXT,
+  HeaderNote,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { colorwayLabel } from './design/colorway-picker';
 import { useAddDevExpense, useDeleteDevExpense, useDevExpenses } from './dev-expenses-field';

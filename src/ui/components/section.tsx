@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { cn } from 'lib/utility';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { SectionHeader } from './section-header';
+import Text from './text';
+import { FoldCaret } from './fold-caret';
 
 /**
  * THE block — the unit every screen in this admin is built from.

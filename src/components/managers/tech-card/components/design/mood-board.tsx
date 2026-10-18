@@ -16,15 +16,24 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { noteArrowsOf } from 'components/managers/tech-card/annotation/surface';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
-import { Section, SectionStack } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
-import { FoldCaret } from 'ui/components/fold-caret';
+import {
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Section,
+  SectionStack,
+  HeaderNote,
+  Text,
+  Textarea,
+  FoldCaret,
+  TILE_CORNER,
+  TILE_QUIET,
+} from 'ui';
+import {
+  FocusedAnnotator,
+  type FocusedView,
+} from 'components/managers/tech-card/annotation/focused-annotator';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
@@ -67,7 +76,6 @@ import {
 } from './board-labels';
 import { useBoardPick, useBoardProposals, usePutBack } from './board-pick';
 import type { GuideFace } from './guide-face';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 import {

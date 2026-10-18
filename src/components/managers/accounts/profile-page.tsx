@@ -1,11 +1,6 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useMemo } from 'react';
-import { Avatar } from 'ui/components/avatar';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Avatar, GroupLabel, Pill, Row, Section, SectionStack, Text } from 'ui';
 import { SpecialtiesField } from './components/specialties-field';
 import { ACCESS } from './utils/hooks';
 import { usePermissions } from './utils/permissions';

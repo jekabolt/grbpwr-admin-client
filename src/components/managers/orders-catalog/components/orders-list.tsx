@@ -3,11 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Row } from 'ui/components/row';
-import { SkeletonLine } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Row, SkeletonLine, Text } from 'ui';
 import { OrderStatus } from './order-status';
 import { formatDateShort, getOrderStatusName } from './utility';
 

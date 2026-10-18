@@ -5,8 +5,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 
 type Row = { countryCode: string; ratePct: string; validFrom: string };
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';

@@ -10,7 +10,7 @@ import {
 } from 'constants/constants';
 
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 import useFilter from 'lib/useFilter';
 

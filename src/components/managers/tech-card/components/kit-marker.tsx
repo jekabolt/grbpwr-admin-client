@@ -21,8 +21,7 @@
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { fabricScopes, isRollGoodsSection } from './bom-purpose';
 import type { MarkerColorway } from './nesting/colorway-widths';
 import { dxfSheetsByScope } from './nesting/dxf-by-scope';

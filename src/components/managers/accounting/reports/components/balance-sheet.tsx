@@ -1,6 +1,6 @@
 import { AcctBalanceSheetRow, AcctBalanceSheetSection, googletype_Decimal } from 'api/proto-http/admin';
 import { useBalanceSheet } from '../../utils/hooks';
-import { Section } from 'ui/components/section';
+import { Section } from 'ui';
 import { CheckStrip, TAccount, TColumn, TLine, Verdict } from '../../components/kit';
 import { CopyTableButton } from './copy-table-button';
 import { formatBase, isNegative } from '../../utils/format';

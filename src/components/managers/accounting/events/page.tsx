@@ -1,8 +1,7 @@
 import { AcctEvent } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { Callout, Note } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
 import { ReportState } from '../reports/components/report-utils';

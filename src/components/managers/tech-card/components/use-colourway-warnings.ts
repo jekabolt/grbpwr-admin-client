@@ -1,5 +1,5 @@
 import type { common_Material, common_TechCardMarkerSummary } from 'api/proto-http/admin';
-import type { HeaderWarning } from 'ui/components/header-warnings';
+import type { HeaderWarning } from 'ui';
 import { markerNormStaleness } from './nesting/marker-io';
 import {
   hasValue,

@@ -1,10 +1,7 @@
 import type { StyleEconomics } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { ConfirmationModal, GroupLabel, Row, Text } from 'ui';
 import { useStyleEconomics } from '../useStyleEconomics';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 

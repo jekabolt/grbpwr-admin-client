@@ -1,8 +1,7 @@
 import type { googletype_Decimal } from 'api/proto-http/admin';
 import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 import { formatMoney } from '../generation/money';
 
 /**

@@ -1,9 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { Button, CalloutBox, Text, FormLabel } from 'ui';
 import { careCodes, careSelectionKey, CareSymbolView, SelectedInstructions } from './care-codes';
 import { CareSymbol } from './care-card';
 import { CareInstructions } from './careInstructions';

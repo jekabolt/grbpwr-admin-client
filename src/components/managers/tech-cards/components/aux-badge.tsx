@@ -1,5 +1,5 @@
 import { common_TechCardPurpose } from 'api/proto-http/admin';
-import { Pill } from 'ui/components/pill';
+import { Pill } from 'ui';
 
 // #8: mark auxiliary tech cards (dust bags, shoppers, packaging…) so a list/board reader can tell
 // them apart from sellable styles at a glance. Driven by TechCardListItem.purpose, which the list

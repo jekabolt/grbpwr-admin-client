@@ -3,8 +3,7 @@ import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,

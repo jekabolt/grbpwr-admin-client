@@ -78,7 +78,7 @@ await build({
 // лидеры не пересекаются; тот же вход — тот же выход.
 const layoutOut = resolve(tmpdir(), `margin-layout-${process.pid}.mjs`);
 await build({
-  entryPoints: [r('ui/components/annotation/margin-layout.ts')],
+  entryPoints: [r('components/managers/tech-card/annotation/margin-layout.ts')],
   bundle: true, platform: 'node', format: 'esm', outfile: layoutOut, logLevel: 'error',
   plugins: mutation ? [mutation] : [],
 });

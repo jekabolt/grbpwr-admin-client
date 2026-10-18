@@ -17,10 +17,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Drawer } from 'ui/components/drawer';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Drawer, Text } from 'ui';
 import {
   ApplyColorwaysAction,
   ImportReportCounters,

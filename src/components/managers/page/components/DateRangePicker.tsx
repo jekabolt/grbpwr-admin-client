@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { FC, useState } from 'react';
 import { DateRange, DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import { PERIOD_OPTIONS } from '../useMetricsQuery';
 import { compareModeHintLine } from '../utils';

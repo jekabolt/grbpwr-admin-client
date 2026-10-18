@@ -2,7 +2,7 @@ import { isActiveRoute, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { AcctTabAlerts, useAcctTabAlerts } from '../utils/hooks';
 
 const TABS: { label: string; route: string; alert?: keyof AcctTabAlerts }[] = [

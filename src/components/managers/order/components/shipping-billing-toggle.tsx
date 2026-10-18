@@ -1,6 +1,5 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { Shipping } from './shipping-information/shipping';
 import { TrackingNumber } from './shipping-information/tracking-number';
 

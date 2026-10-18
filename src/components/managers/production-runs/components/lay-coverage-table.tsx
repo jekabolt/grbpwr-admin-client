@@ -3,9 +3,7 @@ import {
   common_ProductionRunLayPieceYield,
 } from 'api/proto-http/admin';
 import { useMemo } from 'react';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, GenericPopover, Text } from 'ui';
 import { LayVerdict, VERDICT_GLYPH, VERDICT_TEXT, layVerdict } from './useLays';
 
 // Матрица покрытия (Ф4.5): колорвей × размер, «сколько изделий этой клетки настилы РЕАЛЬНО кроят»

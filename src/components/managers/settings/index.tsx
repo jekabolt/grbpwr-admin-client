@@ -8,14 +8,16 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { firstErrorSummary, flattenFieldErrors, revealField } from 'utils/field-errors';
 import { useMemo, useState } from 'react';
 import { useForm, type FieldErrors } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import ToggleField from 'ui/form/fields/toggle-field';
+import {
+  Button,
+  ConfirmationModal,
+  Section,
+  Text,
+  ToggleSwitch,
+  Form,
+  InputField,
+  ToggleField,
+} from 'ui';
 import { TranslationField } from 'components/shared/translation/translation-field';
 import { CarrierPrices } from './components/carrier-prices';
 import { PaymentFeesEditor } from './components/payment-fees-editor';

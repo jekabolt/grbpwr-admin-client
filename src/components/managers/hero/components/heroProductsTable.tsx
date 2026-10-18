@@ -18,9 +18,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import MediaComponent from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Button, Media, Text } from 'ui';
 import { COLORWAY_STATUS_LABEL } from './productPickerModal';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
@@ -139,7 +137,7 @@ export const HeroProductTable: FC<
       </td>
       <td className='border border-text lg:w-16'>
         {product.display?.thumbnail?.media?.thumbnail?.mediaUrl && (
-          <MediaComponent
+          <Media
             src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl}
             alt='Thumbnail'
             type='image'

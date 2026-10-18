@@ -3,8 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { Filter } from './filter';
 import {

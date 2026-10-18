@@ -13,16 +13,19 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Accordion } from 'ui/components/accordion';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { ViewSwitch } from 'ui/components/view-switch';
+import {
+  Accordion,
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  FoldCaret,
+  Placeholder,
+  Text,
+  ViewSwitch,
+} from 'ui';
 import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
 import {
   flushRefusalSentence,

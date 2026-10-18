@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { plural } from '../upload/text';
 
 /**

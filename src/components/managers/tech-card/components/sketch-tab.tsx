@@ -6,21 +6,24 @@ import { AnnotationEditor } from 'components/managers/tech-card/annotation/edito
 import { type EditHistory } from 'components/managers/tech-card/annotation/history';
 import { type AnnotationCapsKey } from 'components/managers/tech-card/annotation/kinds';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
-import { Button } from 'ui/components/button';
+import {
+  Button,
+  GroupLabel,
+  ViewSwitch,
+  SectionHeader,
+  Text,
+  Textarea,
+  InputField,
+  TextareaField,
+  GenericPopover,
+  Chip,
+  ChipRow,
+} from 'ui';
 import { moveItem } from 'components/managers/media/components/gallery-order';
 import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
-import { GroupLabel } from 'ui/components/group-label';
-import { ViewSwitch } from 'ui/components/view-switch';
-import { SectionHeader } from 'ui/components/section-header';
 import { CornerMenu } from './design/picture-tile';
-import Text from 'ui/components/text';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
-import Textarea from 'ui/components/text-area';
-import InputField from 'ui/form/fields/input-field';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { cn } from 'lib/utility';
-import GenericPopover from 'ui/components/popover';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { PieceAddChip, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';

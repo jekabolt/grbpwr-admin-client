@@ -1,5 +1,5 @@
 import { EXPENSE_CURRENCIES } from 'constants/constants';
-import SelectField from 'ui/form/fields/select-field';
+import { SelectField } from 'ui';
 
 type Props = {
   name: string;

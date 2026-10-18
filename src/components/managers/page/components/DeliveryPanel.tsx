@@ -1,6 +1,6 @@
 import type { DeliverySection } from 'api/proto-http/admin';
 import { FC, ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { TimeSeriesChart } from './TimeSeriesChart';
 
 interface DeliveryPanelProps {

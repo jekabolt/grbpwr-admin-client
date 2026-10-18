@@ -1,13 +1,7 @@
 import type { DesignSplitFrame, common_DesignPicture } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
-import { TILE_QUIET } from 'ui/components/tile-skin';
+import { CalloutBox, ConfirmationModal, GroupLabel, Row, Select, Text, TILE_QUIET } from 'ui';
 
 import { detectSplitOf } from './generation/detect-split-image';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
@@ -675,7 +669,7 @@ function SplitSides({ cut }: { cut: SplitCut }) {
                   not just the modal (measured: the body came back empty). «Nothing chosen» is
                   spelled by the ROOT holding '' and the trigger showing its placeholder, which
                   is the arrangement Radix does support. An unwanted side leaves by its ✕. */}
-              <SelectComponent
+              <Select
                 name={`split-frame-${i}`}
                 value={frame.viewKey}
                 placeholder='— view —'

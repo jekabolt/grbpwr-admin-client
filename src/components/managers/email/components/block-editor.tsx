@@ -10,10 +10,7 @@ import {
 } from 'constants/email-campaign';
 import { useCallback } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { Button, Text, InputField, SelectField } from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { HeroProductPicker } from '../../hero/components/hero-product-picker';
 import { LinkField } from '../../hero/components/link-field';

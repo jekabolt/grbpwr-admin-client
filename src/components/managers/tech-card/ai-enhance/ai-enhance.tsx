@@ -4,9 +4,7 @@ import { adminService } from 'api/api';
 import type { EnhanceTextField, EnhanceTextMode } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import GenericPopover from 'ui/components/popover';
+import { Button, Chip, GenericPopover } from 'ui';
 
 /**
  * ═══ AI ENHANCE — ОДНА ТИХАЯ КНОПКА В УГЛУ СВОБОДНОГО ТЕКСТА ═══════════════════════════════════

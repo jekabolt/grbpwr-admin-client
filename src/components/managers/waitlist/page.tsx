@@ -4,13 +4,18 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatSizeName } from '../product/utility/sizes';
 import { formatDateShort } from '../orders-catalog/components/utility';
-import { Button } from 'ui/components/button';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  DataTable,
+  EmptyCell,
+  Input,
+  Pill,
+  Section,
+  SectionStack,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { useProductWaitlist } from './components/useWaitlist';
 
 const PAGE_SIZE = 50;

@@ -1,8 +1,5 @@
 import { common_ProductionLayMode, common_TechCardMarkerSummary } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, DataTable, EmptyCell, Input, Text } from 'ui';
 import { ulid } from 'utils/ulid';
 import { MarkerPicker } from './marker-picker';
 

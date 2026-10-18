@@ -1,6 +1,5 @@
 import { common_ProductionRunLine } from 'api/proto-http/admin';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Text } from 'ui';
 
 // What was actually counted, in the SAME orientation as the plan grid (colour-model in rows,
 // sizes in columns) — until now these numbers existed only inside the receive modal, so "how much

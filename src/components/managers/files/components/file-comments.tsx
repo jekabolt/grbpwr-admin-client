@@ -3,15 +3,18 @@ import type { LibraryFile, LibraryFileComment } from 'api/proto-http/admin';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import {
+  Avatar,
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Text,
+  Textarea,
+} from 'ui';
 import { commentsService } from '../api/commentsService';
 import { isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys, invalidateFileViews } from '../hooks/useFiles';

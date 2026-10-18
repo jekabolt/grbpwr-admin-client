@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
 import { ReactNode } from 'react';
-import Tooltip from 'ui/components/tooltip';
+import { Tooltip } from 'ui';
 
 type Props = {
   // The explanation. Keep it to one or two plain sentences — longer copy belongs in a screen intro,

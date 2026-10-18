@@ -1,8 +1,6 @@
 import { AssigneeSelect } from 'components/managers/tasks/components/assignee-select';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Button, Text, Textarea } from 'ui';
 import { FulfillmentAnnotation as AnnotationModel } from '../api/types';
 import { useSetFulfillmentAssignee, useSetFulfillmentNotes } from '../hooks/useFulfillment';
 import { FulfillmentChecklist } from './fulfillment-checklist';

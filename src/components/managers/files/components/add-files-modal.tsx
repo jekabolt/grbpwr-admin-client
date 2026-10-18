@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Chip, ChipRow, ConfirmationModal, Input, Text, Tile, Tiles } from 'ui';
 import { failureText } from '../api/rpc-error';
 import { useFilesMutations, useFileTopics, useLibraryFiles } from '../hooks/useFiles';
 import { plural } from '../upload/text';

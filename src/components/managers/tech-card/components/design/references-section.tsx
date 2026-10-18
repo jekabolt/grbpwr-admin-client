@@ -4,9 +4,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, Text } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { type BoardItem } from './mood-board';

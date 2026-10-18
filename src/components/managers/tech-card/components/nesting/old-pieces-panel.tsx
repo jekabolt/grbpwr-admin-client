@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 export type OldPieceDecision = 'delete' | 'keep';
 

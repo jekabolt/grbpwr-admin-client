@@ -4,9 +4,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { formatSizeName } from '../utility/sizes';
 

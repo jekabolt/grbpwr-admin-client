@@ -3,10 +3,7 @@ import {
   common_CampaignVariantMetrics,
   common_EmailCampaignStatus,
 } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Section, Text } from 'ui';
 import { fmtInt, fmtRate, StatTile, toNumber } from './stat-tile';
 import { useCampaignMetrics, useDispatchStatus } from './useCampaign';
 

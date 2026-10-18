@@ -1,10 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { Button, Media, Text, InputField } from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { HeroProductPicker } from '../../hero/components/hero-product-picker';
 import { TagPicker } from '../../hero/components/tag-picker';

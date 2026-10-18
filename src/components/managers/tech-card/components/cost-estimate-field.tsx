@@ -12,12 +12,18 @@ import { stampWhen } from 'components/managers/production-runs/components/useLay
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { BarRow } from 'ui/components/bar-row';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import {
+  BarRow,
+  DataTable,
+  EmptyCell,
+  TotalRow,
+  GroupLabel,
+  Pill,
+  Stat,
+  StatGrid,
+  Text,
+  FoldCaret,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { laysProvenancePhrase } from './bom-wastage-suggestion';
 import {
@@ -31,7 +37,6 @@ import {
 } from './costing-vocab';
 import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 const num = (s?: string) => {
   const n = parseDecimalNumber(s);

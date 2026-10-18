@@ -12,12 +12,7 @@ import {
   STATUS_LABELS,
 } from 'constants/email-campaign';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, GroupLabel, Section, Select, Text } from 'ui';
 import { fmtInt, StatTile, StatTone } from './stat-tile';
 import {
   useCancelCampaign,

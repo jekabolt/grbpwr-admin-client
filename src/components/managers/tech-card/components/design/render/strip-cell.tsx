@@ -3,8 +3,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
 import type { MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { PLACEHOLDER_SURFACE, placeholderClass, Text } from 'ui';
 
 import { EMPTY_WORD } from '../core';
 import {

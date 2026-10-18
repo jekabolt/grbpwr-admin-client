@@ -1,8 +1,7 @@
 import { useFitting } from 'components/managers/fittings/components/useFittingQuery';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { FittingForm } from './components';
 
 export function Fitting() {

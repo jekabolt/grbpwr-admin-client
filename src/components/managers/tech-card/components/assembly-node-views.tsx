@@ -7,8 +7,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from 'react';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { CreatePrefill } from './assembly-create-dialog';

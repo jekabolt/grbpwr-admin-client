@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { cn } from 'lib/utility';
 import { useEffect } from 'react';
 import { useFormContext } from 'react-hook-form';
-import Text from 'ui/components/text';
+import Text from '../../components/text';
 import { FormField, FormItem, FormLabel, FormMessage } from '..';
 
 // Email-safe editor: constrained to bold / italic / underline, links and bullet +

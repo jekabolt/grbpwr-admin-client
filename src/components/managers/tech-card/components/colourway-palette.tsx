@@ -1,8 +1,7 @@
 import type { common_Color, common_ColorwayColour, common_Language } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text, FoldCaret } from 'ui';
 
 import {
   blankRow,
@@ -18,7 +17,6 @@ import {
   type PaletteRow,
 } from './colourway-palette-model';
 import { PantonePicker } from './pantone-picker';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ОДИН РЕДАКТОР ПАЛИТРЫ НА ТРИ ЭКРАНА (T45) ═════════════════════════════════════════════════

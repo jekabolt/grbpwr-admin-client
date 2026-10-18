@@ -1,8 +1,5 @@
 import { useLayoutEffect, useState } from 'react';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { CheckboxCommon, Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 import { sizeConflicts, type CardSize, type SizePick } from './dxf-size-plan';
 
 /** The file's sizes against the card's; `sizes` empty = the file is unsized. */

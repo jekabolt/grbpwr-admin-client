@@ -1,8 +1,7 @@
 import { useArchiveDetails } from 'components/managers/archives/components/useArchiveQuery';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { ArchiveForm } from './components';
 
 export function Archive() {

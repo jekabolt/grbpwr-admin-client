@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { ArchiveItem } from './archvie-item';
 import { useInfiniteArchives } from './useArchiveQuery';
 

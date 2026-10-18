@@ -10,7 +10,7 @@ import {
   annotationColorToWire,
   annotationKindToWire,
 } from 'components/managers/tech-card/annotation/wire';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { inputToDecimal } from 'utils/decimal';
 
 import { slotCounter } from '../../fields';

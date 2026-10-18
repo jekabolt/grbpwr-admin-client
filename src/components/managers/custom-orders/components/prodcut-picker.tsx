@@ -2,14 +2,17 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import {
+  Button,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Media,
+  Placeholder,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
 
 /**
  * custPicker v2 — thumbnail grid + basket.

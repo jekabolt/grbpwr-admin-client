@@ -1,7 +1,5 @@
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
-import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
+import { GroupLabel, Text, Tooltip, TooltipProvider } from 'ui';
 import { MeasurementPictogram } from './measurement-pictograms';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 

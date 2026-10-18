@@ -1,11 +1,7 @@
 import type { common_SkuSeason } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { Button, Chip, ChipRow, Input, Text, FormLabel } from 'ui';
 
 import { parseSeasonToSku } from './season-util';
 

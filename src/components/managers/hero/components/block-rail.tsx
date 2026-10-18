@@ -17,8 +17,7 @@ import { heroTypes } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
 

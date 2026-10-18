@@ -11,11 +11,7 @@ import {
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { AnnotationStyleRow } from 'components/managers/tech-card/annotation/style-row';
 import { rememberPen, type NoteArrows } from 'components/managers/tech-card/annotation/surface';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Button, Input, Pill, Text, Textarea } from 'ui';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
 import { CalloutPurposeFields } from './callout-purpose-fields';

@@ -3,11 +3,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Button, Chip, ChipRow, Pill, Text, Textarea } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { InertDoor } from './bench-slot';

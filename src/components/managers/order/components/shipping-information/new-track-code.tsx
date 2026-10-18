@@ -1,6 +1,5 @@
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
+import { Button, Input } from 'ui';
 
 interface Props {
   trackingNumber: string;

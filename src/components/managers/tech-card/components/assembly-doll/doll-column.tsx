@@ -5,8 +5,7 @@
 
 import { lazy, Suspense, useEffect } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import {

@@ -1,12 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Chip, ChipRow, ConfirmationModal, Input, Text } from 'ui';
 import { filesService } from '../api/filesService';
 import { failureText } from '../api/rpc-error';
 import { useFileRoles, useFilesMutations } from '../hooks/useFiles';

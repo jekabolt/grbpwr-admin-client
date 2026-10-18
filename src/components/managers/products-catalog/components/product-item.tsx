@@ -8,9 +8,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import { Tile } from 'ui/components/tiles';
+import { Button, Media, Tile } from 'ui';
 import {
   CatalogCommerceTags,
   CatalogStateBadge,

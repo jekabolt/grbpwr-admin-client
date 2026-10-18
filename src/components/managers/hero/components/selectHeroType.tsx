@@ -4,8 +4,7 @@ import { cn } from 'lib/utility';
 import React, { FC, useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 import { HeroSchema } from './schema';
 
 interface SelectHeroTypeProps {

@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { TaskMedia } from '../api/types';
 import { mediaRefToken } from './task-text';
 

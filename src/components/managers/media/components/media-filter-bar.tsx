@@ -1,8 +1,4 @@
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Input, RatioGlyph, Text } from 'ui';
 import { FilterType, OTHER_RATIO } from '../utils/useFilter';
 
 /**

@@ -3,11 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState, type ReactNode } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { CalloutBox, ConfirmationModal, GroupLabel, Row, Text } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { useColorwayDeletionPreview, useDeleteColorway } from './useColorwayRecipe';
 

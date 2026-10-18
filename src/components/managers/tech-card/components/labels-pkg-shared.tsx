@@ -4,15 +4,19 @@ import { common_TechCardListItem } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import { Toolbar } from 'ui/components/toolbar';
+import {
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Input,
+  Media,
+  Pill,
+  Placeholder,
+  Text,
+  Tile,
+  Tiles,
+  Toolbar,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // Shared building blocks for the LABELS & PKG tab (assembly-field + packaging-recipe-field): the

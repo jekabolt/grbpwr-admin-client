@@ -1,6 +1,4 @@
-import { Drawer } from 'ui/components/drawer';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { Drawer, Placeholder, Text } from 'ui';
 
 // One reason the card can't be released, plus the tab that fixes it. The SAME list the header
 // renders as pills (phase 05) — one source, two renderings.

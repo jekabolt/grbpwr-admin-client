@@ -1,5 +1,4 @@
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
+import { Input, Selector } from 'ui';
 import { SortOrder, SORT_ORDERS } from '../utils/useFilter';
 
 /**

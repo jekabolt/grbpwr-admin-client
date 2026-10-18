@@ -9,15 +9,19 @@ import {
 import { useMaterialLots } from 'components/managers/materials/components/useWarehouse';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import SelectComponent from 'ui/components/select';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Stat,
+  StatGrid,
+  Text,
+  Select,
+} from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { LAY_MODE_LABEL, stampWhen } from './lay-card';
@@ -372,7 +376,7 @@ export function LayEditor({
             colourway
           </Text>
           {isNew ? (
-            <SelectComponent
+            <Select
               name='lay-colorway'
               items={colorwayOptions.map((c) => ({ value: c.colorwayId, label: c.label }))}
               value={colorwayId || ''}
@@ -390,7 +394,7 @@ export function LayEditor({
             lay fabric
           </Text>
           {isNew ? (
-            <SelectComponent
+            <Select
               name='lay-slot'
               items={slotOptions.map((s) => ({ value: s.lineKey, label: s.name }))}
               value={bomLineKey}
@@ -503,7 +507,7 @@ export function LayEditor({
             which roll it was spread from
           </Text>
           {materialId > 0 ? (
-            <SelectComponent
+            <Select
               name='lay-lot'
               // «Рулон не назван» стоит ПЕРВЫМ пунктом, а не отсутствует: это законное состояние
               // настила, а не пропуск в форме, и вернуться в него надо уметь так же, как в него
@@ -566,7 +570,7 @@ export function LayEditor({
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
               unit
             </Text>
-            <SelectComponent
+            <Select
               name='lay-actual-uom'
               items={FACT_UNIT_OPTIONS.map((u) => ({ value: u, label: MATERIAL_UNIT_LABEL[u] }))}
               value={actualUom}

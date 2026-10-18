@@ -6,8 +6,7 @@ import {
   type AnnotationValue,
 } from 'components/managers/tech-card/annotation/canvas';
 import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { mediaRefToken, type MediaRef } from './task-text';
 

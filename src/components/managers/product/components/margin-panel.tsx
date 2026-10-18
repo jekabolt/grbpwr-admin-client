@@ -6,8 +6,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { currencySymbols, SELLING_CURRENCIES } from 'constants/constants';
 import { useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { useCostingFxRates } from './useCostingFxRates';
 
 // cost_price is booked in the base currency; margin is normalised to it.

@@ -11,8 +11,7 @@
 // Карта — ЧИТАТЕЛЬ: пути записи у неё нет. Неверное чтение правят в рельсе, где правят шаг.
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
-import { SectionHeader } from 'ui/components/section-header';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import { SectionHeader, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { activeOf, useActiveStep, useActiveStepStore } from './active-step';
 import { PiecesView } from './pieces-view';

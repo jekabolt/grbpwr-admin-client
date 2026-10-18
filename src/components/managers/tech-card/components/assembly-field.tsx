@@ -7,14 +7,17 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  Input,
+  Pill,
+  GenericPopover,
+  Select,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import {

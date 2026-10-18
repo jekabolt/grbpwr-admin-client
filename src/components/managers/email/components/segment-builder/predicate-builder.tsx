@@ -10,9 +10,7 @@
 //             the field resets operator + values; changing the operator resizes values.
 
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Select, Text } from 'ui';
 import {
   defaultOperatorForField,
   FIELDS,

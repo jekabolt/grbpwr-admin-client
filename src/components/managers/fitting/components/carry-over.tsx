@@ -5,9 +5,7 @@ import {
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { crPieceIds } from './schema';
 import { fittingZoneLabel, normalizeFittingZone } from './zone-options';

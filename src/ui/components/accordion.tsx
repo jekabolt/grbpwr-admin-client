@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cn } from 'lib/utility';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { FoldCaret } from './fold-caret';
 
 /**
  * The reference's `.acc`: a bordered block whose header is a zebra-tinted strip.

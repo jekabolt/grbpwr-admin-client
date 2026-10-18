@@ -5,9 +5,7 @@ import {
 } from 'constants/garment-composition';
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { Button, Text, FormLabel } from 'ui';
 import { CompositionModal } from './composition-modal/composition-modal';
 import { compositionToValue } from './composition-modal/utils';
 

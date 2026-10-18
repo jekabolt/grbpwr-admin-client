@@ -19,11 +19,17 @@ import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filte
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row, RowTotal } from 'ui/components/row';
+import {
+  Button,
+  CalloutBox,
+  DataTable,
+  EmptyCell,
+  GroupLabel,
+  Row,
+  RowTotal,
+  SectionHeader,
+  Text,
+} from 'ui';
 import {
   isMachineStepType,
   isPressStepType,
@@ -45,8 +51,6 @@ import {
   stepDiscriminatorText,
   stepPressText,
 } from './operation-options';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AnnotationCanvas } from './annotation-canvas';
 import { printCutSymmetryCaption } from 'components/managers/print/labels';

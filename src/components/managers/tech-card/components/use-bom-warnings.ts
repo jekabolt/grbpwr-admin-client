@@ -3,7 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { ROUTES } from 'constants/routes';
 import { useFormContext, useFormState, useWatch, type FieldErrors } from 'react-hook-form';
-import type { HeaderWarning, HeaderWarningAction } from 'ui/components/header-warnings';
+import type { HeaderWarning, HeaderWarningAction } from 'ui';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { slotNormRows } from './bom-norm';
 import { catalogPrice, resolveBomPrice } from './bom-price';

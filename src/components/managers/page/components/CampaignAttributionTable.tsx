@@ -1,8 +1,7 @@
 import type { CampaignAttributionRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
+import { GroupLabel, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
-import Text from 'ui/components/text';
 
 interface CampaignAttributionTableProps {
   campaignAttribution: CampaignAttributionRow[] | undefined;

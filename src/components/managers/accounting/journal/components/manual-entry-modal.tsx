@@ -12,18 +12,20 @@ import {
   useFormContext,
   useWatch,
 } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import {
+  Button,
+  ConfirmationModal,
+  Input,
+  Selector,
+  Text,
+  Form,
+  ComboField,
+  DecimalField,
+  SegmentedField,
+} from 'ui';
 import { inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors } from 'utils/field-errors';
-import { Form } from 'ui/form';
-import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'components/shared/currency-select';
-import DecimalField from 'ui/form/fields/decimal-field';
-import SegmentedField from 'ui/form/fields/segmented-field';
 import { Callout, CheckStrip, Verdict } from '../../components/kit';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
 import {

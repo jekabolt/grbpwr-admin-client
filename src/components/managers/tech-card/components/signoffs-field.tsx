@@ -6,15 +6,17 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  Button,
+  FoldCaret,
+  GroupLabel,
+  Input,
+  Pill,
+  SectionHeader,
+  Text,
+  InputField,
+  SelectField,
+} from 'ui';
 import { TechCardFormData } from './schema';
 
 const PENDING = 'TECH_CARD_SIGNOFF_STATE_PENDING';

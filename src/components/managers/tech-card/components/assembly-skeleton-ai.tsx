@@ -18,9 +18,7 @@ import type {
   SuggestAssemblySkeletonResponse,
 } from 'api/proto-http/admin';
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, Pill, Text } from 'ui';
 
 import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 

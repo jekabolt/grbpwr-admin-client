@@ -4,7 +4,7 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { buildOrderTrackingUrl } from 'lib/storefront-links';
 import { ReactNode } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
+import { GrbpwrMark } from 'ui';
 
 const TD = 'border border-black px-1.5 py-1 align-top';
 const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-bgZebra uppercase';

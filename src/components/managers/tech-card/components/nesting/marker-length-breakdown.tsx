@@ -18,10 +18,7 @@
 // считает `markerAreaSplitCm2` — та же тройка, что уезжает в провенанс рецепта процентами, только
 // в сантиметрах; второй реализации здесь нет.
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Pill, Stat, StatGrid, Text } from 'ui';
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 // Разряды в см² — тем же правилом, что у dxf-разбора: два формата одного числа на двух
 // поверхностях одного расчёта разъехались бы первой же правкой.

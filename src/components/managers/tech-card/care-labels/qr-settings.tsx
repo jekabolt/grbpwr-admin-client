@@ -4,8 +4,7 @@
 // только показ: пресет, шаблон, ЖИВОЙ пример ссылки для выбранного в превью варианта, версия QR, мм
 // на модуль и мини-QR — всё из того же `qr.ts`, что рисует изнанку A, — и дверь «edit on the card».
 import { Link } from 'react-router-dom';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 import {
   QR_SIZE_MM,
   QR_QUIET_MODULES,

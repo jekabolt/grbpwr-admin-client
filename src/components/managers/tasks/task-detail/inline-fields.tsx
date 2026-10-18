@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { DatePicker } from 'ui/components/date-picker';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, DatePicker, Input, Text } from 'ui';
 import { DescriptionEditor } from '../components/description-editor';
 import type { TaskMedia } from '../api/types';
 

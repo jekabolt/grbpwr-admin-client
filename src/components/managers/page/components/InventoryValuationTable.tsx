@@ -1,8 +1,6 @@
 import type { InventoryValuation, InventoryValuationRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { GroupLabel, Stat, StatGrid, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 

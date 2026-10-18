@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button } from './button';
+import Text from './text';
 
 /**
  * The reference's section grammar: a RULE, not a box.

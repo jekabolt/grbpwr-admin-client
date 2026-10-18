@@ -25,13 +25,17 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT, shapeFixKey } from 'lib/pattern-import/types';
 import type { PieceDTO } from 'lib/nesting/types';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  DataTable,
+  HeaderWarnings,
+  type HeaderWarning,
+  Pill,
+  Row,
+  Text,
+} from 'ui';
 import { cn } from 'lib/utility';
 import { PieceSheet } from '../../nesting/piece-sheet';
 import type { ImportSessionApi } from '../use-import-session';

@@ -1,13 +1,17 @@
 import { common_TechCardOperationType } from 'api/proto-http/admin';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Chip,
+  ChipRow,
+  Combobox,
+  type ComboboxGroup,
+  ConfirmationModal,
+  FoldCaret,
+  GroupLabel,
+  Input,
+  Select,
+  Text,
+} from 'ui';
 
 import { suggestUnitCode } from './assembly-suggest';
 import { machineTypeOptionsFor, pressEquipmentOptions } from './equipment-options';

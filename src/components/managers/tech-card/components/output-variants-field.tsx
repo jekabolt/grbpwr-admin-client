@@ -8,13 +8,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several

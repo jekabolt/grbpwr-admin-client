@@ -1,8 +1,7 @@
 import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useEffect } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { Text, InputField } from 'ui';
 
 export function PriceFields({ editMode }: { editMode: boolean }) {
   const {

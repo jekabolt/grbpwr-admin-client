@@ -12,12 +12,8 @@ import {
   type PointerEvent,
 } from 'react';
 import { ArtworkImage } from 'components/managers/tech-card/annotation/insets';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
+import { Button, Chip, GroupLabel, Pill, Text } from 'ui';
 import { useRailScroll } from 'components/managers/tech-card/annotation/focused-annotator';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
 
 import { placementsOnPicture } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';

@@ -2,9 +2,7 @@ import { Member } from 'api/proto-http/admin';
 import { localeLabel } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, SectionStack, Text } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { useMember, useTierHistory } from '../utils/hooks';
 import {

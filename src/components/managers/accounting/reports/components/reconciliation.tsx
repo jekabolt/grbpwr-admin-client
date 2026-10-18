@@ -3,7 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { AmountCell } from '../../components/amount-cell';
 import { Note, Pill } from '../../components/kit';
 import { useReconciliation } from '../../utils/hooks';

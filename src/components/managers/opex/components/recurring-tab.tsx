@@ -3,15 +3,19 @@ import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  ConfirmationModal,
+  Pill,
+  Section,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,

@@ -6,14 +6,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Button, ConfirmationModal, Input, Pill, Placeholder, Select, Text, Tile, Tiles } from 'ui';
 import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
 const ALL = 'ALL';

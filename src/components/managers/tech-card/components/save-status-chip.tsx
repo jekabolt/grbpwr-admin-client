@@ -1,10 +1,6 @@
 import { useRef, useState } from 'react';
 import type { AutosaveStatus } from './design/autosave-contract';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { GroupLabel, Pill, GenericPopover, Button, Text } from 'ui';
 import { sameText, TEXT_SECTION_LABEL, type HistoryEntry, type TextSnapshot } from './save-history';
 import type { FormErrorRow } from './stage-progress';
 import type { MachineState } from './useTechCardAutosave';

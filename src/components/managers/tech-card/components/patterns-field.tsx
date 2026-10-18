@@ -26,23 +26,29 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
 import {
+  Button,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
   HeaderWarnings,
   type HeaderWarning,
   type HeaderWarningAction,
-} from 'ui/components/header-warnings';
-import Input from 'ui/components/input';
-import { HeaderNote } from 'ui/components/section-header';
-import { Tile, Tiles } from 'ui/components/tiles';
-import { patternNameOfFile, uploadPatternFile } from 'components/managers/tech-card/patterns/pattern-upload-button';
-import { Pill } from 'ui/components/pill';
-import { Placeholder, PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
+  Input,
+  HeaderNote,
+  Tile,
+  Tiles,
+  Pill,
+  Placeholder,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+} from 'ui';
+import {
+  patternNameOfFile,
+  uploadPatternFile,
+} from 'components/managers/tech-card/patterns/pattern-upload-button';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
 import {
   MAX_PATTERN_BYTES,
   MAX_PATTERN_NAME,

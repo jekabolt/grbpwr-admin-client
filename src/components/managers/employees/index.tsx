@@ -12,18 +12,22 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import SelectComponent from 'ui/components/select';
-import { SkeletonLine } from 'ui/components/skeleton';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { SectionHeader } from 'ui/components/section-header';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  EmptyCell,
+  Input,
+  Pill,
+  Select,
+  SkeletonLine,
+  Stat,
+  StatGrid,
+  Text,
+  SectionHeader,
+} from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   useArchiveEmployee,
@@ -870,7 +874,7 @@ function EmployeeFormModal({
             />
           </Field>
           <Field label='currency'>
-            <SelectComponent
+            <Select
               name='defaultCurrency'
               placeholder='currency'
               fullWidth

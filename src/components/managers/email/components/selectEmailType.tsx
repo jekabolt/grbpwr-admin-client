@@ -6,8 +6,7 @@ import {
 } from 'constants/email-campaign';
 import { cn } from 'lib/utility';
 import React, { FC, useEffect, useRef, useState } from 'react';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 import { v4 as uuidv4 } from 'uuid';
 import { makeEmptyBlock } from './schema';
 

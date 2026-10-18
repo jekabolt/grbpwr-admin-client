@@ -1,6 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useFormContext } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { MediaModifierToggles } from './media-modifier-toggles';
 

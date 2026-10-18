@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { cn } from 'lib/utility';
-import { Arrow } from 'ui/icons/arrow';
+import { Arrow } from '../icons/arrow';
 import Text from './text';
 
 interface FieldsGroupContainerProps {

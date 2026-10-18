@@ -15,7 +15,7 @@ import type {
   PtMm,
   SemanticsOutput,
 } from 'lib/pattern-import/types';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 
 /**

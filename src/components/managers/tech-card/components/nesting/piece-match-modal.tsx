@@ -39,12 +39,16 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import {
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  GroupLabel,
+  HeaderWarnings,
+  type HeaderWarning,
+  Input,
+  Text,
+} from 'ui';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';

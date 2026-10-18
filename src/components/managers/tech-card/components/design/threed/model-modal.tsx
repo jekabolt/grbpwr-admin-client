@@ -1,10 +1,7 @@
 import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, Text } from 'ui';
 import { formatBytes } from 'utils/pattern';
 
 import { RENDER_SHEET_ORDER, benchName } from '../render/model';

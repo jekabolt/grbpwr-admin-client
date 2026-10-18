@@ -1,5 +1,5 @@
 import { TierHistoryEntry } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import { formatEur } from '../../utils/tier-utils';
 

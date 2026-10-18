@@ -5,11 +5,7 @@ import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import { Section } from 'ui/components/section';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Button, CopyToClipboard, Section, Selector, Text } from 'ui';
 import { UpsertShipping } from './components/upsert-shipping';
 
 const currencyOptions = SELLING_CURRENCIES.map((c) => ({ value: c.value, label: c.label }));

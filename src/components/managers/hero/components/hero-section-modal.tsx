@@ -1,7 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 interface HeroSectionModalProps {
   open: boolean;

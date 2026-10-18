@@ -3,8 +3,7 @@
 // count. The shell's own parsing state says what runs; the per-piece reading is `?debug=1` only.
 import { useEffect, useMemo, useState } from 'react';
 import type { Feature, PieceFamily } from 'lib/pattern-import/types';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, Text } from 'ui';
 import { SHEET_INK, SheetViewport, ptsAttr } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Panel, fmtPct } from '../ui-bits';

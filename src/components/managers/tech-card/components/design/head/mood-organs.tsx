@@ -1,12 +1,7 @@
 import { type JSX, type ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, GroupLabel, HeaderNote, Text, FoldCaret } from 'ui';
 
 import { useCardMemory } from './use-draft-fills';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ОРГАНЫ ШАГА MOODBOARD, ОБЩИЕ ДЛЯ ЕГО ШЕСТИ БЛОКОВ ═══════════════════════════════════════════

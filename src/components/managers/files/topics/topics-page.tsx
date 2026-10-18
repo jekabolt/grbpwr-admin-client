@@ -8,15 +8,19 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { SectionHeader } from 'ui/components/section-header';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  Input,
+  SectionHeader,
+  Select,
+  Text,
+} from 'ui';
 import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
 import { FilesDropOverlay } from '../components/drop-overlay';
@@ -695,7 +699,7 @@ export default function FileTopicsPage() {
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
               what we merge into
             </Text>
-            <SelectComponent
+            <Select
               name='mergeTarget'
               value={mergeTarget}
               onValueChange={(v: string) => setMergeTarget(v)}

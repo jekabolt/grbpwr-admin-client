@@ -2,8 +2,7 @@
 // участвует. Мобильные браузеры показывают PDF внутри страницы неровно (iOS — первую страницу,
 // часть Android — ничего), поэтому fallback-содержимое ведёт в новую вкладку, а «скачать» и так
 // всегда висит на строке листа.
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { isSafePatternUrl, type PvSheet } from './manifest';
 
 export function PdfSheet({ sheet }: { sheet: PvSheet }) {

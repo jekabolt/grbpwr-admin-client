@@ -2,7 +2,7 @@ import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/adm
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import { PictureTile } from '../../picture-tile';
 import { mediaThumb } from '../../render/model';

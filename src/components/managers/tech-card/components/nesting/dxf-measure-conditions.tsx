@@ -21,9 +21,7 @@
 // из него выводится и норма строки, и серверная оценка снизу.
 import { useMemo, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { CalloutBox, Selector, Text } from 'ui';
 import { useWorkshopSettings } from '../../../workshop/useWorkshopSettings';
 import type { TechCardFormData } from '../schema';
 import { clampSeamAllowanceMm, engineCmToMm, MAX_SEAM_ALLOWANCE_MM } from './allowance-units';

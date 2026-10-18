@@ -1,5 +1,5 @@
 import { common_AddressInsert } from 'api/proto-http/frontend';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 interface Props {
   shipping: common_AddressInsert | undefined;

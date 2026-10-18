@@ -1,5 +1,5 @@
 import { useFormContext, useWatch } from 'react-hook-form';
-import { FormLabel } from 'ui/form';
+import { FormLabel } from 'ui';
 import { TechCardFormData } from './schema';
 
 // Shared BOM-line chooser keyed by the stable line_key (§2.3). Operations, cut-piece fabric maps and

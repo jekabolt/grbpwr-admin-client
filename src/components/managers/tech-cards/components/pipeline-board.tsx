@@ -1,9 +1,7 @@
 import { common_TechCardListItem, common_TechCardStage } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Accordion } from 'ui/components/accordion';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Accordion, Pill, Text } from 'ui';
 import { TechCardTile } from './tech-card-tile';
 import { ZERO_TIMESTAMP } from './utils';
 import { useStylePipeline } from './useTechCardQuery';

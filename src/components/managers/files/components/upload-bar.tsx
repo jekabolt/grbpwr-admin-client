@@ -11,11 +11,7 @@ import {
   useUploadQueueStore,
 } from 'lib/stores/upload-queue';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Progress } from 'ui/components/progress';
-import { SkeletonLine } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import { Button, Pill, Progress, SkeletonLine, Text } from 'ui';
 import { MAX_UPLOAD_BYTES, filesService } from '../api/filesService';
 import { failureText } from '../api/rpc-error';
 import { filesKeys, useFileTopics } from '../hooks/useFiles';

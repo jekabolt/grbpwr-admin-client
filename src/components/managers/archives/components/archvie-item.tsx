@@ -3,10 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Media, Text } from 'ui';
 import { useDeleteArchive } from './useArchiveQuery';
 
 interface ArchiveItemProps {

@@ -1,10 +1,7 @@
 import { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, GenericPopover, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 export type MarkerFitness = { eligible: boolean; reason: string };

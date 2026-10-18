@@ -14,7 +14,7 @@ import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
-import { TooltipProvider } from 'ui/components/tooltip';
+import { TooltipProvider } from 'ui';
 import { Layout } from 'components/shell/layout';
 import './global.css';
 

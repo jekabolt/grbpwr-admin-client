@@ -2,8 +2,7 @@ import type { MarginByStyleRow } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { FC, useState } from 'react';
 import { generatePath, Link } from 'react-router-dom';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { StyleEconomicsModal } from './StyleEconomicsModal';
 

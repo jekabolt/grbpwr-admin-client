@@ -2,12 +2,7 @@ import { Member, TierCode } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Button, Input, Section, Selector, Text } from 'ui';
 import {
   useHardEraseMember,
   useOverrideTier,

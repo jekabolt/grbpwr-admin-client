@@ -1,8 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { ModelCardList } from './components/model-card-list';
 
 export function Models() {

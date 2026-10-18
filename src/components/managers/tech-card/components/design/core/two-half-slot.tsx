@@ -2,7 +2,7 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
+import { PLACEHOLDER_SURFACE } from 'ui';
 
 /**
  * ═══ ПЛИТКА НА ДВЕ ПОЛОВИНЫ — ОДИН ОРГАН НА ВСЕ ЛЕНТЫ ПОЛОСЫ ══════════════════════════════════

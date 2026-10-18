@@ -10,10 +10,7 @@
 
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Input, Select, Text } from 'ui';
 import {
   arityForOperator,
   effectiveValueKind,

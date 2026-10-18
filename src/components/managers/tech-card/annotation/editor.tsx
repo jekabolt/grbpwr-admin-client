@@ -1,7 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Text } from 'ui';
 
 import {
   effectiveCaps,

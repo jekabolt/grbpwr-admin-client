@@ -4,9 +4,7 @@ import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFiles';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { Button } from 'ui/components/button';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, GenericPopover, Text } from 'ui';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
 import {
   codeEdit,

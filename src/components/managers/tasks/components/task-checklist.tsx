@@ -1,4 +1,4 @@
-import { ChecklistEditor } from 'ui/components/checklist-editor';
+import { ChecklistEditor } from 'ui';
 import { TaskChecklistItem } from '../api/types';
 import {
   useAddChecklistItem,

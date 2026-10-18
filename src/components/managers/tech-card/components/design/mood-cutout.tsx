@@ -2,7 +2,7 @@ import type { common_MediaFull, GetDesignBandResponse } from 'api/proto-http/adm
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { type JSX, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
+import { TILE_CORNER, TILE_QUIET } from 'ui';
 
 import { isRunLive, runStatus } from './generation/run-state';
 import { useRunPolling } from './generation/use-generation';

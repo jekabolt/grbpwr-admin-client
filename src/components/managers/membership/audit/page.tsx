@@ -1,10 +1,7 @@
 import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Button, Input, Text } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { AuditFilters, useRunTierBackfill, useTierAuditLog } from '../utils/hooks';
 import { formatEur } from '../utils/tier-utils';

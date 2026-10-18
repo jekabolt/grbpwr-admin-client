@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { TextareaField } from 'ui';
 
 import { AiEnhance, type EnhanceField } from './ai-enhance';
 

@@ -11,11 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
 import { AskModal, PlaceOrDrawCell, Reason } from './core';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { TILE_CORNER, TILE_QUIET, Button, Input, Pill, Text } from 'ui';
 import { useDrafted } from './drafted-contract';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';

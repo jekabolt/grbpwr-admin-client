@@ -11,10 +11,7 @@
 // значит увиденное и посчитанное не могут разойтись.
 import type { PieceDTO } from 'lib/nesting/types';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
-import { HeaderWarnings } from 'ui/components/header-warnings';
+import { Button, CalloutBox, Text, HeaderWarnings } from 'ui';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet } from './piece-sheet';

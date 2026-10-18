@@ -15,10 +15,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Section } from 'ui/components/section';
-import { HEADER_TEXT } from 'ui/components/section-header';
+import { Button, Chip, Section, HEADER_TEXT } from 'ui';
 import { readColorwayVersion } from './colorway-version';
 import { colorwayTitle, colourwayName, colourwaySwatchHex } from './colourways-matrix';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';

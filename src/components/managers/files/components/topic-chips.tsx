@@ -2,9 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Text } from 'ui';
 import { NewProjectModal } from '../projects/new-project-modal';
 
 export type TopicSelection = { topicIds: number[]; untopiced: boolean };

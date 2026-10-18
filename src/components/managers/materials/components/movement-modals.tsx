@@ -7,8 +7,7 @@ import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import {
   useAdjustMaterialStock,

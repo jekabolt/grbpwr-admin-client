@@ -1,9 +1,6 @@
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, Pill, GenericPopover, Text } from 'ui';
 import { ListTasksFilter, TaskStatus } from '../api/types';
 import { useTasks } from '../hooks/useTasks';
 import { STATUS_LABEL } from '../utils/meta';

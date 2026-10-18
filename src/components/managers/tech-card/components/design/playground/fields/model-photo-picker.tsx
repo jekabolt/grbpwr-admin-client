@@ -1,8 +1,7 @@
 import type { common_MediaFull, common_Model } from 'api/proto-http/admin';
 import { useAllModels, useModel } from 'components/managers/models/components/useModelQuery';
 import { useMemo, type JSX } from 'react';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Select, Text } from 'ui';
 
 import { PictureTile } from '../../picture-tile';
 import { FieldRow } from '../../render/field-row';
@@ -130,7 +129,7 @@ export function ModelPhotoPicker({
     <div className='flex flex-col gap-4' data-model-photo-picker={modelId}>
       <FieldRow label='Profile' className='py-2'>
         <div className='ml-auto w-[280px] max-w-full'>
-          <SelectComponent
+          <Select
             name='playground-model-profile'
             value={modelId > 0 ? String(modelId) : undefined}
             placeholder={list.isLoading ? 'loading the models…' : 'pick a model'}

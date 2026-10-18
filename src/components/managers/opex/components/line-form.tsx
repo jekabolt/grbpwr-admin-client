@@ -1,8 +1,7 @@
 import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import { isRecurringLine, opexVatRegimeOptions } from '../utils/options';

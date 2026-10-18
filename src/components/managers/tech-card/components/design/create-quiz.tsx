@@ -12,11 +12,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn, getCategoriesByParentId } from 'lib/utility';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Input, Row, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { permittedSizeSystems } from 'utils/size-systems';
 

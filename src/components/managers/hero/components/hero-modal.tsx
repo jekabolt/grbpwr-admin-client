@@ -1,6 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 export function HeroModal({
   children,

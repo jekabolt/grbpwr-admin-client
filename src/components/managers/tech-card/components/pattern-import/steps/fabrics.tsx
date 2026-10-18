@@ -10,13 +10,17 @@ import { useMemo, useState } from 'react';
 import type { FabricAssignment, FabricEvidence, SeedId } from 'lib/pattern-import/types';
 import { PURPOSE, isLiningScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CheckboxCommon,
+  Chip,
+  ChipRow,
+  DataTable,
+  HeaderWarnings,
+  type HeaderWarning,
+  Pill,
+  Text,
+} from 'ui';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, ptsAttr } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';

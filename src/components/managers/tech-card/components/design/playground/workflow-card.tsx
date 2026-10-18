@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import type { WorkflowDef } from './registry/types';
 import { WorkflowGlyph } from './workflow-glyph';

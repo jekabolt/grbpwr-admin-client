@@ -19,7 +19,7 @@ import {
   type FocusedView,
 } from 'components/managers/tech-card/annotation/focused-annotator';
 import type { PictureBusyKind } from 'components/managers/tech-card/annotation/picture-busy';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from './autosave-contract';

@@ -1,10 +1,7 @@
 import type { common_DesignPartsPieces } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, Chip, Pill, Text } from 'ui';
 
 /**
  * ═══ PIECES — THE CLOSED NAMES OF PARTS (M6, tmp/plans/flat-consistency 107) ═══════════════════

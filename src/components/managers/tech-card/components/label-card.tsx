@@ -3,15 +3,18 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
 import { useEffect, useId, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  Input,
+  Media,
+  Pill,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+  Textarea,
+} from 'ui';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
-import Textarea from 'ui/components/text-area';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { LABEL_MEDIA_MAX } from './labels-schema';
 

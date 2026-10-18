@@ -10,9 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, Pill, Text } from 'ui';
 import { ulid } from 'utils/ulid';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 

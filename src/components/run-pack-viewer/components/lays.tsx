@@ -6,10 +6,7 @@
 //
 // СОСТАВ РАСКЛАДКИ НЕ УМНОЖЕН НА СЛОИ. Выход настила считает сервер с учётом режима настилания, и
 // вторая арифметика того же числа разошлась бы с первой ровно тогда, когда это дороже всего.
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { CalloutBox, GroupLabel, Row, Text } from 'ui';
 import { layModeWord } from './labels';
 import { RpLay, RpMaterialBlocker } from './manifest';
 

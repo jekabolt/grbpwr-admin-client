@@ -1,6 +1,6 @@
 import type { DesignImageModel } from 'api/proto-http/admin';
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import { FieldRow } from '../../render/field-row';
 import { OptionRow } from './option-row';

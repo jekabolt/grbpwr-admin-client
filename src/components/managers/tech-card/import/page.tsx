@@ -16,10 +16,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { Button, Section, SectionStack, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { ImportReportCounters, ImportReportTable } from './import-report-table';
 
 const UPLOAD_PATH = '/api/techcard-archive/upload';

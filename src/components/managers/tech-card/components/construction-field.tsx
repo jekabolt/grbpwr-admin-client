@@ -1,6 +1,4 @@
-import ComboField from 'ui/form/fields/combo-field';
-import DecimalField from 'ui/form/fields/decimal-field';
-import SelectField from 'ui/form/fields/select-field';
+import { ComboField, DecimalField, SelectField } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { EquipmentParkField } from './equipment-park';
 import { seamClassOptions } from './operation-options';

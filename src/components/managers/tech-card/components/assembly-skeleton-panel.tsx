@@ -44,17 +44,21 @@ import {
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { HeaderNote } from 'ui/components/section-header';
+import {
+  Button,
+  CheckboxCommon,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  FoldCaret,
+  HeaderWarnings,
+  type HeaderWarning,
+  HeaderNote,
+  Text,
+} from 'ui';
 import { useSearchParams } from 'react-router-dom';
 import { revealField } from 'utils/field-errors';
-import Text from 'ui/components/text';
 
 import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './assembly-frontier';
 import { SkeletonAIBar, useSkeletonAI } from './assembly-skeleton-ai';

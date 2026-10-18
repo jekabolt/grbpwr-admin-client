@@ -7,13 +7,15 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn, getCategoriesByParentId } from 'lib/utility';
 import { useCallback, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  ConfirmationModal,
+  GroupLabel,
+  GenericPopover,
+  Row,
+  Text,
+  FormLabel,
+  SelectField,
+} from 'ui';
 import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { followCategory } from './design/flat-route';
 import { garmentClassOf, useGarmentClass } from './design/head/card-facts-form';

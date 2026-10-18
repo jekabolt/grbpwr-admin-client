@@ -5,10 +5,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from '../../../../ui/components/button';
-import Input from '../../../../ui/components/input';
-import Media from '../../../../ui/components/media';
-import Text from '../../../../ui/components/text';
+import { Button, Input, Media, Text } from 'ui';
 import { HeroModal } from './hero-modal';
 
 const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';

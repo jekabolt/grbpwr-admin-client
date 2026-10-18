@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import Text from './text';
 
 /**
  * The reference's `.stats` block: an auto-fitting grid of bordered cells, each a

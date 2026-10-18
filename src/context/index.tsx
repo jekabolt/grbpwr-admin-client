@@ -1,6 +1,6 @@
 import { Dispatch, FC, ReactNode, createContext, useReducer } from 'react';
 
-import { TooltipProvider } from 'ui/components/tooltip';
+import { TooltipProvider } from 'ui';
 
 const initialContextValue = {};
 

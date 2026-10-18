@@ -2,8 +2,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 
 // One resolved, pickable entity row.
 export interface EntityOption {

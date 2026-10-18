@@ -4,7 +4,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import { benchKindOf, colorwayOf } from '../../../bench-kinds';
 import type { NotSentItem } from '../../../core';

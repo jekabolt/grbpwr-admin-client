@@ -1,8 +1,7 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import { Text, Arrow } from 'ui';
 import { AvatarStack } from './avatar-stack';
 
 /**

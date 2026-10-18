@@ -5,8 +5,7 @@ import type {
   TooltipComponentFormatterCallbackParams,
 } from 'echarts';
 import { FC, useMemo } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import {
   ChartCard,
   EChart,

@@ -1,7 +1,5 @@
 import { StyleCostPriceSource } from 'api/proto-http/admin';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Pill, GenericPopover, Text } from 'ui';
 
 /**
  * ONE vocabulary for the whole costing tab.

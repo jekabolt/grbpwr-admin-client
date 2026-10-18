@@ -20,13 +20,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import Select from 'ui/components/select';
-import Textarea from 'ui/components/text-area';
+import { Button, GroupLabel, Section, HeaderCount, Text, Select, Textarea } from 'ui';
 
 import { kindLabel } from '../../bom-kind';
 import { bornBomLine, patchBomLine } from '../../form-writers';

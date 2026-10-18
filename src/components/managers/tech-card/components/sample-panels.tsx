@@ -19,10 +19,7 @@ import {
 } from 'components/managers/materials/components/useWarehouse';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Row, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { wireInt } from './schema';
 import { sampleKeys } from './useSamples';

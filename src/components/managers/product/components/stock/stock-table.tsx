@@ -1,7 +1,7 @@
 import type { common_StockChange } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 function formatStockSource(source: string | undefined): string {
   if (!source) return '—';

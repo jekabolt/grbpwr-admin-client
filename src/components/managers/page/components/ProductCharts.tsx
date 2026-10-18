@@ -8,8 +8,7 @@ import type {
 } from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import {
   categoryAxis,
   ChartCard,

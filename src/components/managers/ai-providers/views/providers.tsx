@@ -5,13 +5,7 @@ import type {
   GetAiProvidersConfigResponse,
 } from 'api/proto-http/admin';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { Button, CalloutBox, Input, Pill, Section, Text, ToggleSwitch } from 'ui';
 import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
 import { WriteError } from './write-error';
 import {

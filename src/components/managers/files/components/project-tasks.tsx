@@ -8,8 +8,7 @@ import { STATUS_LABEL, STATUSES } from 'components/managers/tasks/utils/meta';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 /**
  * ЗАДАЧИ ПРОЕКТА — ОДНА СТРОКА-СВОДКА, А НЕ СПИСОК.

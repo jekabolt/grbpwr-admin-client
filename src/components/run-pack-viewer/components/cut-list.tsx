@@ -13,10 +13,7 @@ import {
   cutSymmetryBadge,
   grainlineArrow,
 } from 'components/managers/tech-card/components/piece-codes';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { CalloutBox, DataTable, EmptyCell, TotalRow, Pill, Text } from 'ui';
 import { fusingViewerCaption, RpCutBlocker, RpCutRow, RpSize } from './manifest';
 import { DESC_CELL, RUNPACK_GRID } from './table';
 

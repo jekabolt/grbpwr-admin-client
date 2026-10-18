@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 
-import Textarea, { TextareaProps } from 'ui/components/text-area';
+import Textarea, { TextareaProps } from '../../components/text-area';
 
-import { Button } from 'ui/components/button';
+import { Button } from '../../components/button';
 import { cn } from 'lib/utility';
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '..';
 

@@ -5,10 +5,7 @@
 // автосейв встал бы для всей карточки. Сумма части ≠ 100 — предупреждение, не запрет.
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { CheckboxCommon, Combobox, type ComboboxGroup, Input, Text } from 'ui';
 import type { OverrideFiber } from '../../care-labels/composition-override';
 import type { FiberDict } from '../../care-labels/composition-resolver';
 import { LABEL_PART_NAME, LABEL_PARTS } from '../../care-labels/label-parts';
