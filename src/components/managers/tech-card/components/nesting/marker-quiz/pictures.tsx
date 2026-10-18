@@ -10,6 +10,8 @@ const TABLE_LENGTH = 300;
 const TABLE_Y = 150;
 const GROUND_Y = 204;
 const MAX_PICTURE_HEIGHT = 240;
+const MIN_STACK_HEIGHT = 12;
+const MIN_STACK_LINES = 3;
 
 type Tone = 'ink' | 'label' | 'error';
 type Anchor = 'left' | 'centre' | 'right';
@@ -319,8 +321,9 @@ function StackLines({
 
 function stackHeight(stackCm: number, plies: number) {
   const byThickness = nonNegative(stackCm) * 10;
-  const byLines = Math.max(0, Math.min(11, Math.round(plies) - 1)) * 3.2;
-  return clamp(Math.max(byThickness, byLines, 2), 2, 42);
+  const drawnLines = clamp(Math.round(nonNegative(plies)), MIN_STACK_LINES, 12);
+  const byLines = (drawnLines - 1) * 3.2;
+  return clamp(Math.max(byThickness, byLines, MIN_STACK_HEIGHT), MIN_STACK_HEIGHT, 42);
 }
 
 function scaledLength(value: number, tableLength: number, pixels = TABLE_LENGTH) {
@@ -336,7 +339,7 @@ export function SpreadChoicePicture(p: { kind: 'single' | 'table' }): JSX.Elemen
   const height = p.kind === 'single' ? 2 : 24;
   const viewBox = withMargin({
     left: x - 20,
-    top: y - height - 2,
+    top: y - 24 - 2,
     right: x + length + 20,
     bottom: groundY,
   });
@@ -485,12 +488,15 @@ export function LayersPicture(p: {
   const stackX = x + 20;
   const length = clamp(scaledLength(p.layCm, p.tableLengthCm), 28, TABLE_LENGTH * 1.3);
   const height = stackHeight(p.stackCm, p.plies);
+  const drawnPlies = Math.max(MIN_STACK_LINES, Math.round(nonNegative(p.plies)));
   const stackTop = TABLE_Y - 1 - height;
   const dimensionX = stackX + length + 10;
   const dimensionTone: Tone = p.stackOk ? 'ink' : 'error';
   const sizes = [...new Set(p.plySizes.map((size) => size.trim()).filter(Boolean))].join(' · ');
   const sizeY = stackTop - 20;
-  const labelX = dimensionX + 11;
+  const labelX = dimensionX + 14;
+  const thicknessLabel =
+    Number.isFinite(p.stackCm) && p.stackCm > 0 ? ` · ${formatNumber(p.stackCm)} cm` : '';
   const right = Math.max(x + TABLE_LENGTH + 20, labelX + 155);
   const viewBox = withMargin({ left: x - 20, top: sizeY - 10, right, bottom: GROUND_Y });
   const overlays: LabelOverlay[] = [
@@ -498,9 +504,10 @@ export function LayersPicture(p: {
       key: 'layers',
       x: labelX,
       y: (stackTop + TABLE_Y - 1) / 2,
-      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'} · ${formatNumber(p.stackCm)} cm`,
+      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'}${thicknessLabel}`,
       tone: dimensionTone,
       anchor: 'left',
+      backed: true,
     },
   ];
 
@@ -522,7 +529,7 @@ export function LayersPicture(p: {
         x={stackX}
         y={TABLE_Y}
         length={length}
-        count={p.plies}
+        count={drawnPlies}
         height={height}
         faceToFace={p.faceToFace}
       />
