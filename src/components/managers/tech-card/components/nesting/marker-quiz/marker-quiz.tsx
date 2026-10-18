@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 
 import type { SpreadMode } from 'lib/nesting/spread';
-import { Button, Chip, Input, Stat, StatGrid, Text } from 'ui';
+import { Button, Chip, Input, Text } from 'ui';
 
 import type { LayMode } from '../use-lay-mode';
 import {
@@ -16,7 +16,6 @@ import {
   LayersPicture,
   SpreadChoicePicture,
   TablePicture,
-  fabricColours,
 } from './pictures';
 
 export type QuizStep = 'spread' | 'confirm' | 'size' | 'knife' | 'what' | 'layers' | 'ends' | 'run';
@@ -138,6 +137,14 @@ export function useMarkerQuiz({
 
 export type MarkerQuizState = ReturnType<typeof useMarkerQuiz>;
 
+// Один размер шрифта на весь квиз — базовый админский; иерархия только цветом и капслоком.
+// Чипы и кнопки `xs`/`sm` из 'ui' по умолчанию мельче, поэтому размер задаётся явно.
+const ONE_SIZE = 'text-textBaseSize';
+// Рамочная кнопка базового размера (size по умолчанию не тянет `text-micro`).
+const FRAMED = 'px-2.5 py-1 uppercase tracking-label';
+// Одна высота у всех контролов ряда: поле, сегменты.
+const CTRL_H = 'h-8';
+
 /** Шаги в шапке модалки: текущий залит, пройденные кликабельны. */
 export function QuizChips({ quiz }: { quiz: MarkerQuizState }) {
   const names = [...new Set(quiz.flow.map((s) => CHIP[s]))];
@@ -147,15 +154,17 @@ export function QuizChips({ quiz }: { quiz: MarkerQuizState }) {
       {names.map((name, i) => {
         const first = quiz.flow.find((s) => CHIP[s] === name) ?? quiz.step;
         return i === current ? (
-          <Chip key={name} selected>
+          <Chip key={name} selected className={ONE_SIZE}>
             {name}
           </Chip>
         ) : i < current ? (
-          <Chip key={name} onClick={() => quiz.go(first)}>
+          <Chip key={name} className={ONE_SIZE} onClick={() => quiz.go(first)}>
             {name}
           </Chip>
         ) : (
-          <Chip key={name}>{name}</Chip>
+          <Chip key={name} className={ONE_SIZE}>
+            {name}
+          </Chip>
         );
       })}
     </div>
@@ -209,7 +218,7 @@ function NumField({
   );
 }
 
-/** − n + : количество изделий размера, число слоёв. */
+/** − n + : количество изделий размера. */
 function Count({
   value,
   min,
@@ -231,7 +240,7 @@ function Count({
     <div className='flex items-stretch'>
       <Button
         variant='secondary'
-        size='xs'
+        className='px-2'
         aria-label={`fewer ${label}`}
         disabled={disabled || value <= min}
         onClick={() => set(value - 1)}
@@ -247,7 +256,7 @@ function Count({
       />
       <Button
         variant='secondary'
-        size='xs'
+        className='px-2'
         aria-label={`more ${label}`}
         disabled={disabled}
         onClick={() => set(value + 1)}
@@ -260,9 +269,72 @@ function Count({
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+    <Text variant='label' tracking='label' component='span' className='uppercase'>
       {children}
     </Text>
+  );
+}
+
+// Сетка «коробок» под картинкой: равные колонки, в каждой — подпись над одним контролом.
+const COLS: Record<number, string> = {
+  1: 'sm:grid-cols-1',
+  2: 'sm:grid-cols-2',
+  3: 'sm:grid-cols-3',
+};
+
+function Boxes({ children, count }: { children: React.ReactNode; count: number }) {
+  return (
+    <div className={`grid w-full max-w-3xl grid-cols-1 gap-3 ${COLS[count] ?? 'sm:grid-cols-3'}`}>
+      {children}
+    </div>
+  );
+}
+
+function Box({
+  label,
+  aside,
+  children,
+}: {
+  label: React.ReactNode;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className='flex min-w-0 flex-col gap-1'>
+      <div className='flex h-5 items-center justify-between gap-2'>
+        <Label>{label}</Label>
+        {aside}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Поле-коробка: подпись над числом. */
+function NumBox({
+  label,
+  value,
+  onCommit,
+  decimal = true,
+  disabled,
+}: {
+  label: string;
+  value: number | null;
+  onCommit: (n: number) => void;
+  decimal?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <Box label={label}>
+      <NumField
+        label={label}
+        decimal={decimal}
+        value={value}
+        disabled={disabled}
+        className={`${CTRL_H} tabular-nums`}
+        onCommit={onCommit}
+      />
+    </Box>
   );
 }
 
@@ -286,8 +358,6 @@ export type QuizWarning = {
 export type MarkerQuizProps = {
   quiz: MarkerQuizState;
   busy: boolean;
-  // Цвет ткани колорвея, если он известен (сегодня в данных его нет — нейтральная ткань).
-  fabricHex?: string | null;
   layMode: LayMode;
   onLayMode: (m: LayMode) => void;
   tableCm: number | null;
@@ -338,7 +408,6 @@ export function MarkerQuiz(p: MarkerQuizProps) {
   const { quiz } = p;
   const step = quiz.step;
   const table = p.layMode === 'table';
-  const fabric = fabricColours(p.fabricHex);
   const layCm = p.markerLengthCm + 2 * p.endLossCm;
   const tableLen = p.tableCm ?? Math.max(Math.ceil(layCm), 200);
   const tableWid = p.tableWidthCm ?? Math.max(p.clothWidthCm + 20, 160);
@@ -371,23 +440,21 @@ export function MarkerQuiz(p: MarkerQuizProps) {
           <div className='grid w-full max-w-3xl gap-4 sm:grid-cols-2'>
             {(
               [
-                ['single', 'One layer', 'cut with scissors'],
-                ['table', 'Stack of layers', 'cut with a knife'],
+                ['single', 'One layer', 'scissors'],
+                ['table', 'Stack of layers', 'knife'],
               ] as const
             ).map(([m, name, sub]) => (
               <Button
                 key={m}
                 aria-pressed={p.layMode === m}
                 disabled={p.busy}
-                className={`flex flex-col gap-3 border p-4 text-left transition-colors hover:border-textColor ${
+                className={`flex flex-col gap-2 border p-4 text-left transition-colors hover:border-textColor ${
                   p.layMode === m ? 'border-textColor' : 'border-borderColor'
                 }`}
                 onClick={() => p.onLayMode(m)}
               >
-                <SpreadChoicePicture kind={m} fabric={fabric} />
-                <Text size='large' component='span'>
-                  {name}
-                </Text>
+                <SpreadChoicePicture kind={m} />
+                <Text component='span'>{name}</Text>
                 <Label>{sub}</Label>
               </Button>
             ))}
@@ -398,45 +465,32 @@ export function MarkerQuiz(p: MarkerQuizProps) {
           <>
             <TablePicture
               lengthCm={p.tableCm ?? 0}
-              widthCm={p.tableWidthCm ?? 0}
+              widthCm={p.tableWidthCm}
               maxStackCm={p.stackLimitCm}
             />
-            <Button variant='secondary' size='sm' onClick={quiz.editTable}>
+            <Button variant='secondary' className={FRAMED} onClick={quiz.editTable}>
               No, change it
             </Button>
           </>
         );
       case 'size':
         return (
-          <TablePicture
-            lengthCm={tableLen}
-            widthCm={tableWid}
-            maxStackCm={p.stackLimitCm}
-            length={{
-              value: p.tableCm ?? 0,
-              onChange: nonNeg(p.onTableCm),
-              unit: 'cm',
-              label: 'length',
-            }}
-            width={{
-              value: p.tableWidthCm ?? 0,
-              onChange: nonNeg(p.onTableWidthCm),
-              unit: 'cm',
-              label: 'width',
-            }}
-          />
+          <>
+            <TablePicture lengthCm={tableLen} widthCm={tableWid} maxStackCm={p.stackLimitCm} />
+            <Boxes count={2}>
+              <NumBox label='length cm' value={p.tableCm} onCommit={nonNeg(p.onTableCm)} />
+              <NumBox label='width cm' value={p.tableWidthCm} onCommit={nonNeg(p.onTableWidthCm)} />
+            </Boxes>
+          </>
         );
       case 'knife':
         return (
-          <KnifePicture
-            fabric={fabric}
-            maxStackCm={{
-              value: p.stackLimitCm ?? 0,
-              onChange: nonNeg(p.onStackCm),
-              unit: 'cm',
-              label: 'max stack',
-            }}
-          />
+          <>
+            <KnifePicture maxStackCm={p.stackLimitCm ?? 0} stackCm={p.stackCm ?? undefined} />
+            <Boxes count={1}>
+              <NumBox label='max stack cm' value={p.stackLimitCm} onCommit={nonNeg(p.onStackCm)} />
+            </Boxes>
+          </>
         );
       case 'what':
         return (
@@ -447,6 +501,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                 {[{ id: 0, label: 'shared' }, ...p.colourways].map((c) => (
                   <Chip
                     key={c.id}
+                    className={ONE_SIZE}
                     selected={c.id === p.colourwayId}
                     pressed={c.id === p.colourwayId}
                     disabled={p.busy}
@@ -467,7 +522,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                     r.qty > 0 ? '' : 'text-labelColor'
                   }`}
                 >
-                  <GarmentPile colour={fabric.face} qty={r.qty} />
+                  <GarmentPile qty={r.qty} />
                   <Text component='span' className={r.bad ? 'text-error' : undefined}>
                     {r.label}
                   </Text>
@@ -489,164 +544,159 @@ export function MarkerQuiz(p: MarkerQuizProps) {
           .filter((x) => x.q > 0)
           .map((x) => `${x.q} ${x.l}`)
           .join(' · ');
+        const askThickness = !p.thicknessFromBom || p.thicknessMm == null;
         return (
           <>
             <LayersPicture
               tableLengthCm={tableLen}
-              tableWidthCm={tableWid}
-              clothWidthCm={p.clothWidthCm}
               layCm={layCm}
-              endLossCm={p.endLossCm}
               plies={p.plies}
               plySizes={plySizes}
-              faceToFace={faceToFace}
-              fabric={fabric}
               stackCm={p.stackCm ?? 0}
               stackOk={p.stackOk}
+              faceToFace={faceToFace}
             />
-            <p className='text-center text-lg tabular-nums'>
+            <Text component='p' className='text-center tabular-nums'>
               {p.plies} layers × ({parts || '—'}) = {p.cutTotal + p.extraTotal}
               {p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal} extra</span>}
-            </p>
-            <div className='flex flex-wrap items-center justify-center gap-3'>
-              {(
-                [
-                  ['face_up', 'all face up'],
-                  ['face_to_face', 'face to face'],
-                ] as const
-              ).map(([m, label]) => (
-                <Chip
-                  key={m}
-                  selected={p.spreadMode === m}
-                  pressed={p.spreadMode === m}
+            </Text>
+            <Boxes count={askThickness ? 3 : 2}>
+              <Box label='face'>
+                <div className={`flex ${CTRL_H}`} role='radiogroup' aria-label='face'>
+                  {(
+                    [
+                      ['face_up', 'up'],
+                      ['face_to_face', 'to face'],
+                    ] as const
+                  ).map(([m, label]) => (
+                    <Chip
+                      key={m}
+                      className={`${ONE_SIZE} -ml-px flex-1 justify-center first:ml-0`}
+                      selected={p.spreadMode === m}
+                      pressed={p.spreadMode === m}
+                      disabled={p.busy}
+                      onClick={() => {
+                        if (m !== p.spreadMode) p.onSpreadMode(m);
+                      }}
+                    >
+                      {label}
+                    </Chip>
+                  ))}
+                </div>
+              </Box>
+              <Box
+                label={p.pliesAuto ? 'layers · auto' : 'layers'}
+                aside={
+                  p.pliesAuto ? undefined : (
+                    <Button
+                      variant='underline'
+                      className='uppercase'
+                      disabled={p.busy}
+                      onClick={() => p.onPlies(null)}
+                    >
+                      auto
+                    </Button>
+                  )
+                }
+              >
+                <NumField
+                  label='layers'
+                  value={p.plies}
                   disabled={p.busy}
-                  onClick={() => {
-                    if (m !== p.spreadMode) p.onSpreadMode(m);
+                  className={`${CTRL_H} tabular-nums`}
+                  onCommit={(n) => {
+                    const next = Math.max(1, Math.round(n));
+                    if (n >= 1 && (next !== p.plies || p.pliesAuto)) p.onPlies(next);
                   }}
-                >
-                  {label}
-                </Chip>
-              ))}
-              <Label>layers</Label>
-              <Count
-                label='layers'
-                value={p.plies}
-                min={1}
-                disabled={p.busy}
-                onChange={(n) => p.onPlies(n)}
-              />
-              {p.pliesAuto ? (
-                <Label>auto</Label>
-              ) : (
-                <Button
-                  variant='underline'
-                  size='xs'
+                />
+              </Box>
+              {askThickness && (
+                <NumBox
+                  label='thickness mm'
+                  value={p.thicknessMm}
                   disabled={p.busy}
-                  onClick={() => p.onPlies(null)}
-                >
-                  auto
-                </Button>
+                  onCommit={(n) => p.onThickness(n > 0 ? n : null)}
+                />
               )}
-              {p.thicknessFromBom && p.thicknessMm != null ? (
-                <Label>{p.thicknessMm} mm each</Label>
-              ) : (
-                <span className='flex items-center gap-1'>
-                  <Label>thickness</Label>
-                  <NumField
-                    label='thickness'
-                    decimal
-                    value={p.thicknessMm}
-                    disabled={p.busy}
-                    className='w-14 text-right tabular-nums'
-                    onCommit={(n) => p.onThickness(n > 0 ? n : null)}
-                  />
-                  <Label>mm</Label>
-                </span>
-              )}
-            </div>
+            </Boxes>
           </>
         );
       }
       case 'ends':
         return (
-          <EndsPicture
-            fabric={fabric}
-            endLoss={{
-              value: p.endLossCm,
-              onChange: (v) => p.onEndLoss(Math.max(0, v)),
-              unit: 'cm',
-              label: 'each end',
-            }}
-          />
+          <>
+            <EndsPicture endLossCm={p.endLossCm} layCm={layCm} tableLengthCm={tableLen} />
+            <Boxes count={1}>
+              <NumBox
+                label='end loss cm'
+                value={p.endLossCm}
+                onCommit={(v) => p.onEndLoss(Math.max(0, v))}
+              />
+            </Boxes>
+          </>
         );
       case 'run': {
+        // Раскладку экрана «run» выбирает владелец; здесь только один размер шрифта: прежняя
+        // сетка фактов (подпись-дверь над значением) без крупных цифр `Stat`.
         const fact = (label: string, to: QuizStep, value: React.ReactNode) => (
-          <Stat
+          <div
             key={label}
-            label={
-              <Button
-                variant='underline'
-                className='uppercase'
-                disabled={p.busy}
-                onClick={() => quiz.go(to)}
-              >
-                {label}
-              </Button>
-            }
-            value={value}
-          />
+            className='flex flex-col gap-0.5 border-r border-b border-borderColor px-2.5 py-2'
+          >
+            <Button
+              variant='underline'
+              className='self-start uppercase'
+              disabled={p.busy}
+              onClick={() => quiz.go(to)}
+            >
+              {label}
+            </Button>
+            <span className='tabular-nums'>{value}</span>
+          </div>
         );
         return (
           <>
             <LayOnTablePicture
               mode={table ? 'table' : 'single'}
               tableLengthCm={tableLen}
-              tableWidthCm={tableWid}
-              clothWidthCm={p.clothWidthCm}
               markerLengthCm={p.markerLengthCm}
-              endLossCm={p.endLossCm}
               plies={table ? p.plies : 1}
-              plySizes={plySizes}
-              faceToFace={faceToFace}
-              fabric={fabric}
               fits={fits}
             />
-            <div className='w-full'>
-              <StatGrid min={140}>
-                {fact(
-                  'garments',
-                  'what',
-                  <>
-                    {p.cutTotal}
-                    {table && p.extraTotal > 0 && (
-                      <span className='text-labelColor'> +{p.extraTotal}</span>
-                    )}
-                  </>,
-                )}
-                {table && fact('layers', 'layers', p.plies)}
-                {table &&
-                  fact(
-                    'stack',
-                    'layers',
-                    <span className={p.stackOk ? undefined : 'text-error'}>
-                      {p.stackCm == null ? '—' : f1(p.stackCm)}
-                      <span className='text-labelColor'>
-                        {' '}
-                        / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)} cm
-                      </span>
-                    </span>,
+            <div className='grid w-full grid-cols-[repeat(auto-fit,minmax(8.75rem,1fr))] border-t border-l border-borderColor'>
+              {fact(
+                'garments',
+                'what',
+                <>
+                  {p.cutTotal}
+                  {table && p.extraTotal > 0 && (
+                    <span className='text-labelColor'> +{p.extraTotal}</span>
                   )}
-                {fact(
-                  'fabric',
-                  table ? 'ends' : 'what',
-                  <>
-                    {p.fabricCm == null
-                      ? '—'
-                      : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)}`}
-                    <span className='text-labelColor'> m</span>
-                  </>,
+                </>,
+              )}
+              {table && fact('layers', 'layers', p.plies)}
+              {table &&
+                fact(
+                  'stack',
+                  'layers',
+                  <span className={p.stackOk ? undefined : 'text-error'}>
+                    {p.stackCm == null ? '—' : f1(p.stackCm)}
+                    <span className='text-labelColor'>
+                      {' '}
+                      / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)} cm
+                    </span>
+                  </span>,
                 )}
-              </StatGrid>
+              {fact(
+                'fabric',
+                table ? 'ends' : 'what',
+                <>
+                  {p.fabricCm == null
+                    ? '—'
+                    : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)}`}
+                  <span className='text-labelColor'> m</span>
+                </>,
+              )}
             </div>
             {p.warnings.length > 0 && (
               <ul className='flex w-full flex-col gap-1.5'>
@@ -660,7 +710,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                     <span className='min-w-0 flex-1'>{w.text}</span>
                     {w.fix &&
                       (w.fix.href ? (
-                        <Button asChild variant='underline' size='xs'>
+                        <Button asChild variant='underline' className='uppercase'>
                           <a
                             href={w.fix.href}
                             target='_blank'
@@ -673,7 +723,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                       ) : (
                         <Button
                           variant='underline'
-                          size='xs'
+                          className='uppercase'
                           disabled={w.fix.disabled || p.busy}
                           onClick={w.fix.onClick}
                         >
@@ -687,7 +737,12 @@ export function MarkerQuiz(p: MarkerQuizProps) {
             {p.extras && (
               <div className='flex w-full flex-wrap items-end gap-x-4 gap-y-1.5'>{p.extras}</div>
             )}
-            <Button variant='underline' size='xs' disabled={p.busy} onClick={quiz.restart}>
+            <Button
+              variant='underline'
+              className='uppercase'
+              disabled={p.busy}
+              onClick={quiz.restart}
+            >
               redo questions
             </Button>
           </>
@@ -697,9 +752,9 @@ export function MarkerQuiz(p: MarkerQuizProps) {
   })();
 
   return (
-    <div className='flex flex-col'>
+    <div className={`flex flex-col ${ONE_SIZE}`}>
       <div className='flex min-h-96 flex-col items-center gap-4 px-2 pt-2 pb-4'>
-        <Text size='large' component='h2' className='text-center'>
+        <Text component='h2' className='text-center'>
           {QUESTION[step]}
         </Text>
         {body}
@@ -707,7 +762,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
       <div className='flex items-center gap-3 border-t border-borderColor pt-3'>
         <Button
           variant='secondary'
-          size='sm'
+          className={FRAMED}
           disabled={quiz.index === 0 || p.busy}
           onClick={quiz.back}
         >
@@ -715,12 +770,17 @@ export function MarkerQuiz(p: MarkerQuizProps) {
         </Button>
         <span className='flex-1' />
         {step === 'run' && p.onShowResult && (
-          <Button variant='underline' size='xs' onClick={p.onShowResult}>
+          <Button variant='underline' className='uppercase' onClick={p.onShowResult}>
             show result
           </Button>
         )}
         {step !== 'spread' && (
-          <Button variant='main' size='sm' disabled={nextDisabled} onClick={() => void onNext()}>
+          <Button
+            variant='main'
+            className={FRAMED}
+            disabled={nextDisabled}
+            onClick={() => void onNext()}
+          >
             {nextLabel}
           </Button>
         )}
