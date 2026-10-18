@@ -1264,9 +1264,6 @@
   "src/components/managers/tech-card/components/nesting/marker-length-breakdown.tsx": {
     "design/no-arbitrary-px": 1
   },
-  "src/components/managers/tech-card/components/nesting/marker-schematic.tsx": {
-    "design/no-style-design": 1
-  },
   "src/components/managers/tech-card/components/nesting/markers-section.tsx": {
     "design/no-arbitrary-px": 2,
     "design/no-local-primitive": 1,
