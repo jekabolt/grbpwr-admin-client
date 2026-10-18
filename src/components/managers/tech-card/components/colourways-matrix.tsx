@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import {
+  AddDoor,
   Button,
   Chip,
   ChipRow,
@@ -1549,15 +1550,13 @@ export function ColourwaysMatrix({
                     onCreated={onCreated}
                     seed={createSeed}
                     anchor={
-                      <button
-                        type='button'
+                      <AddDoor
+                        shape='tile'
                         aria-label='new colourway'
-                        className='flex cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                         style={{ width: TILE, height: TILE }}
                       >
-                        <span className='text-[18px] leading-none text-textColor'>+</span>
-                        <span className='text-micro uppercase tracking-label'>colourway</span>
-                      </button>
+                        colourway
+                      </AddDoor>
                     }
                   />
                 )}

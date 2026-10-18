@@ -5,7 +5,7 @@ import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery'
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
-import { Button, Chip, Input, Media, Pill, Section, Text, Textarea, Toolbar } from 'ui';
+import { AddDoor, Button, Chip, Input, Media, Pill, Section, Text, Textarea, Toolbar } from 'ui';
 import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { InertDoor } from './design/bench-slot';
 import { cardFactsContext } from './design/core/card-facts';
@@ -299,14 +299,9 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
             только когда над ними есть ряды: в пустом списке дверь остаётся первой строкой под
             шапкой, без лишнего зазора. */}
         {!picker ? (
-          <button
-            type='button'
-            onClick={() => setPicker(true)}
-            data-c19-aspect-add=''
-            className={`${afterRows}flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`}
-          >
-            + aspect
-          </button>
+          <AddDoor afterRows={!!afterRows} onClick={() => setPicker(true)} data-c19-aspect-add=''>
+            aspect
+          </AddDoor>
         ) : (
           /* ПИКЕР ВСТАЁТ РОВНО НА МЕСТО РЯДА-ПЛЕЙСХОЛДЕРА — той же последней строкой списка, а не
              отдельным органом ниже: двух дверей «добавить» на экране не бывает ни на миг. Полоса

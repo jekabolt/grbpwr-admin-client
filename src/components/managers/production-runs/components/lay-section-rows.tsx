@@ -1,5 +1,5 @@
 import { common_ProductionLayMode, common_TechCardMarkerSummary } from 'api/proto-http/admin';
-import { Button, DataTable, EmptyCell, Input, Text } from 'ui';
+import { AddDoor, Button, DataTable, EmptyCell, Input, Text } from 'ui';
 import { ulid } from 'utils/ulid';
 import { MarkerPicker } from './marker-picker';
 
@@ -166,17 +166,9 @@ export function LaySectionRows({
         </Text>
       ) : null}
 
-      <div>
-        <Button
-          type='button'
-          variant='secondary'
-          size='sm'
-          disabled={disabled}
-          onClick={() => onChange([...sections, newSectionDraft()])}
-        >
-          + section
-        </Button>
-      </div>
+      <AddDoor disabled={disabled} onClick={() => onChange([...sections, newSectionDraft()])}>
+        section
+      </AddDoor>
     </div>
   );
 }

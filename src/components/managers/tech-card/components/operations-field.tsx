@@ -13,6 +13,7 @@ import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hoo
 import { ROUTES } from 'constants/routes';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
+  AddDoor,
   Accordion,
   Button,
   CalloutBox,
@@ -7966,18 +7967,9 @@ export function OperationsField({
                   пустого рельса итога нет вовсе, и дверь — его первая строка, без зазора. Тот же
                   порядок и те же зазоры — у рельса фулскрина. */}
               <RailTotal />
-              <button
-                type='button'
-                onClick={addOperation}
-                className={cn(
-                  'w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-                  fields.length > 0 && 'mt-4',
-                )}
-              >
-                <Text size='control' variant='uppercase' tracking='label' component='span'>
-                  + operation
-                </Text>
-              </button>
+              <AddDoor afterRows={fields.length > 0} onClick={addOperation}>
+                operation
+              </AddDoor>
             </div>
 
             {selectedIndex >= 0 && (

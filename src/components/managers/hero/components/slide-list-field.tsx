@@ -2,7 +2,7 @@ import { LANGUAGES } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text } from 'ui';
+import { AddDoor, Text } from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { LinkField } from './link-field';
 import { MediaPairField } from './media-pair-field';
@@ -186,9 +186,7 @@ export function SlideListField({
         );
       })}
 
-      <Button type='button' variant='secondary' size='lg' onClick={() => append(blankSlide())}>
-        + add {itemLabel}
-      </Button>
+      <AddDoor onClick={() => append(blankSlide())}>{itemLabel}</AddDoor>
     </div>
   );
 }

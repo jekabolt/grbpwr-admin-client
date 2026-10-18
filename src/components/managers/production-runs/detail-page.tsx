@@ -18,6 +18,7 @@ import { adminService } from 'api/api';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   CalloutBox,
   ConfirmationModal,
@@ -313,9 +314,7 @@ export function ProductionRunDetail() {
   if (isError || !run)
     return (
       <div className='flex flex-col gap-3 pb-16'>
-        <Link to={ROUTES.productionRuns} className='underline'>
-          ← production runs
-        </Link>
+        <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
         <Text size='small'>Run not found.</Text>
       </div>
     );
@@ -737,9 +736,7 @@ export function ProductionRunDetail() {
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <Link to={ROUTES.productionRuns} className='text-textInactiveColor underline'>
-        ← production runs
-      </Link>
+      <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
 
       {/* Identity — what this run is, at a glance: id + lifecycle status, its tech card, and a
           one-line description of what it produces. Actions live beside it, not buried below. */}

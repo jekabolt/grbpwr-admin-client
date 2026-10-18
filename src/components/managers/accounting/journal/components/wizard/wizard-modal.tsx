@@ -4,7 +4,7 @@ import { CreateSupplierModal } from 'components/managers/accounting/subledgers/c
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, ConfirmationModal, Input, Selector, Text, ToggleSwitch } from 'ui';
+import { BackLink, Button, ConfirmationModal, Input, Selector, Text, ToggleSwitch } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { Callout, CheckRow, CheckStrip, GroupHeader, Verdict } from '../../../components/kit';
 import {
@@ -445,13 +445,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
 
             {step === 2 && scenario && (
               <>
-                <button
-                  type='button'
-                  onClick={() => setStep(1)}
-                  className='w-fit underline underline-offset-2 hover:opacity-70'
-                >
-                  <Text size='small'>← back to all cases</Text>
-                </button>
+                <BackLink onClick={() => setStep(1)}>all cases</BackLink>
                 <div>
                   <Verdict className='mb-1'>
                     {scenario.emoji ? `${scenario.emoji} ` : ''}

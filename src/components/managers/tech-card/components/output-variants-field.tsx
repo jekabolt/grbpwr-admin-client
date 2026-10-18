@@ -8,7 +8,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
+import { AddDoor, Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
@@ -454,18 +454,9 @@ export function OutputVariantsPanel({
       {/* The door stands a step below the last colour (O-48): the column's 8px gap plus 8px — the
           last row ends in air, and a door right under it would read as one more row. */}
       {canEdit && (
-        <div className={variants.length > 0 ? 'mt-2' : undefined}>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            disabled={busy}
-            onClick={() => setAddOpen(true)}
-          >
-            + add colour
-          </Button>
-        </div>
+        <AddDoor afterRows={variants.length > 0} disabled={busy} onClick={() => setAddOpen(true)}>
+          colour
+        </AddDoor>
       )}
 
       <AddColourDialog

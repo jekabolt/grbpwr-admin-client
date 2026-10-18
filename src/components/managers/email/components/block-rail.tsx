@@ -17,7 +17,7 @@ import { emailBlockTypes } from 'constants/email-campaign';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text } from 'ui';
+import { AddDoor, Text } from 'ui';
 import { CampaignSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
 
@@ -292,15 +292,7 @@ export const BlockRail: FC<BlockRailProps> = ({
         </Text>
       )}
 
-      <Button
-        type='button'
-        variant='main'
-        size='lg'
-        className='w-full cursor-pointer uppercase'
-        onClick={onAddClick}
-      >
-        + add block
-      </Button>
+      <AddDoor onClick={onAddClick}>block</AddDoor>
     </div>
   );
 };

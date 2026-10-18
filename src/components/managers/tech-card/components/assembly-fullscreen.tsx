@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button, Chip, Pill, Text, FoldCaret } from 'ui';
+import { AddDoor, Button, Chip, Pill, Text, FoldCaret } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import {
@@ -1954,19 +1954,14 @@ export function AssemblyFullscreen({
                         первая строка колонки, без зазора. Порядок и зазоры — те же, что у
                         инлайна. */}
                     {!frozen && (
-                      <button
-                        type='button'
+                      <AddDoor
+                        afterRows={railFields.length > 0}
+                        className='shrink-0'
                         onClick={openCreateDialog}
                         title='a new step from scratch — pick what it joins in the dialog'
-                        className={cn(
-                          'w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-                          railFields.length > 0 && 'mt-4',
-                        )}
                       >
-                        <Text size='control' variant='uppercase' tracking='label' component='span'>
-                          + new operation
-                        </Text>
-                      </button>
+                        new operation
+                      </AddDoor>
                     )}
                   </div>
                   {/* СВОЙ `<fieldset disabled>` — РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО У ДОКА: внешний,

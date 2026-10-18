@@ -5,7 +5,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal, Text } from 'ui';
+import { AddDoor, ConfirmationModal, Text } from 'ui';
 
 type Row = { countryCode: string; ratePct: string; validFrom: string };
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
@@ -93,10 +93,12 @@ export function VatRatesModal({ open, onOpenChange }: { open: boolean; onOpenCha
               </div>
             ))}
             {canEdit && (
-              <button type='button' className='col-span-4 self-start text-textBaseSize uppercase underline'
-                onClick={() => setRows((rs) => [...rs, { countryCode: '', ratePct: '', validFrom: '' }])}>
-                + add country
-              </button>
+              <AddDoor
+                className='col-span-4'
+                onClick={() => setRows((rs) => [...rs, { countryCode: '', ratePct: '', validFrom: '' }])}
+              >
+                country
+              </AddDoor>
             )}
           </div>
         )}

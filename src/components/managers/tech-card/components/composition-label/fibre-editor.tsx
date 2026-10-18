@@ -5,7 +5,7 @@
 // автосейв встал бы для всей карточки. Сумма части ≠ 100 — предупреждение, не запрет.
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { CheckboxCommon, Combobox, type ComboboxGroup, Input, Text } from 'ui';
+import { AddDoor, CheckboxCommon, Combobox, type ComboboxGroup, Input, Text } from 'ui';
 import type { OverrideFiber } from '../../care-labels/composition-override';
 import type { FiberDict } from '../../care-labels/composition-resolver';
 import { LABEL_PART_NAME, LABEL_PARTS } from '../../care-labels/label-parts';
@@ -129,15 +129,13 @@ export function FibreEditor({
                 </button>
               </div>
             ))}
-            <button
-              type='button'
-              className={cn(linkClass, 'self-start text-labelColor')}
+            <AddDoor
               onClick={() =>
                 setRows([...rows, { part, fiberCode: '', pct: Math.max(0, 100 - sum), key: ++seq }])
               }
             >
-              + fibre
-            </button>
+              fibre
+            </AddDoor>
           </div>
         );
       })}

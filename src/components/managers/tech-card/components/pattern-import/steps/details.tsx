@@ -23,6 +23,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import {
+  BackLink,
   Button,
   CheckboxCommon,
   Chip,
@@ -782,14 +783,9 @@ export function DetailsStep({
       default:
         body = PIECES_REASONS.has(b.reason) ? (
           onFixInPieces ? (
-            <Button
-              {...ask('details-blocked')}
-              variant='secondary'
-              size='xs'
-              onClick={() => fixInPieces(seed)}
-            >
-              ← fix in pieces
-            </Button>
+            <BackLink {...ask('details-blocked')} onClick={() => fixInPieces(seed)}>
+              fix in pieces
+            </BackLink>
           ) : (
             say('fixed on the pieces step')
           )
@@ -2522,15 +2518,9 @@ function BlockedState({
         <Pill tone='warn'>{word}</Pill>
       </button>
       {go && (
-        <Button
-          variant='underline'
-          size='xs'
-          className='whitespace-nowrap'
-          title={detail}
-          onClick={stop(go)}
-        >
-          ← fix in {onPieces ? 'pieces' : 'sizes'}
-        </Button>
+        <BackLink className='whitespace-nowrap' title={detail} onClick={stop(go)}>
+          fix in {onPieces ? 'pieces' : 'sizes'}
+        </BackLink>
       )}
     </span>
   );

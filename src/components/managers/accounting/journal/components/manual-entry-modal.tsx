@@ -13,6 +13,7 @@ import {
   useWatch,
 } from 'react-hook-form';
 import {
+  AddDoor,
   Button,
   ConfirmationModal,
   Input,
@@ -455,13 +456,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
                     onEnterLast={() => append(emptyLine('debit'))}
                   />
                 ))}
-                <button
-                  type='button'
-                  onClick={() => append(emptyLine('debit'))}
-                  className='w-fit underline underline-offset-2 hover:opacity-70'
-                >
-                  <Text>+ add line</Text>
-                </button>
+                <AddDoor onClick={() => append(emptyLine('debit'))}>line</AddDoor>
               </div>
 
               {/* Live balance footer (UX 8.4) — same computed sums, now asserted as a CheckStrip

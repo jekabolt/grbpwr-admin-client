@@ -17,7 +17,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Section, Text } from 'ui';
+import { AddDoor, Section, Text } from 'ui';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import { ARCHIVE_ITEM_TYPE_LABEL } from './item-types';
 import { ArchiveFormData } from './schema';
@@ -304,15 +304,7 @@ export const BlockRail: FC<BlockRailProps> = ({
         </div>
       )}
 
-      <Button
-        type='button'
-        variant='main'
-        size='lg'
-        className='w-full cursor-pointer uppercase'
-        onClick={onAddClick}
-      >
-        + add block
-      </Button>
+      <AddDoor onClick={onAddClick}>block</AddDoor>
     </Section>
   );
 };

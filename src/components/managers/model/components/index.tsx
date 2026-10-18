@@ -10,8 +10,9 @@ import { genderOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   Section,
   SectionStack,
@@ -80,9 +81,7 @@ export function ModelForm({
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.models}>← models</Link>
-            </Button>
+            <BackLink to={ROUTES.models}>models</BackLink>
             <Text variant='uppercase' size='large'>
               {isEditMode ? 'edit model' : 'new model'}
             </Text>

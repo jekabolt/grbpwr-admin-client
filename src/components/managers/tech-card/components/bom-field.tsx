@@ -33,6 +33,7 @@ import {
 } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import {
+  AddDoor,
   GroupLabel,
   HeaderWarnings,
   Placeholder,
@@ -1094,14 +1095,13 @@ export function BomField({
         )
       : [];
   const addTile = (
-    <button
-      type='button'
+    <AddDoor
+      shape='tile'
       onClick={() => setPicking({ section: '' })}
-      className='flex shrink-0 flex-col items-center justify-center gap-1 border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
       style={{ width: TILE, height: TILE }}
     >
-      <span className='text-micro uppercase tracking-label'>+ slot</span>
-    </button>
+      slot
+    </AddDoor>
   );
 
   return (

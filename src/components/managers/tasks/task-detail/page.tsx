@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
+  BackLink,
   Button,
   CalloutBox,
   ConfirmationModal,
@@ -253,9 +254,7 @@ export function TaskDetail() {
         <Text size='micro' variant='label'>
           It may have been deleted, or the link is wrong.
         </Text>
-        <Button asChild variant='main' size='lg'>
-          <Link to={ROUTES.tasks}>← back to board</Link>
-        </Button>
+        <BackLink to={ROUTES.tasks}>board</BackLink>
       </Centered>
     );
   }
@@ -275,12 +274,7 @@ export function TaskDetail() {
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
       {/* Header */}
       <div className='flex flex-col gap-3 border-b border-borderColor pb-3'>
-        <Link
-          to={ROUTES.tasks}
-          className='w-fit text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
-        >
-          ← board
-        </Link>
+        <BackLink to={ROUTES.tasks}>board</BackLink>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex flex-wrap items-center gap-2'>

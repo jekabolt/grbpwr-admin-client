@@ -1,7 +1,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { cn } from 'lib/utility';
-import { Text } from 'ui';
+import { AddDoor, Text } from 'ui';
 import { Task, TaskStatus } from '../api/types';
 import { STATUS_LABEL } from '../utils/meta';
 import { SortableTaskCard } from './task-card';
@@ -71,13 +71,9 @@ export function BoardColumn({
               </Text>
             </div>
           ) : canWrite ? (
-            <button
-              type='button'
-              onClick={() => onAdd(status)}
-              className='flex flex-1 items-center justify-center border border-dashed border-borderColor py-6 text-micro uppercase tracking-label text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              + add task
-            </button>
+            <AddDoor className='flex-1 justify-center' onClick={() => onAdd(status)}>
+              task
+            </AddDoor>
           ) : (
             <div className='flex flex-1 items-center justify-center py-6'>
               <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>

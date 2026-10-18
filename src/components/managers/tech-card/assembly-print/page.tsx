@@ -19,8 +19,8 @@ import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admi
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Button, Chip, ChipRow, Input, Text } from 'ui';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { BackLink, Button, Chip, ChipRow, Input, Text } from 'ui';
 import { operationHeading, zoneLabel } from '../components/operation-options';
 import type { WorkCatalog } from '../components/operation-work';
 import { pieceRefKey } from '../components/piece-block-refs';
@@ -467,9 +467,7 @@ export function TechCardAssemblyPrint() {
 
       <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
-          <Button asChild variant='secondary' size='lg'>
-            <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>
-          </Button>
+          <BackLink to={id ? `/tech-cards/${id}` : ROUTES.techCards} />
           <Text variant='uppercase' size='large'>
             assembly order — print
           </Text>
@@ -667,9 +665,7 @@ export function TechCardAssemblyPrint() {
           <Text variant='inactive' className='uppercase'>
             tech card not found
           </Text>
-          <Button asChild variant='main' size='lg' className='uppercase'>
-            <Link to={ROUTES.techCards}>← back to tech cards</Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
         <div

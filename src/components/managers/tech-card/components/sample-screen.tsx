@@ -25,6 +25,8 @@ import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  BackLink,
+  addDoorClass,
   Chip,
   ChipRow,
   HeaderWarnings,
@@ -477,13 +479,7 @@ export function SampleScreen({
     <SectionStack>
       <Section>
         <div className='mb-2.5 flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1'>
-          <button
-            type='button'
-            onClick={onClose}
-            className={cn(HEADER_TEXT, 'text-labelColor underline hover:text-textColor')}
-          >
-            ← samples
-          </button>
+          <BackLink onClick={onClose}>samples</BackLink>
           <Text
             component='h3'
             variant='uppercase'
@@ -1323,7 +1319,7 @@ function RndBlock({
               const p = EXPENSE_PRESETS.find((x) => x.label === e.target.value);
               if (p) start(p.label, p.kind);
             }}
-            className='mt-2 block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className={cn(addDoorClass(), 'mt-2 block cursor-pointer appearance-none')}
           >
             <option value=''>+ add an expense ▾</option>
             {EXPENSE_PRESETS.map((p) => (

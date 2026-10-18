@@ -9,6 +9,7 @@ import { compositionToValue } from 'components/managers/product/components/compo
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import {
+  addDoorClass,
   Button,
   ConfirmationModal,
   DataTable,
@@ -282,7 +283,7 @@ export function MaterialSlots({
         const family = e.target.value as Family | '';
         if (family) addSlot(family);
       }}
-      className='block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      className={cn(addDoorClass(), 'block cursor-pointer appearance-none')}
     >
       <option value=''>+ add a slot ▾</option>
       {FAMILY_ORDER.map((family) => (
