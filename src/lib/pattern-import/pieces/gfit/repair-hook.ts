@@ -6,7 +6,8 @@
 //   'leak'      a size that leaks, strictly between two ANCHORS (sizes closed on their own lines);
 //   'neighbour' a closed size the grade check (G26, silent-inputs) HOLDS — its outline leaves the
 //               grade for another size's drawn line — strictly between two anchors other than itself
-//               (palto SL_76: its tip closes on size 72's lines).
+//               (palto SL_76: its tip closes on size 72's lines). Read only on a sheet where a leak
+//               was repaired, or with GRADE_P2_NEIGHBOUR=1 (cost; see below).
 // The repaired outline runs on the size's OWN lines (its pen class) and the COMMON lines, inside the
 // corridor around the grade model of its two neighbouring anchors (repair.ts `repairSize`, E1–E4);
 // holes ≤ 15 mm between its own line ends are filled from the model and written as derived
@@ -30,7 +31,7 @@ import { continuityVerdicts, isAnchor } from '../fill';
 import { bboxOf, pointInPoly, signedArea, simplify } from '../geom';
 import type { WallModel } from '../walls';
 import { outlineOf, predictPair } from './checks';
-import { GFIT_TOL_P0, type GfitSizeIn } from './fit';
+import { GFIT_TOL_P0, type GfitFamily, type GfitSizeIn } from './fit';
 import { repairSize, type GfitWall } from './repair';
 import { silentRead } from './silent-inputs';
 
@@ -71,6 +72,7 @@ export function gradeAnchor(c: PieceCandidate): boolean {
 }
 
 const DEBUG = typeof process !== 'undefined' && !!process.env?.GRADEP2_DEBUG;
+const TIME = typeof process !== 'undefined' && !!process.env?.GRADEP2_TIME;
 
 export function gradeP2Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.GRADE_P2_OFF;
@@ -170,6 +172,8 @@ export function repairPass(
         },
       };
   };
+  /** Per family: the grade model of a set of anchors (the tries of one family share it). */
+  const fitCaches = new Map<number, Map<string, GfitFamily>>();
   /** The leaks repaired in (A), as they were (a repair resting on a size G26 holds is undone). */
   const orig = new Map<string, PieceCandidate>();
   const tryRepair = (
@@ -226,7 +230,14 @@ export function repairPass(
       ws.push({ pts: ch.pts, kind: 'overlay', closed: ch.closed });
       chainOf.push(id);
     }
-    const rep = repairSize(ins, r, ws, { tol: GFIT_TOL_P0, frame: 'stacked' });
+    let fitCache = fitCaches.get(c.seed);
+    if (!fitCache) fitCaches.set(c.seed, (fitCache = new Map()));
+    const rep = repairSize(ins, r, ws, {
+      tol: GFIT_TOL_P0,
+      frame: 'stacked',
+      fitCache,
+      fast: true,
+    });
     const why: string[] = rep.refusals.map((w) =>
       w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
     );
@@ -384,17 +395,30 @@ export function repairPass(
     for (let i = 0; i < list.length; i++)
       if (list[i].outcome === 'leak') tryRepair(list, i, 'leak');
   }
-  // (B) closed sizes the grade check holds (on another size's line), with the families as now
-  const families: PieceFamily[] = [...cands]
-    .filter(([seed]) => !skip.has(seed))
-    .map(([seed, candidates]) => ({ seed, candidates, monotone: true }));
-  const held = silentRead(families, ctx.set, ctx.wm)
-    .grade()
-    ?.verdicts.filter((v) => v.hold);
+  const tA = Date.now() - t0;
+  // (B) closed sizes the grade check holds (on another size's line), with the families as now —
+  // the sheet's whole grade reading (its breaks come from every family) costs seconds on a big sheet
+  // (London: 9 s of 12): read only where (A) repaired a size (its anchors must not be held — the
+  // undo below) or when asked (GRADE_P2_NEIGHBOUR=1). Elsewhere the semantics stage's own G26
+  // holds such a size, as before; across the archive (B) repaired none (GRADE-P2.md).
+  const wantB =
+    diag.repaired.length > 0 ||
+    (typeof process !== 'undefined' && !!process.env?.GRADE_P2_NEIGHBOUR);
+  const families: PieceFamily[] = wantB
+    ? [...cands]
+        .filter(([seed]) => !skip.has(seed))
+        .map(([seed, candidates]) => ({ seed, candidates, monotone: true }))
+    : [];
+  const held = wantB
+    ? silentRead(families, ctx.set, ctx.wm)
+        .grade()
+        ?.verdicts.filter((v) => v.hold)
+    : [];
   if (DEBUG)
     console.log(
       `GRADEP2 held by G26: ${(held ?? []).map((v) => `${v.seed}:${v.rank}`).join(' ') || '-'}`,
     );
+  const tG = Date.now() - t0 - tA;
   const heldOf = new Map<number, Set<number>>();
   for (const v of held ?? []) heldOf.set(v.seed, (heldOf.get(v.seed) ?? new Set()).add(v.rank));
   for (const v of held ?? []) {
@@ -433,5 +457,9 @@ export function repairPass(
     }
   }
   diag.ms = Date.now() - t0;
+  if (DEBUG || TIME)
+    console.log(
+      `GRADEP2 pass ${diag.ms} ms (A ${tA}, G26 ${tG}) · tried ${diag.tried} · repaired ${diag.repaired.length} · families ${cands.size}`,
+    );
   return diag;
 }

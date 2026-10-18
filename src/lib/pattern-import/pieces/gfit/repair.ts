@@ -17,7 +17,7 @@ import type { PtMm } from 'lib/pattern-import/types';
 import { segNearest, SegGrid } from 'lib/pattern-import/pieces/geom';
 
 import { canonTopology, chordBumps, outlineOf, predictPair, selfIntersects } from './checks';
-import { fitFamily, GFIT_TOL_P0, type GfitSizeIn, type GfitTol } from './fit';
+import { fitFamily, GFIT_TOL_P0, type GfitFamily, type GfitSizeIn, type GfitTol } from './fit';
 import { analyseOutline, ringOf } from './outline';
 
 /**
@@ -117,6 +117,10 @@ export type RepairOpts = {
   /** The pen judge (G22) for this size, 0 … 1; undefined = not judged (synthetic probes). */
   pen?: number;
   frame?: 'stacked' | 'registered';
+  /** The family's grade model of the same sizes, shared by the tries of one family (hook A). */
+  fitCache?: Map<string, GfitFamily>;
+  /** Stop at the first failing E1/E2 (the rest of the checks cannot accept it; hook A: time). */
+  fast?: boolean;
 };
 
 type Snap = { w: number; arc: number; q: PtMm; d: number };
@@ -150,7 +154,15 @@ export function repairSize(
     if (!res.refusals.includes(r)) res.refusals.push(r);
   };
   const ins = others.filter((s) => s.rank !== rank);
-  const fam = fitFamily(ins, { tol, ...(opts.frame ? { frame: opts.frame } : {}) });
+  const fitKey = ins
+    .map((x) => x.rank)
+    .sort((a, b) => a - b)
+    .join(',');
+  let fam = opts.fitCache?.get(fitKey);
+  if (!fam) {
+    fam = fitFamily(ins, { tol, ...(opts.frame ? { frame: opts.frame } : {}) });
+    opts.fitCache?.set(fitKey, fam);
+  }
   if (!fam.model || fam.why === 'inconsistent') {
     res.modelWhy = fam.why ?? 'no-model';
     refuse('no-model');
@@ -362,6 +374,7 @@ export function repairSize(
   // model's point tolerance): a line that arrives off the prediction says the size departs from the
   // grade right where nothing is drawn (a hidden local change the fill would erase)
   if (res.holes.some((h) => Math.max(...h.endOff) > tol.ptMm)) refuse('E2-end-offset');
+  if (opts.fast && res.refusals.length) return res;
 
   // E4: own walls that touch the corridor must not leave it for > 10 mm (notch excursions exempt)
   const pg = new SegGrid(3);
