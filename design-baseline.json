@@ -1273,8 +1273,8 @@
     "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/nesting/nesting-modal.tsx": {
-    "design/no-arbitrary-px": 9,
-    "design/no-raw-control": 10
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 4
   },
   "src/components/managers/tech-card/components/nesting/piece-match-modal.tsx": {
     "design/no-arbitrary-px": 3,

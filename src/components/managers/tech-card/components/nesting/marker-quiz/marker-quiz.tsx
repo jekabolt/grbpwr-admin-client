@@ -100,10 +100,18 @@ export function useMarkerQuiz({
     index,
     reopened,
     go: (s: QuizStep) => setPicked(s),
+    // Ответ на «spread»: стол снова подтверждают (если он сохранён), а не вводят заново.
+    afterSpread: (m: LayMode) => {
+      setTableEditing(false);
+      setPicked(m === 'table' ? 'confirm' : 'what');
+    },
     back: () => {
       if (index > 0) setPicked(flow[index - 1]);
     },
     next: () => {
+      // Ушли со шага ввода стола — поток остаётся «с вводом», даже если сохранение стола только что
+      // сделало его «сохранённым»: иначе шаг «knife» пропал бы из-под Next.
+      if (step === 'size' || step === 'knife') setTableEditing(true);
       if (index < flow.length - 1) setPicked(flow[index + 1]);
     },
     // «No, change it» и любая дверь к размерам стола.

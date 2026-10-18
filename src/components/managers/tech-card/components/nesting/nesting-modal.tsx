@@ -122,11 +122,14 @@ import {
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 import {
-  MarkerSchematic,
-  type SchematicBlock,
-  type SchematicPiece,
-  type SchematicView,
-} from './marker-schematic';
+  MarkerQuiz,
+  QuizChips,
+  QuizSummary,
+  useMarkerQuiz,
+  type QuizRow,
+  type QuizWarning,
+} from './marker-quiz/marker-quiz';
+import { useQuizDone } from './marker-quiz/use-quiz-done';
 import { useLayMode } from './use-lay-mode';
 import { useGoToBomLineField } from './go-to-card-field';
 
@@ -197,22 +200,9 @@ type RailSectionStatus = {
 
 /** Одна ширина на все поля тулбара (правило владельца: поля в ряд одного размера). */
 const FIELD = 'w-[84px] shrink-0';
-// Поля, которые живут в свёрнутой панели раскладки и в строке стола: дверь «show» их раскрывает.
-const LAY_FIELDS = new Set(['nest-gap', 'nest-margin', 'nest-allowance', 'nest-crossgrain']);
-const TABLE_FIELDS = new Set([
-  'nest-table',
-  'nest-table-width',
-  'nest-end-loss',
-  'nest-plies',
-  'nest-spread-mode',
-  'nest-stack-limit',
-  'nest-keep-on-table',
-]);
-// Ячейка состава настила (число без рамки внутри общей коробки) и сегмент режима настила.
+// Число без рамки внутри общей коробки (ширина полотна в тихом ряду шага «run»).
 const CELL_INPUT =
   'w-[3ch] min-w-0 bg-transparent p-0 text-right text-textBaseSize tabular-nums focus:outline-none disabled:text-labelColor';
-const SEG =
-  'flex h-6 items-center border px-2 text-micro uppercase tracking-label transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:text-labelColor';
 
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
@@ -286,15 +276,6 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
     <svg viewBox='-1 -1 32 32' className='h-8 w-8 shrink-0 border border-borderColor bg-bgColor'>
       <polygon points={path} fill='none' stroke='currentColor' strokeWidth='1' />
     </svg>
-  );
-}
-
-// «per ply N» под ячейкой итога в режиме стола: в ячейке 10, на холсте 1 — и это не ошибка.
-function PerPlyNote({ q }: { q: number }) {
-  return (
-    <span className='pointer-events-none absolute top-full left-[7px] mt-px text-micro leading-none whitespace-nowrap text-labelColor'>
-      per ply {q}
-    </span>
   );
 }
 
@@ -2665,11 +2646,12 @@ export function NestingModal({
       )?.widthByLine.get(thicknessSlot.lineKey)
     : undefined;
   const thicknessFromPin = !!thicknessPin && Number.isFinite(thicknessPin.cutCm);
-  const thicknessMm =
+  const bomThicknessMm =
     (thicknessFromPin ? thicknessPin?.fabricThicknessMm : thicknessSlot?.fabricThicknessMm) ?? null;
-  const thicknessArticleId = thicknessFromPin
-    ? thicknessPin?.materialId
-    : thicknessSlot?.materialId;
+  // Толщины нет ни у пина, ни у слота — её спрашивает шаг «layers» квиза. Только на эту сессию:
+  // толщина — поле артикула, и писать её отсюда значило бы завести вторую дверь в материал.
+  const [thicknessEdit, setThicknessEdit] = useState<number | null>(null);
+  const thicknessMm = bomThicknessMm ?? (viewData ? null : thicknessEdit);
   // Предел стопки в слоях — вход авто-слоёв, которые считаются выше (до слота ткани): зеркало.
   const stackCapNow = viewData
     ? null
@@ -2749,23 +2731,23 @@ export function NestingModal({
         disabled: busy,
       }
     : undefined;
-  // Строка цифр режима стола: состав слоя и что им накроется (plies × слой).
-  const compText = (qs: readonly number[]) =>
-    graded
-      ? cellRows
-          .map((r, i) => ({ l: r.label.toLowerCase(), q: qs[i] ?? 0 }))
-          .filter((x) => x.q > 0)
-          .map((x) => `${x.l} ×${x.q}`)
-          .join(' ')
-      : `${(sizeLabel || 'garments').toLowerCase()} ×${qs[0] ?? 0}`;
-  const markerCompText = compText(perPly);
-  const cutCompText = compText(perPly.map((q) => q * plies)).replace(/×/g, '');
+  // ── КВИЗ РАСКЛАДКИ: вопросы по одному вместо прежней шапки. Своих чисел у квиза нет — ответы
+  // пишут в состояние выше, «Run» зовёт тот же requestRun, что и прежняя кнопка.
+  const [quizDone, markQuizDone] = useQuizDone(techCardId, lockedSlot?.lineKey || slotKey);
+  const quiz = useMarkerQuiz({
+    mode: layMode,
+    // Стол цеха сохранён целиком — его подтверждают, а не вводят.
+    tableSaved: wsTableCm != null && wsTableWidthCm != null && wsStackCm != null,
+    // Квиз уже пройден для этой ткани или открыт сохранённый маркер — сразу шаг «run».
+    startAtRun: !!viewData || quizDone,
+    busy,
+  });
   const spreadWarnings: HeaderWarning[] = [];
   if (clothWiderThanTable && tableWidthCm != null) {
     spreadWarnings.push({
       text: `cloth ${clothRollCm} cm wider than the table ${tableWidthCm} cm`,
       error: true,
-      action: { label: 'table settings', onClick: () => focusField('nest-table-width') },
+      action: { label: 'table size', onClick: () => quiz.open('size') },
     });
   }
   if (overTableCm > 0.05) {
@@ -2805,7 +2787,7 @@ export function NestingModal({
       text: `${plies} plies over the stack limit, max ${max}`,
       error: true,
       action: {
-        label: 'set plies to max',
+        label: 'max layers',
         onClick: () => guardManual(() => setPlies(Math.max(1, max))),
       },
     });
@@ -2848,7 +2830,7 @@ export function NestingModal({
   if (!viewData && tableMode && parse.phase === 'ready' && tableCm == null) {
     spreadWarnings.push({
       text: 'table length not set',
-      action: { label: 'set', onClick: () => focusField('nest-table') },
+      action: { label: 'set', onClick: () => quiz.open('size') },
     });
   }
   // Перекрой: в допуске (≤ +1 на размер или ≤ 10 % итога) молчит; сверх — строка с дверью
@@ -2882,7 +2864,7 @@ export function NestingModal({
   if (!viewData && tableMode && thicknessSlot && thicknessMm == null) {
     spreadWarnings.push({
       text: 'max plies unknown: thickness not set',
-      action: openArticle(thicknessArticleId),
+      action: { label: 'set', onClick: () => quiz.open('layers') },
     });
   }
   // Припуск/ширина сменились (догрузка цеха или артикула) уже после старта прогона.
@@ -2946,74 +2928,32 @@ export function NestingModal({
   };
   // Двери «show» у блокеров: поле, которое чинит отказ, получает фокус; детали открывают поповер.
   const [piecesOpen, setPiecesOpen] = useState(false);
-  // Панель раскладки (gap, margin, allowance, rotate) под шапкой, по умолчанию свёрнута.
-  const [layOpen, setLayOpen] = useState(false);
-  // «⋯ table settings» — стол, запас, стопка, лицо, толщина; по умолчанию свёрнуто.
-  const [tableOpen, setTableOpen] = useState(false);
-  // СХЕМА ДО ЗАПУСКА: какое поле шапки сейчас под мышью / в фокусе (data-schematic).
-  const [hoverView, setHoverView] = useState<SchematicView | null>(null);
-  const [focusView, setFocusView] = useState<SchematicView | null>(null);
-  const schematicOf = (t: EventTarget | null): SchematicView | null => {
-    const el = t instanceof Element ? t.closest('[data-schematic]') : null;
-    return (el?.getAttribute('data-schematic') as SchematicView | null) ?? null;
-  };
-  const schematicView: SchematicView = hoverView ?? focusView ?? 'compose';
-  // Ячейка размера под мышью/в фокусе (data-size-key) — схема показывает детали этого размера.
-  const [hoverSizeKey, setHoverSizeKey] = useState<string | null>(null);
-  const [focusSizeKey, setFocusSizeKey] = useState<string | null>(null);
-  const sizeKeyOf = (t: EventTarget | null): string | null => {
-    const el = t instanceof Element ? t.closest('[data-size-key]') : null;
-    return el?.getAttribute('data-size-key') ?? null;
-  };
-  const headerHandlers = {
-    onPointerOver: (e: React.PointerEvent) => {
-      setHoverView(schematicOf(e.target));
-      setHoverSizeKey(sizeKeyOf(e.target));
-    },
-    onPointerLeave: () => {
-      setHoverView(null);
-      setHoverSizeKey(null);
-    },
-    onFocusCapture: (e: React.FocusEvent) => {
-      setFocusView(schematicOf(e.target));
-      setFocusSizeKey(sizeKeyOf(e.target));
-    },
-    onBlurCapture: (e: React.FocusEvent) => {
-      setFocusView(schematicOf(e.relatedTarget));
-      setFocusSizeKey(sizeKeyOf(e.relatedTarget));
-    },
-  };
-  const activeSizeKey = hoverView != null ? hoverSizeKey : focusSizeKey;
-  const focusField = (id: string) => {
-    const go = () => {
+  // Поле тихого ряда шага «run» (ткань): открыть квиз там и поставить фокус после рендера.
+  const focusOnRun = (id: string) => {
+    quiz.open('run');
+    requestAnimationFrame(() => {
       const el = document.getElementById(id);
       const target = el?.matches('input, button, select')
         ? el
         : el?.querySelector<HTMLElement>('button, input, select');
       target?.focus();
-    };
-    // Поле может жить в свёрнутой панели раскладки или в строке стола: сначала раскрыть её,
-    // фокус — после рендера.
-    if (LAY_FIELDS.has(id) && !layOpen) {
-      setLayOpen(true);
-      requestAnimationFrame(go);
-    } else if (TABLE_FIELDS.has(id) && (!tableMode || (id !== 'nest-plies' && !tableOpen))) {
-      if (!tableMode) setLayMode('table');
-      if (id !== 'nest-plies') setTableOpen(true);
-      requestAnimationFrame(go);
-    } else go();
+    });
   };
-  const firstCompField = graded
-    ? `nest-comp-${(compRows.find((r) => (!r.resolvable || r.sizeId <= 0) && r.qty >= 1) ?? compRows[0])?.key ?? ''}`
-    : 'nest-units';
+  // Дверь у блокера: детали — поповер шага «run», ткань — её поле там же, состав — шаг «what».
   const showFix = (section: number, text: string): HeaderWarningAction | undefined => {
-    if (section === 3) return { label: 'show', onClick: () => setPiecesOpen(true) };
-    if (section === 1) {
+    if (section === 3) {
       return {
         label: 'show',
-        onClick: () =>
-          focusField(noSlotChosen && text === 'pick a fabric' ? 'nest-fabric' : firstCompField),
+        onClick: () => {
+          quiz.open('run');
+          setPiecesOpen(true);
+        },
       };
+    }
+    if (section === 1) {
+      return noSlotChosen && text === 'pick a fabric'
+        ? { label: 'show', onClick: () => focusOnRun('nest-fabric') }
+        : { label: 'show', onClick: () => quiz.open('what') };
     }
     return undefined;
   };
@@ -3300,47 +3240,375 @@ export function NestingModal({
       </GenericPopover>
     ) : null;
 
-  // ── данные схемы до запуска ──────────────────────────────────────────────────────────────
-  // Оценка длины по площади: Σ площадь·тираж / (ширина · 0.8). Блоки размеров — доли площади.
+  // ── оценка до прогона и входы квиза ──────────────────────────────────────────────────────
+  // Оценка длины по площади: Σ площадь·тираж / (ширина · 0.8) — картинка и цифры шага «run».
   const areaOfPiece = new Map(pieces.map((p) => [p.id, p.areaCm2]));
-  const areaByGroup = new Map<string, number>();
   let areaTotal = 0;
-  for (const c of runConfig.pieces) {
-    const a = (areaOfPiece.get(c.pieceId) ?? 0) * c.quantity;
-    const g = (c.groupKey ?? '').toLowerCase();
-    areaByGroup.set(g, (areaByGroup.get(g) ?? 0) + a);
-    areaTotal += a;
-  }
+  for (const c of runConfig.pieces) areaTotal += (areaOfPiece.get(c.pieceId) ?? 0) * c.quantity;
   const estLengthCm = areaTotal > 0 && widthCm > 0 ? areaTotal / (widthCm * 0.8) : null;
-  const schematicBlocks: SchematicBlock[] = (() => {
-    if (!graded) return [{ label: sizeLabel || 'garments', qty: ungradedUnits, share: 1 }];
-    const qtyTotal = activeRows.reduce((s, r) => s + r.qty, 0) || 1;
-    // Размеронезависимые детали кроятся на каждое изделие: их площадь делится по тиражу.
-    const uni = areaByGroup.get('') ?? 0;
-    const raw = activeRows.map((r) => {
-      const own = r.tokens.reduce((s, t) => s + (areaByGroup.get(t.toLowerCase()) ?? 0), 0);
-      return { label: r.label, qty: r.qty, area: own + (uni * r.qty) / qtyTotal };
-    });
-    const sum = raw.reduce((s, r) => s + r.area, 0);
-    return raw.map((r) => ({
-      label: r.label,
-      qty: r.qty,
-      share: sum > 0 ? r.area / sum : r.qty / qtyTotal,
-    }));
-  })();
-  const compBad = graded && compRows.some((r) => (!r.resolvable || r.sizeId <= 0) && r.qty >= 1);
-  const schematicPieces: SchematicPiece[] = pieces.map((p) => ({
-    id: p.id,
-    poly: p.poly,
-    bboxW: p.bboxW,
-    bboxH: p.bboxH,
-    checked: !!sel[p.id]?.checked && !!fitsWidth.get(p.id),
-  }));
-  // Детали размера под ячейкой: по размерному токену блока (как в блобе, splitPiecesBySize).
-  const sizeRow = activeSizeKey != null ? cellRows.find((r) => r.key === activeSizeKey) : undefined;
-  const sizePieces: SchematicPiece[] = sizeRow
-    ? schematicPieces.filter((q) => sizeRow.tokens.includes(split.codeById.get(q.id)?.size ?? ''))
-    : [];
+  // Цифры настила квиза и сводки: до прогона — по оценке длины, после — по маркеру. Один настил
+  // (single) — один слой без запаса на концы: шага «ends» у него нет.
+  const layFigures = spreadFigures({
+    plies: tableMode ? plies : 1,
+    thicknessMm,
+    stackLimitCm,
+    compositionTotal: unitsTotal,
+    markerLengthCm: effective?.usedLengthCm ?? estLengthCm,
+    endLossCm: tableMode ? endLossCm : 0,
+    mode: spreadMode,
+  });
+  const quizRows: QuizRow[] = graded
+    ? cellRows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        qty: r.qty,
+        bad: (!r.resolvable || r.sizeId <= 0) && r.qty >= 1,
+        min: 0,
+      }))
+    : [{ key: '', label: sizeLabel || 'garments', qty: cellUngraded, bad: sizeUnknown, min: 1 }];
+  // Те же предупреждения, что в шапке: строкой на шаге «run», ошибки первыми, без повторов.
+  const quizWarnings: QuizWarning[] = topWarnings
+    .map((w) =>
+      typeof w === 'string'
+        ? { text: w, error: false }
+        : { text: w.text, error: !!w.error, fix: w.action },
+    )
+    .filter((w, k, all) => all.findIndex((o) => o.text === w.text) === k)
+    .sort((a, b) => Number(b.error) - Number(a.error));
+  // Квиз на экране, пока результата нет (или его открыли «edit»); прогон и подбор — холст.
+  const quizOpen = !viewData && !running && fitting == null && (quiz.reopened || !effective);
+  const metres = (cm: number | null) => (cm == null ? '—' : `${(cm / 100).toFixed(2)} m`);
+  // Свёрнутый квиз: одна строка фактов над холстом.
+  const summaryFacts: Array<[string, React.ReactNode]> = [];
+  if (viewData) {
+    if (storedNormLabel) summaryFacts.push(['', storedNormLabel]);
+    if (storedSpread) {
+      summaryFacts.push(
+        ['layers', storedSpread.plies],
+        ['face', storedSpread.mode === 'face_up' ? 'up' : 'to face'],
+        ['table', `${figure(storedSpread.tableCm, 1)} cm`],
+        ['stack', `${figure(spread.stackCm, 1)} cm`],
+        ['fabric', metres(spread.fabricCm)],
+      );
+    } else if (tableEndCm != null) {
+      summaryFacts.push(['on table', `${figure(tableEndCm, 1)} cm`]);
+    }
+  } else {
+    summaryFacts.push(['garments', extraTotal > 0 ? `${cutTotal} +${extraTotal}` : cutTotal]);
+    if (tableMode) {
+      summaryFacts.push(
+        ['layers', plies],
+        ['stack', `${figure(layFigures.stackCm, 1)} / ${figure(stackLimitCm, 1)} cm`],
+      );
+    }
+    summaryFacts.push(['fabric', metres(layFigures.fabricCm)]);
+  }
+  // ТИХИЙ РЯД ШАГА «run»: чего нет в вопросах — ткань и ширина, настройки раскладки, детали.
+  // Прежние поля и поповеры шапки как есть; панель раскладки стала поповером «nesting».
+  const quizExtras = (
+    <>
+      <div className='shrink-0 space-y-0.5'>
+        <Text
+          size='micro'
+          variant={noSlotChosen ? undefined : 'label'}
+          component='span'
+          className={noSlotChosen ? `${BOX_LABEL} text-error` : BOX_LABEL}
+        >
+          {widthFrom ? `cloth · ${widthFrom}` : 'cloth'}
+        </Text>
+        <div className='flex gap-1'>
+          {!lockedSlot && fabricLines.length > 0 && (
+            <div
+              id='nest-fabric'
+              className={`${FIELD} relative`}
+              title={[
+                slot ? slotLabel(slot) : 'not picked',
+                pinArticle ? `article: ${pinArticle}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            >
+              <select
+                name='nest-fabric-select'
+                className={`${BOX} cursor-pointer appearance-none truncate pr-5 ${
+                  noSlotChosen ? 'text-error' : ''
+                }`}
+                disabled={busy}
+                value={slotKey}
+                onChange={(e) => chooseSource({ slotKey: e.target.value })}
+              >
+                <option value=''>not picked</option>
+                {fabricLines.map((b) => (
+                  <option key={b.lineKey} value={b.lineKey}>
+                    {slotLabel(b)}
+                  </option>
+                ))}
+              </select>
+              <span
+                aria-hidden
+                className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
+              >
+                ▾
+              </span>
+            </div>
+          )}
+          <label
+            className={`${BOX_AUTO} ${FIELD} gap-1 focus-within:border-textColor`}
+            title={widthSource || 'cloth width'}
+          >
+            <NumBox
+              name='nest-width'
+              className={`${CELL_INPUT} w-full text-left`}
+              decimal
+              value={widthUnset ? null : widthCm}
+              // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
+              // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
+              commitOnBlur
+              onCommit={(n) => {
+                const next = Math.max(10, n);
+                // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
+                // не должен молча выключать автоподстановку ширины по колорвею.
+                if (next !== widthCm || widthUnset) {
+                  guardManual(() => {
+                    setWidthTouched(true);
+                    setWidthUnset(false);
+                    setWidthRaw(null);
+                    setWidthCm(next);
+                  });
+                }
+              }}
+              disabled={busy}
+            />
+            <span className='text-labelColor'>cm</span>
+          </label>
+          <GenericPopover
+            contentProps={{ align: 'start' }}
+            triggerProps={{
+              name: 'nest-lay',
+              title: `gap ${gapCm} · margin ${marginCm} · allowance ${allowanceMm} mm · rotate ${crossGrain ? 'on' : 'off'}`,
+              className: `${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
+            }}
+            openElement={(isOpen) => (
+              <>
+                <span className={doubleAllowanceRefusal ? 'text-error' : ''}>⋯ nesting</span>
+                <span aria-hidden className='text-labelColor'>
+                  {isOpen ? '▴' : '▾'}
+                </span>
+              </>
+            )}
+          >
+            <div id='nest-lay-panel' className='grid grid-cols-2 gap-x-2 gap-y-1.5 p-2'>
+              <label className={`${FIELD} space-y-0.5`}>
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                  gap cm
+                </Text>
+                <NumBox
+                  name='nest-gap'
+                  decimal
+                  value={gapCm}
+                  emptyAs={0}
+                  onCommit={(n) => {
+                    const next = Math.max(0, n);
+                    if (next !== gapCm) guardManual(() => setGapCm(next));
+                  }}
+                  disabled={busy}
+                />
+              </label>
+              <label className={`${FIELD} space-y-0.5`}>
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                  margin cm
+                </Text>
+                <NumBox
+                  name='nest-margin'
+                  decimal
+                  value={marginCm}
+                  emptyAs={0}
+                  onCommit={(n) => {
+                    const next = Math.max(0, n);
+                    if (next !== marginCm) guardManual(() => setMarginCm(next));
+                  }}
+                  disabled={busy}
+                />
+              </label>
+              {/* Припуск на шов — ВХОД алгоритма: раздувает контур до линии кроя до укладки. */}
+              <label
+                className={`${FIELD} space-y-0.5`}
+                title={
+                  [
+                    allowanceSourceText,
+                    !allowanceTouched && allowancePrefill
+                      ? `prefilled: ${allowancePrefill.why}`
+                      : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
+                }
+              >
+                <Text
+                  size='micro'
+                  variant={doubleAllowanceRefusal ? undefined : 'label'}
+                  component='span'
+                  className={doubleAllowanceRefusal ? `${BOX_LABEL} text-error` : BOX_LABEL}
+                >
+                  allowance mm
+                </Text>
+                <NumBox
+                  name='nest-allowance'
+                  decimal
+                  value={allowanceMm}
+                  emptyAs={0}
+                  onCommit={(n) => {
+                    // Потолок (MAX_SEAM_ALLOWANCE_MM) живёт в contour-layer.ts рядом с предзаполнением.
+                    const next = clampSeamAllowanceMm(n);
+                    if (next !== allowanceMm) {
+                      // Флаг «ввели руками» — ВНУТРИ apply, как у ширины.
+                      guardManual(() => {
+                        setAllowanceTouched(true);
+                        setAllowanceMm(next);
+                      });
+                    }
+                  }}
+                  disabled={busy}
+                />
+              </label>
+              <div className={`${FIELD} space-y-0.5`}>
+                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+                  rotate 90°
+                </Text>
+                {/* Переключатель той же коробкой, что и поля: нажатое состояние — заливка чернилом. */}
+                <button
+                  type='button'
+                  id='nest-crossgrain'
+                  name='nest-crossgrain'
+                  aria-pressed={crossGrain}
+                  disabled={busy}
+                  onClick={() => guardManual(() => setCrossGrain(!crossGrain))}
+                  className={`${BOX} justify-center uppercase ${
+                    crossGrain ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
+                  }`}
+                >
+                  {crossGrain ? 'on' : 'off'}
+                </button>
+              </div>
+            </div>
+          </GenericPopover>
+        </div>
+      </div>
+      <div className={`${FIELD} space-y-0.5`}>
+        <Text
+          size='micro'
+          variant={railS3.blockers.length > 0 ? undefined : 'label'}
+          component='span'
+          className={railS3.blockers.length > 0 ? `${BOX_LABEL} text-error` : BOX_LABEL}
+        >
+          pieces
+        </Text>
+        <GenericPopover
+          open={piecesOpen}
+          onOpenChange={setPiecesOpen}
+          className='w-[320px]'
+          contentProps={{ align: 'start' }}
+          triggerProps={{
+            className: `${BOX_AUTO} w-[84px] justify-between focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
+            disabled: parse.phase !== 'ready' || pieces.length === 0,
+          }}
+          openElement={(isOpen) => (
+            <>
+              <span>{parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}</span>
+              <span aria-hidden className='text-labelColor'>
+                {isOpen ? '▴' : '▾'}
+              </span>
+            </>
+          )}
+        >
+          <div className='max-h-[46vh] space-y-1 overflow-y-auto'>
+            <div className='flex items-center justify-between gap-2'>
+              <Text size='micro' variant='label' component='span'>
+                {checkedCount}/{pieces.length}
+                {instanceCount !== checkedCount ? ` · placements ${instanceCount}` : ''}
+                {graded && ungradedCount > 0
+                  ? ` · ${ungradedAllUni ? 'UNI' : 'no size'} ${ungradedCount}`
+                  : ''}
+              </Text>
+              <button
+                type='button'
+                className='text-micro uppercase underline hover:opacity-70'
+                disabled={busy}
+                onClick={() =>
+                  guardManual(() => {
+                    // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
+                    const next: PieceSel = { ...sel };
+                    for (const p of pieces) {
+                      next[p.id] = {
+                        checked: !!fitsWidth.get(p.id),
+                        qty: sel[p.id]?.qty ?? 1,
+                      };
+                    }
+                    setSel(next);
+                  })
+                }
+              >
+                select all
+              </button>
+            </div>
+            {pieces.map((p) => {
+              const fits = fitsWidth.get(p.id) ?? false;
+              const s = sel[p.id] ?? { checked: false, qty: 1 };
+              return (
+                <div key={p.id} className='flex items-center gap-1.5'>
+                  <CheckboxCommon
+                    name={`nest-piece-${p.id}`}
+                    checked={s.checked && fits}
+                    disabled={!fits || busy}
+                    onChange={(c: boolean) =>
+                      guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
+                    }
+                  />
+                  <PieceThumb piece={p} />
+                  <div className='min-w-0 flex-1'>
+                    <Text size='micro' component='p' className='truncate'>
+                      {p.name}
+                    </Text>
+                    {/* Размер детали и её тираж в этом настиле: в списке лежат детали
+                            нескольких размеров, у которых имена различаются одним хвостом. */}
+                    <Text size='nano' variant='label' component='p'>
+                      {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
+                      {graded
+                        ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
+                          // размера» читалось бы про неё как недостача.
+                          ` · ${
+                            split.codeById.get(p.id)?.size ||
+                            (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
+                          } · ×${Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)}`
+                        : ''}
+                    </Text>
+                  </div>
+                  {!fits && <Pill tone='warn'>too wide</Pill>}
+                  <Input
+                    name={`nest-qty-${p.id}`}
+                    type='number'
+                    value={s.qty}
+                    min={1}
+                    disabled={!fits || busy}
+                    className='w-12 shrink-0'
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setSel((m) => ({
+                        ...m,
+                        [p.id]: {
+                          ...s,
+                          qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </GenericPopover>
+      </div>
+    </>
+  );
 
   return (
     <ConfirmationModal
@@ -3366,1015 +3634,269 @@ export function NestingModal({
       }
       width='lg'
       hideActions
+      headerActions={quizOpen ? <QuizChips quiz={quiz} /> : undefined}
     >
-      {/* ШАПКА МАРКЕРА (раунд 6): одна строка из четырёх групп — colourway · garments per size ·
-          cloth · pieces + режим настила; предупреждения справа в той же строке. Панель раскладки и
-          строка стола раскрываются под ней. Наведение/фокус на поле переключает схему холста. */}
-      <div {...headerHandlers}>
-        <div className='mb-2.5 flex flex-wrap items-end gap-x-4 gap-y-1.5'>
-          {!viewData && (
-            <>
-              {cwOptions.length > 0 && (
-                <label
-                  data-schematic='compose'
-                  className={`${FIELD} space-y-0.5`}
-                  title={chosenColorway?.label ?? 'shared'}
-                >
-                  <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                    colourway
-                  </Text>
-                  <span className='relative block'>
-                    <select
-                      name='nest-colourway'
-                      className={`${BOX} cursor-pointer appearance-none truncate pr-5`}
-                      disabled={busy}
-                      value={String(colorwayId)}
-                      onChange={(e) => chooseSource({ colorwayId: Number(e.target.value) || 0 })}
-                    >
-                      <option value='0'>shared</option>
-                      {cwOptions.map((c) => (
-                        <option key={c.colorwayId} value={String(c.colorwayId)}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span
-                      aria-hidden
-                      className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
-                    >
-                      ▾
-                    </span>
-                  </span>
-                </label>
-              )}
-
-              {/* СОСТАВ НАСТИЛА — одна коробка из ячеек «размер · число»: размер с 0 не кроится. */}
-              <div
-                data-schematic='garments'
-                className={`shrink-0 space-y-0.5 ${tableMode ? 'pb-3.5' : ''}`}
-              >
-                <Text
-                  size='micro'
-                  variant={compBad || sizeUnknown ? undefined : 'label'}
-                  component='span'
-                  className={compBad || sizeUnknown ? `${BOX_LABEL} text-error` : BOX_LABEL}
-                >
-                  {tableMode ? 'to cut' : 'garments per size'}
-                </Text>
-                <div className='flex h-6 items-stretch divide-x divide-hairline border border-borderColor bg-bgColor hover:border-textColor'>
-                  {graded ? (
-                    cellRows.map((r, i) => {
-                      const bad = (!r.resolvable || r.sizeId <= 0) && r.qty >= 1;
-                      return (
-                        <label
-                          key={r.key}
-                          title={r.label}
-                          data-schematic='size'
-                          data-size-key={r.key}
-                          className='relative flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'
-                        >
-                          <span
-                            className={`max-w-[6ch] truncate text-micro uppercase tracking-label ${
-                              bad ? 'text-error' : 'text-labelColor'
-                            }`}
-                          >
-                            {r.label}
-                          </span>
-                          <NumBox
-                            name={`nest-comp-${r.key}`}
-                            className={`${CELL_INPUT} ${r.qty > 0 ? '' : 'text-labelColor'}`}
-                            value={r.qty}
-                            emptyAs={0}
-                            arrowStep
-                            disabled={busy}
-                            onCommit={(n) => {
-                              const next = Math.max(0, Math.round(n));
-                              if (next !== r.qty) {
-                                guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
-                              }
-                            }}
-                          />
-                          {tableMode && r.qty > 0 && <PerPlyNote q={perPly[i] ?? 0} />}
-                        </label>
-                      );
-                    })
-                  ) : (
-                    <label className='relative flex cursor-text items-center gap-1 px-[7px] focus-within:bg-bgZebra focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-textColor'>
-                      <span
-                        className={`max-w-[10ch] truncate text-micro uppercase tracking-label ${
-                          sizeUnknown ? 'text-error' : 'text-labelColor'
-                        }`}
-                      >
-                        {sizeLabel || 'garments'}
-                      </span>
-                      <NumBox
-                        name='nest-units'
-                        className={CELL_INPUT}
-                        value={cellUngraded}
-                        emptyAs={1}
-                        arrowStep
-                        disabled={busy}
-                        onCommit={(n) => {
-                          const next = Math.max(1, Math.round(n));
-                          if (next !== cellUngraded) {
-                            guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
-                          }
-                        }}
-                      />
-                      {tableMode && <PerPlyNote q={perPly[0] ?? 0} />}
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              {/* ТКАНЬ: слот BOM (если выбор есть), ширина и свёрнутая сводка раскладки. */}
-              <div className='shrink-0 space-y-0.5'>
-                <Text
-                  size='micro'
-                  variant={noSlotChosen ? undefined : 'label'}
-                  component='span'
-                  className={noSlotChosen ? `${BOX_LABEL} text-error` : BOX_LABEL}
-                >
-                  {widthFrom ? `cloth · ${widthFrom}` : 'cloth'}
-                </Text>
-                <div className='flex gap-1'>
-                  {!lockedSlot && fabricLines.length > 0 && (
-                    <div
-                      id='nest-fabric'
-                      data-schematic='width'
-                      className={`${FIELD} relative`}
-                      title={[
-                        slot ? slotLabel(slot) : 'not picked',
-                        pinArticle ? `article: ${pinArticle}` : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    >
-                      <select
-                        name='nest-fabric-select'
-                        className={`${BOX} cursor-pointer appearance-none truncate pr-5 ${
-                          noSlotChosen ? 'text-error' : ''
-                        }`}
-                        disabled={busy}
-                        value={slotKey}
-                        onChange={(e) => chooseSource({ slotKey: e.target.value })}
-                      >
-                        <option value=''>not picked</option>
-                        {fabricLines.map((b) => (
-                          <option key={b.lineKey} value={b.lineKey}>
-                            {slotLabel(b)}
-                          </option>
-                        ))}
-                      </select>
-                      <span
-                        aria-hidden
-                        className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
-                      >
-                        ▾
-                      </span>
-                    </div>
-                  )}
-                  <label
-                    data-schematic='width'
-                    className={`${BOX_AUTO} ${FIELD} gap-1 focus-within:border-textColor`}
-                    title={widthSource || 'cloth width'}
-                  >
-                    <NumBox
-                      name='nest-width'
-                      className={`${CELL_INPUT} w-full text-left`}
-                      decimal
-                      value={widthUnset ? null : widthCm}
-                      // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
-                      // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
-                      commitOnBlur
-                      onCommit={(n) => {
-                        const next = Math.max(10, n);
-                        // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
-                        // не должен молча выключать автоподстановку ширины по колорвею.
-                        if (next !== widthCm || widthUnset) {
-                          guardManual(() => {
-                            setWidthTouched(true);
-                            setWidthUnset(false);
-                            setWidthRaw(null);
-                            setWidthCm(next);
-                          });
-                        }
-                      }}
-                      disabled={busy}
-                    />
-                    <span className='text-labelColor'>cm</span>
-                  </label>
-                  <button
-                    type='button'
-                    name='nest-lay'
-                    data-schematic='lay'
-                    aria-expanded={layOpen}
-                    aria-controls='nest-lay-panel'
-                    title={`gap ${gapCm} · margin ${marginCm} · allowance ${allowanceMm} mm · rotate ${crossGrain ? 'on' : 'off'}`}
-                    onClick={() => setLayOpen((o) => !o)}
-                    className={`${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-                      layOpen ? 'border-textColor' : ''
-                    }`}
-                  >
-                    <span className={doubleAllowanceRefusal ? 'text-error' : ''}>⋯ nesting</span>
-                    <span aria-hidden className='text-labelColor'>
-                      {layOpen ? '▴' : '▾'}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Детали: дверь в поповер с чек-листом и тиражом; рядом — режим настила. */}
-              <div data-schematic='pieces' className={`${FIELD} space-y-0.5`}>
-                <Text
-                  size='micro'
-                  variant={railS3.blockers.length > 0 ? undefined : 'label'}
-                  component='span'
-                  className={railS3.blockers.length > 0 ? `${BOX_LABEL} text-error` : BOX_LABEL}
-                >
-                  pieces
-                </Text>
-                <GenericPopover
-                  open={piecesOpen}
-                  onOpenChange={setPiecesOpen}
-                  className='w-[320px]'
-                  contentProps={{ align: 'start' }}
-                  triggerProps={{
-                    className: `${BOX_AUTO} w-[84px] justify-between focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`,
-                    disabled: parse.phase !== 'ready' || pieces.length === 0,
-                  }}
-                  openElement={(isOpen) => (
-                    <>
-                      <span>
-                        {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}
-                      </span>
-                      <span aria-hidden className='text-labelColor'>
-                        {isOpen ? '▴' : '▾'}
-                      </span>
-                    </>
-                  )}
-                >
-                  <div className='max-h-[46vh] space-y-1 overflow-y-auto'>
-                    <div className='flex items-center justify-between gap-2'>
-                      <Text size='micro' variant='label' component='span'>
-                        {checkedCount}/{pieces.length}
-                        {instanceCount !== checkedCount ? ` · placements ${instanceCount}` : ''}
-                        {graded && ungradedCount > 0
-                          ? ` · ${ungradedAllUni ? 'UNI' : 'no size'} ${ungradedCount}`
-                          : ''}
-                      </Text>
-                      <button
-                        type='button'
-                        className='text-micro uppercase underline hover:opacity-70'
-                        disabled={busy}
-                        onClick={() =>
-                          guardManual(() => {
-                            // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
-                            const next: PieceSel = { ...sel };
-                            for (const p of pieces) {
-                              next[p.id] = {
-                                checked: !!fitsWidth.get(p.id),
-                                qty: sel[p.id]?.qty ?? 1,
-                              };
-                            }
-                            setSel(next);
-                          })
-                        }
-                      >
-                        select all
-                      </button>
-                    </div>
-                    {pieces.map((p) => {
-                      const fits = fitsWidth.get(p.id) ?? false;
-                      const s = sel[p.id] ?? { checked: false, qty: 1 };
-                      return (
-                        <div key={p.id} className='flex items-center gap-1.5'>
-                          <CheckboxCommon
-                            name={`nest-piece-${p.id}`}
-                            checked={s.checked && fits}
-                            disabled={!fits || busy}
-                            onChange={(c: boolean) =>
-                              guardManual(() =>
-                                setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })),
-                              )
-                            }
-                          />
-                          <PieceThumb piece={p} />
-                          <div className='min-w-0 flex-1'>
-                            <Text size='micro' component='p' className='truncate'>
-                              {p.name}
-                            </Text>
-                            {/* Размер детали и её тираж в этом настиле: в списке лежат детали
-                            нескольких размеров, у которых имена различаются одним хвостом. */}
-                            <Text size='nano' variant='label' component='p'>
-                              {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
-                              {graded
-                                ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
-                                  // размера» читалось бы про неё как недостача.
-                                  ` · ${
-                                    split.codeById.get(p.id)?.size ||
-                                    (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
-                                  } · ×${
-                                    Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
-                                  }`
-                                : ''}
-                            </Text>
-                          </div>
-                          {!fits && <Pill tone='warn'>too wide</Pill>}
-                          <Input
-                            name={`nest-qty-${p.id}`}
-                            type='number'
-                            value={s.qty}
-                            min={1}
-                            disabled={!fits || busy}
-                            className='w-12 shrink-0'
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setSel((m) => ({
-                                ...m,
-                                [p.id]: {
-                                  ...s,
-                                  qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
-                                },
-                              }))
-                            }
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </GenericPopover>
-              </div>
-              <div data-schematic='compose' className='shrink-0 space-y-0.5'>
-                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                  spread
-                </Text>
-                <div role='group' aria-label='spread mode' className='flex'>
-                  {(
-                    [
-                      ['single', 'single lay'],
-                      ['table', 'table'],
-                    ] as const
-                  ).map(([m, label], i) => (
-                    <button
-                      key={m}
-                      type='button'
-                      name={`nest-lay-mode-${m}`}
-                      aria-pressed={layMode === m}
-                      disabled={busy}
-                      onClick={() => {
-                        if (m !== layMode) guardManual(() => setLayMode(m));
-                      }}
-                      className={`${SEG} ${i > 0 ? '-ml-px' : ''} ${
-                        layMode === m
-                          ? 'relative border-textColor bg-textColor text-bgColor'
-                          : 'border-borderColor bg-bgColor text-textColor hover:border-textColor'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-          {topWarnings.length > 0 && (
-            <div className='ml-auto self-end'>
-              <HeaderWarnings items={topWarnings} />
-            </div>
-          )}
-        </div>
-
-        {/* ПАНЕЛЬ РАСКЛАДКИ: gap, margin, allowance, rotate — раскрывается сводкой в группе cloth. */}
-        {!viewData && layOpen && (
-          <div id='nest-lay-panel' className='mb-2.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-            <label data-schematic='gap' className={`${FIELD} space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                gap cm
-              </Text>
-              <NumBox
-                name='nest-gap'
-                decimal
-                value={gapCm}
-                emptyAs={0}
-                onCommit={(n) => {
-                  const next = Math.max(0, n);
-                  if (next !== gapCm) guardManual(() => setGapCm(next));
-                }}
-                disabled={busy}
-              />
-            </label>
-            <label data-schematic='margin' className={`${FIELD} space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                margin cm
-              </Text>
-              <NumBox
-                name='nest-margin'
-                decimal
-                value={marginCm}
-                emptyAs={0}
-                onCommit={(n) => {
-                  const next = Math.max(0, n);
-                  if (next !== marginCm) guardManual(() => setMarginCm(next));
-                }}
-                disabled={busy}
-              />
-            </label>
-            {/* Припуск на шов — ВХОД алгоритма: раздувает контур до линии кроя до укладки. */}
-            <label
-              data-schematic='allowance'
-              className={`${FIELD} space-y-0.5`}
-              title={
-                [
-                  allowanceSourceText,
-                  !allowanceTouched && allowancePrefill ? `prefilled: ${allowancePrefill.why}` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ') || undefined
-              }
-            >
-              <Text
-                size='micro'
-                variant={doubleAllowanceRefusal ? undefined : 'label'}
-                component='span'
-                className={doubleAllowanceRefusal ? `${BOX_LABEL} text-error` : BOX_LABEL}
-              >
-                allowance mm
-              </Text>
-              <NumBox
-                name='nest-allowance'
-                decimal
-                value={allowanceMm}
-                emptyAs={0}
-                onCommit={(n) => {
-                  // Потолок (MAX_SEAM_ALLOWANCE_MM) живёт в contour-layer.ts рядом с предзаполнением.
-                  const next = clampSeamAllowanceMm(n);
-                  if (next !== allowanceMm) {
-                    // Флаг «ввели руками» — ВНУТРИ apply, как у ширины.
-                    guardManual(() => {
-                      setAllowanceTouched(true);
-                      setAllowanceMm(next);
-                    });
-                  }
-                }}
-                disabled={busy}
-              />
-            </label>
-            <div data-schematic='rotate' className={`${FIELD} space-y-0.5`}>
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                rotate 90°
-              </Text>
-              {/* Переключатель той же коробкой, что и поля: нажатое состояние — заливка чернилом. */}
-              <button
-                type='button'
-                id='nest-crossgrain'
-                name='nest-crossgrain'
-                aria-pressed={crossGrain}
-                disabled={busy}
-                onClick={() => guardManual(() => setCrossGrain(!crossGrain))}
-                className={`${BOX} justify-center uppercase ${
-                  crossGrain ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
-                }`}
-              >
-                {crossGrain ? 'on' : 'off'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* РЯД СТОЛА СОХРАНЁННОГО МАРКЕРА: настил, под который он снят (layout.spread), — только
-            чтение, той же коробкой, что и в прогоне. */}
-        {viewData && storedSpread && (
-          <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-            {(
-              [
-                [
-                  'table cm',
-                  storedSpread.tableCm == null ? '—' : storedSpread.tableCm,
-                  'cutting table length',
-                ],
-                ['end loss cm', storedSpread.endLossCm, 'spread end loss on each end of the table'],
-                ['plies', storedSpread.plies, 'plies in the spread'],
-                ['face', storedSpread.mode === 'face_up' ? 'up' : 'to face', 'spread mode'],
-                [
-                  'thickness mm',
-                  thicknessMm == null ? '—' : thicknessMm,
-                  'fabric thickness, from the article',
-                ],
-              ] as const
-            ).map(([label, value, title]) => (
-              <div
-                key={label}
-                className={`${FIELD} space-y-0.5`}
-                title={`${title} · saved with the marker`}
-              >
-                <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                  {label}
-                </Text>
-                <div
-                  className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor ${
-                    label === 'face' ? 'justify-center uppercase' : ''
-                  }`}
-                >
-                  {value}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* РЯД СТОЛА: только в режиме «table». На виду — слои (auto/своё) и дверь «⋯ table
-            settings»; стол, ширина стола, запас, стопка, лицо, толщина и «save for the workshop»
-            свёрнуты под ней (Fable 07: настройки цеха задают раз, слои — каждый раз). */}
-        {!viewData && tableMode && (
-          <div className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-            <label data-schematic='plies' className={`${FIELD} space-y-0.5`}>
-              <Text
-                size='micro'
-                variant={spread.overStack || spread.oddFaceToFace ? undefined : 'label'}
-                component='span'
-                className={
-                  spread.overStack || spread.oddFaceToFace ? `${BOX_LABEL} text-error` : BOX_LABEL
-                }
-              >
-                plies{pliesAuto ? ' · auto' : ''}
-              </Text>
-              <span className='flex items-center gap-1.5'>
-                <NumBox
-                  name='nest-plies'
-                  value={plies}
-                  emptyAs={1}
-                  onCommit={(n) => {
-                    const next = Math.max(1, Math.round(n));
-                    if (next !== plies) guardManual(() => setPlies(next));
-                  }}
-                />
-                {!pliesAuto && (
-                  <Button
-                    type='button'
-                    variant='underline'
-                    title={`back to auto: ${autoPliesN} plies`}
-                    onClick={() => guardManual(() => setPlies(null))}
-                  >
-                    auto
-                  </Button>
-                )}
-              </span>
-            </label>
-            <div className='shrink-0 space-y-0.5'>
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                &nbsp;
-              </Text>
-              <button
-                type='button'
-                name='nest-table-settings'
-                data-schematic='table'
-                aria-expanded={tableOpen}
-                aria-controls='nest-table-panel'
-                onClick={() => setTableOpen((o) => !o)}
-                className={`${BOX_AUTO} gap-1.5 whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-                  tableOpen ? 'border-textColor' : ''
-                } ${tableCm == null || clothWiderThanTable ? 'text-error' : ''}`}
-              >
-                ⋯ table settings
-                <span aria-hidden className='text-labelColor'>
-                  {tableOpen ? '▴' : '▾'}
-                </span>
-              </button>
-            </div>
-          </div>
-        )}
-        {!viewData && tableMode && tableOpen && (
-          <div id='nest-table-panel' className='mb-1.5 flex flex-wrap items-end gap-x-2 gap-y-1.5'>
-            <label
-              data-schematic='table'
-              className={`${FIELD} space-y-0.5`}
-              title='cutting table width · empty = not set'
-            >
-              <Text
-                size='micro'
-                variant={clothWiderThanTable ? undefined : 'label'}
-                component='span'
-                className={clothWiderThanTable ? `${BOX_LABEL} text-error` : BOX_LABEL}
-              >
-                table w cm
-              </Text>
-              <NumBox
-                name='nest-table-width'
-                decimal
-                value={tableWidthCm}
-                commitOnBlur
-                disabled={busy}
-                onClear={() => setTableWidthEdit(null)}
-                onCommit={(n) => setTableWidthEdit(n > 0 ? n : null)}
-              />
-            </label>
-            <label
-              data-schematic='table'
-              className={`${FIELD} space-y-0.5`}
-              title='cutting table length · empty = not set'
-            >
-              <Text
-                size='micro'
-                variant={tableCm == null ? undefined : 'label'}
-                component='span'
-                className={tableCm == null ? `${BOX_LABEL} text-error` : BOX_LABEL}
-              >
-                table l cm
-              </Text>
-              <NumBox
-                name='nest-table'
-                decimal
-                value={tableCm}
-                commitOnBlur
-                disabled={busy}
-                onClear={() => setTableEdit(null)}
-                onCommit={(n) => setTableEdit(n > 0 ? n : null)}
-              />
-            </label>
-            <label
-              data-schematic='endLoss'
-              className={`${FIELD} space-y-0.5`}
-              title='spread end loss on each end of the table'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                end loss cm
-              </Text>
-              <NumBox
-                name='nest-end-loss'
-                decimal
-                value={endLossCm}
-                emptyAs={0}
-                commitOnBlur
-                disabled={busy}
-                onCommit={(n) => setEndLossCm(Math.max(0, n))}
-              />
-            </label>
-            <div
-              data-schematic='face'
-              className={`${FIELD} space-y-0.5`}
-              title='spread mode: face up or face to face'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                face
-              </Text>
-              <button
-                type='button'
-                name='nest-spread-mode'
-                aria-pressed={spreadMode === 'face_to_face'}
-                onClick={() =>
-                  guardManual(() =>
-                    setSpreadMode((m) => (m === 'face_up' ? 'face_to_face' : 'face_up')),
-                  )
-                }
-                className={`${BOX} justify-center uppercase ${
-                  spreadMode === 'face_to_face'
-                    ? 'border-textColor bg-textColor text-bgColor hover:opacity-80'
-                    : ''
-                }`}
-              >
-                {spreadMode === 'face_up' ? 'up' : 'to face'}
-              </button>
-            </div>
-            <label
-              data-schematic='stack'
-              className={`${FIELD} space-y-0.5`}
-              title='stack height limit · empty = not set'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                max stack cm
-              </Text>
-              <NumBox
-                name='nest-stack-limit'
-                decimal
-                value={stackLimitCm}
-                commitOnBlur
-                onClear={() => guardManual(() => setStackEdit(null))}
-                onCommit={(n) => {
-                  const next = n > 0 ? n : null;
-                  if (next !== stackLimitCm) guardManual(() => setStackEdit(next));
-                }}
-              />
-            </label>
-            <div
-              data-schematic='thickness'
-              className={`${FIELD} space-y-0.5`}
-              title='fabric thickness, from the article'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                thickness mm
-              </Text>
-              <div className={`${BOX} bg-bgZebra text-labelColor hover:border-borderColor`}>
-                {thicknessMm == null ? '—' : thicknessMm}
-              </div>
-            </div>
-            <div
-              data-schematic='within'
-              className={`${FIELD} space-y-0.5`}
-              title='keep within the table: the engine stops at the table end'
-            >
-              <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
-                within table
-              </Text>
-              <button
-                type='button'
-                name='nest-keep-on-table'
-                aria-pressed={keepOnTable}
-                disabled={busy || usableCm == null}
-                onClick={() => guardManual(() => setKeepOnTable(!keepOnTable))}
-                className={`${BOX} justify-center uppercase ${
-                  keepOnTable ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
-                }`}
-              >
-                {keepOnTable ? 'on' : 'off'}
-              </button>
-            </div>
-            {workshopDirty && canWriteWorkshop && (
-              <Button
-                type='button'
-                variant='underline'
-                className='h-6'
-                disabled={savingWorkshop}
-                onClick={() => void saveForWorkshop()}
-              >
-                {savingWorkshop ? 'saving…' : 'save for the workshop'}
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* Цифры настила: одна строка, единицы серым, цифры моноширинные. */}
-        {(viewData ? tableEndCm != null || storedSpread != null : tableMode) && (
-          <p className='mb-2.5 text-textBaseSize tabular-nums'>
-            {fitting && (
-              <span className='text-labelColor'>
-                fitting to the table… attempt {fitting.attempt} ·{' '}
-              </span>
-            )}
-            {viewData ? (
-              <>
-                {/* Норма из смешанного маркера — с подписью настила, под который он снят. */}
-                {storedNormLabel && <span className='text-labelColor'>{storedNormLabel} · </span>}
-                <span className='text-labelColor'>on table </span>
-                {figure(tableEndCm, 1)}
-                <span className='text-labelColor'> cm · plies </span>
-                {storedSpread?.plies ?? '—'}
-                <span className='text-labelColor'> · stack </span>
-                {figure(spread.stackCm, 1)}
-                <span className='text-labelColor'> cm / max </span>
-                {figure(spread.maxPlies)}
-                <span className='text-labelColor'> plies · garments </span>
-                {figure(spread.garments)}
-              </>
-            ) : (
-              <>
-                {/* marker xs ×1 · plies 10 = xs 10 [· +n extra] · on table … */}
-                <span className='text-labelColor'>marker </span>
-                {markerCompText || '—'}
-                <span className='text-labelColor'> · plies </span>
-                {plies}
-                <span className='text-labelColor'> = </span>
-                {cutCompText || '—'}
-                {extraTotal > 0 && <span className='text-labelColor'> · +{extraTotal} extra</span>}
-                <span className='text-labelColor'> · on table </span>
-                {figure(tableEndCm, 1)}
-                <span className='text-labelColor'> cm · stack </span>
-                {figure(spread.stackCm, 1)}
-                <span className='text-labelColor'> cm / max </span>
-                {figure(spread.maxPlies)}
-                <span className='text-labelColor'> plies</span>
-              </>
-            )}
-            <span className='text-labelColor'> · fabric </span>
-            {figure(spread.fabricCm == null ? null : spread.fabricCm / 100, 2)}
-            <span className='text-labelColor'> m</span>
-          </p>
-        )}
-      </div>
+      {quizOpen ? (
+        <MarkerQuiz
+          quiz={quiz}
+          busy={busy}
+          layMode={layMode}
+          onLayMode={(m) => {
+            if (m === layMode) quiz.afterSpread(m);
+            else
+              guardManual(() => {
+                setLayMode(m);
+                quiz.afterSpread(m);
+              });
+          }}
+          tableCm={tableCm}
+          tableWidthCm={tableWidthCm}
+          stackLimitCm={stackLimitCm}
+          onTableCm={setTableEdit}
+          onTableWidthCm={setTableWidthEdit}
+          onStackCm={(v) => {
+            if (v !== stackLimitCm) guardManual(() => setStackEdit(v));
+          }}
+          onSaveTable={saveForWorkshop}
+          savingTable={savingWorkshop}
+          colourways={cwOptions.map((c) => ({ id: c.colorwayId, label: c.label }))}
+          colourwayId={colorwayId}
+          onColourway={(id) => chooseSource({ colorwayId: id })}
+          rows={quizRows}
+          onQty={(key, n) => guardManual(() => setQtyByToken((m) => ({ ...m, [key]: n })))}
+          spreadMode={spreadMode}
+          onSpreadMode={(m) => guardManual(() => setSpreadMode(m))}
+          plies={plies}
+          pliesAuto={pliesAuto}
+          onPlies={(n) => guardManual(() => setPlies(n))}
+          perPly={perPly}
+          thicknessMm={thicknessMm}
+          thicknessFromBom={bomThicknessMm != null}
+          onThickness={setThicknessEdit}
+          cutTotal={cutTotal}
+          extraTotal={extraTotal}
+          stackCm={layFigures.stackCm}
+          stackOk={!layFigures.overStack}
+          endLossCm={endLossCm}
+          onEndLoss={setEndLossCm}
+          clothWidthCm={clothRollCm}
+          markerLengthCm={effective?.usedLengthCm ?? estLengthCm ?? 0}
+          markerEstimate={!effective}
+          fabricCm={layFigures.fabricCm}
+          warnings={quizWarnings}
+          extras={quizExtras}
+          runDisabled={runBlocked}
+          onRun={() => {
+            markQuizDone();
+            quiz.close();
+            requestRun();
+          }}
+          onShowResult={effective ? quiz.close : undefined}
+        />
+      ) : (
+        <QuizSummary
+          facts={summaryFacts}
+          onEdit={viewData ? undefined : () => quiz.open('run')}
+          editDisabled={busy}
+          aside={topWarnings.length > 0 ? <HeaderWarnings items={topWarnings} /> : undefined}
+        />
+      )}
 
       {/* Холст на всю ширину модалки. Готовая/сохранённая раскладка идёт через интерактивный
           редактор; потоковое превью GA остаётся дешёвым строковым SVG. */}
-      <div className='space-y-2'>
-        <div className='relative'>
-          {running && liveSvg ? (
-            <div
-              // Потоковое превью: ширина ткани = высота холста, длина — горизонтальный скролл.
-              className='h-[60vh] min-h-[320px] w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-bgColor [&_svg]:h-full [&_svg]:w-auto [&_svg]:max-w-none'
-              dangerouslySetInnerHTML={{ __html: liveSvg }}
-            />
-          ) : effective && !running ? (
-            <LayoutEditor
-              pieces={displayPieces}
-              placements={effective.placements}
-              widthCm={displayWidth}
-              usedLengthCm={effective.usedLengthCm}
-              targetCm={viewData && storedTableEnd ? undefined : displayTarget}
-              tableEndCm={tableEndCm ?? undefined}
-              marginCm={displayMargin}
-              allowCrossGrain={displayCross}
-              // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
-              //
-              // Здесь стояло 'unknown' для сохранённого маркера, «чтобы не перечёркивать снятое до
-              // Ф1». Перечёркивать оно и не могло: rotsFor всегда оставляет ТЕКУЩИЙ поворот детали
-              // в цикле, так что лежащие в блобе 180° никуда не деваются. Зато вместе с прежним
-              // allowsFlip (где unknown разрешал переворот) оно ПРЕДЛАГАЛО оператору поставить
-              // деталь на 180° на ворсовой ткани — и такая правка старого маркера УХОДИЛА В БАЗУ:
-              // сервер милует строки с поколением политики младше 3, и поколение это остаётся
-              // прежним, так что строка остаётся помилованной навсегда. То есть ровно там, где
-              // помилование должно было защищать старые замеры, оно молча узаконивало новый брак.
-              fabricDirection={effectiveDirection}
-              editable={editingActive}
-              violating={violatingIdx}
-              focus={focusReq}
-              onChange={(next) => setManual(next)}
-              corner={downloadButton}
-            />
-          ) : !viewData && !running && !fitting ? (
-            // ДО ЗАПУСКА — живая схема: как сложится настил, а при наведении на поле — что оно меняет.
-            <MarkerSchematic
-              className='h-[40vh] min-h-[320px]'
-              view={schematicView}
-              mode={layMode}
-              widthCm={widthCm}
-              gapCm={gapCm}
-              marginCm={marginCm}
-              allowanceMm={allowanceMm}
-              crossGrain={crossGrain}
-              flipAllowed={allowsFlip(effectiveDirection)}
-              estLengthCm={estLengthCm}
-              blocks={schematicBlocks}
-              pieces={schematicPieces}
-              tableCm={tableCm}
-              endLossCm={endLossCm}
-              usableCm={usableCm}
-              keepOnTable={keepOnTable}
-              plies={plies}
-              spreadMode={spreadMode}
-              stackLimitCm={stackLimitCm}
-              thicknessMm={thicknessMm}
-              stackCm={spread.stackCm}
-              maxPlies={spread.maxPlies}
-              tableWidthCm={tableWidthCm}
-              clothRollCm={widthUnset ? null : clothRollCm}
-              extra={tableMode ? extraTotal : 0}
-              sizePieces={sizePieces}
-              sizeTitle={sizeRow?.label.toLowerCase()}
-            />
-          ) : (
-            <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
-              <Text size='micro' variant='label'>
-                {running
-                  ? 'computing…'
-                  : fitting
-                    ? `fitting to the table… attempt ${fitting.attempt}`
-                    : '—'}
-              </Text>
-            </div>
-          )}
-        </div>
-        {running && (
-          <Progress
-            className='h-px'
-            value={
-              run.nfp
-                ? (run.nfp.done / Math.max(1, run.nfp.total)) * 100
-                : run.best
-                  ? (run.best.elapsedMs / Math.max(1, budgetS * 1000)) * 100
-                  : 0
-            }
-          />
-        )}
-
-        {effective && (
-          <StatGrid min={120}>
-            <Stat
-              label='used'
-              value={`${effective.usedLengthCm.toFixed(1)} cm`}
-              sub={manual ? 'with a manual edit' : undefined}
-            />
-            <Stat
-              label='efficiency'
-              value={`${effPct.toFixed(1)} %`}
-              sub={`fabric ${displayWidth} cm`}
-            />
-            <Stat
-              label='placed'
-              value={`${effective.placedCount}/${effective.totalCount}`}
-              tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
-            />
-            {viewData && view?.summary && (
-              // РАСХОД НА ИЗДЕЛИЕ ДЕЛИТСЯ НА ИЗДЕЛИЯ, А НЕ НА КОМПЛЕКТЫ. Здесь стояло
-              // usedLength / max(1, sets), и на маркере с составом sets приезжает нулём
-              // (proto3 роняет умолчание) — то есть весь настил показывался как норма одного
-              // изделия. Смешанному составу число не показывается вовсе: у него нормы нет.
-              <Stat
-                label='consumption / unit'
-                value={
-                  viewRefusal
-                    ? '—'
-                    : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} cm`
-                }
-                sub={
-                  viewRefusal
-                    ? // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
-                      // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
-                      // отправить оператора чинить не то. Читается ТЕМ ЖЕ источником, что и сам
-                      // отказ, — сводкой строки.
-                      `${refusalWord(view.summary)} — no norm`
-                    : `garments: ${viewData.totalUnits || 1}`
-                }
+      {!quizOpen && (
+        <div className='space-y-2'>
+          <div className='relative'>
+            {running && liveSvg ? (
+              <div
+                // Потоковое превью: ширина ткани = высота холста, длина — горизонтальный скролл.
+                className='h-[60vh] min-h-[320px] w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-bgColor [&_svg]:h-full [&_svg]:w-auto [&_svg]:max-w-none'
+                dangerouslySetInnerHTML={{ __html: liveSvg }}
               />
-            )}
-            {verdict && (
-              <Stat
-                label='verdict'
-                value={
-                  <Pill tone={verdict.ok ? 'ok' : 'warn'}>
-                    {verdict.ok ? 'fits' : 'does not fit'}
-                  </Pill>
-                }
-                sub={verdict.text}
+            ) : effective && !running ? (
+              <LayoutEditor
+                pieces={displayPieces}
+                placements={effective.placements}
+                widthCm={displayWidth}
+                usedLengthCm={effective.usedLengthCm}
+                targetCm={viewData && storedTableEnd ? undefined : displayTarget}
+                tableEndCm={tableEndCm ?? undefined}
+                marginCm={displayMargin}
+                allowCrossGrain={displayCross}
+                // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
+                //
+                // Здесь стояло 'unknown' для сохранённого маркера, «чтобы не перечёркивать снятое до
+                // Ф1». Перечёркивать оно и не могло: rotsFor всегда оставляет ТЕКУЩИЙ поворот детали
+                // в цикле, так что лежащие в блобе 180° никуда не деваются. Зато вместе с прежним
+                // allowsFlip (где unknown разрешал переворот) оно ПРЕДЛАГАЛО оператору поставить
+                // деталь на 180° на ворсовой ткани — и такая правка старого маркера УХОДИЛА В БАЗУ:
+                // сервер милует строки с поколением политики младше 3, и поколение это остаётся
+                // прежним, так что строка остаётся помилованной навсегда. То есть ровно там, где
+                // помилование должно было защищать старые замеры, оно молча узаконивало новый брак.
+                fabricDirection={effectiveDirection}
+                editable={editingActive}
+                violating={violatingIdx}
+                focus={focusReq}
+                onChange={(next) => setManual(next)}
+                corner={downloadButton}
               />
-            )}
-            {running && displayResult && (
-              <Stat
-                label='generation'
-                value={String(displayResult.generation)}
-                sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} s`}
-              />
-            )}
-          </StatGrid>
-        )}
-
-        {/* Одно главное действие: run → stop → save marker; остальное тихо рядом. */}
-        <div className='flex flex-wrap items-center justify-end gap-3'>
-          {manual && !running && (
-            <Button type='button' variant='underline' onClick={() => setManual(null)}>
-              reset edits
-            </Button>
-          )}
-          {viewData && !viewDegraded && canEdit && !editView && (
-            <Button type='button' variant='secondary' size='sm' onClick={() => setEditView(true)}>
-              edit
-            </Button>
-          )}
-          {viewData && editView && (
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={!canSaveView || saving}
-              onClick={updateViewMarker}
-            >
-              {saving ? 'saving…' : 'save edits'}
-            </Button>
-          )}
-          {!viewData &&
-            (running ? (
-              <Button type='button' variant='main' size='sm' disabled={stopping} onClick={stop}>
-                {stopping ? 'stopping…' : 'stop'}
-              </Button>
-            ) : fitting ? (
-              <Button type='button' variant='main' size='sm' onClick={stopFit}>
-                stop
-              </Button>
-            ) : effective ? (
-              <>
-                <Button
-                  type='button'
-                  variant='underline'
-                  disabled={runBlocked}
-                  onClick={requestRun}
-                >
-                  run again
-                </Button>
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  disabled={!canSave}
-                  title={
-                    !canSave
-                      ? tableShortText || (onlyTerminal ? TERMINAL_SAVE_REASON : undefined)
-                      : undefined
-                  }
-                  onClick={() => setSaveOpen(true)}
-                >
-                  save marker
-                </Button>
-              </>
             ) : (
+              <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
+                <Text size='micro' variant='label'>
+                  {running
+                    ? 'computing…'
+                    : fitting
+                      ? `fitting to the table… attempt ${fitting.attempt}`
+                      : '—'}
+                </Text>
+              </div>
+            )}
+          </div>
+          {running && (
+            <Progress
+              className='h-px'
+              value={
+                run.nfp
+                  ? (run.nfp.done / Math.max(1, run.nfp.total)) * 100
+                  : run.best
+                    ? (run.best.elapsedMs / Math.max(1, budgetS * 1000)) * 100
+                    : 0
+              }
+            />
+          )}
+
+          {effective && (
+            <StatGrid min={120}>
+              <Stat
+                label='used'
+                value={`${effective.usedLengthCm.toFixed(1)} cm`}
+                sub={manual ? 'with a manual edit' : undefined}
+              />
+              <Stat
+                label='efficiency'
+                value={`${effPct.toFixed(1)} %`}
+                sub={`fabric ${displayWidth} cm`}
+              />
+              <Stat
+                label='placed'
+                value={`${effective.placedCount}/${effective.totalCount}`}
+                tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
+              />
+              {viewData && view?.summary && (
+                // РАСХОД НА ИЗДЕЛИЕ ДЕЛИТСЯ НА ИЗДЕЛИЯ, А НЕ НА КОМПЛЕКТЫ. Здесь стояло
+                // usedLength / max(1, sets), и на маркере с составом sets приезжает нулём
+                // (proto3 роняет умолчание) — то есть весь настил показывался как норма одного
+                // изделия. Смешанному составу число не показывается вовсе: у него нормы нет.
+                <Stat
+                  label='consumption / unit'
+                  value={
+                    viewRefusal
+                      ? '—'
+                      : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} cm`
+                  }
+                  sub={
+                    viewRefusal
+                      ? // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
+                        // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
+                        // отправить оператора чинить не то. Читается ТЕМ ЖЕ источником, что и сам
+                        // отказ, — сводкой строки.
+                        `${refusalWord(view.summary)} — no norm`
+                      : `garments: ${viewData.totalUnits || 1}`
+                  }
+                />
+              )}
+              {verdict && (
+                <Stat
+                  label='verdict'
+                  value={
+                    <Pill tone={verdict.ok ? 'ok' : 'warn'}>
+                      {verdict.ok ? 'fits' : 'does not fit'}
+                    </Pill>
+                  }
+                  sub={verdict.text}
+                />
+              )}
+              {running && displayResult && (
+                <Stat
+                  label='generation'
+                  value={String(displayResult.generation)}
+                  sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} s`}
+                />
+              )}
+            </StatGrid>
+          )}
+
+          {/* Одно главное действие: run → stop → save marker; остальное тихо рядом. */}
+          <div className='flex flex-wrap items-center justify-end gap-3'>
+            {manual && !running && (
+              <Button type='button' variant='underline' onClick={() => setManual(null)}>
+                reset edits
+              </Button>
+            )}
+            {viewData && !viewDegraded && canEdit && !editView && (
+              <Button type='button' variant='secondary' size='sm' onClick={() => setEditView(true)}>
+                edit
+              </Button>
+            )}
+            {viewData && editView && (
               <Button
                 type='button'
                 variant='main'
                 size='sm'
-                disabled={runBlocked}
-                onClick={requestRun}
+                disabled={!canSaveView || saving}
+                onClick={updateViewMarker}
               >
-                run
+                {saving ? 'saving…' : 'save edits'}
               </Button>
-            ))}
+            )}
+            {!viewData &&
+              (running ? (
+                <Button type='button' variant='main' size='sm' disabled={stopping} onClick={stop}>
+                  {stopping ? 'stopping…' : 'stop'}
+                </Button>
+              ) : fitting ? (
+                <Button type='button' variant='main' size='sm' onClick={stopFit}>
+                  stop
+                </Button>
+              ) : effective ? (
+                <>
+                  <Button
+                    type='button'
+                    variant='underline'
+                    disabled={runBlocked}
+                    onClick={requestRun}
+                  >
+                    run again
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='sm'
+                    disabled={!canSave}
+                    title={
+                      !canSave
+                        ? tableShortText || (onlyTerminal ? TERMINAL_SAVE_REASON : undefined)
+                        : undefined
+                    }
+                    onClick={() => setSaveOpen(true)}
+                  >
+                    save marker
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  disabled={runBlocked}
+                  onClick={requestRun}
+                >
+                  run
+                </Button>
+              ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Save dialog: name + BOM fabric slot. Nested Radix dialogs portal independently. */}
       <ConfirmationModal
