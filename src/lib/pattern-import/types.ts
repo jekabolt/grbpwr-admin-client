@@ -2061,7 +2061,20 @@ export type DraftRul =
       /** Largest distance of an expanded point from its per-size point, mm (≤ 0.1). */
       maxErrMm: number;
     }
-  | { ok: false; reasons: string[] };
+  | {
+      ok: false;
+      reasons: string[];
+      /**
+       * SHAPE-KINK: the reasons per piece, for the UI to route — `identity` = the piece the reason
+       * names (null = the whole package); `gradeAskKey` = the open GRADE P1 counts ask of that piece
+       * whose answer would make its sizes the same drawing (notches / drills / internal lines differ
+       * between sizes). Never answered for the operator. Absent on a package refused before this.
+       */
+      refusals?: RulRefusal[];
+    };
+
+/** SHAPE-KINK: one RUL refusal, structured (DraftRul.refusals). */
+export type RulRefusal = { identity: string | null; why: string; gradeAskKey?: string };
 
 export type DraftScope = {
   target: DraftScopeTarget;

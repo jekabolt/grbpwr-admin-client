@@ -654,8 +654,12 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     rec.verdict = 'refused';
     return rec;
   }
-  const run = <S extends StageName>(st: S, input: StageIO[S]['in']) =>
-    timed(st, () => s.runStage(st, input, ctx()));
+  /** SHAPE-KINK probe: the last semantics input (E2E_GRADE_NONE answers on top of it). */
+  let lastSem: StageIO['semantics']['in'] | null = null;
+  const run = <S extends StageName>(st: S, input: StageIO[S]['in']) => {
+    if (st === 'semantics') lastSem = input as StageIO['semantics']['in'];
+    return timed(st, () => s.runStage(st, input, ctx()));
+  };
   try {
     // 1 · files
     const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
@@ -1728,6 +1732,27 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
           ]
         : [],
     );
+    // SHAPE-KINK probe switch: E2E_GRADE_NONE=1 answers every open GRADE P1 counts ask "in no
+    // size" (the operator's answer, simulated) before the write
+    if (process.env.E2E_GRADE_NONE && lastSem) {
+      const sem0 = (
+        s as unknown as {
+          semantics: { gradeAsks?: { kind: string; key: string; answer?: string }[] } | null;
+        }
+      ).semantics;
+      const open = (sem0?.gradeAsks ?? []).filter((q) => q.kind === 'counts' && !q.answer);
+      if (open.length) {
+        const prev: StageIO['semantics']['in'] = lastSem;
+        await run('semantics', {
+          ...prev,
+          gradeAnswers: {
+            ...(prev.gradeAnswers ?? {}),
+            ...Object.fromEntries(open.map((q) => [q.key, 'none' as const])),
+          },
+        });
+        op('note', `E2E_GRADE_NONE: ${open.length} counts ask(s) answered "in no size"`);
+      }
+    }
     const wr = await run('write', {
       techCardId: CARD_ID,
       scopes: SCOPES,

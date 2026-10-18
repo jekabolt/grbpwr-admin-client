@@ -14,6 +14,8 @@ import type {
   CleanPreview,
   ChainSet,
   DraftRul,
+  GradeAsk,
+  RulRefusal,
   DraftScope,
   ExtractOpts,
   FileId,
@@ -2201,6 +2203,7 @@ export class Session {
                 input,
                 scope.label || scope.scopeKey,
                 filename,
+                this.semantics?.gradeAsks ?? [],
               ),
             }
           : {}),
@@ -2223,6 +2226,7 @@ function rulPackageOf(
   input: StageIO['write']['in'],
   styleName: string,
   filename: string,
+  gradeAsks: readonly GradeAsk[] = [],
 ): DraftRul {
   const sizes = [...input.sizes].sort((a, b) => a.rank - b.rank).map((s) => s.token);
   const base = input.rulBase ?? sizes[Math.floor((sizes.length - 1) / 2)];
@@ -2247,8 +2251,10 @@ function rulPackageOf(
   });
   // a line not matched point for point is never packed (its pairing would be unproven)
   const unmatched = eq.notes.map((n) => `not matched: ${n}`);
-  if (!pack.ok) return { ...pack, reasons: [...pack.reasons, ...unmatched] };
-  if (unmatched.length) return { ok: false, reasons: unmatched };
+  if (!pack.ok || unmatched.length) {
+    const reasons = [...(pack.ok ? [] : pack.reasons), ...unmatched];
+    return { ok: false, reasons, refusals: rulRefusalsOf(reasons, blocks, gradeAsks) };
+  }
   const stem = filename.replace(/\.dxf$/i, '');
   return {
     ok: true,
@@ -2261,6 +2267,40 @@ function rulPackageOf(
     rules: pack.rules,
     maxErrMm: pack.maxErrMm,
   };
+}
+
+/**
+ * SHAPE-KINK: the refusal reasons per piece (the piece a reason starts with, when it is one of the
+ * written identities) and, where the piece's sizes are not the same drawing, the open GRADE P1
+ * counts ask whose answer would make them so — the UI routes the operator to it (never answered
+ * here: the decision stays the operator's).
+ */
+function rulRefusalsOf(
+  reasons: readonly string[],
+  blocks: readonly PlannedBlock[],
+  gradeAsks: readonly GradeAsk[],
+): RulRefusal[] {
+  const ids = new Set(blocks.map((b) => b.identity));
+  return reasons.map((why) => {
+    const head = why.replace(/^not matched: /, '').match(/^([^\s:]+)/)?.[1] ?? '';
+    const identity = ids.has(head) ? head : null;
+    // a per-size entity difference (lines / points in one size and not another)
+    const counts = /not the same drawing|lines\/points/.test(why);
+    // a mirrored hand (`_R` derived from `_L`) answers through its source piece's ask
+    const src = blocks.find((b) => b.identity === identity)?.derivedFrom ?? null;
+    const ask =
+      identity && counts
+        ? gradeAsks.find(
+            (q) =>
+              q.kind === 'counts' &&
+              !q.answer &&
+              [identity, src].some(
+                (id) => !!id && (q.identity === id || `LIN_${q.identity}` === id),
+              ),
+          )
+        : undefined;
+    return { identity, why, ...(ask ? { gradeAskKey: ask.key } : {}) };
+  });
 }
 
 /** Bounding boxes of a line and a set of walls overlap (a sanity check that both share a frame). */
