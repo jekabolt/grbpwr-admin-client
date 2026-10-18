@@ -60,6 +60,7 @@ import { pointInPoly } from 'lib/pattern-import/pieces/geom';
 import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { leakDiag } from './leak-diag';
+import { famRender, leaks2Diag } from './leaks2-diag';
 import { gfitArchive } from './gfit-archive';
 import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import { provenDarts } from 'lib/pattern-import/pieces/darts';
@@ -754,6 +755,96 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       rec.leaksAside = (rec.leaks as { aside?: unknown }).aside;
     } catch (e) {
       rec.leaksError = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
+  // ARCHIVE_MASKPENS (LEAKS-2): the sheet's masked paths by kind and pen
+  if (process.env.ARCHIVE_MASKPENS && S?.sheet) {
+    const st = new Map(S.sheet.styles.map((x) => [x.id, x]));
+    const m: Record<string, number> = {};
+    for (const p of S.sheet.paths)
+      if (p.background) {
+        const x = st.get(p.style);
+        const k = `${p.background}/${(x?.strokeRgb ?? []).join(',')}${x?.fill ? 'f' : ''}`;
+        m[k] = (m[k] ?? 0) + 1;
+      }
+    rec.maskPens = m;
+  }
+  // ARCHIVE_MASKPENS (LEAKS-2): closed sizes of a family sharing ONE outline (the same area within
+  // 0.3 % and bbox within 1 mm as another closed size) — a size closed on another size's line
+  if (process.env.ARCHIVE_MASKPENS && S?.families) {
+    const dup: Record<number, number> = {};
+    for (const f of S.families) {
+      const cl = f.candidates.filter((c) => c.outcome === 'closed' && c.outer.length > 2);
+      let n = 0;
+      cl.forEach((c, i) => {
+        if (
+          cl.some(
+            (o, j) =>
+              j !== i &&
+              Math.abs(o.areaMm2 - c.areaMm2) <= 0.003 * Math.max(o.areaMm2, c.areaMm2) &&
+              Math.abs(o.bbox.minX - c.bbox.minX) <= 1 &&
+              Math.abs(o.bbox.maxX - c.bbox.maxX) <= 1 &&
+              Math.abs(o.bbox.minY - c.bbox.minY) <= 1 &&
+              Math.abs(o.bbox.maxY - c.bbox.maxY) <= 1,
+          )
+        )
+          n++;
+      });
+      if (n) dup[f.seed] = n;
+    }
+    rec.dupClosed = dup;
+  }
+  // ARCHIVE_FAMPNG=<dir> + ARCHIVE_FAMPNG_PICK=<json {rel: [seed…]}> (LEAKS-2): whole families for
+  // a before/after judgement by eye; ARCHIVE_FAMPNG_TAG names the side
+  if (process.env.ARCHIVE_FAMPNG && process.env.ARCHIVE_FAMPNG_PICK && S) {
+    const pick = (
+      JSON.parse(readFileSync(process.env.ARCHIVE_FAMPNG_PICK, 'utf8')) as Record<string, number[]>
+    )[rel];
+    if (pick?.length)
+      try {
+        rec.famPng = famRender(
+          rel,
+          { ...S, run: (box.s as unknown as { run: SizeRun | null }).run },
+          new Set(pick),
+          process.env.ARCHIVE_FAMPNG,
+          process.env.ARCHIVE_FAMPNG_TAG ?? 'x',
+        );
+      } catch (e) {
+        rec.famPngError = String(e).slice(0, 200);
+      }
+  }
+  // ARCHIVE_LEAKS2=<dir> (LEAKS-2): why each leaking size has no line of its own where its grade
+  // puts it (+ ARCHIVE_LEAKS2_PNG=N close-ups over the PDF page)
+  if (process.env.ARCHIVE_LEAKS2 && S) {
+    try {
+      const names = new Map((s.pieces?.seeds ?? []).map((x) => [x.id, seedLabel(x) ?? '']));
+      const n = Number(process.env.ARCHIVE_LEAKS2_PNG ?? 0);
+      rec.leaks2 = leaks2Diag(
+        rel,
+        { ...S, run: (box.s as unknown as { run: SizeRun | null }).run },
+        names,
+        n > 0
+          ? {
+              dir: process.env.ARCHIVE_LEAKS2,
+              max: n,
+              pdf: resolve(ARCHIVE_DIR, rel),
+              ...(process.env.ARCHIVE_LEAKS2_PICK
+                ? {
+                    pick: new Set<string>(
+                      (
+                        JSON.parse(readFileSync(process.env.ARCHIVE_LEAKS2_PICK, 'utf8')) as Record<
+                          string,
+                          string[]
+                        >
+                      )[rel] ?? [],
+                    ),
+                  }
+                : {}),
+            }
+          : null,
+      );
+    } catch (e) {
+      rec.leaks2Error = String((e as Error)?.stack ?? e).slice(0, 400);
     }
   }
   if (process.env.ARCHIVE_PNG && S) {
