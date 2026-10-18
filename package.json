@@ -114,6 +114,8 @@
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "lint:design": "node scripts/design-ratchet.mjs",
+    "design:sync": "node scripts/design-sync.mjs",
+    "design:check": "node scripts/design-sync.mjs --check",
     "probe:design-lint": "node scripts/design-lint-probe.mjs",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",
     "crlf": "prettier --end-of-line crlf --write .",
