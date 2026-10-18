@@ -421,7 +421,8 @@ with their feature, outside `src/ui`.
 
 `SectionHeader` owns the 2px `textColor` rule. Its `question` clause is optional.
 `HeaderNote`, `HeaderCount`, and `HeaderNext` provide quiet header metadata; `HeaderWarnings`
-keeps `! N warnings` and its doors in the header rather than the body.
+keeps `! N warnings` and its doors in the header rather than the body. A hand-drawn `!` glyph,
+`` `! ${n} blocking` `` or a red problem count fails `design/no-hand-header-warnings`.
 
 Inside a block, the rule ladder is fixed:
 
@@ -496,7 +497,9 @@ a bottom rule. `BoardEmpty` is the dashed empty/add door.
 `DataTable` owns scrolling, tabular numbers, right-aligned numeric columns, `borderColor` headers,
 and `hairline` body rows. Put `data-align="left"` on both `th` and `td` for a word column.
 `TotalRow` closes with a `textColor` rule above; `EmptyCell` renders `—`. The `grid` variant frames
-every cell and uses `bgZebra` only on the first column.
+every cell and uses `bgZebra` only on the first column. An absent value in a table cell, `Row`
+value or `Stat` value is `<EmptyCell />`; a literal `'—'`, `'-'` or `'n/a'` there fails
+`design/no-hand-empty-cell` (print documents keep their own dash).
 
 `BarRow` and `WaterfallRow` use `trackBg` with `textColor`, `success`, or `error` fills. `Stepper`
 shows a lifecycle as words and `›`, not as a percentage.

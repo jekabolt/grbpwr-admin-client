@@ -20,6 +20,7 @@ import {
   Tiles,
   Tooltip,
   TooltipProvider,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
@@ -476,7 +477,7 @@ export function MaterialPicker({
                             </Text>
                           ) : null}
                           <Text variant='label' size='micro' className='truncate'>
-                            {meta || '—'}
+                            {meta || <EmptyCell />}
                           </Text>
                         </span>
                         {current ? (

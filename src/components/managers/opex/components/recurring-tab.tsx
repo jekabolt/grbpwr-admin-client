@@ -14,7 +14,7 @@ import {
   StatGrid,
   Text,
   Toolbar,
-  ToolbarSpacer,
+  ToolbarSpacer, EmptyCell,
 } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
@@ -140,7 +140,7 @@ export function RecurringTab({
             // With the FX read denied we cannot fold non-base templates, so the total would be
             // silently short — say "—" rather than print a plausible-looking lie.
             value={
-              fxUnavailable && runRate.uncosted > 0 ? '—' : money(runRate.total, base, canRead)
+              fxUnavailable && runRate.uncosted > 0 ? <EmptyCell /> : money(runRate.total, base, canRead)
             }
             sub={
               fxUnavailable && runRate.uncosted > 0
@@ -277,7 +277,7 @@ function RecurringRow({
       <div className='flex items-start justify-between gap-2'>
         <div className='flex min-w-0 flex-col gap-1'>
           <Text component='span' className='truncate font-medium'>
-            {ins?.label || '—'}
+            {ins?.label || <EmptyCell />}
           </Text>
           <div className='flex flex-wrap items-center gap-1'>
             <Pill tone='mut'>{opexCategoryLabel(ins?.category)}</Pill>
@@ -309,7 +309,7 @@ function RecurringRow({
       </div>
 
       <Text size='micro' variant='label' component='span'>
-        {monthLabelShort(toMonth(ins?.activeFrom)) || '—'} →{' '}
+        {monthLabelShort(toMonth(ins?.activeFrom)) || <EmptyCell />} →{' '}
         {ins?.activeTo ? monthLabelShort(toMonth(ins.activeTo)) : 'open'}
       </Text>
 

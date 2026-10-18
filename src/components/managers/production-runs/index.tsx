@@ -6,7 +6,17 @@ import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, ConfirmationModal, Row, Section, Stat, StatGrid, Text, Toolbar } from 'ui';
+import {
+  Button,
+  ConfirmationModal,
+  Row,
+  Section,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+  EmptyCell,
+} from 'ui';
 import { CreateRunModal } from './components/create-run-modal';
 import { isRunLocked, isRunOpen, isRunReceivable, runDetailPath } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
@@ -292,10 +302,13 @@ export function ProductionRuns() {
           "how much is in flight" with everything ever produced. */}
       <StatGrid>
         <Stat label='in progress' value={String(totals.open)} sub={`of ${runs.length} loaded`} />
-        <Stat label='units planned' value={totals.planned > 0 ? String(totals.planned) : '—'} />
+        <Stat
+          label='units planned'
+          value={totals.planned > 0 ? String(totals.planned) : <EmptyCell />}
+        />
         <Stat
           label='received good'
-          value={totals.produced > 0 ? String(totals.received) : '—'}
+          value={totals.produced > 0 ? String(totals.received) : <EmptyCell />}
           sub={
             totals.produced > 0 && totals.planned > 0
               ? `${Math.round((totals.received / totals.planned) * 100)}% of the plan`
@@ -304,7 +317,7 @@ export function ProductionRuns() {
         />
         <Stat
           label='defect'
-          value={totals.produced > 0 ? String(totals.defect) : '—'}
+          value={totals.produced > 0 ? String(totals.defect) : <EmptyCell />}
           // Same denominator the server uses for defect_pct_actual: what came off the line, not
           // what passed.
           sub={

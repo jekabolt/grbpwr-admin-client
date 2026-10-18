@@ -160,7 +160,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
       <Section title='by provider' question='our number beside theirs'>
         {!report ? (
           <Text size='micro' variant='label'>
-            {loading ? 'loading…' : '—'}
+            {loading ? 'loading…' : <EmptyCell />}
           </Text>
         ) : byProvider.length === 0 ? (
           <Text size='micro' variant='label'>
@@ -219,7 +219,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
       <Section title='by account' question='who the calls were made for'>
         {!report ? (
           <Text size='micro' variant='label'>
-            {loading ? 'loading…' : '—'}
+            {loading ? 'loading…' : <EmptyCell />}
           </Text>
         ) : (report.byActor ?? []).length === 0 ? (
           <Text size='micro' variant='label'>

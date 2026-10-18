@@ -124,7 +124,7 @@ export function FilesStep({
         title='files'
         aside={
           <Text size='micro' variant='label' component='span'>
-            {staged.length || '—'}
+            {staged.length || <EmptyCell />}
           </Text>
         }
       >
@@ -378,7 +378,7 @@ export function FilesStep({
                               {p.why}
                             </td>
                             <td className='tabular-nums'>
-                              {masks.get(`${p.file}:${p.page}`) || '—'}
+                              {masks.get(`${p.file}:${p.page}`) || <EmptyCell />}
                             </td>
                           </tr>
                         ))}

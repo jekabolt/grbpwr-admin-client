@@ -131,7 +131,7 @@ function IssueEditor({
           />
           {opInfo && (
             <Text size='micro' variant='label' className='truncate'>
-              {opInfo.label || '—'}
+              {opInfo.label || <EmptyCell />}
             </Text>
           )}
         </div>
@@ -144,7 +144,7 @@ function IssueEditor({
           />
           {calloutInfo && (
             <Text size='micro' variant='label' className='truncate'>
-              {calloutInfo.part || '—'}
+              {calloutInfo.part || <EmptyCell />}
             </Text>
           )}
         </div>

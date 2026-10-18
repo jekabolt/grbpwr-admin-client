@@ -23,7 +23,7 @@ import {
   RowTotal,
   Section,
   SkeletonBlocks,
-  Text,
+  Text, EmptyCell,
 } from 'ui';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
 import { ShipLabelModal } from '../components/ship-label-modal';
@@ -177,7 +177,7 @@ export function FulfillmentCardDetail() {
                 <CopyToClipboard text={o?.uuid || ''} />
               </span>
               <Text size='micro' variant='label' component='span'>
-                placed {formatDateShort(o?.placed, true) || '—'}
+                placed {formatDateShort(o?.placed, true) || <EmptyCell />}
               </Text>
             </div>
           </div>

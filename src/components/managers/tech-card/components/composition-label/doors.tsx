@@ -14,7 +14,7 @@ import { CareInstructions } from 'components/managers/product/components/care/ca
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Chip, ChipRow, Input, Text, GrbpwrMark } from 'ui';
+import { Button, Chip, ChipRow, Input, Text, GrbpwrMark, EmptyCell } from 'ui';
 import { QR_PRESETS } from '../../care-labels/qr-settings';
 import { STOREFRONT_QR_TEMPLATE } from '../../care-labels/qr';
 import type { QrPreset } from '../../care-labels/use-care-label-prefs';
@@ -157,7 +157,7 @@ export function QrEditor({
   return (
     <div className='flex max-w-[560px] flex-col gap-3'>
       <Text className='break-all' data-qr-example=''>
-        {example || '—'}
+        {example || <EmptyCell />}
       </Text>
       <ChipRow>
         {QR_PRESETS.map((p) => (

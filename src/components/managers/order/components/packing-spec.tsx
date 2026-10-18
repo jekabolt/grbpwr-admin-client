@@ -3,7 +3,7 @@ import { auxSubtypeLabel } from 'components/managers/tech-card/components/labels
 import { useOrderPackingSpec } from 'components/managers/tech-card/components/useAssemblyPacking';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
-import { Button, GroupLabel, Pill, Section, Text } from 'ui';
+import { Button, GroupLabel, Pill, Section, Text, EmptyCell } from 'ui';
 
 const TH =
   'border border-borderColor bg-bgZebra px-2 py-1 text-left text-micro uppercase tracking-label';
@@ -72,7 +72,7 @@ function Resolution({
     !!code &&
     !!garmentCode &&
     code.toUpperCase() !== garmentCode.toUpperCase();
-  if (!code && !material) return <>—</>;
+  if (!code && !material) return <EmptyCell />;
   return (
     <span className='flex flex-col items-start gap-0.5'>
       {code ? (
@@ -233,9 +233,9 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                                         hexByCode={hexByCode}
                                       />
                                     </td>
-                                    <td className={TD}>{a.qty?.value ?? '—'}</td>
-                                    <td className={TD}>{a.printNote || '—'}</td>
-                                    <td className={TD}>{a.positionNote || '—'}</td>
+                                    <td className={TD}>{a.qty?.value ?? <EmptyCell />}</td>
+                                    <td className={TD}>{a.printNote || <EmptyCell />}</td>
+                                    <td className={TD}>{a.positionNote || <EmptyCell />}</td>
                                   </tr>
                                 );
                               })}

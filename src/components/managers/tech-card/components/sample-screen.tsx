@@ -41,6 +41,7 @@ import {
   Text,
   Tile,
   Tiles,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { colorwayLabel } from './design/colorway-picker';
@@ -51,7 +52,6 @@ import { SAMPLE_STAGING_PREFIX, samplePurposeLabel, sampleStatusLabel } from './
 import {
   fittingsNewestFirst,
   lineMaterialId,
-  openChangeRequests,
   SampleReturns,
   specQuantity,
   stockOnHand,
@@ -487,7 +487,7 @@ export function SampleScreen({
             className='font-bold'
             title={titleTip || undefined}
           >
-            #{sample.number ?? '?'} · round {sample.sample?.roundNumber || '—'}
+            #{sample.number ?? '?'} · round {sample.sample?.roundNumber || <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-baseline gap-2.5'>
             {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
@@ -680,10 +680,18 @@ function FittingsBlock({
 }) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
-  const open = openChangeRequests(fittings);
-  const firstOpen = fittings.find((f) =>
-    (f.fitting?.changeRequests ?? []).some((c) => !c.resolved),
-  );
+  // Каждая примерка с открытыми правками — пункт двери `! N` в шапке; клик ведёт в примерку.
+  const openRequests: HeaderWarning[] = fittings.flatMap((f) => {
+    const n = (f.fitting?.changeRequests ?? []).filter((c) => !c.resolved).length;
+    if (n === 0) return [];
+    return [
+      {
+        text: `${ddmm(f.fitting?.fittingDate) || `fitting ${f.id}`} · ${n} open ${n === 1 ? 'request' : 'requests'}`,
+        error: true,
+        action: { label: 'open the fitting', onClick: () => navigate(`/fittings/${f.id}`) },
+      },
+    ];
+  });
   const addHref = `${ROUTES.addFitting}?techCardId=${techCardId}&sampleId=${sampleId}&returnTo=${encodeURIComponent(
     pathname + search,
   )}`;
@@ -694,15 +702,7 @@ function FittingsBlock({
       action={
         <>
           <HeaderNote>{fittings.length}</HeaderNote>
-          {open > 0 && firstOpen && (
-            <button
-              type='button'
-              onClick={() => navigate(`/fittings/${firstOpen.id}`)}
-              className={cn(HEADER_TEXT, 'text-error underline')}
-            >
-              {open} open {open === 1 ? 'request' : 'requests'}
-            </button>
-          )}
+          <HeaderWarnings items={openRequests} />
         </>
       }
     >

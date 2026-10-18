@@ -14,7 +14,7 @@ import {
   Section,
   SectionStack,
   Select,
-  Text,
+  Text, EmptyCell,
 } from 'ui';
 import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
@@ -604,7 +604,7 @@ export function TaskDetail() {
                     label={<FactLabel>planned start</FactLabel>}
                     value={
                       <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
-                        {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
+                        {t.startDate ? format(new Date(t.startDate), 'PP') : <EmptyCell />}
                       </Text>
                     }
                   />
@@ -612,7 +612,7 @@ export function TaskDetail() {
                     label={<FactLabel>due</FactLabel>}
                     value={
                       <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
-                        {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
+                        {t.dueDate ? format(new Date(t.dueDate), 'PP') : <EmptyCell />}
                       </Text>
                     }
                   />
@@ -633,7 +633,7 @@ export function TaskDetail() {
                   value={
                     <Text size='micro' variant='label' component='span'>
                       {task.createdBy ? `${task.createdBy} · ` : ''}
-                      {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
+                      {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
                     </Text>
                   }
                 />

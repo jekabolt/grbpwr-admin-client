@@ -402,7 +402,7 @@ export function DevExpensesField({
                   </td>
                 )}
                 <td>
-                  {decimalToInput(e.amount) || '—'} {e.currency}
+                  {decimalToInput(e.amount) || <EmptyCell />} {e.currency}
                 </td>
                 <td>
                   {e.amountBase?.value ? (
@@ -434,13 +434,17 @@ export function DevExpensesField({
               {!scoped && <td />}
               <td />
               <td>
-                {scoped
-                  ? scopedTotal > 0
-                    ? scopedTotal.toFixed(2)
-                    : '—'
-                  : totalBaseNum > 0
-                    ? totalBaseNum.toFixed(2)
-                    : '—'}
+                {scoped ? (
+                  scopedTotal > 0 ? (
+                    scopedTotal.toFixed(2)
+                  ) : (
+                    <EmptyCell />
+                  )
+                ) : totalBaseNum > 0 ? (
+                  totalBaseNum.toFixed(2)
+                ) : (
+                  <EmptyCell />
+                )}
               </td>
               {canWriteCosting && <td />}
             </TotalRow>
@@ -556,11 +560,11 @@ export function DevExpensesField({
                 <div className='mt-2 flex flex-col'>
                   <Row
                     label='at the actual sales margin'
-                    value={unitMargin > 0 ? unitMargin.toFixed(2) : '—'}
+                    value={unitMargin > 0 ? unitMargin.toFixed(2) : <EmptyCell />}
                   />
                   <Row
                     label={plannedUnits > 0 ? `per garment at ${plannedUnits} pcs` : 'per garment'}
-                    value={perUnit != null ? perUnit.toFixed(2) : '—'}
+                    value={perUnit != null ? perUnit.toFixed(2) : <EmptyCell />}
                     tone={plannedUnits > 0 ? undefined : 'label'}
                   />
                 </div>
@@ -673,16 +677,18 @@ export function DevExpensesField({
         width='sm'
         hideCancel
       >
-        <Row label='kind' value={kindLabel(pendingDelete?.kind) || '—'} />
+        <Row label='kind' value={kindLabel(pendingDelete?.kind) || <EmptyCell />} />
         {pendingDelete?.description && (
           <Row label='description' value={pendingDelete.description} />
         )}
         <Row
           label='amount'
           value={
-            pendingDelete
-              ? `${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency ?? ''}`
-              : '—'
+            pendingDelete ? (
+              `${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency ?? ''}`
+            ) : (
+              <EmptyCell />
+            )
           }
         />
       </ConfirmationModal>

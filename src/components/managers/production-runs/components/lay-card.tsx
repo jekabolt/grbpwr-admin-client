@@ -6,7 +6,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Fragment } from 'react';
-import { Button, GroupLabel, Pill, Row, Text } from 'ui';
+import { Button, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
 import {
   ClothReport,
   FROZEN_FACT_NOTE,
@@ -190,7 +190,7 @@ export function LayCard({
               value={
                 <span className='inline-flex items-center gap-2'>
                   <span className='tabular-nums'>
-                    {s.plies ?? 0} plies · {cmValue(s.sectionLengthCm) ?? '—'} cm
+                    {s.plies ?? 0} plies · {cmValue(s.sectionLengthCm) ?? <EmptyCell />} cm
                   </span>
                   {onPlotter && (s.markerId ?? 0) > 0 && (
                     <Button

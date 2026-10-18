@@ -154,7 +154,7 @@ export function CutList({
                     объясняет, как связаны между собой эти n панелей, и только. */}
                 <td>
                   <Text size='stat' component='p'>
-                    {r.pieces_per_garment ?? '—'}
+                    {r.pieces_per_garment ?? <EmptyCell />}
                   </Text>
                   {badge ? (
                     <div className='mt-0.5'>

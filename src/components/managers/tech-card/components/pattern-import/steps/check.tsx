@@ -35,6 +35,7 @@ import {
   Pill,
   Row,
   Text,
+  EmptyCell,
 } from 'ui';
 import { cn } from 'lib/utility';
 import { PieceSheet } from '../../nesting/piece-sheet';
@@ -268,8 +269,8 @@ export function CheckStep({
                 <Pill tone='attention'>warning</Pill>
               )}
             </td>
-            <td>{c.value ?? '—'}</td>
-            <td className='text-labelColor'>{c.threshold ?? '—'}</td>
+            <td>{c.value ?? <EmptyCell />}</td>
+            <td className='text-labelColor'>{c.threshold ?? <EmptyCell />}</td>
           </>
         )}
       </tr>
@@ -871,7 +872,7 @@ function ScopeSummary({ scope }: { scope: DraftScope }) {
       <DebugFold className='mt-1'>
         <Row label='fabric scope' value={scope.target.label} />
         <Row label='blocks' value={blockSum(m.blocks)} />
-        <Row label='pairs as _L + _R' value={pairs || '—'} />
+        <Row label='pairs as _L + _R' value={pairs || <EmptyCell />} />
         <Row
           label='layers'
           value='1 cut (final) · 14 seam · 7 grain · 4 notch · 8 internal'

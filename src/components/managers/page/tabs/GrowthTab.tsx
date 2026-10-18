@@ -1,7 +1,7 @@
 import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC, ReactNode } from 'react';
-import { Section, SectionStack, Stat, StatGrid, Text } from 'ui';
+import { Section, SectionStack, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import {
   CampaignAttributionTable,
   ChannelRoasTable,
@@ -233,7 +233,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
           <StatGrid min={130}>
             <Stat
               label='Blended MER'
-              value={mer != null ? `${mer.toFixed(1)}×` : '—'}
+              value={mer != null ? `${mer.toFixed(1)}×` : <EmptyCell />}
               sub='revenue / ad spend'
               tone={mer != null && mer >= BREAK_EVEN_ROAS ? 'up' : 'default'}
             />

@@ -56,6 +56,7 @@ import {
   type HeaderWarning,
   HeaderNote,
   Text,
+  EmptyCell,
 } from 'ui';
 import { useSearchParams } from 'react-router-dom';
 import { revealField } from 'utils/field-errors';
@@ -1749,7 +1750,7 @@ function SkeletonLine({
         data-skeleton-check={index}
       />
       <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
-        {pick.applied ? '✓' : number ?? '—'}
+        {pick.applied ? '✓' : number ?? <EmptyCell />}
       </Text>
 
       <span className='flex shrink-0 items-center gap-1'>

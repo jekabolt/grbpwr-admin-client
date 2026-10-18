@@ -33,6 +33,7 @@ import {
   Input,
   Pill,
   Text,
+  EmptyCell,
 } from 'ui';
 import type { CardContext } from '../client';
 import {
@@ -1798,7 +1799,7 @@ export function DetailsStep({
               </td>
               <td>
                 {!specs.length ? (
-                  '—'
+                  <EmptyCell />
                 ) : (
                   // A pair counts PER HAND (PieceSpec): 2 = two _L and two _R per garment.
                   // D3: a count no sheet text gives is marked until confirmed or edited.
@@ -2034,7 +2035,7 @@ export function DetailsStep({
                       `fabrics proposed: ${nameOf(sel)?.suggestion?.fabrics.length ?? '—'}`,
                     ].join(' · ')}
                   >
-                    piece {mark(sel)} · {nameOf(sel)?.displayName || '—'}
+                    piece {mark(sel)} · {nameOf(sel)?.displayName || <EmptyCell />}
                   </span>
                 ) : (
                   'piece'

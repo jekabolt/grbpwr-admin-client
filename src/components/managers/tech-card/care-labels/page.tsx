@@ -19,6 +19,7 @@ import {
   Chip,
   ChipRow,
   GroupLabel,
+  HeaderWarnings,
   Pill,
   Section,
   Text,
@@ -332,11 +333,12 @@ export function TechCardCareLabels() {
           )}
         </div>
         <div className='ml-auto flex items-center gap-3'>
-          {blocking.length > 0 && (
-            <Text variant='errorLabel' size='small'>
-              {blocking.length} blocking {blocking.length === 1 ? 'hole' : 'holes'}
-            </Text>
-          )}
+          <HeaderWarnings
+            items={blocking.map((h) => ({
+              text: [holeAddress(h, colorways), h.message].filter(Boolean).join(' — '),
+              error: true,
+            }))}
+          />
           <Button
             variant='main'
             size='lg'

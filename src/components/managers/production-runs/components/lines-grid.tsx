@@ -6,7 +6,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { Button, Text, EmptyCell } from 'ui';
 import { ulid } from 'utils/ulid';
 import { runDate } from './options';
 import { updateRunErrorMessage, useProductionRuns, useUpdateRunSection } from './useProductionRuns';
@@ -434,7 +434,7 @@ export function LinesGrid({
                           onChange={(e) => setCell(r.productId, s, e.target.value)}
                         />
                       ) : (
-                        qty[key(r.productId, s)] || '—'
+                        qty[key(r.productId, s)] || <EmptyCell />
                       )}
                     </td>
                   ))}

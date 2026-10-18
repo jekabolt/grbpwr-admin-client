@@ -5,7 +5,7 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useForm } from 'react-hook-form';
-import { Button, CheckboxCommon, ConfirmationModal, Section, Text } from 'ui';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell } from 'ui';
 import { PromoCreateRow } from './promo-create-row';
 import { PromoEditRow } from './promo-edit-row';
 import { emptyPromoDraft, promoDraftSchema, type PromoDraftSchema } from './schema';
@@ -232,7 +232,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                         'px-0': col.label === 'Delete' || col.label === 'Edit',
                       })}
                     >
-                      <Text>{col.accessor(p) ?? '-'}</Text>
+                      <Text>{col.accessor(p) ?? <EmptyCell />}</Text>
                     </td>
                   ))}
                 </tr>

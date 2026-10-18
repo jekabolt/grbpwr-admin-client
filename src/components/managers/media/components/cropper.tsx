@@ -9,7 +9,16 @@ import { cn } from 'lib/utility';
 import { FC, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactCrop, { PercentCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Button, CalloutBox, RatioGlyph, Row, SideRailGroup, SideRailItem, Text } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  RatioGlyph,
+  Row,
+  SideRailGroup,
+  SideRailItem,
+  Text,
+  EmptyCell,
+} from 'ui';
 import './cropper.css';
 
 // Ratios are compared with a small tolerance rather than strict equality: ASPECT_RATIOS rounds
@@ -681,7 +690,7 @@ export const MediaCropper: FC<CropperInterface> = ({
             </Button>
           )}
           <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {rect ? `${rect.width}×${rect.height}` : '—'}
+            {rect ? `${rect.width}×${rect.height}` : <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-center gap-2'>
             {blockedReason && (

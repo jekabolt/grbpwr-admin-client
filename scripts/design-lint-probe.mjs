@@ -242,4 +242,65 @@ tester.run('design/no-hand-add-door', design.rules['no-hand-add-door'], {
   ],
 });
 
-console.log('design lint probe: all 10 rules passed');
+tester.run('design/no-hand-empty-cell', design.rules['no-hand-empty-cell'], {
+  valid: [
+    { filename, code: "import { EmptyCell } from 'ui'; const v = <td>{x ?? <EmptyCell />}</td>;" },
+    // string contexts and punctuation stay plain
+    {
+      filename,
+      code: "const t = `${a ?? '—'} cm`; const v = <span title={x ?? '—'}>{a} — {b}</span>;",
+    },
+    {
+      filename,
+      code: "const v = <>{neg ? '-' : ''}{i > 0 ? ' — ' : null}<option>{x || '—'}</option></>;",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "import { Text } from 'ui';\nconst v = <td>{x ?? '—'}</td>;",
+      output: "import { Text, EmptyCell } from 'ui';\nconst v = <td>{x ?? <EmptyCell />}</td>;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "import { Row } from 'ui';\nconst v = <Row label='a' value={ok ? n : 'n/a'} />;",
+      output:
+        "import { Row, EmptyCell } from 'ui';\nconst v = <Row label='a' value={ok ? n : <EmptyCell />} />;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "const v = <span className='text-labelColor'>—</span>;",
+      errors: 1,
+    },
+  ],
+});
+
+tester.run('design/no-hand-header-warnings', design.rules['no-hand-header-warnings'], {
+  valid: [
+    { filename, code: 'const v = <HeaderWarnings items={warnings} />;' },
+    { filename, code: "const v = <button className='text-error'>!</button>;" },
+    { filename, code: "const v = <Text className='text-error'>{n} failed</Text>;" },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const v = <span className={cn(HEADER_TEXT, 'x')}><span className='text-warning'>!</span> {n} waiting</span>;",
+      errors: 1,
+    },
+    { filename, code: 'const label = `! ${n} blocking`;', errors: 1 },
+    {
+      filename,
+      code: "const v = <Text variant='errorLabel'>{n} blocking holes</Text>;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "const v = <button className={cn(HEADER_TEXT, 'text-error underline')}>{n} open</button>;",
+      errors: 2,
+    },
+  ],
+});
+
+console.log(`design lint probe: all ${Object.keys(design.rules).length} rules passed`);

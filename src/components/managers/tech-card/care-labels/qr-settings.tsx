@@ -4,7 +4,7 @@
 // только показ: пресет, шаблон, ЖИВОЙ пример ссылки для выбранного в превью варианта, версия QR, мм
 // на модуль и мини-QR — всё из того же `qr.ts`, что рисует изнанку A, — и дверь «edit on the card».
 import { Link } from 'react-router-dom';
-import { Pill, Text } from 'ui';
+import { Pill, Text, EmptyCell } from 'ui';
 import {
   QR_SIZE_MM,
   QR_QUIET_MODULES,
@@ -83,7 +83,7 @@ export function QrSettings({
         </Link>
       </div>
       <Text size='micro' variant='label' className='break-all' data-care-qr-template=''>
-        {template || '—'}
+        {template || <EmptyCell />}
       </Text>
       <div className='flex items-start gap-3'>
         {link && holes.every((h) => h.level !== 'block') ? <MiniQr link={link} /> : null}
@@ -92,7 +92,7 @@ export function QrSettings({
             {example ? `example · ${example.label}` : 'example · pick a colourway'}
           </Text>
           <Text size='micro' className='break-all' data-care-qr-link=''>
-            {link || '—'}
+            {link || <EmptyCell />}
           </Text>
           {r && r.version > 0 && (
             <Text size='micro' variant='label' data-care-qr-readout=''>

@@ -25,6 +25,7 @@ import {
   type HeaderWarningAction,
   GenericPopover,
   Progress,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -3516,7 +3517,7 @@ export function NestingModal({
         <>
           <FactLabel error={piecesError}>pieces</FactLabel>
           <span className={piecesError ? 'text-error' : undefined}>
-            {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : '—'}
+            {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : <EmptyCell />}
             <span aria-hidden className='text-labelColor'>
               {isOpen ? ' ▴' : ' ▾'}
             </span>
@@ -3745,11 +3746,13 @@ export function NestingModal({
             ) : (
               <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
                 <Text size='micro' variant='label'>
-                  {running
-                    ? 'computing…'
-                    : fitting
-                      ? `fitting to the table… attempt ${fitting.attempt}`
-                      : '—'}
+                  {running ? (
+                    'computing…'
+                  ) : fitting ? (
+                    `fitting to the table… attempt ${fitting.attempt}`
+                  ) : (
+                    <EmptyCell />
+                  )}
                 </Text>
               </div>
             )}
@@ -4003,11 +4006,13 @@ export function NestingModal({
               ? compositionLabel(composition, (id) => sizeNameOfId(id))
               : sizeLabel || 'one size'}{' '}
             · {unitsTotal} garments · per unit:{' '}
-            {mixed
-              ? '—'
-              : effective
-                ? `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} cm`
-                : '—'}
+            {mixed ? (
+              <EmptyCell />
+            ) : effective ? (
+              `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} cm`
+            ) : (
+              <EmptyCell />
+            )}
           </Text>
         </div>
       </ConfirmationModal>

@@ -17,7 +17,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
 import {
   cardMarkers,
   compositionLabel,
@@ -528,12 +528,14 @@ export function MarkersSection({
               {refusalWord(m)}
             </span>
           ) : (
-            '—'
+            <EmptyCell />
           )}
         </span>
-        <span className='text-right text-labelColor'>{width ? `${width} cm` : '—'}</span>
-        <span className='text-right text-labelColor'>{length ? `${length} cm` : '—'}</span>
-        <span className='text-right text-labelColor'>{eff ? `${eff} %` : '—'}</span>
+        <span className='text-right text-labelColor'>{width ? `${width} cm` : <EmptyCell />}</span>
+        <span className='text-right text-labelColor'>
+          {length ? `${length} cm` : <EmptyCell />}
+        </span>
+        <span className='text-right text-labelColor'>{eff ? `${eff} %` : <EmptyCell />}</span>
         <span className='inline-flex items-baseline justify-end gap-2'>
           {m.isNorm && (
             <Pill

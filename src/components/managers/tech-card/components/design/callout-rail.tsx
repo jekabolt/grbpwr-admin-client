@@ -11,7 +11,7 @@ import {
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { AnnotationStyleRow } from 'components/managers/tech-card/annotation/style-row';
 import { rememberPen, type NoteArrows } from 'components/managers/tech-card/annotation/surface';
-import { Button, Input, Pill, Text, Textarea } from 'ui';
+import { Button, Input, Pill, Text, Textarea, EmptyCell } from 'ui';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
 import { CalloutPurposeFields } from './callout-purpose-fields';
@@ -302,7 +302,7 @@ export function CalloutRail({
             <div className='flex items-center gap-2'>
               {numbered && (
                 <Text size='nano' variant='uppercase' component='span' className='w-5 shrink-0'>
-                  {c.number || '—'}
+                  {c.number || <EmptyCell />}
                 </Text>
               )}
               <KindGlyph kind={c.kind ?? 'pin'} spec={c.spec} />

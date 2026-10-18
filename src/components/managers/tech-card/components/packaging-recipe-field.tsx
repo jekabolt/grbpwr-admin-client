@@ -1,7 +1,7 @@
 import { PackagingRecipeItem, PackagingRecipeLine } from 'api/proto-http/admin';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CalloutBox, Input, Placeholder, Pill, Text } from 'ui';
+import { Button, CalloutBox, Input, Placeholder, Pill, Text, EmptyCell } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -143,7 +143,7 @@ function PackagingRow({
               }
             />
           ) : (
-            <Text size='control'>{row.qtyPerOrder || '—'}</Text>
+            <Text size='control'>{row.qtyPerOrder || <EmptyCell />}</Text>
           )}
         </Field>
         <Field label={`/ item${unit}`}>
@@ -158,7 +158,7 @@ function PackagingRow({
               }
             />
           ) : (
-            <Text size='control'>{row.qtyPerItem || '—'}</Text>
+            <Text size='control'>{row.qtyPerItem || <EmptyCell />}</Text>
           )}
         </Field>
       </div>

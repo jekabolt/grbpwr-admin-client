@@ -23,6 +23,7 @@ import {
   Select,
   Text,
   FoldCaret,
+  EmptyCell,
 } from 'ui';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
@@ -2665,7 +2666,7 @@ function WrittenRow({
           className='ml-2'
           data-c19-fill-before={fill.id}
         >
-          was: {fill.before || '—'}
+          was: {fill.before || <EmptyCell />}
         </Text>
       </Text>
       {receipt && (

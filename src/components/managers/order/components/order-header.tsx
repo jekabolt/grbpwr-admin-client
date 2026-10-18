@@ -13,6 +13,7 @@ import {
   Text,
   Toolbar,
   ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 
 // Refunding is only meaningful once money has been taken and before the order is fully
@@ -84,7 +85,7 @@ export function OrderHeader({
         <BackLink to={ROUTES.orders}>orders</BackLink>
         <div className='min-w-0'>
           <Text variant='uppercase' tracking='label' className='font-bold'>
-            order #{order?.id ?? '—'}
+            order #{order?.id ?? <EmptyCell />}
           </Text>
           {identity && (
             <Text size='micro' variant='label' className='truncate'>

@@ -10,6 +10,7 @@ import {
   useMediaStageGestures,
   ZoomDrawToolbar,
 } from './media-viewer-zoom';
+import { EmptyCell } from 'ui';
 
 // One normalized shape the viewer understands. Every call site maps its own data
 // (proto MediaFull, a bare url, a { thumbnail, fullSize } row) down to this.
@@ -700,7 +701,7 @@ function MetaPanel({
                 {r.label}
               </span>
               <span className='tabular-nums'>
-                {r.width && r.height ? `${r.width}×${r.height}` : '—'}
+                {r.width && r.height ? `${r.width}×${r.height}` : <EmptyCell />}
               </span>
               <ViewerAction
                 onClick={() => copy(r.url)}
@@ -758,7 +759,7 @@ function MetaPanel({
                 )}
                 <div className='flex items-baseline gap-2 text-bgColor/70'>
                   <span className='uppercase tracking-label'>{u.kind?.replace(/_/g, ' ')}</span>
-                  <span className='ml-auto truncate'>{u.slot || '—'}</span>
+                  <span className='ml-auto truncate'>{u.slot || <EmptyCell />}</span>
                 </div>
               </div>
             ))

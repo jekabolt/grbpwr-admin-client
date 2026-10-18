@@ -8,7 +8,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { AddDoor, Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
+import { AddDoor, Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
@@ -408,7 +408,7 @@ export function OutputVariantsPanel({
             label={
               <span className='flex min-w-0 items-center gap-2'>
                 <Swatch hex={hexByCode.get(v.colorCode ?? '')} title={v.colorName ?? undefined} />
-                <span className='uppercase'>{v.colorCode || '—'}</span>
+                <span className='uppercase'>{v.colorCode || <EmptyCell />}</span>
                 <Text size='micro' variant='label' component='span' className='truncate'>
                   {v.colorName || ''}
                   {v.materialName ? ` · ${v.materialName}` : ''}
@@ -419,7 +419,7 @@ export function OutputVariantsPanel({
             value={
               <span className='flex items-center gap-2'>
                 <span>
-                  {onHand || '—'}
+                  {onHand || <EmptyCell />}
                   {v.unit ? ` ${v.unit}` : ''}
                 </span>
                 {canEdit && (
@@ -481,9 +481,9 @@ export function OutputVariantsPanel({
           closeOnConfirm={false}
           onConfirm={confirmDelete}
         >
-          <Row label='colour' value={pendingDelete.colorCode || '—'} />
-          <Row label='bucket' value={pendingDelete.materialName || '—'} />
-          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || '—'} />
+          <Row label='colour' value={pendingDelete.colorCode || <EmptyCell />} />
+          <Row label='bucket' value={pendingDelete.materialName || <EmptyCell />} />
+          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || <EmptyCell />} />
           {variants.length === 1 && (
             <Row label='last colour' value='card goes back to one output' />
           )}

@@ -35,6 +35,7 @@ import {
   Tiles,
   DecimalField,
   FoldCaret,
+  EmptyCell,
 } from 'ui';
 import CurrencySelect from 'components/shared/currency-select';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
@@ -1290,7 +1291,7 @@ export function CostingField({
             />
             <Stat
               label={netted ? `− VAT ${vatRate.toFixed(0)}% ${vatCountry}` : '− VAT'}
-              value={netted ? (netRetail ?? 0).toFixed(2) : '—'}
+              value={netted ? (netRetail ?? 0).toFixed(2) : <EmptyCell />}
               sub={netted ? 'net, the margin base' : `no rate for ${vatCountry || 'the country'}`}
             />
             <Stat
@@ -1323,7 +1324,11 @@ export function CostingField({
               // читают не всегда, а число — всегда. Без знака ячейка утверждала точные «42.00» ровно
               // там, где вердикт двумя блоками выше говорит «не выше».
               value={
-                grossMargin != null ? `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}` : '—'
+                grossMargin != null ? (
+                  `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}`
+                ) : (
+                  <EmptyCell />
+                )
               }
               // `certifiable`, not just `hasTarget`: a green «up» on a margin the verdict has already
               // called uncomputable is the contradiction this gate exists to prevent.
@@ -1354,7 +1359,7 @@ export function CostingField({
             <Stat
               label='cost'
               big
-              value={hasCosting && showMoney ? money(unitCost) : '—'}
+              value={hasCosting && showMoney ? money(unitCost) : <EmptyCell />}
               sub={
                 !showMoney
                   ? `will be recomputed in ${cur} on save`
@@ -1638,7 +1643,7 @@ export function CostingField({
                       size='stat'
                       className={broken || !showMoney ? 'text-labelColor' : undefined}
                     >
-                      {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : '—'}
+                      {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : <EmptyCell />}
                     </Text>
                     <Text size='micro' variant='label'>
                       {!showMoney
@@ -1736,7 +1741,7 @@ export function CostingField({
                   <Row
                     key={i}
                     label={`materials · ${line.currency || 'no currency'}`}
-                    value={decimalToInput(line.amount) || '—'}
+                    value={decimalToInput(line.amount) || <EmptyCell />}
                   />
                 ))}
               </div>

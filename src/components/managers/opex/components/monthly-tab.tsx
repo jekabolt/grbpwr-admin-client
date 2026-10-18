@@ -13,7 +13,7 @@ import {
   SkeletonLine,
   Text,
   Toolbar,
-  ToolbarSpacer,
+  ToolbarSpacer, EmptyCell,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
@@ -193,7 +193,7 @@ export function MonthlyContent({
                   className='ml-auto'
                   onClick={() => setEditing(firstUncosted)}
                 >
-                  fix “{firstUncosted.label || '—'}”
+                  fix “{firstUncosted.label || <EmptyCell />}”
                 </Button>
               )}
             </CalloutBox>
@@ -370,7 +370,7 @@ function LineRow({
             </Pill>
           )}
           <Text component='span' className='truncate font-medium'>
-            {line.label || '—'}
+            {line.label || <EmptyCell />}
           </Text>
           {hasVat && (
             <Pill tone='ink' title='carries recoverable VAT / document data'>
@@ -537,7 +537,7 @@ function CopyPreviousModal({
                     {opexCategoryLabel(l.category)}
                   </Text>
                   <Text component='span' className='truncate'>
-                    {l.label || '—'}
+                    {l.label || <EmptyCell />}
                   </Text>
                 </span>
                 {clash ? (

@@ -12,7 +12,7 @@ import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, ConfirmationModal, GroupLabel, Pill, Text } from 'ui';
+import { Button, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell } from 'ui';
 import {
   decimalToInput,
   inputToDecimal,
@@ -1212,7 +1212,7 @@ export function MaterialModal({
               <div className='flex flex-wrap gap-1'>
                 {compFilled.map((r, i) => (
                   <Pill key={i} tone='ink'>
-                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
+                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : <EmptyCell />}
                   </Pill>
                 ))}
               </div>

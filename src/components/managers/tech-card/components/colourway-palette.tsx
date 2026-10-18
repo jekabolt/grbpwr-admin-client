@@ -1,7 +1,7 @@
 import type { common_Color, common_ColorwayColour, common_Language } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
-import { AddDoor, Input, Text, FoldCaret } from 'ui';
+import { AddDoor, Input, Text, FoldCaret, EmptyCell } from 'ui';
 
 import {
   blankRow,
@@ -147,7 +147,7 @@ export function SkuToken({
   return (
     <span className={cn('flex min-w-0 flex-col gap-0.5', className)} {...rest}>
       <Text component='span' className='tabular-nums uppercase' data-cw-token=''>
-        {t || '—'}
+        {t || <EmptyCell />}
       </Text>
       <Text size='micro' variant='label' component='span'>
         {TOKEN_CAPTION}
@@ -245,7 +245,7 @@ export function ColourwayPaletteEditor({
           <div className='flex flex-col gap-0.5'>
             <Label>name</Label>
             <Text component='span' className='uppercase' data-cw-name-read=''>
-              {value.name || '—'}
+              {value.name || <EmptyCell />}
             </Text>
           </div>
         )}
@@ -285,7 +285,7 @@ export function ColourwayPaletteEditor({
           <span className='flex items-center gap-2'>
             {!!picked?.hex && <Swatch hex={picked.hex} title={picked.code} />}
             <Text component='span' className='uppercase' data-cw-family-read=''>
-              {familyWords(value.colorCode, colours) || '—'}
+              {familyWords(value.colorCode, colours) || <EmptyCell />}
             </Text>
           </span>
         </div>

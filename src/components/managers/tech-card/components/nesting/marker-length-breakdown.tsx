@@ -65,17 +65,17 @@ export function MarkerLengthFormula({
     <StatGrid min={150}>
       <Stat
         label='lay length'
-        value={lengthCm > 0 ? fmtNum(lengthCm) : '—'}
+        value={lengthCm > 0 ? fmtNum(lengthCm) : <EmptyCell />}
         sub={widthCm > 0 ? `cm · cutting width ${fmtNum(widthCm)} cm` : 'cm'}
       />
       <Stat
         label='÷ garments in the lay'
-        value={units > 0 ? units : '—'}
+        value={units > 0 ? units : <EmptyCell />}
         sub={unitsLabel || 'composition unreadable'}
       />
       <Stat
         label='= per-unit consumption'
-        value={perGarment != null ? perGarment : '—'}
+        value={perGarment != null ? perGarment : <EmptyCell />}
         sub={unit ? `${unit} · waste already inside` : 'slot unit not set'}
       />
     </StatGrid>

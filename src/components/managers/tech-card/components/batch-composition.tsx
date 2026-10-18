@@ -22,7 +22,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, GroupLabel, Text } from 'ui';
+import { Button, GroupLabel, Text, EmptyCell } from 'ui';
 import { ulid } from 'utils/ulid';
 
 // СОСТАВ ПАРТИИ ПРЯМО В КОСТИНГЕ — колорвей × размер × количество, без ухода с вкладки.
@@ -304,7 +304,7 @@ export function BatchComposition({
                           onChange={(e) => setCell(r.id, s, e.target.value)}
                         />
                       ) : (
-                        qty[runGridKey(r.id, s)] || '—'
+                        qty[runGridKey(r.id, s)] || <EmptyCell />
                       )}
                     </td>
                   ))}

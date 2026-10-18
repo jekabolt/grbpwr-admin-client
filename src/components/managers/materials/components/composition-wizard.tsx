@@ -4,7 +4,7 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Text, EmptyCell } from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 
 // #37: one structured fibre share — a dictionary fibre code + a percent (edited as a plain string,
@@ -365,7 +365,7 @@ export function CompositionWizard({
                         <Text size='small' variant='inactive' className='min-w-0 truncate'>
                           {fiberLabel(r.fiberCode)}
                         </Text>
-                        <Text size='small'>{r.percent ? `${r.percent}%` : '—'}</Text>
+                        <Text size='small'>{r.percent ? `${r.percent}%` : <EmptyCell />}</Text>
                       </div>
                     ))}
                     <div className='flex items-center justify-between gap-3 px-3 py-1.5'>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
-import { Button, Input, Text, Toolbar, ToolbarSpacer } from 'ui';
+import { Button, Input, Text, Toolbar, ToolbarSpacer, EmptyCell } from 'ui';
 import { useLibraryFile } from '../hooks/useFiles';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { extensionOf } from '../utils/format';
@@ -300,7 +300,7 @@ function PdfStage({
       <Toolbar sticky>
         <b className='max-w-[34ch] truncate'>{name}</b>
         <Text size='micro' variant='label' className='tabular-nums'>
-          p. {page} of {numPages || '—'}
+          p. {page} of {numPages || <EmptyCell />}
         </Text>
         <Button
           size='xs'

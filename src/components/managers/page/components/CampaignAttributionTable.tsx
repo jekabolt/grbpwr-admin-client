@@ -1,6 +1,6 @@
 import type { CampaignAttributionRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel, Text } from 'ui';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface CampaignAttributionTableProps {
@@ -115,14 +115,14 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
               return (
                 <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                   <td className='p-2'>
-                    <Text>{row.utmSource || '-'}</Text>
+                    <Text>{row.utmSource || <EmptyCell />}</Text>
                   </td>
                   <td className='p-2'>
-                    <Text>{row.utmMedium || '-'}</Text>
+                    <Text>{row.utmMedium || <EmptyCell />}</Text>
                   </td>
                   <td className='p-2'>
                     <Text className='truncate max-w-[100px]' title={row.utmCampaign || ''}>
-                      {row.utmCampaign || '-'}
+                      {row.utmCampaign || <EmptyCell />}
                     </Text>
                   </td>
                   <td className='p-2 text-right'>
@@ -133,7 +133,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
                   </td>
                   <td className='p-2 text-right'>
                     <Text className='text-labelColor'>
-                      {row.spend > 0 ? formatCurrency(row.spend) : '—'}
+                      {row.spend > 0 ? formatCurrency(row.spend) : <EmptyCell />}
                     </Text>
                   </td>
                   <td className='p-2 text-right'>
@@ -144,14 +144,16 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
                         {roas.toFixed(2)}×
                       </Text>
                     ) : (
-                      <Text className='text-labelColor'>—</Text>
+                      <EmptyCell />
                     )}
                   </td>
                   <td className='p-2 text-right'>
                     <Text className='text-labelColor'>
-                      {row.sessions >= MIN_SESSIONS_FOR_RATE
-                        ? `${conversionRate.toFixed(1)}%`
-                        : '—'}
+                      {row.sessions >= MIN_SESSIONS_FOR_RATE ? (
+                        `${conversionRate.toFixed(1)}%`
+                      ) : (
+                        <EmptyCell />
+                      )}
                     </Text>
                   </td>
                 </tr>

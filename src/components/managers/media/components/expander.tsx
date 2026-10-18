@@ -1,7 +1,7 @@
 import { ASPECT_RATIOS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button, CalloutBox, Input, RatioGlyph, Row, SideRailGroup, SideRailItem, Text } from 'ui';
+import { Button, CalloutBox, Input, RatioGlyph, Row, SideRailGroup, SideRailItem, Text, EmptyCell } from 'ui';
 
 import {
   DEFAULT_BACKGROUND,
@@ -595,7 +595,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
 
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {pixels ? `${outW}×${outH}` : '—'}
+            {pixels ? `${outW}×${outH}` : <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-center gap-2'>
             {blockedReason && (

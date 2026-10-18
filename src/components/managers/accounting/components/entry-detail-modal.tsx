@@ -2,7 +2,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { ROUTES } from 'constants/routes';
 import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Loader, Text } from 'ui';
+import { Button, Loader, Text, EmptyCell } from 'ui';
 import { formatAcctDate, sourceTypeLabel } from '../utils/format';
 import { useJournalEntry } from '../utils/hooks';
 import { AmountCell } from './amount-cell';
@@ -66,7 +66,7 @@ export function EntryDetailModal({ entryId, onOpenChange, actions }: Props) {
                       {formatAcctDate(entry.occurredAt)}
                     </Text>
                     <Text size='small' variant='inactive'>
-                      created by {entry.createdBy || '—'}
+                      created by {entry.createdBy || <EmptyCell />}
                     </Text>
                   </div>
                   <Text>{entry.description}</Text>

@@ -17,6 +17,7 @@ import {
   Text,
   Toolbar,
   ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -217,7 +218,7 @@ function AssemblyTile({
       ) : null}
       <div className='mt-0.5 flex min-w-0 items-center gap-1'>
         <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-          {sizeLabel} · ×{row.qty.trim() || '—'}
+          {sizeLabel} · ×{row.qty.trim() || <EmptyCell />}
         </Text>
         {canEdit && (
           <Text component='span' variant='inactive' className='ml-auto shrink-0'>
