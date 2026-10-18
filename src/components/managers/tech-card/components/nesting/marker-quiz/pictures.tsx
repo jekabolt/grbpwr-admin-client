@@ -10,6 +10,8 @@ const TABLE_LENGTH = 300;
 const TABLE_Y = 150;
 const GROUND_Y = 204;
 const MAX_PICTURE_HEIGHT = 240;
+const MIN_STACK_HEIGHT = 12;
+const MIN_STACK_LINES = 3;
 
 type Tone = 'ink' | 'label' | 'error';
 type Anchor = 'left' | 'centre' | 'right';
@@ -319,8 +321,9 @@ function StackLines({
 
 function stackHeight(stackCm: number, plies: number) {
   const byThickness = nonNegative(stackCm) * 10;
-  const byLines = Math.max(0, Math.min(11, Math.round(plies) - 1)) * 3.2;
-  return clamp(Math.max(byThickness, byLines, 2), 2, 42);
+  const drawnLines = clamp(Math.round(nonNegative(plies)), MIN_STACK_LINES, 12);
+  const byLines = (drawnLines - 1) * 3.2;
+  return clamp(Math.max(byThickness, byLines, MIN_STACK_HEIGHT), MIN_STACK_HEIGHT, 42);
 }
 
 function scaledLength(value: number, tableLength: number, pixels = TABLE_LENGTH) {
@@ -336,7 +339,7 @@ export function SpreadChoicePicture(p: { kind: 'single' | 'table' }): JSX.Elemen
   const height = p.kind === 'single' ? 2 : 24;
   const viewBox = withMargin({
     left: x - 20,
-    top: y - height - 2,
+    top: y - 24 - 2,
     right: x + length + 20,
     bottom: groundY,
   });
@@ -485,12 +488,15 @@ export function LayersPicture(p: {
   const stackX = x + 20;
   const length = clamp(scaledLength(p.layCm, p.tableLengthCm), 28, TABLE_LENGTH * 1.3);
   const height = stackHeight(p.stackCm, p.plies);
+  const drawnPlies = Math.max(MIN_STACK_LINES, Math.round(nonNegative(p.plies)));
   const stackTop = TABLE_Y - 1 - height;
   const dimensionX = stackX + length + 10;
   const dimensionTone: Tone = p.stackOk ? 'ink' : 'error';
   const sizes = [...new Set(p.plySizes.map((size) => size.trim()).filter(Boolean))].join(' · ');
   const sizeY = stackTop - 20;
-  const labelX = dimensionX + 11;
+  const labelX = dimensionX + 14;
+  const thicknessLabel =
+    Number.isFinite(p.stackCm) && p.stackCm > 0 ? ` · ${formatNumber(p.stackCm)} cm` : '';
   const right = Math.max(x + TABLE_LENGTH + 20, labelX + 155);
   const viewBox = withMargin({ left: x - 20, top: sizeY - 10, right, bottom: GROUND_Y });
   const overlays: LabelOverlay[] = [
@@ -498,9 +504,10 @@ export function LayersPicture(p: {
       key: 'layers',
       x: labelX,
       y: (stackTop + TABLE_Y - 1) / 2,
-      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'} · ${formatNumber(p.stackCm)} cm`,
+      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'}${thicknessLabel}`,
       tone: dimensionTone,
       anchor: 'left',
+      backed: true,
     },
   ];
 
@@ -522,7 +529,7 @@ export function LayersPicture(p: {
         x={stackX}
         y={TABLE_Y}
         length={length}
-        count={p.plies}
+        count={drawnPlies}
         height={height}
         faceToFace={p.faceToFace}
       />
@@ -602,79 +609,6 @@ export function EndsPicture(p: {
           />
         </>
       )}
-    </SketchFrame>
-  );
-}
-
-// Контур детали на полосе, см: x — вдоль ткани, y — поперёк.
-export type TopPiece = ReadonlyArray<{ x: number; y: number }>;
-
-// Короткая сторона полотна на картинке не тоньше этого (длинный маркер иначе — нитка).
-const TOP_MIN_HEIGHT = 48;
-
-/**
- * Вид сверху на маркер: полотно длина × ширина, контуры деталей без заливки, размеры снаружи —
- * длина над полотном, ширина справа.
- */
-export function MarkerTopPicture(p: {
-  lengthCm: number;
-  widthCm: number;
-  pieces: readonly TopPiece[];
-  estimate?: boolean;
-}): JSX.Element {
-  const x0 = 20;
-  const y0 = 30;
-  const lengthCm = positive(p.lengthCm, 100);
-  const widthCm = positive(p.widthCm, 140);
-  const k = Math.min(300 / lengthCm, 170 / widthCm);
-  const w = lengthCm * k;
-  const h = Math.max(widthCm * k, TOP_MIN_HEIGHT);
-  const kx = w / lengthCm;
-  const ky = h / widthCm;
-  const dimensionY = y0 - 14;
-  const dimensionX = x0 + w + 12;
-  const labelX = dimensionX + 10;
-  const viewBox = withMargin({
-    left: x0 - 8,
-    top: dimensionY - 12,
-    right: Math.max(labelX + 90, x0 + 300),
-    bottom: y0 + h,
-  });
-  const metres = `${p.estimate ? '≈ ' : ''}${(p.lengthCm / 100).toFixed(2)} m`;
-
-  return (
-    <SketchFrame
-      viewBox={viewBox}
-      overlays={[
-        { key: 'length', x: x0 + w / 2, y: dimensionY, content: metres, backed: true },
-        {
-          key: 'width',
-          x: labelX,
-          y: y0 + h / 2,
-          content: `${formatNumber(p.widthCm)} cm`,
-          anchor: 'left',
-        },
-      ]}
-    >
-      <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
-        <rect x={x0} y={y0} width={w} height={h} vectorEffect='non-scaling-stroke' />
-        {p.pieces.map((poly, index) =>
-          poly.length < 3 ? null : (
-            <polygon
-              key={index}
-              points={poly
-                .map(
-                  (pt) =>
-                    `${x0 + clamp(pt.x, 0, lengthCm) * kx},${y0 + clamp(pt.y, 0, widthCm) * ky}`,
-                )
-                .join(' ')}
-              vectorEffect='non-scaling-stroke'
-            />
-          ),
-        )}
-      </g>
-      <HorizontalDimension x1={x0} x2={x0 + w} y={dimensionY} extensionY={y0 - 3} />
-      <VerticalDimension x={dimensionX} y1={y0} y2={y0 + h} extensionX={x0 + w + 3} />
     </SketchFrame>
   );
 }
