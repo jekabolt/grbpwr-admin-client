@@ -30,7 +30,7 @@ export function RunHeader({
           <Text size='large' component='h1' className='uppercase'>
             PR-{m.run_id ?? '—'}
           </Text>
-          <Text component='p'>
+          <Text size='reading' component='p'>
             {styleNumber || 'style not named'}
             {styleName ? ` · ${styleName}` : ''}
           </Text>
@@ -41,7 +41,7 @@ export function RunHeader({
       </div>
 
       {stop && (
-        <Text component='p'>
+        <Text size='reading' component='p'>
           <b>the run is cancelled</b> — nothing is cut from this run pack. the run pack was left open
           deliberately: a link that went dark together with the cancellation would be
           indistinguishable from a broken one, and on the floor that would read as “the QR doesn't

@@ -23,7 +23,7 @@ export function LinesMatrix({
 }) {
   if (lines.length === 0 || axis.length === 0) {
     return (
-      <Text component='p'>
+      <Text size='reading' component='p'>
         the selected subset has no “colourway × size” cell at all. until it has one, there is nothing
         for the cut list below to be counted from.
       </Text>

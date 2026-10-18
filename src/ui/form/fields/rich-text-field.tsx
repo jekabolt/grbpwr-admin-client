@@ -115,7 +115,7 @@ function EmailRichTextEditor({
         // абзацами, а читать его будет покупатель в почте, где он и наберётся примерно так.
         // Двенадцать здесь сравняли бы тело письма с его же подписью-лейблом.
         class:
-          'min-h-[120px] w-full px-3 py-2 text-base focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
+          'min-h-[120px] w-full px-3 py-2 text-reading focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
       },
       transformPastedHTML: stripToEmailSafeHtml,
     },

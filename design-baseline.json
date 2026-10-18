@@ -1582,12 +1582,6 @@
   "src/components/pattern-viewer/components/sheet-list.tsx": {
     "design/no-raw-control": 1
   },
-  "src/components/pattern-viewer/page.tsx": {
-    "design/no-non-token-class": 1
-  },
-  "src/components/run-pack-viewer/page.tsx": {
-    "design/no-non-token-class": 1
-  },
   "src/components/shared/markdown/doc.tsx": {
     "design/no-arbitrary-px": 1
   },
