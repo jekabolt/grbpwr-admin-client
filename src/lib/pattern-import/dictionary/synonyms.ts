@@ -170,6 +170,7 @@ const NOUNS: readonly { code: string; stems: readonly string[] }[] = [
     ],
   },
   { code: 'SK', stems: ['skirt', 'rock', 'юбк', 'jupe', 'rok ', 'falda', 'nederdel'] },
+  { code: 'RUF', stems: ['ruffle', 'flounce', 'frill '] },
   {
     code: 'SP',
     stems: [
@@ -288,6 +289,9 @@ export function normaliseText(s: string): string {
 const at = (t: string, stem: string) => t.indexOf(` ${stem}`);
 const hasStem = (t: string, stem: string) => at(t, stem) >= 0;
 const CYRILLIC = /[\u0400-\u04FF]/;
+// A tiled PDF can leave either half of «FABRIC AND LINING» on this page. It still names cloths,
+// not a piece called LIN; the fabrics stage reads the same coordinated fragments as two scopes.
+const DUAL_MAIN_LINING = /\b(?:fab)?ric\s+and\s+li(?:n(?:i(?:n(?:g)?)?)?)?\b/u;
 
 function sideOf(t: string): PieceTextReading['side'] {
   const front = FRONT.some((s) => hasStem(t, s));
@@ -351,7 +355,7 @@ export function readPieceText(text: string): PieceTextReading {
       };
   }
   // Lining as a CODE only when nothing else is named on the label.
-  const lin = LINING_CODE.find((s) => hasStem(whole, s));
+  const lin = DUAL_MAIN_LINING.test(whole) ? undefined : LINING_CODE.find((s) => hasStem(whole, s));
   if (lin) return { code: 'LIN', side: null, fabric, matched: lin };
   return { code: null, side: null, fabric, matched: '' };
 }
