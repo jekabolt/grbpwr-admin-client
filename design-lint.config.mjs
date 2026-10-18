@@ -1,9 +1,16 @@
+import fs from 'node:fs';
 import tsParser from '@typescript-eslint/parser';
 import design from './eslint-rules/design/index.js';
+import { parseThemeTokens } from './eslint-rules/design/theme-tokens.js';
+
+const themeTokens = parseThemeTokens(
+  fs.readFileSync(new URL('./src/global.css', import.meta.url), 'utf8'),
+);
 
 const designRules = Object.fromEntries(
   Object.keys(design.rules).map((name) => [`design/${name}`, 'error']),
 );
+designRules['design/no-non-token-class'] = ['error', themeTokens];
 
 const printDocuments = [
   'src/components/managers/print/**/*.{ts,tsx}',
@@ -35,6 +42,7 @@ export default [
     rules: {
       'design/no-arbitrary-px': 'off',
       'design/no-hex-color': 'off',
+      'design/no-non-token-class': 'off',
       'design/no-radius-shadow': 'off',
       'design/no-style-design': 'off',
     },

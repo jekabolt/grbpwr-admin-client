@@ -1,6 +1,12 @@
+import fs from 'node:fs';
 import { RuleTester } from 'eslint';
 import tsParser from '@typescript-eslint/parser';
 import design from '../eslint-rules/design/index.js';
+import { parseThemeTokens } from '../eslint-rules/design/theme-tokens.js';
+
+const themeTokens = parseThemeTokens(
+  fs.readFileSync(new URL('../src/global.css', import.meta.url), 'utf8'),
+);
 
 const tester = new RuleTester({
   languageOptions: {
@@ -109,4 +115,40 @@ tester.run('design/no-local-primitive', design.rules['no-local-primitive'], {
   ],
 });
 
-console.log('design lint probe: all 6 rules passed');
+tester.run('design/no-non-token-class', design.rules['no-non-token-class'], {
+  valid: [
+    {
+      filename,
+      options: [themeTokens],
+      code: "const view = <div className='text-center border-b bg-bgColor text-lg' />;",
+    },
+    {
+      filename,
+      options: [themeTokens],
+      code: "const view = <div className={cn('bg-cover text-ellipsis', ok && 'border-dashed')} />;",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      options: [themeTokens],
+      code: "const view = <div className={`text-2xl ${ok ? 'hover:bg-sky-200' : 'text-text'}`} />;",
+      errors: [
+        { message: /"text-2xl" uses Tailwind's default type scale/u },
+        { message: /"bg-sky-200" uses Tailwind's default palette/u },
+        { message: /"text-text" does not resolve to an @theme token/u },
+      ],
+    },
+    {
+      filename,
+      options: [themeTokens],
+      code: "const view = <div className={classNames('visitedLinkColor', { textGiantSmallSize: big })} />;",
+      errors: [
+        { message: /"visitedLinkColor" does not resolve/u },
+        { message: /"textGiantSmallSize" does not resolve/u },
+      ],
+    },
+  ],
+});
+
+console.log('design lint probe: all 7 rules passed');
