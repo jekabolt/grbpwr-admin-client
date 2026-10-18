@@ -1,0 +1,17 @@
+import noArbitraryPx from './no-arbitrary-px.js';
+import noHexColor from './no-hex-color.js';
+import noLocalPrimitive from './no-local-primitive.js';
+import noRadiusShadow from './no-radius-shadow.js';
+import noRawControl from './no-raw-control.js';
+import noStyleDesign from './no-style-design.js';
+
+export const rules = {
+  'no-arbitrary-px': noArbitraryPx,
+  'no-hex-color': noHexColor,
+  'no-local-primitive': noLocalPrimitive,
+  'no-radius-shadow': noRadiusShadow,
+  'no-raw-control': noRawControl,
+  'no-style-design': noStyleDesign,
+};
+
+export default { rules };
