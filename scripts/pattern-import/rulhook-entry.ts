@@ -5,6 +5,7 @@
 // DXF), the autopilot can never send it. Real runs: B9000-FRONT DXF+RUL packs (8 rules, 0 mm);
 // our own kombinezon export refuses with the piece that is not point-for-point.
 import { existsSync, readFileSync } from 'node:fs';
+import { PATIMPORT } from 'lib/pattern-import/types';
 import { basename } from 'node:path';
 import type {
   CardSize,
@@ -60,7 +61,7 @@ const cardSizes = (tokens: string[]): CardSize[] =>
   tokens.map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i, spellings: [t] }));
 
 /** The wizard mounted over an in-process worker session; every write stage call kept. */
-function mount(tokens: string[]) {
+function mount(tokens: string[], styleLabel = 'rulhook', scopes: DraftScopeTarget[] = SCOPES) {
   let s: Session | null = null;
   const writes: { in: WriteIn; out: WriteOut }[] = [];
   /** STOPFIX: the write stage fails while on (a write that did not happen). */
@@ -91,9 +92,9 @@ function mount(tokens: string[]) {
   const card: CardContext = {
     techCardId: 4242,
     sizes: cardSizes(tokens),
-    scopes: SCOPES,
+    scopes,
     existingPieces: [],
-    styleLabel: 'rulhook',
+    styleLabel,
   };
   let api!: ImportSessionApi;
   mountHook(() => {
@@ -117,6 +118,10 @@ function mount(tokens: string[]) {
   /** files → check by the wizard's own drive with the autopilot's resolver (what an AUTO run does). */
   const drive = async (files: Files) => {
     await dispatch({ type: 'files', files: files.map((f) => new File([f.bytes], f.name)) });
+    return driveOn();
+  };
+  /** the drive from where the run stands (after an operator answer) */
+  const driveOn = async () => {
     const resolve = resolverFor(card, get);
     const answer = (snap: Parameters<typeof resolve>[0]) =>
       resolve({
@@ -136,7 +141,7 @@ function mount(tokens: string[]) {
     }
     return `tick budget spent on ${api.session.step}`;
   };
-  return { get, dispatch, drive, settle, writes, failWrite, close: () => s?.close() };
+  return { get, dispatch, drive, driveOn, settle, writes, failWrite, close: () => s?.close() };
 }
 
 const rulOf = (w: { out: WriteOut } | undefined) => w?.out.scopes[0]?.rul;
@@ -436,14 +441,51 @@ export async function sectionShapeKink(o: { check: Check; pdf: string | null }) 
     return;
   }
   const kb = readFileSync(o.pdf);
-  const k = mount(['6', '8', '10', '12', '14', '16', '18', '20']);
-  const stop = await k.drive([
+  // the card names the model (the sheet carries Style A and Style B)
+  const k = mount(['6', '8', '10', '12', '14', '16', '18', '20'], 'Phoebe Jumpsuit · Style A', [
+    ...SCOPES,
+    {
+      scopeKey: 'TECH_CARD_BOM_PURPOSE_LINING',
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_LINING',
+      bomLineKey: 'L2',
+      label: 'lining',
+      isInterlining: false,
+      sections: ['TECH_CARD_BOM_SECTION_LINING'],
+    },
+  ]);
+  let stop = await k.drive([
     {
       name: basename(o.pdf),
       bytes: kb.buffer.slice(kb.byteOffset, kb.byteOffset + kb.byteLength) as ArrayBuffer,
     },
   ]);
   const api = () => k.get();
+  // the operator's answers the autopilot leaves (as the e2e operator gives them): "looked at the
+  // outlines set aside", and the outline is the seam line (+ the default allowance)
+  for (let t = 0; t < 4 && stop; t++) {
+    const step = api().session.step;
+    if (step === 'pieces' && /set aside/.test(stop)) api().reviewAsides();
+    else if (step === 'meaning' && /seam line\?/.test(stop)) {
+      const i = api().inputs;
+      await k.dispatch({
+        type: 'semantics',
+        input: {
+          fileAllowance: {
+            meaning: 'seam',
+            allowanceMm: PATIMPORT.defaultAllowanceMm,
+            origin: 'operator',
+            evidence: ['shapekink probe: the e2e operator answer'],
+          },
+          pieceOverrides: i.overrides,
+          operatorGrain: i.operatorGrain,
+          operatorFold: i.operatorFold,
+          foldListChecked: i.foldListChecked,
+        },
+      });
+    } else break;
+    await k.settle();
+    stop = await k.driveOn();
+  }
   const shapeCheck = () =>
     Object.values(api().session.gate)
       .flatMap((g) => g.checks)
@@ -472,35 +514,22 @@ export async function sectionShapeKink(o: { check: Check; pdf: string | null }) 
     !no.ok && !!no.reason,
     no,
   );
+  // one move per piece: FP_R is FP_L's mirrored hand (one seed) — it moves with it
   const fx = await api().fixShape('FP_L', '6');
   await k.settle();
   const b6 = blocks().find((b) => b.block === 'FP_L_6');
-  const left = shapeCheck()?.shapeIssues?.filter((x) => x.identity === 'FP_L') ?? [];
+  const left = (shapeCheck()?.shapeIssues ?? []).filter((x) => x.identity.startsWith('FP_'));
   check(
     'K',
-    'fixShape FP_L 6: written again, FP_L no longer held, recorded (piece shapeFixes + block kinkStraightened operator)',
+    'fixShape FP_L 6: written again, FP_L and its mirror FP_R no longer held, recorded (piece shapeFixes with mm + block kinkStraightened operator)',
     fx.ok &&
       !left.length &&
-      !!piece('FP_L')?.shapeFixes?.some((f) => f.size === '6' && f.action === 'straighten') &&
-      !!b6?.kinkStraightened?.some((x) => x.rule === 'operator'),
+      !!piece('FP_L')?.shapeFixes?.some(
+        (f) => f.size === '6' && f.action === 'straighten' && (f.mm ?? 0) > 0,
+      ) &&
+      !!b6?.kinkStraightened?.length &&
+      b6.kinkStraightened.every((x) => x.rule === 'operator'),
     { fx, left, fixes: piece('FP_L')?.shapeFixes, kinks: b6?.kinkStraightened },
-  );
-  const dr = await api().dropSize('FP_R', '6');
-  await k.settle();
-  check(
-    'K',
-    'dropSize FP_R 6: FP_R written without size 6, recorded',
-    dr.ok &&
-      !blocks().some((b) => b.block === 'FP_R_6') &&
-      blocks().some((b) => b.block === 'FP_R_8') &&
-      !!piece('FP_R')?.shapeFixes?.some((f) => f.size === '6' && f.action === 'drop'),
-    { dr, fixes: piece('FP_R')?.shapeFixes },
-  );
-  check(
-    'K',
-    'after both moves the shape check holds nothing of FP',
-    !(shapeCheck()?.shapeIssues ?? []).some((x) => x.identity.startsWith('FP_')),
-    shapeCheck()?.shapeIssues,
   );
   const cl = await api().clearShapeFix('FP_L', '6');
   await k.settle();
@@ -509,6 +538,18 @@ export async function sectionShapeKink(o: { check: Check; pdf: string | null }) 
     'clearShapeFix FP_L 6: the size as drawn again — held again',
     cl.ok && !!shapeCheck()?.shapeIssues?.some((x) => x.identity === 'FP_L' && x.size === '6'),
     { cl, issues: shapeCheck()?.shapeIssues },
+  );
+  const dr = await api().dropSize('FP_R', '6');
+  await k.settle();
+  check(
+    'K',
+    'dropSize FP_R 6: the piece (both hands) written without size 6, recorded, nothing of FP held',
+    dr.ok &&
+      !blocks().some((b) => b.block === 'FP_R_6' || b.block === 'FP_L_6') &&
+      blocks().some((b) => b.block === 'FP_R_8') &&
+      !!piece('FP_R')?.shapeFixes?.some((f) => f.size === '6' && f.action === 'drop') &&
+      !(shapeCheck()?.shapeIssues ?? []).some((x) => x.identity.startsWith('FP_')),
+    { dr, fixes: piece('FP_R')?.shapeFixes, issues: shapeCheck()?.shapeIssues },
   );
   const why = answerProblem('meaning', {
     events: [{ type: 'semantics', input: { shapeFixes: { '0:6': 'drop' } } }],

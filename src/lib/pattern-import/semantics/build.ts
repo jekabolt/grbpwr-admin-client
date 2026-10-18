@@ -1266,7 +1266,10 @@ export function buildPieceSpecsDetailed(
       for (const [r, x] of res.byRank) kinkByRank.set(r, x);
       for (const { c, card } of kept)
         if (operator.has(c.rank)) {
-          const k = kinkByRank.get(c.rank)?.kinks.filter((x) => x.rule === 'operator') ?? [];
+          // a size the operator asked for: every straightening of it is the operator's (D5)
+          const kk = kinkByRank.get(c.rank);
+          if (kk) kk.kinks = kk.kinks.map((x) => ({ ...x, rule: 'operator' as const }));
+          const k = kk?.kinks ?? [];
           // the operator's move is recorded even when it straightened nothing (the gate still asks)
           shapeFixes.push({
             size: card.token,
