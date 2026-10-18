@@ -25,7 +25,7 @@ function Ground({ children, className }: { children: React.ReactNode; className?
 
 function Crossed({ children }: { children: React.ReactNode }) {
   return (
-    <div className='relative w-full'>
+    <div className='relative w-full' data-kit-dont=''>
       {children}
       <svg
         aria-hidden
