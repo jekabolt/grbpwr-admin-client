@@ -69,11 +69,13 @@ function clampStep(step: QuizStep, flow: QuizStep[]): QuizStep {
 }
 
 export function useMarkerQuiz({
+  slotKey,
   mode,
   tableSaved,
   startAtRun,
   busy,
 }: {
+  slotKey: string;
   mode: LayMode;
   // Стол цеха сохранён (длина, ширина, стопка): тогда стол подтверждают, а не вводят.
   tableSaved: boolean;
@@ -86,6 +88,11 @@ export function useMarkerQuiz({
   const [tableEditing, setTableEditing] = useState(false);
   // «edit» в сводке после прогона: квиз снова поверх готового результата.
   const [reopened, setReopened] = useState(false);
+  useEffect(() => {
+    setPicked(null);
+    setTableEditing(false);
+    setReopened(false);
+  }, [slotKey]);
   const editingTable = tableEditing || !tableSaved;
   const flow = quizFlow(mode, editingTable);
   const step = clampStep(picked ?? (startAtRun ? 'run' : 'spread'), flow);
@@ -294,7 +301,7 @@ export type MarkerQuizProps = {
   onTableWidthCm: (v: number | null) => void;
   onStackCm: (v: number | null) => void;
   // Сохранить стол в настройки цеха (на Next с шагов стола; не на каждую цифру).
-  onSaveTable: () => Promise<void>;
+  onSaveTable: () => Promise<boolean>;
   savingTable: boolean;
   colourways: ReadonlyArray<{ id: number; label: string }>;
   colourwayId: number;
@@ -357,7 +364,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
       p.onRun();
       return;
     }
-    if (step === 'size' || step === 'knife') await p.onSaveTable();
+    if ((step === 'size' || step === 'knife') && !(await p.onSaveTable())) return;
     quiz.next();
   };
 

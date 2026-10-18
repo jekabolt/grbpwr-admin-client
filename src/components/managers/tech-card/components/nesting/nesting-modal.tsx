@@ -902,8 +902,9 @@ export function NestingModal({
     (tableWidthEdit !== undefined && tableWidthEdit !== wsTableWidthCm) ||
     (stackEdit !== undefined && stackEdit !== wsStackCm);
   const [savingWorkshop, setSavingWorkshop] = useState(false);
-  const saveForWorkshop = async () => {
-    if (!workshopDirty || !canWriteWorkshop || savingWorkshop) return;
+  const saveForWorkshop = async (): Promise<boolean> => {
+    if (!workshopDirty) return true;
+    if (!canWriteWorkshop || savingWorkshop) return false;
     const asSetting = (v: number | null): googletype_Decimal =>
       v == null ? CLEAR_SETTING : { value: String(Math.round(v * 100) / 100) };
     setSavingWorkshop(true);
@@ -923,8 +924,10 @@ export function NestingModal({
       setTableWidthEdit(undefined);
       setStackEdit(undefined);
       showMessage('saved for the workshop', 'success');
+      return true;
     } catch (e) {
       showMessage(failMessage(e, "couldn't save for the workshop"), 'error');
+      return false;
     } finally {
       setSavingWorkshop(false);
     }
@@ -2735,6 +2738,7 @@ export function NestingModal({
   // пишут в состояние выше, «Run» зовёт тот же requestRun, что и прежняя кнопка.
   const [quizDone, markQuizDone] = useQuizDone(techCardId, lockedSlot?.lineKey || slotKey);
   const quiz = useMarkerQuiz({
+    slotKey: lockedSlot?.lineKey || slotKey,
     mode: layMode,
     // Стол цеха сохранён целиком — его подтверждают, а не вводят.
     tableSaved: wsTableCm != null && wsTableWidthCm != null && wsStackCm != null,

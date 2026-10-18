@@ -26,7 +26,7 @@ export type PictureShape =
 export type OverlayTone = 'plain' | 'dimension' | 'danger' | 'size' | 'large' | 'muted';
 
 export type PictureOverlay = {
-  key: number;
+  key: string;
   x: number;
   y: number;
   content: ReactNode;
@@ -48,7 +48,7 @@ export class IsoPicture {
   readonly overlays: PictureOverlay[] = [];
 
   private bounds = [Infinity, Infinity, -Infinity, -Infinity];
-  private nextKey = 0;
+  private nextShapeKey = 0;
 
   constructor(private readonly isometric = true) {}
 
@@ -75,7 +75,7 @@ export class IsoPicture {
 
     this.shapes.push({
       kind: 'polygon',
-      key: this.nextKey++,
+      key: this.nextShapeKey++,
       points: projected,
       fill,
       stroke,
@@ -88,7 +88,7 @@ export class IsoPicture {
     const [x2, y2] = this.project(to);
     this.shapes.push({
       kind: 'line',
-      key: this.nextKey++,
+      key: this.nextShapeKey++,
       x1,
       y1,
       x2,
@@ -99,9 +99,9 @@ export class IsoPicture {
     });
   }
 
-  label(point: Point, content: ReactNode, tone: OverlayTone = 'plain') {
+  label(key: string, point: Point, content: ReactNode, tone: OverlayTone = 'plain') {
     const [x, y] = this.project(point);
-    this.overlays.push({ key: this.nextKey++, x, y, content, tone });
+    this.overlays.push({ key, x, y, content, tone });
   }
 
   finish(maxHeight = 330, paddingRatio = 0.12): PictureData {

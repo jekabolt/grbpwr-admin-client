@@ -274,7 +274,12 @@ function drawPieces(
     rectangle(0.66, 0.94, 0.05, 0.33);
     rectangle(0.66, 0.94, 0.39, 0.67);
     if (p.labels !== false) {
-      picture.label([x + 0.33 * slotWidth, p.y + 0.5 * p.width, p.z], size, 'size');
+      picture.label(
+        `piece-${index}`,
+        [x + 0.33 * slotWidth, p.y + 0.5 * p.width, p.z],
+        size,
+        'size',
+      );
     }
   });
 }
@@ -329,6 +334,7 @@ function drawKnife(picture: IsoPicture, x: number, y: number, stackTop: number) 
 
 function dimension(
   picture: IsoPicture,
+  key: string,
   from: Point,
   to: Point,
   offset: Point,
@@ -340,7 +346,7 @@ function dimension(
   picture.line(start, end, BLUE, 1.4);
   picture.line(from, addPoints(from, scaledPoint(offset, 1.15)), BLUE, 0.8, '2 3');
   picture.line(to, addPoints(to, scaledPoint(offset, 1.15)), BLUE, 0.8, '2 3');
-  picture.label(midpoint(start, end), label, tone);
+  picture.label(key, midpoint(start, end), label, tone);
 }
 
 function layerColour(fabric: FabricColours, faceToFace: boolean) {
@@ -379,10 +385,10 @@ export function SpreadChoicePicture(p: {
   });
 
   if (p.kind === 'single') {
-    picture.label([120, clothY + clothWidth + 18, top], '✂', 'large');
+    picture.label('scissors', [120, clothY + clothWidth + 18, top], '✂', 'large');
   } else {
     drawKnife(picture, 150, clothY + clothWidth * 0.8, top);
-    picture.label([0, clothY + clothWidth + 20, top], '8 layers', 'dimension');
+    picture.label('layers', [0, clothY + clothWidth + 20, top], '8 layers', 'dimension');
   }
 
   return <PictureFrame data={picture.finish(200, 0.06)} />;
@@ -401,6 +407,7 @@ export function TablePicture(p: {
   drawTable(picture, length, width);
   dimension(
     picture,
+    'length',
     [0, 0, 0],
     [length, 0, 0],
     [0, p.length ? -28 : -26, 0],
@@ -408,6 +415,7 @@ export function TablePicture(p: {
   );
   dimension(
     picture,
+    'width',
     [length, 0, 0],
     [length, width, 0],
     [p.width ? 30 : 26, 0, 0],
@@ -415,6 +423,7 @@ export function TablePicture(p: {
   );
   if (p.maxStackCm != null) {
     picture.label(
+      'stack-limit',
       [length * 0.45, width * 0.5, 0],
       `stack ≤ ${formatOne(p.maxStackCm)} cm`,
       'muted',
@@ -486,10 +495,10 @@ export function KnifePicture(p: { maxStackCm: PicInput; fabric: FabricColours })
   picture.line([190, 0], [190, stackHeight], BLUE, 1.4);
   picture.line([182, stackHeight], [198, stackHeight], BLUE, 1.4);
   picture.line([182, 0], [198, 0], BLUE, 1.4);
-  picture.label([214, stackHeight / 2], <NumberInput input={p.maxStackCm} />);
-  picture.label([80, stackHeight / 2], 'fabric stack', 'size');
-  picture.label([163, stackHeight + 50], 'knife', 'muted');
-  picture.label([80, -50], 'side view', 'muted');
+  picture.label('max-stack', [214, stackHeight / 2], <NumberInput input={p.maxStackCm} />);
+  picture.label('fabric-stack', [80, stackHeight / 2], 'fabric stack', 'size');
+  picture.label('knife', [163, stackHeight + 50], 'knife', 'muted');
+  picture.label('side-view', [80, -50], 'side view', 'muted');
 
   return <PictureFrame data={picture.finish(320, 0.1)} />;
 }
@@ -557,8 +566,14 @@ export function LayersPicture(p: {
     sizes: p.plySizes,
   });
   drawKnife(picture, sheetX + sheetLength * 0.85, clothY + clothWidth + 16, top);
-  picture.label([sheetX, clothY + clothWidth + 10, top / 2], `${p.plies} layers`, 'dimension');
   picture.label(
+    'layers',
+    [sheetX, clothY + clothWidth + 10, top / 2],
+    `${p.plies} layers`,
+    'dimension',
+  );
+  picture.label(
+    'stack-height',
     [sheetX + sheetLength, clothY + clothWidth + 30, top / 2],
     `${formatOne(p.stackCm)} cm high`,
     p.stackOk ? 'muted' : 'danger',
@@ -616,15 +631,17 @@ export function EndsPicture(p: { endLoss: PicInput; fabric: FabricColours }): JS
     labels: false,
   });
   picture.label(
+    'end-loss-input',
     [10 + wasteWidth / 2, clothY + clothWidth + 22, top],
     <NumberInput input={p.endLoss} />,
   );
   picture.label(
+    'end-loss-value',
     [190 - wasteWidth / 2, clothY + clothWidth + 22, top],
     `${formatOne(p.endLoss.value)} cm`,
     'danger',
   );
-  picture.label([100, -40, top], 'cut off, thrown away', 'muted');
+  picture.label('waste-caption', [100, -40, top], 'cut off, thrown away', 'muted');
 
   return <PictureFrame data={picture.finish()} />;
 }
@@ -672,6 +689,7 @@ export function LayOnTablePicture(p: {
     });
     dimension(
       picture,
+      'marker-length',
       [0, 0, top],
       [shownLength, 0, top],
       [0, -30, 0],
@@ -679,6 +697,7 @@ export function LayOnTablePicture(p: {
     );
     dimension(
       picture,
+      'cloth-width',
       [shownLength, 0, top],
       [shownLength, clothWidth, top],
       [30, 0, 0],
@@ -727,6 +746,7 @@ export function LayOnTablePicture(p: {
   });
   dimension(
     picture,
+    'table-length',
     [0, 0, 0],
     [tableLength, 0, 0],
     [0, -60, 0],
@@ -734,6 +754,7 @@ export function LayOnTablePicture(p: {
   );
   dimension(
     picture,
+    'marker-length',
     [sheetX, clothY + tableClothWidth, top],
     [sheetX + layLength, clothY + tableClothWidth, top],
     [0, 32, 0],
