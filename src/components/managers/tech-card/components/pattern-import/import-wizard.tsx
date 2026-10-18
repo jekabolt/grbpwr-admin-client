@@ -45,7 +45,12 @@ import { STEPS, stepIndex, useImportSession, type ImportSessionApi } from './use
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { autopilotApply, resolverFor } from './autopilot/run';
-import { readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+import {
+  GuessesPill,
+  readAutopilotPref,
+  writeAutopilotPref,
+  type SkipGuess,
+} from './autopilot/view';
 import {
   PHASE_OF,
   plural,
@@ -62,7 +67,10 @@ import {
   AutopilotOnContext,
   AskCoach,
   AutoAnswerContext,
+  LikelyContext,
   QuizHistoryContext,
+  SkipQuiz,
+  SkipQuizContext,
   clickAskFix,
   currentAskKey,
   firstAsk,
@@ -70,6 +78,8 @@ import {
   useAskLabel,
   type AutoAnswer,
   type CoachTarget,
+  type LikelyGuess,
+  type LikelyRegistry,
   type QuizHistory,
 } from './ui-bits';
 import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
@@ -319,6 +329,118 @@ function WizardBody({
     await apiRef.current.dispatch(ev);
     if (driving && autopilotRef.current && started.current === sid) resumeRef.current();
   }, []);
+  // ── SKIP — DECIDE FOR ME (ui-bits LIKELY ANSWERS): the steps register the answer they already
+  // pre-select for each open question; skip turns the autopilot on and, on every stop of the drive
+  // on a step that asks, applies ONE such guess (the question asked now first), then resumes. A
+  // step with no safe guess left stops with its reason, as without skip. Every guess is listed in
+  // the header's «auto · N to check», by step, with a door back (D5: nothing silent) ──
+  const likelyReg = useRef(new Map<string, () => LikelyGuess | null>());
+  const likelyCtx = useMemo<LikelyRegistry>(
+    () => ({
+      register: (id, get) => {
+        likelyReg.current.set(id, get);
+        return () => {
+          if (likelyReg.current.get(id) === get) likelyReg.current.delete(id);
+        };
+      },
+    }),
+    [],
+  );
+  const [skipSid, setSkipSid] = useState<number | null>(null);
+  const skipOn = autopilot && skipSid != null && skipSid === session.sessionId;
+  const [guesses, setGuesses] = useState<SkipGuess[]>([]);
+  const skipTried = useRef(new Set<string>());
+  const skipBusy = useRef(false);
+  const skipAt = useRef<unknown>(null);
+  useEffect(() => {
+    setGuesses([]);
+    skipTried.current.clear();
+  }, [session.sessionId]);
+  const noteGuess = (g: SkipGuess) =>
+    setGuesses((xs) => [...xs.filter((x) => !(x.step === g.step && x.what === g.what)), g]);
+  /** One likely answer applied on the step on screen; false = no safe guess left there. */
+  const skipStep = async (): Promise<boolean> => {
+    await nextFrames();
+    const a = apiRef.current;
+    const s = a.session;
+    if (s.busy || s.error || s.sessionId == null) return false;
+    const step = s.step;
+    const now = currentAskKey(mainRef.current);
+    const all = [...likelyReg.current.entries()].flatMap(([id, get]) => {
+      const g = get();
+      return g ? [{ id, g }] : [];
+    });
+    all.sort((x, y) => Number(y.g.key === now) - Number(x.g.key === now));
+    for (const { id, g } of all) {
+      const token = `${s.sessionId}|${step}|${id}|${g.sig ?? ''}`;
+      if (skipTried.current.has(token)) continue;
+      const p = g.likely();
+      if (!p) continue;
+      skipTried.current.add(token);
+      noteGuess({ step, what: g.what, answer: g.answer });
+      try {
+        await p;
+      } catch {
+        /* the step says what failed; the drive stops there with its reason */
+      }
+      if (g.pastOffer) {
+        await nextFrames();
+        const b = apiRef.current;
+        if (b.session.step === step && !b.blocker && !b.session.busy && !b.session.error)
+          await b.next();
+      }
+      return true;
+    }
+    // nothing blocks, only an offer is left: going on as it is (the primary's «go on») is the guess
+    if (!a.blocker && a.offer) {
+      const token = `${s.sessionId}|${step}|offer|${a.offer}`;
+      if (!skipTried.current.has(token)) {
+        skipTried.current.add(token);
+        noteGuess({ step, what: a.offer, answer: 'left as it is' });
+        await a.next();
+        return true;
+      }
+    }
+    return false;
+  };
+  const runSkip = async (always: boolean) => {
+    if (skipBusy.current) return;
+    skipBusy.current = true;
+    let did = false;
+    try {
+      did = await skipStep();
+    } finally {
+      skipBusy.current = false;
+    }
+    if (did || always) resumeRef.current();
+  };
+  /** The button: the autopilot on, this step's guess applied, the drive goes on. */
+  const skipQuiz = () => {
+    const sid = apiRef.current.session.sessionId;
+    if (sid == null || apiRef.current.session.busy) return;
+    setSkipSid(sid);
+    if (!autopilotRef.current) {
+      autopilotRef.current = true;
+      setAutopilot(true);
+    }
+    started.current = sid;
+    setCoach(null);
+    void runSkip(true);
+  };
+  useEffect(() => {
+    // every later stop of the drive on a step that asks: its likely answer, then on
+    const d = api.driveStop;
+    if (!skipOn || !d || d.why === 'auto-stop' || d.why === 'error' || d.why === 'notice') return;
+    if (session.busy || session.error || d.step !== session.step || skipAt.current === d) return;
+    skipAt.current = d;
+    void runSkip(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipOn, api.driveStop, session.step, session.busy, session.error]);
+  /** A guess's door: back to its step, skip off (the operator answers there now). */
+  const guessDoor = (step: WizardStep) => {
+    setSkipSid(null);
+    void api.dispatch({ type: 'back', to: step });
+  };
   /** AP-replay: turn the previous import's answers on — they answer from where the run stands. */
   const reuse = () => {
     if (!prior) return;
@@ -597,11 +719,10 @@ function WizardBody({
   }
 
   // STOPFIX: the stop's own line (not a red error): the run is as it was before the move.
-  // A stop that lands between two stages (the drive disarmed, nothing to undo) still says so:
-  // the press took, the run rests where it got to, "run again" is then the step's own primary.
+  // A stop that lands between two stages is the hook's too (UX-HOOKS §3): it sets `api.stopped`
+  // at once, so the press needs no remembering here.
   const stoppedLine =
-    !session.busy &&
-    (api.errorCode === 'cancelled' || ((!!api.stopped || api.stopPressed) && !session.error));
+    !session.busy && (api.errorCode === 'cancelled' || (!!api.stopped && !session.error));
 
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
@@ -828,6 +949,7 @@ function WizardBody({
                   </span>
                 )}
                 <HeaderWarnings items={warnings} />
+                {guesses.length > 0 && <GuessesPill guesses={guesses} onDoor={guessDoor} />}
                 <Chip
                   quiet
                   nonForm
@@ -840,6 +962,7 @@ function WizardBody({
                   }
                   onClick={() => {
                     const on = !autopilot;
+                    if (!on) setSkipSid(null);
                     // switched on mid-run: it drives from the next "continue", not at once
                     if (on && session.step !== 'files') started.current = session.sessionId;
                     setAutopilot(on);
@@ -866,14 +989,18 @@ function WizardBody({
                     <AutopilotOnContext.Provider value={autopilot}>
                       <AnsweredAndGoContext.Provider value={answeredAndGo}>
                         <AutoAnswerContext.Provider value={autoAnswer}>
-                          {session.busy ? (
-                            // the last picture the run has, dimmed and out of reach while it works
-                            <div className='h-full opacity-40' inert aria-hidden>
-                              {body}
-                            </div>
-                          ) : (
-                            body
-                          )}
+                          <LikelyContext.Provider value={likelyCtx}>
+                            <SkipQuizContext.Provider value={skipQuiz}>
+                              {session.busy ? (
+                                // the last picture the run has, dimmed and out of reach while it works
+                                <div className='h-full opacity-40' inert aria-hidden>
+                                  {body}
+                                </div>
+                              ) : (
+                                body
+                              )}
+                            </SkipQuizContext.Provider>
+                          </LikelyContext.Provider>
                         </AutoAnswerContext.Provider>
                       </AnsweredAndGoContext.Provider>
                     </AutopilotOnContext.Provider>
@@ -949,6 +1076,12 @@ function WizardBody({
                     >
                       {askKind === 'offer' ? askShown : `! ${askShown}`}
                     </button>
+                    {!applied && session.step !== 'check' && session.step !== 'apply' && (
+                      <>
+                        {' · '}
+                        <SkipQuiz onSkip={skipQuiz} />
+                      </>
+                    )}
                   </Text>
                 ) : null}
               </div>
@@ -1142,6 +1275,8 @@ const MOVES = [
   'advance',
   'addSeed',
   'promoteAside',
+  // PROMOTE-BATCH: run again repeats the whole set-aside batch (it was undone whole)
+  'promoteAsides',
   'editPieces',
   'editName',
   'editNames',
@@ -1179,14 +1314,10 @@ function useReplayable(api: ImportSessionApi) {
     }
     wasBusy.current = busy;
   }, [api.session.busy]);
-  // the operator pressed stop (button or Esc) — kept until his next move, even when the press
-  // landed between two stages and the session has nothing to report as stopped
-  const [stopPressed, setStopPressed] = useState(false);
-  // a new run (files read again, reset) forgets the old run's move and stop
+  // a new run (files read again, reset) forgets the old run's move
   useEffect(() => {
     if (api.session.sessionId == null) {
       setMove(null);
-      setStopPressed(false);
     }
   }, [api.session.sessionId]);
 
@@ -1200,7 +1331,6 @@ function useReplayable(api: ImportSessionApi) {
       const ev = name === 'dispatch' ? (args[0] as { type?: string } | undefined) : undefined;
       if (!busyRef.current && !(ev?.type && NOT_A_MOVE.has(ev.type)))
         pending.current = { name, args };
-      setStopPressed(false);
       return fn(...args);
     };
   }
@@ -1211,11 +1341,6 @@ function useReplayable(api: ImportSessionApi) {
         ? String((m.args[0] as { type?: string } | undefined)?.type ?? 'event')
         : m.name;
   return Object.assign(wrapped, {
-    cancel: () => {
-      setStopPressed(true);
-      api.cancel();
-    },
-    stopPressed,
     /** The call the stopped move began with (its name), null = none recorded. */
     lastMove: describe(move),
     /** Repeat the stopped move's call (recorded again as the new move); none → `fallback`. */

@@ -69,6 +69,89 @@ export const AutoAnswerContext = createContext<AutoAnswer | null>(null);
 export const useAutoAnswer = (api: { dispatch: AutoAnswer }): AutoAnswer =>
   useContext(AutoAnswerContext) ?? api.dispatch;
 
+// ═══ LIKELY ANSWERS ════════════════════════════════════════════════════════════════════════════
+//
+// Owner 18.10: «we definitely need a skip quiz button to make it full auto». The shell's ONE
+// "skip — decide for me" (the step's quiz panel, and a quiet link next to the footer's ask line)
+// answers every open question with its most likely answer and carries on to the DXF, like the
+// autopilot. The shell does not know the steps' questions; each step REGISTERS, per open question,
+// the answer it already pre-selects (the bordered card, the "yes" first, the one-click fix):
+//
+//   const order = useLikelySlot('sizes-order');            // a hook: before any early return
+//   …
+//   order.current = byGeometry && orderAsked ? {
+//     key: 'sizes-map',                          // the `data-ask` key it answers (asked now = first)
+//     what: 'size order', answer: `${first} → ${cards[0].name}`,   // for the guesses popover
+//     sig: `${sizes.map.entries.length}`,         // the same guess on the same outputs: tried once
+//     likely: () => mapInOrder(0, autoAnswer),   // Promise = applied; null = no safe guess now
+//   } : null;
+//
+// Rules:
+// * `likely()` applies the guess through the AUTOMATIC path (`useAutoAnswer` above) or the step's
+//   own input patch / apply path — never a path that leaves half an answer behind. Return the
+//   promise of the WHOLE answer (a batch: awaited to the end, e.g. the pieces' set-aside quiz goes
+//   out through the same flush as the shell's primary "apply N answers").
+// * Register `null` (or let `likely` return null) when there is NO SAFE GUESS: a garment the card
+//   does not name, a size map with no geometry, pages missing with line ends in the hole. The
+//   autopilot then stops on that question with its reason, as without skip (D5).
+// * `pastOffer`: the guess answers the step's OFFER and the engine has no input that records it
+//   (fabrics' "main fabric for all"): the shell steps past the offer after it, as the operator's go.
+// * The shell applies one guess per stop, the question asked now first, then resumes the drive;
+//   every guess lands in the autopilot popover ("auto · N to check") by step, with a way back.
+
+/** One registered guess (see LIKELY ANSWERS above). */
+export type LikelyGuess = {
+  /** The `data-ask` key of the question it answers. */
+  key: string;
+  /** What is guessed, in words, for the popover ("size order", "7 grainlines"). */
+  what: string;
+  /** The answer taken, in words ("6 → XS", "as proposed"). */
+  answer: string;
+  /** Changes when the question's outputs change: one try per (guess, sig). */
+  sig?: string;
+  pastOffer?: boolean;
+  likely: () => Promise<unknown> | null;
+};
+export type LikelyRegistry = {
+  register: (id: string, get: () => LikelyGuess | null) => () => void;
+};
+export const LikelyContext = createContext<LikelyRegistry | null>(null);
+/**
+ * A step's likely-answer slot, registered while it is mounted: set `.current` during render (a
+ * step whose questions are computed after an early return sets it there). Every render starts it
+ * at null, so a render that returns early guesses nothing.
+ */
+export function useLikelySlot(id: string): { current: LikelyGuess | null } {
+  const reg = useContext(LikelyContext);
+  const ref = useRef<LikelyGuess | null>(null);
+  ref.current = null;
+  useEffect(() => reg?.register(id, () => ref.current), [reg, id]);
+  return ref;
+}
+/** The shell's "skip — decide for me" (null outside a wizard): the quiz panels show it. */
+export const SkipQuizContext = createContext<(() => void) | null>(null);
+
+/** "skip — decide for me": one quiet link, the step's quiz panel and the footer alike. */
+export function SkipQuiz({ className, onSkip }: { className?: string; onSkip?: () => void }) {
+  const ctx = useContext(SkipQuizContext);
+  const skip = onSkip ?? ctx;
+  if (!skip) return null;
+  return (
+    <button
+      type='button'
+      data-testid='pattern-import-skip'
+      onClick={skip}
+      title='answer every open question with its most likely answer and go on to the DXF — each guess is listed under auto, with a way back'
+      className={cn(
+        'shrink-0 self-start text-left font-normal text-labelColor underline decoration-current/40 underline-offset-2 hover:text-textColor',
+        className,
+      )}
+    >
+      skip — decide for me
+    </button>
+  );
+}
+
 /** A step's slot in the wizard's quiz history; outside a wizard, a slot that lives with the step. */
 export function useQuizSlot<T>(name: string, init: () => T): T {
   const store = useContext(QuizHistoryContext);

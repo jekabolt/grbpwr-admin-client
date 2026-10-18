@@ -1,16 +1,17 @@
 // LINEFIX on the sizes step: which lines look like they sit in the wrong size, and the answers
-// (`line-assign`, LINE-ASSIGN.md) built from the operator's pick. Pure geometry over the chains
-// stage's own previews (drawing frame, mm) — the same frame the sizes canvas draws.
+// (`line-assign`, LINE-ASSIGN.md) built from the operator's pick.
 //
 // The suspect lines come from GRADED NESTS: a piece drawn in every size often shares one corner
 // across the sizes (kombinezon's waistband strips: 8 outlines from (829, 1319), one per size, the
 // area stepping up with the size). A nest with exactly as many area steps as the file has sizes
 // says which outline is which size: the smallest is the first size, and so on. An outline the
-// reader put in another row (all 8 strips in row 6; the other strip's in «ignore» / «common») is
-// a suspect, and its nest names the size it belongs to. The engine gives no such list (its
-// `lineAssign.flags` only judge answers already given), so the step proposes it and the operator
-// confirms — or picks lines by hand.
-import type { ChainAssign, PtMm } from 'lib/pattern-import/types';
+// reader put in another row is a suspect, and its nest names the size it belongs to.
+//
+// The engine gives that list itself (LINEASSIGN-2, `chains.suspects`, with the line's pen against
+// the nest's size) and the closed outlines per size row (`chains.outlines`); both are computed on
+// the set as answered. The geometry below over the chain previews is only the fallback when they
+// are absent (the DXF fast path, an older read).
+import type { ChainAssign, LineSuspect, PtMm } from 'lib/pattern-import/types';
 import { inside } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 
@@ -103,6 +104,21 @@ export type LineNests = {
   nests: number[][];
   /** the lines that look like they sit in the wrong size. */
   suspects: Set<number>;
+  /** the engine's read of each suspect's pen against its nest's size (absent: our geometry). */
+  pen?: Map<number, LineSuspect['pen']>;
+  /** the engine's words for each suspect (tooltip). */
+  why?: Map<number, string>;
+};
+
+/**
+ * A suspect the step may move with ONE click: the engine's pen agrees with its nest, or the pen is
+ * the drawing's slip (two evidences for the nest's size). `against` / `unknown` are asked. Our
+ * geometry fallback reads no pen — one evidence only: its suspects need the operator's size chip.
+ */
+export const oneClick = (n: LineNests, id: number) => {
+  if (!n.pen) return false;
+  const p = n.pen.get(id);
+  return p === 'agrees' || p === 'slip';
 };
 
 /**
@@ -123,21 +139,24 @@ export function sizeOrder(chains: Chains): number[] | null {
   return rows.map((c) => c.id).sort((a, b) => rank.get(a)! - rank.get(b)!);
 }
 
-/**
- * The engine's own suspects (lane pi/lineassign2), when it gives them. Shape assumed:
- * `chains.suspects: { chain, suggest: ClassId | null, nest?: number }[]` — adapt here only.
- */
-type EngineSuspect = { chain: number; suggest?: number | null; nest?: number };
+/** The engine's own suspects (LINEASSIGN-2 `chains.suspects`); null when it gives none. */
 function engineSuspects(chains: Chains): LineNests | null {
-  const list = (chains as { suspects?: EngineSuspect[] }).suspects;
+  const list = chains.suspects;
   if (!Array.isArray(list)) return null;
-  const out: LineNests = { expected: new Map(), nests: [], suspects: new Set() };
+  const out: LineNests = {
+    expected: new Map(),
+    nests: [],
+    suspects: new Set(),
+    pen: new Map(),
+    why: new Map(),
+  };
   const byNest = new Map<number, number[]>();
   for (const s of list) {
     out.suspects.add(s.chain);
-    if (s.suggest != null) out.expected.set(s.chain, s.suggest);
-    const k = s.nest ?? -1;
-    byNest.set(k, [...(byNest.get(k) ?? []), s.chain]);
+    out.expected.set(s.chain, s.suggest);
+    out.pen!.set(s.chain, s.pen);
+    out.why!.set(s.chain, s.why);
+    byNest.set(s.nest, [...(byNest.get(s.nest) ?? []), s.chain]);
   }
   out.nests = [...byNest.values()];
   return out;
@@ -148,12 +167,88 @@ export function lineSuspects(chains: Chains): LineNests {
   return engineSuspects(chains) ?? lineNests(chains);
 }
 
-/** Closed outlines a size row draws: the engine's count when present (`outlineCounts`), else ours. */
+/** Closed outlines a size row draws: the engine's count when present (`outlines`), else ours. */
 export function outlineCount(chains: Chains, classId: number): number {
-  const eng = (chains as { outlineCounts?: Record<number, number> }).outlineCounts;
-  if (eng && eng[classId] != null) return eng[classId];
+  const eng = chains.outlines?.find((o) => o.cls === classId);
+  if (eng) return eng.n;
   const c = chains.classes.find((x) => x.id === classId);
   return (c?.chains ?? []).filter((id) => outline(id, chains.chainPreview[id])).length;
+}
+
+/**
+ * The biggest closed outline a size row draws, mm²: the engine's `maxAreaMm2` when present, else
+ * the shoelace over the previews. 0 = none closed (the geometry cannot order that size).
+ */
+export function outlineArea(chains: Chains, classId: number): number {
+  const eng = chains.outlines?.find((o) => o.cls === classId);
+  if (eng) return eng.maxAreaMm2;
+  const c = chains.classes.find((x) => x.id === classId);
+  let best = 0;
+  for (const id of c?.chains ?? []) {
+    const o = outline(id, chains.chainPreview[id]);
+    if (o) best = Math.max(best, o.area);
+  }
+  return best;
+}
+
+/**
+ * The picture of some lines in their piece: the longest of `ids` that lies inside a piece — the
+ * smallest closed outline of a size or shared row around it — and that piece's box, padded. None
+ * of them inside a piece (a sheet's sketch, its frame): the longest line and its own box.
+ */
+export function lineInPiece(
+  chains: Chains,
+  ids: readonly number[],
+): { chain: number; piece: number | null; box: Box } | null {
+  const own = new Set(ids);
+  const pieces: Outline[] = [];
+  for (const c of chains.classes) {
+    if (c.role !== 'size' && c.role !== 'common') continue;
+    for (const id of c.chains) {
+      if (own.has(id)) continue;
+      const o = outline(id, chains.chainPreview[id]);
+      if (o) pieces.push(o);
+    }
+  }
+  const byLen = ids
+    .map((id) => {
+      const a = chains.chainPreview[id];
+      let len = 0;
+      if (a)
+        for (let k = 0; k + 3 < a.length; k += 2)
+          len += Math.hypot(a[k + 2] - a[k], a[k + 3] - a[k + 1]);
+      return { id, len };
+    })
+    .filter((x) => x.len > 0)
+    .sort((x, y) => y.len - x.len);
+  if (!byLen.length) return null;
+  for (const { id } of byLen) {
+    const lb = boxOf(chains, [id]);
+    if (!lb) continue;
+    const a = chains.chainPreview[id];
+    let piece: Outline | null = null;
+    for (const o of pieces) {
+      if (piece && o.area >= piece.area) continue;
+      const b = o.bb;
+      if (b.minX > lb.minX || b.maxX < lb.maxX || b.minY > lb.minY || b.maxY < lb.maxY) continue;
+      // every point inside (or on) the outline: the line is drawn in the piece, not across it
+      let ok = true;
+      for (let k = 0; ok && k + 1 < a.length; k += 2) {
+        const p = { x: a[k], y: a[k + 1] };
+        ok = inside(p, o.pts) || distToPoly(p, o.pts) <= TOUCH_MM;
+      }
+      if (ok) piece = o;
+    }
+    if (piece) return { chain: id, piece: piece.id, box: pad(piece.bb) };
+  }
+  const id = byLen[0].id;
+  return { chain: id, piece: null, box: pad(boxOf(chains, [id])!) };
+}
+
+/** A box grown by 8 % of its larger side (≥ 10 mm), so the lines do not touch the frame. */
+export function pad(b: Box): Box {
+  const m = Math.max(10, 0.08 * Math.max(b.maxX - b.minX, b.maxY - b.minY));
+  return { minX: b.minX - m, minY: b.minY - m, maxX: b.maxX + m, maxY: b.maxY + m };
 }
 
 export function lineNests(chains: Chains): LineNests {

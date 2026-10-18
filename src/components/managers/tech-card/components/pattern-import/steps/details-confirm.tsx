@@ -17,7 +17,7 @@ import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import Input from 'ui/components/input';
-import { ask, useAnsweredAndGo } from '../ui-bits';
+import { ask, useAnsweredAndGo, useLikelySlot } from '../ui-bits';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
@@ -55,6 +55,9 @@ export function OutlineQuestion({
   const draftMm = Number.isFinite(draftN) && draftN >= 0 ? draftN : null;
   // ANSWERED AND GO: the outline answered, the next question shows — or the step moves on
   const go = useAnsweredAndGo();
+  // LIKELY ANSWERS (ui-bits): skip takes the cut line only where the file names the layer so; with
+  // no word (or a clash) the outline is a real choice — no safe guess, a stop
+  const likely = useLikelySlot('details-outline');
   if (!outlineAsked(api, current)) return null;
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
@@ -65,6 +68,16 @@ export function OutlineQuestion({
     current.origin === 'text' || current.origin === 'measured' ? current : null,
   );
   const prefill = word?.kind === 'cut' && !clash ? 'cut' : null;
+  likely.current =
+    prefill === 'cut' && !busy
+      ? {
+          key: 'details-outline',
+          what: 'drawn outline',
+          answer: 'the cut line (the file names the layer)',
+          sig: 'cut',
+          likely: () => api.answerOutline('cut', mm),
+        }
+      : null;
   const why = [
     current.evidence.some((e) => /only for some pieces/.test(e))
       ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
