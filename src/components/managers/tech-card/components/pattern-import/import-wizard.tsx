@@ -41,7 +41,7 @@ import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
-import { STEPS, stepIndex, useImportSession } from './use-import-session';
+import { STEPS, stepIndex, useImportSession, type ImportSessionApi } from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { autopilotApply, resolverFor } from './autopilot/run';
@@ -204,7 +204,7 @@ function WizardBody({
         : undefined,
     [client],
   );
-  const api = useImportSession({
+  const sessionApi = useImportSession({
     client,
     card,
     namer,
@@ -213,6 +213,22 @@ function WizardBody({
     pageRoles,
     pinScopeKey: initialScopeKey,
   });
+  // STOP · RUN AGAIN: the last action that can start a stage, taken while the run was idle (the
+  // operator's — the screen is out of reach while a stage works), is what "run again" repeats; a
+  // new action takes the "stopped" line away
+  const lastAct = useRef<(() => unknown) | null>(null);
+  const idle = useRef(true);
+  idle.current = !sessionApi.session.busy;
+  const [stopped, setStopped] = useState<StopState | null>(null);
+  const api = replayable(
+    sessionApi,
+    () => apiRef.current,
+    (again) => {
+      if (!idle.current) return;
+      lastAct.current = again;
+      setStopped((st) => (st?.phase === 'stopped' ? null : st));
+    },
+  );
   latest.current = api.session;
   const { session, blocker } = api;
   // files dropped on a pattern slot: read them once, as if picked on the files step
@@ -466,6 +482,63 @@ function WizardBody({
       resumeAutopilot();
     } else void api.next();
   };
+  // ── STOP: the running stage only — the wizard stays on its step with what it had ────────────
+  const stop = () => {
+    if (!session.busy) return;
+    const files = api.inputs.fileList;
+    setStopped({
+      phase: 'stopping',
+      // stopped while the files were read again: "run again" reads them again
+      again:
+        stopped?.phase === 'restoring'
+          ? () => apiRef.current.dispatch({ type: 'files', files })
+          : lastAct.current,
+    });
+    cancelled.current = session.busy.stage;
+    api.cancel();
+  };
+  // The client stops the request in flight only: a stage that ended as the stop was pressed hands
+  // over to the next one of the same move (read → clean, scale → sheet → chains) — stopped as well.
+  const cancelled = useRef<string | null>(null);
+  useEffect(() => {
+    if (stopped?.phase !== 'stopping' || !session.busy) return;
+    if (session.busy.stage === cancelled.current) return;
+    cancelled.current = session.busy.stage;
+    api.cancel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopped?.phase, session.busy?.stage]);
+  useEffect(() => {
+    if (!stopped || session.busy) return;
+    if (stopped.phase === 'stopping') {
+      // the move finished (or failed otherwise) before the stop reached it: nothing was stopped —
+      // said only once the run stays idle (between two stages of one move it is idle for a tick)
+      if (api.errorCode !== 'cancelled') {
+        const t = setTimeout(() => setStopped(null), 120);
+        return () => clearTimeout(t);
+      }
+      // A stage that cannot pause is stopped by restarting the importer (worker/client.ts
+      // HARD_CANCEL_MS): the run went with it and the session came back empty. The files are kept
+      // — read them again, so the wizard is back on the step before the stage, not on an empty one.
+      const files = api.inputs.fileList;
+      if (session.sessionId == null && files.length) {
+        setStopped({ phase: 'restoring', again: null });
+        void sessionApi.dispatch({ type: 'files', files });
+        return;
+      }
+      return setStopped({ ...stopped, phase: 'stopped' });
+    }
+    if (stopped.phase === 'restoring')
+      setStopped(session.error ? null : { phase: 'stopped', again: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopped, session.busy, session.sessionId, api.errorCode]);
+  /** "run again": the stopped stage again — the action that started it, else the primary. */
+  const runAgain = () => {
+    const again = stopped?.again;
+    setStopped(null);
+    if (again) void again();
+    else void continueAnyway();
+  };
+  const stoppedLine = stopped?.phase === 'stopped' && !session.busy;
   // ── ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves on by itself ──
   const stepRef = useRef(session.step);
   stepRef.current = session.step;
@@ -678,7 +751,7 @@ function WizardBody({
             // Esc during a stage cancels the stage, not the wizard.
             if (session.busy) {
               e.preventDefault();
-              api.cancel();
+              stop();
             }
           }}
         >
@@ -865,7 +938,7 @@ function WizardBody({
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>
-              {session.busy && <Working busy={session.busy} onStop={api.cancel} />}
+              {session.busy && <Working busy={session.busy} onStop={stop} />}
             </main>
 
             {/* ── actions: back · the one question · the one button ────────────────────── */}
@@ -882,7 +955,25 @@ function WizardBody({
                 </Button>
               ) : null}
               <div className='min-w-0 flex-1'>
-                {session.error ? (
+                {stoppedLine ? (
+                  <Text
+                    size='micro'
+                    component='p'
+                    className='flex items-baseline gap-1.5 text-labelColor'
+                    data-testid='pattern-import-stopped'
+                  >
+                    stopped ·
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      className='text-labelColor hover:text-textColor'
+                      onClick={runAgain}
+                      title='run the stopped stage again'
+                    >
+                      run again
+                    </Button>
+                  </Text>
+                ) : session.error ? (
                   <StageMessage
                     code={api.errorCode}
                     message={session.error}
@@ -1023,6 +1114,51 @@ function Working({
       </section>
     </div>
   );
+}
+
+/** STOP · RUN AGAIN: a stop on its way, the files read again after a restart, the quiet line. */
+type StopState = {
+  phase: 'stopping' | 'restoring' | 'stopped';
+  again: (() => unknown) | null;
+};
+
+/** The session's actions that may start a stage (what "run again" can repeat). */
+const STAGE_ACTIONS = [
+  'next',
+  'advance',
+  'dispatch',
+  'addSeed',
+  'promoteAside',
+  'editPieces',
+  'editName',
+  'editNames',
+  'confirmSize',
+  'setSize',
+  'drawnAnyway',
+  'confirmShown',
+  'answerOutline',
+  'acceptMissing',
+  'reviewAsides',
+] as const satisfies readonly (keyof ImportSessionApi)[];
+
+/**
+ * The session api with each stage-starting action reported as it is called: `onAct` gets the same
+ * call again, made through the latest api (`now`) when it is repeated.
+ */
+function replayable(
+  api: ImportSessionApi,
+  now: () => ImportSessionApi,
+  onAct: (again: () => unknown) => void,
+): ImportSessionApi {
+  const out: Record<string, unknown> = { ...api };
+  for (const k of STAGE_ACTIONS) {
+    const f = api[k] as unknown as (...a: unknown[]) => unknown;
+    out[k] = (...a: unknown[]) => {
+      onAct(() => (now()[k] as unknown as (...b: unknown[]) => unknown)(...a));
+      return f(...a);
+    };
+  }
+  return out as ImportSessionApi;
 }
 
 /**
