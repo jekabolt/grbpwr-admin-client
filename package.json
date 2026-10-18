@@ -36,6 +36,7 @@
     "patimport:e2e": "node scripts/pattern-import/e2e.mjs",
     "patimport:autopilot": "node scripts/pattern-import/autopilot.mjs",
     "patimport:replay": "node scripts/pattern-import/replay.mjs",
+    "patimport:stopfix": "node --max-old-space-size=8192 scripts/pattern-import/stopfix.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:ask": "node scripts/flat-ask-probe.mjs",
     "flat:pictures": "node scripts/flat-input-pictures-probe.mjs",

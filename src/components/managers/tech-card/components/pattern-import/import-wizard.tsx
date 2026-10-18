@@ -214,30 +214,16 @@ function WizardBody({
         : undefined,
     [client],
   );
-  const sessionApi = useImportSession({
-    client,
-    card,
-    namer,
-    buildDraft,
-    applyDraft,
-    pageRoles,
-    pinScopeKey: initialScopeKey,
-  });
-  // STOP · RUN AGAIN: the last action that can start a stage, taken while the run was idle (the
-  // operator's — the screen is out of reach while a stage works), is what "run again" repeats; a
-  // new action takes the "stopped" line away
-  const lastAct = useRef<(() => unknown) | null>(null);
-  const idle = useRef(true);
-  idle.current = !sessionApi.session.busy;
-  const [stopped, setStopped] = useState<StopState | null>(null);
-  const api = replayable(
-    sessionApi,
-    () => apiRef.current,
-    (again) => {
-      if (!idle.current) return;
-      lastAct.current = again;
-      setStopped((st) => (st?.phase === 'stopped' ? null : st));
-    },
+  const api = useReplayable(
+    useImportSession({
+      client,
+      card,
+      namer,
+      buildDraft,
+      applyDraft,
+      pageRoles,
+      pinScopeKey: initialScopeKey,
+    }),
   );
   latest.current = api.session;
   const { session, blocker } = api;
@@ -527,8 +513,14 @@ function WizardBody({
 
   // ── what the footer asks (D5: every stop reason stays visible — here or in the popover) ──
   const offWizard = (t: string) => /on the card first|on the BOM tab/.test(t);
-  const askText = session.error ? null : blocker ?? autopilotStop ?? api.offer ?? null;
-  const askKind: 'blocker' | 'stop' | 'offer' | null = session.error
+  // STOPFIX: a failed re-write after a storage change is said once, by the toggle on the check
+  // step (with its retry) — the footer keeps the step's own question, not a red block
+  const footerError =
+    session.error && !(session.step === 'check' && api.writeStorage.rewriteError)
+      ? session.error
+      : null;
+  const askText = footerError ? null : blocker ?? autopilotStop ?? api.offer ?? null;
+  const askKind: 'blocker' | 'stop' | 'offer' | null = footerError
     ? null
     : blocker
       ? 'blocker'
@@ -542,7 +534,7 @@ function WizardBody({
     if (i < stageAt) return STAGES[i].steps.every(byItself) ? 'auto' : 'done';
     if (session.busy) return 'working';
     if (applied) return 'done';
-    if (askKind === 'blocker' || askKind === 'stop' || session.error) return 'asks';
+    if (askKind === 'blocker' || askKind === 'stop' || footerError) return 'asks';
     return 'current';
   };
   const subSteps = STAGE_OF_STEP[session.step].steps;
@@ -604,63 +596,6 @@ function WizardBody({
       resumeAutopilot();
     } else void api.next();
   };
-  // ── STOP: the running stage only — the wizard stays on its step with what it had ────────────
-  const stop = () => {
-    if (!session.busy) return;
-    const files = api.inputs.fileList;
-    setStopped({
-      phase: 'stopping',
-      // stopped while the files were read again: "run again" reads them again
-      again:
-        stopped?.phase === 'restoring'
-          ? () => apiRef.current.dispatch({ type: 'files', files })
-          : lastAct.current,
-    });
-    cancelled.current = session.busy.stage;
-    api.cancel();
-  };
-  // The client stops the request in flight only: a stage that ended as the stop was pressed hands
-  // over to the next one of the same move (read → clean, scale → sheet → chains) — stopped as well.
-  const cancelled = useRef<string | null>(null);
-  useEffect(() => {
-    if (stopped?.phase !== 'stopping' || !session.busy) return;
-    if (session.busy.stage === cancelled.current) return;
-    cancelled.current = session.busy.stage;
-    api.cancel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopped?.phase, session.busy?.stage]);
-  useEffect(() => {
-    if (!stopped || session.busy) return;
-    if (stopped.phase === 'stopping') {
-      // the move finished (or failed otherwise) before the stop reached it: nothing was stopped —
-      // said only once the run stays idle (between two stages of one move it is idle for a tick)
-      if (api.errorCode !== 'cancelled') {
-        const t = setTimeout(() => setStopped(null), 120);
-        return () => clearTimeout(t);
-      }
-      // A stage that cannot pause is stopped by restarting the importer (worker/client.ts
-      // HARD_CANCEL_MS): the run went with it and the session came back empty. The files are kept
-      // — read them again, so the wizard is back on the step before the stage, not on an empty one.
-      const files = api.inputs.fileList;
-      if (session.sessionId == null && files.length) {
-        setStopped({ phase: 'restoring', again: null });
-        void sessionApi.dispatch({ type: 'files', files });
-        return;
-      }
-      return setStopped({ ...stopped, phase: 'stopped' });
-    }
-    if (stopped.phase === 'restoring')
-      setStopped(session.error ? null : { phase: 'stopped', again: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopped, session.busy, session.sessionId, api.errorCode]);
-  /** "run again": the stopped stage again — the action that started it, else the primary. */
-  const runAgain = () => {
-    const again = stopped?.again;
-    setStopped(null);
-    if (again) void again();
-    else void continueAnyway();
-  };
-  const stoppedLine = stopped?.phase === 'stopped' && !session.busy;
   // ── ANSWERED AND GO (ui-bits): a quiz answer that leaves nothing asked moves on by itself ──
   const stepRef = useRef(session.step);
   stepRef.current = session.step;
@@ -694,7 +629,7 @@ function WizardBody({
       };
     if (override) return override;
     // a blocker never greys the primary out: the click coaches (shows where and how) instead
-    const blocked = !!blocker && !session.error;
+    const blocked = !!blocker && !footerError;
     if (session.step === 'apply') {
       if (card.downloadOnly)
         return {
@@ -783,6 +718,13 @@ function WizardBody({
     }
   }
 
+  // STOPFIX: the stop's own line (not a red error): the run is as it was before the move.
+  // A stop that lands between two stages is the hook's too (UX-HOOKS §3): it sets `api.stopped`
+  // at once, so the press needs no remembering here.
+  const stoppedLine =
+    !session.busy &&
+    (api.errorCode === 'cancelled' || (!!api.stopped && !session.error));
+
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
   // every line is a link that fixes it (ui-bits ONE-CLICK FIX): the step's marked fix, else the coach
@@ -790,7 +732,7 @@ function WizardBody({
   // of something else: an old replay miss must not click «accept residuals»)
   const fix = { label: 'fix it', onClick: () => fixOrCoach() };
   const coachOnly = { label: 'show where', onClick: () => onAsk() };
-  if (api.notice && !session.error && api.notice !== askText)
+  if (api.notice && !footerError && api.notice !== askText)
     warnings.push({ text: api.notice, action: coachOnly });
   // the footer shows the step's plain question: the session's own sentence stays visible here
   if (askText && askShown !== askText)
@@ -873,7 +815,7 @@ function WizardBody({
             // Esc during a stage cancels the stage, not the wizard.
             if (session.busy) {
               e.preventDefault();
-              stop();
+              api.cancel();
             }
           }}
         >
@@ -1066,7 +1008,7 @@ function WizardBody({
                   </QuizHistoryContext.Provider>
                 </DroppedLabels.Provider>
               </WizardPrimaryContext.Provider>
-              {session.busy && <Working busy={session.busy} onStop={stop} />}
+              {session.busy && <Working busy={session.busy} onStop={api.cancel} />}
             </main>
 
             {/* ── actions: back · the one question · the one button ────────────────────── */}
@@ -1084,27 +1026,31 @@ function WizardBody({
               ) : null}
               <div className='min-w-0 flex-1'>
                 {stoppedLine ? (
+                  // STOPFIX: a stop is the operator's own — one quiet line, the run is kept
                   <Text
                     size='micro'
                     component='p'
-                    className='flex items-baseline gap-1.5 text-labelColor'
+                    className='text-labelColor'
                     data-testid='pattern-import-stopped'
+                    data-stage={api.stopped?.stage ?? undefined}
+                    title={session.error ?? undefined}
                   >
-                    stopped ·
-                    <Button
-                      variant='underline'
-                      size='xs'
-                      className='text-labelColor hover:text-textColor'
-                      onClick={runAgain}
-                      title='run the stopped stage again'
+                    stopped ·{' '}
+                    <button
+                      type='button'
+                      className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+                      title={
+                        api.stopped && api.lastMove ? `repeats: ${api.lastMove}` : primary.title
+                      }
+                      onClick={() => void api.runAgain(primary.onClick)}
                     >
                       run again
-                    </Button>
+                    </button>
                   </Text>
-                ) : session.error ? (
+                ) : footerError ? (
                   <StageMessage
                     code={api.errorCode}
-                    message={session.error}
+                    message={footerError}
                     onReport={api.downloadReport}
                   />
                 ) : askText && !session.busy ? (
@@ -1160,7 +1106,7 @@ function WizardBody({
                   size='sm'
                   className='shrink-0'
                   data-testid='pattern-import-primary'
-                  data-coach={blocker && !session.error && !session.busy ? '' : undefined}
+                  data-coach={blocker && !footerError && !session.busy ? '' : undefined}
                   disabled={!!primary.disabled}
                   loading={!!primary.loading}
                   title={primary.title}
@@ -1212,6 +1158,11 @@ function Working({
   onStop: () => void;
 }) {
   const counted = busy.total > 1;
+  // a note that counts by itself (the restore after a stop: "… · k/n") is not counted twice
+  const ownCount = !!busy.note && /\d+\s*\/\s*\d+\s*$/.test(busy.note);
+  // STOPFIX: the restore after a stop replays stages quietly — say that first, the stage second
+  const restoring = !!busy.note && /^restoring\b/.test(busy.note);
+  const stageWord = STAGE_WORD[busy.stage] ?? busy.stage;
   return (
     <div className='pointer-events-none absolute inset-0 flex items-center justify-center p-4'>
       <section
@@ -1227,7 +1178,7 @@ function Working({
             component='span'
             className='font-bold'
           >
-            {PHASE_OF[busy.stage] ?? 'working'}
+            {restoring ? 'restoring' : PHASE_OF[busy.stage] ?? 'working'}
           </Text>
           <Button
             variant='underline'
@@ -1240,59 +1191,20 @@ function Working({
           </Button>
         </span>
         <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
-          {STAGE_WORD[busy.stage] ?? busy.stage}
-          {busy.note ? ` · ${busy.note}` : ''}
-          {counted ? ` · ${busy.done} / ${busy.total}` : ''}
+          {restoring ? (
+            `${busy.note} · ${stageWord}`
+          ) : (
+            <>
+              {stageWord}
+              {busy.note ? ` · ${busy.note}` : ''}
+              {counted && !ownCount ? ` · ${busy.done} / ${busy.total}` : ''}
+            </>
+          )}
         </Text>
         {counted && <Progress value={(busy.done / busy.total) * 100} />}
       </section>
     </div>
   );
-}
-
-/** STOP · RUN AGAIN: a stop on its way, the files read again after a restart, the quiet line. */
-type StopState = {
-  phase: 'stopping' | 'restoring' | 'stopped';
-  again: (() => unknown) | null;
-};
-
-/** The session's actions that may start a stage (what "run again" can repeat). */
-const STAGE_ACTIONS = [
-  'next',
-  'advance',
-  'dispatch',
-  'addSeed',
-  'promoteAside',
-  'editPieces',
-  'editName',
-  'editNames',
-  'confirmSize',
-  'setSize',
-  'drawnAnyway',
-  'confirmShown',
-  'answerOutline',
-  'acceptMissing',
-  'reviewAsides',
-] as const satisfies readonly (keyof ImportSessionApi)[];
-
-/**
- * The session api with each stage-starting action reported as it is called: `onAct` gets the same
- * call again, made through the latest api (`now`) when it is repeated.
- */
-function replayable(
-  api: ImportSessionApi,
-  now: () => ImportSessionApi,
-  onAct: (again: () => unknown) => void,
-): ImportSessionApi {
-  const out: Record<string, unknown> = { ...api };
-  for (const k of STAGE_ACTIONS) {
-    const f = api[k] as unknown as (...a: unknown[]) => unknown;
-    out[k] = (...a: unknown[]) => {
-      onAct(() => (now()[k] as unknown as (...b: unknown[]) => unknown)(...a));
-      return f(...a);
-    };
-  }
-  return out as ImportSessionApi;
 }
 
 /**
@@ -1355,4 +1267,84 @@ function StageMessage({
       </div>
     </CalloutBox>
   );
+}
+
+/** The session calls that start a move (UX-HOOKS §3): what "run again" repeats after a stop. */
+const MOVES = [
+  'dispatch',
+  'next',
+  'advance',
+  'addSeed',
+  'promoteAside',
+  'editPieces',
+  'editName',
+  'editNames',
+  'answerOutline',
+  'acceptMissing',
+  'confirmSize',
+  'setSize',
+  'drawnAnyway',
+  'setDrawnSizes',
+  'confirmShown',
+  'reviewAsides',
+  'retryWrite',
+] as const;
+type Move = (typeof MOVES)[number];
+/** Events that start no stage: never what a stop interrupted. */
+const NOT_A_MOVE = new Set(['download', 'apply', 'reset']);
+
+/**
+ * STOPFIX "run again": the session api with every move-starting call remembered when it is made
+ * while the run is idle. The first stage that starts afterwards binds it as the move in flight, so
+ * a stop (which undoes that whole move) can be followed by the same call on the same state.
+ * Stages of one move after the first (busy drops between them) keep the binding.
+ */
+function useReplayable(api: ImportSessionApi) {
+  const busyRef = useRef(api.session.busy);
+  busyRef.current = api.session.busy;
+  const pending = useRef<{ name: Move; args: unknown[] } | null>(null);
+  const [move, setMove] = useState<{ name: Move; args: unknown[] } | null>(null);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const busy = !!api.session.busy;
+    if (busy && !wasBusy.current && pending.current) {
+      setMove(pending.current);
+      pending.current = null;
+    }
+    wasBusy.current = busy;
+  }, [api.session.busy]);
+  // a new run (files read again, reset) forgets the old run's move
+  useEffect(() => {
+    if (api.session.sessionId == null) {
+      setMove(null);
+    }
+  }, [api.session.sessionId]);
+
+  const wrapped = { ...api } as ImportSessionApi;
+  const rec = wrapped as unknown as Record<Move, (...a: unknown[]) => unknown>;
+  const raw = api as unknown as Record<Move, (...a: unknown[]) => unknown>;
+  for (const name of MOVES) {
+    const fn = raw[name];
+    if (typeof fn !== 'function') continue;
+    rec[name] = (...args: unknown[]) => {
+      const ev = name === 'dispatch' ? (args[0] as { type?: string } | undefined) : undefined;
+      if (!busyRef.current && !(ev?.type && NOT_A_MOVE.has(ev.type)))
+        pending.current = { name, args };
+      return fn(...args);
+    };
+  }
+  const describe = (m: typeof move) =>
+    !m
+      ? null
+      : m.name === 'dispatch'
+        ? String((m.args[0] as { type?: string } | undefined)?.type ?? 'event')
+        : m.name;
+  return Object.assign(wrapped, {
+    /** The call the stopped move began with (its name), null = none recorded. */
+    lastMove: describe(move),
+    /** Repeat the stopped move's call (recorded again as the new move); none → `fallback`. */
+    // only an undone move (`stopped`) is repeated: a stop that undid nothing would apply it twice
+    runAgain: (fallback: () => unknown) =>
+      api.stopped && move ? rec[move.name](...move.args) : fallback(),
+  });
 }

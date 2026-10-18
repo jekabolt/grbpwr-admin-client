@@ -63,6 +63,8 @@ const cardSizes = (tokens: string[]): CardSize[] =>
 function mount(tokens: string[]) {
   let s: Session | null = null;
   const writes: { in: WriteIn; out: WriteOut }[] = [];
+  /** STOPFIX: the write stage fails while on (a write that did not happen). */
+  const failWrite = { on: false };
   const ctx: StageCtx = { checkCancel: () => {}, progress: () => {} };
   const client: ImportClient = {
     kind: 'worker',
@@ -74,6 +76,7 @@ function mount(tokens: string[]) {
     async run(_id, stage: StageName, input) {
       if (!s) throw new Error('no session');
       if (stage === 'render-som') return { sheetPng: new Blob([]), crops: [], marks: [] } as never;
+      if (stage === 'write' && failWrite.on) throw new Error('the write failed (probe)');
       const out = await s.runStage(stage, input as never, ctx);
       if (stage === 'write') writes.push({ in: input as WriteIn, out: out as WriteOut });
       return out as never;
@@ -133,7 +136,7 @@ function mount(tokens: string[]) {
     }
     return `tick budget spent on ${api.session.step}`;
   };
-  return { get, dispatch, drive, settle, writes, close: () => s?.close() };
+  return { get, dispatch, drive, settle, writes, failWrite, close: () => s?.close() };
 }
 
 const rulOf = (w: { out: WriteOut } | undefined) => w?.out.scopes[0]?.rul;
@@ -321,6 +324,70 @@ export async function sectionH(o: {
       !!wBl &&
       wBl.out.scopes.every((x) => x.rul === undefined),
   );
+
+  // ── H6 · STOPFIX: a re-write that fails — the old draft stays locked and says so; the next
+  // storage event writes again (it was skipped), so does `retryWrite`; apply only after a write ──
+  const tryApply = async () => {
+    await b.get().next();
+    await b.settle();
+    const onApply = b.get().session.step === 'apply';
+    await b.dispatch({ type: 'apply' });
+    const phase = b.get().apply.phase;
+    const ok =
+      b.get().apply.phase === 'done' && (b.get().apply as { result?: { ok: boolean } }).result?.ok;
+    await b.dispatch({ type: 'back', to: 'check' });
+    return { onApply, phase, ok: !!ok };
+  };
+  const n1 = b.writes.length;
+  b.failWrite.on = true;
+  const d0 = b.get().session.draft;
+  await b.dispatch({ type: 'write-storage', storage: 'rul' });
+  const ws1 = b.get().writeStorage;
+  check(
+    'H',
+    'a re-write that fails: the toggle says so (rewriteError), the old draft is kept and held',
+    b.get().session.draft === d0 &&
+      ws1.storage === 'rul' &&
+      !!ws1.rewriteError &&
+      b.get().lockApply() === null,
+    { rewriteError: ws1.rewriteError },
+  );
+  const stale = await tryApply();
+  check(
+    'H',
+    'the draft of the old choice is not applied',
+    stale.onApply && stale.phase === 'idle',
+    stale,
+  );
+  b.failWrite.on = false;
+  await b.dispatch({ type: 'write-storage', storage: 'blocks' });
+  check(
+    'H',
+    'the next storage event writes again (no longer skipped): blocks written, error gone',
+    b.writes.length === n1 + 1 &&
+      b.get().session.draft !== d0 &&
+      !('storage' in (b.writes.at(-1)?.in ?? {})) &&
+      b.get().writeStorage.rewriteError === null,
+    b.get().writeStorage,
+  );
+  b.failWrite.on = true;
+  await b.dispatch({ type: 'write-storage', storage: 'rul' });
+  const failedAgain = !!b.get().writeStorage.rewriteError;
+  b.failWrite.on = false;
+  await b.get().retryWrite();
+  await b.settle();
+  const wR = b.writes.at(-1);
+  check(
+    'H',
+    'retryWrite: the same choice written again (rul), error gone',
+    failedAgain &&
+      b.writes.length === n1 + 2 &&
+      wR?.in.storage === 'rul' &&
+      b.get().writeStorage.rewriteError === null,
+    { failedAgain, writes: b.writes.length - n1 },
+  );
+  const fresh = await tryApply();
+  check('H', 'the draft written for the choice applies', fresh.onApply && fresh.ok, fresh);
   b.close();
 
   // ── H5 · our own kombinezon export (per-size blocks 6…20): refused with the piece that differs ──

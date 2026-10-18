@@ -86,6 +86,16 @@ import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
+import {
+  before,
+  cloneInput,
+  digestOf,
+  nextStageOf,
+  pruneAfter,
+  RESTORE_STAGES,
+  shownStage,
+  type RestoreEntry,
+} from './stop-restore';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -271,6 +281,17 @@ const EMPTY_INPUTS: Inputs = {
   answerCtx: null,
   autopilot: [],
 };
+
+/** STOPFIX: a stage answer for a run the operator has left — it changes nothing (`fail` drops it). */
+class StaleRun extends Error {
+  constructor() {
+    super('a stage of an earlier run');
+    this.name = 'StaleRun';
+  }
+}
+
+/** RULHOOK × STOPFIX: the apply-lock token of a draft the storage re-write holds. */
+const REWRITE = -2;
 
 const EMPTY_SESSION: ImportSession = {
   sessionId: null,
@@ -506,29 +527,247 @@ export function useImportSession(deps: {
     [],
   );
 
+  // ── STOPFIX: a stop never ends the run ──────────────────────────────────────────────────
+  /**
+   * The stages that made the worker's state, with their inputs and output digests (stop-restore.ts):
+   * what a restore plays again after the importer was restarted under the run.
+   */
+  const history = useRef<RestoreEntry[]>([]);
+  /** Bumped when the run starts over (files, reset, a run given up): a late answer is not recorded. */
+  const histGen = useRef(0);
+  /**
+   * The worker session the run lives in after a restore. `session.sessionId` stays the run's id
+   * (the wizard keys "a new run" off it: the autopilot starts once per id) — the worker's may move.
+   */
+  const wid = useRef<number | null>(null);
+  const workerId = () => wid.current ?? sRef.current.sessionId;
+  /** The importer was restarted under the run: the next stage restores it first. */
+  const lost = useRef(false);
+  const [restorePending, setRestorePending] = useState(false);
+  const markLost = (v: boolean) => {
+    lost.current = v;
+    setRestorePending(v);
+  };
+  const restoring = useRef<Promise<void> | null>(null);
+  /** The operator pressed stop: no stage starts until his next action (a move stops between stages). */
+  const stopReq = useRef(false);
+  /** What the last stop stopped; null once a stage runs again (or a new run starts). */
+  const [stopped, setStopped] = useState<{ stage: StageName | null; restarted: boolean } | null>(
+    null,
+  );
+  const resetHistory = () => {
+    history.current = [];
+    histGen.current++;
+    wid.current = null;
+    restoring.current = null;
+    markLost(false);
+    setStopped(null);
+  };
+
+  /**
+   * STOPFIX: one move — an operator action, a drive tick — is all or nothing under a stop: what
+   * it changed (the session, the inputs, the history, the apply lock) is put back as it was when
+   * the move began, so "run again" repeats the action on the state it was made on (a seed is not
+   * added twice, a mask edit is not half-applied). When the move ran a stage that holds state,
+   * the worker is past the screen: its session is replaced by a restore of the history as it was.
+   */
+  type Move = {
+    gen: number;
+    session: ImportSession;
+    inputs: Inputs;
+    history: RestoreEntry[];
+    baseSeeds: Seed[] | null;
+    hints: AiPageHint[];
+    basis: Map<string, string>;
+    lock: typeof applyLock.current;
+    rewriteError: string | null;
+    /** Codex r2: the card the run reads (`back` takes it again before a stage that may stop). */
+    runCard: CardContext | null;
+    cardAt: string | null;
+    /** A stage that holds state was sent to the worker during the move. */
+    touched: boolean;
+    stopped: boolean;
+  };
+  const move = useRef<Move | null>(null);
+  async function asMove<T>(f: () => Promise<T>): Promise<T> {
+    if (move.current) return f();
+    const m: Move = {
+      gen: histGen.current,
+      session: sRef.current,
+      inputs: iRef.current,
+      history: history.current,
+      baseSeeds: baseSeeds.current,
+      hints: pageHints.current,
+      basis: pageBasis.current,
+      lock: applyLock.current,
+      rewriteError: rewriteErr.current,
+      runCard: runCard.current,
+      cardAt: cardAt.current,
+      touched: false,
+      stopped: false,
+    };
+    move.current = m;
+    try {
+      return await f();
+    } finally {
+      if (move.current === m) move.current = null;
+      if (m.stopped && m.gen === histGen.current) rollBack(m);
+    }
+  }
+  function rollBack(m: Move) {
+    const error = sRef.current.error;
+    const back = { ...m.session, busy: null, error };
+    sRef.current = back;
+    setSession(back);
+    iRef.current = m.inputs;
+    setInputs(m.inputs);
+    baseSeeds.current = m.baseSeeds;
+    pageHints.current = m.hints;
+    pageBasis.current = m.basis;
+    applyLock.current = m.lock;
+    runCard.current = m.runCard;
+    cardAt.current = m.cardAt;
+    rewriteErr.current = m.rewriteError;
+    setRewriteError(m.rewriteError);
+    prunePassed();
+    if (!m.touched) return;
+    // the worker ran past the screen (or half-ran a stage): its session is rebuilt from the history
+    // the screen was made of, on the next stage
+    history.current = m.history;
+    const id = workerId();
+    if (id != null && (!client.alive || client.alive(id))) void client.close(id);
+    markLost(true);
+  }
+
+  /** RULHOOK × STOPFIX: the re-write of the check step's draft after a storage change. */
+  const rewriting = useRef(false);
+  const rewriteAgain = useRef(false);
+  const rewriteErr = useRef<string | null>(null);
+  const [rewriteError, setRewriteErrorState] = useState<string | null>(null);
+  const setRewriteError = (x: string | null) => {
+    rewriteErr.current = x;
+    setRewriteErrorState(x);
+  };
+
   // Close the worker session — and end the worker — when the wizard unmounts.
   useEffect(
     () => () => {
-      const id = sRef.current.sessionId;
+      const id = workerId();
       if (id != null) void client.close(id);
       client.dispose?.();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [client],
   );
 
   async function run<S extends StageName>(stage: S, input: StageIO[S]['in']) {
-    const id = sRef.current.sessionId;
-    if (id == null) throw new Error('no session — read the files first');
+    if (sRef.current.sessionId == null) throw new Error('no session — read the files first');
+    // STOPFIX: a stop holds every stage after the one it stopped (a move, a drive)
+    if (stopReq.current) throw new ImportWorkerError('cancelled', 'stopped by the operator', stage);
     // the stage that reads the card's run: what everything after it was built against
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
+    setStopped(null);
     failureRef.current = null;
+    // Codex: a run that outlives its run (files read again, reset) changes nothing of the new one
+    const gen = histGen.current;
+    const live = () => gen === histGen.current;
+    let id: number | null = null;
     try {
-      return await client.run(id, stage, input, (p) =>
-        patch({ busy: { stage, done: p.done, total: p.total, note: p.note } }),
-      );
+      if (lost.current) {
+        const r = (restoring.current ??= restore().finally(() => {
+          if (restoring.current === r) restoring.current = null;
+        }));
+        await r;
+        if (!live()) throw new StaleRun();
+        patch({ busy: { stage, done: 0, total: 1 } });
+      }
+      id = workerId();
+      if (id == null) throw new Error('no session — read the files first');
+      const kept = RESTORE_STAGES.has(stage) ? cloneInput(input) : null;
+      if (kept && move.current) move.current.touched = true;
+      const out = await client.run(id, stage, input, (p) => {
+        if (live()) patch({ busy: { stage, done: p.done, total: p.total, note: p.note } });
+      });
+      if (!live()) throw new StaleRun();
+      if (kept)
+        history.current = [
+          ...pruneAfter(history.current, stage),
+          { stage, input: kept, digest: digestOf(out) },
+        ];
+      return out;
+    } catch (e) {
+      if (!live()) throw e instanceof StaleRun ? e : new StaleRun();
+      if (id != null) {
+        const alive = !client.alive || client.alive(id);
+        // a live worker ran the stage's invalidation before it failed: the history drops the same
+        if (alive) history.current = pruneAfter(history.current, stage);
+        // PATTERNS ("chains: assemble the sheet first"): the worker now holds less than the
+        // screen shows — its latest state stage (the history's frontier) comes before the latest
+        // output on screen (a page-remove whose clean failed; chains new, then sizes failed). The
+        // move is undone like a stop, so the screen never runs ahead of the worker (Codex)
+        const frontier = history.current.at(-1)?.stage ?? null;
+        if (
+          alive &&
+          move.current &&
+          importErrorCode(e) !== 'cancelled' &&
+          shownStage(sRef.current) != null &&
+          (frontier == null || before(frontier, shownStage(sRef.current)))
+        )
+          move.current.stopped = true;
+        // the importer was restarted under a stop: the run is kept, the next stage restores it
+        else if (importErrorCode(e) === 'cancelled') markLost(true);
+      }
+      throw e;
     } finally {
-      patch({ busy: null });
+      if (live()) patch({ busy: null });
+    }
+  }
+
+  /**
+   * STOPFIX: the run back in a fresh worker session — the files read again, every stage of the
+   * history played again quietly with its recorded input, each output checked against the one
+   * recorded. A stop during it keeps the run lost (and kept); any other failure gives the run up
+   * as before the fix (`no-session`: read the files again) — never a run on another drawing.
+   */
+  async function restore(): Promise<void> {
+    const files = iRef.current.fileList;
+    const hist = history.current.slice();
+    const gen = histGen.current;
+    const total = hist.length + 1;
+    const note = (k: number) => `restoring the run after the stop · ${k}/${total}`;
+    patch({ busy: { stage: hist[0]?.stage ?? 'extract', done: 0, total, note: note(0) } });
+    let fresh: number | null = null;
+    try {
+      if (!files.length) throw new Error('the files are no longer at hand');
+      const bytes = await Promise.all(
+        files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+      );
+      const opened = await client.open(bytes);
+      fresh = opened.sessionId;
+      for (let k = 0; k < hist.length; k++) {
+        const h = hist[k];
+        if (stopReq.current)
+          throw new ImportWorkerError('cancelled', 'stopped by the operator', h.stage);
+        if (gen !== histGen.current) throw new StaleRun();
+        patch({ busy: { stage: h.stage, done: k + 1, total, note: note(k + 1) } });
+        const out = await client.run(fresh, h.stage, cloneInput(h.input));
+        if (digestOf(out) !== h.digest)
+          throw new Error(`${h.stage} came out different in the restarted importer`);
+      }
+      if (gen !== histGen.current) throw new StaleRun();
+      wid.current = fresh;
+      markLost(false);
+    } catch (e) {
+      if (fresh != null && wid.current !== fresh) void client.close(fresh);
+      if (gen !== histGen.current) throw new StaleRun();
+      // stopped again: the run stays as it is (kept, still to restore)
+      if (importErrorCode(e) === 'cancelled') throw e;
+      const why = e instanceof Error ? e.message : String(e);
+      throw new ImportWorkerError(
+        'no-session',
+        `the run could not be restored after the stop (${why}) — read the files again`,
+      );
     }
   }
 
@@ -540,6 +779,8 @@ export function useImportSession(deps: {
   } | null>(null);
 
   const fail = (e: unknown) => {
+    // a stage of a run the operator has left (files read again, reset): nothing of the new one moves
+    if (e instanceof StaleRun) return;
     const message = e instanceof Error ? e.message : String(e);
     const code = importErrorCode(e);
     failureRef.current = {
@@ -551,10 +792,28 @@ export function useImportSession(deps: {
       message,
     };
     setErrorCode(code);
-    const id = sRef.current.sessionId;
-    // The worker was restarted (a stage that would not stop, a crash): its session is gone, so
-    // the run starts over from the files — still staged on the files step.
-    if (id != null && client.alive && !client.alive(id)) {
+    const id = workerId();
+    const dead = id != null && !!client.alive && !client.alive(id);
+    // STOPFIX: a stop is the operator's — the run stays on its step with everything it had and
+    // all his answers. When the importer had to be restarted for it (a stage that would not
+    // pause), the next stage restores the run first (`restore`).
+    if (code === 'cancelled') {
+      if (dead) markLost(true);
+      // the move it stopped is undone when it returns (`asMove`)
+      if (move.current) move.current.stopped = true;
+      setStopped({ stage: failureRef.current.stage, restarted: dead });
+      patch({
+        busy: null,
+        error: dead
+          ? 'stopped — the importer was restarted; the run is as it was before this step'
+          : 'stopped by the operator — the run is as it was before this step',
+      });
+      return;
+    }
+    // The worker was restarted (a crash, a run that could not be restored): its session is gone,
+    // so the run starts over from the files — still staged on the files step.
+    if (dead) {
+      resetHistory();
       baseSeeds.current = null;
       setSom(null);
       setApply({ phase: 'idle' });
@@ -666,7 +925,8 @@ export function useImportSession(deps: {
           heldNames.current = [];
           setSom(null);
           setExtracted(NO_EXTRACT);
-          const old = sRef.current.sessionId;
+          const old = workerId();
+          resetHistory();
           if (old != null) await client.close(old);
           // M6: too many files / bytes are refused before a single byte is read.
           checkFilesBeforeReading(ev.files);
@@ -987,12 +1247,19 @@ export function useImportSession(deps: {
           // on the check step the draft is written again with it — unless an apply holds that draft.
           // Codex: the old draft (the old choice) is locked first, before any await — no apply
           // takes it while the write runs, nor after a write that failed; the new draft is free
+          // STOPFIX: a draft only a re-write holds (the last one failed) is written again — the
+          // toggle and the files never part; one held by an apply (running or done) is not
           const s = sRef.current;
           const held = applyLock.current;
-          if (s.step === 'check' && s.draft && !(held && held.draft === s.draft)) {
-            applyLock.current = { draft: s.draft, token: -2, used: true };
-            await dispatchRaw({ type: 'write' });
+          const free = !held || held.draft !== s.draft || held.token === REWRITE;
+          if (s.step !== 'check' || !s.draft || !free) return;
+          // a re-write in flight writes the latest choice once it is done
+          if (rewriting.current) {
+            rewriteAgain.current = true;
+            return;
           }
+          applyLock.current = { draft: s.draft, token: REWRITE, used: true };
+          await rewrite();
           return;
         }
         case 'write': {
@@ -1193,7 +1460,8 @@ export function useImportSession(deps: {
           return;
         }
         case 'reset': {
-          const old = sRef.current.sessionId;
+          const old = workerId();
+          resetHistory();
           if (old != null) await client.close(old);
           pageHints.current = [];
           pageBasis.current = new Map();
@@ -1212,6 +1480,33 @@ export function useImportSession(deps: {
       }
     } catch (e) {
       fail(e);
+    }
+  }
+
+  /**
+   * RULHOOK × STOPFIX: the draft written again with the storage the inputs hold now. Not written
+   * (the write failed): the old draft stays locked — no apply takes it — and `rewriteError` says
+   * why; the next storage event or `retryWrite` writes again. Stopped: the move is undone (the
+   * storage, the draft and its lock as before the event).
+   */
+  async function rewrite() {
+    rewriting.current = true;
+    setRewriteError(null);
+    try {
+      for (;;) {
+        const before = sRef.current.draft;
+        rewriteAgain.current = false;
+        await dispatchRaw({ type: 'write' });
+        if (sRef.current.draft === before) {
+          setRewriteError(sRef.current.error ?? 'the files were not written again');
+          return;
+        }
+        if (!rewriteAgain.current) return;
+        // a newer choice came in while it ran: the draft just written is the old one now
+        applyLock.current = { draft: sRef.current.draft, token: REWRITE, used: true };
+      }
+    } finally {
+      rewriting.current = false;
     }
   }
 
@@ -1313,6 +1608,7 @@ export function useImportSession(deps: {
           pictures: roles.pictures !== false,
         });
       } catch (e) {
+        if (e instanceof StaleRun || importErrorCode(e) === 'cancelled') throw e;
         notes.push(
           `AI page roles: the pages could not be drawn (${e instanceof Error ? e.message : String(e)})`,
         );
@@ -1380,6 +1676,12 @@ export function useImportSession(deps: {
     patch({ semantics: sem });
     namerNote.current = namerError;
     setNotice(namerError);
+  }
+
+  /** STOPFIX: the details of the pieces as named — what `toDetails` ends with, run on its own. */
+  async function buildDetails() {
+    const sem = await run('semantics', semanticsInput(iRef.current));
+    patch({ semantics: sem });
   }
 
   /**
@@ -1498,6 +1800,8 @@ export function useImportSession(deps: {
           await toDetails();
           return;
         case 'meaning': {
+          // STOPFIX: a stop landed on the details before they were built — "next" builds them
+          if (!s.semantics) return await buildDetails();
           setNotice(null);
           // The AI's fabric calls ride along; the worker uses them only where the sheet is silent,
           // only for names auto-accepted at T and never for a name the operator typed (C7).
@@ -1758,6 +2062,8 @@ export function useImportSession(deps: {
   /** An operator action: whatever the drive or a resolver was about to do is stale now. */
   const operatorActs = () => {
     opRev.current++;
+    // STOPFIX: the operator acts again — the stop he pressed is behind him
+    stopReq.current = false;
     disarm();
   };
   /** Only the steps before the current one can be "passed". */
@@ -1810,29 +2116,32 @@ export function useImportSession(deps: {
       opRev.current === at.rev;
     void tracked(async () => {
       try {
-        const t = await driveTick(d.state, {
-          session: sRef.current,
-          inputs: iRef.current,
-          blocker,
-          offer,
-          notice: notice && notice === ackedNote.current ? null : notice,
-          busy: false,
-          resolve: d.resolve,
-          prefill: d.prefill,
-          current: () => ({ session: sRef.current, inputs: iRef.current }),
-          forward: async () => {
-            const rev = opRev.current;
-            const moved = await forwardMarked(true);
-            return moved && opRev.current === rev;
-          },
-          patch: (p) => {
-            iRef.current = { ...iRef.current, ...p };
-            patchInputs(p);
-          },
-          dispatch: (ev) => dispatchRaw(ev),
-          live,
-          failed: () => !!sRef.current.error,
-        });
+        // STOPFIX: one tick is one move — a stop puts back what the tick's answer changed
+        const t = await asMove(() =>
+          driveTick(d.state, {
+            session: sRef.current,
+            inputs: iRef.current,
+            blocker,
+            offer,
+            notice: notice && notice === ackedNote.current ? null : notice,
+            busy: false,
+            resolve: d.resolve,
+            prefill: d.prefill,
+            current: () => ({ session: sRef.current, inputs: iRef.current }),
+            forward: async () => {
+              const rev = opRev.current;
+              const moved = await forwardMarked(true);
+              return moved && opRev.current === rev;
+            },
+            patch: (p) => {
+              iRef.current = { ...iRef.current, ...p };
+              patchInputs(p);
+            },
+            dispatch: (ev) => dispatchRaw(ev),
+            live,
+            failed: () => !!sRef.current.error,
+          }),
+        );
         if (t.kind !== 'stopped' || drive.current !== d) return;
         disarm();
         if (t.why === 'refused' && t.reason) {
@@ -1861,7 +2170,10 @@ export function useImportSession(deps: {
   async function dispatch(ev: WizardEvent): Promise<void> {
     operatorActs();
     if (ev.type === 'files' || ev.type === 'reset') setPassed({});
-    await tracked(() => dispatchRaw(ev));
+    // STOPFIX: an event is one move (reading files or a reset starts a run of its own)
+    await tracked(() =>
+      ev.type === 'files' || ev.type === 'reset' ? dispatchRaw(ev) : asMove(() => dispatchRaw(ev)),
+    );
     prunePassed();
     if (ev.type === 'files' && !sRef.current.error && sRef.current.sessionId != null) arm();
   }
@@ -1923,7 +2235,7 @@ export function useImportSession(deps: {
   /** The operator's "next": this step, then on through every step that asks nothing. */
   async function next(): Promise<void> {
     operatorActs();
-    if (await forwardMarked(false)) arm();
+    if (await asMove(() => forwardMarked(false))) arm();
   }
 
   /**
@@ -1932,11 +2244,28 @@ export function useImportSession(deps: {
    * again; no answer = the run stops there for the operator.
    */
   function advance(opts: { resolve?: AutoResolver<Inputs>; prefill?: AutoResolver<Inputs> } = {}) {
+    stopReq.current = false;
+    // STOPFIX: a resume goes on past the operator's own stop (the drive stops on any error)
+    if (failureRef.current?.code === 'cancelled' && sRef.current.error) {
+      failureRef.current = null;
+      setErrorCode(null);
+      patch({ error: null });
+    }
     if (refusal.current && notice === refusal.current) setNotice(null);
     refusal.current = null;
     // a resume past the namer's outage: acknowledged — the codes are typed without the AI
     if (opts.resolve && notice && notice === namerNote.current) ackedNote.current = notice;
     arm(opts.resolve, opts.prefill);
+    // STOPFIX: stopped on the details before they were built — build them first (the drive waits)
+    const s = sRef.current;
+    if (s.step === 'meaning' && !s.semantics && !s.busy && s.sessionId != null)
+      void tracked(async () => {
+        try {
+          await asMove(buildDetails);
+        } catch (e) {
+          fail(e);
+        }
+      });
   }
 
   /**
@@ -1947,13 +2276,121 @@ export function useImportSession(deps: {
     return addSeed(a.at, a);
   }
 
+  /**
+   * PROMOTE-BATCH (Codex): the next free seed id — above every seed the worker may hold: the first
+   * run's, the clicks, the seeds on screen and the text seeds held back with a set-aside outline
+   * (one of those taken again by a click would promote the wrong outline).
+   */
+  const nextSeedId = (i: Inputs, extra: readonly Seed[] = []) =>
+    Math.max(
+      0,
+      ...(baseSeeds.current ?? []).map((x) => x.id),
+      ...i.clickSeeds.map((x) => x.id),
+      ...(sRef.current.pieces?.seeds ?? []).map((x) => x.id),
+      ...(sRef.current.pieces?.setAside ?? []).flatMap((a) => (a.seed ? [a.seed.id] : [])),
+      ...extra.map((x) => x.id),
+    ) + 1;
+
+  /**
+   * PROMOTE-BATCH: "these are pieces" on several set-aside outlines at once — the seeds that
+   * `promoteAside` gives each, in the order given, with ONE pieces run. One move: a stop — or any
+   * failure — undoes the whole batch. An id that is not among the outlines set aside now (read
+   * again, a piece already, given twice) is skipped with its reason, never a failure. Returns the
+   * seed each promoted aside became (a following piece-edits names them) — only seeds the fill made
+   * a piece of; a seed the fill dropped is reported skipped. null = the batch was undone.
+   */
+  async function promoteAsides(ids: readonly number[]): Promise<PromoteResult | null> {
+    operatorActs();
+    return asMove(async () => {
+      try {
+        const i = iRef.current;
+        const shown = new Map((sRef.current.pieces?.setAside ?? []).map((a) => [a.id, a]));
+        const added: Seed[] = [];
+        const want = new Map<number, SeedId>();
+        const res: PromoteResult = { seeds: {}, skipped: [] };
+        for (const id of ids) {
+          const a = shown.get(id);
+          if (want.has(id) || !a) {
+            res.skipped.push({
+              id,
+              why: want.has(id)
+                ? 'given twice'
+                : 'not set aside now (the pieces were read again, or it is a piece already)',
+            });
+            continue;
+          }
+          // a seed already given for it that the fill has not taken: used again, not doubled
+          const own = [...i.clickSeeds, ...added].find(
+            (x) => x.aside === id || (!!a.seed && x.id === a.seed.id),
+          );
+          const seed: Seed = own ??
+            a.seed ?? {
+              id: nextSeedId(i, added),
+              at: a.at,
+              origin: 'click',
+              variant: i.variant,
+              aside: a.id,
+            };
+          if (!own) added.push(seed);
+          want.set(id, seed.id);
+        }
+        if (!want.size) return res;
+        // Codex: the fill judges a not-a-piece seed against the pieces of the run before
+        // (`separator`): with one of those edits, several promotes run one after the other (the
+        // runs the clicks make), so the batch never draws what the clicks would not
+        const oneByOne = want.size > 1 && i.edits.some((e) => e.kind === 'not-a-piece');
+        const fill = async (clicks: readonly Seed[], seeds: readonly Seed[]) => {
+          let out: StageIO['pieces']['out'] | null = null;
+          for (let k = oneByOne ? Math.min(1, seeds.length) : seeds.length; ; k++) {
+            const step = { ...i, clickSeeds: [...clicks, ...seeds.slice(0, k)] };
+            iRef.current = step;
+            patchInputs({ clickSeeds: step.clickSeeds });
+            out = await run('pieces', piecesInput(step));
+            patch({ pieces: out });
+            settleToPieces();
+            if (k >= seeds.length) break;
+          }
+          return new Set((out?.families ?? []).map((f) => f.seed));
+        };
+        let made = await fill(i.clickSeeds, added);
+        // Codex: a seed the fill made no piece of (another model's held seed, a duplicate label)
+        // is taken back and the fill runs once more without it — its outline stays set aside
+        const dropped = [...want].filter(([, sd]) => !made.has(sd));
+        if (dropped.length) {
+          const gone = new Set(dropped.map(([, sd]) => sd));
+          made = await fill(
+            i.clickSeeds.filter((x) => !gone.has(x.id)),
+            added.filter((x) => !gone.has(x.id)),
+          );
+          for (const [id] of dropped) {
+            res.skipped.push({ id, why: 'the fill made no piece of it — left set aside' });
+            want.delete(id);
+          }
+        }
+        for (const [id, sd] of want) {
+          // still none: the batch is undone rather than handing back a seed with no piece
+          if (!made.has(sd)) throw new Error(`promote-asides: no piece came of outline ${id}`);
+          res.seeds[id] = sd;
+        }
+        return res;
+      } catch (e) {
+        // Codex: any failure undoes the batch (inputs never say "promoted" over pieces that do not)
+        if (move.current) move.current.stopped = true;
+        fail(e);
+        return null;
+      }
+    });
+  }
+
   /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
   async function addSeed(at: PtMm, aside?: SetAside) {
     operatorActs();
+    return asMove(() => addSeedMove(at, aside));
+  }
+  async function addSeedMove(at: PtMm, aside?: SetAside) {
     try {
       const i = iRef.current;
-      const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
-      const id = Math.max(0, ...all.map((s) => s.id)) + 1;
+      const id = nextSeedId(i);
       const seed: Seed = aside?.seed
         ? aside.seed
         : aside
@@ -1985,6 +2422,13 @@ export function useImportSession(deps: {
     edits: ReadonlyMap<SeedId, Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>>,
   ) {
     if (!edits.size) return;
+    // STOPFIX (Codex r2): a typed name and its confirmation are undone with the move a stop ends
+    operatorActs();
+    return asMove(() => editNamesMove(edits));
+  }
+  async function editNamesMove(
+    edits: ReadonlyMap<SeedId, Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>>,
+  ) {
     const i = iRef.current;
     const seeds = [...edits.keys()];
     // C7: the AI's fabric call was for the AI's name — an edited name drops it, and an assignment
@@ -2061,6 +2505,11 @@ export function useImportSession(deps: {
 
   /** Append (or, with `undo`, drop the last) piece edit and re-run the fill. */
   async function editPieces(e: PieceEdit | 'undo') {
+    // STOPFIX (Codex r2): the inputs it sets are part of the move a stop undoes
+    operatorActs();
+    return asMove(() => editPiecesMove(e));
+  }
+  async function editPiecesMove(e: PieceEdit | 'undo') {
     const cur = iRef.current.edits;
     const edits = e === 'undo' ? cur.slice(0, -1) : [...cur, e];
     iRef.current = { ...iRef.current, edits };
@@ -2099,6 +2548,10 @@ export function useImportSession(deps: {
 
   /** D3: the operator's explicit answer to "what is the drawn outline" for the file. */
   async function answerOutline(meaning: 'cut' | 'seam', allowanceMm: number) {
+    operatorActs();
+    return asMove(() => answerOutlineMove(meaning, allowanceMm));
+  }
+  async function answerOutlineMove(meaning: 'cut' | 'seam', allowanceMm: number) {
     const fileAllowance: AllowanceDecision = {
       meaning,
       allowanceMm,
@@ -2156,7 +2609,24 @@ export function useImportSession(deps: {
      * RULHOOK: the storage the next write uses, judged against this run's sizes — `ignored` says
      * why an asked base is not used. Set it with `dispatch({ type: 'write-storage', … })`.
      */
-    writeStorage: writeStorageFor(inputs.writeStorage, writtenTokens(session.sizes)),
+    writeStorage: {
+      ...writeStorageFor(inputs.writeStorage, writtenTokens(session.sizes)),
+      /**
+       * STOPFIX: the last re-write after a storage change did not write — the draft on screen is
+       * the OLD choice and no apply takes it; null = the draft is the choice shown.
+       */
+      rewriteError:
+        rewriteError &&
+        applyLock.current?.token === REWRITE &&
+        applyLock.current.draft === session.draft
+          ? rewriteError
+          : null,
+      /** A re-write is running. */
+      rewriting: rewriting.current,
+    },
+    /** STOPFIX: write the check step's draft again with the storage chosen (after a failed one). */
+    retryWrite: () =>
+      dispatch({ type: 'write-storage', ...(iRef.current.writeStorage ?? { storage: 'blocks' }) }),
     setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
       operatorActs();
       setSheetModes((m) => ({ ...m, [scopeKey]: mode }));
@@ -2196,6 +2666,8 @@ export function useImportSession(deps: {
     next,
     addSeed,
     promoteAside,
+    /** PROMOTE-BATCH: several set-aside outlines are pieces — one pieces run (UX-HOOKS §4). */
+    promoteAsides,
     editPieces,
     editName,
     editNames,
@@ -2215,7 +2687,39 @@ export function useImportSession(deps: {
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
     semanticsInput,
-    cancel: () => client.cancel(),
+    /**
+     * STOPFIX: stop the stage in flight AND the move it is part of — no stage starts again until
+     * the operator's next action (an event, next, advance, an answer). The run keeps its step, its
+     * outputs and every answer; see `stopped` / `restorePending`.
+     */
+    cancel: () => {
+      stopReq.current = true;
+      const armed = !!drive.current;
+      disarm();
+      const idle = !sRef.current.busy;
+      client.cancel();
+      // PATTERNS: pressed in the gap between two stages (of a move, or two ticks of the drive):
+      // nothing in flight to stop — the stop is said now (the stage that would have run next),
+      // and the move, when one is open, is undone when it returns
+      if (idle && (move.current || armed))
+        fail(
+          new ImportWorkerError(
+            'cancelled',
+            'stopped by the operator',
+            nextStageOf(sRef.current.step) ?? undefined,
+          ),
+        );
+    },
+    /**
+     * STOPFIX: what the last stop stopped (`stage`), and whether the importer had to be restarted
+     * for it (`restarted`); null once a stage runs again or a new run starts.
+     */
+    stopped,
+    /**
+     * STOPFIX: the importer was restarted under the run — the next stage first restores it (the
+     * files read again, the stages played again quietly; `session.busy.note` says so meanwhile).
+     */
+    restorePending,
     errorReport,
     downloadReport: () => downloadErrorReport(errorReport()),
   };
@@ -2250,6 +2754,12 @@ export function useImportSession(deps: {
 }
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
+
+/** PROMOTE-BATCH: per promoted aside id, the seed id it became; what was skipped and why. */
+export type PromoteResult = {
+  seeds: Record<number, SeedId>;
+  skipped: { id: number; why: string }[];
+};
 
 /** Where a name came from, as the manifest records it (lib: ai/dxf-names.ts). */
 export { nameOriginOf };
