@@ -781,7 +781,12 @@ const fabricOf = (f: unknown): string => {
 
 type Wrong = { kind: string; subject: string; got: string; want: string; assumed: string | null };
 
-type GoldenAnswers = { pages?: boolean; asides?: boolean; sizes?: Record<string, string> };
+type GoldenAnswers = {
+  pages?: boolean;
+  asides?: boolean;
+  outline?: 'cut' | 'seam';
+  sizes?: Record<string, string>;
+};
 const golden = (): GoldenAnswers | null =>
   process.env.GOLDEN_ANSWERS ? (JSON.parse(process.env.GOLDEN_ANSWERS) as GoldenAnswers) : null;
 
@@ -858,6 +863,21 @@ export async function runCase(c: Case, mutate: string | null) {
       if (ga.asides && step === 'pieces' && /set aside on a guess/.test(reason)) {
         operatorAnswers++;
         return { proceed: true, assumptions: [] };
+      }
+      if (ga.outline && step === 'meaning' && /the cut line .* or the seam line\?/.test(reason)) {
+        operatorAnswers++;
+        return {
+          patch: {
+            fileAllowance: {
+              meaning: ga.outline,
+              allowanceMm: PATIMPORT.defaultAllowanceMm,
+              origin: 'operator',
+              evidence: [],
+            },
+          },
+          events: [{ type: 'names', decisions: snap.session.names }],
+          assumptions: [],
+        };
       }
       const entries = snap.session.sizes?.map.entries;
       if (ga.sizes && step === 'sizes' && entries) {
