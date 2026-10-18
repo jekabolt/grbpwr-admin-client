@@ -1571,8 +1571,9 @@ export function buildPieceSpecsDetailed(
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
         ...(c.rankFrom === 'repair' && c.repair
           ? {
+              // the pre-repair outline (sheet frame, audit pictures) stays on the candidate
               repair: {
-                ...c.repair,
+                ...{ ...c.repair, was: undefined },
                 fromTokens: [tokOfRank(c.repair.from[0]), tokOfRank(c.repair.from[1])],
               },
             }

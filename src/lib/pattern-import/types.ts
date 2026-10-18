@@ -1252,6 +1252,8 @@ export type RepairRecord = {
   score: number;
   /** Largest excess of the repaired outline over the corridor, mm. */
   devMm: number;
+  /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
+  was?: PtMm[];
 };
 export type DerivedEdge = {
   kind: DerivedEdgeKind;

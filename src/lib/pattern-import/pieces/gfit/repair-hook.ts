@@ -194,6 +194,9 @@ export function repairPass(
         holesMm: Math.round(holesMm * 10) / 10,
         score: Math.round((rep.score ?? 0) * 1000) / 1000,
         devMm: Math.round((rep.devMm ?? 0) * 100) / 100,
+        ...(kind === 'neighbour' && c.outer.length > 2
+          ? { was: simplify([...c.outer, c.outer[0]], 0.3).slice(0, -1) }
+          : {}),
       };
       cand = {
         seed: c.seed,

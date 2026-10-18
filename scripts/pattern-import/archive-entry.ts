@@ -8,7 +8,7 @@
 // wrongPassing = a block that passes the gate and is wrong.
 //   node scripts/pattern-import/archive.mjs   (yarn patimport:archive) — this is its child
 // The archive is READ ONLY: bytes are read once, nothing is ever written next to them.
-import { readFileSync, writeSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -482,6 +482,30 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       .map((a) => `${(a.seed && seedLabel(a.seed)) ?? '?'}:${a.reason}:${a.areaMm2}`),
     named: s.semantics?.pieces.length ?? null,
   };
+  // ARCHIVE_GRADEP2_PNG=<dir> (GRADE P2): a picture of every size the repair rebuilt
+  const p2dir = process.env.ARCHIVE_GRADEP2_PNG;
+  if (p2dir && S) {
+    try {
+      const labels =
+        (box.s as unknown as { run: SizeRun | null }).run?.sizes.map((z) => z.label) ?? [];
+      for (const f of fams)
+        for (const c of f.candidates)
+          if (c.rankFrom === 'repair' && c.repair)
+            renderRepairPng(
+              resolve(
+                p2dir,
+                `${rel.replace(/[^\w.-]+/g, '_').slice(0, 60)}-seed${f.seed}-r${c.rank}.png`,
+              ),
+              rel,
+              f,
+              c,
+              S.wallSet ?? S.chains,
+              labels,
+            );
+    } catch (e) {
+      rec.gradep2PngError = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
   // ARCHIVE_PERSIZE=1 (GRADE P0): per family per size how it closes today + the gfit grade check
   // (gfit-archive.ts); ARCHIVE_GFIT_PNG=<dir> a picture of each family the check flags
   // (ARCHIVE_GFIT_PNG_ALL=1: of every family)
@@ -999,4 +1023,72 @@ export async function main(args: string[]): Promise<number> {
     writeSync(1, `@@RESULT ${JSON.stringify(r)}\n`);
   }
   return 0;
+}
+
+/** GRADE P2 audit picture: the drawing, the other sizes, the size's own lines, the repaired outline. */
+function renderRepairPng(
+  file: string,
+  id: string,
+  fam: PieceFamily,
+  c: PieceFamily['candidates'][number],
+  set: ChainSet | null,
+  labels: string[],
+) {
+  mkdirSync(dirname(file), { recursive: true });
+  const r = c.repair!;
+  const strokes: Stroke[] = [];
+  const marks: Label[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of c.outer) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const box = { minX: minX - 25, minY: minY - 25, maxX: maxX + 25, maxY: maxY + 70 };
+  for (const ch of set?.chains ?? []) {
+    if (ch.pts.length < 2) continue;
+    if (
+      !ch.pts.some((p) => p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY)
+    )
+      continue;
+    strokes.push({ pts: ch.pts, closed: ch.closed, color: '#c8c8c8', width: 0.8 });
+  }
+  for (const x of fam.candidates)
+    if (x.rank !== c.rank && x.outcome === 'closed')
+      strokes.push({
+        pts: x.outer,
+        closed: true,
+        color: PALETTE[x.rank % PALETTE.length],
+        width: 0.7,
+      });
+  if (r.was) strokes.push({ pts: r.was, closed: true, color: '#888', width: 5, dash: '6 4' });
+  for (const w of c.walls) {
+    const ch = set?.chains[w];
+    if (ch) strokes.push({ pts: ch.pts, closed: ch.closed, color: '#06c', width: 1.3 });
+  }
+  strokes.push({ pts: c.outer, closed: true, color: '#0a0', width: 2 });
+  for (const d of c.derived ?? []) {
+    strokes.push({ pts: d.pts, color: '#e00', width: 3.5 });
+    marks.push({ at: d.pts[d.pts.length >> 1], text: 'fill', color: '#e00', size: 12 });
+  }
+  const L = (k: number) => labels[k] ?? String(k);
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  renderPng(file, box, strokes, marks, Math.min(6, 1800 / span), [
+    {
+      color: '#000',
+      text: `${id.slice(0, 70)} seed ${fam.seed}: size ${L(c.rank)} ${r.kind === 'leak' ? 'leaked' : "closed on another size's line"} -> repaired from ${L(r.from[0])}+${L(r.from[1])}`,
+    },
+    {
+      color: '#0a0',
+      text: `green = repaired outline; cover ${(r.cover * 100).toFixed(1)} %; holes ${r.holes} (${r.holesMm} mm, red); score ${r.score}; dev ${r.devMm} mm`,
+    },
+    {
+      color: '#06c',
+      text: 'blue = own/common lines it runs on; grey = the drawing; grey dashed thick = before; thin colours = other sizes',
+    },
+  ]);
 }
