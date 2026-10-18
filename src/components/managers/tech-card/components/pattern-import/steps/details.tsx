@@ -74,7 +74,10 @@ import {
   AnsweredAndGoContext,
   AutopilotOnContext,
   type AnsweredAndGo,
+  SkipQuiz,
   useAnsweredAndGo,
+  useAutoAnswer,
+  useLikelySlot,
   useQuizSlot,
 } from '../ui-bits';
 import { plural } from '../stages';
@@ -323,6 +326,13 @@ export function DetailsStep({
     el?.scrollIntoView?.({ block: 'nearest' });
     (card ?? el?.querySelector<HTMLElement>('button:not(:disabled)'))?.focus();
   }, [focusN]);
+  // LIKELY ANSWERS (ui-bits): what «skip — decide for me» takes on this step (grade asks: none,
+  // they stay open and export as drawn)
+  const autoAnswer = useAutoAnswer(api);
+  const likelyGrain = useLikelySlot('details-grain');
+  const likelyCodes = useLikelySlot('details-codes');
+  const likelyQty = useLikelySlot('details-qty');
+  const likelyNames = useLikelySlot('details-names');
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
@@ -454,11 +464,12 @@ export function DetailsStep({
         | 'gradeAnswers'
       >
     >,
+    send: typeof api.dispatch = api.dispatch,
   ) => {
     const i = { ...inputs, ...p };
     // only an operator answer travels as the file's allowance: a shown 'measured'/'text' value is
     // the worker's own reading and is re-read by it (sent back, it would pass as proven everywhere)
-    return api.dispatch({
+    return send({
       type: 'semantics',
       input: {
         ...api.semanticsInput(i),
@@ -1072,6 +1083,77 @@ export function DetailsStep({
 
   // owner 16.10: while a question is open only "question k of n" and its one card are on screen
   // (the full list was information nobody acts on; the table's state cells still jump to any row)
+  // skip: the grain proposals accepted, codes in sheet order, counts and names as shown
+  const busyNow = !!session.busy;
+  likelyGrain.current =
+    proposals.length && !busyNow
+      ? {
+          key: 'details-blocked',
+          what: plural(proposals.length, 'grainline'),
+          answer: 'as proposed',
+          sig: proposals.map((g) => g.seed).join(','),
+          likely: () => {
+            setReviewing(false);
+            return rerun(
+              {
+                operatorGrain: {
+                  ...inputs.operatorGrain,
+                  ...Object.fromEntries(
+                    proposals.map((g) => [g.seed, { a: g.a, b: g.b, accepted: g.evidence }]),
+                  ),
+                },
+              },
+              autoAnswer,
+            );
+          },
+        }
+      : null;
+  likelyCodes.current =
+    bulk.size && !busyNow
+      ? {
+          key: 'details-blocked',
+          what: `codes of ${plural(bulk.size, 'piece')}`,
+          answer: 'in sheet order',
+          sig: [...bulk.keys()].join(','),
+          likely: () => nameAll(),
+        }
+      : null;
+  const qtyLive = rows.flatMap((f) => {
+    const u = qtyOpen(open, f.seed);
+    return u ? [{ sd: f.seed, key: questionKey(u, api.answersNow) }] : [];
+  });
+  likelyQty.current =
+    qtyLive.length && !busyNow
+      ? {
+          key: 'details-confirm',
+          what: plural(qtyLive.length, 'count'),
+          answer: 'as shown',
+          sig: qtyLive.map((x) => `${x.sd}:${x.key}`).join(','),
+          likely: async () =>
+            api.patchInputs((i) => ({
+              confirmedQuantities: {
+                ...i.confirmedQuantities,
+                ...Object.fromEntries(qtyLive.map(({ sd, key }) => [sd, key])),
+              },
+            })),
+        }
+      : null;
+  const namesLive = [
+    ...new Set([...open.name.map((u) => u.seed), ...open.aiNames.map((n) => n.seed)]),
+  ].filter((sd) => rows.some((f) => f.seed === sd));
+  likelyNames.current =
+    namesLive.length && !busyNow
+      ? {
+          key: 'details-confirm',
+          what: plural(namesLive.length, 'name'),
+          answer: 'as shown',
+          sig: namesLive.join(','),
+          likely: async () =>
+            api.patchInputs((i) => ({
+              confirmedNames: [...new Set([...i.confirmedNames, ...namesLive])],
+            })),
+        }
+      : null;
   const checklist = !listed.length ? null : !problems.length ? (
     <Text size='micro' variant='label' component='p' className='uppercase tracking-label'>
       all fixed ✓
@@ -2196,6 +2278,7 @@ export function DetailsStep({
                 data-testid='details-question'
               >
                 {problemCard(active)}
+                <SkipQuiz className='mt-3' />
               </div>
             )}
 

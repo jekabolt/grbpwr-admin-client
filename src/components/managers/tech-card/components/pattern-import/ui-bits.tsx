@@ -132,8 +132,9 @@ export function useLikelySlot(id: string): { current: LikelyGuess | null } {
 export const SkipQuizContext = createContext<(() => void) | null>(null);
 
 /** "skip — decide for me": one quiet link, the step's quiz panel and the footer alike. */
-export function SkipQuiz({ className }: { className?: string }) {
-  const skip = useContext(SkipQuizContext);
+export function SkipQuiz({ className, onSkip }: { className?: string; onSkip?: () => void }) {
+  const ctx = useContext(SkipQuizContext);
+  const skip = onSkip ?? ctx;
   if (!skip) return null;
   return (
     <button

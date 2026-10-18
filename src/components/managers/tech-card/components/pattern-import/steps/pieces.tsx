@@ -40,7 +40,9 @@ import {
   fmtMm,
   fmtPct,
   useAnsweredAndGo,
+  SkipQuiz,
   useAutoAnswer,
+  useLikelySlot,
   useQuizSlot,
 } from '../ui-bits';
 import { plural, useWizardPrimary } from '../stages';
@@ -628,6 +630,10 @@ export function PiecesStep({
     !!autoPick &&
     families.length > 0;
   const autoAnswer = useAutoAnswer(api);
+  // LIKELY ANSWERS (ui-bits): what «skip — decide for me» takes on this step
+  const likelyModel = useLikelySlot('pieces-model');
+  const likelyTouch = useLikelySlot('pieces-touch');
+  const likelyAside = useLikelySlot('pieces-aside');
   useEffect(() => {
     if (!autoGo || session.busy || !autoPick) return;
     // the one-shot guard is read and set HERE, right before the send: a StrictMode replay of this
@@ -639,6 +645,19 @@ export function PiecesStep({
     void autoAnswer({ type: 'variant', variant: autoPick });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoGo, session.busy]);
+  /** A garment is still to pick: the regions and outlines asked belong to no garment yet. */
+  const modelOpen = variants.length > 1 && !session.variant;
+  // skip: the garment the card names (strong or suggested); none named = no safe guess, a stop
+  likelyModel.current =
+    variants.length > 1 && !session.variant && !autoGo && named?.pick && !session.busy
+      ? {
+          key: 'pieces-model',
+          what: 'garment',
+          answer: `${named.pick} (${named.strong ? 'the card names it' : 'suggested by the card'})`,
+          sig: named.pick,
+          likely: () => autoAnswer({ type: 'variant', variant: named.pick }),
+        }
+      : null;
   /** The garment on screen was picked for the operator (not asked). */
   const autoShown = !!session.variant && session.variant === seen.autoVariant && !seen.autoReopened;
   const reopenVariant = () => {
@@ -1773,6 +1792,28 @@ export function PiecesStep({
     const f = families.find((x) => x.seed === how);
     return f ? notAPiece(f) : Promise.resolve();
   };
+  // skip: each region where pieces touch takes its likely answer (one piece, or the small part
+  // dropped); a region with one number only (a loop is needed) has no guess
+  const touchLikely = askTouch.filter((g) => g.likely.kind === 'drop' || g.seeds.length >= 2);
+  likelyTouch.current =
+    touchLikely.length > 0 && !modelOpen && !session.busy
+      ? {
+          key: touchLikely.length > 1 ? 'pieces-touch' : 'pieces-region',
+          what: `${plural(touchLikely.length, 'region')} where pieces touch`,
+          answer: touchLikely
+            .map((g) =>
+              g.likely.kind === 'drop'
+                ? `${nameOf(g.likely.seed)} not a piece`
+                : `${g.seeds.map(nameOf).join(' + ')} one piece`,
+            )
+            .join(', '),
+          sig: touchLikely.map((g) => g.key).join(','),
+          likely: async () => {
+            for (const g of touchLikely)
+              await touchEdit(g, g.likely.kind === 'drop' ? g.likely.seed : 'join');
+          },
+        }
+      : null;
   const answerTouch = (gs: TouchGroup[], how: (g: TouchGroup) => 'join' | number) => {
     pickTool('pan');
     setHint(null);
@@ -2131,21 +2172,56 @@ export function PiecesStep({
    * through is the engine told the outlines were looked at (reviewAsides). A send that failed
    * keeps every answer and asks again («couldn't apply · try again»).
    */
-  const quizEnd = () => {
-    if (seen.committing) return;
+  const flushAsides = async () => {
     seen.asideOk = true;
     setHot(null);
     bump((n) => n + 1);
-    go(
-      commitAsides().then((ok) => {
-        if (ok) return api.reviewAsides();
-        seen.asideOk = false;
-        bump((n) => n + 1);
-        return undefined;
-      }),
-    );
+    if (await commitAsides()) return api.reviewAsides();
+    seen.asideOk = false;
+    bump((n) => n + 1);
+    return undefined;
+  };
+  const quizEnd = () => {
+    if (seen.committing) return;
+    go(flushAsides());
   };
   applyAsides.current = quizEnd;
+  // skip: every card left takes its pre-selected answer (joins yes, inside shapes part of, frames /
+  // small / marks not pieces), a lone uncertain outline stays as the engine guessed; the batch goes
+  // out through the same flush as the primary «apply N answers», awaited to the end
+  // (after the garment: another garment is another set of outlines, the quiz starts over)
+  likelyAside.current =
+    asideItems.length > 0 && !modelOpen && !seen.asideOk && !seen.committing && !session.busy
+      ? {
+          key: 'pieces-aside',
+          what: `${plural(asideItems.length, 'outline')} set aside`,
+          answer: (() => {
+            const n = cardsLeft.reduce(
+              (k, c) =>
+                k + (c.kind === 'group' ? c.items.length : likelyJoin(joinsOf(c.it)) ? 1 : 0),
+              0,
+            );
+            return n ? `${plural(n, 'pre-selected answer')}, the rest as read` : 'left as read';
+          })(),
+          sig: `${asideItems.map((it) => it.a.id).join(',')}|${seen.answers.size}`,
+          likely: () => {
+            for (const c of cardsLeft) {
+              const items = cardItems(c).filter((it) => !seen.asideDone.includes(it.a.id));
+              for (const it of items) {
+                const ans: AsideAnswer | null =
+                  c.kind === 'group'
+                    ? groupAns(c.group, it, false)
+                    : likelyJoin(joinsOf(it)) && canJoin(it)
+                      ? { join: joinsOf(it)[0].seed }
+                      : null;
+                if (ans) seen.answers.set(it.a.id, ans);
+                seen.asideDone = [...seen.asideDone, it.a.id];
+              }
+            }
+            return flushAsides();
+          },
+        }
+      : null;
   /**
    * The quiz's answers, sent once: every outline brought back (a run each, back to back — the
    * session adds one seed per run), then ONE list of piece edits (the joins, the outlines left out
@@ -3540,6 +3616,7 @@ export function PiecesStep({
                     ))}
                   </div>
                 )}
+              <SkipQuiz />
             </div>
           )}
 

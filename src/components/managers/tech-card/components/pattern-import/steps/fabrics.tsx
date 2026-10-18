@@ -29,7 +29,10 @@ import {
   SplitStage,
   ask,
   fmtPct,
+  SkipQuiz,
   useAnsweredAndGo,
+  useAutoAnswer,
+  useLikelySlot,
   useQuizSlot,
 } from '../ui-bits';
 
@@ -88,6 +91,9 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   // every question seen on this run (the wizard owns it): "question k of n" only grows
   const seen = useQuizSlot('fabrics', () => new Set<string>());
   const [other, setOther] = useState<string | null>(null);
+  // LIKELY ANSWERS (ui-bits): skip keeps the defaulted pieces on the main fabric
+  const autoAnswer = useAutoAnswer(api);
+  const likelyMain = useLikelySlot('fabrics-defaulted');
   if (!a || !sem || !session.sheet) return null;
 
   const seeds = [...new Set(sem.pieces.map((p) => p.seed))];
@@ -226,6 +232,18 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       });
   }
   for (const q of questions) seen.add(q.key);
+  const mainScope = card.scopes[0];
+  likelyMain.current =
+    defaulted.length && mainScope && !session.busy
+      ? {
+          key: 'fabrics-defaulted',
+          what: `fabric of ${defaulted.length === 1 ? nameOf(defaulted[0]) : `${defaulted.length} pieces`}`,
+          answer: `${short(mainScope.label)} (main)`,
+          sig: defaulted.join(','),
+          pastOffer: true,
+          likely: () => autoAnswer({ type: 'fabrics', assignment: a }),
+        }
+      : null;
   const active = questions[0] ?? null;
   const asked = new Set(active?.seeds ?? []);
 
@@ -502,6 +520,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                     </Button>
                   )}
                 </span>
+                <SkipQuiz />
               </div>
             </>
           ) : (

@@ -45,7 +45,12 @@ import { STEPS, stepIndex, useImportSession, type ImportSessionApi } from './use
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { autopilotApply, resolverFor } from './autopilot/run';
-import { GuessesPill, readAutopilotPref, writeAutopilotPref, type SkipGuess } from './autopilot/view';
+import {
+  GuessesPill,
+  readAutopilotPref,
+  writeAutopilotPref,
+  type SkipGuess,
+} from './autopilot/view';
 import {
   PHASE_OF,
   plural,
@@ -1044,16 +1049,16 @@ function WizardBody({
                       <AnsweredAndGoContext.Provider value={answeredAndGo}>
                         <AutoAnswerContext.Provider value={autoAnswer}>
                           <LikelyContext.Provider value={likelyCtx}>
-                          <SkipQuizContext.Provider value={skipQuiz}>
-                          {session.busy ? (
-                            // the last picture the run has, dimmed and out of reach while it works
-                            <div className='h-full opacity-40' inert aria-hidden>
-                              {body}
-                            </div>
-                          ) : (
-                            body
-                          )}
-                          </SkipQuizContext.Provider>
+                            <SkipQuizContext.Provider value={skipQuiz}>
+                              {session.busy ? (
+                                // the last picture the run has, dimmed and out of reach while it works
+                                <div className='h-full opacity-40' inert aria-hidden>
+                                  {body}
+                                </div>
+                              ) : (
+                                body
+                              )}
+                            </SkipQuizContext.Provider>
                           </LikelyContext.Provider>
                         </AutoAnswerContext.Provider>
                       </AnsweredAndGoContext.Provider>
@@ -1129,7 +1134,7 @@ function WizardBody({
                     {!applied && session.step !== 'check' && session.step !== 'apply' && (
                       <>
                         {' · '}
-                        <SkipQuiz />
+                        <SkipQuiz onSkip={skipQuiz} />
                       </>
                     )}
                   </Text>
