@@ -138,18 +138,37 @@ function gradeStripEvidence(
   return out;
 }
 
-const overlaps = (a: BoxMm, b: BoxMm, pad = 1) =>
-  a.minX <= b.maxX + pad &&
-  a.maxX >= b.minX - pad &&
-  a.minY <= b.maxY + pad &&
-  a.maxY >= b.minY - pad;
+/** Liang–Barsky: the actual segment enters the padded box (a broad curved line's bbox is not evidence). */
+const segmentInBox = (
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  box: BoxMm,
+  pad: number,
+) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let lo = 0;
+  let hi = 1;
+  for (const [p, q] of [
+    [-dx, a.x - (box.minX - pad)],
+    [dx, box.maxX + pad - a.x],
+    [-dy, a.y - (box.minY - pad)],
+    [dy, box.maxY + pad - a.y],
+  ] as const) {
+    if (Math.abs(p) < 1e-9) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) lo = Math.max(lo, r);
+    else hi = Math.min(hi, r);
+    if (lo > hi) return false;
+  }
+  return true;
+};
 
-const lineBox = (pts: readonly { x: number; y: number }[]): BoxMm => ({
-  minX: Math.min(...pts.map((p) => p.x)),
-  minY: Math.min(...pts.map((p) => p.y)),
-  maxX: Math.max(...pts.map((p) => p.x)),
-  maxY: Math.max(...pts.map((p) => p.y)),
-});
+const lineInBox = (pts: readonly { x: number; y: number }[], box: BoxMm, pad = 2) =>
+  pts.some((p, i) => i > 0 && segmentInBox(pts[i - 1], p, box, pad));
 
 /** Regions inside a proved family shell and crossed by two models' certain cut marks. */
 function variantBandEvidence(
@@ -169,7 +188,7 @@ function variantBandEvidence(
         !m.uncertain &&
         m.kind !== 'piece' &&
         m.pieces.includes(shell.family.seed) &&
-        m.cutLines.some((l) => l.poly.length > 1 && overlaps(a.box, lineBox(l.poly), 2)),
+        m.cutLines.some((l) => lineInBox(l.poly, a.box)),
     );
     const models = [...new Set(touching.map((m) => m.label))];
     if (models.length < 2) continue;
