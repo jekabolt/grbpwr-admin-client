@@ -781,6 +781,10 @@ const fabricOf = (f: unknown): string => {
 
 type Wrong = { kind: string; subject: string; got: string; want: string; assumed: string | null };
 
+type GoldenAnswers = { pages?: boolean; asides?: boolean; sizes?: Record<string, string> };
+const golden = (): GoldenAnswers | null =>
+  process.env.GOLDEN_ANSWERS ? (JSON.parse(process.env.GOLDEN_ANSWERS) as GoldenAnswers) : null;
+
 // ── one case ────────────────────────────────────────────────────────────────────────────────────
 
 export async function runCase(c: Case, mutate: string | null) {
@@ -841,6 +845,38 @@ export async function runCase(c: Case, mutate: string | null) {
     ) {
       operatorAnswers++;
       return { proceed: true, assumptions: [] };
+    }
+    // golden Pass B (env GOLDEN_ANSWERS, JSON): the answers a real operator gives, recorded per
+    // case in golden/cases.tsv — never in the suite's numbers
+    const ga = golden();
+    if (ga && a.stop && a.reason) {
+      const { step, reason } = a.reason;
+      if (ga.pages && step === 'files' && /is it a pattern page\?/.test(reason)) {
+        operatorAnswers++;
+        return { proceed: true, assumptions: [] };
+      }
+      if (ga.asides && step === 'pieces' && /set aside on a guess/.test(reason)) {
+        operatorAnswers++;
+        return { proceed: true, assumptions: [] };
+      }
+      const entries = snap.session.sizes?.map.entries;
+      if (ga.sizes && step === 'sizes' && entries) {
+        operatorAnswers++;
+        const sizes = api.runCard?.sizes ?? card.sizes;
+        return {
+          events: [
+            {
+              type: 'size-map',
+              entries: entries.map((e) => ({
+                ...e,
+                card: sizes.find((z) => z.token === ga.sizes![e.source.label]) ?? null,
+                origin: 'operator' as const,
+              })),
+            },
+          ],
+          assumptions: [],
+        };
+      }
     }
     // --mutate=card: a pick injected at the control's own question — the control must catch it
     if (
