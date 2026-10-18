@@ -156,7 +156,11 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         ? [{ ...e, card: byName.get(name) ?? null, origin: 'operator' as const }]
         : [];
     });
-    if (entries.length) void api.dispatch({ type: 'size-map', entries });
+    if (!entries.length) return;
+    const p = api.dispatch({ type: 'size-map', entries });
+    // a quiz answer that re-read the lines goes on once the map is back (not before: the read
+    // alone leaves the map empty, and the shell would stop on it)
+    if (keepMap.go) go(p);
   }, [kept, sizes, session.busy, inputs.sizeMap, api]);
   // As many sizes drawn as the card has, none matching by name: mapped in order at once, no
   // question (owner 16.10). Built in render (it needs the order), run after it, once per read of
@@ -170,8 +174,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   }));
   const autoAnswer = useAutoAnswer(api);
   useEffect(() => autoMap.current?.());
-  const go = useAnsweredAndGo();
-  // LIKELY ANSWERS (ui-bits): what «skip — decide for me» takes on this step
+  // the engine's suspects still moved in one click or asked (counted on the latest read)
+  const suspectsLeft = useRef(0);
+  const go0 = useAnsweredAndGo();
+  // ANSWERED AND GO holds while the engine's suspects are still moved or asked here: they are no
+  // blocker of the footer, so the shell would go on past them
+  const go: typeof go0 = (p, o) => (suspectsLeft.current > 0 ? void p : go0(p, o));
+  // LIKELY ANSWERS (ui-bits): what «skip — decide for me» takes on this step. Suspects: only the
+  // agreeing pens / the pen slip (one click); a pen against its nest or none read has no
+  // pre-selected size — no guess, it stays asked
   const likelyOrder = useLikelySlot('sizes-order');
   const likelySus = useLikelySlot('sizes-suspects');
   const likelyRole = useLikelySlot('sizes-role');
@@ -199,7 +210,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   useEffect(() => {
     if (lf.goAt == null || session.busy || lf.goAt === chains) return;
     lf.goAt = null;
-    if (notesLeft.current === 0) go();
+    if (notesLeft.current === 0 && suspectsLeft.current === 0) go();
   });
   if (!chains || !sizes || !session.sheet) return null;
 
@@ -239,6 +250,21 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     const entries = notes.filter((k, i) => notes.findIndex((o) => o.name === k.name) === i);
     kept.map = entries.length ? { at: sizes, entries } : null;
     edit(c.id, { sizeLabel: v || null });
+  };
+  /**
+   * A role answer re-reads the lines and the read starts the size map over (`legend`): note the
+   * operator's map by size name first, given back once the new read lands (as a rename does).
+   */
+  const roleKeepingMap = (c: LineClass, v: string) => {
+    const own = new Set((inputs.sizeMap ?? []).map((e) => e.source.rank));
+    const notes = sizes.map.entries
+      .filter((e) => own.has(e.source.rank) && !e.notDrawn)
+      .map((e) => ({ name: norm(e.source.label), card: e.card }));
+    const entries = notes.filter((k, i) => notes.findIndex((o) => o.name === k.name) === i);
+    kept.map = entries.length ? { at: sizes, entries, go: true } : null;
+    const p = setRole(c, v);
+    // no map to give back: go on after the read; else after the map is back (the effect above)
+    if (!entries.length) go(p);
   };
   const setCard = (e: SizeMapEntry, sizeId: string) =>
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
@@ -549,10 +575,19 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       ? [...nests.suspects].filter((id) => !keptLines.has(lineId(id) ?? ''))
       : [];
   const autoSus = engineSus.filter((id) => oneClick(nests!, id));
-  const askNest =
-    nests?.nests
-      .map((n) => n.filter((id) => engineSus.includes(id) && !oneClick(nests, id)))
-      .find((n) => n.length) ?? null;
+  // one question = the asked lines of one nest that name ONE size (a nest whose lines name
+  // different sizes is asked once per size: one answer must not send them all to one row)
+  const askGroups = (nests?.nests ?? []).flatMap((n) => {
+    const ids = n.filter((id) => engineSus.includes(id) && !oneClick(nests!, id));
+    const bySug = new Map<number, number[]>();
+    for (const id of ids) {
+      const k = nests!.expected.get(id) ?? -1;
+      bySug.set(k, [...(bySug.get(k) ?? []), id]);
+    }
+    return [...bySug.values()];
+  });
+  const askNest = askGroups[0] ?? null;
+  suspectsLeft.current = autoSus.length + askGroups.length;
   const askBox = askNest ? boxOf(chains, askNest) : null;
   const penNotes = chains.lineAssign?.notes ?? [];
   // skip: the lines whose pen agrees with their nest (or the pen slip) move in one click
@@ -1270,12 +1305,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                         {
                           label: 'a size line',
                           title: 'no: these lines draw a size (name it or split it in its row)',
-                          onClick: () => go(setRole(hoisted, 'size')),
+                          onClick: () => roleKeepingMap(hoisted, 'size'),
                         },
                         {
                           label: 'not needed',
                           title: 'no: text, a frame or marks; the lines leave the sizes',
-                          onClick: () => go(setRole(hoisted, 'ignore')),
+                          onClick: () => roleKeepingMap(hoisted, 'ignore'),
                         },
                       ]
                     : [
@@ -1285,7 +1320,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                               {
                                 label: 'not needed',
                                 title: 'text, a frame or marks: the lines leave the sizes',
-                                onClick: () => go(setRole(hoisted, 'ignore')),
+                                onClick: () => roleKeepingMap(hoisted, 'ignore'),
                               },
                             ]
                           : []),
@@ -1325,10 +1360,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                     title='each line goes to the size its nest of outlines names'
                     onClick={() => {
                       setHoverIds(null);
-                      sendLines(
-                        assignEach(chains, autoSus, nests!.expected, rowKeyOf),
-                        askNest == null,
-                      );
+                      sendLines(assignEach(chains, autoSus, nests!.expected, rowKeyOf), true);
                     }}
                   >
                     move {autoSus.length} {autoSus.length === 1 ? 'line' : 'lines'} to their sizes
@@ -1372,18 +1404,13 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                     />
                   ),
                   title: `the lines are size ${c.sizeLabel}`,
-                  onClick: () =>
-                    sendLines(
-                      assignTo(chains, askNest, { row: legendKey(c) }),
-                      autoSus.length === 0,
-                    ),
+                  onClick: () => sendLines(assignTo(chains, askNest, { row: legendKey(c) }), true),
                 }))}
                 answers={[
                   {
                     label: 'not needed',
                     title: 'the lines are no size line: they leave the sizes',
-                    onClick: () =>
-                      sendLines(assignTo(chains, askNest, { cls: 'ignore' }), autoSus.length === 0),
+                    onClick: () => sendLines(assignTo(chains, askNest, { cls: 'ignore' }), true),
                   },
                   {
                     label: "they're right",
@@ -2032,7 +2059,12 @@ type LineFixSlot = {
 };
 
 /** The operator's size map noted before a rename: card size per size name, and the read it was on. */
-type KeptMap = { at: unknown; entries: { name: string; card: SizeMapEntry['card'] }[] };
+type KeptMap = {
+  at: unknown;
+  entries: { name: string; card: SizeMapEntry['card'] }[];
+  /** ANSWERED AND GO once the map is given back (a quiz answer, not a rename) */
+  go?: boolean;
+};
 const norm = (label: string | null | undefined) => (label ?? '').trim().toLowerCase();
 
 // ═══ THE MAPPING ROW ══════════════════════════════════════════════════════════════════════════════
