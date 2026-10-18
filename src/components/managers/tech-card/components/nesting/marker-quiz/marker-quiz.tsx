@@ -10,12 +10,12 @@ import { Button, Chip, Input, Text } from 'ui';
 import type { LayMode } from '../use-lay-mode';
 import {
   EndsPicture,
-  GarmentPile,
   KnifePicture,
-  LayOnTablePicture,
   LayersPicture,
+  MarkerTopPicture,
   SpreadChoicePicture,
   TablePicture,
+  type TopPiece,
 } from './pictures';
 
 export type QuizStep = 'spread' | 'confirm' | 'size' | 'knife' | 'what' | 'layers' | 'ends' | 'run';
@@ -218,8 +218,8 @@ function NumField({
   );
 }
 
-/** − n + : количество изделий размера. */
-function Count({
+/** Количество изделий размера: число справа, без −/+. */
+function QtyField({
   value,
   min,
   onChange,
@@ -232,38 +232,17 @@ function Count({
   label: string;
   disabled?: boolean;
 }) {
-  const set = (n: number) => {
-    const next = Math.max(min, Math.round(n));
-    if (next !== value) onChange(next);
-  };
   return (
-    <div className='flex items-stretch'>
-      <Button
-        variant='secondary'
-        className='px-2'
-        aria-label={`fewer ${label}`}
-        disabled={disabled || value <= min}
-        onClick={() => set(value - 1)}
-      >
-        −
-      </Button>
-      <NumField
-        label={label}
-        value={value}
-        disabled={disabled}
-        className='w-12 text-center tabular-nums'
-        onCommit={set}
-      />
-      <Button
-        variant='secondary'
-        className='px-2'
-        aria-label={`more ${label}`}
-        disabled={disabled}
-        onClick={() => set(value + 1)}
-      >
-        +
-      </Button>
-    </div>
+    <NumField
+      label={label}
+      value={value}
+      disabled={disabled}
+      className={`${CTRL_H} w-24 text-right tabular-nums`}
+      onCommit={(n) => {
+        const next = Math.max(min, Math.round(n));
+        if (next !== value) onChange(next);
+      }}
+    />
   );
 }
 
@@ -349,6 +328,9 @@ export type QuizRow = {
   min: number;
 };
 
+// Ячейка полосы шага «run», чей контрол живёт в модалке (ширина полотна, детали).
+export type QuizCell = { label: string; error?: boolean; control: React.ReactNode };
+
 export type QuizWarning = {
   text: string;
   error: boolean;
@@ -395,9 +377,15 @@ export type MarkerQuizProps = {
   // Длина маркера: готового прогона или оценка по площади до него.
   markerLengthCm: number;
   markerEstimate: boolean;
+  // Вид сверху: ширина полосы и контуры деталей на ней (размещения прогона или коробки оценки).
+  topWidthCm: number;
+  topPieces: readonly TopPiece[];
+  // Ширина полотна и детали — ячейки полосы со своими контролами модалки.
+  cloth?: QuizCell;
+  pieces?: QuizCell;
   fabricCm: number | null;
   warnings: QuizWarning[];
-  // Тихий ряд шага «run»: ширина полотна, настройки раскладки, детали — прежние поповеры.
+  // Тихий ряд шага «run»: выбор ткани, настройки раскладки — прежние поповеры.
   extras?: React.ReactNode;
   runDisabled: boolean;
   onRun: () => void;
@@ -411,7 +399,6 @@ export function MarkerQuiz(p: MarkerQuizProps) {
   const layCm = p.markerLengthCm + 2 * p.endLossCm;
   const tableLen = p.tableCm ?? Math.max(Math.ceil(layCm), 200);
   const tableWid = p.tableWidthCm ?? Math.max(p.clothWidthCm + 20, 160);
-  const fits = !table || p.tableCm == null || layCm <= p.tableCm + 0.05;
   const plySizes = p.rows.flatMap((r, i) =>
     Array.from({ length: Math.min(p.perPly[i] ?? 0, 24) }, () => r.label),
   );
@@ -494,39 +481,40 @@ export function MarkerQuiz(p: MarkerQuizProps) {
         );
       case 'what':
         return (
-          <>
+          <div className='flex w-full max-w-md flex-col gap-4'>
             {p.colourways.length > 0 && (
-              <div className='flex flex-wrap items-center justify-center gap-2'>
+              <div className='flex items-center gap-3'>
                 <Label>colourway</Label>
-                {[{ id: 0, label: 'shared' }, ...p.colourways].map((c) => (
-                  <Chip
-                    key={c.id}
-                    className={ONE_SIZE}
-                    selected={c.id === p.colourwayId}
-                    pressed={c.id === p.colourwayId}
-                    disabled={p.busy}
-                    onClick={() => {
-                      if (c.id !== p.colourwayId) p.onColourway(c.id);
-                    }}
-                  >
-                    {c.label}
-                  </Chip>
-                ))}
+                <div className={`flex ${CTRL_H}`} role='radiogroup' aria-label='colourway'>
+                  {[{ id: 0, label: 'shared' }, ...p.colourways].map((c) => (
+                    <Chip
+                      key={c.id}
+                      className={`${ONE_SIZE} -ml-px justify-center first:ml-0`}
+                      selected={c.id === p.colourwayId}
+                      pressed={c.id === p.colourwayId}
+                      disabled={p.busy}
+                      onClick={() => {
+                        if (c.id !== p.colourwayId) p.onColourway(c.id);
+                      }}
+                    >
+                      {c.label}
+                    </Chip>
+                  ))}
+                </div>
               </div>
             )}
-            <div className='grid w-full max-w-3xl grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-3'>
+            <div className='flex flex-col border-t border-textColor'>
               {p.rows.map((r) => (
                 <div
                   key={r.key}
-                  className={`flex flex-col items-center gap-2 border border-borderColor px-2 py-3 ${
+                  className={`flex items-center justify-between gap-3 border-b border-hairline py-1.5 ${
                     r.qty > 0 ? '' : 'text-labelColor'
                   }`}
                 >
-                  <GarmentPile qty={r.qty} />
                   <Text component='span' className={r.bad ? 'text-error' : undefined}>
                     {r.label}
                   </Text>
-                  <Count
+                  <QtyField
                     label={r.label}
                     value={r.qty}
                     min={r.min}
@@ -535,8 +523,12 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                   />
                 </div>
               ))}
+              <div className='flex items-center justify-between gap-3 border-b border-textColor py-1.5 uppercase'>
+                <span>total</span>
+                <span className='w-24 pr-2.5 text-right tabular-nums'>{p.cutTotal}</span>
+              </div>
             </div>
-          </>
+          </div>
         );
       case 'layers': {
         const parts = p.rows
@@ -636,110 +628,136 @@ export function MarkerQuiz(p: MarkerQuizProps) {
           </>
         );
       case 'run': {
-        // Раскладку экрана «run» выбирает владелец; здесь только один размер шрифта: прежняя
-        // сетка фактов (подпись-дверь над значением) без крупных цифр `Stat`.
-        const fact = (label: string, to: QuizStep, value: React.ReactNode) => (
-          <div
+        // Полоса фактов: подпись над значением, вся ячейка — дверь к своему шагу.
+        const cell = (label: string, to: QuizStep, value: React.ReactNode) => (
+          <Button
             key={label}
-            className='flex flex-col gap-0.5 border-r border-b border-borderColor px-2.5 py-2'
+            className='min-w-0 flex-1 border-l border-textColor px-2.5 py-1.5 text-left first:border-l-0'
+            disabled={p.busy}
+            onClick={() => quiz.go(to)}
           >
-            <Button
-              variant='underline'
-              className='self-start uppercase'
-              disabled={p.busy}
-              onClick={() => quiz.go(to)}
+            <span className='flex flex-col gap-0.5'>
+              <Label>{label}</Label>
+              <span className='truncate tabular-nums'>{value}</span>
+            </span>
+          </Button>
+        );
+        // Ячейка с контролом модалки: клик по ней открывает прежнее поле или поповер.
+        const own = (c: QuizCell) => (
+          <div
+            key={c.label}
+            className='flex min-w-0 flex-1 flex-col gap-0.5 border-l border-textColor px-2.5 py-1.5 first:border-l-0'
+          >
+            <Text
+              variant={c.error ? undefined : 'label'}
+              tracking='label'
+              component='span'
+              className={c.error ? 'text-error uppercase' : 'uppercase'}
             >
-              {label}
-            </Button>
-            <span className='tabular-nums'>{value}</span>
+              {c.label}
+            </Text>
+            {c.control}
           </div>
         );
+        const garments = cell(
+          'garments',
+          'what',
+          <>
+            {p.cutTotal}
+            {table && p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal}</span>}
+          </>,
+        );
+        const fabric = cell(
+          'fabric m',
+          table ? 'ends' : 'what',
+          p.fabricCm == null
+            ? '—'
+            : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)}`,
+        );
+        const fix = (w: QuizWarning) =>
+          w.fix &&
+          (w.fix.href ? (
+            <Button asChild variant='secondary' className={FRAMED}>
+              <a
+                href={w.fix.href}
+                target='_blank'
+                rel='noopener noreferrer'
+                onClick={w.fix.onClick}
+              >
+                {w.fix.label}
+              </a>
+            </Button>
+          ) : (
+            <Button
+              variant='secondary'
+              className={FRAMED}
+              disabled={w.fix.disabled || p.busy}
+              onClick={w.fix.onClick}
+            >
+              {w.fix.label}
+            </Button>
+          ));
+        // Стопка: ширина полотна не в полосе — она уходит в тихий ряд прежней коробкой.
+        const quietCloth = table && p.cloth;
         return (
           <>
-            <LayOnTablePicture
-              mode={table ? 'table' : 'single'}
-              tableLengthCm={tableLen}
-              markerLengthCm={p.markerLengthCm}
-              plies={table ? p.plies : 1}
-              fits={fits}
+            <MarkerTopPicture
+              lengthCm={p.markerLengthCm}
+              widthCm={p.topWidthCm}
+              pieces={p.topPieces}
+              estimate={p.markerEstimate}
             />
-            <div className='grid w-full grid-cols-[repeat(auto-fit,minmax(8.75rem,1fr))] border-t border-l border-borderColor'>
-              {fact(
-                'garments',
-                'what',
-                <>
-                  {p.cutTotal}
-                  {table && p.extraTotal > 0 && (
-                    <span className='text-labelColor'> +{p.extraTotal}</span>
-                  )}
-                </>,
-              )}
-              {table && fact('layers', 'layers', p.plies)}
+            <div className='flex w-full border border-textColor'>
+              {garments}
+              {table && cell('layers', 'layers', p.plies)}
               {table &&
-                fact(
-                  'stack',
+                cell(
+                  'stack cm',
                   'layers',
                   <span className={p.stackOk ? undefined : 'text-error'}>
                     {p.stackCm == null ? '—' : f1(p.stackCm)}
                     <span className='text-labelColor'>
                       {' '}
-                      / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)} cm
+                      / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)}
                     </span>
                   </span>,
                 )}
-              {fact(
-                'fabric',
-                table ? 'ends' : 'what',
-                <>
-                  {p.fabricCm == null
-                    ? '—'
-                    : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)}`}
-                  <span className='text-labelColor'> m</span>
-                </>,
-              )}
+              {fabric}
+              {!table && p.cloth && own(p.cloth)}
+              {p.pieces && own(p.pieces)}
             </div>
             {p.warnings.length > 0 && (
-              <ul className='flex w-full flex-col gap-1.5'>
+              <ul className='flex w-full flex-col border-t border-hairline'>
                 {p.warnings.map((w) => (
                   <li
                     key={w.text}
-                    className={`flex items-center gap-3 border px-3 py-2 ${
-                      w.error ? 'border-error text-error' : 'border-borderColor'
-                    }`}
+                    className='flex items-center justify-between gap-3 border-b border-hairline py-1.5 text-error'
                   >
-                    <span className='min-w-0 flex-1'>{w.text}</span>
-                    {w.fix &&
-                      (w.fix.href ? (
-                        <Button asChild variant='underline' className='uppercase'>
-                          <a
-                            href={w.fix.href}
-                            target='_blank'
-                            rel='noopener noreferrer'
-                            onClick={w.fix.onClick}
-                          >
-                            {w.fix.label}
-                          </a>
-                        </Button>
-                      ) : (
-                        <Button
-                          variant='underline'
-                          className='uppercase'
-                          disabled={w.fix.disabled || p.busy}
-                          onClick={w.fix.onClick}
-                        >
-                          {w.fix.label}
-                        </Button>
-                      ))}
+                    <span className='min-w-0 flex-1'>! {w.text}</span>
+                    {fix(w)}
                   </li>
                 ))}
               </ul>
             )}
-            {p.extras && (
-              <div className='flex w-full flex-wrap items-end gap-x-4 gap-y-1.5'>{p.extras}</div>
+            {(p.extras || quietCloth) && (
+              <div className='flex w-full flex-wrap items-end gap-x-4 gap-y-1.5'>
+                {quietCloth && (
+                  <Box
+                    label={
+                      <span className={p.cloth?.error ? 'text-error' : undefined}>
+                        {p.cloth?.label}
+                      </span>
+                    }
+                  >
+                    {p.cloth?.control}
+                  </Box>
+                )}
+                {p.extras}
+              </div>
             )}
             <Button
               variant='underline'
-              className='uppercase'
+              className='self-center text-labelColor uppercase'
               disabled={p.busy}
               onClick={quiz.restart}
             >

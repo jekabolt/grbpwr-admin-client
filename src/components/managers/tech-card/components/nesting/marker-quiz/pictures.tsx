@@ -472,26 +472,6 @@ export function KnifePicture(p: { maxStackCm: number; stackCm?: number }): JSX.E
   );
 }
 
-export function GarmentPile(p: { qty: number }): JSX.Element {
-  return (
-    <svg
-      aria-hidden='true'
-      className='h-auto w-full'
-      style={{ maxHeight: 90, maxWidth: 80 }}
-      viewBox='0 0 48 52'
-    >
-      <path
-        d='M15 5 L6 10 L2 21 L10 24 L12 17 L12 47 L36 47 L36 17 L38 24 L46 21 L42 10 L33 5 Q24 12 15 5 Z'
-        fill='none'
-        stroke={p.qty === 0 ? LABEL : INK}
-        strokeLinejoin='miter'
-        strokeWidth={1}
-        vectorEffect='non-scaling-stroke'
-      />
-    </svg>
-  );
-}
-
 export function LayersPicture(p: {
   tableLengthCm: number;
   layCm: number;
@@ -626,92 +606,75 @@ export function EndsPicture(p: {
   );
 }
 
-export function LayOnTablePicture(p: {
-  mode: 'single' | 'table';
-  tableLengthCm: number;
-  markerLengthCm: number;
-  plies: number;
-  fits: boolean;
+// Контур детали на полосе, см: x — вдоль ткани, y — поперёк.
+export type TopPiece = ReadonlyArray<{ x: number; y: number }>;
+
+// Короткая сторона полотна на картинке не тоньше этого (длинный маркер иначе — нитка).
+const TOP_MIN_HEIGHT = 48;
+
+/**
+ * Вид сверху на маркер: полотно длина × ширина, контуры деталей без заливки, размеры снаружи —
+ * длина над полотном, ширина справа.
+ */
+export function MarkerTopPicture(p: {
+  lengthCm: number;
+  widthCm: number;
+  pieces: readonly TopPiece[];
+  estimate?: boolean;
 }): JSX.Element {
-  const x = 30;
-
-  if (p.mode === 'single') {
-    const naturalLength = Math.max(100, nonNegative(p.markerLengthCm) * 0.5);
-    const markerLength = Math.min(naturalLength, 340);
-    const tableLength = markerLength + 40;
-    const markerX = x + 20;
-    const dimensionY = 108;
-    const viewBox = withMargin({
-      left: x - 20,
-      top: dimensionY - 10,
-      right: x + tableLength + 20,
-      bottom: GROUND_Y,
-    });
-
-    return (
-      <SketchFrame
-        viewBox={viewBox}
-        overlays={[
-          {
-            key: 'marker',
-            x: markerX + markerLength / 2,
-            y: dimensionY,
-            content: `marker ${formatNumber(p.markerLengthCm)} cm`,
-            backed: true,
-          },
-        ]}
-      >
-        <TableSketch x={x} y={TABLE_Y} length={tableLength} groundY={GROUND_Y} />
-        <StackLines x={markerX} y={TABLE_Y} length={markerLength} count={1} height={2} />
-        <HorizontalDimension
-          x1={markerX}
-          x2={markerX + markerLength}
-          y={dimensionY}
-          extensionY={TABLE_Y - 6}
-        />
-      </SketchFrame>
-    );
-  }
-
-  const markerX = x + 20;
-  const usableLength = TABLE_LENGTH - 40;
-  const scaledMarker = scaledLength(p.markerLengthCm, p.tableLengthCm, usableLength);
-  const markerLength = clamp(
-    p.fits ? scaledMarker : Math.max(scaledMarker, TABLE_LENGTH),
-    36,
-    TABLE_LENGTH * 1.45,
-  );
-  const height = stackHeight(0, p.plies);
-  const stackTop = TABLE_Y - 1 - height;
-  const dimensionY = stackTop - 22;
-  const tableEnd = x + TABLE_LENGTH;
-  const markerEnd = markerX + markerLength;
-  const right = Math.max(tableEnd + 20, markerEnd + 20);
-  const viewBox = withMargin({ left: x - 20, top: dimensionY - 10, right, bottom: GROUND_Y });
+  const x0 = 20;
+  const y0 = 30;
+  const lengthCm = positive(p.lengthCm, 100);
+  const widthCm = positive(p.widthCm, 140);
+  const k = Math.min(300 / lengthCm, 170 / widthCm);
+  const w = lengthCm * k;
+  const h = Math.max(widthCm * k, TOP_MIN_HEIGHT);
+  const kx = w / lengthCm;
+  const ky = h / widthCm;
+  const dimensionY = y0 - 14;
+  const dimensionX = x0 + w + 12;
+  const labelX = dimensionX + 10;
+  const viewBox = withMargin({
+    left: x0 - 8,
+    top: dimensionY - 12,
+    right: Math.max(labelX + 90, x0 + 300),
+    bottom: y0 + h,
+  });
+  const metres = `${p.estimate ? '≈ ' : ''}${(p.lengthCm / 100).toFixed(2)} m`;
 
   return (
     <SketchFrame
       viewBox={viewBox}
       overlays={[
+        { key: 'length', x: x0 + w / 2, y: dimensionY, content: metres, backed: true },
         {
-          key: 'marker',
-          x: markerX + markerLength / 2,
-          y: dimensionY,
-          content: `marker ${formatNumber(p.markerLengthCm)} cm`,
-          backed: true,
+          key: 'width',
+          x: labelX,
+          y: y0 + h / 2,
+          content: `${formatNumber(p.widthCm)} cm`,
+          anchor: 'left',
         },
       ]}
     >
-      <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
-      <StackLines
-        x={markerX}
-        y={TABLE_Y}
-        length={markerLength}
-        count={p.plies}
-        height={height}
-        errorFrom={!p.fits ? tableEnd : undefined}
-      />
-      <HorizontalDimension x1={markerX} x2={markerEnd} y={dimensionY} extensionY={stackTop - 5} />
+      <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+        <rect x={x0} y={y0} width={w} height={h} vectorEffect='non-scaling-stroke' />
+        {p.pieces.map((poly, index) =>
+          poly.length < 3 ? null : (
+            <polygon
+              key={index}
+              points={poly
+                .map(
+                  (pt) =>
+                    `${x0 + clamp(pt.x, 0, lengthCm) * kx},${y0 + clamp(pt.y, 0, widthCm) * ky}`,
+                )
+                .join(' ')}
+              vectorEffect='non-scaling-stroke'
+            />
+          ),
+        )}
+      </g>
+      <HorizontalDimension x1={x0} x2={x0 + w} y={dimensionY} extensionY={y0 - 3} />
+      <VerticalDimension x={dimensionX} y1={y0} y2={y0 + h} extensionX={x0 + w + 3} />
     </SketchFrame>
   );
 }
