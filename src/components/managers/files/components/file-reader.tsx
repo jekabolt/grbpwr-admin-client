@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
-import { Button, Input, Text, Toolbar, ToolbarSpacer, EmptyCell } from 'ui';
+import { Button, Input, Text, Toolbar, ToolbarSpacer, EmptyCell, Close } from 'ui';
 import { useLibraryFile } from '../hooks/useFiles';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { extensionOf } from '../utils/format';
@@ -431,14 +431,11 @@ function PdfStage({
             <ToolbarSpacer />
             {/* У крестика нет текста, а значит для скринридера у кнопки нет имени вовсе:
                 читается «кнопка». Имя даёт `aria-label`, и оно называет действие. */}
-            <Button
-              size='xs'
-              variant='secondary'
+            <Close
+              size='sm'
               aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
-            >
-              ✕
-            </Button>
+            />
           </Toolbar>
         ) : (
           <Toolbar className='border-error'>
@@ -453,14 +450,11 @@ function PdfStage({
               {indexing ? ' checking the remaining pages…' : ''}
             </Text>
             <ToolbarSpacer />
-            <Button
-              size='xs'
-              variant='secondary'
+            <Close
+              size='sm'
               aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
-            >
-              ✕
-            </Button>
+            />
           </Toolbar>
         ))}
 

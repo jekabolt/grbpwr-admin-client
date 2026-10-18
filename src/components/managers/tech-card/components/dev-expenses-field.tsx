@@ -8,6 +8,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import {
   Button,
+  Close,
   ConfirmationModal,
   DataTable,
   EmptyCell,
@@ -413,14 +414,7 @@ export function DevExpensesField({
                 </td>
                 {canWriteCosting && (
                   <td>
-                    <button
-                      type='button'
-                      className='text-labelColor hover:text-error'
-                      onClick={() => setPendingDelete(e)}
-                      aria-label='delete'
-                    >
-                      ✕
-                    </button>
+                    <Close size='sm' onClick={() => setPendingDelete(e)} aria-label='delete' />
                   </td>
                 )}
               </tr>

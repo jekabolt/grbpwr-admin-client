@@ -4,7 +4,7 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Text, EmptyCell } from 'ui';
+import { Button, Text, EmptyCell, Close } from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 
 // #37: one structured fibre share — a dictionary fibre code + a percent (edited as a plain string,
@@ -167,9 +167,7 @@ export function CompositionWizard({
               composition
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>

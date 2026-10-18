@@ -389,7 +389,9 @@ function PageToggle({
       {unsure && (
         <span className='absolute left-1 top-1 bg-bgColor px-0.5 leading-none text-warning'>?</span>
       )}
-      {!used && <span className='absolute right-1 top-1 bg-bgColor px-0.5 leading-none'>✕</span>}
+      {!used && (
+        <span className='absolute right-1 top-1 bg-bgColor px-0.5 leading-none'>{'✕'}</span>
+      )}
     </button>
   );
 }

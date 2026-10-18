@@ -5,7 +5,7 @@
 // автосейв встал бы для всей карточки. Сумма части ≠ 100 — предупреждение, не запрет.
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { AddDoor, CheckboxCommon, Combobox, type ComboboxGroup, Input, Text } from 'ui';
+import { AddDoor, CheckboxCommon, Combobox, type ComboboxGroup, Input, Text, Close } from 'ui';
 import type { OverrideFiber } from '../../care-labels/composition-override';
 import type { FiberDict } from '../../care-labels/composition-resolver';
 import { LABEL_PART_NAME, LABEL_PARTS } from '../../care-labels/label-parts';
@@ -119,14 +119,11 @@ export function FibreEditor({
                 <Text size='micro' variant='label'>
                   %
                 </Text>
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove ${r.fiberCode || 'fibre'} from ${LABEL_PART_NAME[part]}`}
                   onClick={() => push(rows.filter((x) => x.key !== r.key))}
-                  className='cursor-pointer px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-1 focus-visible:outline-textColor'
-                >
-                  ✕
-                </button>
+                />
               </div>
             ))}
             <AddDoor

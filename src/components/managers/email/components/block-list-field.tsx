@@ -2,7 +2,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { emailBlockTypes } from 'constants/email-campaign';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, Text } from 'ui';
+import { AddDoor, Text, Close } from 'ui';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { CampaignSchema } from './schema';
@@ -69,14 +69,7 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
                 >
                   ↓
                 </button>
-                <button
-                  type='button'
-                  aria-label='delete block'
-                  onClick={() => fa.remove(i)}
-                  className='px-1.5 leading-none text-textInactiveColor hover:text-textColor'
-                >
-                  ×
-                </button>
+                <Close size='sm' aria-label='delete block' onClick={() => fa.remove(i)} />
               </div>
             </div>
             <div className='p-2'>

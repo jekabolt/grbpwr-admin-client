@@ -49,6 +49,7 @@ import {
   CheckboxCommon,
   Chip,
   ChipRow,
+  Close,
   GroupLabel,
   Pill,
   FoldCaret,
@@ -1079,13 +1080,7 @@ function AssemblySkeletonPanel({
             )}
             {proposal && <HeaderWarnings items={headWarnings} />}
             <Dialog.Close asChild>
-              <button
-                type='button'
-                aria-label='close'
-                className='ml-auto text-labelColor hover:text-textColor'
-              >
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </Dialog.Close>
           </div>
           <Dialog.Description className='sr-only'>

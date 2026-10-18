@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { AddDoor, Button, Chip, Pill, Text, FoldCaret } from 'ui';
+import { AddDoor, Button, Chip, Pill, Text, FoldCaret, Close } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import {
@@ -2810,17 +2810,13 @@ function SketchSticker({
         >
           sketch
         </Text>
-        <button
-          type='button'
+        <Close
+          size='sm'
           onClick={close}
           aria-label='hide the sketch'
           title='hide the sketch (s)'
-          className='ml-auto text-labelColor transition-colors hover:text-textColor'
-        >
-          <Text size='micro' component='span'>
-            ✕
-          </Text>
-        </button>
+          className='ml-auto'
+        />
       </div>
       {/* СВЁРНУТЫЙ СТИКЕР — РОВНО ЕГО ШАПКА: тело снимается, а не прячется `visibility`, иначе
           свёрнутая справка продолжала бы отнимать место у полотна, ничего не показывая. */}

@@ -1,7 +1,7 @@
 import { PackagingRecipeItem, PackagingRecipeLine } from 'api/proto-http/admin';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CalloutBox, Input, Placeholder, Pill, Text, EmptyCell } from 'ui';
+import { Button, CalloutBox, Input, Placeholder, Pill, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -117,17 +117,7 @@ function PackagingRow({
             </Text>
           )}
         </div>
-        {canEdit && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            aria-label='remove material'
-            onClick={onRemove}
-          >
-            ✕
-          </Button>
-        )}
+        {canEdit && <Close size='sm' aria-label='remove material' onClick={onRemove} />}
       </div>
 
       <div className='grid grid-cols-2 gap-2'>

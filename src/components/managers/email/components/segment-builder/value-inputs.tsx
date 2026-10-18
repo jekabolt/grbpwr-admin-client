@@ -10,14 +10,8 @@
 
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button, Input, Select, Text } from 'ui';
-import {
-  arityForOperator,
-  effectiveValueKind,
-  FieldDef,
-  Operator,
-  ValueKind,
-} from './catalog';
+import { Button, Close, Input, Select, Text } from 'ui';
+import { arityForOperator, effectiveValueKind, FieldDef, Operator, ValueKind } from './catalog';
 
 const BOOL_ITEMS = [
   { value: 'true', label: 'true' },
@@ -133,16 +127,12 @@ function TokenInput({
             >
               <Text size='small'>{v}</Text>
               {!disabled && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   onClick={() => onChange(values.filter((_, j) => j !== i))}
                   aria-label={`remove ${v}`}
-                  className='leading-none'
-                >
-                  <Text size='small' variant='inactive'>
-                    [x]
-                  </Text>
-                </button>
+                  className='-my-1 -mr-1 leading-none'
+                />
               )}
             </span>
           ))}

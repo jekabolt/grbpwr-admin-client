@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   CalloutBox,
+  Close,
   Input,
   Pill,
   GenericPopover,
@@ -314,16 +315,12 @@ function AssemblyTile({
       )}
     >
       {canEdit && (
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
+        <Close
+          size='sm'
           aria-label='remove assembly line'
           onClick={onRemove}
           className='absolute right-1 top-1 z-10'
-        >
-          ✕
-        </Button>
+        />
       )}
 
       {canEdit ? (

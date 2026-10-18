@@ -974,8 +974,14 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           title='lines'
           aside={
             flagged ? (
-              <Chip quiet selected onClick={() => setFlag(null)} title='stop lighting this flag'>
-                {FLAG[flagged.kind] ?? flagged.kind} ✕
+              <Chip
+                quiet
+                selected
+                onClick={() => setFlag(null)}
+                onRemove={() => setFlag(null)}
+                title='stop lighting this flag'
+              >
+                {FLAG[flagged.kind] ?? flagged.kind}
               </Chip>
             ) : undefined
           }

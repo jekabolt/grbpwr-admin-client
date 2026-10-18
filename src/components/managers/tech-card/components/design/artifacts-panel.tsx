@@ -45,6 +45,7 @@ import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/z
 import {
   Button,
   Chip,
+  Close,
   ConfirmationModal,
   GroupLabel,
   Toolbar,
@@ -3624,16 +3625,12 @@ export function PlateGrid({
                       </PlateCorner>
                     )}
                     {detachReason ? (
-                      <PlateCorner label={`detach ${plate.name}`} reason={detachReason}>
-                        ✕
-                      </PlateCorner>
+                      <PlateClose label={`detach ${plate.name}`} reason={detachReason} />
                     ) : (
-                      <PlateCorner
+                      <PlateClose
                         label={`detach ${plate.name} — take this picture off the sheet; the callouts on it go with it`}
                         onPress={() => onDetach?.(plate)}
-                      >
-                        ✕
-                      </PlateCorner>
+                      />
                     )}
                   </>
                 }
@@ -4049,5 +4046,41 @@ function PlateCorner({
     >
       {children}
     </span>
+  );
+}
+
+function PlateClose({
+  label,
+  onPress,
+  reason,
+}: {
+  label: string;
+  onPress?: () => void;
+  reason?: string;
+}) {
+  const dead = !!reason || !onPress;
+  return (
+    <Close
+      asChild
+      size='sm'
+      tabIndex={dead ? -1 : 0}
+      aria-disabled={dead || undefined}
+      aria-label={label}
+      title={reason ? `${label} — ${reason}` : label}
+      onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!dead) onPress?.();
+      }}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (!dead) onPress?.();
+      }}
+      className={cn(
+        TILE_QUIET,
+        dead ? 'cursor-not-allowed text-textInactiveColor' : 'cursor-pointer',
+      )}
+    />
   );
 }

@@ -2,7 +2,7 @@ import { LANGUAGES } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, Text } from 'ui';
+import { AddDoor, Text, Close } from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { LinkField } from './link-field';
 import { MediaPairField } from './media-pair-field';
@@ -152,14 +152,7 @@ export function SlideListField({
                 >
                   ↓
                 </button>
-                <button
-                  type='button'
-                  onClick={() => remove(i)}
-                  aria-label={`remove ${itemLabel}`}
-                  className='px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  ×
-                </button>
+                <Close size='sm' onClick={() => remove(i)} aria-label={`remove ${itemLabel}`} />
               </div>
             </div>
 

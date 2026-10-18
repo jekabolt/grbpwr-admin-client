@@ -1,9 +1,10 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { ChevronLeftIcon, ChevronRightIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { ChevronLeftIcon, ChevronRightIcon } from '@radix-ui/react-icons';
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Close } from 'ui';
 import {
   useImageAdjust,
   useImageAnnotate,
@@ -54,7 +55,9 @@ export interface MediaViewerItem {
  */
 export function mediaFullViewerSrc(m: common_MediaFull): string {
   const media = m.media;
-  return media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
+  return (
+    media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || ''
+  );
 }
 
 /** Map a proto `common_MediaFull` to a viewer item (full-size preferred, thumb for the strip). */
@@ -142,7 +145,13 @@ function exportFileName(src: string, marks: { ink: boolean; adjusted: boolean })
   const base = src.split('?')[0]?.split('/').pop() || 'image';
   const stem = base.replace(/\.[^.]+$/, '') || 'image';
   const suffix =
-    marks.ink && marks.adjusted ? 'edited' : marks.ink ? 'annotated' : marks.adjusted ? 'adjusted' : 'copy';
+    marks.ink && marks.adjusted
+      ? 'edited'
+      : marks.ink
+        ? 'annotated'
+        : marks.adjusted
+          ? 'adjusted'
+          : 'copy';
   return `${stem}-${suffix}.png`;
 }
 
@@ -419,160 +428,160 @@ export function MediaViewer({
                   details
                 </ViewerAction>
               )}
-              <Dialog.Close
-                aria-label='Close viewer'
-                className='flex size-8 items-center justify-center border border-bgColor/40 transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
-              >
-                <Cross2Icon className='size-4' />
+              <Dialog.Close asChild>
+                <Close
+                  aria-label='Close viewer'
+                  className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor'
+                />
               </Dialog.Close>
             </span>
           </div>
 
           <div className='flex min-h-0 flex-1'>
-          {/* Stage — click on the empty ground (not the media) closes. Images get
+            {/* Stage — click on the empty ground (not the media) closes. Images get
               real pan/zoom (wheel, drag, pinch) and an optional draw overlay;
               video is untouched. */}
-          <div
-            ref={gestures.viewportRef}
-            className={cn(
-              'relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16',
-              // `isImage`, не `stageLive`: смахивание по рамке «file missing» — тоже листание, и
-              // отдать жест браузеру значило бы отнять его у ряда.
-              isImage && 'touch-none',
-            )}
-            onClick={handleStageClick}
-            {...gestures.viewportHandlers}
-          >
             <div
-              key={safeIndex}
-              className='media-viewer-stage relative flex max-h-full max-w-full items-center justify-center'
-              style={stageLive ? gestures.stageStyle : undefined}
+              ref={gestures.viewportRef}
+              className={cn(
+                'relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16',
+                // `isImage`, не `stageLive`: смахивание по рамке «file missing» — тоже листание, и
+                // отдать жест браузеру значило бы отнять его у ряда.
+                isImage && 'touch-none',
+              )}
+              onClick={handleStageClick}
+              {...gestures.viewportHandlers}
             >
-              {type === 'video' ? (
-                <video
-                  src={current.src}
-                  controls
-                  autoPlay
-                  playsInline
-                  className='max-h-[calc(100vh-11rem)] max-w-full object-contain'
-                />
-              ) : stageMissing ? (
-                /* РАМКА КАДРА СО СЛОВОМ (O-55): тот же белый грунт, что под снимком, и подпись
+              <div
+                key={safeIndex}
+                className='media-viewer-stage relative flex max-h-full max-w-full items-center justify-center'
+                style={stageLive ? gestures.stageStyle : undefined}
+              >
+                {type === 'video' ? (
+                  <video
+                    src={current.src}
+                    controls
+                    autoPlay
+                    playsInline
+                    className='max-h-[calc(100vh-11rem)] max-w-full object-contain'
+                  />
+                ) : stageMissing ? (
+                  /* РАМКА КАДРА СО СЛОВОМ (O-55): тот же белый грунт, что под снимком, и подпись
                    тоном ярлыка — ровно как пустота названа на плитках. Размер — обычный кадр 4:5,
                    потому что настоящего размера у файла, которого нет, никто не измерит. */
-                <div
-                  data-probe='viewer-missing'
-                  title={FILE_MISSING_TITLE}
-                  className='flex h-80 max-h-[calc(100vh-11rem)] w-64 max-w-full items-center justify-center bg-bgColor px-4 text-center text-micro uppercase tracking-label text-labelColor'
-                >
-                  {FILE_MISSING_WORDS}
-                </div>
-              ) : (
-                <>
-                  <img
-                    ref={gestures.imgRef}
-                    src={current.src}
-                    alt={current.alt || ''}
-                    draggable={false}
-                    data-probe='viewer-image'
-                    onDoubleClick={gestures.onImageDoubleClick}
-                    // Адрес — с самого узла, а не из замыкания: запоздалая ошибка прежнего кадра не
-                    // объявит павшим тот, на который уже перелистнули.
-                    onError={(e) => markMissing(e.currentTarget.getAttribute('src'))}
-                    className={cn(
-                      // White ground behind the picture: transparent PNGs (background-removed
-                      // product shots, sketches) are unreadable on the near-black overlay.
-                      'max-h-[calc(100vh-11rem)] max-w-full select-none bg-bgColor object-contain',
-                      gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
-                      !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
-                    )}
-                  />
-                  {/* КАНВАС КОРРЕКЦИИ ЛЕЖИТ ПОВЕРХ СНИМКА И НЕ ЛОВИТ УКАЗАТЕЛЬ. `<img>` под ним
+                  <div
+                    data-probe='viewer-missing'
+                    title={FILE_MISSING_TITLE}
+                    className='flex h-80 max-h-[calc(100vh-11rem)] w-64 max-w-full items-center justify-center bg-bgColor px-4 text-center text-micro uppercase tracking-label text-labelColor'
+                  >
+                    {FILE_MISSING_WORDS}
+                  </div>
+                ) : (
+                  <>
+                    <img
+                      ref={gestures.imgRef}
+                      src={current.src}
+                      alt={current.alt || ''}
+                      draggable={false}
+                      data-probe='viewer-image'
+                      onDoubleClick={gestures.onImageDoubleClick}
+                      // Адрес — с самого узла, а не из замыкания: запоздалая ошибка прежнего кадра не
+                      // объявит павшим тот, на который уже перелистнули.
+                      onError={(e) => markMissing(e.currentTarget.getAttribute('src'))}
+                      className={cn(
+                        // White ground behind the picture: transparent PNGs (background-removed
+                        // product shots, sketches) are unreadable on the near-black overlay.
+                        'max-h-[calc(100vh-11rem)] max-w-full select-none bg-bgColor object-contain',
+                        gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
+                        !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
+                      )}
+                    />
+                    {/* КАНВАС КОРРЕКЦИИ ЛЕЖИТ ПОВЕРХ СНИМКА И НЕ ЛОВИТ УКАЗАТЕЛЬ. `<img>` под ним
                       остаётся в документе намеренно: он и МЕРИТ бокс (`ResizeObserver`), и держит
                       попадание для панорамы и двойного клика. Убери его — и зум с перетаскиванием
                       умерли бы ровно на то время, пока крутят яркость. */}
-                  {adjust.on && (
-                    <canvas
-                      ref={adjust.canvasRef}
-                      aria-hidden
-                      data-probe='adjust-canvas'
-                      style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
-                      className='pointer-events-none absolute left-0 top-0'
-                    />
-                  )}
-                  {annotate.drawMode && (
-                    <canvas
-                      ref={annotate.canvasRef}
-                      aria-label='Drawing surface'
-                      style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
-                      className='absolute left-0 top-0 touch-none cursor-crosshair'
-                      {...annotate.canvasHandlers}
-                    />
-                  )}
+                    {adjust.on && (
+                      <canvas
+                        ref={adjust.canvasRef}
+                        aria-hidden
+                        data-probe='adjust-canvas'
+                        style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
+                        className='pointer-events-none absolute left-0 top-0'
+                      />
+                    )}
+                    {annotate.drawMode && (
+                      <canvas
+                        ref={annotate.canvasRef}
+                        aria-label='Drawing surface'
+                        style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
+                        className='absolute left-0 top-0 touch-none cursor-crosshair'
+                        {...annotate.canvasHandlers}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+
+              {hasMany && (
+                <>
+                  <ArrowButton
+                    side='left'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      go(-1);
+                    }}
+                  />
+                  <ArrowButton
+                    side='right'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      go(1);
+                    }}
+                  />
                 </>
               )}
+
+              {stageLive && (
+                <ZoomDrawToolbar
+                  scale={gestures.scale}
+                  canZoomIn={gestures.canZoomIn}
+                  canZoomOut={gestures.canZoomOut}
+                  isZoomed={gestures.isZoomed}
+                  onZoomIn={gestures.zoomIn}
+                  onZoomOut={gestures.zoomOut}
+                  onReset={gestures.reset}
+                  drawMode={annotate.drawMode}
+                  onToggleDraw={annotate.toggleDrawMode}
+                  color={annotate.color}
+                  onColorChange={annotate.setColor}
+                  colors={annotate.colors}
+                  width={annotate.width}
+                  onWidthChange={annotate.setWidth}
+                  widths={annotate.widths}
+                  hasStrokes={annotate.hasStrokes}
+                  onUndo={annotate.undo}
+                  onClear={annotate.clear}
+                  saving={annotate.saving}
+                  onSave={() =>
+                    void annotate.saveImage(
+                      current.src,
+                      exportFileName(current.src, {
+                        ink: annotate.hasStrokes,
+                        adjusted: !adjust.isZero,
+                      }),
+                      { params: adjust.values, source: adjust.sourceRef.current },
+                    )
+                  }
+                  adjustOpen={adjust.open}
+                  onToggleAdjust={adjust.toggle}
+                  adjust={adjust.values}
+                  onAdjustChange={adjust.setValues}
+                  onAdjustReset={adjust.reset}
+                  adjustStatus={adjust.status}
+                  onSaveAsPicture={onSaveAsPicture ? () => void saveAsPicture() : undefined}
+                />
+              )}
             </div>
-
-            {hasMany && (
-              <>
-                <ArrowButton
-                  side='left'
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    go(-1);
-                  }}
-                />
-                <ArrowButton
-                  side='right'
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    go(1);
-                  }}
-                />
-              </>
-            )}
-
-            {stageLive && (
-              <ZoomDrawToolbar
-                scale={gestures.scale}
-                canZoomIn={gestures.canZoomIn}
-                canZoomOut={gestures.canZoomOut}
-                isZoomed={gestures.isZoomed}
-                onZoomIn={gestures.zoomIn}
-                onZoomOut={gestures.zoomOut}
-                onReset={gestures.reset}
-                drawMode={annotate.drawMode}
-                onToggleDraw={annotate.toggleDrawMode}
-                color={annotate.color}
-                onColorChange={annotate.setColor}
-                colors={annotate.colors}
-                width={annotate.width}
-                onWidthChange={annotate.setWidth}
-                widths={annotate.widths}
-                hasStrokes={annotate.hasStrokes}
-                onUndo={annotate.undo}
-                onClear={annotate.clear}
-                saving={annotate.saving}
-                onSave={() =>
-                  void annotate.saveImage(
-                    current.src,
-                    exportFileName(current.src, {
-                      ink: annotate.hasStrokes,
-                      adjusted: !adjust.isZero,
-                    }),
-                    { params: adjust.values, source: adjust.sourceRef.current },
-                  )
-                }
-                adjustOpen={adjust.open}
-                onToggleAdjust={adjust.toggle}
-                adjust={adjust.values}
-                onAdjustChange={adjust.setValues}
-                onAdjustReset={adjust.reset}
-                adjustStatus={adjust.status}
-                onSaveAsPicture={onSaveAsPicture ? () => void saveAsPicture() : undefined}
-              />
-            )}
-          </div>
 
             {showMeta && current.meta && (
               <MetaPanel meta={current.meta} onUsageNavigate={onUsageNavigate} />

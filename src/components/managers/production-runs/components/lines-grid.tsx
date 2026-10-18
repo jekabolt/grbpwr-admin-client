@@ -6,7 +6,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Text, EmptyCell } from 'ui';
+import { Button, Text, EmptyCell, Close } from 'ui';
 import { ulid } from 'utils/ulid';
 import { runDate } from './options';
 import { updateRunErrorMessage, useProductionRuns, useUpdateRunSection } from './useProductionRuns';
@@ -441,14 +441,11 @@ export function LinesGrid({
                   <td className={`${cell} text-right`}>{rowTotal(r.productId)}</td>
                   {editable ? (
                     <td className={cell}>
-                      <Button
-                        type='button'
-                        variant='secondary'
+                      <Close
+                        size='sm'
                         aria-label='remove colour-model'
                         onClick={() => removeRow(r.productId)}
-                      >
-                        ✕
-                      </Button>
+                      />
                     </td>
                   ) : null}
                 </tr>

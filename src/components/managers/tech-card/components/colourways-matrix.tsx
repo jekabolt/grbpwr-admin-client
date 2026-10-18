@@ -1202,7 +1202,7 @@ function ColourwayColumn({
               lockVersion={colorway.lockVersion ?? lockVersion}
               isLastColorway={isLastColorway}
               onDeleted={() => onDeleted(colorwayId)}
-              triggerClassName='absolute right-1 top-1 flex size-[18px] cursor-pointer items-center justify-center border border-borderColor bg-bgColor text-[11px] leading-none text-labelColor opacity-0 hover:border-error hover:text-error focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover/head:opacity-100 group-focus-within/head:opacity-100 [@media(hover:none)]:size-6 [@media(hover:none)]:opacity-100'
+              triggerClassName='absolute right-1 top-1 bg-bgColor opacity-0 focus-visible:opacity-100 group-hover/head:opacity-100 group-focus-within/head:opacity-100 [@media(hover:none)]:opacity-100'
               trigger='✕'
             />
           )}

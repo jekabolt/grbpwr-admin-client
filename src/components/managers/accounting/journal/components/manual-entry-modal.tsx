@@ -15,6 +15,7 @@ import {
 import {
   AddDoor,
   Button,
+  Close,
   ConfirmationModal,
   Input,
   Selector,
@@ -303,9 +304,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
             <DialogPrimitives.Title className='text-lg uppercase'>
               new journal entry
             </DialogPrimitives.Title>
-            <Button type='button' className='shrink-0 cursor-pointer' onClick={requestClose}>
-              [x]
-            </Button>
+            <Close onClick={requestClose} />
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Create a manual journal entry
@@ -566,14 +565,12 @@ function LineRow({
           >
             <Text size='small'>duplicate</Text>
           </button>
-          <button
-            type='button'
+          <Close
+            size='sm'
+            aria-label='remove journal line'
             onClick={onRemove}
             disabled={count <= 2}
-            className='underline underline-offset-2 hover:opacity-70 disabled:opacity-40'
-          >
-            <Text size='small'>[x]</Text>
-          </button>
+          />
         </div>
       </div>
 

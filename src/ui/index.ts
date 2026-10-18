@@ -17,6 +17,8 @@ export { BarRow, WaterfallRow } from './components/bar-row';
 export { Board, BoardCard, BoardColumn, BoardEmpty } from './components/board';
 /** @primitive Clickable action, all styles */
 export { Button, buttonVariants } from './components/button';
+/** @primitive Close / remove ×  */
+export { Close } from './components/close';
 /** @primitive Inline message box */
 export { CalloutBox } from './components/callout-box';
 /** @primitive Drawing with numbered pins */

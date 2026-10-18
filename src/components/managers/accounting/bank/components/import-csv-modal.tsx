@@ -1,7 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { useImportBankCsv } from '../../utils/hooks';
 
 // Parsers the backend accepts (PostBankTxnRequest.source; empty = revolut). Revolut is the only one
@@ -55,9 +55,7 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
             <DialogPrimitives.Title className='text-lg uppercase'>
               import bank statement
             </DialogPrimitives.Title>
-            <Button type='button' className='shrink-0 cursor-pointer' onClick={onClose}>
-              [x]
-            </Button>
+            <Close onClick={onClose} />
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Paste a bank CSV export to import statement lines into the inbox
@@ -91,7 +89,8 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
             </label>
 
             <Text variant='inactive' size='small'>
-              Already-imported lines are skipped automatically — re-importing the same export is safe.
+              Already-imported lines are skipped automatically — re-importing the same export is
+              safe.
             </Text>
 
             <div className='flex items-center justify-end gap-2'>

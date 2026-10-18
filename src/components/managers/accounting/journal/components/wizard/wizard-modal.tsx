@@ -4,7 +4,16 @@ import { CreateSupplierModal } from 'components/managers/accounting/subledgers/c
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BackLink, Button, ConfirmationModal, Input, Selector, Text, ToggleSwitch } from 'ui';
+import {
+  BackLink,
+  Button,
+  ConfirmationModal,
+  Input,
+  Selector,
+  Text,
+  ToggleSwitch,
+  Close,
+} from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { Callout, CheckRow, CheckStrip, GroupHeader, Verdict } from '../../../components/kit';
 import {
@@ -356,9 +365,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
               >
                 <Text size='small'>manual (advanced)</Text>
               </button>
-              <Button type='button' className='shrink-0 cursor-pointer' onClick={requestClose}>
-                [x]
-              </Button>
+              <Close onClick={requestClose} />
             </div>
           </div>
           <DialogPrimitives.Description className='sr-only'>

@@ -16,6 +16,7 @@ import {
   Text,
   Toolbar,
   EmptyCell,
+  Chip,
 } from 'ui';
 import { CreateRunModal } from './components/create-run-modal';
 import { isRunLocked, isRunOpen, isRunReceivable, runDetailPath } from './components/options';
@@ -351,24 +352,24 @@ export function ProductionRuns() {
           value={techCardId}
           onChange={(e) => patchFilters({ techCardId: e.target.value })}
         />
-        <button
-          type='button'
-          className={`${cell} uppercase ${overdueOnly ? 'border-error text-error' : ''}`}
+        <Chip
+          selected={overdueOnly}
+          pressed={overdueOnly}
           title='only runs past their promised date'
-          aria-pressed={overdueOnly}
           onClick={() => patchFilters({ overdue: overdueOnly ? '' : '1' })}
+          onRemove={overdueOnly ? () => patchFilters({ overdue: '' }) : undefined}
         >
-          late {overdueOnly ? '✕' : ''}
-        </button>
+          late
+        </Chip>
         {staleDays > 0 ? (
-          <button
-            type='button'
-            className={`${cell} uppercase`}
+          <Chip
+            selected
             title='clear staleness filter'
             onClick={() => patchFilters({ stale: '' })}
+            onRemove={() => patchFilters({ stale: '' })}
           >
-            stale ≥{staleDays}d ✕
-          </button>
+            stale ≥{staleDays}d
+          </Chip>
         ) : null}
       </Toolbar>
 

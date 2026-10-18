@@ -29,6 +29,7 @@ import {
   addDoorClass,
   Chip,
   ChipRow,
+  Close,
   HeaderWarnings,
   type HeaderWarning,
   GenericPopover,
@@ -573,14 +574,12 @@ export function SampleScreen({
               photoFace
             )}
             {canEdit && ownPhoto && (
-              <button
-                type='button'
+              <Close
+                size='sm'
                 aria-label='remove the photo'
                 onClick={() => set({ mediaIds: [] })}
-                className='absolute right-0 top-0 hidden border border-borderColor bg-bgColor px-1 text-micro leading-none hover:text-error group-hover:block'
-              >
-                ✕
-              </button>
+                className='absolute right-0 top-0 bg-bgColor opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+              />
             )}
           </div>
 
@@ -1185,12 +1184,11 @@ function RndBlock({
             <Text size='micro' component='span' className='text-right tabular-nums'>
               {decimalToInput(e.amount)} {e.currency}
             </Text>
-            {canWriteCosting ? (
+            {canWriteCosting && confirmId === e.id ? (
               <button
                 type='button'
-                aria-label={confirmId === e.id ? 'confirm delete' : 'delete'}
+                aria-label='confirm delete'
                 onClick={() => {
-                  if (confirmId !== e.id) return setConfirmId(e.id ?? 0);
                   setConfirmId(0);
                   del.mutate(e.id ?? 0, {
                     onError: (err) =>
@@ -1198,13 +1196,17 @@ function RndBlock({
                   });
                 }}
                 onBlur={() => setConfirmId(0)}
-                className={cn(
-                  'text-micro uppercase',
-                  confirmId === e.id ? 'text-error' : 'text-labelColor hover:text-error',
-                )}
+                className='text-micro uppercase text-error'
               >
-                {confirmId === e.id ? 'delete' : '✕'}
+                delete
               </button>
+            ) : canWriteCosting ? (
+              <Close
+                size='sm'
+                aria-label='delete'
+                onClick={() => setConfirmId(e.id ?? 0)}
+                onBlur={() => setConfirmId(0)}
+              />
             ) : (
               <span />
             )}
@@ -1301,14 +1303,7 @@ function RndBlock({
                 ))}
               </select>
             )}
-            <button
-              type='button'
-              aria-label='cancel'
-              onClick={() => setDraft(null)}
-              className='text-micro uppercase text-labelColor hover:text-textColor'
-            >
-              ✕
-            </button>
+            <Close size='sm' aria-label='cancel' onClick={() => setDraft(null)} />
           </div>
         )}
         {canWriteCosting && !draft && (

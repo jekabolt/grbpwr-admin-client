@@ -10,7 +10,7 @@
 //             the field resets operator + values; changing the operator resizes values.
 
 import { cn } from 'lib/utility';
-import { Button, Select, Text } from 'ui';
+import { Button, Close, Select, Text } from 'ui';
 import {
   defaultOperatorForField,
   FIELDS,
@@ -138,16 +138,12 @@ function LeafRow({
           />
         </div>
         {!disabled && (
-          <button
-            type='button'
+          <Close
+            size='sm'
             onClick={onRemove}
             aria-label='remove condition'
             className='shrink-0 self-start leading-none lg:pt-1'
-          >
-            <Text size='small' variant='inactive'>
-              [x]
-            </Text>
-          </button>
+          />
         )}
       </div>
       {issue && (
@@ -195,13 +191,22 @@ function GroupNodeCard({
     >
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
-          <AndOrToggle value={node.op} onChange={(op) => onChange({ ...node, op })} disabled={disabled} />
+          <AndOrToggle
+            value={node.op}
+            onChange={(op) => onChange({ ...node, op })}
+            disabled={disabled}
+          />
           <Text size='small' variant='inactive'>
             {node.op === 'AND' ? 'match ALL of' : 'match ANY of'}
           </Text>
         </div>
         {!isRoot && !disabled && onRemove && (
-          <button type='button' onClick={onRemove} aria-label='remove group' className='leading-none'>
+          <button
+            type='button'
+            onClick={onRemove}
+            aria-label='remove group'
+            className='leading-none'
+          >
             <Text size='small' variant='inactive'>
               remove group
             </Text>

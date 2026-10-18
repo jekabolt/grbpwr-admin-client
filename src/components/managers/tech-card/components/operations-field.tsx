@@ -19,6 +19,7 @@ import {
   CalloutBox,
   Chip,
   ChipRow,
+  Close,
   Combobox,
   type ComboboxGroup,
   ConfirmationModal,
@@ -2496,16 +2497,16 @@ function SuggestedMark({
   onDismiss: () => void;
 }) {
   return (
-    <button
-      type='button'
+    <Chip
       data-suggested={field}
       onClick={onDismiss}
+      onRemove={onDismiss}
+      tone='attention'
       title={`${why} — click to drop it and answer yourself`}
-      className='mt-px inline-flex max-w-full items-center gap-1 border border-warning px-[7px] py-px text-micro uppercase tracking-pill text-warning'
+      className='mt-px max-w-full'
     >
       <span className='truncate'>suggested · {what}</span>
-      <span aria-hidden>✕</span>
-    </button>
+    </Chip>
   );
 }
 
@@ -4840,12 +4841,13 @@ function OperationEditor({
             prefilled ·
           </Text>
           {prefillNotice.map((f) => (
-            <button
+            <Chip
               key={f.field}
-              type='button'
               data-prefill-field={f.field}
               data-prefill-source={f.source}
               onClick={() => dropPrefilled(f.field)}
+              onRemove={() => dropPrefilled(f.field)}
+              tone='attention'
               title={
                 f.source === 'card'
                   ? `carried from step ${f.fromStep} of this card · click to clear`
@@ -4853,7 +4855,7 @@ function OperationEditor({
                     ? `the last “${f.workLabel}” time in the catalogue · click to clear`
                     : `your saved default for “${f.workLabel}” · click to clear`
               }
-              className='inline-flex max-w-full items-center gap-1 border border-warning px-[7px] py-px text-micro uppercase tracking-pill text-warning'
+              className='max-w-full'
             >
               <span className='truncate'>
                 {f.field === 'smv'
@@ -4867,8 +4869,7 @@ function OperationEditor({
                     ? 'catalog'
                     : 'your default'}
               </span>
-              <span aria-hidden>✕</span>
-            </button>
+            </Chip>
           ))}
         </div>
       )}
@@ -5439,15 +5440,13 @@ function OperationEditor({
                 cloth={cloth?.get(k) ?? null}
                 pxBox={TILE_BOX}
               />
-              <button
-                type='button'
+              <Close
+                size='sm'
                 aria-label={`remove piece ${byKey.get(k)?.name ?? ''}`}
                 title='remove the piece from the step'
                 onClick={() => removePieceKey(k)}
-                className='absolute top-0 right-0 flex size-4 items-center justify-center bg-bgColor/80 text-nano leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-              >
-                ✕
-              </button>
+                className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+              />
             </span>
           ) : (
             <Chip key={k} title={byKey.get(k)?.name} onRemove={() => removePieceKey(k)}>

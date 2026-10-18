@@ -2,7 +2,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
-import { Input, Text } from 'ui';
+import { Close, Input, Text } from 'ui';
 
 // One resolved, pickable entity row.
 export interface EntityOption {
@@ -119,14 +119,7 @@ export function EntityPicker({
               </Text>
             )}
           </div>
-          <button
-            type='button'
-            aria-label='clear link'
-            onClick={clear}
-            className='shrink-0 px-1 text-labelColor hover:text-textColor'
-          >
-            ✕
-          </button>
+          <Close size='sm' aria-label='clear link' onClick={clear} />
         </div>
       )}
 

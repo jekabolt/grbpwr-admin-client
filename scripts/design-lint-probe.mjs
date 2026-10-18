@@ -20,6 +20,7 @@ const filename = 'src/components/design-lint-probe.tsx';
 tester.run('design/no-raw-control', design.rules['no-raw-control'], {
   valid: [
     { filename, code: "const view = <Button type='button'>save</Button>;" },
+    { filename, code: "const close = <Close aria-label='remove row' />;" },
     { filename, code: "const picker = <input type='file' hidden />;" },
   ],
   invalid: [
@@ -32,6 +33,16 @@ tester.run('design/no-raw-control', design.rules['no-raw-control'], {
         { message: "Use ToggleSwitch from 'ui' instead of raw checkbox switch." },
         { message: "Use Select, Selector, or Combobox from 'ui' instead of raw <select>." },
         { message: "Use Textarea from 'ui' instead of raw <textarea>." },
+      ],
+    },
+    {
+      filename,
+      code: 'const view = <><Button>×</Button><Button><span>✕</span></Button><button>✖</button></>;',
+      errors: [
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
+        { message: "Use Button from 'ui' instead of raw <button>." },
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
       ],
     },
   ],

@@ -10,7 +10,7 @@ import {
   useState,
   type JSX,
 } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 
 import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
 import { useStartDesignRun } from '../../render/use-design-run';
@@ -525,17 +525,17 @@ export function MaskEditor({
             >
               mask · {label}
             </Text>
-            <Dialog.Close
-              aria-label='close the mask'
-              disabled={uploading}
-              title={
-                uploading
-                  ? `the mask is uploading; you can close the editor once it is up, or after ${MASK_UPLOAD_DEADLINE_MS / 1000} s`
-                  : undefined
-              }
-              className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
-            >
-              ✕
+            <Dialog.Close asChild>
+              <Close
+                aria-label='close the mask'
+                disabled={uploading}
+                title={
+                  uploading
+                    ? `the mask is uploading; you can close the editor once it is up, or after ${MASK_UPLOAD_DEADLINE_MS / 1000} s`
+                    : undefined
+                }
+                className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
+              />
             </Dialog.Close>
           </div>
 

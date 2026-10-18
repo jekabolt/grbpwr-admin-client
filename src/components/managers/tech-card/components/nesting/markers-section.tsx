@@ -17,7 +17,17 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import {
   cardMarkers,
   compositionLabel,
@@ -567,18 +577,14 @@ export function MarkersSection({
             </Pill>
           )}
           {canEdit && (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
+            <Close
+              size='sm'
               aria-label='delete marker'
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();
                 setDeleting({ id, name: m.name ?? '' });
               }}
-            >
-              ✕
-            </Button>
+            />
           )}
         </span>
       </li>

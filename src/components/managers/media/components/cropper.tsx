@@ -18,6 +18,7 @@ import {
   SideRailItem,
   Text,
   EmptyCell,
+  Close,
 } from 'ui';
 import './cropper.css';
 
@@ -395,9 +396,7 @@ export const MediaCropper: FC<CropperInterface> = ({
           <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
             crop image
           </Text>
-          <Button className='cursor-pointer py-1' onClick={onCancel}>
-            [x]
-          </Button>
+          <Close onClick={onCancel} />
         </div>
       )}
 

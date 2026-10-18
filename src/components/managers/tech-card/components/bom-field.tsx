@@ -36,6 +36,7 @@ import {
   AddDoor,
   GroupLabel,
   HeaderWarnings,
+  Close,
   Placeholder,
   ConfirmationModal,
   Text,
@@ -1038,14 +1039,12 @@ export function BomField({
             </Tooltip>
           )}
           {canEdit && (
-            <button
-              type='button'
+            <Close
+              size='sm'
               aria-label={`remove slot ${role}`}
               onClick={() => askRemove(i)}
-              className='absolute right-1 top-1 flex size-[18px] cursor-pointer items-center justify-center border border-borderColor bg-bgColor text-[11px] leading-none text-labelColor opacity-0 hover:border-error hover:text-error focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 [@media(hover:none)]:size-6 [@media(hover:none)]:opacity-100'
-            >
-              ✕
-            </button>
+              className='absolute right-1 top-1 bg-bgColor opacity-0 focus-visible:opacity-100 group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 [@media(hover:none)]:opacity-100'
+            />
           )}
         </div>
         <span className='flex min-w-0 flex-col uppercase tracking-label'>

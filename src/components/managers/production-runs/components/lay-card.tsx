@@ -6,7 +6,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Fragment } from 'react';
-import { Button, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
+import { Button, GroupLabel, Pill, Row, Text, EmptyCell, Close } from 'ui';
 import {
   ClothReport,
   FROZEN_FACT_NOTE,
@@ -139,15 +139,11 @@ export function LayCard({
                 <Button type='button' variant='secondary' size='xs' onClick={onEdit}>
                   edit
                 </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
+                <Close
+                  size='sm'
                   aria-label={`delete lay ${lay.name || title}`}
                   onClick={onDelete}
-                >
-                  ✕
-                </Button>
+                />
               </>
             ) : null}
           </div>
@@ -491,8 +487,8 @@ function ClothRows({
           только принято < выкроено), поэтому аномалия называется здесь, рядом со своим числом. */}
       {perUnit.acceptedOverCut ? (
         <Text size='nano' className='text-error'>
-          {perUnit.acceptedTotal} accepted against {perUnit.cutTotal} cut — that doesn't happen:
-          one of the numbers is lying, check the receipt rows
+          {perUnit.acceptedTotal} accepted against {perUnit.cutTotal} cut — that doesn't happen: one
+          of the numbers is lying, check the receipt rows
         </Text>
       ) : null}
       {perUnit.scrapPerGood != null ? (

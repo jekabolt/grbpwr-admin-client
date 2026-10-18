@@ -1,7 +1,7 @@
 import type { common_Color, common_ColorwayColour, common_Language } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
-import { AddDoor, Input, Text, FoldCaret, EmptyCell } from 'ui';
+import { AddDoor, Input, Text, FoldCaret, EmptyCell, Close } from 'ui';
 
 import {
   blankRow,
@@ -378,16 +378,14 @@ export function ColourwayPaletteEditor({
                     main
                   </Text>
                 )}
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove colour ${i + 1}`}
                   title='remove this colour'
                   data-cw-remove={i}
-                  className='ml-auto px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  className='ml-auto'
                   onClick={() => setRows(value.rows.filter((_, j) => j !== i))}
-                >
-                  ✕
-                </button>
+                />
               </div>
             ))}
           </div>

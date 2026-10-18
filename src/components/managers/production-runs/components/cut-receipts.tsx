@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react';
 import {
   Button,
   CalloutBox,
+  Close,
   ConfirmationModal,
   DataTable,
   EmptyCell,
@@ -707,7 +708,9 @@ export function CutReceipts({
                   <th>cut / good</th>
                   <th>per cut</th>
                   <th>per good</th>
-                  <th data-align='left' className='w-full'>caveats</th>
+                  <th data-align='left' className='w-full'>
+                    caveats
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -776,7 +779,9 @@ export function CutReceipts({
                     notes.push({
                       text: `no receipt for sizes: ${perUnit.missingSizes
                         .map(sizeLabel)
-                        .join(', ')} — “per unit” is overstated and will come down as entries are made`,
+                        .join(
+                          ', ',
+                        )} — “per unit” is overstated and will come down as entries are made`,
                       tone: 'warning',
                     });
                   // «Принято больше выкроенного» — невозможное состояние данных, и никакая другая
@@ -800,7 +805,9 @@ export function CutReceipts({
                     notes.push({
                       text: `accepted exactly 0: ${perUnit.acceptedZeroRows
                         .map((z) => `${sizeLabel(z.sizeId)} on “${z.lay}”`)
-                        .join(', ')} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
+                        .join(
+                          ', ',
+                        )} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
                       tone: 'warning',
                     });
                   if (norm) {
@@ -940,7 +947,9 @@ export function CutReceipts({
                         <th title='how many garments of this size the lay itself cuts'>by lay</th>
                         <th>cut</th>
                         <th>accepted for sewing</th>
-                        <th data-align='left' className='w-full'>note</th>
+                        <th data-align='left' className='w-full'>
+                          note
+                        </th>
                         <th />
                       </tr>
                     </thead>
@@ -1024,15 +1033,11 @@ export function CutReceipts({
                             </td>
                             <td>
                               {editable && stored ? (
-                                <Button
-                                  type='button'
-                                  variant='secondary'
-                                  size='xs'
+                                <Close
+                                  size='sm'
                                   aria-label={`delete the receipt line · ${label}`}
                                   onClick={() => setDeleting({ lay, sizeId })}
-                                >
-                                  ✕
-                                </Button>
+                                />
                               ) : null}
                             </td>
                           </tr>
@@ -1164,7 +1169,9 @@ function LayClothSummary({ report }: { report?: ClothReport }) {
     return (
       <Text size='micro' component='span' className='block text-labelColor'>
         {clothRefusalText(r)}
-        {r.kind === 'no-fact' && !r.frozen ? ' — “per unit” will be computed after the measurement' : ''}
+        {r.kind === 'no-fact' && !r.frozen
+          ? ' — “per unit” will be computed after the measurement'
+          : ''}
       </Text>
     );
   }
@@ -1205,7 +1212,9 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
           <th>accepted for sewing</th>
           <th>handed over finished</th>
           <th>defect</th>
-          <th data-align='left' className='w-full'>discrepancy</th>
+          <th data-align='left' className='w-full'>
+            discrepancy
+          </th>
         </tr>
       </thead>
       <tbody>

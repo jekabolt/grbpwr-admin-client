@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from '
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
+  Close,
   ConfirmationModal,
   Chip,
   ChipRow,
@@ -2676,10 +2677,8 @@ function WrittenRow({
       )}
       <Pill tone='mut'>{areaOf(fill.target)}</Pill>
       {!readOnly && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
+        <Close
+          size='sm'
           data-c19-undo={fill.id}
           disabled={busy}
           onClick={onUndo}
@@ -2695,9 +2694,7 @@ function WrittenRow({
               ? 'your previous words, restored — ✕ puts back the edited draft'
               : 'written by the draft — ✕ puts back what stood here'
           }
-        >
-          ✕
-        </Button>
+        />
       )}
     </div>
   );
@@ -2764,18 +2761,14 @@ function RestoreRow({
           >
             restore previous ↶
           </Button>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
+          <Close
+            size='sm'
             data-c19-restore-dismiss={fill.id}
             disabled={busy}
             onClick={onDismiss}
             aria-label={`drop the ${fill.label} that stood before the draft: ${cutTo(offer.words, 40)}`}
             title='drop these words — undo stays for 10 seconds'
-          >
-            ✕
-          </Button>
+          />
         </>
       )}
     </div>

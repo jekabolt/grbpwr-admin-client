@@ -17,7 +17,7 @@ import { heroTypes } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, Text } from 'ui';
+import { AddDoor, Text, Close } from 'ui';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
 
@@ -273,9 +273,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                           // Selection reads as INK, the way `Chip selected` does — not as a
                           // thicker grey. Keeping both states at 1px also stops the row
                           // reflowing by a pixel the moment you select it.
-                          isSelected
-                            ? 'border border-textColor'
-                            : 'border border-borderColor',
+                          isSelected ? 'border border-textColor' : 'border border-borderColor',
                         )}
                       >
                         <button
@@ -337,14 +335,11 @@ export const BlockRail: FC<BlockRailProps> = ({
                             )}
                           </span>
                         </button>
-                        <button
-                          type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        <Close
+                          size='sm'
                           aria-label='delete block'
                           onClick={() => handleRemoveEntity(uid)}
-                        >
-                          ×
-                        </button>
+                        />
                       </div>
                     );
                   }}

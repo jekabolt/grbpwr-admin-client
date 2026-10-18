@@ -1,6 +1,7 @@
 import { cva, VariantProps } from 'class-variance-authority';
 
 import { cn } from 'lib/utility';
+import { Close } from './close';
 import { HEADER_TEXT } from './section-header';
 
 /**
@@ -134,18 +135,17 @@ export function Chip({
           span-варианте гейт приходится ставить руками, иначе ✕ остаётся живым на выключенном
           чипе. */}
       {onRemove && !(nonForm && disabled) && (
-        <span
-          role='button'
+        <Close
+          asChild
+          size='sm'
           tabIndex={-1}
           aria-label='remove'
           onClick={(e: React.MouseEvent) => {
             e.stopPropagation();
             onRemove();
           }}
-          className='cursor-pointer leading-none'
-        >
-          ✕
-        </span>
+          className='cursor-pointer'
+        />
       )}
     </Component>
   );

@@ -11,7 +11,7 @@ import {
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { AnnotationStyleRow } from 'components/managers/tech-card/annotation/style-row';
 import { rememberPen, type NoteArrows } from 'components/managers/tech-card/annotation/surface';
-import { Button, Input, Pill, Text, Textarea, EmptyCell } from 'ui';
+import { Button, Input, Pill, Text, Textarea, EmptyCell, Close } from 'ui';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
 import { CalloutPurposeFields } from './callout-purpose-fields';
@@ -328,16 +328,14 @@ export function CalloutRail({
               {/* УДАЛИТЬ С НАВЕДЕНИЯ — без разворота строки. Настоящая кнопка: она ПИШЕТ, и fieldset
                   выпущенной карты обязан её гасить; без `onRemove` двери нет вовсе. */}
               {onRemove && !disabled && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`delete callout ${c.number || ''}`.trim()}
                   title='delete'
                   data-callout-remove={index}
                   onClick={() => onRemove(index)}
-                  className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor opacity-0 transition-opacity hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100 motion-reduce:transition-none'
-                >
-                  <span aria-hidden>✕</span>
-                </button>
+                  className='opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
+                />
               )}
             </div>
 

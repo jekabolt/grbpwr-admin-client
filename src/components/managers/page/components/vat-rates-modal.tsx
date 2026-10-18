@@ -5,13 +5,20 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { AddDoor, ConfirmationModal, Text } from 'ui';
+import { AddDoor, ConfirmationModal, Text, Close } from 'ui';
 
 type Row = { countryCode: string; ratePct: string; validFrom: string };
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+const cell =
+  'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Destination-country VAT rates used to compute net-of-VAT revenue. Get + Upsert.
-export function VatRatesModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function VatRatesModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.analytics);
   const { showMessage } = useSnackBarStore();
@@ -42,7 +49,8 @@ export function VatRatesModal({ open, onOpenChange }: { open: boolean; onOpenCha
       showMessage('VAT rates saved', 'success');
       onOpenChange(false);
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save VAT rates', 'error'),
+    onError: (e) =>
+      showMessage(e instanceof Error ? e.message : 'Failed to save VAT rates', 'error'),
   });
 
   const upd = (i: number, patch: Partial<Row>) =>
@@ -75,27 +83,61 @@ export function VatRatesModal({ open, onOpenChange }: { open: boolean; onOpenCha
           <Text size='small'>loading…</Text>
         ) : (
           <div className='grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'>
-            <Text variant='inactive' size='small'>country</Text>
-            <Text variant='inactive' size='small'>rate %</Text>
-            <Text variant='inactive' size='small'>valid from</Text>
+            <Text variant='inactive' size='small'>
+              country
+            </Text>
+            <Text variant='inactive' size='small'>
+              rate %
+            </Text>
+            <Text variant='inactive' size='small'>
+              valid from
+            </Text>
             <span />
             {rows.map((r, i) => (
-              <div key={i} className='col-span-4 grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'>
-                <input className={`${cell} uppercase`} maxLength={2} placeholder='DE' disabled={!canEdit}
-                  value={r.countryCode} onChange={(e) => upd(i, { countryCode: e.target.value })} />
-                <input className={cell} type='number' step='0.01' min='0' max='100' placeholder='21'
-                  disabled={!canEdit} value={r.ratePct} onChange={(e) => upd(i, { ratePct: e.target.value })} />
-                <input className={cell} type='date' disabled={!canEdit}
-                  value={r.validFrom} onChange={(e) => upd(i, { validFrom: e.target.value })} />
-                <button type='button' className='text-textInactiveColor hover:text-error disabled:opacity-50'
-                  disabled={!canEdit} aria-label='remove'
-                  onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}>✕</button>
+              <div
+                key={i}
+                className='col-span-4 grid grid-cols-[5rem_1fr_9rem_2rem] items-center gap-2'
+              >
+                <input
+                  className={`${cell} uppercase`}
+                  maxLength={2}
+                  placeholder='DE'
+                  disabled={!canEdit}
+                  value={r.countryCode}
+                  onChange={(e) => upd(i, { countryCode: e.target.value })}
+                />
+                <input
+                  className={cell}
+                  type='number'
+                  step='0.01'
+                  min='0'
+                  max='100'
+                  placeholder='21'
+                  disabled={!canEdit}
+                  value={r.ratePct}
+                  onChange={(e) => upd(i, { ratePct: e.target.value })}
+                />
+                <input
+                  className={cell}
+                  type='date'
+                  disabled={!canEdit}
+                  value={r.validFrom}
+                  onChange={(e) => upd(i, { validFrom: e.target.value })}
+                />
+                <Close
+                  size='sm'
+                  disabled={!canEdit}
+                  aria-label={`remove ${r.countryCode || 'country'}`}
+                  onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
+                />
               </div>
             ))}
             {canEdit && (
               <AddDoor
                 className='col-span-4'
-                onClick={() => setRows((rs) => [...rs, { countryCode: '', ratePct: '', validFrom: '' }])}
+                onClick={() =>
+                  setRows((rs) => [...rs, { countryCode: '', ratePct: '', validFrom: '' }])
+                }
               >
                 country
               </AddDoor>

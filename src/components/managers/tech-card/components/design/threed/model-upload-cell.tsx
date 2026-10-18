@@ -6,10 +6,10 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import {
   Button,
   CalloutBox,
+  Close,
   PLACEHOLDER_SURFACE,
   placeholderClass,
   Text,
-  TILE_CORNER,
   TILE_QUIET,
 } from 'ui';
 import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
@@ -17,7 +17,12 @@ import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 import { InertDoor } from '../bench-slot';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
-import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage } from './model-file';
+import {
+  MODEL_FILE_ACCEPT,
+  isGlbFile,
+  modelFileError,
+  modelUploadErrorMessage,
+} from './model-file';
 
 /**
  * Глиф пустого кадра — коробка модели, тем же штрихом 1.25 и в той же коробке 24×24, что фотоглиф
@@ -442,16 +447,14 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
         {/* ВЫЛОЖИТЬ ИЗ КАДРА — тихий угол по закону углов плитки: верх справа, ✕, появляется по
             наведению. Ничего не отправлялось, поэтому вопроса нет. */}
         {has && !busy && (
-          <button
-            type='button'
+          <Close
+            size='sm'
             aria-label='take the staged files out of the frame'
             title='take the files out of the frame — nothing was sent'
             data-model-discard=''
             onClick={discard}
-            className={cn('absolute right-1 top-1 z-20 py-0.5 leading-none', TILE_CORNER, TILE_QUIET)}
-          >
-            ✕
-          </button>
+            className={cn('absolute right-1 top-1 z-20 bg-bgColor', TILE_QUIET)}
+          />
         )}
       </div>
 
@@ -481,10 +484,24 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
           строку занимает дверь. */}
       {has ? (
         <>
-          <Text size='nano' variant='label' component='span' className='min-w-0 truncate' title={staged.model?.name}>
-            {staged.model ? `${staged.model.name} · ${formatBytes(staged.model.size)}` : 'no model yet'}
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            className='min-w-0 truncate'
+            title={staged.model?.name}
+          >
+            {staged.model
+              ? `${staged.model.name} · ${formatBytes(staged.model.size)}`
+              : 'no model yet'}
           </Text>
-          <Text size='nano' variant='label' component='span' className='min-w-0 truncate' title={staged.preview?.name}>
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            className='min-w-0 truncate'
+            title={staged.preview?.name}
+          >
             {staged.preview ? `preview · ${staged.preview.name}` : 'no preview · optional'}
           </Text>
           {/* РЯД ДВЕРЕЙ — по правилу полосы (F-14): одна кнопка `secondary/xs` во всю ширину ячейки,
@@ -508,7 +525,10 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
                 {busy === 'sending' ? 'sending…' : busy === 'filing' ? 'filing…' : 'file it ▸'}
               </Button>
             ) : (
-              <span data-model-file='' className='flex w-full [&>span]:flex [&>span]:w-full [&_button]:w-full'>
+              <span
+                data-model-file=''
+                className='flex w-full [&>span]:flex [&>span]:w-full [&_button]:w-full'
+              >
                 <InertDoor
                   label='file it ▸'
                   reason='no model yet — a preview alone is not a model. Drop the .glb onto the frame and the pair goes up together'

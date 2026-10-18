@@ -8,7 +8,18 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { AddDoor, Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
+import {
+  AddDoor,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
@@ -433,16 +444,12 @@ export function OutputVariantsPanel({
                     >
                       {v.active ? 'retire' : 'reactivate'}
                     </Button>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
+                    <Close
+                      size='sm'
                       aria-label={`delete colour ${v.colorCode ?? ''}`}
                       disabled={busy}
                       onClick={() => setPendingDelete(v)}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </>
                 )}
               </span>

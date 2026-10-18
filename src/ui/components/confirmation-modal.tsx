@@ -1,6 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useEffect, useState } from 'react';
 import { Button } from './button';
+import { Close } from './close';
 import Input from './input';
 import Text from './text';
 
@@ -168,9 +169,7 @@ export function ConfirmationModal({
                 <div className='flex min-w-0 items-center gap-1.5'>{headerActions}</div>
               )}
               <DialogPrimitives.Close asChild>
-                <button type='button' aria-label='close' className='ml-auto text-labelColor'>
-                  ✕
-                </button>
+                <Close className='ml-auto' />
               </DialogPrimitives.Close>
             </div>
           ) : (

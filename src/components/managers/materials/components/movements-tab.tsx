@@ -2,7 +2,7 @@ import { common_MaterialMovementType } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, Text, EmptyCell } from 'ui';
+import { Button, Text, EmptyCell, Chip } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialPicker } from './material-picker';
 import { useMaterials } from './useMaterials';
@@ -191,24 +191,14 @@ export function MovementsTab() {
         {/* run/sample filters arrive via deep links ("movements →" on the run page etc.) and have
             no picker of their own — surface them as clearable chips so the filter is never invisible. */}
         {runId > 0 ? (
-          <button
-            type='button'
-            className={`${cell} uppercase`}
-            title='clear run filter'
-            onClick={() => patch({ run: 0 })}
-          >
-            PR-{runId} ✕
-          </button>
+          <Chip title='clear run filter' onRemove={() => patch({ run: 0 })}>
+            PR-{runId}
+          </Chip>
         ) : null}
         {sampleId > 0 ? (
-          <button
-            type='button'
-            className={`${cell} uppercase`}
-            title='clear sample filter'
-            onClick={() => patch({ sample: 0 })}
-          >
-            sample #{sampleId} ✕
-          </button>
+          <Chip title='clear sample filter' onRemove={() => patch({ sample: 0 })}>
+            sample #{sampleId}
+          </Chip>
         ) : null}
         <label className='flex flex-col gap-1'>
           <Text size='small'>from</Text>
