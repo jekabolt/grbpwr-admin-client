@@ -352,7 +352,7 @@ export function CheckStep({
         <>
           {s.fixable && (
             <Button
-              {...ask('check-shape-fix', true, 'straighten it like the other sizes')}
+              {...ask('check-shape-fix', true, 'straighten it')}
               variant='secondary'
               size='sm'
               data-suggested
@@ -385,7 +385,7 @@ export function CheckStep({
       answers = done ? null : to && c.door !== 'check' ? (
         // a door back, not a fix: the answer is given on that step (coached)
         <Button
-          {...ask('check-fix', 'open the step that fixes it')}
+          {...ask('check-fix', 'open that step')}
           variant='secondary'
           size='sm'
           data-suggested
@@ -402,12 +402,12 @@ export function CheckStep({
       ) : (
         // no step fixes it (round trip, probe square, …): the report is the door
         <Button
-          {...ask('check-report', 'no step fixes it — download the report')}
+          {...ask('check-report', 'download the report')}
           variant='secondary'
           size='sm'
           data-suggested
           className={cn(ANSWER, SUGGESTED)}
-          title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
+          title='JSON report'
           onClick={api.downloadReport}
         >
           download report
