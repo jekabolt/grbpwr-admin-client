@@ -722,8 +722,7 @@ function WizardBody({
   // A stop that lands between two stages is the hook's too (UX-HOOKS §3): it sets `api.stopped`
   // at once, so the press needs no remembering here.
   const stoppedLine =
-    !session.busy &&
-    (api.errorCode === 'cancelled' || (!!api.stopped && !session.error));
+    !session.busy && (api.errorCode === 'cancelled' || (!!api.stopped && !session.error));
 
   // ── header warnings: what is true but is not the one question (D5: nothing is dropped) ────
   const warnings: HeaderWarning[] = [];
@@ -1276,6 +1275,8 @@ const MOVES = [
   'advance',
   'addSeed',
   'promoteAside',
+  // PROMOTE-BATCH: run again repeats the whole set-aside batch (it was undone whole)
+  'promoteAsides',
   'editPieces',
   'editName',
   'editNames',

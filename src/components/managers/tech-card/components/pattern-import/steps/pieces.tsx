@@ -478,6 +478,8 @@ export function PiecesStep({
     asideOk: false,
     /** Outlines brought back from the set-aside check: aside id → the piece it became. */
     promoted: new Map<number, { aside: SetAside; seed: number }>(),
+    /** Every set-aside outline the quiz has shown (aside id → it): a repeated batch is adopted. */
+    asideById: new Map<number, SetAside>(),
     split: null as SplitCheck | null,
     /** The set-aside quiz, one outline at a time: the aside ids answered, in order. */
     asideDone: [] as number[],
@@ -860,6 +862,18 @@ export function PiecesStep({
   const lastEdit = inputs.edits[inputs.edits.length - 1];
   const dropped = (seed: number) =>
     inputs.edits.some((e) => e.kind === 'not-a-piece' && e.seed === seed);
+  for (const a of weakList) seen.asideById.set(a.id, a);
+  // a stopped batch repeated by the footer's «run again» (its move, STOPFIX) brought outlines back
+  // outside the quiz's send: they are that send's — adopted, so «try again» sends only their joins
+  // and undo leaves them out again
+  if (!seen.committing && seen.answers.size)
+    for (const c of inputs.clickSeeds) {
+      const a = c.aside == null ? undefined : seen.asideById.get(c.aside);
+      if (!a || seen.promoted.has(a.id) || !seen.answers.has(a.id) || dropped(c.id)) continue;
+      if (weakList.some((w) => w.id === a.id)) continue;
+      seen.promoted.set(a.id, { aside: a, seed: c.id });
+      if (seen.pendingBefore) seen.pendingFresh = [...seen.pendingFresh, c.id];
+    }
   const asideItems: AsideItem[] = [
     ...weakList
       .filter((a) => !seen.promoted.has(a.id))
@@ -1206,6 +1220,7 @@ export function PiecesStep({
     seen.asideOk = false;
     seen.asideDone = [];
     seen.promoted.clear();
+    seen.asideById.clear();
     seen.split = null;
     seen.own.clear();
     seen.autoDone.clear();
@@ -2223,9 +2238,10 @@ export function PiecesStep({
         }
       : null;
   /**
-   * The quiz's answers, sent once: every outline brought back (a run each, back to back — the
-   * session adds one seed per run), then ONE list of piece edits (the joins, the outlines left out
-   * again). The answers stay until all of it went through.
+   * The quiz's answers, sent once: every outline brought back in ONE batch (PROMOTE-BATCH: one
+   * pieces run, undone whole on a stop or a failure), then ONE list of piece edits naming the seeds
+   * it returned (the joins, the outlines left out again). An outline the batch skipped stays set
+   * aside, said on the quiet line. The answers stay until all of it went through.
    */
   const commitAsides = async (): Promise<boolean> => {
     if (seen.committing) return false;
@@ -2256,12 +2272,20 @@ export function PiecesStep({
     seen.pendingBefore = before;
     const tick = () => new Promise((r) => setTimeout(r, 30));
     try {
-      for (const x of promote) {
-        await toggleAside(x.it);
-        const sd = seen.promoted.get(x.it.a.id)?.seed;
-        if (sd == null) throw new Error('an outline could not be brought back');
-        seen.pendingFresh = [...seen.pendingFresh, sd];
+      const skipped: { id: number; why: string }[] = [];
+      if (promote.length) {
+        const r = await api.promoteAsides(promote.map((x) => x.it.a.id));
+        // null: the whole batch was undone (a stop or a failure) — nothing kept, ask again
+        if (!r) throw new Error('the outlines could not be brought back');
+        for (const x of promote) {
+          const sd = r.seeds[x.it.a.id];
+          if (sd == null) continue;
+          seen.promoted.set(x.it.a.id, { aside: x.it.a, seed: sd });
+          if (!seen.pendingFresh.includes(sd)) seen.pendingFresh = [...seen.pendingFresh, sd];
+        }
+        skipped.push(...r.skipped);
       }
+      const gone = new Set(skipped.map((x) => x.id));
       const seedOf = (it: AsideItem) => it.seed ?? seen.promoted.get(it.a.id)?.seed ?? null;
       const now = seen.editsNow;
       const merges: PieceEdit[] = joins.flatMap((x) => {
@@ -2280,16 +2304,22 @@ export function PiecesStep({
         await tick();
         if (seen.errNow) throw new Error('the pieces did not run');
       }
-      const hosts = joins.map((x) => (x.ans as { join: number }).join);
+      const joined = joins.filter((x) => !gone.has(x.it.a.id));
+      const hosts = joined.map((x) => (x.ans as { join: number }).join);
       const fresh = seen.pendingFresh;
-      const back = promote.length + reBring.length - joins.length;
+      const back =
+        promote.filter((x) => !gone.has(x.it.a.id)).length + reBring.length - joined.length;
       seen.applied = {
         text: [
-          joins.length
-            ? `${plural(joins.length, 'outline')} joined to piece${new Set(hosts).size > 1 ? 's' : ''} ${[...new Set(hosts.map(nameOf))].join(', ')}`
+          joined.length
+            ? `${plural(joined.length, 'outline')} joined to piece${new Set(hosts).size > 1 ? 's' : ''} ${[...new Set(hosts.map(nameOf))].join(', ')}`
             : '',
           back > 0 ? `${plural(back, 'outline')} back as pieces` : '',
           leave.length ? `${plural(leave.length, 'outline')} left out` : '',
+          // the batch skipped them (read again, or the fill made no piece): still set aside
+          skipped.length
+            ? `${plural(skipped.length, 'outline')} stayed set aside (${skipped[0].why})`
+            : '',
         ]
           .filter(Boolean)
           .join(' · '),
@@ -2298,7 +2328,7 @@ export function PiecesStep({
         restore: before,
         batch: todo.map((x) => x.it.a.id),
         fresh,
-        drop: todo.filter((x) => bring(x)).map((x) => x.it.a.id),
+        drop: todo.filter((x) => bring(x) && !gone.has(x.it.a.id)).map((x) => x.it.a.id),
         hosts,
       };
       seen.answers = new Map();
