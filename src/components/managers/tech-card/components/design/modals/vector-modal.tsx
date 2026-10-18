@@ -9,13 +9,8 @@ import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { nearestOnPolyline } from 'ui/components/annotation/geometry';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { nearestOnPolyline } from 'components/managers/tech-card/annotation/geometry';
+import { Button, CalloutBox, Chip, ChipRow, ConfirmationModal, Pill, Text } from 'ui';
 
 import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } from '../../canvas-view';
 import { exactPalette, isMapInk, planHex } from '../colour-plan/model';

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { EnhanceRefusal, enhanceText, type EnhanceRequest } from 'ui/components/ai-enhance';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import GenericPopover from 'ui/components/popover';
-import Textarea from 'ui/components/text-area';
+import {
+  EnhanceRefusal,
+  enhanceText,
+  type EnhanceRequest,
+} from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { Button, Chip, GenericPopover, Textarea } from 'ui';
 import { extractFieldViolations, transportRefusal } from 'utils/field-errors';
 
 import { recentMenu } from '../card-recent';

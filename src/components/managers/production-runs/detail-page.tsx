@@ -17,14 +17,18 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row, RowTotal } from 'ui/components/row';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  RowTotal,
+  Section,
+  SectionStack,
+  Text,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { CutReceipts } from './components/cut-receipts';

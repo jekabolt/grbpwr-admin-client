@@ -1,7 +1,6 @@
 import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
 import { Link } from 'react-router-dom';
-import { DataTable } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { overdueDays, runDate, runDetailPath, runStatusLabel, runStatusTone } from './options';
 

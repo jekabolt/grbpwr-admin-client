@@ -1,7 +1,6 @@
 // Селектор группы (скоупа ткани) — крупные пилюли под палец. Показывается только когда групп
 // больше одной; преселект из ?g деградирует в первую группу молча (см. page.tsx).
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { bomPurposeLabel } from 'components/managers/tech-card/components/bom-purpose-labels';
 import type { PvGroup } from './manifest';
 

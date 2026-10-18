@@ -1,7 +1,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { Task, TaskStatus } from '../api/types';
 import { STATUS_LABEL } from '../utils/meta';
 import { SortableTaskCard } from './task-card';

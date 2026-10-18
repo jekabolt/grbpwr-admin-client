@@ -1,10 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useSnackBarStore } from 'lib/stores/store';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { ConfirmationModal, Form, InputField, TextareaField } from 'ui';
 import { applyServerFieldErrors } from 'utils/field-errors';
 import { z } from 'zod';
 import { useCreateSupplier } from '../../utils/hooks';

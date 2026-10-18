@@ -118,7 +118,7 @@ import {
   type AnnotationCapsKey,
   type AnnotationColorKey,
   type AnnotationKindKey,
-} from 'ui/components/annotation/kinds';
+} from 'components/managers/tech-card/annotation/kinds';
 import {
   annotationCapsOut,
   annotationColorFromWire,
@@ -126,8 +126,8 @@ import {
   annotationKindFromWire,
   annotationKindToWire,
   readAnnotationCaps,
-} from 'ui/components/annotation/wire';
-import { parseSpec, specWire } from 'ui/components/annotation/purpose';
+} from 'components/managers/tech-card/annotation/wire';
+import { parseSpec, specWire } from 'components/managers/tech-card/annotation/purpose';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles

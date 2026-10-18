@@ -6,9 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 import { FC, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Stat, StatGrid, Text } from 'ui';
 import { ExecutiveHealthStrip, ForecastStrip } from '../components';
 import { ProductNameLink } from '../components/ProductNameLink';
 import type { MetricsPeriod } from '../useMetricsQuery';

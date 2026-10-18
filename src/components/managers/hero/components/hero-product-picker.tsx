@@ -1,7 +1,6 @@
 import { common_Colorway } from 'api/proto-http/admin';
 import { useFormContext } from 'react-hook-form';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
 import { ProductPickerModal } from './productPickerModal';
 import { ProductSelectionApi } from './useProductSelection';
 

@@ -5,8 +5,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { CampaignCard } from './components/campaign-card';
 import { useCampaignsPaged } from './components/useCampaign';
 

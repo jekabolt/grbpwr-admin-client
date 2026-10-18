@@ -1,8 +1,5 @@
 import { FC, useMemo, useState } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { CalloutBox, Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 import { CareMethodsList, CareSlotEmpty, CareSymbol } from './care-card';
 import { CareSymbolView, SelectedInstructions } from './care-codes';
 import { useCareVocabulary } from './use-care-vocabulary';

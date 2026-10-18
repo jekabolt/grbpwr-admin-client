@@ -1,6 +1,6 @@
 import type { common_DesignPicture } from 'api/proto-http/admin';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 import { pictureHandle } from '../handles';
 import {

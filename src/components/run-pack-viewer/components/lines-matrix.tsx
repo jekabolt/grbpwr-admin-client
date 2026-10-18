@@ -2,8 +2,7 @@
 //
 // Единственный источник тиража во всём наряде: кат-лист и настилы ниже считаются от него. Ни
 // выпущенного, ни брака здесь нет и быть не может — наряд это задание на партию, а не отчёт по ней.
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Text } from 'ui';
 import { lineKeyOf, lineLabelOf } from './labels';
 import { RpLine, RpSize } from './manifest';
 import { DESC_CELL, RUNPACK_GRID } from './table';

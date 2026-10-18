@@ -3,10 +3,7 @@
 import { common_ArchiveList } from 'api/proto-http/admin';
 import { useInfiniteArchives } from 'components/managers/archives/components/useArchiveQuery';
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import MediaComponent from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Button, Input, Media, Text } from 'ui';
 import { HeroModal } from './hero-modal';
 
 interface Props {
@@ -109,7 +106,7 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                     </td>
                     <td className='border border-textInactiveColor lg:w-16'>
                       {archive.thumbnail?.media?.thumbnail?.mediaUrl && (
-                        <MediaComponent
+                        <Media
                           src={archive.thumbnail.media.thumbnail.mediaUrl}
                           alt='Thumbnail'
                           type='image'

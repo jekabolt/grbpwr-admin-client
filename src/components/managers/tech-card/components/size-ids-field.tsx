@@ -10,12 +10,7 @@ import { isDxfUrl } from 'utils/pattern';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, ConfirmationModal, GroupLabel, Row, Text } from 'ui';
 import { permittedSizeSystems } from 'utils/size-systems';
 import { TechCardFormData } from './schema';
 

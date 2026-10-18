@@ -1,7 +1,7 @@
 import type { common_Model } from 'api/proto-http/admin';
 import { genderOptions } from 'constants/filter';
 import { useMemo, type JSX } from 'react';
-import SelectComponent from 'ui/components/select';
+import { Select } from 'ui';
 
 import { BODY_TYPES, mediaThumb } from './model';
 
@@ -200,7 +200,7 @@ export function BodyPicker({
 
   return (
     <div className='w-[260px] shrink-0' data-body-picker=''>
-      <SelectComponent
+      <Select
         name='design-threed-body'
         value={value}
         placeholder='any body'

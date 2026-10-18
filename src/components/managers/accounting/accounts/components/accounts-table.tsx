@@ -1,7 +1,6 @@
 import { AcctAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
-import Tooltip from 'ui/components/tooltip';
+import { Text, Tooltip } from 'ui';
 import { Pill } from '../../components/kit';
 
 type Props = {

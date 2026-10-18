@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 const GENDER_LABELS: Record<string, string> = {
   GENDER_ENUM_FEMALE: 'women',

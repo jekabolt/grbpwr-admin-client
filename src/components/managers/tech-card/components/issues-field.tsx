@@ -1,20 +1,23 @@
 import { techCardIssueSeverityOptions, techCardIssueStatusOptions } from 'constants/filter';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Placeholder } from 'ui/components/placeholder';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import {
+  Button,
+  Placeholder,
+  DataTable,
+  EmptyCell,
+  Pill,
+  SectionHeader,
+  Text,
+  InputField,
+  SelectField,
+  FoldCaret,
+} from 'ui';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useFormPieces } from './piece-picker';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 const OPEN = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const RESOLVED = 'TECH_CARD_ISSUE_STATUS_RESOLVED';
@@ -146,14 +149,14 @@ function IssueEditor({
           )}
         </div>
       </div>
-      <TextareaField
+      <AiTextareaField
         name={`issues.${index}.description`}
         label='description *'
         rows={2}
         maxLength={2000}
         enhance='description'
       />
-      <TextareaField
+      <AiTextareaField
         name={`issues.${index}.resolutionNote`}
         label='resolution note'
         rows={2}

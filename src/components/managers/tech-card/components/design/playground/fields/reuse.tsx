@@ -4,12 +4,7 @@ import { useTechCardFittings } from 'components/managers/tech-cards/components/u
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, GroupLabel, GenericPopover, HeaderCount, Text } from 'ui';
 
 import { assetLabel, clothShelf } from '../../assets/model';
 import { CardPicturePicker } from '../../core/card-picture-picker';

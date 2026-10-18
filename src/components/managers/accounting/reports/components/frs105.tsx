@@ -1,6 +1,5 @@
 import { googletype_Decimal } from 'api/proto-http/admin';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Text } from 'ui';
 import { AmountCell } from '../../components/amount-cell';
 import { Callout, GroupHeader, RowLine, StatGrid, StatTile, Verdict } from '../../components/kit';
 import { formatBase, isNegative } from '../../utils/format';

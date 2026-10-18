@@ -10,7 +10,7 @@
 //   node scripts/ai-enhance-probe.mjs                  → зелёный
 //   node scripts/ai-enhance-probe.mjs --mutate=aspect  → у аспекта снова нет `ai ✦`: КРАСНЫЙ
 //   node scripts/ai-enhance-probe.mjs --mutate=boxed   → `ai ✦` снова в рамке: КРАСНЫЙ
-//   node scripts/ai-enhance-probe.mjs --mutate=field   → `TextareaField` забыл `enhance`: КРАСНЫЙ
+//   node scripts/ai-enhance-probe.mjs --mutate=field   → `AiTextareaField` забыл `enhance`: КРАСНЫЙ
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -34,16 +34,16 @@ const MUTATIONS = {
   ],
   boxed: [
     {
-      file: /ui\/components\/ai-enhance\.tsx$/,
+      file: /tech-card\/ai-enhance\/ai-enhance\.tsx$/,
       from: "              variant='underline'\n              size='xs'\n              disabled={busy}",
       to: "              variant='secondary'\n              size='xs'\n              disabled={busy}",
     },
   ],
   field: [
     {
-      file: /ui\/form\/fields\/textarea-field\.tsx$/,
-      from: '              {enhance && (\n                <AiEnhance',
-      to: '              {false && enhance && (\n                <AiEnhance',
+      file: /tech-card\/ai-enhance\/ai-textarea-field\.tsx$/,
+      from: '        enhance\n          ? ({ value, apply, disabled }) => (',
+      to: '        false && enhance\n          ? ({ value, apply, disabled }) => (',
     },
   ],
 };

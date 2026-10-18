@@ -3,9 +3,7 @@
 // ui/components/input.tsx and the panel grammar of assembly-fullscreen.tsx, named once.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
-import { FoldCaret } from 'ui/components/fold-caret';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { FoldCaret, Input, Text } from 'ui';
 import type { WizardEvent } from 'lib/pattern-import/types';
 
 /**

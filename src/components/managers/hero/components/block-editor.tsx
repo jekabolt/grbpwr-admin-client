@@ -1,11 +1,8 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import ToggleField from 'ui/form/fields/toggle-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { GroupLabel, Text, InputField, ToggleField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { DoubleEditor } from './double-editor';

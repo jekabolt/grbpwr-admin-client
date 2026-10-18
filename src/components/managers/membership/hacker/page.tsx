@@ -1,8 +1,6 @@
 import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, SectionStack, Text } from 'ui';
 import { HackerAccounts } from './components/accounts';
 import { HackerInvites } from './components/invites';
 

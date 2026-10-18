@@ -32,15 +32,17 @@ import {
   type FieldErrors,
 } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderWarnings } from 'ui/components/header-warnings';
-import { Placeholder } from 'ui/components/placeholder';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
-import Tooltip from 'ui/components/tooltip';
-import ComboField from 'ui/form/fields/combo-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  GroupLabel,
+  HeaderWarnings,
+  Placeholder,
+  ConfirmationModal,
+  Text,
+  Tooltip,
+  ComboField,
+  InputField,
+  SelectField,
+} from 'ui';
 import { carriesGarmentComposition } from 'utils/care-label';
 import { FIELD_REVEAL_EVENT, revealField, type FieldRevealDetail } from 'utils/field-errors';
 import { sectionShort } from './bom-line-picker';

@@ -1,11 +1,6 @@
 import type { common_OrderFull, common_OrderItem } from 'api/proto-http/frontend';
 import { useMemo } from 'react';
-import Checkbox from 'ui/components/checkbox';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { CheckboxCommon, Media, Pill, Placeholder, Text, Tile, Tiles } from 'ui';
 import { money, toNum } from '../money';
 
 export type OrderLine = {
@@ -111,7 +106,7 @@ function UnitSelector({
       )}
       {line.unitKeys.map((key, i) => (
         <label key={key} className='flex cursor-pointer items-center gap-1'>
-          <Checkbox
+          <CheckboxCommon
             name={`refund-${key}`}
             checked={selectedUnitKeys.includes(key)}
             onChange={() => onToggleOrderItems([key])}

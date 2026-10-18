@@ -45,19 +45,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Section, SectionStack } from 'ui/components/section';
-import { HeaderNext, SectionHeader } from 'ui/components/section-header';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Drawer } from 'ui/components/drawer';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import {
+  Button,
+  Pill,
+  Section,
+  SectionStack,
+  HeaderNext,
+  SectionHeader,
+  GroupLabel,
+  Row,
+  CalloutBox,
+  Drawer,
+  ConfirmationModal,
+  Text,
+  Form,
+} from 'ui';
 import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
 import { LabDipTab } from './lab-dip-tab';
@@ -83,7 +87,7 @@ import { DevExpensesField } from './dev-expenses-field';
 import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
-import { useEditHistory } from 'ui/components/annotation/history';
+import { useEditHistory } from 'components/managers/tech-card/annotation/history';
 import { gateTechCardPayload, isDesignOnlyMediaKind } from './design/payload-gate';
 import { useDesignBand } from './design/use-design-band';
 import { CardDetails } from './design/card-details';

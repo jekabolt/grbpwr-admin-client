@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import { UnitGlyph, useUnitPicture } from './unit-silhouette';

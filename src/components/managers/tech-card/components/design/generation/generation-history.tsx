@@ -6,12 +6,7 @@ import type {
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, GroupLabel, Section, HeaderCount, Text, FoldCaret } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { runRepresentation, type Representation } from '../bench-kinds';
@@ -40,7 +35,6 @@ import { expectedTileCount, fixSelectionOf, isRunLive, runStamp, runStateWord } 
 import { REP_NOUN } from './run-tile';
 import { thumbUrl } from './thumb';
 import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from './use-generation';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE GENERATION HISTORY — runs, and only runs. ONE organ on five steps.

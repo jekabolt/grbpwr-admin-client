@@ -1,7 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Toolbar } from 'ui/components/toolbar';
+import { Button, Input, Toolbar } from 'ui';
 import { LABEL_KEY_MAX } from './labels-schema';
 import type { LabelKind } from './tech-card-options';
 

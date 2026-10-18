@@ -1,5 +1,5 @@
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatCurrency } from '../utils';
 
 export type WaterfallStep = {

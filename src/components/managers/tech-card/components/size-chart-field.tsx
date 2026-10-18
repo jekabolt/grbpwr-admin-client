@@ -14,11 +14,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { DataTable } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
+import { Button, DataTable, Input, Pill, Placeholder } from 'ui';
 import { TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 

@@ -1,8 +1,7 @@
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Text, Textarea } from 'ui';
 import type { TaskMedia } from '../api/types';
 import { MediaRefRow } from './media-ref-row';
 import { TaskDescriptionView } from './task-description';

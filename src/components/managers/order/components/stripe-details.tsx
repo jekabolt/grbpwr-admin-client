@@ -1,6 +1,6 @@
 import type { common_OrderStripeDetails, googletype_Decimal } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // Shared rendering for the admin-only Stripe settlement metadata (common.OrderStripeDetails)
 // plus the payment-identity fields on the order. Used by the order detail Payment section and

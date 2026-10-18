@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import Text from './text';
 
 /**
  * The reference's `.kb` / `.kbcol`: a horizontally scrolling row of bordered columns,

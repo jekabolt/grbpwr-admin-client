@@ -1,7 +1,6 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Selector, Text } from 'ui';
 import useFilter from '../../../../lib/useFilter';
 
 // R1/R9: the catalog colour filter is sourced from the controlled colour dictionary (the same

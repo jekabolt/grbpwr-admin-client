@@ -6,14 +6,19 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { deriveOrderCounts, overviewToCounts, type OrderStat } from './components/order-stats';
 import { OrdersList } from './components/orders-list';
 import { StockChangesReport } from './components/StockChangesReport';

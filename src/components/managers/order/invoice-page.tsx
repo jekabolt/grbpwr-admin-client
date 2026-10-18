@@ -5,13 +5,17 @@ import { useQuery } from '@tanstack/react-query';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Placeholder } from 'ui/components/placeholder';
-import { Section, SectionStack } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  Placeholder,
+  Section,
+  SectionStack,
+  Select,
+  Text,
+} from 'ui';
 import { InvoiceDocument } from './components/invoice-document';
 
 /**
@@ -166,7 +170,7 @@ export function OrderInvoicePrint() {
                 >
                   product language
                 </Text>
-                <SelectComponent
+                <Select
                   name='invoice-language'
                   placeholder='default'
                   fullWidth

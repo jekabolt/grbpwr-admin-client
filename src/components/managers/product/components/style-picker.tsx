@@ -3,8 +3,7 @@ import { adminService } from 'api/api';
 import { common_TechCardListItem } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { Text, FormLabel } from 'ui';
 
 // StylePicker (Q9d/S5): attach a colourway to its parent style by SEARCHING (style number / name /
 // brand) instead of hand-typing a numeric style id. Bound to the form's `styleId` string field.

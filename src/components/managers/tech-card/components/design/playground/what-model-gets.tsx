@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import { InventoryLine, NotSent, WmgGroup, WmgShell } from '../core';
 import type { Inventory } from './registry/types';

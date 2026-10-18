@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
+import { Button, Chip, ChipRow, GroupLabel } from 'ui';
 
 import { STAGE_WORDS, type OnePressStage } from './trace-onepress';
 

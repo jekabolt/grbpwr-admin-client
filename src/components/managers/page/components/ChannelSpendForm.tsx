@@ -2,10 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Input, Text } from 'ui';
 import { tabMetricsKeys } from '../useTabMetricsQuery';
 
 const EMPTY = { date: '', utmSource: '', utmMedium: '', utmCampaign: '', amount: '' };

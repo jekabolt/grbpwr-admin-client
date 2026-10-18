@@ -1,10 +1,7 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSyncExternalStore } from 'react';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { Tile } from 'ui/components/tiles';
+import { Pill, Text, TILE_CORNER, TILE_QUIET, Tile } from 'ui';
 
 import { runHandle } from '../handles';
 import { isCancelling, overdueWord, runStatus } from './run-state';

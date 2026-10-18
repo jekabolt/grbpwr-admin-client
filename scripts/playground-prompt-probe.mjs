@@ -298,7 +298,7 @@ if (on('--mutate-mask-placeholder'))
 if (on('--mutate-steer-in-menu'))
   patch(
     'steer-in-menu',
-    /ui\/components\/ai-enhance\.tsx$/,
+    /tech-card\/ai-enhance\/ai-enhance\.tsx$/,
     "{ mode: 'prompt', label: 'as a prompt', hint: 'rewrite as a generation prompt' },",
     "{ mode: 'prompt', label: 'as a prompt', hint: 'rewrite as a generation prompt' },\n  { mode: 'steer', label: 'steer', hint: 'for this field' },",
   );

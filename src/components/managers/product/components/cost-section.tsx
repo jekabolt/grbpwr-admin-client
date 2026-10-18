@@ -7,9 +7,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { currencySymbols } from 'constants/constants';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { Button, Text, InputField } from 'ui';
 import { ProductMarginPanel } from './margin-panel';
 
 // Internal per-unit COGS + its provenance. Field-shaping (🔒 costing): the whole

@@ -1,8 +1,7 @@
 import { useModel } from 'components/managers/models/components/useModelQuery';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { ModelForm } from './components';
 
 export function Model() {

@@ -15,10 +15,7 @@ import {
   patternUploadErrorMessage,
   stripDataUrlPrefix,
 } from 'utils/pattern';
-import { Button } from './button';
-import { ConfirmationModal } from './confirmation-modal';
-import Input from './input';
-import Text from './text';
+import { Button, ConfirmationModal, Input, Text } from 'ui';
 
 export type UploadedPattern = {
   url: string;

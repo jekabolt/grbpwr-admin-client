@@ -1,9 +1,7 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useRef, useMemo, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Text } from 'ui';
 
 import { GROUP_GAP } from '../core';
 import { ColourPicker } from '../assets/colour-picker';

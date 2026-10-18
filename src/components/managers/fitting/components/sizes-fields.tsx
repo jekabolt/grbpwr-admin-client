@@ -1,7 +1,7 @@
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // A fitting tries on ONE sample, and that sample already carries its own sizeId — the old
 // multi-size picker here let the user record a second, independent set of sizes that could

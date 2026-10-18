@@ -1,7 +1,7 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { FC, ReactNode, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Section, SectionStack } from 'ui/components/section';
+import { Section, SectionStack } from 'ui';
 import {
   ClearList,
   CogsStructureTable,

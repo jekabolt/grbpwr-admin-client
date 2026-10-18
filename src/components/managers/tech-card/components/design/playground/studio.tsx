@@ -1,8 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useCallback, useEffect, useRef, type JSX } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { CalloutBox, Section, Text } from 'ui';
 
 import { useStartRunPending } from '../render/use-design-run';
 import { playgroundRunScope, useWorkflowAddress } from './address';

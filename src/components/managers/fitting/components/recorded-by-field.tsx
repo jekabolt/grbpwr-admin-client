@@ -2,8 +2,7 @@ import { useCurrentAccount } from 'components/managers/accounts/utils/hooks';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useEffect } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Select, Text } from 'ui';
 import { FittingFormData } from './schema';
 
 // Radix <Select.Item> can't carry an empty-string value (same constraint the outcome field

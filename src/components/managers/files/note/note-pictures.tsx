@@ -5,8 +5,8 @@ import {
   ViewerAction,
   useMediaViewer,
   type MediaViewerItem,
-} from 'ui/components/media-viewer';
-import type { MarkdownPicture } from 'ui/markdown/doc';
+} from 'components/shared/media-viewer/media-viewer';
+import type { MarkdownPicture } from 'components/shared/markdown/doc';
 import {
   fileCardPath,
   fileRefImageSrc,

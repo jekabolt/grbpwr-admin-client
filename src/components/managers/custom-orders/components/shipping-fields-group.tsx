@@ -1,9 +1,7 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { GroupLabel, InputField, SelectField } from 'ui';
 import { getUniqueCountries } from '../utility/constant';
 
 // custFlow v2 — the delivery address plus carrier/cost, as a plain field stack (no accordion stage).

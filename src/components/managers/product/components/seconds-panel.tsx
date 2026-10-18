@@ -4,9 +4,7 @@ import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { formatSizeName } from '../utility/sizes';
 
 // B-grade seconds surface (0251). B variants are factory seconds of this SAME colourway

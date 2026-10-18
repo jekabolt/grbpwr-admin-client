@@ -1,6 +1,4 @@
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { fibreName } from './utils';
 
 interface FibreRowProps {

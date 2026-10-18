@@ -25,11 +25,7 @@
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { HEADER_TEXT } from 'ui/components/section-header';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Pill, HEADER_TEXT, Stat, StatGrid, Text } from 'ui';
 import { PieceSilhouette } from '../piece-silhouette';
 import { nettoLengthCm, type DxfNormAreas, type DxfNormPiece } from './dxf-consumption';
 import { findPiece, type DxfIndex, type FoundPiece } from './dxf-geometry';

@@ -1,7 +1,5 @@
-import ComboField from 'ui/form/fields/combo-field';
-import DecimalField from 'ui/form/fields/decimal-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { ComboField, DecimalField, SelectField } from 'ui';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { EquipmentParkField } from './equipment-park';
 import { seamClassOptions } from './operation-options';
 
@@ -39,7 +37,7 @@ export function ConstructionField() {
             The equipment park below takes their place. */}
       </div>
       <div className='mt-2'>
-        <TextareaField
+        <AiTextareaField
           name='construction.notes'
           label='notes'
           rows={2}

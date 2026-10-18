@@ -2,9 +2,7 @@
 // переопределение). И заданная, и пустая страна правятся здесь же выбором из словаря; выбранное ставится в одно сохранение карточки (made-in.ts) и до него видно как
 // «saves with the card». Одна галочка — «also the other N without a country», второй кнопки нет.
 import { useMemo, useState } from 'react';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import Text from 'ui/components/text';
+import { CheckboxCommon, Combobox, type ComboboxGroup, Text } from 'ui';
 
 export type Country = { code: string; name: string };
 

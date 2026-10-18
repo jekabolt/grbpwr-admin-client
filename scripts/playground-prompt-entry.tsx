@@ -24,7 +24,7 @@ import { useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter } from 'react-router-dom';
-import { ENHANCE_MODES } from 'ui/components/ai-enhance';
+import { ENHANCE_MODES } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { TooltipProvider } from 'ui/components/tooltip';
 
 const CARD = 7;

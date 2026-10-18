@@ -1,7 +1,6 @@
 import { LIMIT_OPTIONS, ORDER_FACTOR_OPTIONS, SOURCE_OPTIONS } from 'constants/constants';
 import { useMemo } from 'react';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { InputField, SelectField } from 'ui';
 
 export interface StockHistorySizeOption {
   id?: number;

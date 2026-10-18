@@ -1,7 +1,6 @@
 import { common_Material, common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
 
 // Catalog image (#39): resolves the display URL for a single MediaFull the same way everywhere —
 // thumbnail first (cropped/optimized), full-size as a fallback for an item that has none.

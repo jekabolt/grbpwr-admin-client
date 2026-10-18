@@ -1,6 +1,6 @@
 import type { FunnelSection } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatNumber } from '../utils';
 
 // Same 3 trustworthy steps as FunnelChart; the 10-step GA4 funnel is noise at boutique traffic.

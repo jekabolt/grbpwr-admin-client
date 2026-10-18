@@ -6,11 +6,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Fragment } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Pill, Row, Text } from 'ui';
 import {
   ClothReport,
   FROZEN_FACT_NOTE,

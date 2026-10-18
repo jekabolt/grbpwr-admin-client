@@ -2,16 +2,19 @@ import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { SkeletonLine } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Section,
+  SkeletonLine,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import {

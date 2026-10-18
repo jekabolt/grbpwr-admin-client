@@ -10,8 +10,7 @@ import {
   useState,
   type JSX,
 } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
 import { useStartDesignRun } from '../../render/use-design-run';

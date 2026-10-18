@@ -1,7 +1,6 @@
 import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { Fragment } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { VideoSize } from '..';
 import { usePendingFiles } from '../utils/usePendingFiles';
 import { DragDropArea } from './dragdrop-area';

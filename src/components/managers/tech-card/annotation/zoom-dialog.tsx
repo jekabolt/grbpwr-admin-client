@@ -1,8 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ViewerAction } from 'ui/components/media-viewer';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Text } from 'ui';
+import { ViewerAction } from 'components/shared/media-viewer/media-viewer';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
 import { AnnotationToolbar } from './toolbar';

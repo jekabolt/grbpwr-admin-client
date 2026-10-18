@@ -1,7 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Text, Tile, Tiles } from 'ui';
 
 import { WORKFLOWS } from './registry';
 import { whyNot } from './registry/common';

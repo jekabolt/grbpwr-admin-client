@@ -8,11 +8,7 @@ import {
   MATERIAL_UNIT_LABEL,
   stampWhen,
 } from 'components/managers/production-runs/components/useLays';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Pill, Stat, StatGrid, Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (T7, волна 2).

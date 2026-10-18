@@ -6,17 +6,21 @@ import { useStyleEconomics } from 'components/managers/page/useStyleEconomics';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Progress } from 'ui/components/progress';
-import { Row } from 'ui/components/row';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  TotalRow,
+  FoldCaret,
+  GroupLabel,
+  Input,
+  Pill,
+  Progress,
+  Row,
+  Select,
+  Text,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { HelpMark, noFx } from './costing-vocab';
 import { SamplePicker } from './sample-picker';

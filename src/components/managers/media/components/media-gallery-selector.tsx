@@ -2,9 +2,12 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
-import Media from 'ui/components/media';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
+import {
+  MediaViewer,
+  mediaFullToViewerItem,
+  useMediaViewer,
+} from 'components/shared/media-viewer/media-viewer';
 import { readSlotAspect } from '../utils/calculate-aspect';
 import { useMediaIntake } from '../utils/useMediaIntake';
 import {

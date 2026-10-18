@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { Button, FoldCaret } from 'ui';
 
 /**
  * ═══ `custom` РЯДОМ С GENERATE (T18 / T19, слово владельца 03.10) ══════════════════════════════

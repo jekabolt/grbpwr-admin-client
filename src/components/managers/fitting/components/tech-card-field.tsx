@@ -7,10 +7,7 @@ import { stageLabel } from 'components/managers/tech-cards/components/utils';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, Input, Row, Text } from 'ui';
 import { FittingFormData } from './schema';
 
 // The list endpoint returns lightweight list items (flat header fields); GetTechCard

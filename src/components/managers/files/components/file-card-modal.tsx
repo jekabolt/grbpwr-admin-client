@@ -4,12 +4,7 @@ import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, ConfirmationModal, GroupLabel, Input, Text } from 'ui';
 import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
 import {
   isProjectTopic,

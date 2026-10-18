@@ -1,14 +1,9 @@
 import type { GetDesignBandResponse, common_DesignRun } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, GroupLabel, Pill, HeaderCount, Text, FoldCaret } from 'ui';
 
-import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { mediaFullToViewerItem } from 'components/shared/media-viewer/media-viewer';
 
 import { GROUP_GAP } from '../core';
 import { PictureTile } from '../picture-tile';
@@ -24,7 +19,6 @@ import {
 } from './run-state';
 import { Thumb, thumbUrl } from './thumb';
 import { useGenerationWrites } from './use-generation';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE RUN PANEL — what went into a run, unfolded under its row by `META ▸` (the mock-up's

@@ -1,7 +1,6 @@
 import { AcctPeriod } from 'api/proto-http/admin';
 import { format, parseISO } from 'date-fns';
-import { Button } from 'ui/components/button';
-import Tooltip from 'ui/components/tooltip';
+import { Button, Tooltip } from 'ui';
 import { Pill, RowLine } from '../../components/kit';
 import { formatAcctDate } from '../../utils/format';
 

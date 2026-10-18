@@ -1,8 +1,7 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import { Link } from 'react-router-dom';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { computeExecutiveAlerts, deriveHealthStatus, type HealthStatus } from '../executiveAlerts';
 
 const STATUS_LABEL: Record<HealthStatus, string> = {

@@ -2,12 +2,7 @@ import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, CopyToClipboard, Input, Section, Text } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
   useGenerateHackerInvite,

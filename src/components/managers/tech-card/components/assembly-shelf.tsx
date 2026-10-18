@@ -27,9 +27,7 @@
 import { useMemo } from 'react';
 
 import { cn } from 'lib/utility';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
-import { ViewSwitch } from 'ui/components/view-switch';
+import { Chip, ChipRow, Text, ViewSwitch, FoldCaret } from 'ui';
 
 import { ClothSwatch } from './cloth-hatch';
 import type { FoundPiece } from './nesting/dxf-geometry';
@@ -44,7 +42,6 @@ import {
 import { PieceTile } from './piece-silhouette';
 import { UnitGlyph, useUnitPicture } from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /** Ось группировки полки. Взаимоисключающая: не фильтр и не вложенность. */
 export type ShelfAxis = 'unit' | 'cloth';

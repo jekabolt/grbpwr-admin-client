@@ -1,6 +1,4 @@
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Input, Selector, Text } from 'ui';
 import { MembersFilters } from '../../utils/hooks';
 import { MEMBER_STATUS_OPTIONS, TIER_KEY_BY_CODE, TIER_OPTIONS } from '../../utils/tier-utils';
 

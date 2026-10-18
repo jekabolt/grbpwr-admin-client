@@ -14,11 +14,7 @@ import {
 import { cn } from 'lib/utility';
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Input, Media, Select, Text } from 'ui';
 import { useInfiniteArchives } from '../../archives/components/useArchiveQuery';
 import { ProductPickerModal } from './productPickerModal';
 import { TagPicker } from './tag-picker';

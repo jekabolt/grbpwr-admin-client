@@ -1,8 +1,6 @@
 import { AccessLevel, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Text } from 'ui';
 import { ACCESS } from '../utils/hooks';
 
 const LEVELS: { label: string; value: AccessLevel }[] = [

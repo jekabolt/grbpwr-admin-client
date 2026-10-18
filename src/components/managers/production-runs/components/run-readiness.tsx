@@ -7,10 +7,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Link } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { CalloutBox, GroupLabel, Pill, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
   SEV_BLOCKER,

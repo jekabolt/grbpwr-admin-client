@@ -11,11 +11,7 @@ import { fitsOneSheet, planPdf, type PdfPlan } from 'lib/pattern-export/dxf-pdf'
 import { PDF_FORMATS, pdfLayoutOf, type PdfFormatId } from 'lib/pattern-export/formats';
 import { penRole, type PltSheet } from 'lib/pattern-export/plt-pdf';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, ConfirmationModal, Input, Text } from 'ui';
 
 type Mode = PdfFormatId;
 

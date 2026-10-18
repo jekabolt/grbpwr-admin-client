@@ -10,7 +10,7 @@ import {
   FormProvider,
   useFormContext,
 } from 'react-hook-form';
-import Text from 'ui/components/text';
+import Text from '../components/text';
 
 const Form = FormProvider;
 

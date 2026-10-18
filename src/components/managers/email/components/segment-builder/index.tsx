@@ -1,6 +1,5 @@
 import { useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
-import SelectField from 'ui/form/fields/select-field';
+import { Text, SelectField } from 'ui';
 import { useSegments } from '../useCampaign';
 
 interface SegmentPanelProps {

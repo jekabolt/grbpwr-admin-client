@@ -1,7 +1,6 @@
 import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useFormContext } from 'react-hook-form';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
+import { Text, InputField } from 'ui';
 
 type CarrierPricesProps =
   | {

@@ -7,13 +7,16 @@ import type {
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { mediaFullToViewerItem } from 'ui/components/media-viewer';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Button } from 'ui/components/button';
+import {
+  GroupLabel,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Section,
+  HeaderCount,
+  Text,
+  Button,
+} from 'ui';
+import { mediaFullToViewerItem } from 'components/shared/media-viewer/media-viewer';
 import {
   FLAT_CELL_PX,
   FLAT_CELL_STYLE,

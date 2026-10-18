@@ -5,14 +5,8 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
-import { Placeholder } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import { Button, CalloutBox, Placeholder, Section, HeaderCount, Text, Tiles, FoldCaret } from 'ui';
+import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
 
 import { serverSpeaksDesign } from '../capability';
 import { ReplacingEditor } from '../generation/propagating-editor';
@@ -39,7 +33,6 @@ import {
 } from './model';
 import { DOOR, DOOR_ROW } from './render-tile';
 import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
    Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и

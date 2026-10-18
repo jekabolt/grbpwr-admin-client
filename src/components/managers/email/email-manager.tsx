@@ -6,7 +6,7 @@
 
 import { cn } from 'lib/utility';
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { EmailCampaigns } from '.';
 import { EmailSegments } from './segments';
 

@@ -1,8 +1,7 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Select, Text } from 'ui';
 
 import { COLORWAY_NONE, renderBenchOccupied, colorwayOf } from './bench-kinds';
 /* СЛОВО ОСИ 0 БЕРЁТСЯ У ВОРОТ, А НЕ ПИШЕТСЯ ЗДЕСЬ ВТОРОЙ РАЗ: подпись пункта и отказ, который
@@ -559,7 +558,7 @@ export function ColorwaySelect({
         {label}
       </Text>
       <span className='w-[190px]' title={nothing ? emptyNote : archivedNote}>
-        <SelectComponent
+        <Select
           name={probe}
           value={unpicked ? PICK_ITEM : String(colorwayId)}
           disabled={disabled || nothing}

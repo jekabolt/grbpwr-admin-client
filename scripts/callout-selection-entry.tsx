@@ -2,7 +2,7 @@
 // пин, плашка — на штриховом флэте; выбор задаёт проба через `window.__select`.
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AnnotationSurface, type SurfaceCallout } from 'ui/components/annotation/surface';
+import { AnnotationSurface, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
 
 const FLAT =
   'data:image/svg+xml;utf8,' +

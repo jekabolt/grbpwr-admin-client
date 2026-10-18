@@ -16,9 +16,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AnnotationEditor } from 'ui/components/annotation/editor';
-import type { ShapePoint, SurfaceCallout, PenStyle } from 'ui/components/annotation/surface';
-import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { AnnotationEditor } from 'components/managers/tech-card/annotation/editor';
+import type { ShapePoint, SurfaceCallout, PenStyle } from 'components/managers/tech-card/annotation/surface';
+import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 type C = {

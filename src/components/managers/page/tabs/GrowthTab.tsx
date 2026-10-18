@@ -1,9 +1,7 @@
 import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC, ReactNode } from 'react';
-import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Stat, StatGrid, Text } from 'ui';
 import {
   CampaignAttributionTable,
   ChannelRoasTable,

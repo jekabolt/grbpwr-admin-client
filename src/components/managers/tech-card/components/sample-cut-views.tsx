@@ -1,14 +1,17 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
-import { EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import { Row, RowTotal } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  CalloutBox,
+  EmptyCell,
+  GroupLabel,
+  Media,
+  Pill,
+  Placeholder,
+  Row,
+  RowTotal,
+  Text,
+} from 'ui';
 import {
   CUT_SYMMETRY_PRINT_LEGEND,
   cutSymmetryBadge,

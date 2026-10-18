@@ -1197,6 +1197,14 @@ export type PieceCandidate = {
    * semantics. Absent = none.
    */
   notchMarks?: ChainId[];
+  /**
+   * SHAPE-KINK (pieces/notch-marks.ts cleanPlacementMarks): placement marks (closed boxes longer
+   * than a notch mark, straddling the line) this size's outline ran around while a strict majority
+   * of the family's sizes did not, now kept on the size's own drawn line under them — the mark,
+   * where it sits (sheet frame), how far the outline had left the line and over what span, mm.
+   * Recorded (D5): piece note, manifest `kinkStraightened`, passport. Absent = none.
+   */
+  placeMarks?: { id: ChainId; at: PtMm; mm: number; spanMm: number }[];
 };
 
 /**
@@ -1562,6 +1570,44 @@ export type PieceSpec = {
    * the G5 count warning / SHAPE_COUNTS_HOLD hold lifts for these, the passport records the answer.
    */
   gradeIntended?: GradeCountFeature[];
+  /** SHAPE-KINK: the operator's one-shape moves on this piece (D5, manifest + passport). */
+  shapeFixes?: ShapeFixRecord[];
+};
+
+/** SHAPE-KINK: what an operator one-shape move does to a size. */
+export type ShapeFixAction = 'straighten' | 'drop';
+/** SHAPE-KINK: one operator move, as the manifest records it (`mm` = the largest straightening). */
+export type ShapeFixRecord = { size: string; action: ShapeFixAction; mm?: number };
+export const shapeFixKey = (seed: SeedId | number, sizeToken: string) => `${seed}:${sizeToken}`;
+
+/**
+ * SHAPE-KINK: one stretch of a size's drawn outline straightened onto its line / the family's
+ * structure (D5: recorded, never presented as drawn). `at` = the stretch's middle, sheet frame;
+ * `mm` = how far the outline had left the chord / line; `spanMm` = the chord's length. Rules:
+ * 'mark-wall' — a placement mark the fill took as a wall, the size's own line under it
+ * (pieces/notch-marks.ts); 'jitter' — ≤ 2 mm over ≤ 20 mm against a strict majority;
+ * 'mark-detour' — ≤ 6 mm, the size's own drawn line on the chord, against a strict majority;
+ * 'operator' — api.fixShape (semantics/kink-repair.ts).
+ */
+export type KinkRule = 'mark-wall' | 'jitter' | 'mark-detour' | 'operator';
+export type KinkRecord = { at: PtMm; mm: number; spanMm: number; rule: KinkRule };
+
+/**
+ * SHAPE-KINK: a G5 one-shape failure, structured for the check step's one-click moves
+ * (GateCheck.shapeIssues). `at` = where the offending turn is, WRITTEN (block) frame, mm;
+ * `mm` = how far straightening it moves the line (0 when not fixable); `kind`: the size has a turn
+ * the majority lacks ('extra-turn') or lacks one the majority has ('missing-turn'); `fixable` =
+ * api.fixShape(identity, size) can straighten it (else `why`); api.dropSize is always offered.
+ */
+export type ShapeIssue = {
+  identity: string;
+  seed: SeedId | null;
+  size: string;
+  at: PtMm;
+  mm: number;
+  kind: 'extra-turn' | 'missing-turn';
+  fixable: boolean;
+  why: string;
 };
 
 export type PieceSizeSpec = {
@@ -1589,6 +1635,8 @@ export type PieceSizeSpec = {
    * answered `none`), per kind — recorded (D5), counted in the manifest. Absent = none.
    */
   removedByOperator?: Partial<Record<GradeCountFeature, number>>;
+  /** SHAPE-KINK: stretches of this size's outline straightened (D5). Absent = as drawn. */
+  kinks?: KinkRecord[];
 };
 
 /**
@@ -1687,6 +1735,13 @@ export type SemanticsInput = {
    * is no longer asked does nothing). Never given by the autopilot.
    */
   gradeAnswers?: Readonly<Record<string, GradeAnswer>>;
+  /**
+   * SHAPE-KINK: the operator's one-shape moves, keyed `${seed}:${sizeToken}` (shapeFixKey):
+   * 'straighten' = api.fixShape (that size's extra turns straightened onto the family's majority
+   * structure, ≤ 6 mm, recorded), 'drop' = api.dropSize (the piece is exported without that size,
+   * recorded). Never given by the autopilot. Absent = none.
+   */
+  shapeFixes?: Readonly<Record<string, ShapeFixAction>>;
   /** The text label of each text-seeded piece ("22", "Piece 7"), for binding the cutting list. */
   seedLabels?: Partial<Record<SeedId, string>>;
   /** MOOD Ф0 (G24): the text (TextId) each text-seeded piece was seeded from — its header. */
@@ -2006,7 +2061,20 @@ export type DraftRul =
       /** Largest distance of an expanded point from its per-size point, mm (≤ 0.1). */
       maxErrMm: number;
     }
-  | { ok: false; reasons: string[] };
+  | {
+      ok: false;
+      reasons: string[];
+      /**
+       * SHAPE-KINK: the reasons per piece, for the UI to route — `identity` = the piece the reason
+       * names (null = the whole package); `gradeAskKey` = the open GRADE P1 counts ask of that piece
+       * whose answer would make its sizes the same drawing (notches / drills / internal lines differ
+       * between sizes). Never answered for the operator. Absent on a package refused before this.
+       */
+      refusals?: RulRefusal[];
+    };
+
+/** SHAPE-KINK: one RUL refusal, structured (DraftRul.refusals). */
+export type RulRefusal = { identity: string | null; why: string; gradeAskKey?: string };
 
 export type DraftScope = {
   target: DraftScopeTarget;
@@ -2169,6 +2237,8 @@ export type ManifestPiece = {
   aiConfidence?: number;
   /** GRADE P1: per-size count differences the operator answered "intended" (absent = none). */
   gradeIntended?: GradeCountFeature[];
+  /** SHAPE-KINK: the operator's one-shape moves (fixShape / dropSize) on this piece. */
+  shapeFixes?: ShapeFixRecord[];
 };
 
 export type ManifestBlock = {
@@ -2216,6 +2286,11 @@ export type ManifestBlock = {
    * own / common lines.
    */
   grade?: ManifestGrade;
+  /**
+   * SHAPE-KINK: stretches of this size's outline straightened onto its own line / the family's
+   * structure (D5) — rule, how far it had left the line, the chord's span (mm). Absent = as drawn.
+   */
+  kinkStraightened?: { rule: KinkRule; mm: number; spanMm: number }[];
 };
 
 /** GRADE P2: ManifestBlock.grade. */
@@ -2382,6 +2457,13 @@ export type GateCheck = {
   /** Blocks (or identities) the check names. */
   blocks: string[];
   note: string;
+  /** SHAPE-KINK: the G5 one-shape hold, per held size (the check step's fixShape / dropSize). */
+  shapeIssues?: ShapeIssue[];
+  /**
+   * SHAPE-KINK: where this failure is answered when it is not the check id's usual step — 'check'
+   * = on the check step itself (shapeIssues: api.fixShape / api.dropSize). Absent = the id's step.
+   */
+  door?: 'check';
 };
 
 /** One derived edge G15 accepted — the audited list the manifest carries (`GateReport.derived`). */
@@ -3113,6 +3195,12 @@ export type WizardEvent =
    * step it writes again.
    */
   | ({ type: 'write-storage' } & WriteStorage)
+  /**
+   * SHAPE-KINK: the operator's one-shape move on the check step (api.fixShape / api.dropSize /
+   * api.clearShapeFix) — `Inputs.shapeFixes`, semantics and the write run again. The operator's
+   * only: never an autopilot / replay answer (in no step of ANSWERS).
+   */
+  | { type: 'shape-fix'; identity: string; size: string; action: ShapeFixAction | 'clear' }
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
   | { type: 'apply'; token?: number }
   | { type: 'download' }

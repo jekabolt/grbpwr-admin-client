@@ -8,11 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { Button, Input, Pill, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './ai-panel';
 import { FormatBar } from './format-bar';
 import { MarkdownView } from './markdown-view';

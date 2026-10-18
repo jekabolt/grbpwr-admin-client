@@ -1,10 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AdminAccount, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { Button, Input, Text, ToggleSwitch } from 'ui';
 import { useCreateAccount, useUpdateAccountPermissions } from '../utils/hooks';
 import { PermissionPicker } from './permission-picker';
 

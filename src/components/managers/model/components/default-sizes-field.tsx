@@ -2,7 +2,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { ModelFormData } from './schema';
 import { SizePickerModal } from './size-picker-modal';
 

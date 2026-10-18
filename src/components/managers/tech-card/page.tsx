@@ -3,8 +3,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import { useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { TechCardForm } from './components';
 import { TechCardStagingProvider } from './components/useTechCardStaging';
 

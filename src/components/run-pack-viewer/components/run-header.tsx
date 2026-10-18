@@ -2,9 +2,7 @@
 //
 // Порядок строк тот же, что на печатном наряде (run-pack-document.tsx): цех читает шапку по
 // позициям, и переставленная строка «по какой карте кроим» — это не косметика.
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Pill, Row, Text } from 'ui';
 import { dayOf, runStatusIsStop, runStatusWord } from './labels';
 import { RpManifest } from './manifest';
 

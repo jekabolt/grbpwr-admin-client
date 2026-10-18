@@ -27,12 +27,16 @@ import { useWatch, type Control } from 'react-hook-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import Text from 'ui/components/text';
+import {
+  Button,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  FoldCaret,
+  HeaderWarnings,
+  type HeaderWarning,
+  Text,
+} from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { mmToEngineCm } from './nesting/allowance-units';

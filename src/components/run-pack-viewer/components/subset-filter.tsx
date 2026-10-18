@@ -4,8 +4,7 @@
 // телефон в цеху, палец в перчатке, и промах здесь стоит не раздражения, а перелистывания наряда
 // в неподходящий момент. Выбранное = залитая чернилами кнопка, остальные — контурные; состояние
 // продублировано aria-pressed, потому что заливка одна на всё и монохромна.
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { lineKeyOf, lineLabelOf } from './labels';
 import { RpLay, RpLine, RpSize } from './manifest';
 import { emptySubset, layKeyOf, Subset, subsetActive, toggleIn } from './subset';

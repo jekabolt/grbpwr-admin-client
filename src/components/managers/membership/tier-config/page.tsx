@@ -3,10 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Input, Section, SectionStack, Text } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
 

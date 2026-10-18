@@ -6,16 +6,21 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Input,
+  Media,
+  Placeholder,
+  Select,
+  Text,
+  Tile,
+  Tiles,
+  Tooltip,
+  TooltipProvider,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
   TrimPictogram,

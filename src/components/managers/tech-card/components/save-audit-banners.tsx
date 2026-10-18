@@ -1,6 +1,4 @@
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Text } from 'ui';
 
 import type { PresenceAudit } from './operations-presence';
 

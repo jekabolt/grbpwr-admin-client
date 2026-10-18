@@ -5,9 +5,7 @@
 
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { StoredSeamDirection } from 'lib/seams';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Button, Chip, Text } from 'ui';
 import type { HandPick } from './seams-sheet';
 import {
   deltaPct,

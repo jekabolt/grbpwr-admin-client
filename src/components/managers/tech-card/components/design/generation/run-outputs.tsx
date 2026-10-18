@@ -4,9 +4,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { Fragment, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import { Button, Text, Tiles, FoldCaret } from 'ui';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
@@ -27,7 +25,6 @@ import {
 } from './run-state';
 import { RunTile } from './run-tile';
 import { thumbUrl } from './thumb';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ WHAT A RUN BROUGHT BACK — ONE BLOCK, TWO HOSTS (26.09, O-53) ═══════════════════════════════

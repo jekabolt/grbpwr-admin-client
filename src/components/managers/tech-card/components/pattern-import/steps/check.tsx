@@ -2,36 +2,59 @@
 // naming the blocks it failed and the step where the answer lives. Beside it, the pieces drawn
 // by the card's OWN sheet component (nesting/piece-sheet.tsx) under their block names — what the
 // card will see once the files land, not a second opinion about it.
-// Owner 16.10: the card's preview on the LEFT (the block a failing check names selected, in its
-// size), the one question on the RIGHT — a failing check, its blocks, its door (fix in <step>, or
-// the report when no step fixes it); "next check" walks the others. No check has a one-click fix
-// (every door leaves the step), so the ask line coaches. The passing ones fold into one count
-// line; warnings, what the files leave out and every other blocking check are the header's
-// `! N warnings`; values and limits are each check's tooltip; the run time is diagnostics.
-import { useContext, useMemo, useState } from 'react';
+// Owner 16.10: the card's preview on the LEFT, the one question on the RIGHT.
+// CHECK-QUIZ (owner OK 18.10, 05-CHECK-QUIZ.md): the side panel is a quiz — one question at a time
+// from every held size of a shape check, every other failing check, then every open grade question
+// (check-quiz.ts words them: ≤ 6 words, piece names, answers ≤ 3 words, the likely one bordered);
+// progress is dots; an answer moves on by itself (an answered question leaves the open list). A
+// shape question zooms the sheet onto the place (a red ring); a grade question shows the sizes side
+// by side instead of the sheet. No question left: «ready» — the storage choice, the files written,
+// the passing checks folded, and «N answers · change» back to the first question. Warnings, what the
+// files leave out and every other blocking check are the header's `! N warnings`; values and limits
+// are each check's tooltip; the run time and the report are diagnostics.
+import { useContext, useEffect, useMemo, useState } from 'react';
 import type {
   DraftScope,
   GateCheck,
   GateCheckId,
+  GradeAnswer,
+  GradeAsk,
   PieceSpec,
+  ShapeIssue,
   WizardStep,
 } from 'lib/pattern-import/types';
+import { PATIMPORT, shapeFixKey } from 'lib/pattern-import/types';
 import type { PieceDTO } from 'lib/nesting/types';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  DataTable,
+  HeaderWarnings,
+  type HeaderWarning,
+  Pill,
+  Row,
+  Text,
+} from 'ui';
+import { cn } from 'lib/utility';
 import { PieceSheet } from '../../nesting/piece-sheet';
 import type { ImportSessionApi } from '../use-import-session';
 import { STEPS } from '../use-import-session';
 import { plural } from '../stages';
-import { DebugFold, Fold, Panel, SplitStage, ask, fmtBytes } from '../ui-bits';
+import { DebugFold, Fold, Panel, SplitStage, ask, fmtBytes, useQuizSlot } from '../ui-bits';
 import { focusFromGate, type PieceFocus } from '../piece-focus';
 import { DroppedLabels, leftOut } from './not-in-file';
-import { openGradeAsks } from './details-grade';
+import { GradeSizes, gradeRefusal, openGradeAsks } from './details-grade';
+import {
+  CHECK_ASK,
+  checkSubject,
+  gradeChoices,
+  gradeQuestion,
+  openQuestions,
+  pieceName,
+  shapeFocus,
+  type CheckQ,
+} from './check-quiz';
 import { writtenTokens } from '../write-storage';
 
 const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
@@ -77,6 +100,10 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
  */
 const isG9Fallback = (c: GateCheck) => c.id === 'G9-sizes' && c.severity === 'warn';
 
+/** One answer: full width, 44 px, the likely one bordered in ink. */
+const ANSWER = 'h-11 w-full justify-center';
+const SUGGESTED = 'border-2 !border-textColor';
+
 export function CheckStep({
   api,
   onFixInPieces,
@@ -85,39 +112,71 @@ export function CheckStep({
   /** "fix in pieces": the pieces step with the named blocks selected and the reason (M1). */
   onFixInPieces?: (f: PieceFocus) => void;
 }) {
-  const { session } = api;
+  const { session, inputs } = api;
   const scopes = session.draft?.scopes ?? [];
   const [key, setKey] = useState<string | null>(scopes[0]?.target.scopeKey ?? null);
   const scope = scopes.find((s) => s.target.scopeKey === key) ?? scopes[0];
   const report = scope ? session.gate[scope.target.scopeKey] : undefined;
   const tokens = scope?.manifest.sizes.map((s) => s.token) ?? [];
-  const [token, setToken] = useState<string | null>(null);
-  // the block the operator picked, kept only for the question it was picked on
+  // the size and the block the operator picked, kept only for the question they were picked on
+  const [tokenPick, setTokenPick] = useState<{ q: string | null; t: string } | null>(null);
   const [pick, setPick] = useState<{ q: string | null; b: string | null } | null>(null);
-  // the failing check shown as the question (one at a time, "next" walks them)
-  const [at, setAt] = useState(0);
+  // a question opened again from a dot or «change» (else: the first open one)
+  const [revisit, setRevisit] = useState<string | null>(null);
+  // why the last move on a question was refused (shown under its answers)
+  const [moveErr, setMoveErr] = useState<{ q: string; why: string } | null>(null);
 
+  const allPieces = useMemo(() => session.semantics?.pieces ?? [], [session.semantics]);
   const specs = useMemo(
-    () => (session.semantics?.pieces ?? []).filter((p) => scope?.identities.includes(p.identity)),
-    [session.semantics, scope],
+    () => allPieces.filter((p) => scope?.identities.includes(p.identity)),
+    [allPieces, scope],
   );
 
   const { labels } = useContext(DroppedLabels);
 
   const blocking = (r = report) => r?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   const failing = blocking();
-  const active = failing.length ? failing[Math.min(at, failing.length - 1)] : null;
-  const qKey = active ? `${scope?.target.scopeKey}:${active.id}:${active.blocks.join(',')}` : null;
-  // the left preview shows the first block the question names, in that block's size
+  const gradeOpen = session.semantics ? openGradeAsks(session.semantics) : [];
+  const open = openQuestions(scope?.target.scopeKey ?? null, failing, gradeOpen);
+  const openKeys = new Set(open.map((q) => q.key));
+
+  // every question asked on this visit, in the order first asked (the dots), with its last shape
+  // (the wizard's quiz slot: the step unmounts while the files are written again)
+  const seen = useQuizSlot('check-quiz-seen', () => new Map<string, CheckQ>());
+  for (const q of open) seen.set(q.key, q);
+  const scopeKey = scope?.target.scopeKey ?? '';
+  const order = [...seen.values()].filter((q) => q.kind === 'grade' || q.scopeKey === scopeKey);
+  const isDone = (q: CheckQ) => !openKeys.has(q.key);
+  const answered = order.filter(isDone).length;
+  // only a reversible answer (shape move, grade answer) is opened again, and only while nothing
+  // blocks: a blocking question stays the coach's and the footer primary's target (open[0])
+  const blocked = open.some((q) => q.kind !== 'grade');
+  const canRevisit = (q: CheckQ) => q.kind !== 'check' && !blocked;
+  const revisited = revisit ? order.find((q) => q.key === revisit && canRevisit(q)) ?? null : null;
+  const firstReversible = order.find(canRevisit) ?? null;
+  const current = revisited ?? open[0] ?? null;
+  const qKey = current?.key ?? null;
+  // a revisit whose question vanished from the list falls back to the open ones
+  useEffect(() => {
+    if (revisit && !revisited) setRevisit(null);
+  }, [revisit, revisited]);
+
+  const shape = current?.kind === 'shape' ? current.issue : null;
+  const activeCheck = current && current.kind !== 'grade' ? current.check : null;
+  const askedBlock = shape ? `${shape.identity}_${shape.size}` : activeCheck?.blocks[0] ?? null;
   const blockSize = (b: string) =>
     tokens.find((t) => b.toLowerCase().endsWith(`_${t.toLowerCase()}`)) ?? null;
-  const askedBlock = active?.blocks[0] ?? null;
   const picked = pick && pick.q === qKey ? pick.b : askedBlock?.toLowerCase() ?? null;
+  const token = tokenPick && tokenPick.q === qKey ? tokenPick.t : null;
   const size =
     token && tokens.includes(token)
       ? token
-      : (askedBlock && blockSize(askedBlock)) ?? tokens[Math.floor(tokens.length / 2)] ?? null;
+      : (shape && tokens.includes(shape.size) ? shape.size : null) ??
+        (askedBlock && blockSize(askedBlock)) ??
+        tokens[Math.floor(tokens.length / 2)] ??
+        null;
   const dtos = useMemo(() => (size ? piecesForCard(specs, size) : []), [specs, size]);
+  const focus = shape && size === shape.size ? shapeFocus(shape, dtos, scope, allPieces) : null;
 
   if (!scopes.length)
     return (
@@ -128,6 +187,7 @@ export function CheckStep({
       </Panel>
     );
 
+  const busy = !!session.busy || api.writeStorage.rewriting;
   const quiet = (c: GateCheck) => !!report?.passed && isG9Fallback(c);
   const warns = report?.checks.filter((c) => !c.ok && c.severity === 'warn' && !quiet(c)) ?? [];
   const fix = (c: GateCheck, to: WizardStep) => {
@@ -172,9 +232,9 @@ export function CheckStep({
           },
         ]
       : []),
-    // every blocking check stays readable here, the one asked now included (its note, its blocks)
+    // every blocking check stays readable here, its note and its blocks
     ...failing
-      .filter((c) => c !== active)
+      .filter((c) => c !== activeCheck)
       .map(
         (c): HeaderWarning => ({
           text: `${c.id.split('-')[0]} ${CHECK[c.id].what} — blocks the export${c.note ? ` · ${c.note}` : ''}`,
@@ -216,46 +276,314 @@ export function CheckStep({
     );
   };
 
-  const activeFix = active ? CHECK[active.id].fix : null;
-  const gradeOpen = session.semantics ? openGradeAsks(session.semantics).length : 0;
-  const question = active ? `${active.id.split('-')[0]} fails: ${CHECK[active.id].what}` : null;
+  /** After an answer: the next open question (a revisit ends). */
+  const moved = (q: string, r: { ok: boolean; reason: string | null } | void) => {
+    if (r && !r.ok) {
+      setMoveErr({ q, why: r.reason ?? 'not possible' });
+      return;
+    }
+    setMoveErr(null);
+    setRevisit(null);
+  };
+
+  /**
+   * GRADE P1: the answer re-runs semantics with `gradeAnswers[key]`, as the details step does
+   * (details.tsx `answerGrade` / `rerun`), then writes the draft again so the files, the gate and the
+   * .rul package carry it. A refused answer keeps the question open, its reason under the answer.
+   */
+  const answerGrade = async (g: GradeAsk, a: GradeAnswer) => {
+    const i = { ...inputs, gradeAnswers: { ...(inputs.gradeAnswers ?? {}), [g.key]: a } };
+    await api.dispatch({
+      type: 'semantics',
+      input: {
+        ...api.semanticsInput(i),
+        fileAllowance:
+          i.fileAllowance?.origin === 'operator'
+            ? i.fileAllowance
+            : {
+                meaning: 'seam',
+                allowanceMm: PATIMPORT.defaultAllowanceMm,
+                origin: 'default',
+                evidence: [],
+              },
+      },
+    });
+    await api.retryWrite();
+    moved(`g:${g.key}`);
+  };
+
+  const sem = session.semantics;
+  const rulOn = api.writeStorage.storage === 'rul';
+  const rulWants = (askKey: string) =>
+    rulOn &&
+    scopes.some((s) => s.rul && !s.rul.ok && s.rul.refusals?.some((x) => x.gradeAskKey === askKey));
+
+  /** An operator shape move recorded for this size (seed unknown: let clearShapeFix decide). */
+  const applied = (i: ShapeIssue) =>
+    i.seed == null
+      ? Object.keys(api.shapeFixes).length > 0
+      : !!api.shapeFixes[shapeFixKey(i.seed, i.size)];
+  const undos = order.flatMap((q) =>
+    q.kind === 'shape' && isDone(q) && applied(q.issue) ? [q] : [],
+  );
+
+  /** The question asked now, worded and with its answers. */
+  const quiz = (q: CheckQ) => {
+    const done = isDone(q);
+    const err = moveErr && moveErr.q === q.key ? moveErr.why : null;
+    let text: string;
+    let tip: string | undefined;
+    let answers: React.ReactNode = null;
+    if (q.kind === 'shape') {
+      const s = q.issue;
+      const who = pieceName(s.identity, allPieces);
+      text = `${who}: ${s.size} bends off`;
+      tip = [s.why, q.check.note].filter(Boolean).join(' · ') || undefined;
+      const asked = applied(s);
+      answers = done ? (
+        asked && (
+          <Button
+            variant='secondary'
+            size='sm'
+            className={ANSWER}
+            disabled={busy}
+            onClick={async () => moved(q.key, await api.clearShapeFix(s.identity, s.size))}
+          >
+            as drawn
+          </Button>
+        )
+      ) : (
+        <>
+          {s.fixable && (
+            <Button
+              {...ask('check-shape-fix', true, 'straighten it')}
+              variant='secondary'
+              size='sm'
+              data-suggested
+              className={cn(ANSWER, SUGGESTED)}
+              disabled={busy}
+              onClick={async () => moved(q.key, await api.fixShape(s.identity, s.size))}
+            >
+              straighten {s.size}
+            </Button>
+          )}
+          <Button
+            {...ask('check-shape-drop', !s.fixable, 'export without this size')}
+            variant='secondary'
+            size='sm'
+            {...(!s.fixable ? { 'data-suggested': true } : {})}
+            className={cn(ANSWER, !s.fixable && SUGGESTED)}
+            disabled={busy}
+            onClick={async () => moved(q.key, await api.dropSize(s.identity, s.size))}
+          >
+            leave {s.size} out
+          </Button>
+        </>
+      );
+    } else if (q.kind === 'check') {
+      const c = q.check;
+      const who = checkSubject(c, allPieces);
+      text = `${who ? `${who}: ` : ''}${CHECK_ASK[c.id]}`;
+      tip = [CHECK[c.id].what, c.note, limitOf(c)].filter(Boolean).join(' · ') || undefined;
+      const to = CHECK[c.id].fix;
+      answers = done ? null : to && c.door !== 'check' ? (
+        // a door back, not a fix: the answer is given on that step (coached)
+        <Button
+          {...ask('check-fix', 'open that step')}
+          variant='secondary'
+          size='sm'
+          data-suggested
+          className={cn(ANSWER, SUGGESTED)}
+          title={
+            to === 'pieces' && c.blocks.length
+              ? `opens pieces with ${c.blocks.length === 1 ? c.blocks[0] : `${c.blocks.length} blocks`} selected`
+              : undefined
+          }
+          onClick={() => fix(c, to)}
+        >
+          fix in {stepWord(to)}
+        </Button>
+      ) : (
+        // no step fixes it (round trip, probe square, …): the report is the door
+        <Button
+          {...ask('check-report', 'download the report')}
+          variant='secondary'
+          size='sm'
+          data-suggested
+          className={cn(ANSWER, SUGGESTED)}
+          title='JSON report'
+          onClick={api.downloadReport}
+        >
+          download report
+        </Button>
+      );
+    } else {
+      const fresh = sem?.gradeAsks?.find((a) => a.key === q.ask.key) ?? q.ask;
+      text = gradeQuestion(fresh, allPieces);
+      tip = fresh.question;
+      const refusal = sem ? gradeRefusal(sem, fresh) : null;
+      const sent = inputs.gradeAnswers?.[fresh.key] ?? null;
+      answers = gradeChoices(fresh, refusal ? sent : null).map((c) => (
+        <span key={c.answer} className='flex flex-col items-stretch gap-0.5'>
+          <Button
+            {...ask('check-grade', c.suggested && !done)}
+            variant='secondary'
+            size='sm'
+            {...(c.suggested ? { 'data-suggested': true } : {})}
+            className={cn(ANSWER, c.suggested && SUGGESTED)}
+            disabled={busy}
+            data-testid={`grade-answer-${c.answer}`}
+            onClick={() => void answerGrade(fresh, c.answer)}
+          >
+            {c.label}
+          </Button>
+          {refusal && sent === c.answer && (
+            <Text size='micro' variant='label' component='p' data-testid='grade-refused'>
+              {refusal}
+            </Text>
+          )}
+        </span>
+      ));
+      if (rulWants(fresh.key))
+        answers = (
+          <>
+            {answers}
+            <Text size='micro' variant='label' component='p' data-testid='check-grade-rul'>
+              .rul needs an answer
+            </Text>
+          </>
+        );
+    }
+    return (
+      // the question and its answers: the coach's zone
+      <div
+        data-ask-zone=''
+        data-ask-label={text}
+        data-testid='check-question'
+        className='flex min-w-0 flex-col gap-3'
+      >
+        <Text size='micro' component='p' title={tip}>
+          {text}
+          {done && (
+            <Text size='micro' variant='label' component='span'>
+              {' '}
+              ✓
+            </Text>
+          )}
+        </Text>
+        <span className='flex flex-col items-stretch gap-2'>{answers}</span>
+        {/* the operator's own shape moves stay undoable while another check blocks (a
+            straightened size may surface a new blocker); the coach keeps this card's answer */}
+        {blocked && q.key === open[0]?.key && undos.length > 0 && (
+          <span className='flex flex-col items-stretch gap-2'>
+            {undos.map((u) => (
+              <Button
+                key={u.key}
+                variant='secondary'
+                size='sm'
+                className={ANSWER}
+                disabled={busy}
+                data-testid='check-shape-undo'
+                onClick={async () =>
+                  moved(q.key, await api.clearShapeFix(u.issue.identity, u.issue.size))
+                }
+              >
+                undo {pieceName(u.issue.identity, allPieces)} {u.issue.size}
+              </Button>
+            ))}
+          </span>
+        )}
+        {err && (
+          <Text size='micro' variant='label' component='p'>
+            {err}
+          </Text>
+        )}
+      </div>
+    );
+  };
+
+  const dots = order.length > 0 && (
+    <span className='flex items-center gap-1.5' data-testid='check-dots'>
+      {order.map((q) => (
+        <Button
+          key={q.key}
+          aria-label={isDone(q) ? 'answered' : 'open'}
+          aria-current={q.key === qKey ? 'step' : undefined}
+          disabled={!canRevisit(q) && q.key !== open[0]?.key}
+          className={cn(
+            'size-2 border border-textColor',
+            isDone(q) && 'bg-textColor',
+            q.key === qKey && 'outline outline-1 outline-offset-2 outline-textColor',
+          )}
+          onClick={() => {
+            setMoveErr(null);
+            setRevisit(q.key === open[0]?.key ? null : q.key);
+          }}
+        >
+          {null}
+        </Button>
+      ))}
+    </span>
+  );
+
+  const gradeSpec = (g: GradeAsk): PieceSpec | undefined =>
+    allPieces.find((p) => p.identity === g.identity) ?? allPieces.find((p) => p.seed === g.seed);
+  const gradeAsk = current?.kind === 'grade' ? current.ask : null;
 
   return (
     <SplitStage
       sideWidth={380}
       canvas={
-        <Panel
-          title='what the card will see'
-          bodyClassName='flex flex-col gap-2'
-          aside={
-            <ChipRow>
-              {tokens.map((t) => (
-                <Chip key={t} quiet selected={t === size} onClick={() => setToken(t)}>
-                  {t}
-                </Chip>
-              ))}
-            </ChipRow>
-          }
-        >
-          {scope && <ScopeSummary scope={scope} />}
-          {dtos.length > 0 && (
-            <PieceSheet
-              pieces={dtos}
-              keyOf={(p) => (p.blockName ?? '').toLowerCase()}
-              markOf={() => 'mapped'}
-              labelOf={(p) => p.blockName ?? p.name}
-              selectedKey={picked}
-              onPick={(k) => setPick({ q: qKey, b: k === picked ? null : k })}
-              grainLayer='7'
-              innerLayers={new Set(['14'])}
-            />
-          )}
-        </Panel>
+        gradeAsk ? (
+          <Panel
+            title={pieceName(gradeAsk.identity, allPieces)}
+            bodyClassName='flex flex-col gap-2'
+          >
+            <span className='[&_svg]:size-40'>
+              <GradeSizes ask={gradeAsk} spec={gradeSpec(gradeAsk)} />
+            </span>
+          </Panel>
+        ) : (
+          <Panel
+            title='what the card will see'
+            bodyClassName='flex flex-col gap-2'
+            aside={
+              <ChipRow>
+                {tokens.map((t) => (
+                  <Chip
+                    key={t}
+                    quiet
+                    selected={t === size}
+                    onClick={() => setTokenPick({ q: qKey, t })}
+                  >
+                    {t}
+                  </Chip>
+                ))}
+              </ChipRow>
+            }
+          >
+            {scope && <ScopeSummary scope={scope} />}
+            {dtos.length > 0 && (
+              <PieceSheet
+                pieces={dtos}
+                keyOf={(p) => (p.blockName ?? '').toLowerCase()}
+                markOf={() => 'mapped'}
+                labelOf={(p) => p.blockName ?? p.name}
+                selectedKey={picked}
+                onPick={(k) => setPick({ q: qKey, b: k === picked ? null : k })}
+                grainLayer='7'
+                innerLayers={new Set(['14'])}
+                focus={focus?.box ?? null}
+                focusMark={focus?.mark ?? null}
+              />
+            )}
+          </Panel>
+        )
       }
       side={
         <Panel
           title='check'
-          bodyClassName='flex flex-col gap-2'
+          bodyClassName='flex flex-col gap-4'
           aside={<HeaderWarnings items={warnings} />}
         >
           {scopes.length > 1 && (
@@ -280,7 +608,7 @@ export function CheckStep({
                       title={s.target.label}
                       onClick={() => {
                         setKey(s.target.scopeKey);
-                        setAt(0);
+                        setRevisit(null);
                       }}
                     >
                       {bad ? '! ' : ''}
@@ -291,127 +619,71 @@ export function CheckStep({
               </ChipRow>
             </span>
           )}
-          {/* GRADE P1: per-size questions never block — said once, quietly, with the way back to
-              the first open one on DETAILS (it is the step's first question once nothing blocks) */}
-          {gradeOpen > 0 && (
-            <button
-              type='button'
-              data-testid='check-grade-open'
-              className='self-start text-left'
-              title='the sizes differ in notches / drill holes / internal lines; open the first question'
-              onClick={() => void api.dispatch({ type: 'back', to: 'meaning' })}
-            >
-              <Text size='micro' variant='label' component='span' className='underline'>
-                {gradeOpen} grade {gradeOpen === 1 ? 'question' : 'questions'} not answered —
-                exported as drawn
-              </Text>
-            </button>
-          )}
           {scope && report && (
             <>
-              {active && question ? (
+              {current ? (
                 <>
-                  <Text size='micro' variant='label' component='p'>
-                    question {Math.min(at, failing.length - 1) + 1} of {failing.length}
-                  </Text>
-                  {/* the failing check and its doors: the coach's zone */}
-                  <div
-                    data-ask-zone=''
-                    data-ask-label={question}
-                    data-testid='check-question'
-                    className='flex min-w-0 flex-col gap-2'
-                  >
-                    <Text
-                      size='micro'
-                      component='p'
-                      title={
-                        [active.note, limitOf(active)].filter(Boolean).join(' · ') || undefined
-                      }
-                    >
-                      {question}
-                    </Text>
-                    {active.blocks.length > 0 && (
-                      <span className='flex flex-wrap gap-1'>
-                        {active.blocks.map((b) => (
-                          <Chip
-                            key={b}
-                            quiet
-                            selected={picked === b.toLowerCase()}
-                            title='show it on the left'
-                            onClick={() => {
-                              setPick({ q: qKey, b: b.toLowerCase() });
-                              const t = blockSize(b);
-                              if (t) setToken(t);
-                            }}
-                          >
-                            {b}
-                          </Chip>
-                        ))}
-                      </span>
-                    )}
-                    <span className='flex flex-col items-stretch gap-1.5'>
-                      {activeFix && (
-                        // a door back, not a fix: the answer is given on that step (coached)
-                        <Button
-                          {...ask('check-fix', 'open the step that fixes it')}
-                          variant='secondary'
-                          size='xs'
-                          title={
-                            activeFix === 'pieces' && active.blocks.length
-                              ? `opens pieces with ${active.blocks.length === 1 ? active.blocks[0] : `${active.blocks.length} blocks`} selected`
-                              : undefined
-                          }
-                          onClick={() => fix(active, activeFix)}
-                        >
-                          fix in {stepWord(activeFix)}
-                        </Button>
-                      )}
-                      <Button
-                        // no step fixes it (round trip, probe square, …): the report is the door
-                        {...ask(
-                          'check-report',
-                          !activeFix,
-                          'no step fixes it — download the report',
-                        )}
-                        variant='secondary'
-                        size='xs'
-                        title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
-                        onClick={api.downloadReport}
-                      >
-                        download report
-                      </Button>
-                      {failing.length > 1 && (
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          className='text-labelColor hover:text-textColor'
-                          onClick={() =>
-                            setAt((i) => (Math.min(i, failing.length - 1) + 1) % failing.length)
-                          }
-                        >
-                          next check
-                        </Button>
-                      )}
-                    </span>
-                  </div>
+                  {dots}
+                  {quiz(current)}
                 </>
               ) : (
-                <Text size='micro' variant='label' component='p'>
-                  passes ✓
-                </Text>
-              )}
-              <WriteStorageChoice api={api} scope={scope} />
-              {passing.length > 0 && (
-                <Fold label={`${plural(passing.length, 'check')} pass`}>
-                  <DataTable>
-                    <tbody>{passing.map((c, i) => checkRow(c, i, false))}</tbody>
-                  </DataTable>
-                </Fold>
+                <>
+                  <Text size='micro' component='p' data-testid='check-ready'>
+                    ready
+                  </Text>
+                  <WriteStorageChoice
+                    api={api}
+                    scope={scope}
+                    onGrade={(k) => setRevisit(`g:${k}`)}
+                  />
+                  <span className='flex flex-col gap-1'>
+                    {scopes
+                      .flatMap((s) => [
+                        s.filename,
+                        ...(rulOn && s.rul?.ok
+                          ? [`${s.rul.dxfFilename} + ${s.rul.rulFilename}`]
+                          : []),
+                      ])
+                      .map((f) => (
+                        <Text
+                          key={f}
+                          size='micro'
+                          variant='label'
+                          component='p'
+                          className='break-words'
+                        >
+                          {f}
+                        </Text>
+                      ))}
+                  </span>
+                  {passing.length > 0 && (
+                    <Fold label={`${plural(passing.length, 'check')} pass`}>
+                      <DataTable>
+                        <tbody>{passing.map((c, i) => checkRow(c, i, false))}</tbody>
+                      </DataTable>
+                    </Fold>
+                  )}
+                  {answered > 0 && firstReversible && (
+                    <button
+                      type='button'
+                      data-testid='check-change'
+                      className='self-start text-left'
+                      onClick={() => setRevisit(firstReversible.key)}
+                    >
+                      <Text size='micro' variant='label' component='span' className='underline'>
+                        {plural(answered, 'answer')} · change
+                      </Text>
+                    </button>
+                  )}
+                </>
               )}
               <DebugFold>
                 <Text size='micro' variant='label' component='p'>
                   {report.durationMs} ms
                 </Text>
+                <Button variant='underline' size='xs' onClick={api.downloadReport}>
+                  download report
+                </Button>
                 <DataTable>
                   <thead>
                     <tr>
@@ -442,7 +714,16 @@ export function CheckStep({
  * (`ignored`); a scope that cannot be graded point for point → its first reason, the per-size DXF
  * stays the file.
  */
-function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: DraftScope }) {
+function WriteStorageChoice({
+  api,
+  scope,
+  onGrade,
+}: {
+  api: ImportSessionApi;
+  scope: DraftScope;
+  /** CHECK-QUIZ: open the grade question a refusal names, here on the check step. */
+  onGrade?: (askKey: string) => void;
+}) {
   const ws = api.writeStorage;
   const rul = ws.storage === 'rul';
   // STOPFIX: a re-write in flight holds the choice; a failed one says why, once, with a retry
@@ -538,7 +819,39 @@ function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: Draf
           title={r.reasons.slice(0, 3).join('\n')}
           data-testid='check-storage-refused'
         >
-          no .rul: {r.reasons[0] ?? 'not gradable'} — per-size DXF only
+          {plainRul(r.reasons[0])}
+          {/* SHAPE-KINK: a refusal a GRADE P1 answer lifts is a link to that question */}
+          {r.refusals?.some((x) => x.gradeAskKey) && (
+            <>
+              {' · '}
+              <button
+                type='button'
+                data-ask-fix='check-storage'
+                data-testid='check-storage-grade'
+                className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+                onClick={() => {
+                  const k = r.refusals?.find((x) => x.gradeAskKey)?.gradeAskKey;
+                  if (k && onGrade) onGrade(k);
+                  else void api.dispatch({ type: 'back', to: 'meaning' });
+                }}
+              >
+                answer{' '}
+                {plural(
+                  new Set(r.refusals.flatMap((x) => (x.gradeAskKey ? [x.gradeAskKey] : []))).size,
+                  'grade question',
+                )}{' '}
+                (
+                {[
+                  ...new Set(
+                    r.refusals.flatMap((x) =>
+                      x.gradeAskKey && x.identity ? [x.identity.replace(/_[LR]$/, '')] : [],
+                    ),
+                  ),
+                ].join(', ')}
+                )
+              </button>
+            </>
+          )}
         </Text>
       )}
     </div>
@@ -652,4 +965,26 @@ function piecesForCard(specs: PieceSpec[], token: string): PieceDTO[] {
     x += w + 4;
   });
   return out;
+}
+
+/**
+ * The SHAPE note of G5 in plain words: «FP_L: one piece, one shape across sizes — XS's cut line
+ * turns where S's does not (1.5mm convex …)» → piece FP, size XS, 1.5 mm.
+ */
+function shapeKink(c: GateCheck): { piece: string; size: string; mm: string } | null {
+  if (c.id !== 'G5-features' || !c.note) return null;
+  const m =
+    /(\w+?)(?:_[LR])?: one piece, one shape across sizes \S+ (\w+)'s cut line turns where \w+'s does not \(([\d.]+) ?mm/.exec(
+      c.note,
+    );
+  return m ? { piece: m[1], size: m[2], mm: m[3] } : null;
+}
+
+/** «FP_L: POLYLINE on layer 14 (closed) has 50 points in M but 52 in XS …» in plain words. */
+function plainRul(reason: string | undefined) {
+  const m =
+    reason && /^(\w+?)(?:_[LR])?: .* has (\d+) points in (\w+) but (\d+) in (\w+)/.exec(reason);
+  if (m)
+    return `no grading table: piece ${m[1]} is drawn differently in size ${m[5]} than in ${m[3]}; the per-size DXF is the file`;
+  return `no grading table: ${reason ?? 'the sizes do not match point for point'}; the per-size DXF is the file`;
 }

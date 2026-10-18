@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
+import { Chip, ChipRow } from 'ui';
 
 import {
   ANNOTATION_COLOR_KEYS,

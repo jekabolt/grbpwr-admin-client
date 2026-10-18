@@ -1,7 +1,5 @@
 import { cn } from 'lib/utility';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Input, Select, Text } from 'ui';
 import { useAcctAccounts, useAcctPeriods } from '../../utils/hooks';
 import {
   monthsForAsOf,

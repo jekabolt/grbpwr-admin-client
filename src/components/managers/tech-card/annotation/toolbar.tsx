@@ -1,5 +1,4 @@
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Text } from 'ui';
 
 import { kindDef, PALETTE_KINDS, placingHint, type KindDef } from './kinds';
 import { PURPOSE_TOOLS } from './purpose';

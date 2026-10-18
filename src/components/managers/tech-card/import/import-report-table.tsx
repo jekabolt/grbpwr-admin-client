@@ -21,10 +21,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, Pill, Stat, StatGrid, Text } from 'ui';
 
 /**
  * Человеческий перевод кодов причин. Источник — закрытый словарь `internal/techcardarchive/

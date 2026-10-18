@@ -5,7 +5,7 @@ import type {
   GeographySection,
 } from 'api/proto-http/admin';
 import { FC, ReactNode, useState } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { countryDisplay, UNMATCHED_COUNTRY } from '../countries';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 

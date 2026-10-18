@@ -1,6 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, useRef, useState, type JSX } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';

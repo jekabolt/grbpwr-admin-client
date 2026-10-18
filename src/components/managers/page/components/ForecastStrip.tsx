@@ -1,8 +1,7 @@
 import type { RevenueForecast } from 'api/proto-http/admin';
 import { format, subYears } from 'date-fns';
 import { FC } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatCurrency, formatCurrencyWhole, parseDecimal } from '../utils';
 
 interface ForecastStripProps {

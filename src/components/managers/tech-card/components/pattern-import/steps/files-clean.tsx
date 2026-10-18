@@ -12,13 +12,8 @@ import type {
   PageMaskEdit,
   StageIO,
 } from 'lib/pattern-import/types';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import type { HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, Chip, ChipRow, DataTable, Pill, Text } from 'ui';
+import type { HeaderWarning } from 'ui';
 import { cn } from 'lib/utility';
 import {
   AI_PAGES,

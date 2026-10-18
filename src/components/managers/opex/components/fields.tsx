@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { opexCategorySelectOptions, opexCurrencyOptions } from '../utils/options';
 
 // Shared OPEX form primitives, used by both the creation wizard and the edit modals so the two

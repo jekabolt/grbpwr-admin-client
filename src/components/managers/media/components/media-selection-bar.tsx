@@ -1,11 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Text } from 'ui';
 import {
   MediaUsageMap,
   isMediaInUse,

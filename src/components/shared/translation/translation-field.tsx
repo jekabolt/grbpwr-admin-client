@@ -1,9 +1,8 @@
 import { LANGUAGES } from 'constants/constants';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { LanguageButtons } from '../../components/language-buttons';
+import { Input, Text } from 'ui';
+import { LanguageButtons } from './language-buttons';
 
 type Props = {
   label: string;

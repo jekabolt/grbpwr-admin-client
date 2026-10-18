@@ -1,12 +1,6 @@
 import { riskTone } from 'components/managers/order/components/stripe-details';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, CopyToClipboard, Input, Pill, Text } from 'ui';
 import { emptyParcel, GeneratedLabel, ShippingOptionVM, ShippingParcel } from '../api/types';
 import {
   useFulfillmentCard,

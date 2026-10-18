@@ -2,7 +2,7 @@
 // сразу (ручки видны); гоняется scripts/artwork-warp-probe.mjs. `window.__ZOOM` — кадр с зумом.
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AnnotationSurface, type SurfaceCallout } from 'ui/components/annotation/surface';
+import { AnnotationSurface, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
 
 const PIC =
   'data:image/svg+xml;utf8,' +

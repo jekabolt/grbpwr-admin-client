@@ -2,9 +2,8 @@ import { LANGUAGES } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { Button, Text } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { LinkField } from './link-field';
 import { MediaPairField } from './media-pair-field';
 

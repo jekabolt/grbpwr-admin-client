@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import type { ShapePoint } from 'ui/components/annotation/geometry';
-import { parseSpec, placePurpose, sectionLettersOf } from 'ui/components/annotation/purpose';
-import type { PenStyle, SurfaceCallout } from 'ui/components/annotation/surface';
+import type { ShapePoint } from 'components/managers/tech-card/annotation/geometry';
+import { parseSpec, placePurpose, sectionLettersOf } from 'components/managers/tech-card/annotation/purpose';
+import type { PenStyle, SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
 
 import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import { newClientRequestId } from './use-design-band';

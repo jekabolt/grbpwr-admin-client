@@ -4,11 +4,8 @@ import { translateToAllLanguages } from 'lib/translate';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { RichTextField } from 'ui/form/fields/rich-text-field';
-import { LanguageButtons } from '../../components/language-buttons';
+import { Button, Input, Text, RichTextField } from 'ui';
+import { LanguageButtons } from './language-buttons';
 
 type FieldConfig = {
   name: string;

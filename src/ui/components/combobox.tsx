@@ -1,7 +1,7 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import Text from './text';
+import { Arrow } from '../icons/arrow';
 
 // КОМБОБОКС — ВЫБОР ПОИСКОМ, А НЕ СКАНИРОВАНИЕМ СПИСКА.
 //

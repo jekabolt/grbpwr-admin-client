@@ -1,8 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { moveItem } from 'components/managers/media/components/gallery-order';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { rememberMedia, resolveMedia } from '../api/tasksService';
 import type { TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark, useTaskMediaViewer } from './task-media-viewer';

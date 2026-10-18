@@ -4,12 +4,7 @@
 // rules under a GroupLabel, tone only in a Pill — no box inside the block.
 import { useState } from 'react';
 import type { AutopilotAssumption, WizardStep } from 'lib/pattern-import/types';
-import { Button } from 'ui/components/button';
-import GenericPopover from 'ui/components/popover';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, GenericPopover, GroupLabel, Pill, Row, Text } from 'ui';
 
 const STEP_WORD: Record<string, string> = {
   files: 'files',

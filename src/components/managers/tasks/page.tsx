@@ -5,17 +5,17 @@ import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips'
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { SectionHeader } from 'ui/components/section-header';
 import {
+  Button,
+  CalloutBox,
+  SectionHeader,
   SideRail,
   SideRailGroup,
   SideRailItem,
   SideRailLayout,
-} from 'ui/components/side-rail';
-import Text from 'ui/components/text';
-import { Toolbar } from 'ui/components/toolbar';
+  Text,
+  Toolbar,
+} from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
 import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';

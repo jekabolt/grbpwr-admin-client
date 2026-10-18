@@ -23,13 +23,16 @@ import type {
   SizeCountAsk,
   SizeMapEntry,
 } from 'lib/pattern-import/types';
-import { Chip } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import {
+  Chip,
+  DataTable,
+  HeaderWarnings,
+  type HeaderWarning,
+  Input,
+  Pill,
+  GenericPopover,
+  Text,
+} from 'ui';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
 import { drawnUnmapped } from 'lib/pattern-import/sizes/map';
 import { sheetLegendQuestion } from 'lib/pattern-import/pieces/sheets';

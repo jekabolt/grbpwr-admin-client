@@ -18,14 +18,8 @@ import type {
   VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
-import { Button } from 'ui/components/button';
+import { Button, CalloutBox, Chip, ChipRow, FoldCaret, HeaderWarnings, Row, Text } from 'ui';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings } from 'ui/components/header-warnings';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
 import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
@@ -1189,9 +1183,9 @@ export function PiecesStep({
     const pcs = `piece${hs.length > 1 ? 's' : ''} ${hs.join(', ')}`;
     switch (c.group) {
       case 'join':
-        return `${n} outlines ${c.items.every((it) => joinsOf(it)[0]?.below) ? 'under' : 'against'} ${pcs}: part of them?`;
+        return `the ${n} blue outlines ${c.items.every((it) => joinsOf(it)[0]?.below) ? 'under' : 'against'} ${pcs}: part of those pieces?`;
       case 'inner':
-        return `${plural(n, 'shape')} inside ${pcs}: part of ${hs.length > 1 || n > 1 ? 'them' : `piece ${hs[0]}`}?`;
+        return `${n > 1 ? `the ${n} blue shapes` : 'the blue shape'} inside ${pcs}: part of ${hs.length > 1 || n > 1 ? 'them' : `piece ${hs[0]}`}?`;
       case 'frame':
         return `${plural(n, 'frame')} round pieces: not pieces?`;
       case 'small':
@@ -1205,8 +1199,8 @@ export function PiecesStep({
     ? groupQ(groupNow)
     : quizNow
       ? quizLikely
-        ? `is this part of piece ${nameOf(quizJoins[0].seed)}?`
-        : 'is this a pattern piece?'
+        ? `is the blue outline part of piece ${nameOf(quizJoins[0].seed)}?`
+        : 'is the blue outline a pattern piece?'
       : seen.answers.size
         ? seen.applyFailed
           ? `couldn't apply ${plural(seen.answers.size, 'answer')}: try again?`
@@ -1714,8 +1708,39 @@ export function PiecesStep({
   /** The region where pieces touch that the card asks about (one question for every number). */
   const activeTouch = activeRegion?.group ?? null;
   /** The pieces the active question is about: lit on the canvas, their numbers drawn large. */
-  const asked =
-    active?.kind === 'touch'
+  /** The set-aside card on screen: its outlines (lettered a, b, …) and the pieces they join. */
+  const cardShown = active?.kind === 'aside' && cardNow ? cardItems(cardNow) : [];
+  const cardHosts = [
+    ...new Set(
+      cardShown.flatMap((it) => {
+        const h = groupNow
+          ? groupNow.group === 'join'
+            ? joinsOf(it)[0]?.seed
+            : (classOf(it) as { host?: number }).host
+          : quizJoins[0]?.seed;
+        return h != null ? [h] : [];
+      }),
+    ),
+  ];
+  /** The view zooms to the card's outlines and the pieces they belong to, all at once. */
+  const cardBox = cardShown.length
+    ? [
+        ...cardShown.map((it) => it.a.box),
+        ...cardHosts.flatMap((h) => {
+          const f = families.find((x) => x.seed === h);
+          return f ? [cand(f).bbox] : [];
+        }),
+      ].reduce((u, b) => ({
+        minX: Math.min(u.minX, b.minX),
+        minY: Math.min(u.minY, b.minY),
+        maxX: Math.max(u.maxX, b.maxX),
+        maxY: Math.max(u.maxY, b.maxY),
+      }))
+    : null;
+  const letterOf = (i: number) => String.fromCharCode(97 + i);
+  const asked = cardShown.length
+    ? new Set(cardHosts)
+    : active?.kind === 'touch'
       ? new Set(active.groups.flatMap((g) => g.seeds))
       : activeTouch
         ? new Set(activeTouch.seeds)
@@ -2712,7 +2737,7 @@ export function PiecesStep({
             )}
             <SheetViewport
               bbox={session.sheet.sheet.bbox}
-              focus={quizNow ? quizNow.a.box : zoomBox}
+              focus={cardBox ?? zoomBox}
               reveal={reveal}
               tool={tool === 'pan' ? 'pan' : tool === 'lasso' ? 'lasso' : 'point'}
               onPick={(k) => {
@@ -2957,41 +2982,52 @@ export function PiecesStep({
                     />
                   )}
                   {/* the set-aside check: every outline it asks about, the hovered one lit */}
-                  {active?.kind === 'aside' &&
-                    quizNow &&
-                    [quizNow].map(({ a, picked }) => {
-                      const lit = true;
-                      const r = {
-                        x: a.box.minX,
-                        y: vy(a.box.maxY),
-                        width: a.box.maxX - a.box.minX,
-                        height: a.box.maxY - a.box.minY,
-                      };
-                      return (
-                        <g
-                          key={`q${a.id}`}
-                          onPointerEnter={() => setHot({ kind: 'aside', id: a.id })}
-                          onPointerLeave={() => setHot(null)}
-                        >
-                          <rect
-                            {...r}
-                            fill={lit ? SHEET_INK.blue : 'none'}
-                            fillOpacity={lit ? 0.12 : 0}
-                            stroke={lit ? SHEET_INK.blue : picked ? SHEET_INK.ink : SHEET_INK.mut}
-                            strokeWidth={unit * (lit ? 2 : 1)}
-                            strokeDasharray={lit ? undefined : `${unit * 3} ${unit * 3}`}
+                  {cardShown.map(({ a }, i) => {
+                    const off = seen.flip.has(a.id);
+                    const lit = !off || (hot?.kind === 'aside' && hot.id === a.id);
+                    const r = {
+                      x: a.box.minX,
+                      y: vy(a.box.maxY),
+                      width: a.box.maxX - a.box.minX,
+                      height: a.box.maxY - a.box.minY,
+                    };
+                    return (
+                      <g
+                        key={`q${a.id}`}
+                        onPointerEnter={() => setHot({ kind: 'aside', id: a.id })}
+                        onPointerLeave={() => setHot(null)}
+                      >
+                        <rect
+                          {...r}
+                          fill={lit ? SHEET_INK.blue : 'none'}
+                          fillOpacity={lit ? 0.35 : 0}
+                          stroke={lit ? SHEET_INK.blue : SHEET_INK.ink}
+                          strokeWidth={unit * (lit ? 3 : 1.6)}
+                          strokeDasharray={lit ? undefined : `${unit * 3} ${unit * 3}`}
+                          pointerEvents='none'
+                        />
+                        {cardShown.length > 1 && (
+                          <text
+                            x={a.box.maxX + unit * 6}
+                            y={vy((a.box.minY + a.box.maxY) / 2)}
+                            fontSize={unit * 16}
+                            fill={lit ? SHEET_INK.blue : SHEET_INK.ink}
+                            dominantBaseline='middle'
                             pointerEvents='none'
-                          />
-                          <rect
-                            {...r}
-                            fill='none'
-                            stroke='transparent'
-                            strokeWidth={unit * 8}
-                            pointerEvents='stroke'
-                          />
-                        </g>
-                      );
-                    })}
+                          >
+                            {letterOf(i)}
+                          </text>
+                        )}
+                        <rect
+                          {...r}
+                          fill='none'
+                          stroke='transparent'
+                          strokeWidth={unit * 8}
+                          pointerEvents='stroke'
+                        />
+                      </g>
+                    );
+                  })}
                   {asides
                     .filter((a) => asideKey(a) === asideOpen || a === asideAt)
                     .map((a) => (
@@ -3399,7 +3435,7 @@ export function PiecesStep({
                         data-aside-group={groupNow.group}
                         data-aside-group-n={groupNow.items.length}
                       >
-                        {groupNow.items.map((it) => {
+                        {groupNow.items.map((it, i) => {
                           const flipped = seen.flip.has(it.a.id);
                           const js = joinsOf(it);
                           const host = hostOf(it);
@@ -3438,7 +3474,7 @@ export function PiecesStep({
                                 style={{ height: 96 }}
                               />
                               <Text size='micro' variant='label' component='span'>
-                                {groupWord(groupNow.group, it, flipped)}
+                                {letterOf(i)} · {groupWord(groupNow.group, it, flipped)}
                               </Text>
                             </button>
                           );

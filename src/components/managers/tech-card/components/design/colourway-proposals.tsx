@@ -11,12 +11,7 @@ import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Input, Pill, Section, Text } from 'ui';
 
 import { ColourwayPaletteEditor, PaletteSwatches, type PaletteValue } from '../colourway-palette';
 import { nameI18nPatch, paletteRefusal, paletteToWire } from '../colourway-palette-model';

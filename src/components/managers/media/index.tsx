@@ -5,16 +5,14 @@ import { isVideo } from 'lib/features/filterContentType';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
+import { Button, SideRailLayout, Text } from 'ui';
 import {
   MediaViewer,
   ViewerAction,
   mediaFullListToViewerItems,
   mediaFullViewerSrc,
   useMediaViewer,
-} from 'ui/components/media-viewer';
-import { SideRailLayout } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+} from 'components/shared/media-viewer/media-viewer';
 import { Filter } from './components/filter';
 import { MediaFilterBar } from './components/media-filter-bar';
 import { SlotFit } from './components/media-item';

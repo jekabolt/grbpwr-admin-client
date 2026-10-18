@@ -1,9 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMemo } from 'react';
 import { type Resolver, useForm } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
+import { Button, Text, Form } from 'ui';
 import { downloadCsv, stockChangesToCsv } from './stock-csv';
 import { StockHistoryFilters, type StockHistorySizeOption } from './stock-history-filters';
 import {

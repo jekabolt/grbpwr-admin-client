@@ -1,11 +1,6 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import type { JSX, ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Text } from 'ui';
 
 import { isRunLive } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';

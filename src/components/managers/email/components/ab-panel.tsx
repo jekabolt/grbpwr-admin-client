@@ -7,13 +7,8 @@ import {
   AB_TEST_PCT_MIN,
 } from 'constants/email-campaign';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import ToggleField from 'ui/form/fields/toggle-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { GroupLabel, Section, Text, InputField, SelectField, ToggleField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 
 /**
  * Ф4 — A/B config. Enable toggle, dimension (subject|content), test %, decision

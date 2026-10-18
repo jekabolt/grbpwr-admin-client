@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { AutosaveStatus } from './design/autosave-contract';
 import { saveSentence } from './save-status-chip';
 import type { FormErrorRow } from './stage-progress';

@@ -1,5 +1,5 @@
 import { common_CompositionEntry } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // Structured fibre composition (S17/M1): the typed composition_entries projection of a style, resolved

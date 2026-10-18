@@ -2,7 +2,7 @@ import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 
 import type { AssemblyBlock } from './assembly-blocks';

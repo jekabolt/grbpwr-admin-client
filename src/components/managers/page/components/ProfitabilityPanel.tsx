@@ -1,7 +1,7 @@
 import type { ProfitabilitySection } from 'api/proto-http/admin';
 import { FC, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import {
   formatCurrency,
   formatCurrencyDelta,

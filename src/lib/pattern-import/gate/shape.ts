@@ -8,7 +8,8 @@
 // report the manifest carries) — it holds only with SHAPE_COUNTS_HOLD=1 (soft rule, 17.10).
 //   probe switch (node only): SHAPE_GATE_OFF=1 — not evaluated (the "before" column)
 
-import type { GateCheck, PtMm } from '../types';
+import type { GateCheck, PtMm, ShapeIssue } from '../types';
+import { repairMinorityKinks } from '../semantics/kink-repair';
 import {
   countMismatch,
   constructionFreeShapes,
@@ -40,12 +41,15 @@ export function shapeFamilies(ctx: GateCtx): {
   notes: string[];
   warned: string[];
   warnNotes: string[];
+  /** SHAPE-KINK: per held size, the structured failure (the check step's one-click moves) */
+  issues: ShapeIssue[];
 } {
   const failed: string[] = [];
   const notes: string[] = [];
   const warned: string[] = [];
   const warnNotes: string[] = [];
-  if (shapeGateOff() || !ctx.raw) return { failed, notes, warned, warnNotes };
+  const issues: ShapeIssue[] = [];
+  if (shapeGateOff() || !ctx.raw) return { failed, notes, warned, warnNotes, issues };
   const rankOf = new Map(ctx.m.sizes.map((s) => [s.token, s.rank]));
   const byId = new Map<string, typeof ctx.blocks>();
   for (const b of ctx.blocks) {
@@ -62,6 +66,7 @@ export function shapeFamilies(ctx: GateCtx): {
       rank: number;
       sh: SizeShape;
       seam: PtMm[] | null;
+      cut: PtMm[];
     }[] = [];
     let unreadable = false;
     // SILENT-TAIL (17.10): the cut of a seam-drawn piece is the allowance offset of its seam; a
@@ -90,6 +95,7 @@ export function shapeFamilies(ctx: GateCtx): {
       ).length;
       const seam = seamDrawn ? ctx.contours.get(b.block)?.get(LAYERS.seam) ?? null : null;
       rows.push({
+        cut,
         block: b.block,
         token: b.mb.sizeToken,
         rank: rankOf.get(b.mb.sizeToken) ?? b.size?.rank ?? 0,
@@ -115,6 +121,7 @@ export function shapeFamilies(ctx: GateCtx): {
     if (h) {
       const t = h.first;
       failed.push(...h.held.map((i) => rows[i].block));
+      issues.push(...issuesOf(identity, bs[0].spec?.seed ?? null, rows, h, free ?? sh));
       const why = `(${t.what.slice(8)}: a bump, dip, step or kink in one size only)`;
       if (!h.canonical)
         notes.push(
@@ -148,7 +155,80 @@ export function shapeFamilies(ctx: GateCtx): {
       }
     }
   }
-  return { failed, notes, warned, warnNotes };
+  return { failed, notes, warned, warnNotes, issues };
+}
+
+/**
+ * SHAPE-KINK: the held sizes of one identity as structured issues. Whether api.fixShape can
+ * straighten a size is judged here on the written drawn line (the seam of a seam-drawn piece, else
+ * the cut) with the operator's limits (semantics/kink-repair.ts: ≤ 6 mm, a strict majority, only
+ * removing turns) — the same rule semantics applies when the operator asks.
+ */
+function issuesOf(
+  identity: string,
+  seed: number | null,
+  rows: { token: string; rank: number; sh: SizeShape; seam: PtMm[] | null; cut: PtMm[] }[],
+  h: NonNullable<ReturnType<typeof turnHold>>,
+  sh: readonly SizeShape[],
+): ShapeIssue[] {
+  const lines = rows.map((r, i) => ({ rank: i, token: r.token, outer: r.seam ?? r.cut }));
+  const res = repairMinorityKinks(lines, { operator: new Set(lines.map((l) => l.rank)) });
+  const canon = h.canonical ?? [];
+  const lacksTurn = (i: number) =>
+    canon.some((c) =>
+      sh[c].events.some((y, k) => sh[i].events[k] && y.strong > sh[i].events[k].weak),
+    );
+  const out: ShapeIssue[] = [];
+  const held = new Set(h.held);
+  // a whole-family hold names every size; the repair (when one exists) says which ones are off
+  const named = res.byRank.size ? [...res.byRank.keys()] : h.held;
+  for (const i of named) {
+    if (!held.has(i)) continue;
+    const r = res.byRank.get(i);
+    const at =
+      r?.kinks[0]?.at ?? (h.first.a === i ? h.first.at?.[0] : undefined) ?? centre(rows[i].cut);
+    out.push({
+      identity,
+      seed,
+      size: rows[i].token,
+      at: { x: Math.round(at.x * 10) / 10, y: Math.round(at.y * 10) / 10 },
+      mm: r ? Math.max(...r.kinks.map((k) => k.mm)) : 0,
+      kind: lacksTurn(i) ? 'missing-turn' : 'extra-turn',
+      fixable: !!r,
+      why: r
+        ? `straighten ${r.kinks.length} place(s), ≤ ${Math.max(...r.kinks.map((k) => k.mm))} mm, onto the shape the other sizes share`
+        : res.why || 'no straightening within 6 mm makes it the family shape',
+    });
+  }
+  return out;
+}
+
+const centre = (pts: readonly PtMm[]): PtMm => {
+  const b = bboxOf(pts);
+  return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+};
+
+/**
+ * SHAPE-KINK: the one-shape TURN hold as its own G5 block check — `shapeIssues` (per held size) and
+ * `door: 'check'` (answered on the check step: api.fixShape / api.dropSize, never in meaning) — and
+ * the count warning (g5ShapeCounts). [] when nothing differs.
+ */
+export function g5Shape(ctx: GateCtx): GateCheck[] {
+  const f = shapeFamilies(ctx);
+  const out: GateCheck[] = [];
+  if (f.failed.length)
+    out.push({
+      id: 'G5-features',
+      ok: false,
+      severity: 'block',
+      value: null,
+      threshold: 'one cut-line shape in every size (fix the shape or leave the size out)',
+      blocks: [...new Set(f.failed)].sort(),
+      note: f.notes.join('; '),
+      shapeIssues: f.issues,
+      door: 'check',
+    });
+  return [...out, ...countsCheck(f)];
 }
 
 /**
@@ -156,7 +236,10 @@ export function shapeFamilies(ctx: GateCtx): {
  * WARN check (rides in the manifest's gate report; the check step lists it). [] when none.
  */
 export function g5ShapeCounts(ctx: GateCtx): GateCheck[] {
-  const f = shapeFamilies(ctx);
+  return countsCheck(shapeFamilies(ctx));
+}
+
+function countsCheck(f: ReturnType<typeof shapeFamilies>): GateCheck[] {
   if (!f.warned.length) return [];
   return [
     {

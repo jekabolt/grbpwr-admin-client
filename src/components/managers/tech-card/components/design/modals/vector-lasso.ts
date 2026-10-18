@@ -1,4 +1,4 @@
-import { simplifyPath } from 'ui/components/annotation/geometry';
+import { simplifyPath } from 'components/managers/tech-card/annotation/geometry';
 
 import { strokePolyline, type VectorStroke } from './vector-strokes';
 

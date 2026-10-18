@@ -13,12 +13,7 @@ import { extensionOf } from 'components/managers/files/utils/format';
 // формат русский («500 кб»), и эта строка — собственная подпись ЭКРАНА ЗАДАЧ, английского
 // целиком. Арифметика у обоих одна и та же, различаются только слова.
 import { formatBytes } from 'utils/pattern';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Button, Chip, ChipRow, ConfirmationModal, Input, Text, Tile, Tiles } from 'ui';
 
 /**
  * Library files attached to a card.

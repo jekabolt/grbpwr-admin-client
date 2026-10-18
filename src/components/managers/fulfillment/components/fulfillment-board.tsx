@@ -1,4 +1,4 @@
-import { Board, BoardColumn, BoardEmpty } from 'ui/components/board';
+import { Board, BoardColumn, BoardEmpty } from 'ui';
 import {
   FulfillmentCard as FulfillmentCardModel,
   FulfillmentColumn,

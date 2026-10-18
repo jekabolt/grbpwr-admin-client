@@ -19,11 +19,7 @@ import { compareToSizeChart, POM, type ChartCell } from 'lib/pom';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import { Chip, ChipRow, GroupLabel, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 
 import { SeamsReview } from '../assembly-seams/seams-review';
 import { useHeldSeamGraph } from '../assembly-seams/use-seam-decisions';

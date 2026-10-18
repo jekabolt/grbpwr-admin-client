@@ -9,10 +9,7 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, GroupLabel, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
 import { crPieceIds, FittingFormData } from './schema';

@@ -1,8 +1,7 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC } from 'react';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Stat, StatGrid, Text } from 'ui';
 import {
   formatCurrencyDelta,
   formatCurrencyWhole,

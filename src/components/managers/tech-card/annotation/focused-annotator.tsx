@@ -9,7 +9,7 @@ import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ANNOTATION_EDITOR_H } from './annotation/editor';
+import { ANNOTATION_EDITOR_H } from './editor';
 import {
   AnnotationSurface,
   noteArrowsOf,
@@ -17,18 +17,23 @@ import {
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
-} from './annotation/surface';
-import { AnnotationToolbar } from './annotation/toolbar';
-import { AnnotationZoomDialog } from './annotation/zoom-dialog';
-import { Button } from './button';
-import { Chip, ChipRow } from './chip';
+} from './surface';
+import { AnnotationToolbar } from './toolbar';
+import { AnnotationZoomDialog } from './zoom-dialog';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Pill,
+  PLACEHOLDER_SURFACE,
+  Text,
+  TILE_CORNER,
+  TILE_QUIET,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { PictureBusy, type PictureBusyKind } from './picture-busy';
-import { Pill } from './pill';
-import { PLACEHOLDER_SURFACE } from './placeholder';
 import { SpotRings, type SpotRing } from './spot-rings';
-import Text from './text';
-import { TILE_CORNER, TILE_QUIET } from './tile-skin';
-import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
 //

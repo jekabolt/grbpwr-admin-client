@@ -17,9 +17,9 @@ import {
   type FocusedTileAction,
   type FocusedTileBadge,
   type FocusedView,
-} from 'ui/components/focused-annotator';
-import type { PictureBusyKind } from 'ui/components/picture-busy';
-import Text from 'ui/components/text';
+} from 'components/managers/tech-card/annotation/focused-annotator';
+import type { PictureBusyKind } from 'components/managers/tech-card/annotation/picture-busy';
+import { Text } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from './autosave-contract';

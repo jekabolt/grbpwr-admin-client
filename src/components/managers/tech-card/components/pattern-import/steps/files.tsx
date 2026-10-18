@@ -8,14 +8,18 @@ import { refusalMessage } from 'lib/pattern-import/adapters/sniff/errors';
 import { refusalForName } from 'lib/pattern-import/adapters/sniff/native';
 import type { PageClass } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  DataTable,
+  EmptyCell,
+  GroupLabel,
+  HeaderWarnings,
+  type HeaderWarning,
+  Pill,
+  PLACEHOLDER_SURFACE,
+  Text,
+} from 'ui';
 import { kindOfName } from '../formats';
 import { plural, useWizardPrimary } from '../stages';
 import type { ImportSessionApi } from '../use-import-session';

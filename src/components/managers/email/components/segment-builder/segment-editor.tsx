@@ -10,12 +10,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Section, SectionStack } from 'ui/components/section';
-import Textarea from 'ui/components/text-area';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Input, Section, SectionStack, Textarea, Text } from 'ui';
 import { useDeleteSegment, useSegment, useUpsertSegment } from '../useCampaign';
 import { PredicateBuilder } from './predicate-builder';
 import {

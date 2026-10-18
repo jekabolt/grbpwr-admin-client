@@ -1,8 +1,7 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 import { HeroSectionModal } from './hero-section-modal';
 
 interface TagPickerProps {

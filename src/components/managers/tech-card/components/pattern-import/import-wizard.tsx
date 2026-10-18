@@ -10,15 +10,18 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Progress } from 'ui/components/progress';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { HeaderNote } from 'ui/components/section-header';
-import { Stepper } from 'ui/components/stepper';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ConfirmationModal,
+  Progress,
+  HeaderWarnings,
+  type HeaderWarning,
+  HeaderNote,
+  Stepper,
+  Text,
+} from 'ui';
 import {
   forRun,
   type ApplyDraftFn,

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 export function CategoryButton({
   href,

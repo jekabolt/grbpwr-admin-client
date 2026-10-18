@@ -12,8 +12,7 @@ import { useCreateTask, useTasks } from 'components/managers/tasks/hooks/useTask
 import { dueMeta, PRIORITY_LABEL, STATUS_LABEL } from 'components/managers/tasks/utils/meta';
 import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 // TASKS hub panel (#75) — this tech card as a working hub: the work items linked to it, at a
 // glance, without leaving the card. Mounted in the tech-card FORM (near the lifecycle strip) so

@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Combobox, type ComboboxGroup, Input, Pill, Section, Select, Text } from 'ui';
 import type { Task, TaskRelation, TaskRelationKind } from '../api/types';
 import {
   useAddTaskRelation,
@@ -380,7 +374,7 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
             {/* Три пункта, все три ВСЕГДА среди items: значение, которого нет в списке, скрытый
                 нативный select у Radix стирает — а стирать здесь нечего, потому что стартовое
                 значение тоже из этого списка. */}
-            <SelectComponent
+            <Select
               name='relation-kind'
               items={kindOptions}
               value={kind}

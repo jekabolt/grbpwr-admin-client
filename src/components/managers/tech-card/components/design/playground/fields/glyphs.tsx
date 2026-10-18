@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import Tooltip from 'ui/components/tooltip';
+import { Tooltip } from 'ui';
 
 /**
  * The small line glyphs that head a playground section: what KIND of input sits under the title.

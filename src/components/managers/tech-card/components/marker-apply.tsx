@@ -42,17 +42,22 @@ import type {
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import { HeaderNote, HeaderNoteTone } from 'ui/components/section-header';
-import { Row } from 'ui/components/row';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  FoldCaret,
+  HeaderWarnings,
+  type HeaderWarning,
+  Pill,
+  HeaderNote,
+  HeaderNoteTone,
+  Row,
+  Selector,
+  Text,
+} from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { sizeTokensOf } from './nesting/block-code';
 import {

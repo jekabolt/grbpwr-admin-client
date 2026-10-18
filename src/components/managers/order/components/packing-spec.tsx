@@ -3,11 +3,7 @@ import { auxSubtypeLabel } from 'components/managers/tech-card/components/labels
 import { useOrderPackingSpec } from 'components/managers/tech-card/components/useAssemblyPacking';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Pill, Section, Text } from 'ui';
 
 const TH =
   'border border-borderColor bg-bgZebra px-2 py-1 text-left text-micro uppercase tracking-label';

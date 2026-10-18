@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import Text from './text';
 import { cn } from 'lib/utility';
 
 /** Auto-filling grid of small cards. Used for anything picked by looking at it. */

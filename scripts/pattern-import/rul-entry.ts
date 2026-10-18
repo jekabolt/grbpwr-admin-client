@@ -31,7 +31,7 @@ import { isUnsupportedFormat, sniffFormat } from 'lib/pattern-import/adapters/sn
 import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
-import { sectionH } from './rulhook-entry';
+import { sectionH, sectionShapeKink } from './rulhook-entry';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -1149,6 +1149,22 @@ export async function main(): Promise<number> {
     sizes: SIZES,
     kombinezon: process.env.RULHOOK_KOMBINEZON ?? resolve(CORPUS, 'rul-real/kombinezon-main.dxf'),
   });
+  // SHAPE-KINK: the check step's fixShape / dropSize through the real hook (automatic repairs off)
+  if (!process.env.RUL_SKIP_SHAPEKINK) {
+    const env = {
+      PLACE_MARKS_OFF: process.env.PLACE_MARKS_OFF,
+      SHAPE_KINK_OFF: process.env.SHAPE_KINK_OFF,
+    };
+    process.env.PLACE_MARKS_OFF = '1';
+    process.env.SHAPE_KINK_OFF = '1';
+    try {
+      await sectionShapeKink({ check, pdf: resolve(CORPUS, 'pdf/kombinezon.pdf') });
+    } finally {
+      for (const [k, v] of Object.entries(env))
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+    }
+  }
   // zip helper sanity (a ZIP of a DXF + a binary .rul is not a pair)
   check(
     'Z',

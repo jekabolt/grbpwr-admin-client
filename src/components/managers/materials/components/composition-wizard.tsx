@@ -4,8 +4,7 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 
 // #37: one structured fibre share — a dictionary fibre code + a percent (edited as a plain string,

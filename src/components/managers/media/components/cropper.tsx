@@ -9,12 +9,7 @@ import { cn } from 'lib/utility';
 import { FC, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactCrop, { PercentCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import { Row } from 'ui/components/row';
-import { SideRailGroup, SideRailItem } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, RatioGlyph, Row, SideRailGroup, SideRailItem, Text } from 'ui';
 import './cropper.css';
 
 // Ratios are compared with a small tolerance rather than strict equality: ASPECT_RATIOS rounds

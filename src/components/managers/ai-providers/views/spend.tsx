@@ -5,13 +5,18 @@ import type {
 } from 'api/proto-http/admin';
 import { Fragment, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import {
+  CalloutBox,
+  DataTable,
+  EmptyCell,
+  Input,
+  Section,
+  Stat,
+  StatGrid,
+  Text,
+  ViewSwitch,
+  type ViewSwitchOption,
+} from 'ui';
 import { dayWord, formatUsd, sumUsd, usd } from '../utils/format';
 import { useAiSpend } from '../utils/hooks';
 import {

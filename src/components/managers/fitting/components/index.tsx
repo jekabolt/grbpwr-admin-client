@@ -17,19 +17,22 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
+import {
+  Button,
+  Section,
+  SectionStack,
+  Text,
+  Form,
+  InputField,
+  SelectField,
+  TextareaField,
+} from 'ui';
 import {
   applyServerFieldErrors,
   extractFieldViolations,
   fieldErrorSummary,
   revealField,
 } from 'utils/field-errors';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
 import { ChangeRequestsFields } from './change-requests-fields';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';

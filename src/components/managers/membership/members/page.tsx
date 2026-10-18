@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ROUTES } from 'constants/routes';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { MembersFilters, useMembers } from '../utils/hooks';
 import { MembersFilter } from './components/members-filter';
 import { MembersTable } from './components/members-table';

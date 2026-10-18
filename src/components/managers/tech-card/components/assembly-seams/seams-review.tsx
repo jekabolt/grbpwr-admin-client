@@ -15,12 +15,7 @@ import type { EdgeId, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/typ
 import type { StoredSeam, StoredSeamDirection } from 'lib/seams';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Progress } from 'ui/components/progress';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
+import { Button, Chip, Progress, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { ConnectStrip } from './connect-strip';
 import { GROUPS, progressWords, type ReviewItem, type SeamGroup } from './review-model';

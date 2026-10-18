@@ -12,15 +12,18 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row, RowTotal } from 'ui/components/row';
-import { Section } from 'ui/components/section';
-import { SkeletonBlocks } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  CopyToClipboard,
+  GroupLabel,
+  Row,
+  RowTotal,
+  Section,
+  SkeletonBlocks,
+  Text,
+} from 'ui';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
 import { ShipLabelModal } from '../components/ship-label-modal';
 import {

@@ -1,9 +1,7 @@
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Chip, ChipRow } from 'ui/components/chip';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, GenericPopover, Text } from 'ui';
 import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 
 // A cut piece a norm or an operation can point at. `lineKey` is the stable client-minted ULID the

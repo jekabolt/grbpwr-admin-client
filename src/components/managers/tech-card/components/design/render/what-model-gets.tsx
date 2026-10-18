@@ -10,8 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { assetById, assetThumb } from '../assets/model';

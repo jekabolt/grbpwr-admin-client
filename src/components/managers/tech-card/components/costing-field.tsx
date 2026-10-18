@@ -18,21 +18,26 @@ import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import GenericPopover from 'ui/components/popover';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import CurrencySelect from 'ui/form/fields/currency-select';
-import DecimalField from 'ui/form/fields/decimal-field';
-import TextareaField from 'ui/form/fields/textarea-field';
-import { FoldCaret } from 'ui/components/fold-caret';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  HeaderWarnings,
+  type HeaderWarning,
+  GroupLabel,
+  Pill,
+  Row,
+  GenericPopover,
+  Stat,
+  StatGrid,
+  Text,
+  Tile,
+  Tiles,
+  DecimalField,
+  FoldCaret,
+} from 'ui';
+import CurrencySelect from 'components/shared/currency-select';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
 import { bomPurposeLabel } from './bom-purpose';
@@ -1546,7 +1551,7 @@ export function CostingField({
               </div>
             )}
             <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
-              <TextareaField
+              <AiTextareaField
                 name='costing.notes'
                 label='notes'
                 rows={2}

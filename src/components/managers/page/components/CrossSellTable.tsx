@@ -1,7 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { ProductNameLink } from './ProductNameLink';
 
 interface CrossSellTableProps {

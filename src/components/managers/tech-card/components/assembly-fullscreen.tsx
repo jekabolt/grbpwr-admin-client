@@ -12,10 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, Chip, Pill, Text, FoldCaret } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import {
@@ -46,7 +43,6 @@ import {
 } from './use-panel-prefs';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 // ФУЛСКРИН СХЕМЫ СБОРКИ — ТРЕТИЙ ВИД, а не отдельный экран.
 //

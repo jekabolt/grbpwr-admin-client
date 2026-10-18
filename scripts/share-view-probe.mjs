@@ -58,8 +58,8 @@ const MUTATIONS = {
     to: '            <AdminMarkdownView source={text} />',
     also: [
       [
-        "import { MarkdownDoc, parse as parseMarkdown } from 'ui/markdown/doc';",
-        "import { MarkdownDoc, parse as parseMarkdown } from 'ui/markdown/doc';\nimport { MarkdownView as AdminMarkdownView } from 'components/managers/files/note/markdown-view';",
+        "import { MarkdownDoc, parse as parseMarkdown } from 'components/shared/markdown/doc';",
+        "import { MarkdownDoc, parse as parseMarkdown } from 'components/shared/markdown/doc';\nimport { MarkdownView as AdminMarkdownView } from 'components/managers/files/note/markdown-view';",
       ],
     ],
   },

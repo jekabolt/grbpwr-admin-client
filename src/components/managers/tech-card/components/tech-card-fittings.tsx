@@ -9,14 +9,12 @@ import { ROUTES } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Toolbar } from 'ui/components/toolbar';
+import { Button, Chip, ChipRow, Pill, Placeholder, SectionHeader, Text, Toolbar } from 'ui';
+import {
+  MediaViewer,
+  mediaFullToViewerItem,
+  useMediaViewer,
+} from 'components/shared/media-viewer/media-viewer';
 
 // green = signed off · red = rejected · blue = mid-flight, another round is coming · grey = unset.
 const verdictTone = (v?: string): 'ok' | 'warn' | 'attention' | 'mut' => {

@@ -11,8 +11,9 @@ import { newClientRequestId } from '../use-design-band';
  *   ONE LOGICAL PRESS = ONE KEY, UNTIL THE SERVER HAS ANSWERED DEFINITIVELY.
  *
  *  · The ledger is keyed by WHAT the intent is, not by who shows it: `{operator, card, scope,
- *    fingerprint}`. `scope` is the form (`playground:change_color`, or '' for the screens that do not
- *    name one); the fingerprint is the canonical wire request (`requestFingerprint`).
+ *    fingerprint}`. `scope` is the form (`playground:change_color`, `flat` for FLAT's GENERATE, or
+ *    '' for the screens that do not name one); the fingerprint is the canonical wire request
+ *    (`requestFingerprint`).
  *  · ACCEPTED (the door booked or handed back a run) → the entry goes: the next press is a new run.
  *  · REFUSED DEFINITIVELY (a 4xx: nothing was booked) → the entry goes too, so the next press mints a
  *    fresh key instead of replaying one the server has already turned down. EXCEPT when an earlier
@@ -218,6 +219,18 @@ export function ledgerSettle(
  */
 export function requestFingerprint(wire: unknown): string {
   return JSON.stringify(canonical(wire));
+}
+
+/**
+ * A SHORT DIGEST OF THE CANONICAL FORM of a value that is part of the intent but NOT on the wire —
+ * FLAT's snapshot of what the server will freeze into the run (`generation/use-generation.ts`). It
+ * goes into that caller's fingerprint beside the wire object, never into the wire object, and it is
+ * digested because it can be large (every callout of the card) while the fingerprint is a key of
+ * this ledger's stored book. Canonical first, for the fingerprint's own reason: key order and edge
+ * spaces are accidents of whoever built the object.
+ */
+export function fingerprintDigest(value: unknown): string {
+  return hash(requestFingerprint(value));
 }
 
 function canonical(v: unknown): unknown {

@@ -1,9 +1,7 @@
 import { AcctBankTxn } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 import { EntryDetailModal } from '../components/entry-detail-modal';
 import { Callout, GroupHeader, Note, Pill, RowLine, Verdict } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';

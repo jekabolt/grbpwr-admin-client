@@ -1,6 +1,6 @@
 import type { PaymentMethodMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface PaymentMixTableProps {

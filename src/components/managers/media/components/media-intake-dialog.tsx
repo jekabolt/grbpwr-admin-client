@@ -3,10 +3,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, Media, Pill, Text } from 'ui';
 import { formatBytes, usePendingFiles, type PreviewItem } from '../utils/usePendingFiles';
 import { MediaCropper } from './cropper';
 

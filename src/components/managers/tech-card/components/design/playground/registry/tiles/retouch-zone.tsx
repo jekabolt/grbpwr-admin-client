@@ -9,8 +9,8 @@ import {
   annotationCapsOut,
   annotationColorToWire,
   annotationKindToWire,
-} from 'ui/components/annotation/wire';
-import Text from 'ui/components/text';
+} from 'components/managers/tech-card/annotation/wire';
+import { Text } from 'ui';
 import { inputToDecimal } from 'utils/decimal';
 
 import { slotCounter } from '../../fields';

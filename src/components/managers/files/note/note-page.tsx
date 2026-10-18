@@ -8,13 +8,16 @@ import { useSnackBarStore } from 'lib/stores/store';
 // маршрута. Второй сборщик того же адреса разошёлся бы с первым молча — маршрут остался бы
 // рабочим, а ссылка «сохранить как отдельную заметку» вела бы в никуда.
 import { notePath, ROUTES, SECTION } from 'constants/routes';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  Pill,
+  Section,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { filesService } from '../api/filesService';
 import { byteLength, NOTE_MAX_BYTES, notesService } from '../api/notesService';
 import { failureText, isForbidden, isUnknownRoute } from '../api/rpc-error';

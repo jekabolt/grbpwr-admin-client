@@ -4,14 +4,17 @@ import { format } from 'date-fns';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import { Section, SectionStack } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  Pill,
+  Row,
+  Section,
+  SectionStack,
+  Select,
+  Text,
+} from 'ui';
 import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
@@ -496,7 +499,7 @@ export function TaskDetail() {
                   <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                     board
                   </Text>
-                  <SelectComponent
+                  <Select
                     name='detail-board'
                     items={boardOptions}
                     value={task.board}
@@ -513,7 +516,7 @@ export function TaskDetail() {
                   <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                     column
                   </Text>
-                  <SelectComponent
+                  <Select
                     name='detail-status'
                     items={statusOptions}
                     value={task.status}
@@ -535,7 +538,7 @@ export function TaskDetail() {
               {canWrite ? (
                 <div className='flex flex-col gap-3 border-t border-hairline pt-3'>
                   <InlineField label='priority'>
-                    <SelectComponent
+                    <Select
                       name='detail-priority'
                       items={priorityOptions}
                       value={t.priority}

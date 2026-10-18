@@ -4,9 +4,7 @@
 // is rebuilt from the decisions after the re-read.
 
 import type { DollSeamReport } from 'lib/doll/types';
-import { Chip } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Chip, Pill, Text } from 'ui';
 
 import type { ReportRow } from './words';
 

@@ -1,6 +1,5 @@
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { CalloutBox, Text } from 'ui';
 import { readBench, viewLabel } from './bench-slot';
 import { batchHandle, shelfBatchOrdinals } from './handles';
 

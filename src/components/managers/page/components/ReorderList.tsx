@@ -1,8 +1,6 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { FC, ReactNode } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { GroupLabel, Section, Text } from 'ui';
 import { buildReorderGroups } from '../productSignals';
 import { formatCurrency, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';

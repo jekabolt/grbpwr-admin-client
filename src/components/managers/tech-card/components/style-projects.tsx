@@ -15,10 +15,7 @@ import { plural } from 'components/managers/files/upload/text';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Input, Text } from 'ui';
 
 /**
  * ПРОЕКТЫ, В КОТОРЫХ УПОМЯНУТА ЭТА ВЕЩЬ (Ф3).

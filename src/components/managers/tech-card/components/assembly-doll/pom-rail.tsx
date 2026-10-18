@@ -8,8 +8,7 @@
 
 import { DICTIONARY_POM, type ChartComparison, type GarmentKind, type PomValue } from 'lib/pom';
 import { cn } from 'lib/utility';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 
 import { setHoverPom } from './doll-store';
 import { cm, exactnessWords, namedKeys, specWords } from './words';

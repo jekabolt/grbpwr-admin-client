@@ -8,20 +8,23 @@ import { CompositionModal } from 'components/managers/product/components/composi
 import { compositionToValue } from 'components/managers/product/components/composition/composition-modal/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import {
+  Button,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  Pill,
+  Section,
+  Text,
+  ComboField,
+  DecimalField,
+  InputField,
+  SelectField,
+} from 'ui';
 
 import { EmptyState, GROUP_SEAM } from './core';
 import { draftedKey, useDrafted } from './drafted-contract';
 import { BoardMovedPill, DraftedPill } from './head/mood-organs';
-import ComboField from 'ui/form/fields/combo-field';
-import DecimalField from 'ui/form/fields/decimal-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
 
 import {
   KIND_HOME_SECTION,

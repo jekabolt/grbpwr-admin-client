@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { FabricDirection, Placement, PieceDTO, Pt, RotationDeg } from 'lib/nesting/types';
 import { allowedRotations, placedPoly } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';

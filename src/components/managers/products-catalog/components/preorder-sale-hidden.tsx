@@ -1,5 +1,4 @@
-import Checkbox from 'ui/components/checkbox';
-import Text from 'ui/components/text';
+import { CheckboxCommon, Text } from 'ui';
 import useFilter from '../../../../lib/useFilter';
 import StatusFilter from './status-filter';
 
@@ -16,7 +15,7 @@ export default function PreorderSaleHidden() {
 
       <div className='flex flex-wrap gap-3'>
         <div className='flex items-center gap-2'>
-          <Checkbox
+          <CheckboxCommon
             name='preorder'
             label='preorder'
             checked={preorder === 'true'}
@@ -26,7 +25,7 @@ export default function PreorderSaleHidden() {
         </div>
 
         <div className='flex items-center gap-2'>
-          <Checkbox
+          <CheckboxCommon
             name='sale'
             label='sale'
             checked={sale === 'true'}

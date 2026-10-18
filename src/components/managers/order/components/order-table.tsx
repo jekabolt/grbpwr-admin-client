@@ -3,8 +3,7 @@ import { common_OrderItem } from 'api/proto-http/frontend';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
 
 const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
 

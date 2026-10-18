@@ -4,12 +4,7 @@ import { CreateSupplierModal } from 'components/managers/accounting/subledgers/c
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { Button, ConfirmationModal, Input, Selector, Text, ToggleSwitch } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { Callout, CheckRow, CheckStrip, GroupHeader, Verdict } from '../../../components/kit';
 import {

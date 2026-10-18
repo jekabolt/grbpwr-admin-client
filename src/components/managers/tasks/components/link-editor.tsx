@@ -1,8 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Select, Text } from 'ui';
 import { TaskInsert } from '../api/types';
 import {
   archiveConfig,
@@ -116,7 +114,7 @@ export function LinkEditor({
             add link
           </Text>
           <div className='w-40'>
-            <SelectComponent
+            <Select
               name='link-type'
               items={typeItems}
               value={type.field}

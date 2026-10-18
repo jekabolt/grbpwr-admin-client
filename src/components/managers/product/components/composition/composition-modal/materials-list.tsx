@@ -1,5 +1,4 @@
-import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Text } from 'ui';
 
 interface MaterialsListProps {
   compositionGarment: [string, string][];

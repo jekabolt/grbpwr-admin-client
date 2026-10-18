@@ -2,8 +2,7 @@
 // «Скачать» — отдельный <a href={download_url}> БЕЗ fetch: качается навигацией браузера и
 // потому обязан выживать при любом сломанном рендере (парс DXF, PDF-плагин, что угодно).
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { formatBytes } from 'utils/pattern';
 import { DxfSheet } from './dxf-sheet';
 import { PdfSheet } from './pdf-sheet';

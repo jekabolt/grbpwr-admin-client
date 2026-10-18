@@ -1,8 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaExpander } from './expander';

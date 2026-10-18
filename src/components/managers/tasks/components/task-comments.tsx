@@ -1,12 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Avatar, Button, ConfirmationModal, Section, Text, Textarea } from 'ui';
 import type { TaskComment, TaskMedia } from '../api/types';
 import { useAddComment, useDeleteComment, useTaskComments } from '../hooks/useTasks';
 import { TaskText, type MediaRef } from './task-text';

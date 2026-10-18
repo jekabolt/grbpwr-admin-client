@@ -1,9 +1,6 @@
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { CalloutBox, ConfirmationModal, Input, Text } from 'ui';
 
 import { pictureUrl, readBench } from '../bench-slot';
 import { pictureHandle } from '../handles';

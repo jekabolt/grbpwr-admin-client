@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
-import { Pill } from 'ui/components/pill';
+import { Pill } from 'ui';
 
 /**
  * ═══ ОДНА ОБЁРТКА ПОДСВЕТКИ «DRAFTED» НА ВСЮ СТУДИЮ ════════════════════════════════════════════

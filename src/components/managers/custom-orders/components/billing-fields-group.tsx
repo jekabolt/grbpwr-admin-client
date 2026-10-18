@@ -1,9 +1,6 @@
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import CheckboxField from 'ui/form/fields/checkbox-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { GroupLabel, CheckboxField, InputField, SelectField } from 'ui';
 import { getUniqueCountries } from '../utility/constant';
 
 // custFlow v2 — billing, as a plain field stack. VAT id drives the B2B / reverse-charge path on the

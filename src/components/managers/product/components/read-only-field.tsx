@@ -2,7 +2,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { ReactNode } from 'react';
 import { generatePath, Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // A clean read-only DISPLAY for a DERIVED / non-editable fact (brand, category, season, composition,
 // care…). Deliberately styled UNLIKE an editable input — a small label over plain text/chips, no

@@ -1,7 +1,6 @@
 import { googletype_Decimal } from 'api/proto-http/admin';
 import { Fragment } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { useProfitLoss } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import {

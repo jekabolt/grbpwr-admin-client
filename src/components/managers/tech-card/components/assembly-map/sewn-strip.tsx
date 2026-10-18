@@ -2,7 +2,7 @@
 // разрез шва — `SeamIcon` (полоса дизайна), стежок — `StitchPictogram` (кисти флэта). Пустой слот —
 // пунктир и слово, и это ДВЕРЬ: щелчок открывает шаг и ставит фокус в его поле.
 import { cn } from 'lib/utility';
-import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
+import { StitchPictogram } from 'components/managers/tech-card/annotation/stitch-pictogram';
 import { SeamIcon } from '../design/seam-icons';
 import type { SewnField, SewnTile } from './sewn';
 

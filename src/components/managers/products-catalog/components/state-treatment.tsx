@@ -1,6 +1,6 @@
 import { ArchiveIcon, EyeNoneIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { common_Colorway, common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // Catalog-scoped lifecycle presentation.
 //

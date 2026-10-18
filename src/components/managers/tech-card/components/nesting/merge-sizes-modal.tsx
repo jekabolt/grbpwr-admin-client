@@ -10,11 +10,7 @@ import {
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, HeaderWarnings, type HeaderWarning, Pill, Text } from 'ui';
 import { MAX_PATTERN_BYTES, formatBytes, patternFileError } from 'utils/pattern';
 import { planSizeMerge, type SizeMergePlan } from './size-merge';
 import { useDictionarySizeTokens } from './use-block-sizes';

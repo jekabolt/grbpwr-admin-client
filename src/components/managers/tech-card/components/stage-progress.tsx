@@ -6,12 +6,7 @@ import type {
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { Link, useLocation } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import { HeaderNext, HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Pill, GenericPopover, HeaderNext, HeaderNote, Text } from 'ui';
 
 /**
  * ═══ ПРОГРЕСС СТЕЙДЖА — ОДИН РЯД ВМЕСТО СЕЛЕКТОВ, ПОЛОСЫ И ЧЕК-ЛИСТА (волна 25.09 · T17/T18/T20) ════

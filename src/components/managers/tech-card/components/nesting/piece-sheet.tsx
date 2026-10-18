@@ -11,8 +11,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import type { BoxMm } from 'lib/pattern-import/types';
+import { GenericPopover, Text } from 'ui';
 import { BodySilhouette } from './body-silhouette';
 import { outlineGeo } from './sheet-outline-geo';
 import { useSheetViewPrefs, type SheetViewPrefs } from './sheet-view-prefs';
@@ -24,6 +24,8 @@ export type PieceMark = 'open' | 'staged' | 'mapped' | 'dropped' | 'unnamed';
 // Вид листа (владелец, patterns-lite r3): синяя заливка 12 % и синяя обводка 1px — деталь
 // «есть и связана»; остальные состояния отличаются от неё обводкой/пунктиром, как раньше.
 const BLUE = '#2323ff';
+// «связь снимается» — один красный на весь лист: заливка состояния, линия шва, засечки, рамка фокуса.
+const DROP_RED = '#c22222';
 type PieceStyle = {
   fill: string;
   fillOpacity: number;
@@ -39,7 +41,7 @@ const STYLE: Record<PieceMark, PieceStyle> = {
   // связь уже лежит на сервере
   mapped: { fill: BLUE, fillOpacity: 0.12, stroke: BLUE, strokeOpacity: 0.8, dash: false },
   // помечена «снять» — связь уйдёт при сохранении
-  dropped: { fill: '#ffffff', fillOpacity: 1, stroke: '#c22222', strokeOpacity: 1, dash: true },
+  dropped: { fill: '#ffffff', fillOpacity: 1, stroke: DROP_RED, strokeOpacity: 1, dash: true },
   // в файле у контура нет имени блока, привязать не к чему (приглушена)
   unnamed: { fill: '#f2f2f2', fillOpacity: 1, stroke: '#d5d5d5', strokeOpacity: 1, dash: false },
 };
@@ -115,6 +117,14 @@ type Box = { x: number; y: number; w: number; h: number };
 // подписи, и их пришлось бы разворачивать обратно на каждой детали.
 const vy = (y: number) => -y;
 
+// Public focus coordinates are mm/Y-up; PieceSheet's SVG viewBox is cm/Y-down.
+function boxFromMm(b: BoxMm, padRatio: number): Box {
+  const w = Math.max((b.maxX - b.minX) / 10, 0.1);
+  const h = Math.max((b.maxY - b.minY) / 10, 0.1);
+  const pad = Math.max(w, h) * padRatio;
+  return { x: b.minX / 10 - pad, y: vy(b.maxY / 10) - pad, w: w + 2 * pad, h: h + 2 * pad };
+}
+
 // Сдвиг курсора, ниже которого жест считается кликом, а не протяжкой (экранные пиксели).
 const DRAG_SLOP = 4;
 
@@ -142,6 +152,8 @@ export function PieceSheet({
   tall,
   bare,
   topLeft,
+  focus,
+  focusMark,
 }: {
   pieces: readonly PieceDTO[];
   // Overlaid in the canvas's top-left corner (the dialog's size switch).
@@ -150,6 +162,10 @@ export function PieceSheet({
   tall?: boolean;
   // No gesture hint line under the sheet: only real problems stay.
   bare?: boolean;
+  /** Zoom to this mm/Y-up box when its numbers change. null leaves the current view alone. */
+  focus?: BoxMm | null;
+  /** Stroke-only ring in the same mm/Y-up sheet coordinates. */
+  focusMark?: { x: number; y: number; r: number } | null;
   // Слой долевой. '' — не показывать. Рисуется поверх контуров: раскладка поворачивает деталь
   // именно по этой линии, и человек должен увидеть прочитанное ДО того, как ткань разрезана.
   grainLayer?: string;
@@ -197,6 +213,13 @@ export function PieceSheet({
   const [view, setView] = useState<Box | null>(null);
   const box = view ?? fit;
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  const focusKey = focus ? `${focus.minX}|${focus.minY}|${focus.maxX}|${focus.maxY}` : '';
+  useEffect(() => {
+    if (focus) setView(boxFromMm(focus, 0.25));
+    // focusKey stands for `focus`: a new object with the same numbers must not re-zoom.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey]);
   // Жест: одновременно кандидат на выбор детали и на протяжку — что это было, решает пройденный
   // путь. Раньше деталь съедала pointerdown через stopPropagation, и лист переставал двигаться
   // ровно там, где деталь заполняла кадр, то есть на любом полезном увеличении.
@@ -623,7 +646,7 @@ export function PieceSheet({
                       y1={vy(a.y)}
                       x2={b.x}
                       y2={vy(b.y)}
-                      stroke='#c22222'
+                      stroke={DROP_RED}
                       strokeWidth={box.w / 400 || 0.01}
                     />
                     {/* Засечки на концах: без них короткая линия читается как случайный штрих. */}
@@ -633,7 +656,7 @@ export function PieceSheet({
                         cx={pt.x}
                         cy={vy(pt.y)}
                         r={box.w / 300 || 0.01}
-                        fill='#c22222'
+                        fill={DROP_RED}
                       />
                     ))}
                   </g>
@@ -706,6 +729,19 @@ export function PieceSheet({
                 </text>
               </g>
             ))}
+
+          {focusMark ? (
+            <circle
+              pointerEvents='none'
+              cx={focusMark.x / 10}
+              cy={vy(focusMark.y / 10)}
+              r={focusMark.r / 10}
+              fill='none'
+              stroke={DROP_RED}
+              strokeWidth={1}
+              vectorEffect='non-scaling-stroke'
+            />
+          ) : null}
         </svg>
         {topLeft && <div className='absolute top-1.5 left-1.5'>{topLeft}</div>}
         {/* Угол холста: «весь лист» (только когда кадр ушёл от вписанного) и настройки вида. */}

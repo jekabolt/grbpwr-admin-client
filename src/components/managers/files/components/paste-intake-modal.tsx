@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileTopic } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Chip, ChipRow, ConfirmationModal, Input, Text } from 'ui';
 import { inheritTopics, type BatchTopics } from '../upload/queue';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { ProjectArchiveMark, projectHint } from './topic-chips';

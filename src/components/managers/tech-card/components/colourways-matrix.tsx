@@ -18,14 +18,19 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import GenericPopover from 'ui/components/popover';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Tooltip from 'ui/components/tooltip';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  DataTable,
+  EmptyCell,
+  HeaderWarnings,
+  type HeaderWarning,
+  GenericPopover,
+  Section,
+  Text,
+  Tooltip,
+} from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
 import {

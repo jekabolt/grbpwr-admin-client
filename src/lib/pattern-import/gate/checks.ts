@@ -50,7 +50,6 @@ import { GRAIN_INSIDE_TOL_MM, grainOutsideMm, pointOnRings } from '../semantics/
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
-import { shapeFamilies } from './shape';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -793,9 +792,8 @@ export function g5(ctx: GateCtx): GateCheck {
   }
   // SHAPE (owner 16.10): one piece, one shape — the sizes of an identity carry the same features
   // and the same cut-line structure (gate/shape.ts)
-  const fam = shapeFamilies(ctx);
-  failed.push(...fam.failed);
-  notes.push(...fam.notes);
+  // (SHAPE-KINK: the turn hold is its own G5 check with shapeIssues and the check-step door —
+  // gate/shape.ts g5Shape; this check keeps the per-block feature findings)
   return check(
     'G5-features',
     failed,

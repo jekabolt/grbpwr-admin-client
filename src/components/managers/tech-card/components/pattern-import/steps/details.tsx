@@ -22,14 +22,17 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable } from 'ui/components/data-table';
-import { HeaderWarnings } from 'ui/components/header-warnings';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CheckboxCommon,
+  Chip,
+  ChipRow,
+  DataTable,
+  HeaderWarnings,
+  Input,
+  Pill,
+  Text,
+} from 'ui';
 import type { CardContext } from '../client';
 import {
   codeWordsOf,

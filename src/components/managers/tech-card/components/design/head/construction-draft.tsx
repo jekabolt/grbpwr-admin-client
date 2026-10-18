@@ -10,15 +10,20 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { HeaderCount, HeaderNote } from 'ui/components/section-header';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  ConfirmationModal,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  Section,
+  HeaderCount,
+  HeaderNote,
+  Select,
+  Text,
+  FoldCaret,
+} from 'ui';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import { kindsForSection } from '../../bom-kind';
@@ -111,7 +116,6 @@ import {
   type ParkedDraft,
 } from './use-draft-fills';
 import { draftIdeaRefusal, refusalReason, useDraftDesignIdea } from './use-draft-idea';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * «DRAFT THE CONSTRUCTION» — ОДНА КНОПКА, ОДИН ПЛАТНЫЙ ПРОГОН, ОДИН ОТВЕТ НА ЧЕТЫРЕ ГРУППЫ.
@@ -2440,7 +2444,7 @@ function DecideRow({
              `aria-label` триггера, и прежнее «pick a section» оставалось именем выбора навсегда —
              и после выбора, и одинаковым у каждой такой строки. Длинное имя режется многоточием. */
           <div className='w-[160px] shrink-0' data-c19-draft-section={row.id}>
-            <SelectComponent
+            <Select
               name={`draft-section-${row.id}`}
               items={techCardBomSectionOptions}
               value={section ?? ''}

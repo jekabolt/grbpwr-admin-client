@@ -1,13 +1,7 @@
 import { ASPECT_RATIOS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import { Row } from 'ui/components/row';
-import { SideRailGroup, SideRailItem } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Input, RatioGlyph, Row, SideRailGroup, SideRailItem, Text } from 'ui';
 
 import {
   DEFAULT_BACKGROUND,

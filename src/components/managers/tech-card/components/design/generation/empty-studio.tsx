@@ -1,6 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 import { EmptyState } from '../core';
 

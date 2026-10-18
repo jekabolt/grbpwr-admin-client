@@ -3,7 +3,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { ConfirmationModal } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import {

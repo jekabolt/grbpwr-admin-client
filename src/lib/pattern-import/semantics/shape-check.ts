@@ -187,7 +187,7 @@ export function turnMismatch(
 }
 
 /** Sizes i and j share one turn structure: neither has a strong event the other lacks (hysteresis). */
-function sameTurns(a: SizeShape, b: SizeShape): boolean {
+export function sameTurns(a: SizeShape, b: SizeShape): boolean {
   for (let k = 0; k < a.events.length; k++) {
     const x = a.events[k];
     const y = b.events[k];
@@ -198,7 +198,7 @@ function sameTurns(a: SizeShape, b: SizeShape): boolean {
 }
 
 /** Every maximum set of sizes that pairwise share one turn structure (Bron–Kerbosch, n is small). */
-function largestAgreeing(sh: readonly SizeShape[]): number[][] {
+export function largestAgreeing(sh: readonly SizeShape[]): number[][] {
   const n = sh.length;
   const nb = sh.map(
     (a, i) => new Set(sh.flatMap((b, j) => (i !== j && sameTurns(a, b) ? [j] : []))),
@@ -310,6 +310,8 @@ export function countNotesOfBlocks(
     internalRemoved?: number;
     /** GRADE P2: the size was repaired from the grade */
     grade?: { geometryOrigin: string; from: readonly string[]; holesMm: number };
+    /** SHAPE-KINK: stretches straightened onto the line / the family's shape */
+    kinkStraightened?: readonly { rule: string; mm: number; spanMm: number }[];
   }[],
   uniToken = 'UNI',
   /** GRADE P1: per identity, the count kinds the operator answered "intended" */
@@ -365,6 +367,20 @@ export function countNotesOfBlocks(
         identity,
         note: `notches graded (not drawn): ${g.map((b) => `${b.sizeToken} ${b.notchesGraded}`).join(', ')}`,
       });
+    // SHAPE-KINK (D5): sizes whose outline was straightened onto its line / the family's shape
+    const ks = bs.filter((b) => b.kinkStraightened?.length);
+    if (ks.length)
+      out.push({
+        identity,
+        note: `outline straightened, one shape across sizes: ${ks
+          .map(
+            (b) =>
+              `${b.sizeToken} ${b
+                .kinkStraightened!.map((k) => `${k.rule} ${k.mm} mm/${k.spanMm} mm`)
+                .join(', ')}`,
+          )
+          .join('; ')}`,
+      });
     // GRADE P2 (D5): sizes whose outline was repaired from the grade of two drawn sizes
     const rp = bs.filter((b) => b.grade?.geometryOrigin === 'repaired');
     if (rp.length)
@@ -373,6 +389,31 @@ export function countNotesOfBlocks(
         note: `sizes repaired from the grade on their own lines (holes not drawn): ${rp
           .map((b) => `${b.sizeToken} from ${b.grade!.from.join('+')}, ${b.grade!.holesMm} mm`)
           .join('; ')}`,
+      });
+  }
+  return out;
+}
+
+/** SHAPE-KINK (D5): the operator's one-shape moves per piece, as passport notes. */
+export function shapeFixNotes(
+  pieces: readonly {
+    identity: string;
+    shapeFixes?: readonly { size: string; action: string; mm?: number }[];
+  }[],
+): { identity: string; note: string }[] {
+  const out: { identity: string; note: string }[] = [];
+  for (const p of pieces) {
+    const st = (p.shapeFixes ?? []).filter((f) => f.action === 'straighten');
+    const dr = (p.shapeFixes ?? []).filter((f) => f.action === 'drop');
+    if (st.length)
+      out.push({
+        identity: p.identity,
+        note: `operator: shape straightened in ${st.map((f) => `${f.size}${f.mm != null ? ` (${f.mm} mm)` : ''}`).join(', ')}`,
+      });
+    if (dr.length)
+      out.push({
+        identity: p.identity,
+        note: `operator: exported without size ${dr.map((f) => f.size).join(', ')} (one shape across sizes)`,
       });
   }
   return out;

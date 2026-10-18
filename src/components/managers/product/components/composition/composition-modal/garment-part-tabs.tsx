@@ -1,5 +1,5 @@
 import { composition, CompositionStructure } from 'constants/garment-composition';
-import { Chip, ChipRow } from 'ui/components/chip';
+import { Chip, ChipRow } from 'ui';
 import { getPartTotal } from './utils';
 
 interface GarmentPartTabsProps {

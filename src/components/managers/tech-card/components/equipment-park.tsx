@@ -1,18 +1,23 @@
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
-import { FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
-import DecimalField from 'ui/form/fields/decimal-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  Button,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Select,
+  Text,
+  Tiles,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  DecimalField,
+  InputField,
+  SelectField,
+} from 'ui';
 import { ulid } from 'utils/ulid';
 import {
   automationLevelOptions,

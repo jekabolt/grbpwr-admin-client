@@ -2,8 +2,7 @@ import { common_BuyerInsert } from 'api/proto-http/frontend';
 import { localeLabel } from 'constants/constants';
 import { STATUS } from 'constants/filter';
 import { cn } from 'lib/utility';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Text from 'ui/components/text';
+import { CopyToClipboard, Text } from 'ui';
 
 interface Props {
   buyer: common_BuyerInsert | undefined;

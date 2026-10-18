@@ -1,9 +1,8 @@
 import { LANGUAGES } from 'constants/constants';
 import { useEffect, useMemo, useState } from 'react';
 import { Control, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { LanguageButtons } from 'ui/components/language-buttons';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
+import { LanguageButtons } from 'components/shared/translation/language-buttons';
 import { mapFormToCampaignInsert } from './map-schema-to-campaign';
 import { CampaignSchema } from './schema';
 import { useRenderPreview } from './useCampaign';

@@ -5,7 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 import { AskModal } from '../core';
 import { applyPlan, type SplitPiece } from '../render/apply-split';

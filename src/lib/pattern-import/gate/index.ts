@@ -62,9 +62,9 @@ import {
   g9,
   sameManifest,
 } from './checks';
-import { g5ShapeCounts } from './shape';
+import { g5Shape } from './shape';
 import { withShapeNotes } from '../passport/digest';
-import { countNotesOfBlocks } from '../semantics/shape-check';
+import { countNotesOfBlocks, shapeFixNotes } from '../semantics/shape-check';
 import { UNI_TOKEN } from '../write/plan';
 import { readRawDxf } from './reader';
 import { contourMm, roundTrip } from './roundtrip';
@@ -210,7 +210,7 @@ export function createRunGate(
       await squareProbe(),
       ...g3g4(ctx, derived.ok),
       g5(ctx),
-      ...g5ShapeCounts(ctx),
+      ...g5Shape(ctx),
       g6(ctx),
       g7(ctx),
       g8(ctx),
@@ -448,6 +448,30 @@ export type WriteAndGateCtx = {
  * write → embed(gate: null) → runGate → embed(gate: report) → re-read → G13 (gate filled).
  * The returned text carries the final report; `report.passed` false = the scope must not be applied.
  */
+/**
+ * SHAPE-KINK (Codex r1): the report as the manifest carries it — the check step's working fields
+ * (`shapeIssues`, `door`: the operator's one-click moves) stay in the session's report only; the
+ * file's copy is the plain check (its note names the sizes), so it reads back equal.
+ */
+const CHANGE_NOTE =
+  /^(operator: |outline straightened|sizes repaired|notches drawn as the outline)/;
+const changesFirst = (ns: { identity: string; note: string }[]) => [
+  ...ns.filter((n) => CHANGE_NOTE.test(n.note)),
+  ...ns.filter((n) => !CHANGE_NOTE.test(n.note)),
+];
+
+function embeddable(r: GateReport): GateReport {
+  if (!r.checks.some((c) => c.shapeIssues || c.door)) return r;
+  return {
+    ...r,
+    checks: r.checks.map((c) => {
+      if (!c.shapeIssues && !c.door) return c;
+      const { shapeIssues: _i, door: _d, ...plain } = c;
+      return plain;
+    }),
+  };
+}
+
 export async function writeAndGate(
   job: WriteJob,
   ctx: WriteAndGateCtx,
@@ -462,13 +486,17 @@ export async function writeAndGate(
         ...detail0,
         manifest: {
           ...detail0.manifest,
+          // SHAPE-KINK (D5, Codex r1): the geometry changes first — the digest drops from the tail
           passport: withShapeNotes(
             detail0.manifest.passport,
-            countNotesOfBlocks(
-              detail0.manifest.blocks,
-              UNI_TOKEN,
-              (id) => detail0.manifest.pieces.find((p) => p.identity === id)?.gradeIntended,
-            ),
+            changesFirst([
+              ...shapeFixNotes(detail0.manifest.pieces),
+              ...countNotesOfBlocks(
+                detail0.manifest.blocks,
+                UNI_TOKEN,
+                (id) => detail0.manifest.pieces.find((p) => p.identity === id)?.gradeIntended,
+              ),
+            ]),
           ),
         },
       }
@@ -501,7 +529,7 @@ export async function writeAndGate(
     ...(ctx.sheets ? { sheets: ctx.sheets } : {}),
   };
   const report = await createRunGate(ctx.rules, { read })(text0, expect);
-  let m1 = { ...m0, gate: report };
+  let m1 = { ...m0, gate: embeddable(report) };
   let text1 = embed(detail.bareText, m1);
   // Preflight (M1): the manifest rides in front of `0 / SECTION`; a sniffer with a bounded head
   // window (the backend's was 64 KB) would refuse the upload as "not a DXF". Compressed manifests
@@ -519,7 +547,7 @@ export async function writeAndGate(
       note: `the manifest in front of the drawing is ${(prologue / 1024).toFixed(1)} KB (limit ${PATIMPORT.manifestPrologueWarnBytes / 1024} KB); an upload sniffer with a short head window may refuse the file`,
     });
     report.passed = passedOf(report.checks);
-    m1 = { ...m0, gate: report };
+    m1 = { ...m0, gate: embeddable(report) };
     text1 = embed(detail.bareText, m1);
   }
   // Re-read what will actually be uploaded: the report must be IN the file (G13 "gate filled").
@@ -554,7 +582,7 @@ export async function writeAndGate(
   if (!final.ok) {
     report.checks.push(final);
     report.passed = passedOf(report.checks);
-    m1 = { ...m0, gate: report };
+    m1 = { ...m0, gate: embeddable(report) };
     text1 = embed(detail.bareText, m1);
   }
   return {

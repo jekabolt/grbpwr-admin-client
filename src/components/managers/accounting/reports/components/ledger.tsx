@@ -1,8 +1,7 @@
 import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { useAccountLedger } from '../../utils/hooks';
 import { ACCT_PAGE_SIZE } from '../../utils/constants';
 import { AmountCell } from '../../components/amount-cell';

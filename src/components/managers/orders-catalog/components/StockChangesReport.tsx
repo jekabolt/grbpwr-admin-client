@@ -6,9 +6,7 @@ import {
   downloadCsv,
   stockChangeRowsToCsv,
 } from 'components/managers/product/components/stock/stock-csv';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { useSnackBarStore } from 'lib/stores/store';
 
 function toRfc3339DateOnly(dateStr: string, endOfDay: boolean): string {

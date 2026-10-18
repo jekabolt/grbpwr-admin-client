@@ -55,6 +55,9 @@ const SERIES_REACH_MM = 60;
 const SERIES_MIN_RANKS = 3;
 const SERIES_SIZE_TOL = 0.3;
 
+/** One stretch an outline ran around a mark and now runs on the line under it. */
+type CleanDetail = { id: ChainId; at: PtMm; mm: number; spanMm: number };
+
 type Mark = {
   id: ChainId;
   pts: PtMm[];
@@ -270,14 +273,14 @@ export function cleanAroundMarks(
   log?: string[],
   /** marks of a graded series (≥ 3 alike nearby): only these may be crossed without a drawn line */
   series?: ReadonlySet<ChainId>,
-): { outer: PtMm[]; cleaned: ChainId[] } {
+): { outer: PtMm[]; cleaned: ChainId[]; detail: CleanDetail[] } {
   const n = outer.length;
-  if (n < 4 || !marks.length) return { outer: [...outer], cleaned: [] };
+  if (n < 4 || !marks.length) return { outer: [...outer], cleaned: [], detail: [] };
   const on: number[] = outer.map((p) => {
     for (let k = 0; k < marks.length; k++) if (near(marks[k], p, ALONG_MM)) return k;
     return -1;
   });
-  if (on.every((k) => k >= 0)) return { outer: [...outer], cleaned: [] };
+  if (on.every((k) => k >= 0)) return { outer: [...outer], cleaned: [], detail: [] };
   // start the scan on a vertex that runs along no mark: every run is then contiguous
   const start = on.findIndex((k) => k < 0);
   type Run = { s: number; e: number; mark: number };
@@ -300,6 +303,7 @@ export function cleanAroundMarks(
   };
   const replace = new Map<number, { e: number; path: PtMm[] }>();
   const cleaned: ChainId[] = [];
+  const detail: CleanDetail[] = [];
   for (const r of runs) {
     if (r.s === r.e) continue;
     const m = marks[r.mark];
@@ -366,8 +370,14 @@ export function cleanAroundMarks(
     if (dev < DETOUR_MIN_MM) continue;
     replace.set(s0, { e: e0, path });
     cleaned.push(m.id);
+    detail.push({
+      id: m.id,
+      at: m.centre,
+      mm: Math.round(dev * 10) / 10,
+      spanMm: Math.round(dist(path[0], path[path.length - 1]) * 10) / 10,
+    });
   }
-  if (!replace.size) return { outer: [...outer], cleaned };
+  if (!replace.size) return { outer: [...outer], cleaned, detail };
   const res: PtMm[] = [];
   for (let t = 0; t < n; ) {
     const i = (start + t) % n;
@@ -380,7 +390,7 @@ export function cleanAroundMarks(
     res.push(outer[i]);
     t++;
   }
-  return { outer: res, cleaned };
+  return { outer: res, cleaned, detail };
 }
 
 /** A notch at the point of `outer` nearest to `p`, pointing inward, depth from the mark. */
@@ -546,7 +556,12 @@ export function readNotchMarks(
 }
 
 /** The size's own drawn lines (its walls that are no mark), for the line under a mark. */
-function linesOf(c: PieceCandidate, set: ChainSet): { pts: PtMm[]; closed: boolean }[] {
+function linesOf(
+  c: PieceCandidate,
+  set: ChainSet,
+  /** chains that are no line here (the placement marks themselves) */
+  skip?: ReadonlySet<ChainId>,
+): { pts: PtMm[]; closed: boolean }[] {
   // the size's own pen (its longest size class among its walls) and the common lines — never
   // another size's line that also bounds it somewhere
   const clsOf = new Map<number, { id: number; role: string }>();
@@ -566,7 +581,7 @@ function linesOf(c: PieceCandidate, set: ChainSet): { pts: PtMm[]; closed: boole
       : undefined;
   return c.walls.flatMap((id) => {
     const ch = set.chains[id];
-    if (!ch || ch.pts.length < 2) return [];
+    if (!ch || ch.pts.length < 2 || skip?.has(id)) return [];
     const k = clsOf.get(id);
     if (k && k.role !== 'common' && !(k.role === 'size' && k.id === own)) return [];
     const b = bboxOf(ch.pts);
@@ -576,40 +591,145 @@ function linesOf(c: PieceCandidate, set: ChainSet): { pts: PtMm[]; closed: boole
 }
 
 /**
+ * SHAPE-KINK (18.10, kombinezon FP size 6): a placement mark — a closed chain longer than a notch
+ * mark (a 96 × 11 mm label / loop box) — straddling the line. When the fill takes it as one size's
+ * wall, that size's outline leaves its line and runs around half the box (a 5.6 mm step on the
+ * waist of size 6 only). It is never a wall of the size when two evidences agree (D3):
+ *   1. the size's OWN drawn line runs on under the mark (`lineUnder`: the own pen or a common line,
+ *      through both ends of the stretch; two disagreeing drawn paths = no answer) — never the chord;
+ *   2. a strict majority of the family's sizes (≥ 2, > half) does not run around such a mark there.
+ * Sizes > PLACE_MAX_MM across or thinner than MARK_MIN_MM are not marks.
+ */
+const PLACE_MAX_MM = 160;
+const PLACE_SHORT_MAX_MM = 25;
+/** alike placement marks (graded copies of one) lie within this distance of each other, mm */
+const PLACE_REACH_MM = 120;
+
+function placementMarksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
+  const out: Mark[] = [];
+  for (const ch of set.chains) {
+    if (!ch.closed || ch.pts.length < 3) continue;
+    const b = bboxOf(ch.pts);
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    const long = Math.max(w, h);
+    const short = Math.min(w, h);
+    // the compact ones are notch marks (marksOf); a big closed chain is a piece or a frame
+    if (long > PLACE_MAX_MM || short < MARK_MIN_MM || short > PLACE_SHORT_MAX_MM) continue;
+    if (long <= MARK_MAX_MM && short >= MARK_COMPACT * long) continue;
+    if (b.maxX < box.minX || b.minX > box.maxX || b.maxY < box.minY || b.minY > box.maxY) continue;
+    out.push({
+      id: ch.id,
+      pts: ch.pts,
+      centre: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 },
+      // straddle / closeness are judged on the short side (the line runs through its middle)
+      across: short,
+      box: b,
+    });
+  }
+  return out;
+}
+
+/** The candidate's outline runs along the mark (≥ 2 vertices within ALONG_MM). */
+const runsAlong = (c: Pick<PieceCandidate, 'outer'>, m: Mark) =>
+  c.outer.filter((q) => near(m, q, ALONG_MM)).length >= 2;
+
+/**
  * Pieces stage (session, after every fill / refill / edit): every candidate's outline stretch that
  * runs around a notch mark centred on it is replaced (see top), the mark leaves the candidate's
- * walls and is kept in `notchMarks`. Candidates without such a stretch are returned as they are.
+ * walls and is kept in `notchMarks`. Then (SHAPE-KINK) a placement mark a minority size ran around
+ * with its own line under it leaves that size's walls (`placeMarks`). Candidates without such a
+ * stretch are returned as they are.
  */
 export function cleanNotchMarks(families: PieceFamily[], set: ChainSet): PieceFamily[] {
-  return families.map((f) => {
-    const live = f.candidates.filter((c) => c.outer.length >= 3);
-    if (!live.length) return f;
-    const pad = MARK_MAX_MM;
-    const fb = bboxOf(
-      live.flatMap((c) => [
-        { x: c.bbox.minX - pad, y: c.bbox.minY - pad },
-        { x: c.bbox.maxX + pad, y: c.bbox.maxY + pad },
-      ]),
-    );
-    const marks = marksOf(set, fb);
-    if (!marks.length) return f;
-    const series = seriesOf(marks, f.candidates);
-    let changed = false;
-    const candidates = f.candidates.map((c) => {
-      if (c.outer.length < 3 || c.features?.length) return c;
-      const r = cleanAroundMarks(c.outer, marks, linesOf(c, set), undefined, series);
-      if (!r.cleaned.length) return c;
-      changed = true;
-      const gone = new Set(r.cleaned);
-      return {
-        ...c,
-        outer: r.outer,
-        walls: c.walls.filter((w) => !gone.has(w)),
-        notchMarks: [...new Set([...(c.notchMarks ?? []), ...r.cleaned])],
-        areaMm2: areaOf(r.outer),
-        bbox: bboxOf(r.outer),
-      };
-    });
-    return changed ? { ...f, candidates } : f;
+  return families.map((f) => cleanPlacementMarks(cleanCompactMarks(f, set), set));
+}
+
+function cleanCompactMarks(f: PieceFamily, set: ChainSet): PieceFamily {
+  const live = f.candidates.filter((c) => c.outer.length >= 3);
+  if (!live.length) return f;
+  const pad = MARK_MAX_MM;
+  const fb = bboxOf(
+    live.flatMap((c) => [
+      { x: c.bbox.minX - pad, y: c.bbox.minY - pad },
+      { x: c.bbox.maxX + pad, y: c.bbox.maxY + pad },
+    ]),
+  );
+  const marks = marksOf(set, fb);
+  if (!marks.length) return f;
+  const series = seriesOf(marks, f.candidates);
+  let changed = false;
+  const candidates = f.candidates.map((c) => {
+    if (c.outer.length < 3 || c.features?.length) return c;
+    const r = cleanAroundMarks(c.outer, marks, linesOf(c, set), undefined, series);
+    if (!r.cleaned.length) return c;
+    changed = true;
+    const gone = new Set(r.cleaned);
+    return {
+      ...c,
+      outer: r.outer,
+      walls: c.walls.filter((w) => !gone.has(w)),
+      notchMarks: [...new Set([...(c.notchMarks ?? []), ...r.cleaned])],
+      areaMm2: areaOf(r.outer),
+      bbox: bboxOf(r.outer),
+    };
   });
+  return changed ? { ...f, candidates } : f;
+}
+
+export function cleanPlacementMarks(f: PieceFamily, set: ChainSet): PieceFamily {
+  // probe switch (node only): PLACE_MARKS_OFF=1 — placement marks stay walls (the "before")
+  if (typeof process !== 'undefined' && process.env?.PLACE_MARKS_OFF) return f;
+  const live = f.candidates.filter((c) => c.outer.length >= 3 && !c.features?.length);
+  // a majority needs ≥ 3 sizes
+  if (live.length < 3) return f;
+  const pad = PLACE_SHORT_MAX_MM;
+  const fb = bboxOf(
+    live.flatMap((c) => [
+      { x: c.bbox.minX - pad, y: c.bbox.minY - pad },
+      { x: c.bbox.maxX + pad, y: c.bbox.maxY + pad },
+    ]),
+  );
+  const marks = placementMarksOf(set, fb);
+  if (!marks.length) return f;
+  const n = live.length;
+  const markIds = new Set(marks.map((m) => m.id));
+  // per mark: how many sizes run around an alike mark at that place (its graded copies included)
+  const alike = (m: Mark, o: Mark) => {
+    const lm = Math.max(m.box.maxX - m.box.minX, m.box.maxY - m.box.minY);
+    const lo = Math.max(o.box.maxX - o.box.minX, o.box.maxY - o.box.minY);
+    return (
+      dist(m.centre, o.centre) <= PLACE_REACH_MM &&
+      Math.abs(lm - lo) <= 0.3 * lm &&
+      Math.abs(m.across - o.across) <= 0.3 * m.across + 1
+    );
+  };
+  const detouring = (m: Mark) =>
+    live.filter((c) => marks.some((o) => alike(m, o) && runsAlong(c, o))).length;
+  let changed = false;
+  const candidates = f.candidates.map((c) => {
+    if (c.outer.length < 3 || c.features?.length) return c;
+    // evidence 2: only the marks this size runs around that a strict majority does not
+    const mine = marks.filter((m) => runsAlong(c, m));
+    if (!mine.length) return c;
+    const minority = mine.filter((m) => {
+      const keep = n - detouring(m);
+      return keep >= 2 && 2 * keep > n;
+    });
+    if (!minority.length) return c;
+    // evidence 1: the size's own drawn line under the mark (an empty series: never the chord)
+    const r = cleanAroundMarks(c.outer, minority, linesOf(c, set, markIds), undefined, new Set());
+    if (!r.cleaned.length) return c;
+    changed = true;
+    const gone = new Set(r.cleaned);
+    return {
+      ...c,
+      outer: r.outer,
+      walls: c.walls.filter((w) => !gone.has(w)),
+      placeMarks: [...(c.placeMarks ?? []), ...r.detail],
+      areaMm2: areaOf(r.outer),
+      bbox: bboxOf(r.outer),
+    };
+  });
+  return changed ? { ...f, candidates } : f;
 }

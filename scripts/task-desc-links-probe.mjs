@@ -622,7 +622,7 @@ console.log('\nЦ4 · обрезка хвостовых скобок не ква
 {
   const pureOut = resolve(tmpdir(), `autolink-pure-${process.pid}.mjs`);
   await esbuild({
-    entryPoints: [resolve(REPO, 'src/ui/markdown/autolink.tsx')],
+    entryPoints: [resolve(REPO, 'src/components/shared/markdown/autolink.tsx')],
     bundle: true,
     platform: 'node',
     format: 'esm',

@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, Input, PLACEHOLDER_SURFACE, GenericPopover, Text } from 'ui';
 import {
   ensurePantoneLibrary,
   findPantone,

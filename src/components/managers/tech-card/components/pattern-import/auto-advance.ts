@@ -432,6 +432,15 @@ export function answerProblem<I>(step: WizardStep, a: AutoAnswer<I>): string | n
           Object.keys(e.input.gradeAnswers).length > 0,
       )
       .map(() => 'gradeAnswers (operator only)'),
+    // SHAPE-KINK: fixShape / dropSize are the operator's moves only (D3/D5)
+    ...(a.events ?? [])
+      .filter(
+        (e) =>
+          e.type === 'semantics' &&
+          !!e.input.shapeFixes &&
+          Object.keys(e.input.shapeFixes).length > 0,
+      )
+      .map(() => 'shapeFixes (operator only)'),
     ...Object.keys(a.patch ?? {})
       // A10: the autopilot's record of what it assumed rides with any answer (it answers nothing)
       .filter((k) => k !== 'autopilot' && !ok.inputs.includes(k))

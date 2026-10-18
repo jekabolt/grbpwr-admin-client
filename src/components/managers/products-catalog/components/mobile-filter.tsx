@@ -5,8 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import useFilter from 'lib/useFilter';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 import Color from './color';
 import FilterOptionButtons from './filter-buttons';

@@ -13,18 +13,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import MediaComponent from 'ui/components/media';
+import { Media, GenericPopover, Pill, Text, TILE_CORNER, TILE_QUIET } from 'ui';
 import {
   FILE_MISSING_TITLE,
   FILE_MISSING_WORDS,
   MediaViewer,
   ViewerAction,
   type MediaViewerItem,
-} from 'ui/components/media-viewer';
-import GenericPopover from 'ui/components/popover';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
+} from 'components/shared/media-viewer/media-viewer';
 
 import { PICKER_BLEED, PICKER_ROW } from './core/two-step-picker';
 import { uploadRaster } from './modals/use-edit-layer';
@@ -1355,7 +1351,7 @@ export function PictureTile({
             </Text>
           </div>
         ) : url ? (
-          <MediaComponent src={faceSrc} alt={alt} aspectRatio='auto' fit={fit} />
+          <Media src={faceSrc} alt={alt} aspectRatio='auto' fit={fit} />
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
           // от «картинка не загрузилась».

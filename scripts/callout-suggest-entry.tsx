@@ -11,7 +11,7 @@ import {
   type AutosaveApi,
 } from 'components/managers/tech-card/components/design/autosave-contract';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
-import { useEditHistory } from 'ui/components/annotation/history';
+import { useEditHistory } from 'components/managers/tech-card/annotation/history';
 
 const flat = (label: string) =>
   'data:image/svg+xml;utf8,' +

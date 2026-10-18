@@ -1,4 +1,4 @@
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Tile, Tiles } from 'ui';
 
 /**
  * ПЛИТКА-ПРИГЛАШЕНИЕ В ПРОЕКТЕ.

@@ -42,14 +42,18 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { HeaderWarnings, type HeaderWarning } from 'ui/components/header-warnings';
-import { Progress as ProgressBar } from 'ui/components/progress';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  FoldCaret,
+  HeaderWarnings,
+  type HeaderWarning,
+  Progress as ProgressBar,
+  Row,
+  Text,
+} from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { aliasInScope, fabricScopes, isRollGoodsSection } from './bom-purpose';
 import type { MarkerJob, PlanRefusal } from './nesting/batch-marker-plan';

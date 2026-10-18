@@ -1,7 +1,6 @@
 import { cn } from 'lib/utility';
 import { FC, useEffect, useRef, useState } from 'react';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 import { ARCHIVE_ITEM_TYPES, ArchiveItemValue } from './item-types';
 
 interface SelectItemTypeProps {

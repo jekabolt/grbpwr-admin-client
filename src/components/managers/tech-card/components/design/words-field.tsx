@@ -1,7 +1,6 @@
 import type { ChangeEvent, JSX, Ref } from 'react';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { Text, Textarea } from 'ui';
 
 /**
  * ═══ ОРГАН СЛОВ — ОДИН НА ДВА ЭКРАНА (27.09, O-61, D-60) ══════════════════════════════════════

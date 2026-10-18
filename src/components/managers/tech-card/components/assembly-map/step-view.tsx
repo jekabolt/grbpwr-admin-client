@@ -15,10 +15,7 @@ import {
   thenChain,
 } from 'lib/assembly-skeleton/map';
 import { useMemo } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { GroupLabel, Pill, Row, Text } from 'ui';
 import { machineTypeLabel, PRESS_EQUIPMENT_LABELS } from '../equipment-options';
 import { operationHeading, zoneLabel } from '../operation-options';
 import type { WorkCatalog } from '../operation-work';
