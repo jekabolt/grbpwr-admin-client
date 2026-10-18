@@ -219,8 +219,8 @@ export function CheckStep({
   const activeFix = active ? CHECK[active.id].fix : null;
   const gradeOpen = session.semantics ? openGradeAsks(session.semantics).length : 0;
   // SHAPE-KINK (engine batch5): the structured issue and its one-click moves, when the engine has them
-  const shape = (active as ShapeCheck | null)?.shapeIssues?.[0] ?? null;
-  const moves = api as ShapeMoves;
+  const shape = active?.shapeIssues?.[0] ?? null;
+  const moves = api;
   const kink = shape
     ? {
         piece: shape.identity.replace(/_[LR]$/, ''),
@@ -358,7 +358,7 @@ export function CheckStep({
                             data-suggested
                             className='border-textColor'
                             disabled={!!api.session.busy}
-                            onClick={() => void moves.fixShape!(shape.identity, shape.size)}
+                            onClick={() => void moves.fixShape(shape.identity, shape.size)}
                           >
                             straighten {kink.size} like the other sizes
                           </Button>
@@ -369,7 +369,7 @@ export function CheckStep({
                             variant='secondary'
                             size='xs'
                             disabled={!!api.session.busy}
-                            onClick={() => void moves.dropSize!(shape.identity, shape.size)}
+                            onClick={() => void moves.dropSize(shape.identity, shape.size)}
                           >
                             leave {kink.size} out of piece {kink.piece}
                           </Button>
@@ -406,7 +406,7 @@ export function CheckStep({
                       </span>
                     )}
                     <span className='flex flex-col items-stretch gap-1.5'>
-                      {activeFix && !kink && (active as { door?: string }).door !== 'check' && (
+                      {activeFix && !kink && active.door !== 'check' && (
                         // a door back, not a fix: the answer is given on that step (coached)
                         <Button
                           {...ask('check-fix', 'open the step that fixes it')}
@@ -595,6 +595,34 @@ function WriteStorageChoice({ api, scope }: { api: ImportSessionApi; scope: Draf
           data-testid='check-storage-refused'
         >
           {plainRul(r.reasons[0])}
+          {/* SHAPE-KINK: a refusal a GRADE P1 answer lifts is a link to that question */}
+          {r.refusals?.some((x) => x.gradeAskKey) && (
+            <>
+              {' · '}
+              <button
+                type='button'
+                data-ask-fix='check-storage'
+                data-testid='check-storage-grade'
+                className='cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-textColor hover:decoration-current'
+                onClick={() => void api.dispatch({ type: 'back', to: 'meaning' })}
+              >
+                answer{' '}
+                {plural(
+                  new Set(r.refusals.flatMap((x) => (x.gradeAskKey ? [x.gradeAskKey] : []))).size,
+                  'grade question',
+                )}{' '}
+                (
+                {[
+                  ...new Set(
+                    r.refusals.flatMap((x) =>
+                      x.gradeAskKey && x.identity ? [x.identity.replace(/_[LR]$/, '')] : [],
+                    ),
+                  ),
+                ].join(', ')}
+                )
+              </button>
+            </>
+          )}
         </Text>
       )}
     </div>
@@ -731,21 +759,3 @@ function plainRul(reason: string | undefined) {
     return `no grading table: piece ${m[1]} is drawn differently in size ${m[5]} than in ${m[3]}; the per-size DXF is the file`;
   return `no grading table: ${reason ?? 'the sizes do not match point for point'}; the per-size DXF is the file`;
 }
-
-/** SHAPE-KINK fields until the engine's types land on this branch (batch5). */
-type ShapeCheck = GateCheck & {
-  shapeIssues?: {
-    identity: string;
-    seed: number;
-    size: string;
-    at: { x: number; y: number };
-    mm: number;
-    kind: 'extra-turn' | 'missing-turn';
-    fixable: boolean;
-    why?: string;
-  }[];
-};
-type ShapeMoves = {
-  fixShape?: (identity: string, size: string) => unknown;
-  dropSize?: (identity: string, size: string) => unknown;
-};
