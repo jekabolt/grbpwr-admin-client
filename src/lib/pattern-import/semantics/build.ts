@@ -66,8 +66,10 @@ import type {
   Unproven,
   GradeAsk,
   GradeCountFeature,
+  KinkRecord,
+  ShapeFixRecord,
 } from '../types';
-import { PATIMPORT } from '../types';
+import { PATIMPORT, shapeFixKey } from '../types';
 import {
   describePen,
   type Pen,
@@ -132,6 +134,7 @@ import {
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
 import { cleanTracedOutline, familyCornerKinds, offsetContour } from './offset';
+import { repairMinorityKinks, kinkRepairOff, ownLineOn, type KinkDone } from './kink-repair';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
 type DxfExtra = {
@@ -1206,12 +1209,87 @@ export function buildPieceSpecsDetailed(
       for (const [k, bs] of notchBumpSeries(lines)) bumpsByRank.set(lines[k].rank, bs);
     }
 
-    for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet, {
-        ...featOpts,
-        folds: facingOf.get(c),
-        ownClass: run.sizes[c.rank]?.classId ?? null,
+    // SHAPE-KINK: the operator's one-shape moves on this piece (api.fixShape / api.dropSize)
+    const fixOf = (token: string) => input.shapeFixes?.[shapeFixKey(seed, token)];
+    const shapeFixes: ShapeFixRecord[] = [];
+    const featsOf = new Map<PieceCandidate, ReturnType<typeof classifyFeatures>>();
+    const featsFor = (c: PieceCandidate) => {
+      let f = featsOf.get(c);
+      if (!f) {
+        f = classifyFeatures(c, set, sheet, {
+          ...featOpts,
+          folds: facingOf.get(c),
+          ownClass: run.sizes[c.rank]?.classId ?? null,
+        });
+        featsOf.set(c, f);
+      }
+      return f;
+    };
+    // SHAPE-KINK: a size (or a strict minority) whose outline turns where a strict majority of the
+    // family does not — straightened by the chord onto the family's structure when the stretch is
+    // jitter (≤ 2 mm over ≤ 20 mm) or the size's own drawn line runs on the chord (≤ 6 mm), or
+    // the operator asked (api.fixShape, ≤ 6 mm); never at a notch (semantics/kink-repair.ts, D3)
+    const kinkByRank = new Map<number, { outer: PtMm[]; kinks: KinkDone[] }>();
+    const kept = p.cands.filter(({ card }) => fixOf(card.token) !== 'drop');
+    if (
+      !traced &&
+      !kinkRepairOff() &&
+      !p.ungraded &&
+      kept.length >= 3 &&
+      !kept.some(({ c }) => c.dxf || c.features?.length)
+    ) {
+      const lines = kept.map(({ c, card }) => {
+        const mr = markReads.get(c.rank);
+        let o = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+        const nb = bumpsByRank.get(c.rank);
+        if (nb?.length) o = chordAcross(o, nb);
+        return { rank: c.rank, token: card.token, outer: o };
       });
+      // every notch any size carries (ticks, marks, bumps): no straightening there (GRADE P1's)
+      const notchAts: PtMm[] = [];
+      for (const { c } of kept) {
+        for (const f of featsFor(c)) if (f.kind === 'notch') notchAts.push(f.at);
+        for (const n of markReads.get(c.rank)?.notches ?? []) notchAts.push(n.at);
+        for (const b of bumpsByRank.get(c.rank) ?? []) notchAts.push(b.at);
+      }
+      const operator = new Set(
+        kept.filter(({ card }) => fixOf(card.token) === 'straighten').map(({ c }) => c.rank),
+      );
+      const res = repairMinorityKinks(lines, {
+        notches: notchAts,
+        ownLine: (rank, a, b) => {
+          const c = kept.find((x) => x.c.rank === rank)?.c;
+          return !!c && ownLineOn(c, set, run.sizes[rank]?.classId ?? null, a, b);
+        },
+        operator,
+      });
+      for (const [r, x] of res.byRank) kinkByRank.set(r, x);
+      for (const { c, card } of kept)
+        if (operator.has(c.rank)) {
+          const k = kinkByRank.get(c.rank)?.kinks.filter((x) => x.rule === 'operator') ?? [];
+          // the operator's move is recorded even when it straightened nothing (the gate still asks)
+          shapeFixes.push({
+            size: card.token,
+            action: 'straighten',
+            ...(k.length ? { mm: Math.max(...k.map((x) => x.mm)) } : {}),
+          });
+          if (!kinkByRank.has(c.rank))
+            warnings.push(
+              `${name.code} ${card.token}: fix shape asked, nothing straightened — ${res.why || 'the size already has the family shape'}`,
+            );
+        }
+    }
+
+    for (const { c, card } of p.cands) {
+      // SHAPE-KINK: the operator's "drop this size" — the piece is exported without it (recorded)
+      if (fixOf(card.token) === 'drop') {
+        shapeFixes.push({ size: card.token, action: 'drop' });
+        pieceNotes.push(
+          `${card.token}: left out of the export by the operator (one piece, one shape across sizes — api.dropSize)`,
+        );
+        continue;
+      }
+      const feats = featsFor(c);
       const mr = markReads.get(c.rank);
       if (mr) {
         feats.push(...mr.notches);
@@ -1224,6 +1302,17 @@ export function buildPieceSpecsDetailed(
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
       let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      // SHAPE-KINK (pieces/notch-marks.ts): a placement mark this size ran around, kept on its line
+      const sizeKinks: KinkRecord[] = (c.placeMarks ?? []).map((m) => ({
+        at: m.at,
+        mm: m.mm,
+        spanMm: m.spanMm,
+        rule: 'mark-wall' as const,
+      }));
+      if (c.placeMarks?.length)
+        pieceNotes.push(
+          `${card.token}: outline kept on its own drawn line under ${c.placeMarks.length} placement mark(s) the fill had taken as its wall (${c.placeMarks.map((m) => `${m.mm} mm over ${m.spanMm} mm`).join(', ')}; the other sizes run straight there) — D5`,
+        );
       const nb = bumpsByRank.get(c.rank);
       if (nb?.length) {
         outer = chordAcross(outer, nb);
@@ -1259,6 +1348,23 @@ export function buildPieceSpecsDetailed(
         );
         pieceNotes.push(
           `${card.token}: ${nb.length} notch(es) drawn as the outline (${nb.map((b) => `${b.depth > 0 ? 'bump' : 'dip'} ${Math.abs(b.depth).toFixed(1)} mm`).join(', ')}; the same place in other sizes) — the line crosses by the chord, the notch on layer 4`,
+        );
+      }
+      const kk = kinkByRank.get(c.rank);
+      if (kk) {
+        // the removed stretch is no longer the line: G3 does not count its walls, G4 does not hold
+        // the chord to them (the GRADE P1 chord record, same audit)
+        const removed = kk.kinks.map((k) => {
+          const P = k.chord[0];
+          const Q = k.chord[1];
+          return { chord: [P, Q] as [PtMm, PtMm], bump: k.removed };
+        });
+        const key = `${seed}:${c.rank}`;
+        notchChords.set(key, [...(notchChords.get(key) ?? []), ...removed]);
+        outer = kk.outer;
+        sizeKinks.push(...kk.kinks.map(({ chord: _c, removed: _r, ...k }) => k));
+        pieceNotes.push(
+          `${card.token}: outline straightened onto the family's shape at ${kk.kinks.length} place(s) (${kk.kinks.map((k) => `${k.rule} ${k.mm} mm over ${k.spanMm} mm`).join(', ')}; a strict majority of sizes does not turn there) — D5`,
         );
       }
       // Every candidate outline (F4 fill, operator refill, DXF fast path) passes here before fold
@@ -1569,6 +1675,7 @@ export function buildPieceSpecsDetailed(
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
+        ...(sizeKinks.length ? { kinks: sizeKinks } : {}),
         ...(c.rankFrom === 'repair' && c.repair
           ? {
               // the pre-repair outline (sheet frame, audit pictures) stays on the candidate
@@ -1852,6 +1959,7 @@ export function buildPieceSpecsDetailed(
       fused: ov.fused ?? false,
       ungraded: p.ungraded,
       ...(intendedHere.length ? { gradeIntended: intendedHere } : {}),
+      ...(shapeFixes.length ? { shapeFixes } : {}),
     };
     const out: PieceSpec[] = [];
     if (mode === 'derived') {

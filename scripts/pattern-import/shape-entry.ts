@@ -21,7 +21,8 @@ import {
 import { shapeFamilies } from 'lib/pattern-import/gate/shape';
 import type { GateCtx } from 'lib/pattern-import/gate/checks';
 import { LAYERS } from 'lib/pattern-import/write/manifest-build';
-import { readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
+import { cleanPlacementMarks, readNotchMarks } from 'lib/pattern-import/pieces/notch-marks';
+import { repairMinorityKinks } from 'lib/pattern-import/semantics/kink-repair';
 import type { Session } from 'lib/pattern-import/worker/session';
 
 import { CASES, runCase } from './e2e-entry';
@@ -644,7 +645,7 @@ function unitCase(): CaseRes {
     );
     const ctx = {
       raw: { blocks: new Map(toks.map((t) => [`FP_${t}`, []])) },
-      m: { sizes: toks.map((t, k) => ({ token: t, rank: k })) },
+      m: { sizes: toks.map((t, k) => ({ token: t, rank: k })), pieces: [] },
       blocks,
       contours,
     } as unknown as GateCtx;
@@ -681,6 +682,220 @@ function unitCase(): CaseRes {
   {
     const f = gateOf([false, false, false]);
     expect('gate one shape: nothing held', !f.failed.length, `failed [${f.failed}]`);
+  }
+  // ── SHAPE-KINK honesty (18.10): what is straightened, and what never is ──
+  {
+    // a square per size (100 + 4k), the top edge from right to left; `top` = extra vertices on it
+    const ring = (k: number, top: PtMm[] = []): PtMm[] => {
+      const w = 100 + 4 * k;
+      return [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: w }, ...top, { x: 0, y: w }];
+    };
+    const w0 = (k: number) => 100 + 4 * k;
+    // jitter: a 1.5 mm kink over 3 mm on the top edge (turns 90° — the gate holds it)
+    const spike = (k: number): PtMm[] => [
+      { x: 61.5, y: w0(k) },
+      { x: 60, y: w0(k) + 1.5 },
+      { x: 58.5, y: w0(k) },
+    ];
+    // a step-out of `h` mm over 40 mm (a tab)
+    const tab = (k: number, h: number): PtMm[] => [
+      { x: 80, y: w0(k) },
+      { x: 80, y: w0(k) + h },
+      { x: 40, y: w0(k) + h },
+      { x: 40, y: w0(k) },
+    ];
+    const fam = (tops: (PtMm[] | null)[]) =>
+      tops.map((t, k) => ({ rank: k, token: `S${k}`, outer: ring(k, t ?? []) }));
+    const kinkCases: {
+      name: string;
+      tops: (PtMm[] | null)[];
+      opts?: Parameters<typeof repairMinorityKinks>[1];
+      want: { rank: number; rule: string }[] | null;
+    }[] = [
+      {
+        name: 'jitter spike in one size of 5: straightened (jitter)',
+        tops: [null, null, spike(2), null, null],
+        want: [{ rank: 2, rule: 'jitter' }],
+      },
+      {
+        name: 'a real 4 mm tab in one size: NOT straightened automatically',
+        tops: [null, null, tab(2, 4), null, null],
+        want: null,
+      },
+      {
+        name: 'the 4 mm tab, operator asked: straightened (operator)',
+        tops: [null, null, tab(2, 4), null, null],
+        opts: { operator: new Set([2]) },
+        want: [{ rank: 2, rule: 'operator' }],
+      },
+      {
+        name: 'an 8 mm tab, operator asked: refused (> 6 mm)',
+        tops: [null, null, tab(2, 8), null, null],
+        opts: { operator: new Set([2]) },
+        want: null,
+      },
+      {
+        name: 'the 4 mm tab with the size own line on the chord: straightened (mark-detour)',
+        tops: [null, null, tab(2, 4), null, null],
+        opts: { ownLine: () => true },
+        want: [{ rank: 2, rule: 'mark-detour' }],
+      },
+      {
+        name: 'jitter spike at a notch place: NOT straightened (GRADE P1)',
+        tops: [null, null, spike(2), null, null],
+        opts: { notches: [{ x: 60, y: 108 }] },
+        want: null,
+      },
+      {
+        name: '2 vs 2: NOT straightened',
+        tops: [null, null, spike(2), spike(3)],
+        want: null,
+      },
+      {
+        name: 'the odd size LACKS the majority tab: NOT straightened (a chord adds no turn)',
+        tops: [tab(0, 4), tab(1, 4), null, tab(3, 4), tab(4, 4)],
+        opts: { operator: new Set([0, 1, 2, 3, 4]) },
+        want: null,
+      },
+      {
+        name: 'a design tab in 3 of 5 (majority): NOT straightened',
+        tops: [tab(0, 1.5), tab(1, 1.5), tab(2, 1.5), null, null],
+        want: null,
+      },
+    ];
+    for (const c of kinkCases) {
+      const r = repairMinorityKinks(fam(c.tops), c.opts ?? {});
+      const got = [...r.byRank].map(([rank, x]) => ({
+        rank,
+        rule: x.kinks.map((k) => k.rule).join('+'),
+      }));
+      const ok =
+        c.want == null
+          ? !got.length
+          : got.length === c.want.length &&
+            c.want.every((w) => got.some((g) => g.rank === w.rank && g.rule === w.rule));
+      expect(`kink ${c.name}`, ok, `${JSON.stringify(got)} ${r.why}`);
+    }
+    // the gate's structured issue: the 6 mm tooth of size 2 is fixable by the operator, at the tooth
+    const f = gateOf([false, false, true, false, false]);
+    const is = f.issues;
+    expect(
+      'gate shapeIssues: one issue for S2, extra-turn, fixable ≤ 6 mm',
+      is.length === 1 &&
+        is[0].size === 'S2' &&
+        is[0].kind === 'extra-turn' &&
+        is[0].fixable &&
+        is[0].mm <= 6 &&
+        Math.abs(is[0].at.x - 57) < 10,
+      JSON.stringify(is),
+    );
+    const f2 = gateOf([false, false, true, true]);
+    expect(
+      'gate shapeIssues 2 vs 2: not fixable (no strict majority)',
+      f2.issues.length > 0 && f2.issues.every((x) => !x.fixable && !!x.why),
+      JSON.stringify(f2.issues),
+    );
+  }
+  // placement marks (pieces stage): a closed box straddling the line a minority size ran around
+  {
+    const W = (k: number) => 300 + 10 * k;
+    // the drawn size line (its own class) and the box (common) on its top edge at y = W
+    const box = (k: number): PtMm[] => [
+      { x: 100, y: W(k) - 5.4 },
+      { x: 196, y: W(k) - 5.4 },
+      { x: 196, y: W(k) + 5.6 },
+      { x: 100, y: W(k) + 5.6 },
+    ];
+    const line = (k: number, step = false): PtMm[] =>
+      step
+        ? [
+            { x: 0, y: 0 },
+            { x: W(k), y: 0 },
+            { x: W(k), y: W(k) },
+            { x: 196, y: W(k) },
+            { x: 196, y: W(k) + 5.6 },
+            { x: 100, y: W(k) + 5.6 },
+            { x: 100, y: W(k) },
+            { x: 0, y: W(k) },
+          ]
+        : [
+            { x: 0, y: 0 },
+            { x: W(k), y: 0 },
+            { x: W(k), y: W(k) },
+            { x: 0, y: W(k) },
+          ];
+    // the outline running around the top half of the box
+    const around = (k: number): PtMm[] => line(k, true);
+    const mk = (detour: boolean[], ownStep = false) => {
+      const chains: { id: number; pts: PtMm[]; closed: boolean; lengthMm: number }[] = [];
+      const classes: { id: number; role: string; sizeLabel: string | null; chains: number[] }[] =
+        [];
+      const cands = detour.map((d, k) => {
+        const lineId = chains.length;
+        chains.push({ id: lineId, pts: line(k, ownStep && d), closed: true, lengthMm: 4 * W(k) });
+        const boxId = chains.length;
+        chains.push({ id: boxId, pts: box(k), closed: true, lengthMm: 214 });
+        classes.push({ id: k, role: 'size', sizeLabel: `S${k}`, chains: [lineId] });
+        classes.push({
+          id: 100 + k,
+          role: d ? 'common' : 'ignore',
+          sizeLabel: null,
+          chains: [boxId],
+        });
+        const outer = d ? around(k) : line(k);
+        return {
+          rank: k,
+          outer,
+          walls: d ? [lineId, boxId] : [lineId],
+          bbox: { minX: 0, minY: 0, maxX: W(k), maxY: W(k) + (d ? 5.6 : 0) },
+          areaMm2: W(k) * W(k),
+          rankFrom: 'class',
+        };
+      });
+      const set = { chains, classes } as unknown as ChainSet;
+      const f = cleanPlacementMarks(
+        { seed: 0, candidates: cands } as unknown as Parameters<typeof cleanPlacementMarks>[0],
+        set,
+      );
+      return f.candidates as unknown as {
+        rank: number;
+        outer: PtMm[];
+        walls: number[];
+        placeMarks?: { mm: number; spanMm: number }[];
+      }[];
+    };
+    const maxY = (o: PtMm[]) => Math.max(...o.map((q) => q.y));
+    {
+      const c = mk([true, false, false, false, false]);
+      const ok =
+        Math.abs(maxY(c[0].outer) - W(0)) < 0.01 &&
+        c[0].placeMarks?.length === 1 &&
+        Math.abs(c[0].placeMarks[0].mm - 5.6) < 0.2 &&
+        !c[0].walls.includes(1) &&
+        c.slice(1).every((x) => !x.placeMarks);
+      expect(
+        'placement mark: the minority size runs on its own line under the box (mark-wall)',
+        ok,
+        JSON.stringify(c.map((x) => [maxY(x.outer), x.placeMarks])),
+      );
+    }
+    {
+      // a real design step next to the box: the size's own drawn line steps too — nothing under it
+      const c = mk([true, false, false, false, false], true);
+      expect(
+        'placement mark beside a real step (own line steps): NOT cleaned',
+        Math.abs(maxY(c[0].outer) - (W(0) + 5.6)) < 0.01 && !c[0].placeMarks,
+        JSON.stringify(c.map((x) => [maxY(x.outer), x.placeMarks])),
+      );
+    }
+    {
+      const c = mk([true, true, true, false, false]);
+      expect(
+        'placement mark the majority runs around: NOT cleaned',
+        c.every((x) => !x.placeMarks),
+        JSON.stringify(c.map((x) => x.placeMarks)),
+      );
+    }
   }
   const bad = rows.filter((r) => r.turn);
   return {

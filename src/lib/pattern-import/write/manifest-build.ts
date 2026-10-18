@@ -43,6 +43,8 @@ export function manifestPiece(p: PieceSpec): ManifestPiece {
   if (p.aiConfidence != null) m.aiConfidence = p.aiConfidence;
   // GRADE P1: count differences the operator answered "intended"
   if (p.gradeIntended?.length) m.gradeIntended = [...p.gradeIntended];
+  // SHAPE-KINK: the operator's one-shape moves (fixShape / dropSize)
+  if (p.shapeFixes?.length) m.shapeFixes = p.shapeFixes.map((f) => ({ ...f }));
   return m;
 }
 
@@ -101,6 +103,16 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     ...(contour ? { contour } : {}),
     // P1: closed through continuity walls — the rules, chains and anchors (G21 checks them)
     ...(b.size.continuity ? { continuity: continuityOfBlock(b.size.continuity) } : {}),
+    // SHAPE-KINK: stretches straightened onto the size's line / the family's shape (D5)
+    ...(b.size.kinks?.length
+      ? {
+          kinkStraightened: b.size.kinks.map((k) => ({
+            rule: k.rule,
+            mm: r1(k.mm),
+            spanMm: r1(k.spanMm),
+          })),
+        }
+      : {}),
     // GRADE P2: repaired from the grade — where the geometry comes from, never presented as drawn
     ...(b.size.repair
       ? {

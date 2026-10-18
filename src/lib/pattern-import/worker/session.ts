@@ -104,6 +104,7 @@ import { writeAndGate } from '../gate';
 import { writeR12 } from '../write/r12';
 import type { PlannedBlock } from '../write/plan';
 import { expandRul, looksLikeRul, packRul, parseRul, zipRulPair } from '../adapters/rul';
+import { equalizeForRul } from '../adapters/rul/correspond';
 import { rulSizesMismatch } from '../adapters/rul/settle';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize, splitRows } from '../chains';
 import { layerLoopAsides } from '../chains/layer-role';
@@ -2225,13 +2226,29 @@ function rulPackageOf(
 ): DraftRul {
   const sizes = [...input.sizes].sort((a, b) => a.rank - b.rank).map((s) => s.token);
   const base = input.rulBase ?? sizes[Math.floor((sizes.length - 1) / 2)];
-  const perSize = writeR12(blocks, {
+  // SHAPE-KINK: one point list per graded line in every size (corners matched, edges resampled at
+  // every size's own vertices) — the per-size DXF itself is not touched (adapters/rul/correspond.ts)
+  const eq = equalizeForRul(blocks, base ?? '');
+  const perSize = writeR12(eq.blocks, {
     styleName,
     createdAt: new Date().toISOString(),
     sampleSize: base ?? '',
   });
-  const pack = packRul(perSize, { sizes, base, name: styleName });
-  if (!pack.ok) return pack;
+  // probe switch (node only): PATIMPORT_RUL_PICK=<regex> packs only the pieces it matches
+  const pickRe =
+    typeof process !== 'undefined' && process.env?.PATIMPORT_RUL_PICK
+      ? new RegExp(process.env.PATIMPORT_RUL_PICK)
+      : null;
+  const pack = packRul(perSize, {
+    sizes,
+    base,
+    name: styleName,
+    ...(pickRe ? { pick: (piece: string) => pickRe.test(piece) } : {}),
+  });
+  if (!pack.ok)
+    return eq.notes.length
+      ? { ...pack, reasons: [...pack.reasons, ...eq.notes.map((n) => `not matched: ${n}`)] }
+      : pack;
   const stem = filename.replace(/\.dxf$/i, '');
   return {
     ok: true,

@@ -1735,6 +1735,8 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       sizes: writeSizes,
       dialect: 'r12',
       generator: 'e2e-probe',
+      // SHAPE-KINK probe switch: E2E_WRITE_STORAGE=rul also packs base DXF + .rul (scope.rul)
+      ...(process.env.E2E_WRITE_STORAGE === 'rul' ? { storage: 'rul' as const } : {}),
     });
     // A0.5 (B1): what the card will read back from each written file — the manifest embedded in
     // the DXF — must be the card, the scope and the sizes this run was given

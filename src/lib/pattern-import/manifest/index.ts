@@ -50,6 +50,7 @@ import {
   type GrainEvidenceKind,
   type GrainFeature,
   type GradeCountFeature,
+  type ShapeFixRecord,
   type GateReport,
   type ManifestBlock,
   type ManifestContinuity,
@@ -79,6 +80,9 @@ export {
 } from './identity';
 import { contourSigShapeProblem } from './contour-sig';
 import { continuityOfBlock } from '../write/manifest-build';
+
+/** SHAPE-KINK: ManifestBlock.kinkStraightened rules. */
+const KINK_RULES = new Set(['mark-wall', 'jitter', 'mark-detour', 'operator']);
 export {
   CONTOUR_SIG_MAX_PTS,
   CONTOUR_SIG_Q_MM,
@@ -745,6 +749,21 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.gradeIntended`, 'not a list of notches | drills | internal');
+    // SHAPE-KINK: optional, the operator's one-shape moves
+    if (
+      pc.shapeFixes !== undefined &&
+      !(
+        Array.isArray(pc.shapeFixes) &&
+        pc.shapeFixes.every(
+          (f) =>
+            isObj(f) &&
+            isStr(f.size) &&
+            (f.action === 'straighten' || f.action === 'drop') &&
+            (f.mm === undefined || (isNum(f.mm) && f.mm >= 0)),
+        )
+      )
+    )
+      fail(`${p}.shapeFixes`, 'not a list of { size, action: straighten | drop, mm? }');
     const ci = pc.identity.trim().toLowerCase();
     if (pieceByIdentity.has(ci)) fail(`${p}.identity`, `duplicate "${pc.identity}"`);
     pieceByIdentity.set(ci, pc);
@@ -766,6 +785,12 @@ export function validateManifest(x: unknown): ConversionManifest {
     if (pc.aiConfidence !== undefined) out.aiConfidence = pc.aiConfidence as number;
     if (Array.isArray(pc.gradeIntended) && pc.gradeIntended.length)
       out.gradeIntended = [...(pc.gradeIntended as GradeCountFeature[])];
+    if (Array.isArray(pc.shapeFixes) && pc.shapeFixes.length)
+      out.shapeFixes = (pc.shapeFixes as ShapeFixRecord[]).map((f) => ({
+        size: f.size,
+        action: f.action,
+        ...(f.mm !== undefined ? { mm: f.mm } : {}),
+      }));
     return out;
   });
   // A pair is two identities naming each other, one per hand. Anything else is not a pair the card
@@ -816,6 +841,23 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.notchesChorded`, 'not an integer 1…notches');
+    // SHAPE-KINK: optional, the stretches straightened (rule, mm, span)
+    if (
+      b.kinkStraightened !== undefined &&
+      !(
+        Array.isArray(b.kinkStraightened) &&
+        b.kinkStraightened.every(
+          (k) =>
+            isObj(k) &&
+            KINK_RULES.has(k.rule as string) &&
+            isNum(k.mm) &&
+            k.mm >= 0 &&
+            isNum(k.spanMm) &&
+            k.spanMm >= 0,
+        )
+      )
+    )
+      fail(`${p}.kinkStraightened`, 'not a list of { rule, mm, spanMm }');
     // GRADE P1: the operator's all / none on a count question (graded ≤ the kind's count; removed ≥ 1)
     for (const [k, of] of [
       ['drillsGraded', 'drills'],
@@ -902,6 +944,13 @@ export function validateManifest(x: unknown): ConversionManifest {
       notches: b.notches as number,
       ...(b.notchesGraded !== undefined ? { notchesGraded: b.notchesGraded as number } : {}),
       ...(b.notchesChorded !== undefined ? { notchesChorded: b.notchesChorded as number } : {}),
+      ...(Array.isArray(b.kinkStraightened) && b.kinkStraightened.length
+        ? {
+            kinkStraightened: (b.kinkStraightened as ManifestBlock['kinkStraightened'])!.map(
+              (k) => ({ rule: k.rule, mm: k.mm, spanMm: k.spanMm }),
+            ),
+          }
+        : {}),
       ...(b.drillsGraded !== undefined ? { drillsGraded: b.drillsGraded as number } : {}),
       ...(b.internalGraded !== undefined ? { internalGraded: b.internalGraded as number } : {}),
       ...(b.notchesRemoved !== undefined ? { notchesRemoved: b.notchesRemoved as number } : {}),

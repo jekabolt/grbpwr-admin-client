@@ -62,9 +62,9 @@ import {
   g9,
   sameManifest,
 } from './checks';
-import { g5ShapeCounts } from './shape';
+import { g5Shape } from './shape';
 import { withShapeNotes } from '../passport/digest';
-import { countNotesOfBlocks } from '../semantics/shape-check';
+import { countNotesOfBlocks, shapeFixNotes } from '../semantics/shape-check';
 import { UNI_TOKEN } from '../write/plan';
 import { readRawDxf } from './reader';
 import { contourMm, roundTrip } from './roundtrip';
@@ -210,7 +210,7 @@ export function createRunGate(
       await squareProbe(),
       ...g3g4(ctx, derived.ok),
       g5(ctx),
-      ...g5ShapeCounts(ctx),
+      ...g5Shape(ctx),
       g6(ctx),
       g7(ctx),
       g8(ctx),
@@ -462,14 +462,15 @@ export async function writeAndGate(
         ...detail0,
         manifest: {
           ...detail0.manifest,
-          passport: withShapeNotes(
-            detail0.manifest.passport,
-            countNotesOfBlocks(
+          passport: withShapeNotes(detail0.manifest.passport, [
+            ...countNotesOfBlocks(
               detail0.manifest.blocks,
               UNI_TOKEN,
               (id) => detail0.manifest.pieces.find((p) => p.identity === id)?.gradeIntended,
             ),
-          ),
+            // SHAPE-KINK (D5): the operator's fixShape / dropSize moves
+            ...shapeFixNotes(detail0.manifest.pieces),
+          ]),
         },
       }
     : detail0;
