@@ -20,9 +20,10 @@ import type {
   GradeAnswer,
   GradeAsk,
   PieceSpec,
+  ShapeIssue,
   WizardStep,
 } from 'lib/pattern-import/types';
-import { PATIMPORT } from 'lib/pattern-import/types';
+import { PATIMPORT, shapeFixKey } from 'lib/pattern-import/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -313,6 +314,15 @@ export function CheckStep({
     rulOn &&
     scopes.some((s) => s.rul && !s.rul.ok && s.rul.refusals?.some((x) => x.gradeAskKey === askKey));
 
+  /** An operator shape move recorded for this size (seed unknown: let clearShapeFix decide). */
+  const applied = (i: ShapeIssue) =>
+    i.seed == null
+      ? Object.keys(api.shapeFixes).length > 0
+      : !!api.shapeFixes[shapeFixKey(i.seed, i.size)];
+  const undos = order.flatMap((q) =>
+    q.kind === 'shape' && isDone(q) && applied(q.issue) ? [q] : [],
+  );
+
   /** The question asked now, worded and with its answers. */
   const quiz = (q: CheckQ) => {
     const done = isDone(q);
@@ -325,8 +335,7 @@ export function CheckStep({
       const who = pieceName(s.identity, allPieces);
       text = `${who}: ${s.size} bends off`;
       tip = [s.why, q.check.note].filter(Boolean).join(' · ') || undefined;
-      const fixed = api.shapeFixes;
-      const asked = Object.keys(fixed).length > 0;
+      const asked = applied(s);
       answers = done ? (
         asked && (
           <Button
@@ -459,6 +468,27 @@ export function CheckStep({
           )}
         </Text>
         <span className='flex flex-col items-stretch gap-2'>{answers}</span>
+        {/* the operator's own shape moves stay undoable while another check blocks (a
+            straightened size may surface a new blocker); the coach keeps this card's answer */}
+        {blocked && q.key === open[0]?.key && undos.length > 0 && (
+          <span className='flex flex-col items-stretch gap-2'>
+            {undos.map((u) => (
+              <Button
+                key={u.key}
+                variant='secondary'
+                size='sm'
+                className={ANSWER}
+                disabled={busy}
+                data-testid='check-shape-undo'
+                onClick={async () =>
+                  moved(q.key, await api.clearShapeFix(u.issue.identity, u.issue.size))
+                }
+              >
+                undo {pieceName(u.issue.identity, allPieces)} {u.issue.size}
+              </Button>
+            ))}
+          </span>
+        )}
         {err && (
           <Text size='micro' variant='label' component='p'>
             {err}
