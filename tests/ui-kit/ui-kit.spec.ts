@@ -50,6 +50,10 @@ test('find filters rail and blocks', async ({ page }) => {
     await find.fill(word);
     await expect(page.locator('#rules')).toBeVisible();
   }
+  for (const word of ['neighbours', 'соседство', 'gap', 'nest']) {
+    await find.fill(word);
+    await expect(page.locator('#neighbours')).toBeVisible();
+  }
   await find.fill('zzzz');
   await expect(page.getByText('none', { exact: true }).first()).toBeVisible();
 });

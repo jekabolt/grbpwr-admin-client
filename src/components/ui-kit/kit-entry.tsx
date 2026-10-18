@@ -5,6 +5,10 @@ export type KitDemo = {
   /** Export names from 'ui'. The first is the block id; the rest get wrapping anchors. */
   names: string[];
   Demo: React.ComponentType;
+  /** Header note when the block is not a barrel export (defaults to its import line). */
+  question?: string;
+  /** Extra words `find` matches, for blocks people look for by another name. */
+  keywords?: string[];
 };
 
 export type KitGroup = {
@@ -19,10 +23,18 @@ export type KitGroup = {
  * Chip block: extra names wrap the Section in zero-cost block anchors instead of adding children
  * (a child would add a stack gap).
  */
-export function KitEntry({ names, children }: { names: string[]; children: React.ReactNode }) {
+export function KitEntry({
+  names,
+  question,
+  children,
+}: {
+  names: string[];
+  question?: string;
+  children: React.ReactNode;
+}) {
   const [id, ...rest] = names;
   let node = (
-    <Section id={id} title={id} question={`import { ${names.join(', ')} } from 'ui'`}>
+    <Section id={id} title={id} question={question ?? `import { ${names.join(', ')} } from 'ui'`}>
       {children}
     </Section>
   );

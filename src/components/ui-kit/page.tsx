@@ -14,6 +14,7 @@ import { formDemos, SampleForm } from './form-fields';
 import { inputDemos } from './inputs';
 import { KitEntry, KitGroup } from './kit-entry';
 import { layoutDemos } from './layout';
+import { neighboursDemo } from './neighbours';
 import { mediaDemos } from './media';
 import { overlayDemos } from './overlays';
 import { statusDemos } from './status';
@@ -26,7 +27,7 @@ import { TOKEN_BLOCKS, TOKEN_COUNT, TokenEntry, visibleTokens } from './tokens';
  * tests/ui-kit screenshots it and checks every barrel export has a block here.
  */
 const GROUPS: KitGroup[] = [
-  { label: 'layout', demos: layoutDemos },
+  { label: 'layout', demos: [neighboursDemo, ...layoutDemos] },
   { label: 'actions', demos: actionDemos },
   { label: 'inputs', demos: inputDemos },
   { label: 'form fields', demos: formDemos, Provider: SampleForm },
@@ -37,7 +38,7 @@ const GROUPS: KitGroup[] = [
 ];
 
 const PRIMITIVE_COUNT = GROUPS.reduce(
-  (n, g) => n + g.demos.reduce((m, d) => m + d.names.length, 0),
+  (n, g) => n + g.demos.reduce((m, d) => m + (d.question ? 0 : d.names.length), 0),
   0,
 );
 
@@ -63,7 +64,7 @@ export function UiKitPage() {
   );
   const groups = GROUPS.map((g) => ({
     ...g,
-    demos: g.demos.filter((d) => d.names.some(match)),
+    demos: g.demos.filter((d) => [...d.names, ...(d.keywords ?? [])].some(match)),
   })).filter((g) => g.demos.length > 0);
   const empty = tokens.length === 0 && groups.length === 0;
 
@@ -137,8 +138,8 @@ export function UiKitPage() {
             {groups.map(({ label, demos, Provider = Fragment }) => (
               <Provider key={label}>
                 <SectionStack>
-                  {demos.map(({ names, Demo }) => (
-                    <KitEntry key={names[0]} names={names}>
+                  {demos.map(({ names, question, Demo }) => (
+                    <KitEntry key={names[0]} names={names} question={question}>
                       <Demo />
                     </KitEntry>
                   ))}
