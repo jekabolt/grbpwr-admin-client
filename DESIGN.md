@@ -414,6 +414,19 @@ each primitive. Outside `src/ui`, import catalog entries only from `ui`. A new p
 owner's approval and a `[primitive-ok]` commit marker. Feature components and compositions live
 with their feature, outside `src/ui`.
 
+### Neighbours
+
+How blocks sit next to each other. Live samples: [/ui-kit#neighbours](/ui-kit#neighbours).
+
+1. **Under.** Blocks are siblings in `SectionStack`, 24px `gutter` apart. Nothing is drawn in the gap: no margin, `<hr>` or `border-b`.
+2. **Beside.** `SectionStack row` (`lg:flex-row gap-gutter`). Two outlines never touch. *(rule, not linted)*
+3. **In: never.** Structure inside a block is `GroupLabel` + `Row`, never a nested `Section`. *(rule, not linted)*
+4. **Own surfaces are siblings.** `StatGrid`, `Tiles`, `Board` and preview iframes sit in the stack next to blocks, never inside a `Section`. `DataTable` is not a surface; it lives inside a block. Modals, drawers and popovers float outside the flow.
+5. **Toolbar** is its own strip in the stack, directly above what it controls, the same 24px away.
+6. **Inside a block:** 16px `block` padding, 10px `stack` between children. Header actions are underlined words; one main action per block.
+7. **Page edge:** the shell keeps 10px (`px-2.5`) to the first block. The ground (`pageBg`) shows only in gaps.
+8. **Warnings** live in the block they concern: `! N` in its header (`HeaderWarnings`) plus red text. A free `CalloutBox` between blocks is old debt (3 sites). *(rule, not linted)*
+
 ### Blocks and headers
 
 `Section` is one logical block: `bgColor`, a `borderColor` outline, 16px `block` padding, and a
