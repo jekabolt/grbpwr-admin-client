@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 
 import { cn } from 'lib/utility';
-import { HEADER_TEXT } from 'ui/components/section-header';
+import { HEADER_TEXT } from './section-header';
 
 export type ViewSwitchOption<T extends string> = {
   value: T;
@@ -139,7 +139,7 @@ export function ViewSwitch<T extends string>({
                       'border-borderColor bg-bgColor text-labelColor',
                       !off && 'hover:text-textColor',
                     ),
-              o.disabled && !on && 'text-textInactiveColor',
+              o.disabled && !on && 'text-borderColor',
             )}
           >
             {o.label}

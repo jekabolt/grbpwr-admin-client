@@ -1,7 +1,5 @@
 import { common_SupportTicketPriority, common_SupportTicketStatus } from 'api/proto-http/admin';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Input, Selector, Text } from 'ui';
 import { PRIORITY_OPTIONS, STATUS_OPTIONS, TicketFilters } from './utils';
 
 interface FilterProps {

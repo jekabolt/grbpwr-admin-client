@@ -1,8 +1,11 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { FILE_MISSING_TITLE, FILE_MISSING_WORDS } from 'ui/components/media-viewer';
-import Text from 'ui/components/text';
+import {
+  FILE_MISSING_TITLE,
+  FILE_MISSING_WORDS,
+} from 'components/shared/media-viewer/media-viewer';
+import { Text } from 'ui';
 
 /**
  * The address of a picture's smallest usable rendition. Thumbnail first, then compressed, then the

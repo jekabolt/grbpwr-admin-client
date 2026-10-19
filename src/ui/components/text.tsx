@@ -8,10 +8,10 @@ const textVariants = cva('', {
       selected: ['text-bgColor', 'bg-textColor', 'uppercase'],
       uppercase: ['text-text', 'uppercase'],
       underlined: ['underline', 'text-text'],
-      underLineWithColor: ['underline', 'text-blue', 'uppercase'],
+      underLineWithColor: ['underline', 'text-warning', 'uppercase'],
       strikethrough: ['line-through', 'text-text'],
       strileTroughInactive: ['line-through', 'text-inactive'],
-      inactive: ['text-textInactiveColor'],
+      inactive: ['text-borderColor'],
       // Readable secondary text for functional field labels/hints (AA on white).
       label: ['text-labelColor'],
       /**
@@ -51,6 +51,8 @@ const textVariants = cva('', {
       stat: ['text-stat', 'font-bold', 'tabular-nums'],
       statBig: ['text-statBig', 'font-bold', 'tabular-nums'],
       large: ['text-lg'],
+      // 16px — only the surfaces DESIGN.md names: public QR pages (/p/, /r/) and the email canvas.
+      reading: ['text-reading'],
     },
     // Pairs with variant='uppercase'. Never set letter-spacing by hand in a screen.
     tracking: {

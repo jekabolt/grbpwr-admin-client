@@ -6,7 +6,7 @@
 
 import { cn } from 'lib/utility';
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { EmailCampaigns } from '.';
 import { EmailSegments } from './segments';
 
@@ -30,7 +30,7 @@ export function EmailManager() {
 
   return (
     <div className='flex flex-col gap-6'>
-      <div className='flex flex-wrap gap-1.5 border-b border-textInactiveColor pb-3'>
+      <div className='flex flex-wrap gap-1.5 border-b border-borderColor pb-3'>
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -40,7 +40,7 @@ export function EmailManager() {
               'border px-3 py-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
               tab === t.id
                 ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor hover:bg-textColor hover:text-bgColor',
+                : 'border-borderColor hover:bg-textColor hover:text-bgColor',
             )}
           >
             <Text size='small' variant='uppercase' className={tab === t.id ? '!text-bgColor' : ''}>

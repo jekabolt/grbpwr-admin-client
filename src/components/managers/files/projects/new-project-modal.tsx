@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Input, Text } from 'ui';
 import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
 import { invalidateFileViews } from '../hooks/useFiles';

@@ -1,10 +1,9 @@
 import { ProductPickerModal } from 'components/managers/hero/components/productPickerModal';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { LinkField } from './link-field';
 import { TagPicker } from './tag-picker';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { HeroProductEntityInterface } from '../utility/interface';
 import { HeroProductTable } from './heroProductsTable';
 import { HeroSchema } from './schema';

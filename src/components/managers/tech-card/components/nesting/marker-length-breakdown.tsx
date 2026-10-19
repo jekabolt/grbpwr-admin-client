@@ -18,10 +18,7 @@
 // считает `markerAreaSplitCm2` — та же тройка, что уезжает в провенанс рецепта процентами, только
 // в сантиметрах; второй реализации здесь нет.
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Pill, Stat, StatGrid, Text } from 'ui';
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 // Разряды в см² — тем же правилом, что у dxf-разбора: два формата одного числа на двух
 // поверхностях одного расчёта разъехались бы первой же правкой.
@@ -68,17 +65,17 @@ export function MarkerLengthFormula({
     <StatGrid min={150}>
       <Stat
         label='lay length'
-        value={lengthCm > 0 ? fmtNum(lengthCm) : '—'}
+        value={lengthCm > 0 ? fmtNum(lengthCm) : <EmptyCell />}
         sub={widthCm > 0 ? `cm · cutting width ${fmtNum(widthCm)} cm` : 'cm'}
       />
       <Stat
         label='÷ garments in the lay'
-        value={units > 0 ? units : '—'}
+        value={units > 0 ? units : <EmptyCell />}
         sub={unitsLabel || 'composition unreadable'}
       />
       <Stat
         label='= per-unit consumption'
-        value={perGarment != null ? perGarment : '—'}
+        value={perGarment != null ? perGarment : <EmptyCell />}
         sub={unit ? `${unit} · waste already inside` : 'slot unit not set'}
       />
     </StatGrid>
@@ -139,7 +136,7 @@ export function MarkerAreaSplit({
             <span>{(share * 100).toFixed(share < 0.1 ? 1 : 0)}%</span>
             {/* Полоса — монохромная, ink на треке: та же ранжированная полоса, что в разборе по
                 деталям и в BarRow системы. Цветом здесь красить нечего: доля — не состояние. */}
-            <span aria-hidden className='block h-[3px] w-full bg-trackBg'>
+            <span aria-hidden className='block h-[3px] w-full bg-pageBg'>
               <span
                 className='block h-full bg-textColor'
                 style={{ width: `${Math.min(100, Math.max(2, share * 100))}%` }}

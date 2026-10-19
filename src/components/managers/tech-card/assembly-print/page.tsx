@@ -17,13 +17,10 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { BackLink, Button, Chip, ChipRow, Input, Text } from 'ui';
 import { operationHeading, zoneLabel } from '../components/operation-options';
 import type { WorkCatalog } from '../components/operation-work';
 import { pieceRefKey } from '../components/piece-block-refs';
@@ -32,8 +29,21 @@ import { skuToSeasonLabel } from '../components/season-util';
 import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
+import { CardUnitPicturesProvider } from '../components/card-unit-pictures';
+import { firstColorwayCloth, useCardCategoryNames } from '../components/skeleton-card-inputs';
+import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
-import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
+import { useCardSeamGraph } from '../components/card-unit-pictures';
+import {
+  typesetMap,
+  typesetRoute,
+  typesetSeams,
+  type SeamSheet,
+  type PaperDoc,
+  type SheetMeta,
+  type ShapeLookup,
+  type UnionLookup,
+} from './paper';
 import {
   exportPaperPdf,
   isPaper,
@@ -46,8 +56,9 @@ import {
   type PdfTarget,
 } from './paper-pdf';
 import { PaperPages } from './paper-svg';
+import { seamSheetOf } from './seam-sheet';
 
-type Form = 'route' | 'map';
+type Form = 'route' | 'map' | 'seams';
 
 const PX_PER_MM = 96 / 25.4;
 
@@ -169,15 +180,24 @@ function Document({
   onDoc: (doc: PaperDoc, key: string) => void;
   docKey: string;
 }) {
-  const { shapeByKey, hasDxf, isLoading, error } = usePieceShapes(shapes);
+  // SEAM MAP читает выкройку всегда: без контуров листу нечего показать, тумблер силуэтов не про него.
+  const wantShapes = shapes || form === 'seams';
+  const { shapeByKey, hasDxf, isLoading, error } = usePieceShapes(wantShapes);
+  const { graph: seamGraph, settling } = useCardSeamGraph();
   useEffect(() => onShapesAvailable(hasDxf), [hasDxf, onShapesAvailable]);
   useEffect(() => {
     // Контуры входят в гейт только когда их просили И есть чем рисовать: без DXF ждать нечего, а
     // отказ разбора — degraded, не блокировка (правило 1 гейта).
-    onDeps(
-      shapes && hasDxf ? [{ label: 'piece contours', status: depStatus(isLoading, !!error) }] : [],
-    );
-  }, [shapes, hasDxf, isLoading, error, onDeps]);
+    onDeps([
+      ...(wantShapes && hasDxf
+        ? [{ label: 'piece contours', status: depStatus(isLoading, !!error) }]
+        : []),
+      // Граф швов отстаивается 400 мс и читается в простое: кнопка ждёт его, а не печатает пустой лист.
+      ...(form === 'seams' && hasDxf
+        ? [{ label: 'seam graph', status: depStatus(isLoading || settling, false) }]
+        : []),
+    ]);
+  }, [wantShapes, hasDxf, isLoading, error, onDeps, form, settling]);
 
   const M = useMemo(
     () => assemblyPrintModel(printInput(techCard.techCard, workCatalog)),
@@ -187,9 +207,47 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
+  // Пиктограммы узлов (полоса C) — только когда их поставили выше по дереву; сегодня никто.
+  const unitPictures = useUnitPictures();
+  const unionOf = useMemo<UnionLookup>(
+    () => (unitPictures ? (key) => unitPictures.get(key) ?? null : null),
+    [unitPictures],
+  );
+  // SEAM MAP — тот же граф и та же арифметика, что PIECES на экране (lib/assembly-skeleton/map);
+  // «как шьют» — из формы-снимка сохранённой карточки той же функцией, что полоса STEP на вкладке.
+  const formOps = useWatch<TechCardFormData>({ name: 'operations' }) as
+    | TechCardFormData['operations']
+    | undefined;
+  const construction = useWatch<TechCardFormData>({ name: 'construction' }) as
+    | TechCardFormData['construction']
+    | undefined;
+  const seamSheet = useMemo<SeamSheet>(
+    () =>
+      form === 'seams'
+        ? seamSheetOf(
+            seamGraph,
+            (formOps ?? []).map((o) => ({
+              ...o,
+              inputKeys: o.inputKeys ?? [],
+              outputUnitKey: o.outputUnitKey ?? '',
+              sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+            })),
+            M,
+            {
+              defaultSeamClass: construction?.defaultSeamClass,
+              machines: construction?.equipmentDefaults?.machines ?? [],
+            },
+          )
+        : null,
+    [form, seamGraph, formOps, construction, M],
+  );
   const doc = useMemo(() => {
     const set = (m: SheetMeta) =>
-      form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
+      form === 'seams'
+        ? typesetSeams(M, m, seamSheet)
+        : form === 'map'
+          ? typesetMap(M, m, shapeOf, unionOf)
+          : typesetRoute(M, m, shapeOf, unionOf);
     let d = set(meta);
     if (!target) return d;
     // Подвал масштабированного листа длиннее (размер файла, процент, формат и число страниц) и может
@@ -208,7 +266,7 @@ function Document({
     if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
       d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
-  }, [M, meta, shapeOf, form, target]);
+  }, [M, meta, shapeOf, unionOf, form, target, seamSheet]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
   // Экран и ⌘P показывают ФАЙЛ: те же страницы в физическом размере, разбивка — сеткой склейки.
   const out = pdfSize(doc, target);
@@ -220,11 +278,46 @@ function Document({
   );
 }
 
+/**
+ * Пиктограммы узлов на бумаге — той же арифметикой и по тем же контурам, что на экране
+ * (`CardUnitPicturesProvider`); выключаются тем же выбором «силуэты», что и силуэты деталей. Без
+ * DXF карта пустая, и лист набирается как раньше.
+ */
+function PrintUnitPictures({
+  enabled,
+  techCard,
+  children,
+}: {
+  enabled: boolean;
+  techCard: common_TechCard;
+  children: ReactNode;
+}) {
+  const { shapeByKey, hasDxf } = usePieceShapes(enabled);
+  // The SAME inputs the construction tab gives its pictures — cloth of the first colourway and the
+  // category chain — so the paper draws the screen's graph (lining apart from the shell, the
+  // garment's own template), not a cloth-less generic one.
+  const bomItems = useWatch<TechCardFormData>({ name: 'bomItems' }) as
+    | TechCardFormData['bomItems']
+    | undefined;
+  const cloth = useMemo(() => firstColorwayCloth(techCard, bomItems), [techCard, bomItems]);
+  const categoryNames = useCardCategoryNames();
+  return (
+    <CardUnitPicturesProvider
+      shapes={enabled && hasDxf ? shapeByKey : null}
+      cloth={cloth}
+      categoryNames={categoryNames}
+    >
+      {children}
+    </CardUnitPicturesProvider>
+  );
+}
+
 export function TechCardAssemblyPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
   const [searchParams, setSearchParams] = useSearchParams();
-  const form: Form = searchParams.get('form') === 'map' ? 'map' : 'route';
+  const formParam = searchParams.get('form');
+  const form: Form = formParam === 'map' || formParam === 'seams' ? formParam : 'route';
   const shapes = searchParams.get('shapes') !== 'off';
   const sizeParam = searchParams.get('size');
   // Мемо по строке адреса: объект цели входит в зависимости набора листа.
@@ -372,11 +465,9 @@ export function TechCardAssemblyPrint() {
     <div className='flex min-h-screen flex-col'>
       <style>{SCREEN_CSS}</style>
 
-      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-borderColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
-          <Button asChild variant='secondary' size='lg'>
-            <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>
-          </Button>
+          <BackLink to={id ? `/tech-cards/${id}` : ROUTES.techCards} />
           <Text variant='uppercase' size='large'>
             assembly order — print
           </Text>
@@ -404,6 +495,15 @@ export function TechCardAssemblyPrint() {
                 title='tree of unit cards, leaves on the left — 420 / 594 / 841 mm wide by the number of columns'
               >
                 map tree
+              </Chip>
+              <Chip
+                nonForm
+                pressed={form === 'seams'}
+                selected={form === 'seams'}
+                onClick={() => setChoice({ form: 'seams' })}
+                title='every piece once at 1:12, each sewn edge numbered by the step that sews it — A4 landscape, grows to A3 when the pieces do not fit'
+              >
+                seam map
               </Chip>
             </ChipRow>
           </div>
@@ -565,9 +665,7 @@ export function TechCardAssemblyPrint() {
           <Text variant='inactive' className='uppercase'>
             tech card not found
           </Text>
-          <Button asChild variant='main' size='lg' className='uppercase'>
-            <Link to={ROUTES.techCards}>← back to tech cards</Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
         <div
@@ -584,18 +682,20 @@ export function TechCardAssemblyPrint() {
             style={{ transform: `scale(${k})`, width: `${stageWmm}mm` }}
           >
             <FormProvider {...methods}>
-              <Document
-                techCard={techCard}
-                form={form}
-                shapes={shapes}
-                workCatalog={workCatalog}
-                meta={meta}
-                onDeps={setDocDeps}
-                onShapesAvailable={setShapesAvailable}
-                onDoc={onDoc}
-                docKey={currentKey}
-                target={target}
-              />
+              <PrintUnitPictures enabled={shapes || form === 'seams'} techCard={techCard}>
+                <Document
+                  techCard={techCard}
+                  form={form}
+                  shapes={shapes}
+                  workCatalog={workCatalog}
+                  meta={meta}
+                  onDeps={setDocDeps}
+                  onShapesAvailable={setShapesAvailable}
+                  onDoc={onDoc}
+                  docKey={currentKey}
+                  target={target}
+                />
+              </PrintUnitPictures>
             </FormProvider>
           </div>
         </div>

@@ -1,7 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Overlay } from 'ui/components/overlay';
-import Text from 'ui/components/text';
+import { Button, Close, Overlay, Text } from 'ui';
 import Color from './color';
 import FromTo from './from-to';
 import Gender from './gender';
@@ -30,11 +28,11 @@ export default function Filter({
       {isOpen && (
         <div className='hidden lg:block'>
           <Overlay cover='screen' onClick={toggleModal} disablePointerEvents={false} />
-          <div className='fixed inset-y-2 right-2 z-30 w-[445px] border border-textInactiveColor bg-bgColor p-2.5 text-textColor'>
+          <div className='fixed inset-y-2 right-2 z-30 w-[445px] border border-borderColor bg-bgColor p-2.5 text-textColor'>
             <div className='flex h-full flex-col'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button onClick={toggleModal}>[x]</Button>
+                <Close onClick={toggleModal} />
               </div>
               <div className='h-full space-y-10 overflow-y-scroll py-6'>
                 <div className='space-y-6'>

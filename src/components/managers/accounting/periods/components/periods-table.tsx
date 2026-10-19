@@ -1,7 +1,6 @@
 import { AcctPeriod } from 'api/proto-http/admin';
 import { format, parseISO } from 'date-fns';
-import { Button } from 'ui/components/button';
-import Tooltip from 'ui/components/tooltip';
+import { Button, Tooltip, EmptyCell } from 'ui';
 import { Pill, RowLine } from '../../components/kit';
 import { formatAcctDate } from '../../utils/format';
 
@@ -55,7 +54,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                 <span className='font-medium'>{formatPeriodLabel(p.period)}</span>
                 {isClosed && (p.closedAt || p.closedBy) ? (
                   <span className='text-[10px] uppercase tracking-wide text-labelColor'>
-                    closed {p.closedAt ? formatAcctDate(p.closedAt) : '—'}
+                    closed {p.closedAt ? formatAcctDate(p.closedAt) : <EmptyCell />}
                     {p.closedBy ? ` by ${p.closedBy}` : ''}
                   </span>
                 ) : null}
@@ -65,7 +64,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
               <span className='flex items-center gap-2'>
                 {/* Closed = the figures behind it are final (green "done" state); open reads
                     muted/neutral — an open month is not an error. */}
-                <Pill tone={isClosed ? 'ok' : 'muted'}>{p.status || '—'}</Pill>
+                <Pill tone={isClosed ? 'ok' : 'muted'}>{p.status || <EmptyCell />}</Pill>
                 {/* Every non-actionable state shows a VISIBLE reason (not a bare "—"), with the
                     full explanation on hover — so it's never ambiguous whether an action is
                     missing or simply not applicable yet. */}
@@ -74,7 +73,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                     trigger={
                       <span
                         tabIndex={0}
-                        className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
+                        className='cursor-help text-textBaseSize uppercase text-borderColor'
                       >
                         read-only
                       </span>
@@ -94,7 +93,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                     trigger={
                       <span
                         tabIndex={0}
-                        className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
+                        className='cursor-help text-textBaseSize uppercase text-borderColor'
                       >
                         not over yet
                       </span>
@@ -110,7 +109,9 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                     reopen
                   </Button>
                 ) : (
-                  <span className='text-textBaseSize text-textInactiveColor'>—</span>
+                  <span className='text-textBaseSize'>
+                    <EmptyCell />
+                  </span>
                 )}
               </span>
             }

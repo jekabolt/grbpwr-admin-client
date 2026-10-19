@@ -17,8 +17,7 @@ import { emailBlockTypes } from 'constants/email-campaign';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { AddDoor, Text, Close } from 'ui';
 import { CampaignSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
 
@@ -199,7 +198,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         <div
                           ref={setRefs}
                           style={style}
-                          className='flex items-center justify-between gap-2 border border-dashed border-textInactiveColor px-2 py-1.5'
+                          className='flex items-center justify-between gap-2 border border-dashed border-borderColor px-2 py-1.5'
                         >
                           <Text variant='inactive' size='small'>
                             #{index + 1} deleted
@@ -224,14 +223,12 @@ export const BlockRail: FC<BlockRailProps> = ({
                           // Selection reads as INK, the way `Chip selected` does — not as a
                           // thicker grey. Keeping both states at 1px also stops the row
                           // reflowing by a pixel the moment you select it.
-                          isSelected
-                            ? 'border border-textColor'
-                            : 'border border-borderColor',
+                          isSelected ? 'border border-textColor' : 'border border-borderColor',
                         )}
                       >
                         <button
                           type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-borderColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                           aria-label='drag to reorder block'
                           {...dragHandleProps}
                         >
@@ -269,14 +266,11 @@ export const BlockRail: FC<BlockRailProps> = ({
                             )}
                           </span>
                         </button>
-                        <button
-                          type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        <Close
+                          size='sm'
                           aria-label='delete block'
                           onClick={() => handleRemove(uid)}
-                        >
-                          ×
-                        </button>
+                        />
                       </div>
                     );
                   }}
@@ -293,15 +287,7 @@ export const BlockRail: FC<BlockRailProps> = ({
         </Text>
       )}
 
-      <Button
-        type='button'
-        variant='main'
-        size='lg'
-        className='w-full cursor-pointer uppercase'
-        onClick={onAddClick}
-      >
-        + add block
-      </Button>
+      <AddDoor onClick={onAddClick}>block</AddDoor>
     </div>
   );
 };

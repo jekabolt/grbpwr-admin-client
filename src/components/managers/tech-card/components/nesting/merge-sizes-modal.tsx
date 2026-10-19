@@ -1,17 +1,6 @@
-// СКЛЕЙКА ПО-РАЗМЕРНЫХ ВЫГРУЗОК — экран.
-//
-// ЗАЧЕМ ОН ЕСТЬ. CLO кладёт припуск на шов только для ТЕКУЩЕГО размера: в выгрузке «все размеры»
-// линия кроя во всех блоках одна, базового размера, и на старших размерах она местами заходит
-// внутрь линии шва — кроить по ней значит резать по живому. Лечится это выгрузкой по одному
-// размеру за раз, но тогда у карточки пять файлов вместо чертежа: раскладка, просмотр и печать
-// считают их разными листами, а размерная полоска на плитке — пятью обрывками. Здесь пять
-// файлов становятся одним, и в карточку уезжает он.
-//
-// ЧТО ОПЕРАТОР ВИДИТ ДО ЗАГРУЗКИ. Какие размеры узнались в именах блоков, сколько деталей принёс
-// каждый файл, какие файлы оказались дублями (CLO повторяет предыдущий размер чаще, чем хочется
-// верить), и сам склеенный чертёж нашим же листом — с переключением размера и слоя. Это тот же
-// просмотр, которым карточка показывает уже загруженные выкройки, поэтому увиденное здесь и
-// посчитанное потом не могут разойтись.
+// СКЛЕЙКА ПО-РАЗМЕРНЫХ ВЫГРУЗОК. CLO кладёт припуск на шов только для текущего размера, поэтому
+// конструктор выгружает размеры по одному; здесь пять файлов становятся одним чертежом, и в
+// карточку уезжает он. Экран — список файлов с узнанными размерами и одно действие «merge».
 import {
   decodeDxfBytes,
   encodeDxfBytes,
@@ -20,14 +9,9 @@ import {
 } from 'lib/nesting/dxf/merge';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Button, ConfirmationModal, HeaderWarnings, type HeaderWarning, Pill, Text } from 'ui';
 import { MAX_PATTERN_BYTES, formatBytes, patternFileError } from 'utils/pattern';
-import { DxfSheetView } from './dxf-sheet-view';
 import { planSizeMerge, type SizeMergePlan } from './size-merge';
 import { useDictionarySizeTokens } from './use-block-sizes';
 
@@ -56,11 +40,16 @@ export function MergeSizesModal({
   open,
   onClose,
   onReady,
+  initialFiles,
+  scopeKey,
 }: {
   open: boolean;
   onClose: () => void;
-  /** Готовый файл — родитель отдаёт его обычной модалке загрузки (имя, материал, upload). */
-  onReady: (file: File) => void;
+  /** Готовый файл — родитель грузит его в слот `scopeKey` (тот, на который бросили файлы). */
+  onReady: (file: File, scopeKey?: string) => void;
+  /** Файлы, уже брошенные на слот: склейка стартует с них, без своего выбора. */
+  initialFiles?: File[];
+  scopeKey?: string;
 }) {
   const dictTokens = useDictionarySizeTokens();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -141,7 +130,7 @@ export function MergeSizesModal({
     };
   }, [picked, dictTokens]);
 
-  function handleFiles(list: FileList | null) {
+  function handleFiles(list: FileList | File[] | null) {
     const files = list ? Array.from(list) : [];
     if (files.length === 0) return;
     const bad = files
@@ -154,9 +143,7 @@ export function MergeSizesModal({
     // Размерный ряд длиннее двух десятков не бывает, а разбор — это воркер и мегабайты геометрии
     // на файл: промах мышью по всей папке не должен вешать вкладку на минуту.
     if (files.length > MAX_SHEETS) {
-      setError(
-        `files picked: ${files.length} — is that a size range? we don't merge more than ${MAX_SHEETS} at a time.`,
-      );
+      setError(`${files.length} files: merge takes up to ${MAX_SHEETS}`);
       return;
     }
     setBuilt(null); // старую ссылку отзовёт эффект: у времени жизни blob'а один хозяин
@@ -164,22 +151,45 @@ export function MergeSizesModal({
     setPicked(files);
   }
 
-  const previewFiles = useMemo(
-    () => (built ? [{ name: built.file.name, url: built.url }] : null),
-    [built],
-  );
-
-  const sizes = built
-    ? [...new Set(built.plan.rows.filter((r) => !r.duplicateOf).flatMap((r) => r.sizes))]
-    : [];
+  // Брошенные на слот файлы: разбор стартует сразу, при каждом открытии с новой пачкой.
+  useEffect(() => {
+    if (open && initialFiles && initialFiles.length > 0) handleFiles(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFiles]);
 
   // Потолок стоит на СКЛЕЙКЕ, а не на исходниках: каждый файл по отдельности проходит проверку
-  // размера, а их сумма — не обязательно. Узнать об этом на загрузке значило бы отдать оператору
-  // отказ сервера вместо объяснения; кнопка «скачать» при этом остаётся — файл-то собран.
+  // размера, а их сумма — не обязательно. Собранный файл всё равно можно скачать из подвала.
   const tooBig = built != null && built.file.size > MAX_PATTERN_BYTES;
-  // Один файл склеивать не с чем: получилась бы его же копия под новым именем. Это не ошибка, а
-  // не тот вход — для готового чертежа рядом стоит «+ DXF».
+  // Один файл склеивать не с чем: получилась бы его же копия под новым именем.
   const singleSheet = picked.length === 1;
+
+  // Всё, что не так со склейкой, — в шапке тела, не абзацами.
+  const warnings: (HeaderWarning | null | undefined | false)[] = [
+    error ? { text: error, error: true } : null,
+    ...(built
+      ? [
+          ...built.parseWarnings,
+          ...built.plan.warnings,
+          ...built.result.warnings,
+          ...(built.result.skipped.length > 0
+            ? [`repeated blocks skipped: ${built.result.skipped.length}`]
+            : []),
+        ]
+      : []),
+  ];
+
+  const hint = busy ? (
+    'merging…'
+  ) : singleSheet ? (
+    'pick 2 or more size files'
+  ) : tooBig && built ? (
+    <>
+      {formatBytes(built.file.size)}, over the {formatBytes(MAX_PATTERN_BYTES)} limit ·{' '}
+      <a href={built.url} download={built.file.name} className='underline underline-offset-2'>
+        download
+      </a>
+    </>
+  ) : undefined;
 
   return (
     <ConfirmationModal
@@ -188,167 +198,72 @@ export function MergeSizesModal({
         if (!o && !busy) onClose();
       }}
       onConfirm={() => {
-        if (built) onReady(built.file);
+        if (built) onReady(built.file, scopeKey);
       }}
       onCancel={() => {
         if (!busy) onClose();
       }}
-      title='merge sizes into one DXF'
-      confirmLabel='upload to the card'
-      cancelLabel='cancel'
+      title={picked.length > 1 ? `merge ${picked.length} size files` : 'merge size files'}
+      headerActions={<HeaderWarnings items={warnings} />}
+      hideCancel
+      confirmLabel='merge'
       confirmDisabled={!built || busy || tooBig || singleSheet}
-      width='lg'
+      footerHint={hint}
       closeOnConfirm
     >
-      <div className='space-y-2.5'>
-        <Text size='micro' variant='label' component='p'>
-          CLO puts the seam allowance on the current size only — which is why the pattern maker
-          exports the sizes one by one. here they are collected into one drawing: the geometry of
-          every block is copied verbatim (notches, grainline, inner lines and text stay where they
-          are), and the sizes are nested into one another, as in an “all sizes” export.
-        </Text>
-
-        <div className='flex flex-wrap items-center gap-1.5'>
-          <input
-            ref={inputRef}
-            id={inputId}
-            type='file'
-            accept='.dxf,image/vnd.dxf'
-            multiple
-            className='sr-only'
-            onChange={(e) => {
-              handleFiles(e.target.files);
-              if (inputRef.current) inputRef.current.value = '';
-            }}
-          />
-          <Button
-            type='button'
-            variant={picked.length === 0 ? 'main' : 'secondary'}
-            size='xs'
-            disabled={busy}
-            onClick={() => inputRef.current?.click()}
-          >
-            {picked.length === 0 ? '+ pick size files' : 'pick other files'}
-          </Button>
-          {busy && (
-            <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-              parsing and merging…
-            </Text>
-          )}
-          {built && (
-            <Button asChild variant='secondary' size='xs'>
-              <a href={built.url} download={built.file.name}>
-                download the file
-              </a>
+      <div className='space-y-1.5'>
+        {picked.length === 0 ? (
+          <>
+            <input
+              ref={inputRef}
+              id={inputId}
+              type='file'
+              accept='.dxf,image/vnd.dxf'
+              multiple
+              className='sr-only'
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                if (inputRef.current) inputRef.current.value = '';
+              }}
+            />
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+            >
+              + pick size files
             </Button>
-          )}
-        </div>
-
-        {error && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='p'>
-              {error}
-            </Text>
-          </CalloutBox>
-        )}
-
-        {singleSheet && (
-          <Text size='micro' variant='label' component='p'>
-            one file picked — there is nothing to merge it with. a finished drawing is uploaded
-            with the “+ DXF” button; what goes here is the PER-SIZE exports, one file per size.
-          </Text>
-        )}
-
-        {tooBig && built && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='p'>
-              the merged file is {formatBytes(built.file.size)} — over the upload ceiling (
-              {formatBytes(MAX_PATTERN_BYTES)}). it can't be uploaded to the card; download it and
-              hand it to the pattern maker so the export comes out lighter (splines and inner
-              lines are what usually bloats it).
-            </Text>
-          </CalloutBox>
-        )}
-
-        {picked.length > 0 && (
-          <div className='border border-borderColor'>
+          </>
+        ) : (
+          <div>
             {picked.map((f, i) => {
               const row = built?.plan.rows[i];
               return (
                 <div
                   key={`${f.name}-${i}`}
-                  className='flex flex-wrap items-baseline gap-1.5 border-b border-hairline px-1.5 py-1 last:border-b-0'
+                  className='flex items-baseline gap-1.5 border-b border-hairline py-1 last:border-b-0'
                 >
-                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='min-w-0 flex-1 truncate'
+                    title={f.name}
+                  >
                     {f.name}
                   </Text>
-                  <Text size='nano' variant='label' component='span'>
-                    {formatBytes(f.size)}
-                  </Text>
-                  {row && row.sizes.length > 0 && (
-                    <Pill tone={row.duplicateOf ? 'warn' : 'ink'}>{row.sizes.join(', ')}</Pill>
-                  )}
-                  {row && (
-                    <Text size='nano' variant='label' component='span'>
-                      pieces: {row.blocks}
-                    </Text>
-                  )}
-                  {row?.duplicateOf && (
-                    <Pill
-                      tone='warn'
-                      title={`the same blocks were already brought by ${row.duplicateOf}`}
-                    >
-                      duplicate — not included
+                  {row?.duplicateOf ? (
+                    <Pill tone='warn' title={`same blocks as ${row.duplicateOf}`}>
+                      duplicate, skipped
                     </Pill>
-                  )}
-                  {!!row?.moved && (
-                    <Pill tone='attention' title='the file was exported in its own coordinate system'>
-                      pieces moved: {row.moved}
-                    </Pill>
+                  ) : (
+                    row && row.sizes.length > 0 && <Pill tone='ink'>{row.sizes.join(', ')}</Pill>
                   )}
                 </div>
               );
             })}
           </div>
-        )}
-
-        {built && (
-          <>
-            <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
-              <Text size='micro' component='span'>
-                <b>merged:</b> blocks {built.result.blocks.length}
-                {sizes.length > 0 ? `, sizes ${sizes.join(', ')}` : ''}
-              </Text>
-              {built.result.skipped.length > 0 && (
-                <Pill
-                  tone='warn'
-                  title={built.result.skipped
-                    .map((s) => `${s.block}: already brought by ${s.keptFrom}`)
-                    .join('; ')}
-                >
-                  repeated blocks: {built.result.skipped.length}
-                </Pill>
-              )}
-              {built.plan.maxShiftMm > 0 && (
-                <Pill tone='attention'>
-                  largest move: {built.plan.maxShiftMm.toFixed(0)} mm
-                </Pill>
-              )}
-              <Text size='nano' variant='label' component='span' className='ml-auto'>
-                {formatBytes(built.file.size)} · {built.file.name}
-              </Text>
-            </div>
-
-            {[...built.parseWarnings, ...built.plan.warnings, ...built.result.warnings].map((w) => (
-              <Text key={w} size='nano' component='p' className='text-error'>
-                {w}
-              </Text>
-            ))}
-
-            {/* Проверка глазами до загрузки: тот же лист, что показывает карточку. Размер и слой
-                переключаются — если склейка перепутала кадры, это видно сразу, а не в цеху. */}
-            {previewFiles && <DxfSheetView files={previewFiles} dictTokens={dictTokens} />}
-          </>
         )}
       </div>
     </ConfirmationModal>

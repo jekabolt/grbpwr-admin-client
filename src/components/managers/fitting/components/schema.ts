@@ -15,8 +15,8 @@ import {
   annotationKindToWire,
   readAnnotationCaps,
   annotationCapsOut,
-} from 'ui/components/annotation/wire';
-import { ANNOTATION_CAPS_KEYS } from 'ui/components/annotation/kinds';
+} from 'components/managers/tech-card/annotation/wire';
+import { ANNOTATION_CAPS_KEYS } from 'components/managers/tech-card/annotation/kinds';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 import { normalizeFittingZone } from './zone-options';

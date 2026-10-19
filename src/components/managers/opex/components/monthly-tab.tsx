@@ -2,16 +2,20 @@ import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { SkeletonLine } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  Close,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Section,
+  SkeletonLine,
+  Text,
+  Toolbar,
+  ToolbarSpacer, EmptyCell,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import {
@@ -116,7 +120,11 @@ export function MonthlyContent({
           >
             ‹
           </Button>
-          <Text component='span' variant='uppercase' className='min-w-[7.5rem] text-center font-bold'>
+          <Text
+            component='span'
+            variant='uppercase'
+            className='min-w-[7.5rem] text-center font-bold'
+          >
             {monthLabel(month)}
           </Text>
           <Button
@@ -190,7 +198,7 @@ export function MonthlyContent({
                   className='ml-auto'
                   onClick={() => setEditing(firstUncosted)}
                 >
-                  fix “{firstUncosted.label || '—'}”
+                  fix “{firstUncosted.label || <EmptyCell />}”
                 </Button>
               )}
             </CalloutBox>
@@ -200,7 +208,13 @@ export function MonthlyContent({
 
           {groups.length === 0 ? (
             <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
-              <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='font-bold uppercase'
+              >
                 no opex booked for {monthLabel(month)}
               </Text>
               <Text size='micro' variant='label' component='span'>
@@ -208,7 +222,13 @@ export function MonthlyContent({
                 every month. Recurring (⟳) lines also appear here once the worker materialises them.
               </Text>
               {canWrite && (
-                <Button type='button' variant='main' size='sm' className='mt-1' onClick={() => setWizardOpen(true)}>
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  className='mt-1'
+                  onClick={() => setWizardOpen(true)}
+                >
                   + add opex
                 </Button>
               )}
@@ -275,7 +295,6 @@ export function MonthlyContent({
     </div>
   );
 }
-
 
 // opxLines v1 — one category as a GroupLabel (name · count · folded total) over hairline-separated
 // line rows, all inside the month's ONE ledger block (Section) rather than a card per category.
@@ -367,7 +386,7 @@ function LineRow({
             </Pill>
           )}
           <Text component='span' className='truncate font-medium'>
-            {line.label || '—'}
+            {line.label || <EmptyCell />}
           </Text>
           {hasVat && (
             <Pill tone='ink' title='carries recoverable VAT / document data'>
@@ -376,7 +395,12 @@ function LineRow({
           )}
         </div>
         {line.note && (
-          <Text size='micro' variant='label' component='span' className='block max-w-[40ch] truncate'>
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='block max-w-[40ch] truncate'
+          >
             {line.note}
           </Text>
         )}
@@ -401,14 +425,7 @@ function LineRow({
             <Button variant='underline' size='xs' onClick={onEdit}>
               edit
             </Button>
-            <button
-              type='button'
-              className='text-labelColor hover:text-error'
-              aria-label='delete line'
-              onClick={onDelete}
-            >
-              ✕
-            </button>
+            <Close size='sm' aria-label='delete line' onClick={onDelete} />
           </div>
         )}
       </div>
@@ -530,11 +547,17 @@ function CopyPreviousModal({
                   onChange={() => !clash && toggle(id)}
                 />
                 <span className='flex min-w-0 flex-1 items-baseline gap-1.5'>
-                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    tracking='label'
+                    component='span'
+                    className='uppercase'
+                  >
                     {opexCategoryLabel(l.category)}
                   </Text>
                   <Text component='span' className='truncate'>
-                    {l.label || '—'}
+                    {l.label || <EmptyCell />}
                   </Text>
                 </span>
                 {clash ? (

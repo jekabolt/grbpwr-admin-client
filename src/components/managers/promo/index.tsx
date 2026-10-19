@@ -1,7 +1,6 @@
 import { common_PromoCode } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { PromoTable } from './components/promo-table';
 import { useInfinitePromo } from './components/usePromoQuery';
 

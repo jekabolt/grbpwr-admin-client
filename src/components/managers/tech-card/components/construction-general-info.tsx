@@ -5,11 +5,8 @@ import { cn } from 'lib/utility';
 import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
-import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { AiEnhance, type EnhanceField } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { Button, Section, Text, Textarea, EmptyCell } from 'ui';
 import { GROUP_SEAM } from './design/core';
 import { cardFactsContext } from './design/core/card-facts';
 import { DraftedField } from './design/core/drafted-field';
@@ -413,7 +410,7 @@ function StyleFacts({
                     className={cn(fitDrafted && 'text-warning')}
                     fact='fit'
                   >
-                    {fit ? fitLabel(fit) : '—'}
+                    {fit ? fitLabel(fit) : <EmptyCell />}
                   </FactValue>
                 </DraftedField>
                 <DraftedPill
@@ -434,7 +431,7 @@ function StyleFacts({
               className='break-words'
               fact='category'
             >
-              {categoryPath || '—'}
+              {categoryPath || <EmptyCell />}
             </FactValue>
           </div>
         </>

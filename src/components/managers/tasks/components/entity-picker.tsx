@@ -2,8 +2,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Close, Input, Media, Text } from 'ui';
 
 // One resolved, pickable entity row.
 export interface EntityOption {
@@ -104,11 +103,9 @@ export function EntityPicker({
       {selected && (
         <div className='flex items-center gap-2 border border-borderColor p-1.5'>
           {selected.thumbnail && (
-            <img
-              src={selected.thumbnail}
-              alt=''
-              className='h-8 w-8 shrink-0 border border-borderColor object-cover'
-            />
+            <div className='h-8 w-8 shrink-0 border border-borderColor'>
+              <Media src={selected.thumbnail} alt='' aspectRatio='auto' />
+            </div>
           )}
           <div className='min-w-0 flex-1'>
             <Text size='micro' className='truncate'>
@@ -120,14 +117,7 @@ export function EntityPicker({
               </Text>
             )}
           </div>
-          <button
-            type='button'
-            aria-label='clear link'
-            onClick={clear}
-            className='shrink-0 px-1 text-labelColor hover:text-textColor'
-          >
-            ✕
-          </button>
+          <Close size='sm' aria-label='clear link' onClick={clear} />
         </div>
       )}
 
@@ -144,6 +134,7 @@ export function EntityPicker({
               }}
               onFocus={() => setOpen(true)}
               placeholder={selected ? 'change…' : config.searchPlaceholder}
+              className='min-h-11 sm:min-h-0'
             />
           </div>
         </Popover.Anchor>
@@ -168,21 +159,20 @@ export function EntityPicker({
               </Text>
             ) : (
               results.map((o) => (
-                <button
+                <Button
                   key={String(o.value)}
                   type='button'
+                  variant='default'
                   onClick={() => choose(o)}
                   className={cn(
-                    'flex w-full items-center gap-2 border-b border-borderColor p-1.5 text-left last:border-b-0 hover:bg-bgZebra',
-                    o.value === value && 'bg-bgSecondary',
+                    'flex min-h-11 w-full items-center gap-2 border-b border-borderColor p-1.5 text-left last:border-b-0 hover:bg-pageBg sm:min-h-0',
+                    o.value === value && 'bg-pageBg',
                   )}
                 >
                   {o.thumbnail && (
-                    <img
-                      src={o.thumbnail}
-                      alt=''
-                      className='h-8 w-8 shrink-0 border border-borderColor object-cover'
-                    />
+                    <div className='h-8 w-8 shrink-0 border border-borderColor'>
+                      <Media src={o.thumbnail} alt='' aspectRatio='auto' />
+                    </div>
                   )}
                   <div className='min-w-0'>
                     <Text size='micro' className='truncate'>
@@ -194,7 +184,7 @@ export function EntityPicker({
                       </Text>
                     )}
                   </div>
-                </button>
+                </Button>
               ))
             )}
           </Popover.Content>

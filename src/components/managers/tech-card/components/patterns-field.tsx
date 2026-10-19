@@ -1,3 +1,5 @@
+import { parseDecimalNumber } from 'utils/decimal';
+import { revealField } from 'utils/field-errors';
 import type { common_Material } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
@@ -8,63 +10,117 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { PieceDTO } from 'lib/nesting/types';
+import { fetchMediaBlob } from 'lib/features/media-blob';
+import {
+  INSUNITS_CODE,
+  asciiDxfProblem,
+  bytesToLatin1,
+  drawingExtents,
+  latin1ToBytes,
+  unitsMissing,
+  writeInsunits,
+  type DxfLinearUnit,
+} from 'lib/nesting/dxf/insunits';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { HeaderNote } from 'ui/components/section-header';
-import { Tile, Tiles } from 'ui/components/tiles';
 import {
-  PatternUploadButton,
-  PatternUploadModal,
-  type UploadedPattern,
-} from 'ui/components/pattern-upload-button';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+  Button,
+  Close,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  HeaderWarnings,
+  type HeaderWarning,
+  type HeaderWarningAction,
+  Input,
+  HeaderNote,
+  Tile,
+  Tiles,
+  Pill,
+  Placeholder,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+} from 'ui';
 import {
+  patternNameOfFile,
+  uploadPatternFile,
+} from 'components/managers/tech-card/patterns/pattern-upload-button';
+import { cn } from 'lib/utility';
+import {
+  MAX_PATTERN_BYTES,
   MAX_PATTERN_NAME,
   clampPatternName,
+  clampUtf8Bytes,
   formatBytes,
+  isDxfFile,
   isDxfUrl,
   patternFileError,
+  patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
 import {
   type FabricScope,
   type ScopeDirection,
   aliasInScope,
+  aliasScopeKey,
   bindingForScope,
   bomPurposeLabel,
+  fabricScopeKey,
   fabricScopes,
   scopeKeyOfBinding,
   strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf, uniOf } from './nesting/block-code';
+import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
+import {
+  applySizeMap,
+  guessSizeMap,
+  needsSizeDialog,
+  planSizeMap,
+  remapManifest,
+  scanDxfSizes,
+  type SizePick,
+} from './nesting/dxf-size-plan';
+import { DxfSizesDialog, UNSIZED, type SizesAsk } from './nesting/dxf-sizes-dialog';
+import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
-import { publishPatternSizeIndex } from './pattern-size-index';
+import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
-import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
-import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
+import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
+import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
+import { createCardApply } from './pattern-import/card-apply';
+import type { ApplyDraftFn } from './pattern-import/client';
+import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import {
+  followUpPending,
+  followUpTargets,
+  initialRows,
+  retryRows,
+  type FollowUpStep,
+} from 'lib/pattern-import/fabrics/followup';
+import type { ConversionManifest } from 'lib/pattern-import/types';
+import type { FollowUpJob } from './pattern-import/follow-up';
+import { AutopilotPill } from './pattern-import/autopilot/view';
+import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
+import { useAutoPieceAreas } from './use-auto-piece-areas';
+import { useUniPrefill } from './use-uni-prefill';
+import { drawingFromDxf } from 'lib/pattern-export/drawing';
+import { PatternExportMenu } from './pattern-export/export-menu';
+import { useTechCardStaging } from './useTechCardStaging';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
 const NestingModal = lazy(() =>
   import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
-);
-// Просмотр DXF нашим листом — из того же ленивого чанка: воркер и парсер общие.
-const DxfSheetViewer = lazy(() =>
-  import('./nesting/dxf-sheet-viewer').then((m) => ({ default: m.DxfSheetViewer })),
 );
 // Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
 const PieceMatchModal = lazy(() =>
@@ -75,10 +131,31 @@ const PieceMatchModal = lazy(() =>
 const MergeSizesModal = lazy(() =>
   import('./nesting/merge-sizes-modal').then((m) => ({ default: m.MergeSizesModal })),
 );
-// Замер площадей деталей — тот же ленивый чанк по той же причине: он тянет разбор геометрии и
-// офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
-// открытый диалог второй раз ничего не качает.
-const PieceAreasDialog = lazy(() => import('./piece-areas-dialog'));
+// Импорт выкройки любого формата (F13) — свой ленивый чанк: мастер с воркером и фикстурой не
+// грузится, пока его не открыли.
+const ImportWizard = lazy(() =>
+  import('./pattern-import/import-wizard').then((m) => ({ default: m.ImportWizard })),
+);
+// Замер площадей + индекс размеров сразу после импорта (MF-C): тот же ленивый чанк разбора.
+const ImportFollowUpRunner = lazy(() =>
+  import('./pattern-import/follow-up').then((m) => ({ default: m.ImportFollowUpRunner })),
+);
+
+/** «converted» badge tooltip: what the importer wrote into the sheet (MF-C, M10). */
+function convertedTitle(m: ConversionManifest): string {
+  const src =
+    (m.source?.files ?? [])
+      .map((f) => f.name)
+      .filter(Boolean)
+      .join(', ') || 'unknown source';
+  const at = formatTechCardDate(m.createdAt);
+  const gate = !m.gate
+    ? 'no gate report'
+    : m.gate.passed
+      ? `gate passed${m.gate.checks.some((c) => !c.ok) ? ' with warnings' : ''}`
+      : `gate blocked (${m.gate.checks.filter((c) => !c.ok && c.severity === 'block').length})`;
+  return `converted by the pattern importer from ${src}${at !== '—' ? ` on ${at}` : ''} · ${gate} · layer ${m.layers.cut} is the final cut line, sizes and pieces come from the file's manifest`;
+}
 
 // Секции BOM, к которым МОЖНО привязать выкройку. Это ровно те же четыре «рулонные» семьи,
 // что стор гросс-апит вейстеджем и что кладёт маркер (rollGoodsSections): подклад, бортовку и
@@ -99,6 +176,43 @@ const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
 // либо ULID строки BOM, либо пустая строка), так что коллизия невозможна по построению.
 const LOOSE_KEY = '__loose';
 const PDF_KEY = '__pdf';
+
+// What a slot takes: DXF uploads directly, everything else goes through the import wizard
+// (its files step accepts the same list, pattern-import/steps/files.tsx).
+const SLOT_ACCEPT_DXF = '.dxf,image/vnd.dxf';
+const SLOT_ACCEPT_ALL = `${SLOT_ACCEPT_DXF},.pdf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff`;
+const IMPORT_EXT = new Set(SLOT_ACCEPT_ALL.split(',').filter((x) => x.startsWith('.')));
+
+// The parser's warning for a sheet without $INSUNITS (lib/nesting/worker/parse-files.ts):
+// `${sheet name}: units are not set in the file — mm assumed`. Turned into the `set units` door.
+const UNITS_GUESS = ': units are not set in the file — ';
+
+/** A DXF's bytes with $INSUNITS written, as a File of the same name. */
+function fileWithUnits(text: string, unit: DxfLinearUnit, name: string, type = ''): File {
+  return new File([latin1ToBytes(writeInsunits(text, INSUNITS_CODE[unit])) as BlobPart], name, {
+    type,
+  });
+}
+
+/** ASCII DXF text when the file declares no usable units; null otherwise (binary, set, not DXF). */
+async function unitlessText(blob: Blob): Promise<string | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (asciiDxfProblem(bytes)) return null;
+  const text = bytesToLatin1(bytes);
+  return unitsMissing(text) ? text : null;
+}
+
+/** Every message in a react-hook-form error subtree (skips the DOM `ref`). */
+function messagesOf(e: unknown): string[] {
+  if (!e || typeof e !== 'object') return [];
+  const own = (e as { message?: unknown }).message;
+  return [
+    ...(typeof own === 'string' && own ? [own] : []),
+    ...Object.entries(e)
+      .filter(([k]) => k !== 'ref' && k !== 'message' && k !== 'type' && k !== 'types')
+      .flatMap(([, v]) => messagesOf(v)),
+  ];
+}
 
 /** English count noun: 1 sheet, 2 sheets. */
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -223,8 +337,11 @@ export function PatternsField({
   canEdit = true,
   canPublishIndex = true,
   savedSizeIds,
+  headerEl,
 }: {
   techCardId?: number;
+  // The block header's action slot: counts and warnings are portalled there.
+  headerEl?: HTMLElement | null;
   // Вкладка PATTERNS открыта. Без явного ответа обойтись нельзя: карточка монтирует ВСЕ вкладки
   // сразу и прячет их через `hidden`, поэтому «смонтированы» и «на экране» — разные вещи, а
   // разбор стоит скачивания всех DXF карточки. Обязательный проп, а не умолчание: молчаливое
@@ -245,7 +362,10 @@ export function PatternsField({
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  const [params, setParams] = useSearchParams();
+  // The import wizard's apply ends in the card's own save (F7): the page has no save button.
+  const autosave = useTechCardAutosave();
   const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
@@ -255,10 +375,26 @@ export function PatternsField({
   const liveRows = (useWatch({ control, name: 'patterns' }) ?? []) as PatternRow[];
   // A save's form.reset() overwrites concurrent edits and un-dirties them — freeze renames
   // for its duration.
-  const { isSubmitting } = useFormState({ control });
+  const { isSubmitting, errors } = useFormState({ control });
   // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
   const season = (useWatch({ control, name: 'season' }) ?? '') as string;
+  // Детали кроя карточки — мастеру импорта, чтобы ИИ не привязал имя к чужой детали (Codex C10).
+  const cardPieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
+    lineKey?: string;
+    name?: string;
+    cutSymmetry?: string;
+    piecesPerGarment?: number;
+    fused?: boolean;
+    fusingMode?: string;
+  }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
+  // Эталон припуска карточки — в предзаполнение раскладки, тем же порядком, что у планировщика.
+  const cardSeamRaw = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
+  const cardSeamAllowanceMm = (() => {
+    const n = parseDecimalNumber(cardSeamRaw);
+    return Number.isFinite(n) ? n : null;
+  })();
+  const cardName = (useWatch({ control, name: 'name' }) ?? '') as string;
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
@@ -275,26 +411,49 @@ export function PatternsField({
   // один раз, без кнопки «ещё раз» и без цикла на каждый рендер формы.
   const { data: cardRead, dataUpdatedAt: cardReadAt } = useTechCard(techCardId);
   const { data: materialsData } = useMaterials('', true, !!techCardId);
-  const colorwayOptions = useMemo(() => {
+  const materialById = useMemo(() => {
     const byId = new Map<number, common_Material>();
     for (const m of materialsData?.materials ?? []) {
       const id = Number(m.id ?? 0);
       if (id) byId.set(id, m);
     }
-    return markerColorways(cardRead, byId);
-  }, [cardRead?.techCard, materialsData?.materials]);
+    return byId;
+  }, [materialsData?.materials]);
+  const colorwayOptions = useMemo(
+    () => markerColorways(cardRead, materialById),
+    [cardRead?.techCard, materialById],
+  );
 
   // Материал, над которым сейчас висит перетаскиваемый файл ('' = ничей).
   const [dragKey, setDragKey] = useState<string | null>(null);
-  // Files dropped onto a material group, staged for the naming modal (click uploads stage inside
-  // PatternUploadButton; drops land here because the modal must know which cloth was aimed at).
-  const [droppedOn, setDroppedOn] = useState<{ scopeKey: string; files: File[] } | null>(null);
-  // Открыта склейка по-размерных выгрузок. Готовый файл она отдаёт в ту же модалку названия и
-  // материала, что и обычная загрузка: склейка отвечает за ЧЕРТЁЖ, а не за то, куда он ляжет.
-  const [merging, setMerging] = useState(false);
-  // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
-  // this state and split into the two viewers at the bottom.
+  // Several DXFs dropped on one slot: the size merge, then a direct upload into that slot.
+  const [merging, setMerging] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  // Non-DXF files dropped on a slot: the import wizard, starting from those files.
+  const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  // Direct uploads in flight, per slot.
+  const [uploading, setUploading] = useState<Record<string, number>>({});
+  // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
+  const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
+  // The hidden picker and the slot it was opened for.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickFor = useRef('');
+  // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
+  // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
+  const [unitsAsk, setUnitsAsk] = useState<{
+    items: UnitsItem[];
+    confirm: (units: Record<string, DxfLinearUnit>) => Promise<void> | void;
+    cancel: () => void;
+  } | null>(null);
+  const [unitsBusy, setUnitsBusy] = useState(false);
+  // Sizes dialog: a DXF whose sizes the card cannot read, and what confirm does with the mapping.
+  const [sizesAsk, setSizesAsk] = useState<{
+    ask: SizesAsk;
+    confirm: (picks: Record<string, SizePick>) => void;
+    cancel: () => void;
+  } | null>(null);
+  // Downloading the unitless sheets before the dialog can show their size.
+  const [unitsFetching, setUnitsFetching] = useState(false);
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
   // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
@@ -314,6 +473,9 @@ export function PatternsField({
   // фоном, и рассказывать про удавшуюся запись, которую никто не заказывал, — это отчёт о работе,
   // о которой не спрашивали. А вот «карточку надо сохранить» — руководство к действию.
   const [indexFailures, setIndexFailures] = useState<Record<string, string>>({});
+  // Замер площадей и индекс размеров после импорта (MF-C, M3): работа живёт здесь, а не в мастере —
+  // она переживает его закрытие и показывает отказ строкой под шапкой с повтором.
+  const [followUp, setFollowUp] = useState<FollowUpJob | null>(null);
   // Раскладка modal: the DXF files of one fabric, pooled (null = closed).
   const [nesting, setNesting] = useState<{
     sizeId: number;
@@ -331,6 +493,11 @@ export function PatternsField({
     // сохранения не зависит: слот решает, на какую строку BOM ляжет длина, а не какой деталью
     // кроя является блок.
     aliases: Array<{ blockName?: string; pieceLineKey?: string }>;
+    // Opened by the colourways deep link (`&auto=1`): the modal presses «run» once by itself.
+    autoRun?: boolean;
+    // The colourway the deep link came from (`markerColorway`): preselected, so the width is ITS
+    // pinned article's, not the BOM line's. 0/absent = the shared marker.
+    colorwayId?: number;
   } | null>(null);
   // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
   // nesting engine (null = closed).
@@ -339,14 +506,6 @@ export function PatternsField({
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
-  // «замерить площади деталей» одной ткани (null = закрыт). Диалог монтируется только открытым:
-  // монтирование и есть «взвести разбор».
-  const [measuring, setMeasuring] = useState<{
-    scope: FabricScope<FabricLine>;
-    label: string;
-    sheets: PatternRow[];
-  } | null>(null);
-
   // Сопоставление блоков DXF с деталями кроя, как его записал диалог «сопоставить детали».
   // Раскладке оно нужно, чтобы сохранённый маркер нёс piece_line_key и пережил переименование
   // детали; фильтрация по скоупу — здесь, потому что скоуп знает эта панель, а не модалка.
@@ -373,6 +532,7 @@ export function PatternsField({
     // разбивает скоуп направления надвое: см. markerScopeLines в bom-purpose.ts.
     isSample?: boolean;
     id?: number;
+    materialId?: number;
   }>;
   const fabricBomLines = useMemo(
     () =>
@@ -400,6 +560,9 @@ export function PatternsField({
           // этого непроставленное направление на СЕМПЛОВОМ рулоне снимало бы 180° у
           // производственного маркера, который сервер бы принял.
           isSample: !!b.isSample,
+          // Толщина слоя артикула строки — для настила под раскроечный стол.
+          fabricThicknessMm: materialThicknessMm(materialById.get(Number(b.materialId ?? 0))),
+          materialId: Number(b.materialId ?? 0) || undefined,
           order: i,
         }))
         // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
@@ -409,7 +572,7 @@ export function PatternsField({
             SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section) ||
             a.order - b.order,
         ),
-    [bomItems],
+    [bomItems, materialById],
   );
   // Скоупы — то, к чему выкройка привязывается с 0267: одна группа на НАЗНАЧЕНИЕ и одна на каждую
   // ещё не разложенную строку. У неразобранной карточки назначений нет вовсе, поэтому каждая
@@ -423,16 +586,22 @@ export function PatternsField({
   // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
   // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
   // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
+  // A part that repeats the one before it is said once (owner 17.10: «main material · main
+  // material» — a line named after its own purpose).
+  const once = (parts: (string | undefined)[]) =>
+    parts
+      .map((x) => x?.trim() ?? '')
+      .filter((x, i, a) => x && a.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i);
   const scopeLabel = (s: FabricScope<FabricLine>): string => {
     if (!s.byPurpose) {
       const l = s.lines[0];
-      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'unnamed';
+      return once([l?.role, l?.name]).join(' · ') || 'unnamed';
     }
-    const names = s.lines
-      .map((l) => l.name.trim())
-      .filter(Boolean)
-      .join(', ');
-    return [bomPurposeLabel(s.key), names].filter(Boolean).join(' · ');
+    const purpose = bomPurposeLabel(s.key);
+    const names = once(s.lines.map((l) => l.name)).filter(
+      (n) => n.toLowerCase() !== purpose.trim().toLowerCase(),
+    );
+    return once([purpose, names.join(', ')]).join(' · ');
   };
   const uploadScopes = useMemo(
     () => scopes.map((s) => ({ key: s.key, label: scopeLabel(s) })),
@@ -642,8 +811,6 @@ export function PatternsField({
   // подмножество читаемых файлов.
   const sheetsOfScope = (scopeKey: string): PatternRow[] =>
     (allByScopeMap.get(scopeKey) ?? []).map((e) => e.row);
-  const areaStateOf = (scopeKey: string): ScopeAreaState =>
-    scopeAreaState(serverScopeKeysOfSheets(sheetsOfScope(scopeKey)), cardRead?.pieceAreaScopes);
 
   // ФОРМА МОГЛА УЙТИ ВПЕРЁД СЕРВЕРА, И ТОГДА «ЗАМЕРЕНО» — НЕ ОТВЕТ, А ВЧЕРАШНЯЯ НОВОСТЬ.
   //
@@ -690,7 +857,7 @@ export function PatternsField({
     if (g.entries.length === 0) return [];
     const missing = missingIn(audits[sigOf(g.entries)]);
     if (missing.length === 0) return [];
-    return [`${scopeLabel(g.scope)} — missing ${missing.map(nameOf).join(', ')}`];
+    return [`${scopeLabel(g.scope)}: missing ${missing.map(nameOf).join(', ')}`];
   });
 
   // Загрузку гейтит ТКАНЬ, а не размерный ряд: выкройка привязывается к материалу, и без строки BOM
@@ -699,16 +866,277 @@ export function PatternsField({
   // градацию, и ряд из этих же файлов потом и набирают.
   const canUpload = canEdit && uploadScopes.length > 0;
 
-  // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
-  // server enforces), then stage the good files for naming + upload.
-  function stageDrop(scopeKey: string, list: FileList | null) {
+  // Слот принимает файлы только когда есть размерный ряд: и склейка, и импорт раскладывают
+  // размеры файла по ряду карточки.
+  const canDrop = canUpload && sizeIds.length > 0;
+  const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
+
+  function openPicker(scopeKey: string) {
+    if (!canDrop) return;
+    pickFor.current = scopeKey;
+    fileInputRef.current?.click();
+  }
+
+  const scopeOfKey = (key: string) => scopes.find((x) => x.key === key);
+  const bindingOf = (key: string) => {
+    const sc = scopeOfKey(key);
+    return sc ? bindingForScope(sc) : { fabricPurpose: '', bomLineKey: '' };
+  };
+
+  // Ask the units of the DXFs that declare none; resolves the files to upload (rewritten where
+  // asked) or null on cancel. Files with units pass through untouched; binary and UTF-16 DXFs
+  // are refused here, before any rewrite reads them as latin1.
+  async function withUnits(picked: File[]): Promise<File[] | null> {
+    const problems = await Promise.all(
+      picked.map(async (f) =>
+        isDxfFile(f) ? asciiDxfProblem(new Uint8Array(await f.arrayBuffer())) : null,
+      ),
+    );
+    picked.forEach((f, i) => {
+      if (problems[i]) showMessage(`${f.name}: ${problems[i]}`, 'error');
+    });
+    const files = picked.filter((_, i) => !problems[i]);
+    if (files.length === 0) return null;
+    const texts = await Promise.all(
+      files.map((f) => (isDxfFile(f) ? unitlessText(f) : Promise.resolve(null))),
+    );
+    const need = texts.flatMap((t, i) => (t != null ? [i] : []));
+    if (need.length === 0) return files;
+    const units = await new Promise<Record<string, DxfLinearUnit> | null>((resolve) =>
+      setUnitsAsk({
+        items: need.map((i) => ({
+          key: String(i),
+          name: files[i].name,
+          extents: drawingExtents(texts[i]!),
+        })),
+        confirm: (u) => {
+          setUnitsAsk(null);
+          resolve(u);
+        },
+        cancel: () => {
+          setUnitsAsk(null);
+          resolve(null);
+        },
+      }),
+    );
+    if (!units) return null;
+    return files.map((f, i) =>
+      texts[i] != null ? fileWithUnits(texts[i]!, units[String(i)] ?? 'mm', f.name, f.type) : f,
+    );
+  }
+
+  // Map the sizes of a DXF the card cannot read (unsized on a multi-size card, or graded in names
+  // the card does not have) onto the card's sizes: block names are rewritten and left-out sizes
+  // removed before upload; an unsized file instead takes the picked size as its row's size.
+  // Resolves null on cancel.
+  async function withSizes(file: File): Promise<{ file: File; sizeId?: number } | null> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (asciiDxfProblem(bytes)) return null; // withUnits already said why
+    const text = bytesToLatin1(bytes);
+    const scan = scanDxfSizes(text, (t) => dictTokens.has(t));
+    const cards = orderSizes(sizeIds).map((id) => ({
+      id,
+      label: nameOf(id),
+      tokens: sizeTokensOf(sizeById.get(id)),
+    }));
+    if (!needsSizeDialog(scan, cards)) return { file };
+    const picks = await new Promise<Record<string, SizePick> | null>((resolve) =>
+      setSizesAsk({
+        ask: {
+          name: file.name,
+          sizes: scan.sizes,
+          cards,
+          initial:
+            scan.sizes.length > 0
+              ? guessSizeMap(scan.sizes, cards)
+              : { [UNSIZED]: { on: true, to: cards[0].id } },
+        },
+        confirm: (p) => {
+          setSizesAsk(null);
+          resolve(p);
+        },
+        cancel: () => {
+          setSizesAsk(null);
+          resolve(null);
+        },
+      }),
+    );
+    if (!picks) return null;
+    if (scan.sizes.length === 0) return { file, sizeId: picks[UNSIZED]?.to || undefined };
+    try {
+      const plan = planSizeMap(scan, picks, cards);
+      let out = applySizeMap(text, plan);
+      // A converter sheet declares its blocks in an embedded manifest; it moves with the blocks,
+      // or the next parse refuses the sheet.
+      if (text.includes('GRBPWR-MANIFEST')) {
+        const mf = await import('lib/pattern-import/manifest');
+        const m = mf.readManifest(text);
+        if (m) out = mf.embedManifest(out, remapManifest(m, plan));
+      }
+      return {
+        file: new File([latin1ToBytes(out) as BlobPart], file.name, { type: file.type }),
+      };
+    } catch (e) {
+      showMessage(`${file.name}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      return null;
+    }
+  }
+
+  // New sheets are named by the card, not by the file: `{style number or card name} {material}`,
+  // + ' 2', ' 3'… while the slot already holds that name. Existing rows are never renamed — the
+  // name is the marker's provenance key (nesting/sheet-name.ts).
+  function autoName(scopeKey: string, file: File): string {
+    const sc = scopeOfKey(scopeKey);
+    const material = (sc ? scopeLabel(sc).split(' · ')[0] : '').trim().toLowerCase();
+    const base = clampPatternName(
+      [styleNumber.trim() || cardName.trim(), material].filter(Boolean).join(' '),
+    );
+    if (!base) return patternNameOfFile(file);
+    const taken = new Set(
+      ((getValues('patterns') ?? []) as PatternRow[])
+        .filter((r) => scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey)
+        .map((r) => (r.name ?? '').trim()),
+    );
+    // The suffix gets its bytes BEFORE the base is clamped: a base already at the 255-byte cap
+    // would otherwise clamp `${base} 2` back to `base` and the loop would never end.
+    const withSuffix = (suffix: string) =>
+      `${clampUtf8Bytes(base, MAX_PATTERN_NAME - new TextEncoder().encode(suffix).length).trimEnd()}${suffix}`;
+    let name = base;
+    for (let n = 2; taken.has(name) && n <= 999; n++) name = withSuffix(` ${n}`);
+    // Finite fallback: a ulid tail is unique enough without another scan.
+    if (taken.has(name)) name = withSuffix(` ${ulid().slice(-8).toLowerCase()}`);
+    return name;
+  }
+
+  // One DXF into one slot: no naming modal (the slot is the material, the name is the card's).
+  async function directUpload(scopeKey: string, picked: File) {
+    // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
+    const fixed = await withUnits([picked]);
+    if (!fixed) return;
+    const sized = await withSizes(fixed[0]);
+    if (!sized) return;
+    const file = sized.file;
+    const bump = (d: number) =>
+      setUploading((u) => {
+        const n = (u[scopeKey] ?? 0) + d;
+        const { [scopeKey]: _gone, ...rest } = u;
+        return n > 0 ? { ...rest, [scopeKey]: n } : rest;
+      });
+    bump(1);
+    try {
+      const up = await uploadPatternFile(file);
+      append({
+        sizeId: sized.sizeId ?? storageSizeId,
+        lineKey: ulid(),
+        ...up,
+        name: autoName(scopeKey, file),
+        ...bindingOf(scopeKey),
+      });
+      setPendingView({ scopeKey, urls: [up.url] });
+    } catch (e) {
+      console.error('UploadPattern failed', e);
+      showMessage(`${file.name}: ${patternUploadErrorMessage(e)}`, 'error');
+    } finally {
+      bump(-1);
+    }
+  }
+
+  // The file router: tile drop, tile click and «add files» all land here.
+  //   1 DXF → direct upload → pieces; ≥2 DXF → size merge → upload → pieces;
+  //   anything else → import wizard → apply → pieces.
+  function routeFiles(scopeKey: string, list: FileList | File[] | null) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
-    if (files.length === 0) return;
-    const checked = files.map((f) => ({ f, err: patternFileError(f, { dxfOnly: true }) }));
+    if (files.length === 0 || !canDrop) return;
+    const errOf = (f: File): string | null => {
+      if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
+      const ext = (f.name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase();
+      if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
+      return f.size > MAX_PATTERN_BYTES ? 'too large, 40 MB at most' : null;
+    };
+    const checked = files.map((f) => ({ f, err: errOf(f) }));
     for (const x of checked) if (x.err) showMessage(`${x.f.name}: ${x.err}`, 'error');
     const good = checked.filter((x) => !x.err).map((x) => x.f);
-    if (good.length > 0) setDroppedOn({ scopeKey, files: good });
+    if (good.length === 0) return;
+    setSelectedKey(scopeKey);
+    if (good.every(isDxfFile)) {
+      void (async () => {
+        const ready = await withUnits(good);
+        if (!ready) return;
+        if (ready.length === 1) void directUpload(scopeKey, ready[0]);
+        else setMerging({ scopeKey, files: ready });
+      })();
+      return;
+    }
+    setImporting({ scopeKey, files: good });
+  }
+
+  // Sheets already on the card that the parser read with guessed units.
+  const guessedNames = useMemo(
+    () =>
+      new Set(
+        (geometry.data?.warnings ?? [])
+          .filter((w) => w.includes(UNITS_GUESS))
+          .map((w) => w.slice(0, w.indexOf(UNITS_GUESS))),
+      ),
+    [geometry.data],
+  );
+  const unitless = dxfEntries.filter((e) => guessedNames.has(patternSheetName(e.row)));
+
+  // `set units` on existing sheets: download, ask, rewrite $INSUNITS, upload as a new file and swap
+  // url/filename/size on the SAME row (lineKey, name, binding kept — aliases and pieces stay).
+  async function setUnitsOfExisting() {
+    if (unitsFetching || unitless.length === 0) return;
+    setUnitsFetching(true);
+    const rows = unitless.map((e) => e.row);
+    const got = await Promise.allSettled(
+      rows.map(async (r) => unitlessText(await fetchMediaBlob(r.url!))),
+    );
+    setUnitsFetching(false);
+    const ready = rows.flatMap((row, i) => {
+      const g = got[i];
+      if (g.status === 'rejected') {
+        showMessage(`${labelOf(row)}: download failed`, 'error');
+        return [];
+      }
+      return g.value != null ? [{ row, text: g.value }] : [];
+    });
+    if (ready.length === 0) return;
+    setUnitsAsk({
+      items: ready.map(({ row, text }) => ({
+        key: row.url!,
+        name: labelOf(row),
+        extents: drawingExtents(text),
+      })),
+      cancel: () => setUnitsAsk(null),
+      confirm: async (units) => {
+        for (const { row, text } of ready) {
+          try {
+            const file = fileWithUnits(
+              text,
+              units[row.url!] ?? 'mm',
+              row.filename || 'pattern.dxf',
+              'image/vnd.dxf',
+            );
+            const up = await uploadPatternFile(file, row.name ?? '');
+            const live = (getValues('patterns') ?? []) as PatternRow[];
+            const i = live.findIndex((r) => r.url === row.url);
+            // Removed or replaced meanwhile: the new file is not forced onto another row.
+            if (i < 0) continue;
+            setValue(`patterns.${i}.url`, up.url, { shouldDirty: true });
+            setValue(`patterns.${i}.filename`, up.filename, { shouldDirty: true });
+            setValue(`patterns.${i}.sizeBytes`, up.sizeBytes, { shouldDirty: true });
+            // 0 = "assign one": the server numbers a url it has not seen on this card.
+            setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
+            setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
+          } catch (e) {
+            console.error('UploadPattern failed', e);
+            showMessage(`${labelOf(row)}: ${patternUploadErrorMessage(e)}`, 'error');
+          }
+        }
+        setUnitsAsk(null);
+      },
+    });
   }
 
   // ИНДЕКС РАЗМЕРОВ (Ф6.3) — публикуется САМ, следом за разбором.
@@ -733,59 +1161,117 @@ export function PatternsField({
   // фоновую запись был бы отчётом о работе, о которой не спрашивали; ответ, за которым сюда
   // пришли, стоит на плитках. Отказ пишется строкой под шапкой: «сохраните карточку» — это
   // руководство к действию, а не отчёт.
-  const publishedRef = useRef<Set<string>>(new Set());
+  //
+  // Запись по ключу хранит ОБЕЩАНИЕ, а не галку (MF-C): замер после импорта публикует индекс своих
+  // скоупов сам, следом за площадями, и обязан не дублировать уже улетевший PUT, а дождаться его.
+  // Пока его работа открыта, этот эффект её скоупы пропускает — порядок «сохранение → площади →
+  // индекс» держит она.
+  const publishedRef = useRef<Map<string, Promise<PublishSizeIndexResult>>>(new Map());
+  // A10 (Codex r5 #3): rows an import wrote whose save was not confirmed — a retry saves them
+  const importUnsaved = useRef(false);
+  const recordIndex = (sig: string, res: PublishSizeIndexResult) =>
+    setIndexFailures((f) => {
+      if (res.ok) {
+        if (!(sig in f)) return f;
+        const { [sig]: _dropped, ...rest } = f;
+        return rest;
+      }
+      return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
+    });
+  const indexOnce = (
+    g: (typeof scopeGroups)[number],
+    force = false,
+  ):
+    | { sig: string; run: Promise<PublishSizeIndexResult>; fresh: boolean }
+    | { sig: string; skip: string } => {
+    const sig = sigOf(g.entries);
+    const a = audits[sig];
+    if (!techCardId) return { sig, skip: "the card isn't saved yet" };
+    if (a?.phase !== 'ready') return { sig, skip: 'the sheets of this fabric are not parsed yet' };
+    const tokens = [...a.found];
+    const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
+    const had = publishedRef.current.get(key);
+    if (had && !force) return { sig, run: had, fresh: false };
+    const run = publishPatternSizeIndex({
+      techCardId,
+      sheets: g.entries.map((e) => ({
+        lineKey: e.row.lineKey,
+        fabricPurpose: e.row.fabricPurpose,
+        bomLineKey: e.row.bomLineKey,
+      })),
+      sizeTokens: tokens,
+    });
+    publishedRef.current.set(key, run);
+    return { sig, run, fresh: true };
+  };
+  // Публикация индекса одного скоупа для замера после импорта: тот же ключ, та же запись отказа.
+  const publishIndexForRef = useRef<
+    (scopeKey: string, force: boolean) => Promise<PublishSizeIndexResult>
+  >(async () => ({ ok: false, reason: 'not ready' }));
+  publishIndexForRef.current = async (scopeKey, force) => {
+    if (!canPublishIndex) return { ok: false, reason: 'publishing is not allowed on this card' };
+    const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+    if (!g || g.entries.length === 0) return { ok: false, reason: 'no DXF sheet in this fabric' };
+    const o = indexOnce(g, force);
+    if ('skip' in o) return { ok: false, reason: o.skip };
+    const res = await o.run;
+    recordIndex(o.sig, res);
+    return res;
+  };
+  const followUpScopes = useMemo(
+    () =>
+      new Set(
+        followUp && followUpPending(followUp.rows) ? followUp.rows.map((r) => r.scopeKey) : [],
+      ),
+    [followUp],
+  );
   useEffect(() => {
     if (!canPublishIndex || !techCardId || !bundle) return;
     let cancelled = false;
     (async () => {
       for (const g of scopeGroups) {
         if (g.entries.length === 0) continue;
-        const sig = sigOf(g.entries);
-        const a = audits[sig];
-        if (a?.phase !== 'ready') continue;
-        const tokens = [...a.found];
-        const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
-        if (publishedRef.current.has(key)) continue;
-        publishedRef.current.add(key);
-        const res = await publishPatternSizeIndex({
-          techCardId,
-          sheets: g.entries.map((e) => ({
-            lineKey: e.row.lineKey,
-            fabricPurpose: e.row.fabricPurpose,
-            bomLineKey: e.row.bomLineKey,
-          })),
-          sizeTokens: tokens,
-        });
+        if (followUpScopes.has(g.scope.key)) continue;
+        const o = indexOnce(g);
+        if ('skip' in o || !o.fresh) continue;
+        const res = await o.run;
         if (cancelled) return;
-        setIndexFailures((f) => {
-          if (res.ok) {
-            if (!(sig in f)) return f;
-            const { [sig]: _dropped, ...rest } = f;
-            return rest;
-          }
-          return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
-        });
+        recordIndex(o.sig, res);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt]);
+    // indexOnce/recordIndex read this render's audits/scopeGroups — exactly the deps below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt, followUpScopes]);
 
-  // Загрузчик возвращает НЕПРОЗРАЧНЫЙ ключ скоупа: контрол живёт в ui/ и не обязан знать ни про
-  // назначения, ни про строки BOM. Разворачивает его в два поля провода здесь — в одном месте, тем
-  // же bindingForScope, которым пользуется и селект в строке.
-  function toRow(p: UploadedPattern): Omit<UploadedPattern, 'scopeKey'> & {
-    fabricPurpose: string;
-    bomLineKey: string;
-  } {
-    const { scopeKey, ...rest } = p;
-    const picked = scopes.find((x) => x.key === scopeKey);
-    return {
-      ...rest,
-      ...(picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' }),
-    };
-  }
+  // Pieces of the card: UNI prefill and automatic area measurement (no button, no dialog).
+  useUniPrefill();
+  const areaRefusals = useAutoPieceAreas({
+    techCardId,
+    enabled: active && canEdit && canPublishIndex && !!techCardId,
+  });
+
+  const openPieces = (g: (typeof scopeGroups)[number]) =>
+    setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(g.entries) });
+
+  // A sheet just landed: open the pieces viewer once the form rows carry its url, so the viewer
+  // reads the new file together with the slot's other sheets.
+  useEffect(() => {
+    if (!pendingView) return;
+    const g = scopeGroups.find((x) => x.scope.key === pendingView.scopeKey);
+    if (!g) {
+      setPendingView(null);
+      return;
+    }
+    const have = new Set(g.entries.map((e) => e.row.url));
+    if (g.entries.length === 0 || !pendingView.urls.every((u) => have.has(u))) return;
+    setPendingView(null);
+    setSelectedKey(g.scope.key);
+    openPieces(g);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingView, scopeGroups]);
 
   function commitRename(index: number, value: string) {
     // '' is a legal committed value — it clears the name and the row falls back to the
@@ -797,255 +1283,256 @@ export function PatternsField({
     setEditing(null);
   }
 
+  // Применение импорта + запуск замера после него (MF-C, M3). Замер стартует ТОЛЬКО на сохранении
+  // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
+  // нулевым (F7).
+  const importScopeRef = useRef('');
+  importScopeRef.current = importing?.scopeKey ?? '';
+  function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
+    return async (draft, onProgress) => {
+      const result = await apply(draft, onProgress);
+      const targets = followUpTargets(draft, result);
+      if (result.ok) {
+        // After an apply the pieces viewer of the slot opens by itself: the dropped-on slot when
+        // the import wrote into it, else the first slot it wrote.
+        const keys = draft.scopes.map((sc) => sc.target.scopeKey);
+        const aimed = importScopeRef.current;
+        const k = keys.includes(aimed) ? aimed : keys[0];
+        if (k) {
+          setImporting(null);
+          setPendingView({
+            scopeKey: k,
+            urls: [
+              ...result.uploaded.filter((u) => u.scopeKey === k).map((u) => u.url),
+              ...(result.replaced ?? []).filter((r) => r.scopeKey === k).map((r) => r.newUrl),
+            ],
+          });
+        }
+      }
+      if (targets && result.ok) {
+        const urls = [
+          ...result.uploaded.map((u) => u.url),
+          ...draft.scopes.flatMap((sc) => (sc.alreadyOnCard ? [sc.alreadyOnCard.url] : [])),
+        ];
+        setFollowUp({ id: Date.now(), rows: initialRows(targets), urls, nonce: 0 });
+      }
+      return result;
+    };
+  }
+  function retryFollowUp(only?: { scopeKey?: string; step?: FollowUpStep }) {
+    setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
+  }
+
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
     const rev = revisionOf(row);
-    // When the file first landed, server-side and carried across saves. formatTechCardDate
-    // answers '—' for the unset timestamp a just-uploaded row still carries; that dash reads as
-    // data, so drop it instead.
-    const uploaded = formatTechCardDate(row.uploadedAt);
-    const uploadedOn = uploaded === '—' ? null : uploaded;
-    // Лист БЕЗ размера (0281) — не «размер вне ряда», а отсутствие притязания на размер: сервер его
-    // с рядом не сверяет и не отвергает. Красный флаг на нём был бы требованием починить то, что не
-    // сломано, и вернул бы на карточку ровно ту зависимость от ряда, которую 0281 убрала.
+    // Лист БЕЗ размера (0281) — не «размер вне ряда»: сервер его с рядом не сверяет.
     const stray = !!row.sizeId && !inRange.has(row.sizeId);
-    // Разрешённый скоуп строки: сначала назначение, иначе строка BOM — и с поправкой на то, что
-    // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
+    // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    // A DXF name opens the pieces viewer of its slot; a sheet without a material has none.
+    const rowGroup =
+      dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
+    const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
+    const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
+    const nameTitle =
+      [row.filename, converted ? convertedTitle(converted) : ''].filter(Boolean).join('\n') ||
+      undefined;
+    const meta = [rev != null ? `v${rev}` : '', row.sizeBytes ? formatBytes(row.sizeBytes) : '']
+      .filter(Boolean)
+      .join(' · ');
 
     return (
-      <tr
-        key={row.lineKey || `row-${index}`}
-        className='border-b border-hairline align-middle last:border-b-0'
-      >
-        <td className='py-1 pr-2'>
-          {editing?.index === index ? (
-            <Input
-              name={`pattern-rename-${index}`}
-              value={editing.value}
-              placeholder={row.filename || 'name'}
-              maxLength={MAX_PATTERN_NAME}
-              autoFocus
-              autoComplete='off'
-              className='px-1 py-0 text-micro'
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setEditing({ index, value: e.target.value })
-              }
-              onBlur={() => commitRename(index, editing.value)}
-              onKeyDown={(e: React.KeyboardEvent) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  commitRename(index, editing.value);
+      <li key={row.lineKey || `row-${index}`} className='py-1'>
+        <div className='flex items-center gap-1.5'>
+          <div className='min-w-0 flex-1'>
+            {editing?.index === index ? (
+              <Input
+                name={`pattern-rename-${index}`}
+                value={editing.value}
+                placeholder={row.filename || 'name'}
+                maxLength={MAX_PATTERN_NAME}
+                autoFocus
+                autoComplete='off'
+                className='px-1 py-0 text-micro'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setEditing({ index, value: e.target.value })
                 }
-                if (e.key === 'Escape') setEditing(null);
-              }}
-            />
-          ) : (
-            <>
+                onBlur={() => commitRename(index, editing.value)}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitRename(index, editing.value);
+                  }
+                  if (e.key === 'Escape') setEditing(null);
+                }}
+              />
+            ) : (
               <span className='flex flex-wrap items-center gap-1.5'>
-                <button
-                  type='button'
-                  onClick={() => setViewing(row)}
-                  title={`view ${labelOf(row)}`}
-                  className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
-                >
-                  {labelOf(row)}
-                </button>
-                {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
-                    котором заводят выкройки. Серый нейтральный тон, а не красный. */}
-                {!dxf && <Pill tone='mut'>legacy format</Pill>}
+                {!dxf || rowGroup ? (
+                  <button
+                    type='button'
+                    onClick={() => (rowGroup ? openPieces(rowGroup) : setViewing(row))}
+                    title={nameTitle}
+                    className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
+                  >
+                    {labelOf(row)}
+                  </button>
+                ) : (
+                  <span title={nameTitle} className='min-w-0 truncate text-micro'>
+                    {labelOf(row)}
+                  </span>
+                )}
+                {!dxf && <Pill tone='mut'>pdf</Pill>}
+                {/* «converted» carried no decision: what the importer wrote rides in the name's
+                    tooltip; only the autopilot's «auto · N to check» stays beside the name */}
+                {converted?.autopilot && (
+                  <AutopilotPill
+                    assumptions={converted.autopilot.assumptions}
+                    onCheckPieces={rowGroup ? () => openPieces(rowGroup) : undefined}
+                  />
+                )}
+                {converted && distrust && (
+                  <Pill tone='warn' title={distrust}>
+                    manifest not trusted
+                  </Pill>
+                )}
+                {converted && !!techCardId && converted.techCardId !== techCardId && (
+                  <Pill tone='warn'>converted for card #{converted.techCardId}</Pill>
+                )}
                 {stray && <Pill tone='warn'>size out of range</Pill>}
               </span>
-              {/* When a name is set the filename still matters (it is what the factory's CAD
-                  saved) — keep it readable underneath rather than only in a tooltip. */}
-              {row.name && row.filename && (
-                <span className='block truncate text-nano text-labelColor'>{row.filename}</span>
-              )}
-              {stray && (
-                <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
-                  <Text size='nano' component='span' className='text-error'>
-                    the size of this row is not in the card's range — the server will refuse the save
-                  </Text>
-                  {canEdit && storageSizeId > 0 && (
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
-                      title="re-file the row onto a size that is in the range (the size is only a storage slot)"
-                      onClick={() =>
-                        // Смена size_id — это keyed replacement: сервер перенумерует ревизию
-                        // (MAX+1). Файл при этом тот же, и ни один потребитель размер строки не
-                        // читает.
-                        setValue(`patterns.${index}.sizeId`, storageSizeId, { shouldDirty: true })
-                      }
-                    >
-                      re-file
-                    </Button>
-                  )}
-                </span>
-              )}
-              {/* Cloth binding, editable in place — но ЗА КНОПКОЙ «⇄», а не всегда на виду.
-                  Раньше под заголовком, который уже назвал материал, у каждой строки висел
-                  полноширинный селект со списком всех материалов: поле выбора ответа под самим
-                  ответом, N раз подряд. Перепривязка при этом нужна и остаётся достижимой в один
-                  клик — и она обязана быть достижимой: каждый DXF, залитый до 0260, привязки не
-                  несёт вовсе, и без этого селекта раскладка для таких строк осталась бы догадкой
-                  навсегда. Legacy PDF не трогаем — лист, который читает человек, ни из чего не
-                  кроят.
-
-                  Пишутся ОБА поля разом, через bindingForScope: назначение — то, чем лист
-                  привязан, а строка едет рядом только когда назначение владеет ровно одной.
-                  Записать одно и оставить другое как было — это и есть способ получить лист,
-                  который в панели лежит в одной ткани, а на сервере разрешается в другую. */}
-              {dxf && uploadScopes.length > 0 && (rebinding === index || !rowScope) && (
-                <select
-                  className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
-                  aria-label={`material for ${labelOf(row)}`}
-                  value={rowScope}
-                  disabled={isSubmitting || !canEdit}
-                  onChange={(e) => {
-                    const picked = scopes.find((x) => x.key === e.target.value);
-                    const b = picked
-                      ? bindingForScope(picked)
-                      : { fabricPurpose: '', bomLineKey: '' };
-                    setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, {
-                      shouldDirty: true,
-                    });
-                    setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
-                    setRebinding(null);
-                  }}
-                >
-                  {/* ОДНА пустая опция, с разным текстом. Строка, чью привязку удалили или
-                      переклассифицировали, всё ещё несёт её в форме, и селект показывает пустое —
-                      но «материал не выбран» здесь читалось бы как «оператор не выбирал», а
-                      выбирал: выбор просто перестал на что-то указывать, и это разные новости. */}
-                  <option value=''>
-                    {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
-                      ? 'the binding is lost — pick again'
-                      : 'no material picked'}
-                  </option>
-                  {uploadScopes.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </>
+            )}
+          </div>
+          {meta && (
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {meta}
+            </Text>
           )}
-        </td>
-        <td className='py-1 pr-2 text-nano uppercase tracking-label text-labelColor'>
-          {dxf ? 'dxf' : 'pdf'}
-        </td>
-        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
-          {rev != null ? `v${rev}` : '—'}
-        </td>
-        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
-          {row.sizeBytes ? formatBytes(row.sizeBytes) : '—'}
-        </td>
-        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
-          {uploadedOn ?? '—'}
-        </td>
-        <td className='py-1 text-right'>
-          <span className='inline-flex gap-1'>
+          <span className='inline-flex shrink-0 gap-1'>
+            {stray && canEdit && storageSizeId > 0 && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                // Смена size_id — keyed replacement: сервер перенумерует ревизию, файл тот же.
+                onClick={() =>
+                  setValue(`patterns.${index}.sizeId`, storageSizeId, { shouldDirty: true })
+                }
+              >
+                re-file
+              </Button>
+            )}
             {dxf && uploadScopes.length > 0 && canEdit && (
               <Button
                 type='button'
                 variant='secondary'
                 size='xs'
                 aria-label='rebind pattern'
-                title='rebind the sheet to another material'
                 onClick={() => setRebinding((r) => (r === index ? null : index))}
               >
                 ⇄
               </Button>
+            )}
+            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles) or as PLT for a
+                plotter, cut line on the card's contour layer (a converter manifest overrides). */}
+            {dxf && row.url && (
+              <PatternExportMenu
+                label={labelOf(row)}
+                drawing={async () =>
+                  drawingFromDxf(
+                    await (await fetchMediaBlob(row.url as string)).arrayBuffer(),
+                    labelOf(row),
+                  )
+                }
+                plot={async () => {
+                  const [{ plotFromDxfBytes }, blob] = await Promise.all([
+                    import('lib/pattern-export/plot-dxf'),
+                    fetchMediaBlob(row.url as string),
+                  ]);
+                  return {
+                    plot: await plotFromDxfBytes(
+                      await blob.arrayBuffer(),
+                      labelOf(row),
+                      dxfIndex?.contourLayer,
+                    ),
+                    title: labelOf(row),
+                  };
+                }}
+              />
             )}
             <Button
               type='button'
               variant='secondary'
               size='xs'
               aria-label='rename pattern'
-              title='rename'
               disabled={isSubmitting}
               onClick={() => setEditing({ index, value: row.name ?? '' })}
             >
               ✎
             </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              aria-label='remove pattern'
-              onClick={() => remove(index)}
-            >
-              ✕
-            </Button>
+            <Close size='sm' aria-label='remove pattern' onClick={() => remove(index)} />
           </span>
-        </td>
-      </tr>
+        </div>
+        {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в
+            панели в одной ткани, а на сервере разрешается в другую. */}
+        {dxf && uploadScopes.length > 0 && (rebinding === index || !rowScope) && (
+          <select
+            className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
+            aria-label={`material for ${labelOf(row)}`}
+            value={rowScope}
+            disabled={isSubmitting || !canEdit}
+            onChange={(e) => {
+              const b = bindingOf(e.target.value);
+              setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, { shouldDirty: true });
+              setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
+              setRebinding(null);
+            }}
+          >
+            <option value=''>
+              {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
+                ? 'binding lost, pick again'
+                : 'pick a material'}
+            </option>
+            {uploadScopes.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </li>
     );
   }
 
-  /** Шапка таблицы листов — одна на все три таблицы блока, чтобы колонки читались одинаково. */
-  function sheetHead() {
-    return (
-      <thead>
-        <tr className='border-b border-borderColor text-nano uppercase tracking-label text-labelColor'>
-          <th className='py-1 pr-2 text-left font-normal'>sheet</th>
-          <th className='py-1 pr-2 text-left font-normal'>type</th>
-          <th className='py-1 pr-2 text-right font-normal'>v</th>
-          {/* «вес», а не «размер»: в этом блоке размер — это S/M/L, и рядом стоят «размер вне
-              ряда» и полоска покрытия размеров. Колонка «размер: 2.4 MB» читалась размерной. */}
-          <th className='py-1 pr-2 text-right font-normal'>weight</th>
-          <th className='py-1 pr-2 text-right font-normal'>uploaded</th>
-          <th className='py-1 text-right font-normal' />
-        </tr>
-      </thead>
-    );
-  }
+  const sheetList = (list: Entry[]) => (
+    <ul className='divide-y divide-hairline'>{list.map(renderSheetRow)}</ul>
+  );
 
-  // Покрытие размеров ОДНОЙ полоской чипов вместо фразы «нет в файлах: XS, S».
-  //
-  // Вопрос «каким размером этот материал кроить нечем» — это вопрос про множество, и множество
-  // читается сеткой, а не перечислением через запятую: чтобы увидеть дырку в списке, его надо
-  // прочесть, а в полоске она видна не читая.
+  // Покрытие размеров одной полоской чипов: дырка видна, не читая.
   function renderCoverage(list: Entry[]) {
     const a = audits[sigOf(list)];
-    // Разбор ещё не включён — вкладку не открывали. Состояние существует ровно один кадр после
-    // открытия и на экране не живёт (скрытая вкладка ничего не рисует), но полоска обязана
-    // отвечать на любом входе, а не падать в undefined.
     if (!a || a.phase === 'loading') {
       return (
         <Text size='nano' variant='label' component='span'>
-          parsing the files…
+          parsing…
         </Text>
       );
     }
     if (a.phase === 'error') {
-      // Без кнопки «ещё раз»: полоска живёт ВНУТРИ плитки, а плитка — кнопка выбора материала, и
-      // вложенная кнопка в кнопке невалидна. Повтор стоит строкой отказа под шапкой блока —
-      // одного сорвавшегося скачивания достаточно, чтобы ответ пропал, а причина обычно разовая.
       return (
         <Text size='nano' component='span' className='text-error'>
-          the check failed: {a.message}
+          parse error
         </Text>
       );
     }
     if (a.found.size === 0) {
-      // ДВА РАЗНЫХ ФАКТА ОДНОЙ ФОРМЫ. «Размеров в именах нет» — это молчание разбора, и тон у него
-      // соответствующий; «все блоки помечены UNI» — это ответ автора, и он не про нехватку: такие
-      // детали идут во ВСЕ размеры целиком, покрывать им нечего.
       return (
         <Text size='nano' variant='label' component='span'>
-          {a.uniOnly
-            ? 'the pieces are ungraded (UNI) — they go into every size'
-            : 'there are no sizes in the block names — the file is not graded'}
+          {a.uniOnly ? 'UNI' : 'not graded'}
         </Text>
       );
     }
-    // Пустой ряд — НЕ повод для галочки. Ряд карточки не даёт недостающих по построению, и «все
-    // размеры на месте» читалось бы как проверка, хотя проверять было нечего. Показываем то, что
-    // реально сказали файлы, — это и есть ответ, за которым сюда пришли, когда ряд ещё не набран.
     if (sizeIds.length === 0) {
       return (
         <span className='flex flex-wrap items-center gap-1'>
@@ -1054,9 +1541,6 @@ export function PatternsField({
               {t}
             </Chip>
           ))}
-          <Text size='nano' variant='label' component='span'>
-            the card's range is empty, there is nothing to check against
-          </Text>
         </span>
       );
     }
@@ -1066,604 +1550,680 @@ export function PatternsField({
         {orderSizes(sizeIds).map((id) => {
           const gone = missing.has(id);
           return (
-            <Chip
-              key={id}
-              selected={!gone}
-              tone={gone ? 'error' : 'default'}
-              title={gone ? 'this size is not in the files' : 'present in the files'}
-            >
+            <Chip key={id} selected={!gone} tone={gone ? 'error' : 'default'}>
               {nameOf(id)}
             </Chip>
           );
         })}
-        {missing.size > 0 && (
-          <Text size='nano' component='span' className='text-error'>
-            missing {[...missing].map(nameOf).join(', ')}
-          </Text>
-        )}
       </span>
     );
   }
 
-  /**
-   * Состояние замера площадей ОДНОЙ ткани, строкой на плитке.
-   *
-   * Стоит рядом с покрытием размеров намеренно: это второй факт, который вкладка выкроек знает о
-   * материале и который стоит денег в другом месте экрана. «Не замерены» — не поломка файла, а
-   * незакрытая возможность (костинг не сможет оценить расход по геометрии), поэтому нейтральный
-   * тон; «устарели» — синяя пилюля: состояние mid-flight, требующее человека.
-   */
-  function renderAreaState(scopeKey: string) {
-    const st = areaStateOf(scopeKey);
-    // Несохранённая правка выкроек или связей делает серверный ответ ответом про ВЧЕРАШНИЙ
-    // источник — и это надо сказать там же, где показан сам ответ.
-    const asOf = st.phase !== 'none' && sourceDirty ? ' · from the saved data' : '';
-    if (st.phase === 'stale' || st.phase === 'partial') {
-      return (
-        <span className='flex flex-wrap items-center gap-1'>
-          <Pill tone='attention'>
-            {st.phase === 'stale' ? 'the areas are stale' : 'the areas are measured only in part'}
-          </Pill>
-          <Text size='nano' variant='label' component='span'>
-            {st.phase === 'stale'
-              ? `the measurement was made against other files or links${asOf}`
-              : `some sheets of this fabric are unmeasured: ${st.missing}${asOf}`}
-          </Text>
-        </span>
-      );
-    }
-    return (
-      <Text size='nano' variant='label' component='span'>
-        {st.phase === 'fresh'
-          ? `piece areas measured · ${st.pieces}${asOf}`
-          : 'piece areas are not measured'}
-      </Text>
-    );
-  }
+  // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер.
+  const dropProps = (key: string) =>
+    canDrop
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            e.preventDefault();
+            setDragKey(key);
+          },
+          onDragLeave: () => setDragKey((k) => (k === key ? null : k)),
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            setDragKey(null);
+            routeFiles(key, e.dataTransfer.files);
+          },
+        }
+      : {};
 
-  // ── ПОЛКА: одна плитка на материал карточки ─────────────────────────────────────────────
-  //
-  // Плитка отвечает на три вопроса разом, и все три раньше требовали чтения: чем этот материал
-  // кроится (силуэты), каких размеров в файлах нет (полоска), и есть ли вообще чем кроить
-  // (красный кант со словом). Сводный красный CalloutBox над списком поэтому больше не нужен:
-  // он печатал ровно то же самое второй раз, и «своего DXF нет…» стояло в нём дословно тем же
-  // текстом, что и в пустой группе под ним.
+  // ── СЛОТЫ: одна плитка на материал карточки ─────────────────────────────────────────────
   function renderTile(g: (typeof scopeGroups)[number]) {
     const key = g.scope.key;
     const label = scopeLabel(g.scope);
     const has = g.entries.length > 0;
-    const main = isMainScope(g);
+    const busy = (uploading[key] ?? 0) > 0;
     const blocks = dxfIndex ? countBlocks(dxfIndex, key) : 0;
     const a = audits[sigOf(g.entries)];
     const missing = a?.phase === 'ready' ? missingIn(a) : [];
+    const empty = (
+      <div
+        className={cn(
+          'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
+          canDrop && !busy
+            ? 'border-labelColor text-textColor group-hover/slot:border-textColor'
+            : 'border-borderColor text-labelColor',
+        )}
+      >
+        {busy ? (
+          <span className='text-micro'>uploading…</span>
+        ) : !canDrop ? (
+          <span className='text-micro'>
+            {canUpload ? 'set the size range first' : 'no pattern'}
+          </span>
+        ) : (
+          <>
+            <span className='text-micro'>+ drop pattern files</span>
+            <span className='text-nano text-labelColor'>
+              {importOk ? 'DXF or PDF' : 'DXF'} · one file or one per size
+            </span>
+          </>
+        )}
+      </div>
+    );
     return (
       <div
         key={key}
-        className={dragKey === key ? 'outline outline-2 outline-textColor' : undefined}
-        onDragOver={(e) => {
-          if (!canUpload) return;
-          e.preventDefault();
-          setDragKey(key);
-        }}
-        onDragLeave={() => setDragKey((k) => (k === key ? null : k))}
-        onDrop={(e) => {
-          if (!canUpload) return;
-          e.preventDefault();
-          setDragKey(null);
-          stageDrop(key, e.dataTransfer.files);
-        }}
+        className={cn('group/slot', dragKey === key && 'outline outline-2 outline-textColor')}
+        data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
+        {...dropProps(key)}
       >
         <Tile
-          selected={selectedKey === key}
-          tone={(!has && main) || missing.length > 0 ? 'error' : 'default'}
-          onClick={() => setSelectedKey(key)}
-          // Имя материала в плитке обрезается по ширине дорожки, а различает материалы как раз
-          // хвост («основной материал · Твил 1» и «· Твил 2»), поэтому полное имя обязано
-          // дочитываться наведением — не открывая плитку.
+          selected={has && selectedKey === key}
+          dashed={!has}
+          tone={missing.length > 0 ? 'error' : 'default'}
+          onClick={() => {
+            setSelectedKey(key);
+            if (!has) openPicker(key);
+          }}
           title={label}
           media={
-            has && dxfIndex && blocks > 0 ? (
-              <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-bgZebra p-1'>
+            !has ? (
+              empty
+            ) : busy ? (
+              <Placeholder dashed label='uploading…' className='h-[84px] w-full' />
+            ) : dxfIndex && blocks > 0 ? (
+              <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-pageBg p-1'>
                 <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
               </div>
             ) : (
               <Placeholder
                 dashed
-                tone={!has && main ? 'error' : 'default'}
-                // «формы не разобраны» отсюда ушло вместе с кнопкой: разбор идёт сам, и не
-                // разобранных форм больше не бывает — бывает идущий разбор, упавший разбор и
-                // разобранный файл, в котором для этого материала контуров не нашлось.
-                label={
-                  !has
-                    ? 'no dxf'
-                    : geometry.isError
-                      ? 'parse error'
-                      : dxfIndex
-                        ? 'no shapes found'
-                        : 'parsing…'
-                }
+                label={geometry.isError ? 'parse error' : dxfIndex ? 'no shapes found' : 'parsing…'}
                 className='h-[84px] w-full'
               />
             )
           }
           name={label}
-          sub={
-            has
-              ? `${g.entries.length} ${plural(g.entries.length, 'sheet')}${
-                  blocks > 0 ? ` · ${blocks} blocks` : ''
-                }`
-              : main
-                ? 'there is nothing to cut this material from'
-                : 'it has no DXF of its own — possibly in the main fabric file'
-          }
+          sub={has && blocks > 0 ? `${blocks} ${plural(blocks, 'piece')}` : undefined}
         >
-          {has && (
-            <>
-              <span className='mt-1 block'>{renderCoverage(g.entries)}</span>
-              <span className='mt-1 block'>{renderAreaState(key)}</span>
-            </>
-          )}
+          {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
         </Tile>
       </div>
     );
   }
 
   /** Плитка для того, что материалом не подписано: непривязанные DXF и наследие в PDF. */
-  function renderExtraTile(
-    key: string,
-    name: string,
-    sub: string,
-    list: Entry[],
-    tone: 'default' | 'error',
-  ) {
+  function renderExtraTile(key: string, name: string, list: Entry[]) {
     return (
       <Tile
         key={key}
         dashed
         selected={selectedKey === key}
-        tone={tone}
         onClick={() => setSelectedKey(key)}
         media={
           <Placeholder
             dashed
-            tone={tone}
             label={`${list.length} ${plural(list.length, 'file')}`}
             className='h-[84px] w-full'
           />
         }
         name={name}
-        sub={sub}
       />
     );
   }
 
-  // Панель выбранного материала: действия и листы. Действия висят у ОДНОГО материала — того, с
-  // которым сейчас работают, — а не по четыре штуки в шапке каждой группы разом.
+  const door = 'text-labelColor hover:text-textColor';
+
+  // Панель выбранного слота: файлы и две двери (pieces, marker) + add files.
   function renderSelected() {
     if (selectedKey === LOOSE_KEY) {
       return (
         <div>
-          <GroupLabel>DXF without a material</GroupLabel>
-          <Text size='nano' variant='label' className='mb-1'>
-            uploaded before binding existed, or they lost their BOM line. pick a material on the row
-            — without one neither the width nor the selvedge is computed, and the marker doesn't
-            know what it measures.
-          </Text>
-          <table className='w-full border-collapse text-micro'>
-            {sheetHead()}
-            <tbody>{looseDxf.map(renderSheetRow)}</tbody>
-          </table>
+          <GroupLabel>without a material</GroupLabel>
+          {sheetList(looseDxf)}
         </div>
       );
     }
     if (selectedKey === PDF_KEY) {
       return (
         <div>
-          <GroupLabel>PDF — legacy format</GroupLabel>
-          <Text size='nano' variant='label' className='mb-1'>
-            new patterns are accepted only as DXF: from a PDF you can neither build a marker, nor
-            match its pieces to cut pieces, nor read a size. these files stay on the card and are
-            saved with it — they can be opened and downloaded; to replace one, upload a DXF onto the
-            right material and delete the PDF.
-          </Text>
-          <table className='w-full border-collapse text-micro'>
-            {sheetHead()}
-            <tbody>{pdfEntries.map(renderSheetRow)}</tbody>
-          </table>
+          <GroupLabel>PDF</GroupLabel>
+          {sheetList(pdfEntries)}
         </div>
       );
     }
     const g = scopeGroups.find((x) => x.scope.key === selectedKey);
-    if (!g) return null;
-    const has = g.entries.length > 0;
+    if (!g || g.entries.length === 0) return null;
     const label = scopeLabel(g.scope);
-    // Раскладка мерит КОНКРЕТНЫЙ артикул: ширина и кромка приходят с пина колорвея на одну строку.
-    // Поэтому запереть её на строку можно только когда назначение владеет ровно одной; иначе
-    // модалка спрашивает сама — ровно как она уже делает для DXF без привязки.
+    // Раскладка мерит КОНКРЕТНЫЙ артикул: запереть её на строку можно только когда назначение
+    // владеет ровно одной; иначе модалка спрашивает сама.
     const soleLine = g.scope.lines.length === 1 ? g.scope.lines[0].lineKey : '';
     return (
       <div
         className={dragKey === g.scope.key ? 'outline outline-2 outline-textColor' : undefined}
-        onDragOver={(e) => {
-          if (!canUpload) return;
-          e.preventDefault();
-          setDragKey(g.scope.key);
-        }}
-        onDragLeave={() => setDragKey((k) => (k === g.scope.key ? null : k))}
-        onDrop={(e) => {
-          if (!canUpload) return;
-          e.preventDefault();
-          setDragKey(null);
-          stageDrop(g.scope.key, e.dataTransfer.files);
-        }}
+        {...dropProps(g.scope.key)}
       >
         <GroupLabel
           action={
             <div className='flex flex-wrap items-center gap-1.5'>
-              {has && (
+              {/* `patterns.match` — цель перехода из вкладки операций (запасная — `patterns.shelf`). */}
+              {canEdit && (
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
-                  title={`automatic marker of “${label}” pieces on a strip`}
-                  onClick={() =>
-                    setNesting({
-                      // Размер тут ничего не решает у ГРАДУИРОВАННОГО файла: он выбирается внутри
-                      // по именам блоков, и маркер сохраняется на выбранный. Это запасной вариант
-                      // для НЕградуированного — файла, в именах которого размера нет вовсе: такому
-                      // маркеру размер может дать только карточка.
-                      //
-                      // `||`, а не `??`: у листа без размера (0281) здесь стоит 0, и `??` его бы
-                      // принял как ответ — раскладка неградуированного файла осталась бы
-                      // несохранимой НАВСЕГДА, даже после того как оператор набрал размерный ряд,
-                      // потому что вернуть строке размер в интерфейсе нечем. Пустой ряд по-прежнему
-                      // даёт 0, и модалка честно отказывает: там размера действительно нет.
-                      sizeId: g.entries[0]?.row.sizeId || storageSizeId,
-                      files: filesOf(g.entries),
-                      bomLineKey: soleLine,
-                      // Алиасы ЭТОГО скоупа: одно и то же имя блока на верхе и на подкладе —
-                      // разные детали кроя, и отдать модалке всё подряд значило бы проставить в
-                      // блоб чужой ключ.
-                      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, g.scope)),
-                      // Направление СКОУПА, а не строки: назначение законно владеет несколькими
-                      // артикулами, и согласованность их направлений никто не валидирует.
-                      // Строгое побеждает — одна ворсовая в скоупе делает ворсовым весь скоуп,
-                      // иначе маркер, законный для одной ткани, кладёт вторую ворсом к себе же.
-                      //
-                      // СЕМПЛОВЫЕ строки из ответа выброшены: сервер партиционирует скоуп по
-                      // is_sample (0265, MarkerFabricScope), и непроставленное направление на
-                      // семпловом рулоне иначе объявляло бы «НЕ ЗАДАНО» производственной
-                      // раскладке, которую сервер принял бы. Если в скоупе ОДНА семпловая ярдажа
-                      // и ничего больше — судим по ней, это и есть семпловая раскладка.
-                      //
-                      // Это ЗНАЧЕНИЕ НА СТАРТЕ: сохранить оператор может на любую тканевую строку
-                      // карточки, и модалка пересчитывает направление по выбранному слоту сама.
-                      fabricDirection: strictestDirection(
-                        g.scope.lines.some((l) => !l.isSample)
-                          ? g.scope.lines.filter((l) => !l.isSample)
-                          : g.scope.lines,
-                      ),
-                    })
-                  }
-                >
-                  ⌗ marker
-                </Button>
-              )}
-              {/* Алиас пишется в скоуп ткани, и стор ОТКАЗЫВАЕТ паре (слот, блок), чей слот не
-                  является живой тканевой строкой, — это уронило бы весь сейв карточки из-за
-                  строки, до которой в интерфейсе не добраться.
-
-                  Якорь `patterns.match` — цель перехода из вкладки операций: на карточке с
-                  чертежом деталь заводит ТОЛЬКО эта модалка, ручной «+ piece» там не рендерится.
-                  Кнопка живёт внутри ВЫБРАННОЙ плитки и только когда у той есть файлы, то есть в
-                  DOM её может не быть вовсе — поэтому у перехода есть запасной якорь на полке
-                  (`patterns.shelf` ниже), а не расчёт на «подсветится первая». */}
-              {has && canEdit && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className={door}
                   data-field='patterns.match'
-                  title={`match the DXF pieces to the cut pieces of “${label}”`}
-                  onClick={() =>
-                    setMatching({
-                      scope: g.scope,
-                      fabricName: label,
-                      files: filesOf(g.entries),
-                    })
-                  }
+                  onClick={() => openPieces(g)}
                 >
-                  ↔ cut pieces
+                  pieces
                 </Button>
               )}
-              {/* ЗАМЕР ПЛОЩАДЕЙ — ОТДЕЛЬНОЕ ДЕЙСТВИЕ, И ЖИВЁТ ОНО ЗДЕСЬ.
-                  До него площади можно было записать только применив норму «по выкройкам» на строке
-                  рецепта «на изделие» — то есть на строке, которой у проблемной карточки нет:
-                  серверная оценка снизу существует ровно для слота БЕЗ такой строки, и путь к ней
-                  начинался с её заведения. Круг замкнутый, и разомкнуть его можно только там, где
-                  лежат сами файлы и их разбор.
-                  Гейт — `canEdit` (право писать И не выпущенная карточка), а не `canPublishIndex`:
-                  индекс размеров описывает файлы и на релизе законен, а площади — вход
-                  себестоимости, и менять их на выпущенной карточке нельзя. Карточка без id тоже не
-                  мерит: площадям не на чем висеть. */}
-              {has && canEdit && !!techCardId && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className={door}
+                onClick={() =>
+                  setNesting({
+                    // Запасной размер для НЕградуированного файла; `||`, а не `??`: у листа без
+                    // размера (0281) здесь 0.
+                    sizeId: g.entries[0]?.row.sizeId || storageSizeId,
+                    files: filesOf(g.entries),
+                    bomLineKey: soleLine,
+                    // Алиасы ЭТОГО скоупа: одно имя блока на верхе и на подкладе — разные детали.
+                    aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+                    // Строгое направление скоупа; семпловые строки не голосуют, если есть
+                    // производственные (0265).
+                    fabricDirection: strictestDirection(
+                      g.scope.lines.some((l) => !l.isSample)
+                        ? g.scope.lines.filter((l) => !l.isSample)
+                        : g.scope.lines,
+                    ),
+                  })
+                }
+              >
+                marker
+              </Button>
+              {canDrop && (
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
-                  title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
-                  onClick={() =>
-                    setMeasuring({
-                      scope: g.scope,
-                      label,
-                      // ВСЕ листы скоупа, а не только DXF: сервер считает отпечаток по своему
-                      // составу скоупа, и подмножество он отвергнет как чужой набор.
-                      sheets: sheetsOfScope(g.scope.key),
-                    })
-                  }
+                  size='xs'
+                  className={door}
+                  onClick={() => openPicker(g.scope.key)}
                 >
-                  ∑ piece areas
+                  add files
                 </Button>
-              )}
-              {canUpload && (
-                <PatternUploadButton
-                  label='+ DXF'
-                  dxfOnly
-                  fabricScopes={uploadScopes}
-                  defaultScopeKey={g.scope.key}
-                  onUploaded={(p) =>
-                    append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })
-                  }
-                  // A group header frames no words (owner, item 38): the underlined door.
-                  quiet
-                />
               )}
             </div>
           }
         >
-          {label}
+          {/* the tile above already names the material (it is the selected one): the files */}
+          files
         </GroupLabel>
-        {has ? (
-          <table className='w-full border-collapse text-micro'>
-            {sheetHead()}
-            <tbody>{g.entries.map(renderSheetRow)}</tbody>
-          </table>
-        ) : (
-          <Text
-            size='micro'
-            component='p'
-            className={isMainScope(g) ? 'text-error' : 'text-labelColor'}
-          >
-            {isMainScope(g)
-              ? 'there is nothing to cut this material from'
-              : 'it has no DXF of its own — the pieces may be in the main fabric file'}
-            {canUpload ? ' — drop a DXF here or press “+ DXF”' : ''}
-          </Text>
-        )}
+        {sheetList(g.entries)}
       </div>
     );
   }
 
+  // Мастер импорта: только с файлами, брошенными на слот.
+  const renderImportWizard = () =>
+    techCardId && importing ? (
+      <Suspense fallback={null}>
+        <ImportWizard
+          initialFiles={importing.files}
+          initialScopeKey={importing.scopeKey}
+          card={buildCardContext({
+            techCardId,
+            orderedSizeIds: orderSizes(sizeIds),
+            sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+            rawSizeName: (id) => sizeById.get(id),
+            scopes: scopes.map((sc) => ({
+              key: sc.key,
+              byPurpose: sc.byPurpose,
+              label: scopeLabel(sc),
+              binding: bindingForScope(sc),
+              sections: sc.lines.map((l) => l.section),
+            })),
+            pieces: cardPieces,
+            aliases: pieceDxfAliases.map((a) => ({
+              scopeKey: aliasScopeKey(a),
+              blockName: a.blockName,
+              pieceLineKey: a.pieceLineKey,
+            })),
+            patterns: liveRows.map((p) => ({
+              scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+              filename: p.filename,
+              url: p.url,
+              lineKey: p.lineKey,
+              name: p.name,
+              manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
+            })),
+            styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+            cardName,
+            styleNumber,
+          })}
+          // F7: upload every file, then ONE batch into this form, then the card's own save.
+          applyDraft={followUpApply(
+            createCardApply({
+              read: () => ({
+                patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
+                pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
+                aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
+              }),
+              write: (path, value) =>
+                setValue(path as Parameters<typeof setValue>[0], value as never, {
+                  shouldDirty: true,
+                }),
+              storageSizeId,
+              save: (reason) => autosave.flush(reason),
+              unsaved: {
+                get: () => importUnsaved.current,
+                set: (v) => {
+                  importUnsaved.current = v;
+                },
+              },
+            }),
+          )}
+          followUp={followUp?.rows ?? null}
+          onRetryFollowUp={retryFollowUp}
+          onReviewPieces={(scopeKey) => {
+            const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+            if (!g || g.entries.length === 0) return;
+            setImporting(null);
+            setSelectedKey(scopeKey);
+            openPieces(g);
+          }}
+          onClose={() => setImporting(null)}
+        />
+      </Suspense>
+    ) : null;
+
+  // ── ШАПКА БЛОКА: счёт и предупреждения (portal в action секции) ─────────────────────────
+  // Each warning carries its fix where this screen has one (owner, patterns-lite round 2).
+  const withFiles = (k: string) =>
+    scopeGroups.find((g) => g.scope.key === k && g.entries.length > 0);
+  // The pieces viewer of a slot; without a known slot, the selected one, else the first with files.
+  const piecesDoor = (scopeKey?: string): HeaderWarningAction | undefined => {
+    const g =
+      (scopeKey ? withFiles(scopeKey) : undefined) ??
+      (selectedKey ? withFiles(selectedKey) : undefined) ??
+      scopeGroups.find((x) => x.entries.length > 0);
+    return g
+      ? {
+          label: 'open pieces',
+          onClick: () => {
+            setSelectedKey(g.scope.key);
+            openPieces(g);
+          },
+        }
+      : undefined;
+  };
+  // DEEP LINK from COLOURWAYS: `?tab=patterns&marker=<bomLineKey>[&auto=1]`. Opens the marker of
+  // the slot holding that line exactly as its «marker» button does (lock = that line), once per
+  // link, then drops `marker`/`auto` from the URL so a reload does not reopen it. Waits for the
+  // card's BOM to reach the form; a slot without DXF gets scrolled to and pulsed instead.
+  const deepMarker = params.get('marker') ?? '';
+  const deepAuto = params.get('auto') === '1';
+  const deepColorway = Number(params.get('markerColorway') ?? 0) || 0;
+  // Identity-stable; `peek` reads the staged list without subscribing this panel to it.
+  const staging = useTechCardStaging();
+  const deepHandled = useRef('');
+  useEffect(() => {
+    if (!deepMarker) {
+      deepHandled.current = '';
+      return;
+    }
+    if (deepHandled.current === deepMarker) return;
+    const g = scopeGroups.find((x) => x.scope.lines.some((l) => l.lineKey === deepMarker));
+    // BOM not in the form yet: wait. A card whose BOM loaded without that line falls through.
+    if (!g && scopes.length === 0) return;
+    deepHandled.current = deepMarker;
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('marker');
+        p.delete('auto');
+        p.delete('markerColorway');
+        return p;
+      },
+      { replace: true },
+    );
+    if (g && g.entries.length > 0) {
+      setSelectedKey(g.scope.key);
+      setNesting({
+        sizeId: g.entries[0]?.row.sizeId || storageSizeId,
+        files: filesOf(g.entries),
+        bomLineKey: deepMarker,
+        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+        fabricDirection: strictestDirection(
+          g.scope.lines.some((l) => !l.isSample)
+            ? g.scope.lines.filter((l) => !l.isSample)
+            : g.scope.lines,
+        ),
+        // Unsaved recipe edits on that colourway = the saved pin may be stale: open, never run.
+        autoRun:
+          deepAuto &&
+          !(
+            deepColorway && (staging?.peek() ?? []).some((c) => c.key === `recipe:${deepColorway}`)
+          ),
+        colorwayId: deepColorway || undefined,
+      });
+      return;
+    }
+    // No pattern for that fabric: show its slot (anchor on the tile), else the shelf.
+    if (g) setSelectedKey(g.scope.key);
+    const anchor = g ? `patterns.slot.${g.scope.lines[0]?.lineKey ?? deepMarker}` : '';
+    window.setTimeout(() => {
+      if (!anchor || !revealField(anchor)) revealField('patterns.shelf');
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepMarker, scopeGroups, scopes.length]);
+  // autoRun waits until the deep link's colourway is known from the SAVED card and its pinned
+  // article for that line is loaded — otherwise the run would measure the BOM line's width.
+  const nestingCwReady = (() => {
+    if (!nesting?.colorwayId) return true;
+    const cw = colorwayOptions.find((c) => c.colorwayId === nesting.colorwayId);
+    if (!cw) return false;
+    const pin = cw.widthByLine.get(nesting.bomLineKey);
+    return !pin || materialById.has(pin.materialId ?? 0);
+  })();
+  // The size range lives on its own SIZES tab now (index.tsx). The door switches the card there —
+  // a sibling `hidden` panel, already mounted — and revealField pulses its `data-field` anchor.
+  const sizeRangeDoor: HeaderWarningAction | undefined = headerEl
+    ? {
+        label: 'open size range',
+        onClick: () => {
+          setParams(
+            (prev) => {
+              const p = new URLSearchParams(prev);
+              p.set('tab', 'sizes');
+              p.delete('sample');
+              p.delete('fits');
+              return p;
+            },
+            { replace: true },
+          );
+          window.setTimeout(() => revealField('sizeIds'), 0);
+        },
+      }
+    : undefined;
+  const reparse: HeaderWarningAction = { label: 'retry', onClick: () => void geometry.refetch() };
+
+  const pieceErrors: HeaderWarning[] = [];
+  for (const [k, v] of Object.entries((errors.pieces ?? {}) as Record<string, unknown>)) {
+    const i = Number(k);
+    const piece = Number.isInteger(i) ? cardPieces[i] : undefined;
+    const who = Number.isInteger(i) ? piece?.name?.trim() || `#${i + 1}` : '';
+    // A piece has no fabric of its own: its slot is the one its DXF block is linked in.
+    const linked = piece?.lineKey
+      ? pieceDxfAliases.find((a) => a.pieceLineKey === piece.lineKey)
+      : undefined;
+    const slot = linked
+      ? scopeKeyOfBinding(linked.fabricPurpose, linked.bomLineKey, scopes)
+      : undefined;
+    for (const m of messagesOf(v))
+      pieceErrors.push({
+        text: who ? `piece ${who}: ${m}` : `pieces: ${m}`,
+        error: true,
+        action: piecesDoor(slot),
+      });
+  }
+  for (const [k, v] of Object.entries((errors.pieceDxfAliases ?? {}) as Record<string, unknown>)) {
+    const i = Number(k);
+    const alias = Number.isInteger(i) ? pieceDxfAliases[i] : undefined;
+    const who = Number.isInteger(i) ? alias?.blockName?.trim() || `#${i + 1}` : '';
+    const slot = alias
+      ? scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, scopes)
+      : undefined;
+    for (const m of messagesOf(v))
+      pieceErrors.push({
+        text: who ? `piece ${who}: ${m}` : `pieces: ${m}`,
+        error: true,
+        action: piecesDoor(slot),
+      });
+  }
+  const followUpFailures: HeaderWarning[] = !importing
+    ? (followUp?.rows ?? []).flatMap((r) =>
+        (['areas', 'sizeIndex'] as const)
+          .filter((step) => r[step].state === 'failed')
+          .map((step) => ({
+            text: `${r.label}: ${step === 'areas' ? 'piece areas' : 'size index'} not saved, ${r[step].detail}`,
+            error: true,
+            action: {
+              label: 'retry',
+              onClick: () => retryFollowUp({ scopeKey: r.scopeKey, step }),
+            },
+          })),
+      )
+    : [];
+  const unitsWarning: HeaderWarning | null =
+    unitless.length > 0
+      ? {
+          text: `units guessed: ${unitless.length} ${plural(unitless.length, 'sheet')}`,
+          action: canEdit
+            ? {
+                label: unitsFetching ? 'set units…' : 'set units',
+                onClick: () => void setUnitsOfExisting(),
+                disabled: unitsFetching || isSubmitting,
+              }
+            : undefined,
+        }
+      : null;
+  const outOfRangeAction: HeaderWarningAction | undefined =
+    canEdit && storageSizeId > 0
+      ? {
+          label: 're-file',
+          disabled: isSubmitting,
+          onClick: () => {
+            for (const e of outOfRange)
+              setValue(`patterns.${e.index}.sizeId`, storageSizeId, { shouldDirty: true });
+          },
+        }
+      : sizeRangeDoor;
+  const parserWarnings: HeaderWarning[] = (geometry.data?.warnings ?? [])
+    .filter((w) => !w.includes(UNITS_GUESS))
+    .map((w) => (isFetchFailure(w) ? { text: w, action: reparse } : w));
+  const missingSizeWarnings: HeaderWarning[] = missingSizeNotes.map((text) => ({
+    text,
+    action: sizeRangeDoor,
+  }));
+  const noPatternWarnings: HeaderWarning[] = materialsWithoutDxf.map((g) => ({
+    text: `${scopeLabel(g.scope)}: no pattern`,
+    action: canDrop
+      ? { label: 'add files', onClick: () => openPicker(g.scope.key) }
+      : canUpload
+        ? sizeRangeDoor
+        : undefined,
+  }));
+  const looseWarning: HeaderWarning | null =
+    looseDxf.length > 0
+      ? {
+          text: `without a material: ${looseDxf.length}`,
+          action:
+            canEdit && uploadScopes.length > 0
+              ? {
+                  label: 'choose material',
+                  onClick: () => {
+                    // The loose panel shows a material select on every unbound row.
+                    setSelectedKey(LOOSE_KEY);
+                    requestAnimationFrame(() =>
+                      headerEl
+                        ?.closest('section')
+                        ?.querySelector<HTMLSelectElement>('select[aria-label^="material for"]')
+                        ?.focus(),
+                    );
+                  },
+                }
+              : undefined,
+        }
+      : null;
+  const indexWarnings: HeaderWarning[] = Object.entries(indexFailures).flatMap(([sig, reason]) => {
+    const g = scopeGroups.find((x) => x.entries.length > 0 && sigOf(x.entries) === sig);
+    if (!g) return [];
+    return [
+      {
+        text: `size index not saved: ${reason}`,
+        action: {
+          label: 'retry',
+          onClick: () => void publishIndexForRef.current(g.scope.key, true),
+        },
+      },
+    ];
+  });
+  // Auto piece-area refusals: a fix only where the reason has one on this screen.
+  const areaFix = (k: string, reason: string): HeaderWarningAction | undefined => {
+    if (reason.includes('no piece linked') || reason.includes('linked pieces missing'))
+      return piecesDoor(k);
+    if (reason.includes('download failed') || reason.includes('could not be parsed'))
+      return reparse;
+    if (reason.includes('no size range')) return sizeRangeDoor;
+    return undefined;
+  };
+  const areaWarnings: HeaderWarning[] = Object.entries(areaRefusals).map(([k, reason]) => ({
+    text: `${scopeLabelByKey.get(k) ?? 'pattern'}: ${reason}`,
+    action: areaFix(k, reason),
+  }));
+  const warnings: HeaderWarning[] = [
+    ...pieceErrors,
+    geometry.isError && {
+      text: `parsing failed: ${geometry.error?.message ?? 'reason unknown'}`,
+      error: true,
+      action: reparse,
+    },
+    outOfRange.length > 0 && {
+      text: `size out of range: ${outOfRange.length} ${plural(outOfRange.length, 'sheet')}`,
+      error: true,
+      action: outOfRangeAction,
+    },
+    ...followUpFailures,
+    unitsWarning,
+    ...parserWarnings,
+    ...missingSizeWarnings,
+    ...noPatternWarnings,
+    looseWarning,
+    ...indexWarnings,
+    ...areaWarnings,
+  ].filter((w): w is HeaderWarning => !!w);
+  const withoutPattern = scopeGroups.filter((g) => g.entries.length === 0).length;
+  const header = (
+    <>
+      {geometry.isFetching && <HeaderNote>parsing…</HeaderNote>}
+      {scopeGroups.length > 0 && (
+        <HeaderNote>
+          materials: {scopeGroups.length} · without pattern: {withoutPattern}
+        </HeaderNote>
+      )}
+      <HeaderWarnings items={warnings} />
+    </>
+  );
+  const headerPortal = headerEl ? createPortal(header, headerEl) : null;
+
   if (fields.length === 0 && fabricBomLines.length === 0) {
     return (
-      <Text size='micro' variant='label'>
-        add fabric lines in the BOM — a pattern binds to a material.
-        {sizeIds.length === 0
-          ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
-          : ''}
-      </Text>
+      <>
+        {headerPortal}
+        {/* owner 17.10: the empty block is the door that creates the fabric slot — the BOM tab
+            opens with the catalog picker already on the fabric section (bom-field reads addSlot) */}
+        {canEdit ? (
+          <button
+            type='button'
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.set('tab', 'bom');
+              next.set('addSlot', 'TECH_CARD_BOM_SECTION_FABRIC');
+              setParams(next, { replace: true });
+            }}
+            style={PLACEHOLDER_SURFACE}
+            className={cn(
+              placeholderClass({ dashed: true }),
+              'h-[84px] w-full cursor-pointer hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+            )}
+          >
+            + fabric slot
+          </button>
+        ) : (
+          <Placeholder
+            dashed
+            label='add fabric lines in the BOM first'
+            className='h-[84px] w-full'
+          />
+        )}
+      </>
     );
   }
 
   return (
     <div className='space-y-2.5'>
-      {/* Панель блока: состояние слева, действия справа. Разбор в действиях больше не стоит — он
-          идёт сам, — и от него здесь осталось только слово о том, что он ИДЁТ: скачивание файлов
-          занимает секунды, и без него плитки просто молчат. */}
-      <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
-        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          materials: {scopeGroups.length}
-        </Text>
-        {materialsWithoutDxf.length > 0 && (
-          <HeaderNote tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
-            without DXF: {materialsWithoutDxf.length}
-          </HeaderNote>
-        )}
-        {missingSizeNotes.length > 0 && (
-          <HeaderNote tone='warn' title={missingSizeNotes.join('; ')}>
-            size gaps: {missingSizeNotes.length}
-          </HeaderNote>
-        )}
-        {looseDxf.length > 0 && (
-          <HeaderNote tone='attention'>without a material: {looseDxf.length}</HeaderNote>
-        )}
-        <div className='ml-auto flex flex-wrap items-center gap-1.5'>
-          {geometry.isFetching && (
-            <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-              parsing the files…
-            </Text>
-          )}
-          {canUpload && (
-            <>
-              {/* Склейка стоит РЯДОМ с загрузкой, а не внутри неё: это другой вход — не «положить
-                  файл», а «собрать файл из пяти». Внутри «+ DXF» её пришлось бы объяснять каждому,
-                  кто просто хочет положить готовый чертёж. */}
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                onClick={() => setMerging(true)}
-                title='CLO exports the seam allowance only for the current size — merge the sizes into one drawing'
-              >
-                merge sizes
-              </Button>
-              <PatternUploadButton
-                label='+ DXF'
-                dxfOnly
-                fabricScopes={uploadScopes}
-                defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
-                onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-                quiet
-              />
-            </>
-          )}
-        </div>
-      </div>
+      {headerPortal}
+      {!headerEl && <div className='flex flex-wrap items-center gap-1.5'>{header}</div>}
 
-      {/* Отказ общего разбора и выпавшие из пачки листы — вслух. Молчащий разбор оставлял плитки в
-          «формы не разобраны» без причины, а лист, не скачавшийся с CDN, исчезал из счёта блоков и
-          из миниатюры без единого слова: его детали просто «не находились».
-          «ещё раз» — единственная оставшаяся кнопка разбора, и она появляется ТОЛЬКО на отказе:
-          сорвавшееся скачивание обычно разовое, а повторить его иначе нечем — автостарт уже
-          отработал и сам себя не перезапустит. */}
-      {geometry.isError && (
-        <div className='flex flex-wrap items-center gap-1.5'>
-          <Text size='nano' component='span' className='text-error'>
-            parsing the files failed: {geometry.error?.message ?? 'reason unknown'} — there is
-            nothing to show the silhouettes or the size coverage from
-          </Text>
-          <Button type='button' variant='secondary' size='xs' onClick={() => geometry.refetch()}>
-            again
-          </Button>
-        </div>
-      )}
-      {(geometry.data?.warnings ?? []).map((w) => (
-        <Text key={w} size='nano' component='p' className='text-error'>
-          {w}
-        </Text>
-      ))}
-      {/* Индекс размеров не записался. Отдельно от разбора: показанному на плитках ответу отказ
-          записи не мешает — он мешает ГЕЙТУ ГОТОВНОСТИ прогона, который без индекса так и будет
-          отвечать «никто не проверял». Почти всегда лечится сохранением карточки.
-          Печатаются только отказы ЖИВЫХ наборов: набор, чьи файлы с тех пор перезалили или
-          отвязали, больше не существует — его подпись некому пересобрать, и красная строка про
-          него висела бы вечно, требуя починить то, чего уже нет. */}
-      {Object.entries(indexFailures)
-        .filter(([sig]) =>
-          scopeGroups.some((g) => g.entries.length > 0 && sigOf(g.entries) === sig),
-        )
-        .map(([sig, reason]) => (
-          <Text key={sig} size='nano' component='p' className='text-error'>
-            the size index was not saved — {reason}
-          </Text>
-        ))}
+      <input
+        ref={fileInputRef}
+        type='file'
+        multiple
+        accept={importOk ? SLOT_ACCEPT_ALL : SLOT_ACCEPT_DXF}
+        className='sr-only'
+        tabIndex={-1}
+        aria-hidden
+        onChange={(e) => {
+          routeFiles(pickFor.current, e.target.files);
+          // Reset so re-picking the same file re-fires onChange.
+          e.target.value = '';
+        }}
+      />
 
-      {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
-          карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
-          материале, и увидеть его, не открыв нужную плитку, было бы нельзя. Всё остальное, что
-          раньше стояло в этом callout'е, теперь написано на самих плитках. */}
-      {outOfRange.length > 0 && (
-        <CalloutBox tone='error'>
-          <Text size='micro' component='p'>
-            <b>out of the size range:</b> {outOfRange.length}{' '}
-            {outOfRange.length === 1 ? 'row will reject' : 'rows will reject'} the save of the card
-            — open their material and press “re-file”.
-          </Text>
-        </CalloutBox>
+      {followUp && techCardId && followUpPending(followUp.rows) && (
+        <Suspense fallback={null}>
+          <ImportFollowUpRunner
+            job={followUp}
+            techCardId={techCardId}
+            scopes={scopes}
+            sheetsOfScope={sheetsOfScope}
+            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc))}
+            sizeIds={sizeIds}
+            savedSizeIds={savedSizeIds}
+            sizeNameById={sizeById}
+            sourceDirty={sourceDirty}
+            publishIndex={(k, force) => publishIndexForRef.current(k, force)}
+            onRows={(id, rows) => setFollowUp((j) => (j && j.id === id ? { ...j, rows } : j))}
+          />
+        </Suspense>
       )}
 
-      {fabricBomLines.length === 0 && (
-        <Text size='micro' variant='label'>
-          there are no fabric lines in the BOM — a pattern has nothing to bind to. add the main
-          fabric (and lining / interlining / insulation, if there are any) on the BOM tab.
-        </Text>
-      )}
-
-      {/* Полка рисуется, когда есть ХОТЬ ОДНА плитка, а не когда есть тканевые строки BOM. Плитки
-          «без материала» и «PDF» строятся и без скоупов вовсе, а таблицы этих файлов живут только
-          внутри ВЫБРАННОЙ плитки — так что гейт по `fabricBomLines` прятал их целиком. Карточка, у
-          которой тканевые строки удалили или переклассифицировали, показывала счётчик «без
-          материала: N» и ни одного способа открыть, переименовать или удалить эти файлы, а callout
-          выше советовал «откройте их материал», которого не существует. */}
+      {/* Якорь `patterns.shelf` — цель перехода из вкладки операций: сетка слотов стоит всегда. */}
       {shelfKeys.length > 0 && (
         <>
-          {/* 200, а не 158: в этой плитке живут миниатюра, имя материала, счёт листов, ПОЛОСА
-              РАЗМЕРОВ (до восьми чипов) и строка замера площадей. На 158 полоса переносилась на
-              три ряда, а имя обрезалось до роли — то есть плитка переставала отвечать на то, ради
-              чего её и открывают: каким размером этот материал кроить нечем. */}
-          {/* Якорь `patterns.shelf` — ЗАПАСНАЯ цель перехода из вкладки операций. Основная цель,
-              кнопка «↔ детали кроя», живёт внутри ВЫБРАННОЙ плитки и только у плитки с файлами:
-              оператор, оставивший выбранной пустую ткань, «без материала» или PDF, пришёл бы на
-              вкладку, где подсвечивать нечего, и переход молча ничего бы не сделал. Полка же
-              стоит всегда, и подсветка на ней говорит ровно верное: «выбери материал, дальше
-              кнопка». */}
           <div data-field='patterns.shelf'>
             <Tiles min={200}>
               {scopeGroups.map(renderTile)}
-              {looseDxf.length > 0 &&
-                renderExtraTile(
-                  LOOSE_KEY,
-                  'without a material',
-                  'the marker and the cut pieces are unavailable',
-                  looseDxf,
-                  // НЕ error: файл не сломан, у него просто ещё не выбрана ткань, а пилюля этого же
-                  // дефекта в шапке блока — синяя (mid-flight). Красная плитка рядом с синей пилюлей
-                  // читалась бы как два разных дефекта. Синего тона у Tile нет, поэтому состояние
-                  // здесь несут пунктирный кант и слова «без материала» / «недоступны».
-                  'default',
-                )}
-              {pdfEntries.length > 0 &&
-                renderExtraTile(PDF_KEY, 'PDF', 'legacy format', pdfEntries, 'default')}
+              {looseDxf.length > 0 && renderExtraTile(LOOSE_KEY, 'without a material', looseDxf)}
+              {pdfEntries.length > 0 && renderExtraTile(PDF_KEY, 'PDF', pdfEntries)}
             </Tiles>
           </div>
           {renderSelected()}
         </>
       )}
 
-      {/* Пустой ряд больше не блокирует загрузку — но и молчать о нём нельзя: без ряда раскладку
-          сохранить не выйдет (маркер кладётся на КОНКРЕТНЫЙ размер карточки, и токен из имени блока
-          ему не во что резолвить), а проверка размеров отвечать будет, но сверять найденное станет
-          не с чем. Это не ошибка карточки, поэтому нейтральный тон. */}
-      {sizeIds.length === 0 && fabricBomLines.length > 0 && (
-        <Text size='micro' variant='label'>
-          the size range is not set — DXFs upload and open as usual, and a sheet is stored sizeless
-          (the sizes live in the file itself anyway). the range is needed to SAVE a marker: a marker
-          lands on a specific size of the card. which sizes are in the files, the strip on the tile
-          shows by itself, and “↔ cut pieces” adds the unambiguous ones into the card's range.
-        </Text>
-      )}
+      {renderImportWizard()}
 
-      {/* Объяснение материи — В ПОДВАЛЕ, а не над полкой. Оно верное и нужное, но это справка, а
-          не ответ: наверху блока оно стояло между вопросом и ответом и читалось раньше их. */}
-      <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1.5'>
-        patterns are DXF, by MATERIAL. one drawing carries the whole size range: the size is written
-        in the block names, is picked when viewing and in the marker, and the card collects the
-        missing sizes from the file by itself. that is why a file binds to a material — main fabric,
-        lining, interlining, insulation — and one material may have several files (the main fabric
-        and the pocketing are two different BOM lines). the colourway does not affect the file — the
-        pattern pieces are shared — but the article and its width are substituted per colourway.
-      </Text>
-
-      {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
-          материала — грузится он как любая другая выкройка, потому что после склейки он и есть
-          обычный градуированный чертёж. */}
       {merging && (
         <Suspense fallback={null}>
           <MergeSizesModal
-            open={merging}
-            onClose={() => setMerging(false)}
-            onReady={(file) => {
-              setMerging(false);
-              setDroppedOn({ scopeKey: selectedKey ?? uploadScopes[0]?.key ?? '', files: [file] });
+            open
+            initialFiles={merging.files}
+            scopeKey={merging.scopeKey}
+            onClose={() => setMerging(null)}
+            onReady={(file, scopeKey) => {
+              setMerging(null);
+              void directUpload(scopeKey ?? merging.scopeKey, file);
             }}
           />
         </Suspense>
       )}
 
-      {/* Naming modal for drops onto a material (click uploads carry their own inside the
-          button). Размер не спрашивается: их в файле несколько. */}
-      <PatternUploadModal
-        files={droppedOn?.files ?? null}
-        onClose={() => setDroppedOn(null)}
-        onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-        fabricScopes={uploadScopes}
-        defaultScopeKey={droppedOn?.scopeKey}
-        dxfOnly
-      />
-
-      {/* In-app PDF viewer, kept for the legacy rows: the browser renders the sheet inside the
-          modal; a fallback link opens it in a new tab if the storage host refuses to be framed. */}
+      {/* In-app PDF viewer, kept for the legacy rows. */}
       <ConfirmationModal
         open={viewing != null && !isDxfUrl(viewing.url)}
         onOpenChange={(o) => {
@@ -1694,29 +2254,30 @@ export function PatternsField({
         </div>
       </ConfirmationModal>
 
-      {/* Просмотр DXF — НАШИМ листом, с выбором размера и слоёв. WebGL-вьювер рисовал файл
-          целиком, а градуированный чертёж это пять размеров сразу: каша, в которой ничего не
-          разобрать, и никакого способа посмотреть один размер. Здесь та же геометрия, по
-          которой считается раскладка, так что увиденное и посчитанное не расходятся. */}
-      {viewing && isDxfUrl(viewing.url) && (
-        <Suspense fallback={null}>
-          <DxfSheetViewer
-            files={[{ name: labelOf(viewing), url: viewing.url! }]}
-            title={labelOf(viewing)}
-            onClose={() => setViewing(null)}
-          />
-        </Suspense>
-      )}
+      <DxfUnitsDialog
+        items={unitsAsk?.items ?? null}
+        busy={unitsBusy}
+        onCancel={() => unitsAsk?.cancel()}
+        onConfirm={async (units) => {
+          if (!unitsAsk) return;
+          setUnitsBusy(true);
+          try {
+            await unitsAsk.confirm(units);
+          } finally {
+            setUnitsBusy(false);
+          }
+        }}
+      />
+
+      <DxfSizesDialog
+        ask={sizesAsk?.ask ?? null}
+        onCancel={() => sizesAsk?.cancel()}
+        onConfirm={(picks) => sizesAsk?.confirm(picks)}
+      />
 
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
       {nesting && (
-        <Suspense
-          fallback={
-            <Text size='micro' variant='label'>
-              loading the marker module…
-            </Text>
-          }
-        >
+        <Suspense fallback={null}>
           <NestingModal
             files={nesting.files}
             sizeLabel=''
@@ -1732,84 +2293,27 @@ export function PatternsField({
             season={season}
             styleNumber={styleNumber}
             pieceAliases={nesting.aliases}
+            requiredSeamAllowanceMm={cardSeamAllowanceMm}
+            autoRun={!!nesting.autoRun && nestingCwReady}
+            initialColorwayId={nesting.colorwayId}
             onClose={() => setNesting(null)}
           />
         </Suspense>
       )}
 
-      {/* Замер площадей деталей одной ткани. Пишет ТОЛЬКО площади: ни нормы, ни рецепта, ни одного
-          поля формы карточки он не трогает — поэтому и стоит рядом с файлами, а не в деньгах. */}
-      {measuring && techCardId && (
-        <Suspense
-          fallback={
-            <Text size='micro' variant='label'>
-              loading the DXF parsing module…
-            </Text>
-          }
-        >
-          <PieceAreasDialog
-            techCardId={techCardId}
-            scope={measuring.scope}
-            scopeLabel={measuring.label}
-            sheets={measuring.sheets}
-            aliases={pieceDxfAliases.filter((a) => aliasInScope(a, measuring.scope))}
-            sizeIds={sizeIds}
-            // Ряд, который СЕРВЕР считает рядом карточки. Замер идёт по ряду ФОРМЫ, а принимает его
-            // сервер по своему — и модалка «↔ детали кроя» растит ряд формы сама, молча, от одного
-            // своего открытия. Без этой пары диалогу нечем заметить расхождение до отказа сервера.
-            savedSizeIds={savedSizeIds}
-            sizeNameById={sizeById}
-            current={areaStateOf(measuring.scope.key)}
-            // Выкройки или связи блок→деталь правлены и НЕ СОХРАНЕНЫ. Диалог обязан на этом
-            // остановиться: сопоставление пишет только в форму (setValue), сервер несохранённых
-            // связей не видит физически — и отвечает отказом «у скоупа нет связей блок→деталь»
-            // на набор, который оператор прямо перед собой видит связанным.
-            sourceDirty={sourceDirty}
-            // РАСКРОЙНАЯ ШИРИНА СКОУПА — ТОЛЬКО ЧТОБЫ НАЗВАТЬ ПОРЯДОК ВЕЛИЧИНЫ, в расчёт площадей
-            // она не входит. Считается ОБЩИМ резолвером (slotCutWidth: рулон − 2×кромка), а не
-            // вторым выражением здесь: разойдись они, к рулону на одной поверхности вычли бы кромку,
-            // а на другой нет — те самые 2–4%, которых никто не заметит.
-            //
-            // Назначение законно владеет НЕСКОЛЬКИМИ строками BOM, и ширины у них могут не совпасть.
-            // Тогда ширины нет: делить площадь на «какую-нибудь из двух» и печатать результат как
-            // факт — хуже, чем не печатать ничего.
-            //
-            // СТРОКА БЕЗ ШИРИНЫ ТОЖЕ ГАСИТ ОТВЕТ, а не выбывает из голосования. Соблазн считать
-            // «незаполненная не спорит» и делить на единственную известную — это ровно подстановка
-            // номинала вместо неизвестного: у той строки может быть своя ширина, просто её не
-            // внесли, и напечатанная длина утверждала бы про скоуп то, чего никто не проверял.
-            cuttingWidthCm={(() => {
-              const cut = measuring.scope.lines.map((l) => slotCutWidth(l).cutCm);
-              if (cut.some((w) => !Number.isFinite(w) || w <= 0)) return undefined;
-              const widths = new Set(cut);
-              return widths.size === 1 ? [...widths][0] : undefined;
-            })()}
-            onClose={() => setMeasuring(null)}
-          />
-        </Suspense>
-      )}
-
-      {/* Сопоставление блоков DXF с деталями кроя — тот же ленивый чанк (общий воркер разбора). */}
+      {/* Просмотр деталей слота — тот же ленивый чанк (общий воркер разбора). */}
       {matching && (
-        <Suspense
-          fallback={
-            <Text size='micro' variant='label'>
-              loading the DXF parsing module…
-            </Text>
-          }
-        >
+        <Suspense fallback={null}>
           <PieceMatchModal
             files={matching.files}
             scope={matching.scope}
             fabricName={matching.fabricName}
             scopeLabelByKey={scopeLabelByKey}
             sizeLabel=''
-            // Состав потерь для деталей, которых в перезалитом чертеже больше нет. Обе величины
-            // живут ТОЛЬКО в ответе сервера: рецепт колорвеев правится своим RPC, площади пишет
-            // SaveTechCardPieceAreas — в форме карточки их нет ни в каком виде. Тот же `cardRead`,
-            // из которого панель выкроек читает состояние замера.
+            // Состав потерь живёт только в ответе сервера (рецепт колорвеев, площади).
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
+            techCardId={techCardId}
             onClose={() => setMatching(null)}
           />
         </Suspense>

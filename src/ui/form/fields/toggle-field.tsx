@@ -1,5 +1,5 @@
 import { useFormContext } from 'react-hook-form';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { ToggleSwitch } from '../../components/toggle-switch';
 import { FormControl, FormField, FormItem } from '..';
 
 type Props = {

@@ -5,15 +5,17 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { publicFilePageUrl, shareTokenOf } from 'components/file-share-viewer/link';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Avatar,
+  Button,
+  CalloutBox,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Pill,
+  Text,
+} from 'ui';
 import {
   ACCESS_LEVEL_BADGE,
   ACCESS_LEVEL_HINT,
@@ -465,9 +467,7 @@ export function FileAccessSection({
                   }}
                   className={`flex items-start gap-2 px-1 py-1.5 text-left ${
                     i > 0 ? 'border-t border-hairline' : ''
-                  } ${
-                    frozen ? 'cursor-not-allowed' : 'hover:bg-bgZebra'
-                  } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor`}
+                  } ${frozen ? 'cursor-not-allowed' : 'hover:bg-pageBg'} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor`}
                 >
                   <span
                     aria-hidden
@@ -963,7 +963,7 @@ export function FileAccessSection({
                       prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
                     )
                   }
-                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
+                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 enabled:hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
                 >
                   <span
                     aria-hidden

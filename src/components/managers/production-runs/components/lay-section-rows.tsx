@@ -1,8 +1,5 @@
 import { common_ProductionLayMode, common_TechCardMarkerSummary } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { AddDoor, Button, DataTable, EmptyCell, Input, Text, Close } from 'ui';
 import { ulid } from 'utils/ulid';
 import { MarkerPicker } from './marker-picker';
 
@@ -145,16 +142,12 @@ export function LaySectionRows({
                     >
                       ↓
                     </Button>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
+                    <Close
+                      size='sm'
                       disabled={disabled}
                       aria-label={`delete section ${i + 1}`}
                       onClick={() => onChange(sections.filter((_, idx) => idx !== i))}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </div>
                 </td>
               </tr>
@@ -169,17 +162,9 @@ export function LaySectionRows({
         </Text>
       ) : null}
 
-      <div>
-        <Button
-          type='button'
-          variant='secondary'
-          size='sm'
-          disabled={disabled}
-          onClick={() => onChange([...sections, newSectionDraft()])}
-        >
-          + section
-        </Button>
-      </div>
+      <AddDoor disabled={disabled} onClick={() => onChange([...sections, newSectionDraft()])}>
+        section
+      </AddDoor>
     </div>
   );
 }

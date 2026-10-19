@@ -2,15 +2,14 @@ import { common_MaterialMovementType } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text, EmptyCell, Chip } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialPicker } from './material-picker';
 import { useMaterials } from './useMaterials';
 import { MovementFilter, useMaterialMovements } from './useWarehouse';
 import { movementDelta, movementTypeFilterOptions, movementTypeLabel } from './warehouse-options';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // A movement's reference target, deep-linked where a destination exists (the production run detail
 // page; a sample lives inside its tech card, wired in W3).
@@ -30,8 +29,8 @@ function MovementRef({
       </Link>
     );
   if (sampleId) return <>sample #{sampleId}</>;
-  if (lot) return <span className='text-textInactiveColor'>lot {lot}</span>;
-  return <>—</>;
+  if (lot) return <span className='text-borderColor'>lot {lot}</span>;
+  return <EmptyCell />;
 }
 
 // The movement ledger table for a given filter (query + paging + display). Reused by the warehouse
@@ -95,7 +94,7 @@ export function MovementsList({ filter }: { filter: MovementFilter }) {
         <tbody>
           {movements.map((m) => (
             <tr key={m.id}>
-              <td className={cell}>{String(m.occurredAt ?? '').slice(0, 10) || '—'}</td>
+              <td className={cell}>{String(m.occurredAt ?? '').slice(0, 10) || <EmptyCell />}</td>
               <td className={cell}>{movementTypeLabel(m.movementType)}</td>
               <td className={cell}>
                 {materialLabel.get(Number(m.materialId)) ?? `#${m.materialId}`}
@@ -104,10 +103,16 @@ export function MovementsList({ filter }: { filter: MovementFilter }) {
                 {movementDelta(m.onHandBefore?.value, m.onHandAfter?.value) ||
                   decimalToInput(m.quantity)}
               </td>
-              <td className={`${cell} text-right`}>{decimalToInput(m.onHandAfter) || '—'}</td>
+              <td className={`${cell} text-right`}>
+                {decimalToInput(m.onHandAfter) || <EmptyCell />}
+              </td>
               {canReadCosting ? (
                 <td className={`${cell} text-right`}>
-                  {m.unitCost?.value ? `${decimalToInput(m.unitCost)} ${m.currency || ''}` : '—'}
+                  {m.unitCost?.value ? (
+                    `${decimalToInput(m.unitCost)} ${m.currency || ''}`
+                  ) : (
+                    <EmptyCell />
+                  )}
                 </td>
               ) : null}
               <td className={cell}>
@@ -117,7 +122,7 @@ export function MovementsList({ filter }: { filter: MovementFilter }) {
                   lot={m.lot || undefined}
                 />
               </td>
-              <td className={cell}>{m.adminUsername || '—'}</td>
+              <td className={cell}>{m.adminUsername || <EmptyCell />}</td>
             </tr>
           ))}
         </tbody>
@@ -186,24 +191,14 @@ export function MovementsTab() {
         {/* run/sample filters arrive via deep links ("movements →" on the run page etc.) and have
             no picker of their own — surface them as clearable chips so the filter is never invisible. */}
         {runId > 0 ? (
-          <button
-            type='button'
-            className={`${cell} uppercase`}
-            title='clear run filter'
-            onClick={() => patch({ run: 0 })}
-          >
-            PR-{runId} ✕
-          </button>
+          <Chip title='clear run filter' onRemove={() => patch({ run: 0 })}>
+            PR-{runId}
+          </Chip>
         ) : null}
         {sampleId > 0 ? (
-          <button
-            type='button'
-            className={`${cell} uppercase`}
-            title='clear sample filter'
-            onClick={() => patch({ sample: 0 })}
-          >
-            sample #{sampleId} ✕
-          </button>
+          <Chip title='clear sample filter' onRemove={() => patch({ sample: 0 })}>
+            sample #{sampleId}
+          </Chip>
         ) : null}
         <label className='flex flex-col gap-1'>
           <Text size='small'>from</Text>

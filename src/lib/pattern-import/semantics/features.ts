@@ -1,0 +1,872 @@
+// Typed features of one piece candidate: notches (layer 4), drills (layer 8 squares), internal
+// lines (layer 8), grain (layer 7, exactly one per block), fold, seam.
+//
+// The DXF fast path already carries them (`PieceCandidate.features`, F8 `dxf.features`); a PDF /
+// SVG / HPGL candidate gets them here from the ChainSet:
+//   • notch  — a short (≤ 15 mm), straight chain that crosses or touches the outline at ≥ 45°;
+//              written starting ON the cut line pointing inward, depth < 1 cm (the writer clamps);
+//   • drill  — a small closed chain (≤ 15 mm across) or a dot inside the outline;
+//   • grain  — a straight open line ≥ 40 mm inside (one chain, or 2–6 collinear dashes of one
+//              style) and its evidence (A1): a grain class (counts two), arrowheads (barbs ≤ 25 mm
+//              at 15–60° at both ends or a symmetric pair — not among lettering), a grain word
+//              ("grain", "Fadenlauf", "долевая", "droit fil"…) beside it, the same line in every
+//              size copy (a grainline is not graded), the dashes themselves, a bias cross (MOOD Ф3.4:
+//              two straight lines of one look crossing near both middles at ~90°, "cut on bias" —
+//              a grain word beside an arm or a bias word in the piece is its second evidence; the
+//              other arm is the same mark, never an internal line). Two or more evidences →
+//              'detected'; exactly one → 'proposed' (D3: shown, accepted only by a click);
+//   • internal — every other chain inside of an internal/common class (darts, pocket placement).
+// Size lines of OTHER ranks run inside a multi-size outline too; they are size-classed and skipped.
+
+import type {
+  BoxMm,
+  Chain,
+  ChainSet,
+  DrillFeature,
+  Feature,
+  GrainEvidenceKind,
+  GrainFeature,
+  InternalFeature,
+  NotchFeature,
+  PathRange,
+  PieceCandidate,
+  PtMm,
+  SemanticsInput,
+  Sheet,
+  Style,
+} from '../types';
+import { PATIMPORT } from '../types';
+import { drawnSeam, featuresOf } from './allowance';
+import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
+import { glyphCellKey, undashed } from './glyphs';
+import type { FoldChord } from './facing';
+
+export const NOTCH_MAX_CHAIN_MM = 15;
+export const DRILL_MAX_MM = 15;
+export const GRAIN_MIN_MM = 40;
+/** A1: a grain word this close to the line (its box centre to the segment), mm. */
+export const GRAIN_TEXT_MM = 60;
+/** A1: a grain word turned along the line (±10°) counts this far, mm. */
+export const GRAIN_TEXT_ALONG_MM = 120;
+/**
+ * N3 (Codex): a grain word turned along the line (±10°) this close to it (its box centre to the
+ * segment) is written ON the line. Its direction is the SAME text's testimony, not a second
+ * evidence: it only strengthens that line against competing lines (never 'detected' alone), mm.
+ */
+export const GRAIN_TEXT_ON_LINE_MM = 10;
+/** …by this much strength (below every evidence kind but dashes' tie-breaker weight). */
+const GRAIN_ALONG_BONUS = 0.25;
+/** A1: an arrowhead barb: a chain this short, its tip this close to a line end, at 15–60°. */
+export const GRAIN_HEAD_MAX_MM = 25;
+export const GRAIN_HEAD_END_MM = 6;
+export const GRAIN_HEAD_MIN_DEG = 15;
+export const GRAIN_HEAD_MAX_DEG = 60;
+/** N3: each barb of a one-end pair is at least this long, mm. */
+export const GRAIN_PAIR_BARB_MIN_MM = 2.5;
+/** A1: dashes of one dashed grainline: 2–6 of them, gaps up to this, mm. */
+export const GRAIN_DASH_GAP_MM = 20;
+export const GRAIN_DASH_MAX = 6;
+/** A1: a size copy of the line: length within ±1 mm, direction within ±2°. */
+export const GRAIN_COPY_LEN_MM = 1;
+export const GRAIN_COPY_DEG = 2;
+/** A1: a size copy of a nested sheet's shared line lies on it, ≤ this across, mm. */
+export const GRAIN_COPY_ON_LINE_MM = 1;
+/**
+ * A1: how strong each evidence is when two lines compete (never length first): a grain class, then
+ * arrowheads, then the word, then the ungraded copies, then the dashes.
+ */
+const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
+  class: 8,
+  arrowheads: 4,
+  word: 2,
+  ungraded: 1,
+  dashes: 0.5,
+  cross: 4,
+  'dxf-layer': 8,
+  operator: 8,
+  borrowed: 0,
+  geometry: 0,
+  accepted: 0,
+};
+
+/** What the caller knows beyond the candidate: the sheet's size count and the family's box. */
+export type FeatureOpts = {
+  sizeCount?: number;
+  region?: BoxMm;
+  /** MOOD Ф3.3: this size's facing fold, as the family's check proved it (build.ts) — layer 8. */
+  folds?: readonly FoldChord[];
+  /** DARTS: the darts proven of this piece (SemanticsInput.darts) — their legs go to layer 8. */
+  darts?: SemanticsInput['darts'];
+  /** DARTS: this size's own size class (SizeRun) — its dart legs are drawn in it. */
+  ownClass?: number | null;
+};
+
+const GRAIN_WORDS =
+  /grain|fadenlauf|fadenl|долев|droit[\s-]*fil|sens\s+du\s+fil|draadrichting|kierunek\s+nitki|nitka|hilo|dritto\s+filo|trådretning|canal/iu;
+/** MOOD Ф3.4: "cut on bias" in a piece's own text — the second evidence of a bias cross. */
+const BIAS_WORDS = /\bbias\b|schräg|по\s+косой|biais|al\s+bies|sbieco/iu;
+/** A bias cross: arms this long, alike within this share, crossing within this share of each middle. */
+const CROSS_LEN_TOL = 0.15;
+const CROSS_MID_TOL = 0.15;
+/** …at this angle or squarer, degrees. */
+const CROSS_MIN_DEG = 75;
+
+/** Max distance of a polyline's vertices from its chord, mm. */
+function straightness(pts: readonly PtMm[]): number {
+  if (pts.length < 3) return 0;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  let m = 0;
+  for (const p of pts) m = Math.max(m, footOnSegment(p, a, b).d);
+  return m;
+}
+
+const lengthOf = (pts: readonly PtMm[], closed: boolean) => {
+  let s = 0;
+  for (let i = 0; i < (closed ? pts.length : pts.length - 1); i++)
+    s += dist(pts[i], pts[(i + 1) % pts.length]);
+  return s;
+};
+
+const angleDeg = (a: PtMm, b: PtMm) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+
+/** A notch from a short segment crossing/touching the outline; null when it does not. */
+export function notchFrom(seg: [PtMm, PtMm], outer: readonly PtMm[]): NotchFeature | null {
+  const [p, q] = seg;
+  const L = dist(p, q);
+  if (!(L >= PATIMPORT.notchMinMm * 0.5) || L > NOTCH_MAX_CHAIN_MM) return null;
+  const cp = closestOnPolyline(p, outer, true);
+  const cq = closestOnPolyline(q, outer, true);
+  const near = cp.d <= cq.d ? cp : cq;
+  const pin = pointInPolygon(p, outer);
+  const qin = pointInPolygon(q, outer);
+  const crosses = pin !== qin;
+  if (!crosses && near.d > 1) return null;
+  // angle against the outline's local tangent
+  const a = outer[near.seg];
+  const b = outer[(near.seg + 1) % outer.length];
+  const tang = { x: b.x - a.x, y: b.y - a.y };
+  const tl = Math.hypot(tang.x, tang.y) || 1;
+  const sx = (q.x - p.x) / L;
+  const sy = (q.y - p.y) / L;
+  const cos = Math.abs((tang.x * sx + tang.y * sy) / tl);
+  if ((Math.acos(Math.min(1, cos)) * 180) / Math.PI < PATIMPORT.notchMinAngleDeg) return null;
+  const at = near.q;
+  const inner = pin && !qin ? p : qin && !pin ? q : cp.d <= cq.d ? q : p;
+  const depth = Math.min(PATIMPORT.notchMaxMm, Math.max(1, dist(at, inner)));
+  return {
+    kind: 'notch',
+    at,
+    seg: [at, inner],
+    depthMm: depth,
+    origin: 'detected',
+    ranges: [],
+    confidence: crosses ? 0.9 : 0.7,
+  };
+}
+
+/** A dart leg may stop this far short of the cut line (drawn to the seam line: ⅝" allowance), mm. */
+const DART_MOUTH_GAP_MM = 16;
+
+/**
+ * DARTS: this size's own dart legs for each dart proven of the piece (FeatureOpts.darts). The
+ * proven face is where the sizes' legs cross; each size draws its own V: two straight lines of its
+ * own size class, each from this size's outline (its mouth on it, or stopping on the seam line
+ * short of it: ≤ DART_MOUTH_GAP_MM) into the piece, meeting
+ * (≤ 2 mm) at a point inside it (≥ 5 mm from the outline). Of those Vs, the one whose point is
+ * nearest the proven dart's point, within max(30 mm, its length), opening along the dart's axis
+ * (each leg within 35° of point → mouth, its two mouths on either side of the axis), each leg
+ * ×0.4…×2.5 the dart's length; a V two darts both pick is neither's. A V drawn as one
+ * polyline (mouth – point – mouth) is split at its point. The legs' chains, per dart.
+ */
+export function dartVs(
+  cand: PieceCandidate,
+  set: ChainSet,
+  darts: NonNullable<FeatureOpts['darts']>,
+  ownClass?: number | null,
+): ({ legs: Chain[]; pts: PtMm[][] } | null)[] {
+  const clsOf = new Map<number, (typeof set.classes)[number]>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
+  const walls = new Set(cand.walls);
+  const wallCls = new Set(cand.walls.map((w) => clsOf.get(w)?.id));
+  const bb = bboxOf(cand.outer);
+  // this size's own lines: its own size class when the run names it (an outline that borrowed a
+  // neighbour size's stretch carries that class among its walls too), else its walls' size classes
+  const own = set.chains.filter((ch) => {
+    const k = clsOf.get(ch.id);
+    if (k?.role !== 'size' || walls.has(ch.id)) return false;
+    if (ownClass != null ? k.id !== ownClass : !wallCls.has(k.id)) return false;
+    const q = bboxOf(ch.pts);
+    return q.minX <= bb.maxX && q.maxX >= bb.minX && q.minY <= bb.maxY && q.maxY >= bb.minY;
+  });
+  const gap = (p: PtMm) => closestOnPolyline(p, cand.outer, true).d;
+  const onOutline = (p: PtMm) => gap(p) <= DART_MOUTH_GAP_MM;
+  const inside = (p: PtMm) => pointInPolygon(p, cand.outer) && gap(p) >= 5;
+  type Leg = { ch: Chain; mouth: PtMm; tip: PtMm; pts: PtMm[] };
+  const legs: Leg[] = [];
+  for (const ch of own) {
+    if (ch.closed || ch.pts.length < 2) continue;
+    const e0 = ch.pts[0];
+    const e1 = ch.pts[ch.pts.length - 1];
+    const on0 = onOutline(e0);
+    const on1 = onOutline(e1);
+    // a leg: its mouth end the nearer the outline, its point inside
+    const [mouth, tip] = gap(e0) <= gap(e1) ? [e0, e1] : [e1, e0];
+    if ((on0 || on1) && inside(tip) && straightness(ch.pts) <= 2) {
+      legs.push({ ch, mouth, tip, pts: ch.pts });
+    } else if (on0 && on1 && ch.pts.length >= 3) {
+      // one polyline mouth – point – mouth: split at the vertex farthest from the chord
+      let k = -1;
+      let far = 0;
+      for (let i = 1; i < ch.pts.length - 1; i++) {
+        const d = footOnSegment(ch.pts[i], e0, e1).d;
+        if (d > far) {
+          far = d;
+          k = i;
+        }
+      }
+      if (k < 0 || !inside(ch.pts[k])) continue;
+      const a = ch.pts.slice(0, k + 1);
+      const b = ch.pts.slice(k).reverse();
+      if (straightness(a) > 2 || straightness(b) > 2) continue;
+      legs.push(
+        { ch, mouth: e0, tip: ch.pts[k], pts: a },
+        { ch, mouth: e1, tip: ch.pts[k], pts: b },
+      );
+    }
+  }
+  const angle = (from: PtMm, to: PtMm) => Math.atan2(to.y - from.y, to.x - from.x);
+  const off = (a: number, b: number) => {
+    let d = Math.abs(a - b) % (2 * Math.PI);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    return d;
+  };
+  const picks: ({ a: Leg; b: Leg } | null)[] = [];
+  for (const d of darts) {
+    const mid = { x: (d.base[0].x + d.base[1].x) / 2, y: (d.base[0].y + d.base[1].y) / 2 };
+    const ax = angle(d.apex, mid);
+    // which side of the V's axis a mouth lies on (its two mouths on either side)
+    const side = (tip: PtMm, p: PtMm) =>
+      Math.sign(Math.cos(ax) * (p.y - tip.y) - Math.sin(ax) * (p.x - tip.x));
+    const fits = (l: Leg) => {
+      const len = dist(l.tip, l.mouth);
+      return (
+        len >= 0.4 * d.lenMm &&
+        len <= 2.5 * d.lenMm &&
+        off(angle(l.tip, l.mouth), ax) <= Math.PI * (35 / 180)
+      );
+    };
+    let best: { a: Leg; b: Leg; r: number } | null = null;
+    for (let i = 0; i < legs.length; i++)
+      for (let j = i + 1; j < legs.length; j++) {
+        const a = legs[i];
+        const b = legs[j];
+        if (dist(a.tip, b.tip) > 2 || !fits(a) || !fits(b)) continue;
+        if (side(a.tip, a.mouth) * side(a.tip, b.mouth) >= 0) continue;
+        const r = dist(a.tip, d.apex);
+        if (r > Math.max(30, d.lenMm)) continue;
+        if (!best || r < best.r) best = { a, b, r };
+      }
+    picks.push(best ? { a: best.a, b: best.b } : null);
+  }
+  // each dart its nearest V; a leg two darts both pick belongs to neither (Codex r2: the answer
+  // must not hang on the order or on which of the darts are passed — the pieces step counts with
+  // every possible dart of the piece, the semantics with the proven ones)
+  const pickedBy = new Map<Leg, number>();
+  for (const p of picks)
+    if (p) for (const l of [p.a, p.b]) pickedBy.set(l, (pickedBy.get(l) ?? 0) + 1);
+  return picks.map((p) =>
+    p && pickedBy.get(p.a) === 1 && pickedBy.get(p.b) === 1
+      ? { legs: [p.a.ch, p.b.ch], pts: [p.a.pts, p.b.pts] }
+      : null,
+  );
+}
+
+/**
+ * Classify the chains around one candidate into features (PDF path). The DXF fast path's own
+ * features win when present: they are read from typed layers, not guessed.
+ */
+export function classifyFeatures(
+  cand: PieceCandidate,
+  set: ChainSet,
+  sheet?: Sheet,
+  opts: FeatureOpts = {},
+): Feature[] {
+  const known = featuresOf(cand);
+  if (known.length) return known;
+  const out: Feature[] = [];
+  const clsOf = new Map<number, (typeof set.classes)[number]>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
+  const walls = new Set(cand.walls);
+  const wallCls = new Set(cand.walls.map((w) => clsOf.get(w)?.id));
+  const box = bboxOf(cand.outer);
+  const pad = NOTCH_MAX_CHAIN_MM;
+  const notchChains = new Set<number>();
+
+  // notches: short chains anywhere near the outline (they cross it, so they are not "inside")
+  for (const ch of set.chains) {
+    if (walls.has(ch.id) || ch.closed || ch.lengthMm > NOTCH_MAX_CHAIN_MM) continue;
+    const role = clsOf.get(ch.id)?.role;
+    if (role === 'size' || role === 'seam' || role === 'ignore' || role === 'grain') continue;
+    const b = bboxOf(ch.pts);
+    if (
+      b.maxX < box.minX - pad ||
+      b.minX > box.maxX + pad ||
+      b.maxY < box.minY - pad ||
+      b.minY > box.maxY + pad
+    )
+      continue;
+    if (straightness(ch.pts) > 0.5) continue;
+    const n = notchFrom([ch.pts[0], ch.pts[ch.pts.length - 1]], cand.outer);
+    if (!n) continue;
+    notchChains.add(ch.id);
+    out.push({ ...n, ranges: ch.ranges, confidence: role === 'notch' ? 1 : n.confidence });
+  }
+
+  // the chains inside that may carry a feature (another size's line, a seam, ignored: never)
+  // N3: the seam line drawn in the outlines' own pen (one-pen sheets, wm M) is the seam, measured
+  const seamIds = new Set(drawnSeam(cand, set)?.ids ?? []);
+  const inner: Chain[] = [];
+  for (const id of new Set(cand.inside)) {
+    const ch = set.chains[id];
+    if (!ch || notchChains.has(id) || seamIds.has(id)) continue;
+    const k = clsOf.get(id);
+    const role = k?.role;
+    if (role === 'size' && !wallCls.has(k?.id)) continue; // another size's line
+    if (role === 'ignore' || role === 'seam') continue;
+    if (role === 'size') continue; // own size, inner loop = seam measurement, not a feature
+    inner.push(ch);
+  }
+  // DARTS: this size's own legs of each dart proven of the piece — internal lines, «dart»
+  if (opts.darts?.length) {
+    for (const v of dartVs(cand, set, opts.darts, opts.ownClass))
+      for (let i = 0; i < (v?.legs.length ?? 0); i++)
+        out.push({
+          kind: 'internal',
+          pts: v!.pts[i],
+          closed: false,
+          origin: 'detected',
+          ranges: v!.legs[i].ranges,
+          confidence: 0.9,
+          label: 'dart',
+        } satisfies InternalFeature);
+  }
+
+  const grain = bestGrain(cand, set, sheet, inner, clsOf, opts);
+  const taken = new Set(grain ? [...grain.ids, ...grain.heads] : []);
+  if (grain) out.push(grain.feature);
+
+  for (const ch of inner) {
+    if (taken.has(ch.id)) continue;
+    const role = clsOf.get(ch.id)?.role;
+    const b = bboxOf(ch.pts);
+    const across = Math.hypot(b.maxX - b.minX, b.maxY - b.minY);
+    if (ch.closed && across <= DRILL_MAX_MM) {
+      out.push({
+        kind: 'drill',
+        at: centroidOf(ch.pts),
+        origin: 'detected',
+        ranges: ch.ranges,
+        confidence: 0.8,
+      } satisfies DrillFeature);
+      continue;
+    }
+    if (ch.pts.length === 1) {
+      out.push({
+        kind: 'drill',
+        at: ch.pts[0],
+        origin: 'detected',
+        ranges: ch.ranges,
+        confidence: 0.6,
+      });
+      continue;
+    }
+    // a grain-classed line that lost to another is not an internal line (exactly ONE grain)
+    if (role === 'grain') continue;
+    if (lengthOf(ch.pts, ch.closed) >= 5)
+      out.push({
+        kind: 'internal',
+        pts: ch.pts,
+        closed: ch.closed,
+        origin: 'detected',
+        ranges: ch.ranges,
+        confidence: 0.8,
+      } satisfies InternalFeature);
+  }
+  // MOOD Ф3.3 (R11): the size's own line across the piece named fold — the facing's fold line
+  // (semantics/facing.ts), proven in every size of the family by build.ts. Skipped above as the
+  // size's own line; it leaves on layer 8.
+  for (const f of opts.folds ?? [])
+    out.push({
+      kind: 'internal',
+      pts: f.pts,
+      closed: false,
+      origin: 'detected',
+      ranges: set.chains[f.chains[0]]?.ranges ?? [],
+      confidence: 0.9,
+      label: 'fold line',
+    } satisfies InternalFeature);
+  return out;
+}
+
+// ── grain (A1) ──────────────────────────────────────────────────────────────────────────────
+
+/** One straight line inside the piece that may be its grainline. */
+type GrainLine = {
+  a: PtMm;
+  b: PtMm;
+  /** The chains drawing it (one, or the dashes). */
+  ids: number[];
+  ranges: PathRange[];
+  len: number;
+  dashed: boolean;
+  grainClass: boolean;
+  /** Barbs drawn in the same polyline as the shaft (barb → tip → shaft), trimmed off it. */
+  barbs: [PtMm, PtMm][];
+};
+
+/**
+ * A polyline that is a straight shaft with its arrowhead drawn in one stroke (blazer: barb → tip →
+ * shaft): up to two end segments ≤ GRAIN_HEAD_MAX_MM trimmed off each end leave a straight body
+ * ≥ GRAIN_MIN_MM. Null when no such trim makes it straight.
+ */
+function trimBarbs(pts: readonly PtMm[]): { body: PtMm[]; barbs: [PtMm, PtMm][] } | null {
+  const n = pts.length;
+  for (let k = 1; k <= 4; k++)
+    for (let i = 0; i <= Math.min(2, k); i++) {
+      const j = k - i;
+      if (j > 2 || n - i - j < 2) continue;
+      const body = pts.slice(i, n - j);
+      if (straightness(body) > 0.5 || lengthOf(body, false) < GRAIN_MIN_MM) continue;
+      const barbs: [PtMm, PtMm][] = [];
+      for (let t = 0; t < i; t++) barbs.push([pts[t], pts[t + 1]]);
+      for (let t = n - j - 1; t < n - 1; t++) barbs.push([pts[t], pts[t + 1]]);
+      if (barbs.some(([p, q]) => dist(p, q) > GRAIN_HEAD_MAX_MM)) continue;
+      return { body, barbs };
+    }
+  return null;
+}
+
+/** Where segments a–b and c–d cross: their parameters (0..1 each), or null. */
+function crossing(a: PtMm, b: PtMm, c: PtMm, d: PtMm): { t: number; u: number } | null {
+  const rx = b.x - a.x;
+  const ry = b.y - a.y;
+  const sx = d.x - c.x;
+  const sy = d.y - c.y;
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+  const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? { t, u } : null;
+}
+
+/** Smallest angle between two directions, degrees, 0..90 (lines have no sense). */
+function lineAngleDiff(a: number, b: number): number {
+  const d = (((a - b) % 180) + 180) % 180;
+  return Math.min(d, 180 - d);
+}
+
+/** Straight open lines ≥ GRAIN_MIN_MM: single chains, and 2–6 collinear dashes of one style. */
+function grainLines(inner: readonly Chain[], isGrainClass: (id: number) => boolean): GrainLine[] {
+  const straight = inner.filter(
+    (ch) => !ch.closed && ch.pts.length >= 2 && straightness(ch.pts) <= 0.5,
+  );
+  const out: GrainLine[] = [];
+  const inDashes = new Set<number>();
+  // (d) dashes: collinear (±2°, ≤ 0.7 mm off the line), one style, gaps ≤ GRAIN_DASH_GAP_MM
+  const segs = straight
+    .filter((ch) => ch.lengthMm >= 2)
+    .map((ch) => {
+      const a = ch.pts[0];
+      const z = ch.pts[ch.pts.length - 1];
+      const L = dist(a, z) || 1;
+      return { ch, a, z, ux: (z.x - a.x) / L, uy: (z.y - a.y) / L, L };
+    });
+  const used = new Set<number>();
+  for (const s of segs) {
+    if (used.has(s.ch.id)) continue;
+    const off = (p: PtMm) => Math.abs((p.x - s.a.x) * -s.uy + (p.y - s.a.y) * s.ux);
+    const along = (p: PtMm) => (p.x - s.a.x) * s.ux + (p.y - s.a.y) * s.uy;
+    const cosTol = Math.cos((GRAIN_COPY_DEG * Math.PI) / 180);
+    const members = segs
+      .filter(
+        (o) =>
+          !used.has(o.ch.id) &&
+          o.ch.style === s.ch.style &&
+          Math.abs(o.ux * s.ux + o.uy * s.uy) >= cosTol &&
+          off(o.a) <= 0.7 &&
+          off(o.z) <= 0.7,
+      )
+      .map((o) => {
+        const t0 = along(o.a);
+        const t1 = along(o.z);
+        return { o, lo: Math.min(t0, t1), hi: Math.max(t0, t1) };
+      })
+      .sort((x, y) => x.lo - y.lo);
+    if (members.length < 2) continue;
+    // the run of members around s with every gap ≤ GRAIN_DASH_GAP_MM
+    const runs: (typeof members)[] = [];
+    let cur: typeof members = [];
+    let reach = -Infinity;
+    for (const m of members) {
+      if (cur.length && m.lo - reach > GRAIN_DASH_GAP_MM) {
+        runs.push(cur);
+        cur = [];
+      }
+      cur.push(m);
+      reach = Math.max(reach, m.hi);
+    }
+    runs.push(cur);
+    const run = runs.find((r) => r.some((m) => m.o === s));
+    if (!run || run.length < 2) continue;
+    for (const m of run) used.add(m.o.ch.id);
+    if (run.length > GRAIN_DASH_MAX) continue; // a long dashed line: a fold, a stitch line
+    // dashes follow one another; strokes that overlap are copies of one line (sizes, duplicates)
+    if (run.some((m, i) => i > 0 && m.lo < Math.max(...run.slice(0, i).map((x) => x.hi)) - 0.5))
+      continue;
+    // a dashed line repeats: dash lengths alike (lettering strokes on one baseline are not)
+    const lens = run.map((m) => m.hi - m.lo);
+    if (Math.min(...lens) < 0.3 * Math.max(...lens)) continue;
+    const lo = run[0].lo;
+    const hi = Math.max(...run.map((m) => m.hi));
+    if (hi - lo < GRAIN_MIN_MM) continue;
+    const ids = run.map((m) => m.o.ch.id);
+    for (const id of ids) inDashes.add(id);
+    out.push({
+      a: { x: s.a.x + s.ux * lo, y: s.a.y + s.uy * lo },
+      b: { x: s.a.x + s.ux * hi, y: s.a.y + s.uy * hi },
+      ids,
+      ranges: run.flatMap((m) => m.o.ch.ranges),
+      len: hi - lo,
+      dashed: true,
+      grainClass: ids.some(isGrainClass),
+      barbs: [],
+    });
+  }
+  for (const ch of straight) {
+    if (inDashes.has(ch.id)) continue;
+    const L = lengthOf(ch.pts, false);
+    if (L < GRAIN_MIN_MM) continue;
+    out.push({
+      a: ch.pts[0],
+      b: ch.pts[ch.pts.length - 1],
+      ids: [ch.id],
+      ranges: ch.ranges,
+      len: L,
+      dashed: false,
+      grainClass: isGrainClass(ch.id),
+      barbs: [],
+    });
+  }
+  // a shaft with its head(s) in the same stroke
+  for (const ch of inner) {
+    if (ch.closed || ch.pts.length < 3 || straightness(ch.pts) <= 0.5) continue;
+    const t = trimBarbs(ch.pts);
+    if (!t) continue;
+    out.push({
+      a: t.body[0],
+      b: t.body[t.body.length - 1],
+      ids: [ch.id],
+      ranges: ch.ranges,
+      len: lengthOf(t.body, false),
+      dashed: false,
+      grainClass: isGrainClass(ch.id),
+      barbs: t.barbs,
+    });
+  }
+  return out;
+}
+
+/**
+ * (a) Arrowheads: barbs — segments of chains ≤ GRAIN_HEAD_MAX_MM — whose tip is ≤ GRAIN_HEAD_END_MM
+ * from a line end and which run back along the line at 15–60°. They count at BOTH ends, or as a
+ * symmetric pair (one barb each side) at one end; a head among lettering (its cell as dense as the
+ * gate's G18 refuses) does not count. Returns the head chains, or null.
+ */
+function arrowheads(
+  line: GrainLine,
+  heads: readonly Chain[],
+  lettered: (p: PtMm) => boolean,
+): number[] | null {
+  const ends = [line.a, line.b];
+  const sides: Set<number>[] = [new Set(), new Set()];
+  const barbsAt: { side: number; deg: number; len: number }[][] = [[], []];
+  const ids = new Set<number>();
+  const own = new Set(line.ids);
+  const integral: Chain[] = line.barbs.map(([p, q]) => ({
+    id: -1,
+    pts: [p, q],
+    closed: false,
+    ranges: [],
+    motif: null,
+    style: -1 as Chain['style'],
+    lengthMm: dist(p, q),
+  }));
+  const cosLo = Math.cos((GRAIN_HEAD_MAX_DEG * Math.PI) / 180);
+  const cosHi = Math.cos((GRAIN_HEAD_MIN_DEG * Math.PI) / 180);
+  for (const h of [...heads, ...integral]) {
+    if (own.has(h.id)) continue;
+    const n = h.pts.length;
+    for (let i = 0; i < (h.closed ? n : n - 1); i++) {
+      const p = h.pts[i];
+      const q = h.pts[(i + 1) % n];
+      for (let e = 0; e < 2; e++) {
+        const E = ends[e];
+        const O = ends[1 - e];
+        const tip = dist(p, E) <= dist(q, E) ? p : q;
+        const far = tip === p ? q : p;
+        if (dist(tip, E) > GRAIN_HEAD_END_MM) continue;
+        const vx = far.x - tip.x;
+        const vy = far.y - tip.y;
+        const vl = Math.hypot(vx, vy);
+        if (vl < 1.5) continue;
+        const ix = O.x - E.x;
+        const iy = O.y - E.y;
+        const il = Math.hypot(ix, iy) || 1;
+        const cos = (vx * ix + vy * iy) / (vl * il);
+        if (cos < cosLo || cos > cosHi) continue;
+        if (lettered(tip) || lettered(far)) continue;
+        const side = Math.sign(ix * vy - iy * vx);
+        sides[e].add(side);
+        barbsAt[e].push({ side, deg: (Math.acos(Math.min(1, cos)) * 180) / Math.PI, len: vl });
+        if (h.id >= 0) ids.add(h.id);
+      }
+    }
+  }
+  const both = sides[0].size > 0 && sides[1].size > 0;
+  // N3 (wm M back): a pair at ONE end is a drawn head only when its two barbs mirror each other —
+  // like angles (± 10°), like lengths (≤ 1.6 ×), each ≥ 2.5 mm — and stand alone (≤ 4 DIFFERENT
+  // strokes at the tip; palto draws one head per size, 5 identical copies). A diagonal running into
+  // a tile label («KOLUMNA 5») meets short horizontal / vertical strokes of all lengths: no head.
+  const distinct = (bs: { side: number; deg: number; len: number }[]) =>
+    bs.filter(
+      (b, i) =>
+        !bs
+          .slice(0, i)
+          .some(
+            (o) =>
+              o.side === b.side && Math.abs(o.deg - b.deg) <= 2 && Math.abs(o.len - b.len) <= 0.5,
+          ),
+    ).length;
+  const pair = barbsAt.some(
+    (bs) =>
+      distinct(bs) <= 4 &&
+      bs.some(
+        (p) =>
+          p.len >= GRAIN_PAIR_BARB_MIN_MM &&
+          bs.some(
+            (q) =>
+              q.side !== p.side &&
+              q.len >= GRAIN_PAIR_BARB_MIN_MM &&
+              Math.abs(q.deg - p.deg) <= 10 &&
+              Math.max(p.len, q.len) <= 1.6 * Math.min(p.len, q.len),
+          ),
+      ),
+  );
+  if (!both && !pair) return null;
+  if (lettered(line.a) || lettered(line.b)) return null;
+  return [...ids];
+}
+
+/** The candidate's best grain line with its evidence, or null when no line has any. */
+function bestGrain(
+  cand: PieceCandidate,
+  set: ChainSet,
+  sheet: Sheet | undefined,
+  inner: readonly Chain[],
+  clsOf: Map<number, ChainSet['classes'][number]>,
+  opts: FeatureOpts,
+): { feature: GrainFeature; ids: number[]; heads: number[] } | null {
+  const lines = grainLines(inner, (id) => clsOf.get(id)?.role === 'grain');
+  if (!lines.length) return null;
+
+  // the gate's lettering test (G16/G18) on the short strokes inside: per 60 mm cell, dashes out
+  const strokes = undashed(
+    inner.filter((ch) => ch.lengthMm < PATIMPORT.glyphShortMm && ch.pts.length >= 2),
+  );
+  const cells = new Map<string, number>();
+  for (const st of strokes) {
+    const k = glyphCellKey(st.pts[0]);
+    cells.set(k, (cells.get(k) ?? 0) + 1);
+  }
+  const lettered = (p: PtMm) => (cells.get(glyphCellKey(p)) ?? 0) >= PATIMPORT.glyphMaxShortPerCell;
+  // heads: short chains inside, also those the legend set aside (a lettering pass takes barbs for
+  // strokes — blazer); the lettering test above, on the strokes that are written, still applies
+  const headChains = [...new Set(cand.inside)].flatMap((id) => {
+    const ch = set.chains[id];
+    const role = clsOf.get(id)?.role;
+    return ch &&
+      ch.lengthMm <= GRAIN_HEAD_MAX_MM &&
+      ch.pts.length >= 2 &&
+      role !== 'size' &&
+      role !== 'seam'
+      ? [ch]
+      : [];
+  });
+
+  const grainTexts = (sheet?.texts ?? []).filter(
+    (t) =>
+      GRAIN_WORDS.test(t.text) &&
+      (pointInPolygon(
+        { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 },
+        cand.outer,
+      ) ||
+        cand.textsInside.includes(t.id)),
+  );
+
+  // (c) ungraded: the same line (±1 mm, ±2°) in ≥ n − 1 size copies inside the family's box —
+  // and each copy provably another size's: on its own per-size layer / OCG (kombinezon draws one
+  // per size), or lying ON the line (≤ 1 mm across, a nested sheet's shared line) in at least
+  // max(3, n − 1) copies (two coincident strokes may be a fill + stroke duplicate). A long CF /
+  // placket line beside the grain, equal in every size, is neither.
+  const n = opts.sizeCount ?? 0;
+  const box = opts.region ?? cand.bbox;
+  const styleLayer = new Map((sheet?.styles ?? []).map((st) => [st.id, st.layer]));
+  const ungradedOf = (l: GrainLine): boolean => {
+    if (n < 3 || l.dashed) return false;
+    const ang = angleDeg(l.a, l.b);
+    const ux = (l.b.x - l.a.x) / l.len;
+    const uy = (l.b.y - l.a.y) / l.len;
+    const own = set.chains[l.ids[0]];
+    const layers = new Set<string>();
+    const ownLayer = own ? styleLayer.get(own.style) : null;
+    if (ownLayer) layers.add(ownLayer);
+    let onLine = 1;
+    for (const o of set.chains) {
+      if (o.id === l.ids[0] || o.closed || Math.abs(o.lengthMm - l.len) > GRAIN_COPY_LEN_MM + 0.5)
+        continue;
+      const a = o.pts[0];
+      const z = o.pts[o.pts.length - 1];
+      if (Math.abs(dist(a, z) - l.len) > GRAIN_COPY_LEN_MM) continue;
+      if (lineAngleDiff(angleDeg(a, z), ang) > GRAIN_COPY_DEG) continue;
+      const m = { x: (a.x + z.x) / 2, y: (a.y + z.y) / 2 };
+      if (m.x < box.minX - 10 || m.x > box.maxX + 10 || m.y < box.minY - 10 || m.y > box.maxY + 10)
+        continue;
+      if (straightness(o.pts) > 0.5) continue;
+      // a size copy lies BESIDE the line (graded placement), not further along it: the two
+      // overlap along the line's direction by at least half (a collinear stroke is not a copy)
+      const t0 = (a.x - l.a.x) * ux + (a.y - l.a.y) * uy;
+      const t1 = (z.x - l.a.x) * ux + (z.y - l.a.y) * uy;
+      if (Math.min(l.len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) < 0.5 * l.len) continue;
+      const lay = styleLayer.get(o.style);
+      if (lay) layers.add(lay);
+      if (Math.abs((m.x - l.a.x) * -uy + (m.y - l.a.y) * ux) <= GRAIN_COPY_ON_LINE_MM) onLine++;
+    }
+    return layers.size >= Math.max(2, n - 1) || onLine >= Math.max(3, n - 1);
+  };
+
+  let best: {
+    l: GrainLine;
+    evidence: GrainEvidenceKind[];
+    weight: number;
+    strength: number;
+    heads: number[];
+  } | null = null;
+  // a line among lettering (its ends or middle in a cell as dense as G18 refuses) is a stroke
+  const live = lines.filter((l) => {
+    const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
+    return !(lettered(l.a) || lettered(l.b) || lettered(mid));
+  });
+  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it); written
+  // along that line (± 10°) within 10 mm it strengthens that line only — one text, one evidence
+  const worded = new Set<GrainLine>();
+  const along = new Set<GrainLine>();
+  for (const t of grainTexts) {
+    const c = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
+    let near: { l: GrainLine; d: number } | null = null;
+    for (const l of live) {
+      const d = footOnSegment(c, l.a, l.b).d;
+      if (!near || d < near.d) near = { l, d };
+    }
+    if (!near) continue;
+    const turned = lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10;
+    if (near.d <= GRAIN_TEXT_MM || (near.d <= GRAIN_TEXT_ALONG_MM && turned)) worded.add(near.l);
+    if (turned && near.d <= GRAIN_TEXT_ON_LINE_MM) along.add(near.l);
+  }
+  // MOOD Ф3.4: bias crosses — two single straight lines of one style, alike in length, crossing
+  // near both middles at ~90° ("Cut 1 on bias", either arm is the grain). The cross is one evidence;
+  // a grain word labelling either arm, or a bias word among the piece's own texts, the second.
+  const crossOf = new Map<GrainLine, GrainLine>();
+  // one look, not one style id: a pen re-declared under another clip is the same pen
+  const styleById = new Map((sheet?.styles ?? []).map((st) => [st.id, st]));
+  const sameLook = (a?: number, b?: number) => {
+    if (a === undefined || b === undefined) return false;
+    if (a === b) return true;
+    const x = styleById.get(a);
+    const y = styleById.get(b);
+    if (!x || !y) return false;
+    const rgb = (z: Style) => (z.strokeRgb ?? [-1, -1, -1]).join(',');
+    return (
+      rgb(x) === rgb(y) &&
+      Math.abs(x.widthMm - y.widthMm) <= 0.05 &&
+      (x.dash ?? []).join(',') === (y.dash ?? []).join(',')
+    );
+  };
+  const single = live.filter((l) => !l.dashed && l.ids.length === 1);
+  for (let i = 0; i < single.length; i++)
+    for (let j = i + 1; j < single.length; j++) {
+      const p = single[i];
+      const q = single[j];
+      if (crossOf.has(p) || crossOf.has(q)) continue;
+      if (!sameLook(set.chains[p.ids[0]]?.style, set.chains[q.ids[0]]?.style)) continue;
+      if (Math.abs(p.len - q.len) > CROSS_LEN_TOL * Math.max(p.len, q.len)) continue;
+      if (lineAngleDiff(angleDeg(p.a, p.b), angleDeg(q.a, q.b)) < CROSS_MIN_DEG) continue;
+      const x = crossing(p.a, p.b, q.a, q.b);
+      if (!x || Math.abs(x.t - 0.5) > CROSS_MID_TOL || Math.abs(x.u - 0.5) > CROSS_MID_TOL)
+        continue;
+      crossOf.set(p, q);
+      crossOf.set(q, p);
+    }
+  const biasSaid =
+    crossOf.size > 0 &&
+    (sheet?.texts ?? []).some(
+      (t) =>
+        BIAS_WORDS.test(t.text) &&
+        (cand.textsInside.includes(t.id) ||
+          pointInPolygon(
+            { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 },
+            cand.outer,
+          )),
+    );
+  for (const l of live) {
+    const heads = arrowheads(l, headChains, lettered);
+    const cross = crossOf.get(l);
+    const word = worded.has(l) || (!!cross && (worded.has(cross) || biasSaid));
+    const ungraded = ungradedOf(l);
+    const evidence: GrainEvidenceKind[] = [
+      ...(l.grainClass ? (['class'] as const) : []),
+      ...(heads ? (['arrowheads'] as const) : []),
+      ...(word ? (['word'] as const) : []),
+      ...(ungraded ? (['ungraded'] as const) : []),
+      ...(l.dashed ? (['dashes'] as const) : []),
+      ...(cross ? (['cross'] as const) : []),
+    ];
+    // a grain class is the legend's (operator's, a DXF layer's) word: it counts two
+    const weight = evidence.length + (l.grainClass ? 1 : 0);
+    if (!weight) continue;
+    // competing lines: the stronger evidence wins, length only breaks a tie
+    const strength =
+      evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0) +
+      (word && along.has(l) ? GRAIN_ALONG_BONUS : 0);
+    if (!best || strength > best.strength || (strength === best.strength && l.len > best.l.len))
+      // the other arm of a cross is the same mark: taken with it, never an internal line
+      best = { l, evidence, weight, strength, heads: [...(heads ?? []), ...(cross?.ids ?? [])] };
+  }
+  if (!best) return null;
+  const { l, evidence, weight, heads } = best;
+  return {
+    feature: {
+      kind: 'grain',
+      a: l.a,
+      b: l.b,
+      angleDeg: angleDeg(l.a, l.b),
+      // D3: one evidence is a proposal, never applied without the operator's click
+      origin: weight >= 2 ? 'detected' : 'proposed',
+      ranges: l.ranges,
+      confidence: Math.min(1, 0.4 + weight / 5),
+      evidence,
+    },
+    ids: l.ids,
+    heads,
+  };
+}

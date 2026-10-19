@@ -2,12 +2,7 @@ import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, CopyToClipboard, Input, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
   useGenerateHackerInvite,
@@ -107,11 +102,11 @@ export function HackerInvites() {
       </label>
 
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
+        <table className='w-full border-collapse border border-borderColor min-w-max'>
+          <thead className='bg-borderColor h-9'>
             <tr>
               {['ID', 'Email', 'Created by', 'Created', 'Expires', 'Status', ''].map((h) => (
-                <th key={h} className='border border-textInactiveColor px-2 h-9'>
+                <th key={h} className='border border-borderColor px-2 h-9'>
                   <Text variant='uppercase' size='small'>
                     {h}
                   </Text>
@@ -138,27 +133,27 @@ export function HackerInvites() {
                 return (
                   <tr
                     key={inv.id}
-                    className='border-b border-textInactiveColor last:border-b-0 h-9'
+                    className='border-b border-borderColor last:border-b-0 h-9'
                   >
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{inv.id}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
-                      <Text size='small'>{inv.email || '-'}</Text>
+                    <td className='border border-borderColor text-center px-2'>
+                      <Text size='small'>{inv.email || <EmptyCell />}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
-                      <Text size='small'>{inv.createdBy || '-'}</Text>
+                    <td className='border border-borderColor text-center px-2'>
+                      <Text size='small'>{inv.createdBy || <EmptyCell />}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.createdAt)}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.expiresAt)}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{statusLabel}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       {inv.active && canWrite(SECTION.members) && (
                         <Button
                           variant='underline'

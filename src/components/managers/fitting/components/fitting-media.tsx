@@ -1,13 +1,12 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotationEditor } from 'ui/components/annotation/editor';
-import { useEditHistory } from 'ui/components/annotation/history';
-import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
-import type { AnnotationCapsKey, AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
-import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { AnnotationEditor } from 'components/managers/tech-card/annotation/editor';
+import { useEditHistory } from 'components/managers/tech-card/annotation/history';
+import { rememberPen, type PenStyle, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
+import type { AnnotationCapsKey, AnnotationColorKey, AnnotationKindKey } from 'components/managers/tech-card/annotation/wire';
+import { ConfirmationModal, Text } from 'ui';
+import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { demoteCalloutToPin, hasDrawnGeometry } from './callout-geometry';
 import { FittingFormData } from './schema';
 

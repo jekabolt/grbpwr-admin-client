@@ -1,7 +1,5 @@
 import { CompositionStructure } from 'constants/garment-composition';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { ConfirmationModal, GroupLabel, Text } from 'ui';
 import { CompositionSummary } from './composition-summary';
 import { FibreRow } from './material-row';
 import { GarmentPartTabs } from './garment-part-tabs';

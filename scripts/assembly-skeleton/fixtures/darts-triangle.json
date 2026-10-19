@@ -1,0 +1,45 @@
+{
+  "id": "darts-triangle",
+  "note": "Skirt front whose waist dart is drawn as a CLOSED triangle with its base on the waist line.",
+  "category": "skirt",
+  "pieces": [
+    {
+      "key": "SKIRT_FRONT",
+      "poly": [
+        [0, 0],
+        [30, 0],
+        [30, 60],
+        [0, 60]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": true,
+          "pts": [
+            [10, 60],
+            [11.25, 49],
+            [12.5, 60]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "SKIRT_BACK",
+      "poly": [
+        [0, 0],
+        [30, 0],
+        [30, 60],
+        [0, 60]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {
+    "SKIRT_FRONT": 1
+  },
+  "notchWarnings": 0
+}

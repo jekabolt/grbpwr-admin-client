@@ -6,14 +6,19 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { deriveOrderCounts, overviewToCounts, type OrderStat } from './components/order-stats';
 import { OrdersList } from './components/orders-list';
 import { StockChangesReport } from './components/StockChangesReport';
@@ -21,7 +26,11 @@ import { useInfiniteOrders, useOrdersOverview } from './components/useOrdersQuer
 
 // The three queue statuses the counts strip (ordHead v2) exposes as one-click filters,
 // plus their labels. `today` is a revenue figure, not a filter, so it is not here.
-const QUEUE_FILTERS: { key: keyof ReturnType<typeof deriveOrderCounts>; status: common_OrderStatusEnum; label: string }[] = [
+const QUEUE_FILTERS: {
+  key: keyof ReturnType<typeof deriveOrderCounts>;
+  status: common_OrderStatusEnum;
+  label: string;
+}[] = [
   { key: 'toFulfil', status: 'ORDER_STATUS_ENUM_CONFIRMED', label: 'to fulfil' },
   { key: 'awaitingPayment', status: 'ORDER_STATUS_ENUM_AWAITING_PAYMENT', label: 'awaiting pay' },
   { key: 'refundInProgress', status: 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS', label: 'refunds' },
@@ -52,7 +61,7 @@ function StatButton({
       onClick={onClick}
       className={cn(
         'border-b border-r border-borderColor px-2.5 py-2 text-left transition-colors',
-        active ? 'bg-textColor text-bgColor' : 'hover:bg-bgZebra',
+        active ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg',
       )}
     >
       <span className='block text-micro uppercase tracking-label'>{label}</span>

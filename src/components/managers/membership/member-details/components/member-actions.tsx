@@ -2,12 +2,7 @@ import { Member, TierCode } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Button, Input, Section, Selector, Text } from 'ui';
 import {
   useHardEraseMember,
   useOverrideTier,
@@ -63,7 +58,7 @@ export function MemberActions({ member }: { member: Member }) {
           Manual tier change
         </Text>
         <div className='flex flex-wrap gap-2 items-center'>
-          <span className='inline-block px-2 py-0.5 bg-textInactiveColor/30'>
+          <span className='inline-block px-2 py-0.5 bg-borderColor/30'>
             <Text>{formatTierLabel(member.currentTier, member.currentTierDisplay)}</Text>
           </span>
           <Text variant='inactive'>&rarr;</Text>

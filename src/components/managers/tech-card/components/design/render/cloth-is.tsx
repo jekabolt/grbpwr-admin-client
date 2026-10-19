@@ -1,9 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, GroupLabel, Input, HeaderNote, Text } from 'ui';
 
 import { GROUP_GAP } from '../core';
 import type { ColourDraft } from './drafts';

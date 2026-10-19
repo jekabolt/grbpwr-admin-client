@@ -13,15 +13,19 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Accordion } from 'ui/components/accordion';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { ViewSwitch } from 'ui/components/view-switch';
+import {
+  Accordion,
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  FoldCaret,
+  Placeholder,
+  Text,
+  ViewSwitch,
+} from 'ui';
 import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
 import {
   flushRefusalSentence,
@@ -1015,13 +1019,8 @@ export function ConstructionAudit({
     </Text>
   ) : (
     <>
-      {findings.length === 0 ? (
-        <Text size='micro' variant='label' component='span'>
-          machine: clean
-        </Text>
-      ) : (
-        <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>
-      )}
+      {/* Clean says nothing: a folded block with no count IS the all-clear. */}
+      {findings.length > 0 && <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>}
       {inFlight ? (
         <Pill tone='attention'>analyzing…</Pill>
       ) : run ? (
@@ -1031,11 +1030,7 @@ export function ConstructionAudit({
         // не имеет права снимать её строкой выше. Любой статус, кроме ok, — не отчёт.
         run.aiStatus !== 'ok' ? (
           <Pill tone='warn'>ai: no report</Pill>
-        ) : modelFindings.length === 0 ? (
-          <Text size='micro' variant='label' component='span'>
-            ai: none
-          </Text>
-        ) : (
+        ) : modelFindings.length === 0 ? null : (
           <Pill tone='warn'>{`ai: ${modelFindings.length}`}</Pill>
         )
       ) : null}
@@ -1065,12 +1060,7 @@ export function ConstructionAudit({
           область: чип, положенный в неё, сворачивал бы блок тем же нажатием, которым тратит
           деньги, и человек видел бы схлопнувшуюся панель вместо начавшегося прогона. Цена решения
           честная и небольшая: чтобы заказать разбор, блок нужно раскрыть. */}
-      <div className='mb-2 flex items-start justify-between gap-2'>
-        <Text size='micro' variant='label'>
-          what the machine checked on the saved card, and what it did not
-        </Text>
-        {analyzeControl}
-      </div>
+      {analyzeControl && <div className='mb-2 flex justify-end'>{analyzeControl}</div>}
 
       {/* НЕСОХРАНЁННАЯ КАРТОЧКА — ОТДЕЛЬНАЯ ВЕТКА, А НЕ ЗАГРУЗКА. Вкладка сборки открыта и на
           `/add-tech-card` (`isTabVisible` не гейтит её на `isEditMode`), а отключённый запрос
@@ -1079,26 +1069,20 @@ export function ConstructionAudit({
           Аудит читает СОХРАНЁННЫЕ факты, и сказать об этом прямо дешевле, чем изображать работу. */}
       {!techCardId ? (
         <Text size='micro' variant='label'>
-          the audit reads the saved card — save this one first, and it will run on every save after
-          that.
+          save the card to run the audit
         </Text>
       ) : /* Ошибка и пустота ОБЯЗАНЫ выглядеть по-разному. Пустой список находок на упавшем запросе
              читается как «всё чисто» — та самая тишина, от которой защищает `not checked`. */
       isError ? (
         <CalloutBox tone='error'>
-          <Text size='micro'>
-            the construction audit could not be run — this is not a clean card, it is a report that
-            did not arrive.
-          </Text>
+          <Text size='micro'>the audit did not run · not a clean card</Text>
         </CalloutBox>
       ) : isPending ? (
         <Placeholder label='auditing the saved assembly' className='h-8' />
       ) : (
         <div className='flex flex-col gap-2'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            {findings.length === 0
-              ? 'no findings — every check this run ran came back clean'
-              : summary}
+            {findings.length === 0 ? 'no findings' : summary}
           </Text>
 
           {/* Порядок сервера — как пришёл. Он ранжирован там, и пересортировка на клиенте развела
@@ -1124,16 +1108,17 @@ export function ConstructionAudit({
           )}
 
           {notChecked.length > 0 && (
-            <div className='space-y-px'>
-              <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                not checked this run
-              </Text>
+            <details className='group space-y-px'>
+              <summary className='inline-flex cursor-pointer list-none items-center text-micro uppercase tracking-label text-labelColor'>
+                not checked · {notChecked.length}
+                <FoldCaret open='details' />
+              </summary>
               {notChecked.map((n, i) => (
                 <Text key={i} size='micro' variant='label'>
                   · {n}
                 </Text>
               ))}
-            </div>
+            </details>
           )}
 
           {/* ═══ AI REVIEW — its own block, with its own header, status and footer ═══ */}
@@ -1176,7 +1161,7 @@ export function ConstructionAudit({
                   <Text size='micro'>
                     {analyze.error instanceof Error &&
                     analyze.error.message === ANALYZE_ABORTED_BY_CLIENT
-                      ? `the client stopped waiting after ${Math.round(ANALYZE_CLIENT_BUDGET_MS / 1000)} s. That is THIS SCREEN giving up, not the model failing — the server's own budget is longer, so the run may well have finished after we stopped listening. Press re-run to ask again.`
+                      ? `stopped waiting after ${Math.round(ANALYZE_CLIENT_BUDGET_MS / 1000)} s · the run may have finished: re-run`
                       : // NOT «did not reach the server»: the commonest failure here is a REFUSAL
                         // that reached it perfectly — the run is already in flight for this card,
                         // or the hourly ceiling is spent (both arrive as ResourceExhausted with a
@@ -1208,9 +1193,8 @@ export function ConstructionAudit({
                       looks, without this line, exactly like a run that found half as many. */}
                   {dropped > 0 && (
                     <Text size='micro' variant='label'>
-                      {plural(dropped, 'finding')} dropped before this list: {run.droppedBadRef}{' '}
-                      whose anchors resolved nowhere on this card, {run.droppedContradiction}{' '}
-                      contradicting the recomputed facts or repeating a machine finding above.
+                      {plural(dropped, 'finding')} dropped · {run.droppedBadRef} unanchored ·{' '}
+                      {run.droppedContradiction} contradicting
                     </Text>
                   )}
 
@@ -1223,8 +1207,8 @@ export function ConstructionAudit({
                   {modelFindings.length === 0 ? (
                     <Text size='micro' variant='label'>
                       {run.aiStatus === 'ok'
-                        ? 'the model found nothing to report on this card.'
-                        : 'no model findings arrived — read the status above before reading this as clean.'}
+                        ? 'no model findings'
+                        : 'no model findings arrived · not a clean card'}
                     </Text>
                   ) : (
                     groups.map((g) => (

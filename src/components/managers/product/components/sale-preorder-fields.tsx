@@ -1,7 +1,7 @@
 import { isValid, parseISO } from 'date-fns';
 import { useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import InputField from 'ui/form/fields/input-field';
+import { InputField } from 'ui';
 
 function parseWellKnownTimestamp(timestamp: string): Date | null {
   if (!timestamp || timestamp === '0001-01-01T00:00:00Z') return null;

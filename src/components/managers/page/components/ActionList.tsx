@@ -1,5 +1,5 @@
 import { FC, ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { ActionItem } from '../productSignals';
 import { ProductNameLink } from './ProductNameLink';
 import { ActPill, MiniPill, VerdictList, VerdictRow } from './VerdictList';

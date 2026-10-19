@@ -3,21 +3,31 @@
 // (GetTechCardMarker → NestingModal in view mode, same lazy chunk as the nesting itself).
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_TechCard, common_TechCardMarker } from 'api/proto-http/admin';
+import type {
+  common_TechCard,
+  common_TechCardMarker,
+  common_TechCardMarkerSummary,
+} from 'api/proto-http/admin';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { colorwayLabelOf } from './colorway-widths';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { cn } from 'lib/utility';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import {
   cardMarkers,
   compositionLabel,
@@ -37,6 +47,7 @@ import {
 // пересборкой — второй его копии здесь быть не должно. Модуль зависит только от типов и от чистой
 // geom/, так что импорт в НЕленивый чанк не тащит ни clipper, ни dxf-parser.
 import { patternSourcesForMarker, type MarkerPatternRow } from './marker-rebuild';
+import { planAutoNorm } from './auto-norm';
 import {
   fabricScopes,
   isRollGoodsSection,
@@ -62,7 +73,6 @@ const SOURCE_LABEL: Record<string, string> = {
 // незаписанный припуск означает, что замера не делал никто. Ровно этим «старая норма» и
 // отличается от свежей раскладки с нулевым припуском, а на глаз они выглядели бы одинаково.
 const NOT_RECORDED = 'not recorded';
-
 
 // Припуск, который РЕАЛЬНО лежит между линией шва и линией кроя, = наложенный раскладкой плюс
 // уже сидевший в контуре файла (их СУММА — определение сервера, см. TechCardMarkerInsert). Пару
@@ -111,6 +121,57 @@ function conditionLines(c: MarkerConditions): string[] {
 }
 
 const PIECE_SET_MATCHES = 'TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES';
+
+// Состав словами строки: 'xs ×1' для одного размера, 'xs 1 · s 2' для смешанного настила.
+// Число изделий (бывшая колонка «garments») сидит здесь же — отдельной колонки больше нет.
+function compositionText(
+  comp: readonly { sizeId: number; quantity: number }[],
+  sizeName: (id: number) => string,
+): string {
+  if (comp.length === 0) return '';
+  if (comp.length === 1) return `${sizeName(comp[0].sizeId)} ×${comp[0].quantity}`;
+  return comp.map((c) => `${sizeName(c.sizeId)} ${c.quantity}`).join(' · ');
+}
+
+// АВТОИМЯ НЕ ПОКАЗЫВАЕМ: оно склеено из размера, колорвея и ткани (baseMarkerName) и повторяет то,
+// что строка и так говорит составом и группой. Показываем только имя, которое дал человек.
+function isAutoName(m: common_TechCardMarkerSummary, sizeLabels: readonly string[]): boolean {
+  // Только имя, совпадающее с генерированным образцом «размер · …» — переименованная человеком
+  // раскладка (даже автоматическая по происхождению) остаётся видна по имени (Codex r5).
+  const name = (m.name ?? '').trim();
+  if (!name.includes(' · ')) return false;
+  const head = name
+    .split(' · ')[0]
+    .trim()
+    .toLowerCase()
+    .replace(/\s*[×x]\s*\d+$/, '');
+  return sizeLabels.some((l) => l.trim().toLowerCase() === head);
+}
+
+// Всё, что сняли со строки, уезжает в её подсказку — ничего не теряется.
+function rowTooltip(m: common_TechCardMarkerSummary, colorway: string): string {
+  const cond = conditionsOf(m);
+  const allow = allowanceText(cond);
+  const lines = conditionLines(cond);
+  const units = totalUnitsOf(m);
+  const updated = formatTechCardDate(m.updatedAt);
+  return [
+    m.name ?? '',
+    `source: ${SOURCE_LABEL[m.source ?? ''] ?? m.source ?? ''}`,
+    `BOM slot: ${m.bomItemName || 'not linked / deleted'}`,
+    `colourway: ${colorway || 'shared'}`,
+    units ? `garments: ${units}` : '',
+    `seam allowance: ${allow ? `${allow.total} (${allow.origin})` : NOT_RECORDED}`,
+    ...(lines.length > 0 ? lines : [`layers / flip: ${NOT_RECORDED}`]),
+    isLegacyNorm(m) ? 'legacy norm: capture conditions not recorded' : '',
+    !pieceSetChanged(m) && !isLegacyNorm(m) && m.pieceSetStatus !== PIECE_SET_MATCHES
+      ? 'piece set not checked'
+      : '',
+    updated ? `updated ${updated}${m.updatedBy ? ` by ${m.updatedBy}` : ''}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 // Как назвать скоуп эксклюзивности словами. Скоуп — (карточка, строка BOM), то есть «одна норма
 // на ТКАНЬ»; непривязанная раскладка попадает в собственный скоуп «без ткани», и он тоже скоуп.
@@ -187,15 +248,27 @@ export function MarkersSection({
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  // Назначение нормы: подтверждение, занятость и ПЕРЕЖИВАЮЩАЯ строка о последствиях.
-  const [norming, setNorming] = useState<{
-    id: number;
-    name: string;
-    slot: string;
-    on: boolean;
-    refusal: string;
-  } | null>(null);
-  const [normBusy, setNormBusy] = useState(false);
+  // Удаление нормы: куда она переедет (тот же план, что у автоматики, без удаляемой раскладки).
+  const deletingNorm =
+    deleting != null && markers.some((m) => Number(m.id) === deleting.id && m.isNorm);
+  const nextNorm = useMemo(() => {
+    if (!deleting || !deletingNorm) return undefined;
+    const gone = markers.find((m) => Number(m.id) === deleting.id);
+    const scope = (gone?.bomLineKey ?? '').trim();
+    const rest = markers.filter((m) => Number(m.id) !== deleting.id);
+    return (
+      planAutoNorm(rest).find((st) => st.scope === scope)?.marker ??
+      rest.find((m) => m.isNorm && (m.bomLineKey ?? '').trim() === scope)
+    );
+  }, [deleting, deletingNorm, markers]);
+  // НОРМА НАЗНАЧАЕТСЯ САМА (auto-norm.ts): последняя созданная годная раскладка ткани. Попытки
+  // помнятся по ключу id@updated_at — одна и та же версия раскладки не назначается дважды, и отказ
+  // сервера не превращается в ретрай на каждом рендере. `normRunning` не пускает второй проход,
+  // пока идёт первый: записи идут строго по одной, значит и на строку BOM — одна в полёте.
+  // `normPass` перезапускает эффект после прохода — шаги, пришедшие, пока он шёл, не теряются.
+  const normTried = useRef(new Set<string>());
+  const normRunning = useRef(false);
+  const [normPass, setNormPass] = useState(0);
   // Почему это НЕ тост. Переназначение нормы рецепты не пересчитывает, и починка (применить новую
   // норму) делается на ДРУГОЙ вкладке — тост до неё не доживёт, а несделанное применение значит,
   // что костинг продолжает считать по прежнему числу. Плашка висит, пока её не закроют.
@@ -266,7 +339,10 @@ export function MarkersSection({
       if (r.marker) setView(r.marker);
       else showMessage('marker not found', 'error');
     } catch (e) {
-      showMessage(e instanceof Error && e.message ? e.message : "couldn't open the marker", 'error');
+      showMessage(
+        e instanceof Error && e.message ? e.message : "couldn't open the marker",
+        'error',
+      );
     } finally {
       setOpeningId(null);
     }
@@ -282,43 +358,71 @@ export function MarkersSection({
   // говорит, из какой раскладки число когда-то взяли, и ничего не пересчитывает. Ровно поэтому
   // предупреждение ниже остаётся верным и после Ф6.8, а расхождение «раскладку с тех пор
   // перемеряли» показывается на строке рецепта, а не здесь.
-  const setNorm = async () => {
-    if (!norming) return;
-    setNormBusy(true);
-    try {
-      const r = await adminService.SetTechCardMarkerNorm({ id: norming.id, isNorm: norming.on });
-      const prevId = Number(r.previousNormMarkerId ?? 0);
-      const prev = prevId ? markers.find((x) => Number(x.id ?? 0) === prevId) : undefined;
-      // Читается ПОЛЕ, а не подразумевается: сервер отвечает recipes_not_recalculated = true
-      // именно затем, чтобы это не было домыслом экрана. Отсутствие поля читаем как «не
-      // пересчитаны» — пересчитывать некому ни на одной версии сервера.
-      const notRecalculated = r.recipesNotRecalculated !== false;
-      setNormNote(
-        norming.on
-          ? `the norm of ${scopeWord(norming.slot)} is now “${norming.name}”${
-              prev ? `, the previous one was “${prev.name ?? ''}”` : ''
-            }.${
-              notRecalculated
-                ? ' recipes were NOT recalculated: the consumption applied into the recipe from the previous norm stayed the same number. if it has to change — apply the new marker in the colourway consumption by hand.'
-                : ''
-            }`
-          : `“${norming.name}” is no longer the norm of ${scopeWord(norming.slot)}. no other norm appeared in its place — assign one, otherwise costing and the readiness gate have nothing to ask.${
-              notRecalculated ? ' recipes were not recalculated: the applied consumption stayed the same.' : ''
+  //
+  // Поэтому назначение — автоматическое, а последствие — нет: если норма ткани СМЕНИЛАСЬ (была
+  // прежняя), плашка говорит, что рецепты держат старое число и применить новое надо руками.
+  // Первое назначение (прежней нормы не было) плашки не даёт: устаревать в рецептах нечему.
+  const autoSteps = useMemo(() => (canEdit ? planAutoNorm(markers) : []), [canEdit, markers]);
+  useEffect(() => {
+    if (normRunning.current) return;
+    const steps = autoSteps.filter((s) => !normTried.current.has(s.key));
+    if (steps.length === 0) return;
+    normRunning.current = true;
+    for (const s of steps) normTried.current.add(s.key);
+    (async () => {
+      const notes: string[] = [];
+      let changed = false;
+      for (const s of steps) {
+        const id = Number(s.marker.id ?? 0);
+        try {
+          // ПЕРЕЧИТАТЬ ПЕРЕД ЗАПИСЬЮ. План посчитан по кэшу карточки (staleTime 5 мин), а рядом
+          // может идти параллельное сохранение/назначение. Пишем, только если план по СВЕЖЕМУ
+          // списку для этой ткани тот же самый (та же раскладка, она ещё не норма); иначе —
+          // пропуск: инвалидация ниже принесёт свежий список, и следующий проход решит по нему.
+          const fresh = await adminService.GetTechCard({
+            id: techCardId,
+            vatCountryCode: undefined,
+          });
+          const freshStep = planAutoNorm(cardMarkers(fresh.techCard?.markers)).find(
+            (x) => x.scope === s.scope,
+          );
+          if (!freshStep || Number(freshStep.marker.id ?? 0) !== id) {
+            changed = true; // кэш устарел — перечитать
+            continue;
+          }
+          const r = await adminService.SetTechCardMarkerNorm({ id, isNorm: true });
+          changed = true;
+          const prevId = Number(r.previousNormMarkerId ?? 0);
+          const prev = prevId
+            ? cardMarkers(fresh.techCard?.markers).find((x) => Number(x.id ?? 0) === prevId)
+            : undefined;
+          // Поле читается, а не подразумевается: отсутствие = «не пересчитаны».
+          if (prevId && r.recipesNotRecalculated !== false) {
+            notes.push(
+              `the norm of ${scopeWord(s.marker.bomItemName ?? '')} is now the newest complete marker “${
+                s.marker.name ?? ''
+              }”${prev ? ` (was “${prev.name ?? ''}”)` : ''}. recipes were NOT recalculated: the consumption already applied from the previous norm stays the same number — if it has to change, apply the new marker in the colourway consumption.`,
+            );
+          }
+        } catch (e) {
+          // Тихо не глотаем: оператор должен знать, что у ткани осталась прежняя норма (или никакой).
+          showMessage(
+            `couldn't make “${s.marker.name ?? ''}” the norm: ${
+              e instanceof Error && e.message ? e.message : 'unknown error'
             }`,
-      );
-      showMessage(norming.on ? 'norm assigned' : 'norm cleared', 'success');
-      qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-      qc.invalidateQueries({ queryKey: techCardKeys.lists() });
-      setNorming(null);
-    } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : "couldn't change the norm",
-        'error',
-      );
-    } finally {
-      setNormBusy(false);
-    }
-  };
+            'error',
+          );
+        }
+      }
+      if (notes.length > 0) setNormNote(notes.join('\n'));
+      if (changed) {
+        await qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        qc.invalidateQueries({ queryKey: techCardKeys.lists() });
+      }
+      normRunning.current = false;
+      setNormPass((n) => n + 1);
+    })();
+  }, [autoSteps, normPass, qc, showMessage, techCardId]);
 
   const deleteMarker = async () => {
     if (!deleting) return;
@@ -330,29 +434,170 @@ export function MarkersSection({
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setDeleting(null);
     } catch (e) {
-      showMessage(e instanceof Error && e.message ? e.message : "couldn't delete the marker", 'error');
+      showMessage(
+        e instanceof Error && e.message ? e.message : "couldn't delete the marker",
+        'error',
+      );
     } finally {
       setDeleteBusy(false);
     }
   };
 
+  // Группы по строке BOM — только когда тканей больше одной; иначе заголовок группы повторял бы
+  // секцию.
+  const groups = useMemo(() => {
+    const byKey = new Map<string, { key: string; label: string; markers: typeof markers }>();
+    for (const m of markers) {
+      const label = (m.bomItemName ?? '').trim();
+      const key = label || '\u0000';
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key, label: label || 'not linked', markers: [] };
+        byKey.set(key, g);
+      }
+      g.markers.push(m);
+    }
+    return [...byKey.values()];
+  }, [markers]);
+
   if (markers.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        there are no saved markers — run “⌗ marker” on the size tile and press “save marker”
+        no saved markers
       </Text>
     );
   }
+
+  const renderRow = (m: common_TechCardMarkerSummary, last: boolean) => {
+    const id = Number(m.id ?? 0);
+    const cons = consumptionCm(m);
+    // Отказ выдать скалярную норму ЗАМЕЩАЕТ число, а не приписывается к нему: на смешанном составе
+    // средняя по составу выглядит как обычная норма, и глазом её не отличить.
+    const refusal = scalarNormRefusal(m);
+    const comp = compositionOf(m);
+    const draft = isDraftMarker(m);
+    const conflict = (m.normConflict ?? '').trim();
+    const changed = pieceSetChanged(m);
+    const name = (m.name ?? '').trim();
+    const custom =
+      name &&
+      !isAutoName(
+        m,
+        comp.map((c) => sizeName(c.sizeId)),
+      );
+    const colorway = Number(m.colorwayId ?? 0)
+      ? colorwayLabelById.get(Number(m.colorwayId)) ?? 'colourway not on the card'
+      : '';
+    const width = decNum(m.fabricWidthCm);
+    const length = decNum(m.usedLengthCm);
+    const eff = decNum(m.efficiencyPct);
+    return (
+      <li
+        key={id}
+        title={rowTooltip(m, colorway)}
+        onClick={() => openingId == null && openMarker(id)}
+        className={cn(
+          'grid cursor-pointer grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-pageBg',
+          !last && 'border-b border-hairline',
+        )}
+      >
+        <button
+          type='button'
+          className='min-w-0 truncate text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          disabled={openingId === id}
+          onClick={(e) => {
+            e.stopPropagation();
+            openMarker(id);
+          }}
+        >
+          {custom ? (
+            <>
+              {name} · {compositionText(comp, sizeName)}
+            </>
+          ) : (
+            compositionText(comp, sizeName) || (
+              <Text size='micro' variant='label' component='span'>
+                composition unreadable
+              </Text>
+            )
+          )}
+          {openingId === id && (
+            <Text size='micro' variant='label' component='span'>
+              {' '}
+              opening…
+            </Text>
+          )}
+        </button>
+        <span className='text-right'>
+          {cons != null ? (
+            `${cons} cm / unit`
+          ) : refusal ? (
+            // Смешанный состав — не поломка: у такого маркера просто нет одной цифры на изделие.
+            // Красный здесь врал бы (красный = убыток/поломка), поэтому серый текст, причина в title.
+            <span className='text-labelColor' title={refusal}>
+              {refusalWord(m)}
+            </span>
+          ) : (
+            <EmptyCell />
+          )}
+        </span>
+        <span className='text-right text-labelColor'>{width ? `${width} cm` : <EmptyCell />}</span>
+        <span className='text-right text-labelColor'>
+          {length ? `${length} cm` : <EmptyCell />}
+        </span>
+        <span className='text-right text-labelColor'>{eff ? `${eff} %` : <EmptyCell />}</span>
+        <span className='inline-flex items-baseline justify-end gap-2'>
+          {m.isNorm && (
+            <Pill
+              tone='ok'
+              title='the norm: the marker costing and the readiness gate measure this fabric by. chosen automatically — the newest complete single-size marker of the fabric.'
+            >
+              norm
+            </Pill>
+          )}
+          {draft && (
+            <Pill tone='warn' title={refusal}>
+              draft
+              {Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
+                ? ` · ${m.placedCount ?? 0} of ${m.totalCount ?? 0}`
+                : ''}
+            </Pill>
+          )}
+          {changed && (
+            <Pill
+              tone='attention'
+              title='the piece set on the card changed since the capture — recheck'
+            >
+              set changed
+            </Pill>
+          )}
+          {conflict && (
+            <Pill tone='warn' title={conflict}>
+              norm conflict
+            </Pill>
+          )}
+          {canEdit && (
+            <Close
+              size='sm'
+              aria-label='delete marker'
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                setDeleting({ id, name: m.name ?? '' });
+              }}
+            />
+          )}
+        </span>
+      </li>
+    );
+  };
 
   return (
     <div className='space-y-2'>
       {conflicts.map((t) => (
         <CalloutBox key={t} tone='error'>
           <Text size='micro' component='p'>
-            <b>two norms on one fabric.</b> {t} costing and the gate take the freshest of them, so
-            the answer is the same everywhere — but it was picked by date, not by a person. press
-            “set as the norm” on the marker you mean to measure by: assigning it clears the flag on
-            the other.
+            <b>two norms on one fabric.</b> {t} the next complete marker saved for this fabric
+            becomes its only norm; or delete the marker you don't want.
           </Text>
         </CalloutBox>
       ))}
@@ -361,260 +606,29 @@ export function MarkersSection({
         // дожить до туда.
         <CalloutBox tone='warning'>
           <div className='flex items-start justify-between gap-2'>
-            <Text size='micro' component='p'>
+            <Text size='micro' component='p' className='whitespace-pre-line'>
               {normNote}
             </Text>
-            <Button type='button' variant='secondary' size='xs' onClick={() => setNormNote(null)}>
+            <Button type='button' variant='underline' size='xs' onClick={() => setNormNote(null)}>
               got it
             </Button>
           </div>
         </CalloutBox>
       )}
-      <div className='overflow-x-auto'>
-        <DataTable variant='grid' className='[&_td]:text-micro [&_th]:text-nano'>
-          <thead>
-            <tr>
-              <th>name</th>
-              {/* СОСТАВ вместо размера: раскладка больше не «один размер», она называет, сколько
-                  изделий какого размера кроит один настил. У снятых до Ф2 состав ровно один
-                  размер, и колонка выглядит как прежняя. */}
-              <th>composition</th>
-              <th>BOM slot</th>
-              <th>width</th>
-              <th>length</th>
-              <th>garments</th>
-              <th>consumption / unit</th>
-              <th>eff.</th>
-              {/* УСЛОВИЯ СЪЁМКИ (Ф3). Без них длина настила — число без правил: раскладка по
-                  линии шва и раскладка по линии кроя отличаются на припуск по всему периметру
-                  КАЖДОЙ детали, а в колонке «длина» выглядят одинаково. */}
-              <th>seam allowance</th>
-              <th>layers / flip</th>
-              <th>updated</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {markers.map((m) => {
-              const cons = consumptionCm(m);
-              // Отказ выдать скалярную норму. Он ЗАМЕЩАЕТ число в колонке расхода, а не
-              // приписывается к нему: на смешанном составе средняя по составу выглядит как
-              // обычная норма, и глазом её не отличить.
-              const refusal = scalarNormRefusal(m);
-              const comp = compositionOf(m);
-              const cond = conditionsOf(m);
-              const allow = allowanceText(cond);
-              const lines = conditionLines(cond);
-              const legacy = isLegacyNorm(m);
-              const draft = isDraftMarker(m);
-              const conflict = (m.normConflict ?? '').trim();
-              // НЕИЗВЕСТНОСТЬ — НЕ ИЗМЕНЕНИЕ, и поле поэтому трёхзначное: маркер, снятый до Ф3,
-              // отпечатка не несёт, и объявить его «изменившимся» значило бы разом пометить ВСЕ
-              // старые раскладки — шум там, где нужен сигнал. Поэтому у неизвестности бейджа нет.
-              const setUnknown = !pieceSetChanged(m) && m.pieceSetStatus !== PIECE_SET_MATCHES;
-              return (
-                <tr key={m.id}>
-                  <td>
-                    <span className='inline-flex items-center gap-1.5'>
-                      <span className='max-w-[180px] truncate'>{m.name}</span>
-                      <Pill tone='mut'>{SOURCE_LABEL[m.source ?? ''] ?? m.source}</Pill>
-                    </span>
-                    {(m.isNorm ||
-                      draft ||
-                      pieceSetChanged(m) ||
-                      legacy ||
-                      conflict ||
-                      setUnknown) && (
-                      <span className='mt-0.5 flex flex-wrap items-center gap-1'>
-                        {draft && (
-                          // ЧЕРНОВИК ОБЯЗАН БЫТЬ ВИДЕН ЗДЕСЬ. От измеренной раскладки он
-                          // отличается в этой таблице ровно одним — пустой колонкой расхода, — а
-                          // пустая колонка читается как «ещё не посчитали». Тон тот же, что у
-                          // соседней пилюли отказа в колонке расхода («смешанный состав»): это
-                          // одна и та же категория — раскладка, числа с которой не берут.
-                          <Pill tone='warn' title={scalarNormRefusal(m)}>
-                            draft
-                            {Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
-                              ? ` · ${m.placedCount ?? 0} of ${m.totalCount ?? 0}`
-                              : ''}
-                          </Pill>
-                        )}
-                        {m.isNorm && (
-                          // ЧЁРНАЯ, а не цветная: назначение нормы — РЕШЕНИЕ человека, а не
-                          // состояние «сломано / в полёте / готово», и цвет в этой системе несёт
-                          // только состояние.
-                          <Pill
-                            tone='ink'
-                            title='the norming marker of THIS fabric on the card: costing computes by it and the readiness gate asks for it. there is one norm per fabric, not one per card.'
-                          >
-                            norm
-                          </Pill>
-                        )}
-                        {pieceSetChanged(m) && (
-                          <Pill
-                            tone='attention'
-                            title='the set of pieces on the CARD has changed since the capture — the marker has to be rechecked. the digest is card-wide, so a piece added on ANOTHER fabric raises the flag here too: this means “recheck”, not “the marker is wrong”.'
-                          >
-                            set changed
-                          </Pill>
-                        )}
-                        {legacy && (
-                          // Категория ПРОИЗВОДНАЯ: своего флага у неё нет и не будет — непомеченное
-                          // само остаётся старым. Серая, потому что сегодня такова КАЖДАЯ строка,
-                          // снятая до Ф3, и красить их все значило бы закрасить весь список.
-                          <Pill
-                            tone='mut'
-                            title='the capture conditions were not recorded: which line it was measured by, and with what allowance, is unknown. costing cannot tell a marker taken on the seam line from one taken on the cut line, and they differ by the allowance around the whole perimeter of every piece. re-capture the marker to make the norm comparable.'
-                          >
-                            legacy norm
-                          </Pill>
-                        )}
-                        {conflict && (
-                          // Сервер сообщает конфликт ЯВНО и одним текстом на КАЖДОЙ строке
-                          // скоупа: увидеть его с одной строки и пропустить с другой нельзя.
-                          <Pill tone='warn' title={conflict}>
-                            norm conflict
-                          </Pill>
-                        )}
-                        {setUnknown && !legacy && (
-                          // Условия записаны, а отпечаток посчитать не удалось: тихая серая
-                          // подпись, а не бейдж. У старой нормы её не показываем — там про набор
-                          // и так ничего не известно, и второе слово об одном и том же лишнее.
-                          <Text size='nano' variant='label' component='span'>
-                            set not checked
-                          </Text>
-                        )}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {compositionLabel(comp, sizeName) || (
-                      <Text size='nano' variant='label' component='span'>
-                        composition unreadable
-                      </Text>
-                    )}
-                  </td>
-                  <td>
-                    {/* The wire cannot tell «never linked» from «slot deleted» (both come
-                        from the same LEFT JOIN going NULL) — one honest label, no fake pill. */}
-                    {m.bomItemName || (
-                      <Text size='nano' variant='label' component='span'>
-                        not linked / deleted
-                      </Text>
-                    )}
-                    {/* «общая» — это НЕ отсутствие данных: маркер снят до 0264 или ширина у всех
-                        колорвеев одна, и такая раскладка законно предлагается каждому. Пустая
-                        ячейка читалась бы как недозаполненная. */}
-                    <span className='block text-nano text-labelColor'>
-                      {colorwayLabelById.get(Number(m.colorwayId ?? 0)) ??
-                        (Number(m.colorwayId ?? 0) ? 'colourway not on the card' : 'shared')}
-                    </span>
-                  </td>
-                  <td>{decNum(m.fabricWidthCm)} cm</td>
-                  <td>{decNum(m.usedLengthCm)} cm</td>
-                  <td>{totalUnitsOf(m) || <EmptyCell />}</td>
-                  <td className='font-semibold'>
-                    {cons != null ? (
-                      `${cons} cm`
-                    ) : refusal ? (
-                      // Слово, а не пустая ячейка: пустая читается как «ещё не посчитали», тогда
-                      // как здесь считать НЕЧЕГО — и причина висит подсказкой на самой пилюле.
-                      <Pill tone='warn' title={refusal}>
-                        {refusalWord(m)}
-                      </Pill>
-                    ) : (
-                      <EmptyCell />
-                    )}
-                  </td>
-                  <td>{decNum(m.efficiencyPct) ? `${decNum(m.efficiencyPct)} %` : <EmptyCell />}</td>
-                  <td>
-                    {/* НИКОГДА не «0 см» вместо незаписанного: ноль — это утверждение о замере
-                        («клали линию как нарисована»), а здесь замера не делал никто. */}
-                    {allow ? (
-                      <>
-                        {allow.total}
-                        <span className='block text-nano text-labelColor'>{allow.origin}</span>
-                      </>
-                    ) : (
-                      <Text size='nano' variant='label' component='span'>
-                        {NOT_RECORDED}
-                      </Text>
-                    )}
-                  </td>
-                  <td>
-                    {lines.length > 0 ? (
-                      lines.map((l) => (
-                        <span key={l} className='block text-nano text-labelColor'>
-                          {l}
-                        </span>
-                      ))
-                    ) : (
-                      <Text size='nano' variant='label' component='span'>
-                        {NOT_RECORDED}
-                      </Text>
-                    )}
-                  </td>
-                  <td>
-                    <span title={m.updatedBy || ''}>{formatTechCardDate(m.updatedAt)}</span>
-                  </td>
-                  <td>
-                    <span className='inline-flex gap-1'>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        size='xs'
-                        disabled={openingId === m.id}
-                        onClick={() => openMarker(m.id ?? 0)}
-                      >
-                        {openingId === m.id ? 'opening…' : 'open'}
-                      </Button>
-                      {canEdit && (
-                        // Отдельное действие, а не поле сохранения: пересохранение геометрии не
-                        // должно уметь перехватить норму, а стейлый бандл — снять её, не зная о
-                        // признаке. Снятие оставлено рядом с назначением: без него ошибочно
-                        // назначенную норму нечем убрать, когда назначать вместо неё нечего.
-                        //
-                        // ЧЕРНОВИКУ КНОПКА ПОГАШЕНА С ПРИЧИНОЙ. Сервер откажет ему в любом случае
-                        // (SetTechCardMarkerNorm плюс CHECK chk_tcm_draft_not_norm), но отказ
-                        // после нажатия читается как сбой, а не как правило.
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          disabled={draft}
-                          title={draft ? scalarNormRefusal(m) : undefined}
-                          onClick={() =>
-                            setNorming({
-                              id: m.id ?? 0,
-                              name: m.name ?? '',
-                              slot: m.bomItemName ?? '',
-                              on: !m.isNorm,
-                              refusal,
-                            })
-                          }
-                        >
-                          {m.isNorm ? 'clear the norm' : 'set as the norm'}
-                        </Button>
-                      )}
-                      {canEdit && (
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          aria-label='delete marker'
-                          onClick={() => setDeleting({ id: m.id ?? 0, name: m.name ?? '' })}
-                        >
-                          ✕
-                        </Button>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </DataTable>
-      </div>
+      {groups.map((g) => (
+        <div key={g.key}>
+          {groups.length > 1 && <GroupLabel>{g.label}</GroupLabel>}
+          <div className='grid grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] gap-x-4 border-b border-borderColor pb-1 text-micro uppercase tracking-label text-labelColor'>
+            <span>marker</span>
+            <span className='text-right'>per unit</span>
+            <span className='text-right'>width</span>
+            <span className='text-right'>length</span>
+            <span className='text-right'>eff.</span>
+            <span />
+          </div>
+          <ul>{g.markers.map((m, i) => renderRow(m, i === g.markers.length - 1))}</ul>
+        </div>
+      ))}
 
       {view && (
         <Suspense
@@ -655,72 +669,19 @@ export function MarkersSection({
         onCancel={() => {
           if (!deleteBusy) setDeleting(null);
         }}
-        title='delete the marker?'
-        confirmLabel={deleteBusy ? 'deleting…' : 'delete'}
+        title={`delete marker ${deleting?.name ?? ''}?`}
+        confirmLabel={deleteBusy ? 'deleting…' : 'delete marker'}
         confirmDisabled={deleteBusy}
         closeOnConfirm={false}
+        hideCancel
       >
-        <Text size='micro' component='p'>
-          “{deleting?.name}” will be deleted for good. the consumption already written into the
-          recipes will not change — only the marker itself and its hint in costing will go.
-        </Text>
-      </ConfirmationModal>
-
-      <ConfirmationModal
-        open={norming != null}
-        onOpenChange={(o) => {
-          if (!o && !normBusy) setNorming(null);
-        }}
-        onConfirm={setNorm}
-        onCancel={() => {
-          if (!normBusy) setNorming(null);
-        }}
-        title={norming?.on === false ? 'clear the norm?' : 'set as the norm?'}
-        confirmLabel={
-          norming?.on === false
-            ? normBusy
-              ? 'clearing…'
-              : 'clear the norm'
-            : normBusy
-              ? 'assigning…'
-              : 'set as the norm'
-        }
-        confirmDisabled={normBusy}
-        closeOnConfirm={false}
-      >
-        <div className='space-y-2'>
-          {norming?.on === false ? (
-            <Text size='micro' component='p'>
-              “{norming?.name}” will stop being the norm of {scopeWord(norming?.slot ?? '')}. no
-              other norm will appear in its place: clearing assigns nothing, and until the next
-              assignment the fabric stays without a norm — the readiness gate will see that.
-            </Text>
-          ) : norming?.slot ? (
-            <Text size='micro' component='p'>
-              “{norming?.name}” will become the norming marker of {scopeWord(norming?.slot ?? '')}:
-              costing computes by it and the readiness gate asks for it. the previous norm of THE
-              SAME fabric will lose the flag — there is one norm per fabric, not one per card, and
-              the norms of other fabrics are not affected.
-            </Text>
-          ) : (
-            <Text size='micro' component='p'>
-              “{norming?.name}” is not linked to a fabric, so it lands in its own “no fabric” scope
-              — one such norm per card. the readiness gate will not accept it anyway: it asks about a
-              fabric. link the marker to a BOM slot if it is meant to norm.
-            </Text>
-          )}
-          <Text size='micro' component='p'>
-            recipes are not recalculated. the number already applied into a recipe from the previous
-            norm stays as it was: applying is a separate deliberate action (colourway consumption →
-            apply marker). the flag only says WHICH marker to measure by, and computes nothing itself.
-          </Text>
-          {norming?.on !== false && !!norming?.refusal && (
-            <Text size='micro' variant='label' component='p'>
-              {norming.refusal} such a marker can be set as the norm — it is still a measurement of
-              a lay — but it cannot be applied into a recipe as a single number.
-            </Text>
-          )}
-        </div>
+        {deletingNorm && (
+          <Row
+            label='norm moves to'
+            value={nextNorm ? nextNorm.name ?? '' : 'none'}
+            tone={nextNorm ? undefined : 'error'}
+          />
+        )}
       </ConfirmationModal>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { cn } from 'lib/utility';
 import { Button } from './button';
+import { Close } from './close';
 import Input from './input';
 import Text from './text';
 
@@ -57,7 +58,7 @@ export function ChecklistEditor({
         </Text>
         {total > 0 && (
           <div
-            className='h-1 w-24 shrink-0 bg-textInactiveColor'
+            className='h-1 w-24 shrink-0 bg-borderColor'
             role='progressbar'
             aria-valuenow={pct}
             aria-valuemin={0}
@@ -77,7 +78,7 @@ export function ChecklistEditor({
           {items.map((item) => (
             <li
               key={item.id}
-              className='group flex items-center gap-2 border-b border-textInactiveColor py-1.5 last:border-b-0'
+              className='group flex items-center gap-2 border-b border-borderColor py-1.5 last:border-b-0'
             >
               <button
                 type='button'
@@ -89,7 +90,7 @@ export function ChecklistEditor({
                 disabled={!canWrite}
                 onClick={() => onToggle(item.id, !item.isDone)}
                 className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center border border-textInactiveColor text-micro leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  'flex h-4 w-4 shrink-0 items-center justify-center border border-borderColor text-micro leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   item.isDone ? 'bg-textColor text-bgColor' : 'bg-bgColor text-transparent',
                   !canWrite && 'cursor-default opacity-70',
                 )}
@@ -106,8 +107,8 @@ export function ChecklistEditor({
                 {item.content}
               </Text>
               {canWrite && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove "${item.content}"`}
                   onClick={() => onDelete(item.id)}
                   /* ✕ ВИДЕН ВСЕГДА, НО ТИХИЙ. Он прятался за `opacity-0 group-hover:opacity-100`,
@@ -115,10 +116,7 @@ export function ChecklistEditor({
                      удаление пункта было там недостижимо — функция существовала end-to-end и
                      читалась как отсутствующая. Тишина теперь весом (серый → чёрный на ховере),
                      а не отсутствием: цвет прячет кнопку от взгляда, но не от пальца. */
-                  className='shrink-0 px-1 text-labelColor transition-colors hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  ✕
-                </button>
+                />
               )}
             </li>
           ))}

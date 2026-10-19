@@ -10,14 +10,18 @@ import { genderOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { useNavigate } from 'react-router-dom';
+import {
+  BackLink,
+  Button,
+  Section,
+  SectionStack,
+  Text,
+  Form,
+  InputField,
+  SelectField,
+  TextareaField,
+} from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields } from './measurements-fields';
 import { ModelMedia } from './model-media';
@@ -75,11 +79,9 @@ export function ModelForm({
         className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit)}
       >
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.models}>← models</Link>
-            </Button>
+            <BackLink to={ROUTES.models}>models</BackLink>
             <Text variant='uppercase' size='large'>
               {isEditMode ? 'edit model' : 'new model'}
             </Text>
@@ -119,7 +121,7 @@ export function ModelForm({
         </SectionStack>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
         <Text variant='inactive' size='small'>
           {form.formState.isDirty ? 'unsaved changes' : ' '}
         </Text>

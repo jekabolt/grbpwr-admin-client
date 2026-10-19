@@ -1,8 +1,6 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useState } from 'react';
-import { Avatar } from 'ui/components/avatar';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Avatar, GenericPopover, Text } from 'ui';
 import { useSetFulfillmentAssignee } from '../hooks/useFulfillment';
 
 // ffAssign v2 — the assignee is an Avatar on the card that opens a Popover to
@@ -100,7 +98,7 @@ function AssigneeRow({
       onClick={onClick}
       aria-pressed={selected}
       className={
-        'flex items-center gap-2 px-1 py-1 text-left transition-colors hover:bg-bgZebra ' +
+        'flex items-center gap-2 px-1 py-1 text-left transition-colors hover:bg-pageBg ' +
         (selected ? 'text-textColor' : 'text-labelColor')
       }
     >

@@ -1,8 +1,7 @@
 import type { common_Color, common_ColorwayColour, common_Language } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { AddDoor, Input, Text, FoldCaret, EmptyCell, Close } from 'ui';
 
 import {
   blankRow,
@@ -18,7 +17,6 @@ import {
   type PaletteRow,
 } from './colourway-palette-model';
 import { PantonePicker } from './pantone-picker';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ОДИН РЕДАКТОР ПАЛИТРЫ НА ТРИ ЭКРАНА (T45) ═════════════════════════════════════════════════
@@ -68,7 +66,7 @@ export function paletteValueFromRead(read: {
 }
 
 const CELL =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 function Label({ children }: { children: React.ReactNode }): JSX.Element {
   return (
@@ -149,7 +147,7 @@ export function SkuToken({
   return (
     <span className={cn('flex min-w-0 flex-col gap-0.5', className)} {...rest}>
       <Text component='span' className='tabular-nums uppercase' data-cw-token=''>
-        {t || '—'}
+        {t || <EmptyCell />}
       </Text>
       <Text size='micro' variant='label' component='span'>
         {TOKEN_CAPTION}
@@ -247,7 +245,7 @@ export function ColourwayPaletteEditor({
           <div className='flex flex-col gap-0.5'>
             <Label>name</Label>
             <Text component='span' className='uppercase' data-cw-name-read=''>
-              {value.name || '—'}
+              {value.name || <EmptyCell />}
             </Text>
           </div>
         )}
@@ -287,7 +285,7 @@ export function ColourwayPaletteEditor({
           <span className='flex items-center gap-2'>
             {!!picked?.hex && <Swatch hex={picked.hex} title={picked.code} />}
             <Text component='span' className='uppercase' data-cw-family-read=''>
-              {familyWords(value.colorCode, colours) || '—'}
+              {familyWords(value.colorCode, colours) || <EmptyCell />}
             </Text>
           </span>
         </div>
@@ -380,32 +378,26 @@ export function ColourwayPaletteEditor({
                     main
                   </Text>
                 )}
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove colour ${i + 1}`}
                   title='remove this colour'
                   data-cw-remove={i}
-                  className='ml-auto px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  className='ml-auto'
                   onClick={() => setRows(value.rows.filter((_, j) => j !== i))}
-                >
-                  ✕
-                </button>
+                />
               </div>
             ))}
           </div>
         )}
         {value.rows.length < PALETTE_MAX ? (
-          <button
-            type='button'
+          <AddDoor
+            afterRows={value.rows.length > 0}
             data-cw-add=''
-            className={cn(
-              'self-start border border-dashed border-borderColor px-2.5 py-1 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              value.rows.length > 0 && 'mt-4',
-            )}
             onClick={() => setRows([...value.rows, blankRow()])}
           >
-            + colour
-          </button>
+            colour
+          </AddDoor>
         ) : (
           <Hint>a palette holds up to {PALETTE_MAX} colours</Hint>
         )}

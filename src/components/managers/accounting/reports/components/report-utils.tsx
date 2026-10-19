@@ -1,8 +1,6 @@
 import { AcctPeriod, googletype_Decimal } from 'api/proto-http/admin';
 import { ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { Loader } from 'ui/components/loader';
-import Text from 'ui/components/text';
+import { Button, Loader, Text } from 'ui';
 
 // Shared, dependency-free helpers for the Reports screen (Step 5). Kept local to reports/**
 // because the READ-ONLY accounting/utils/format.ts covers money/dates but not the month-column
@@ -201,7 +199,7 @@ export function ReportState({
 export function CaveatsNote({ caveats }: { caveats: string[] }) {
   if (caveats.length === 0) return null;
   return (
-    <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+    <div className='flex flex-col gap-1 border border-borderColor p-3'>
       {caveats.map((c, i) => (
         <div key={i} className='flex items-start gap-2 text-labelColor'>
           <span aria-hidden className='font-bold leading-none'>

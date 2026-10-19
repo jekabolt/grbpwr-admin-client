@@ -10,15 +10,19 @@ import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  Media,
+  Pill,
+  Placeholder,
+  GroupLabel,
+  Row,
+  Text,
+  Tile,
+  Tiles,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { composeArticleFromMaterial, materialSpec } from './material-code';
 import { MaterialModal } from './material-modal';
@@ -34,7 +38,7 @@ const sectionLabel = (v?: string) =>
 const classLabel = (c?: common_MaterialClass) =>
   c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // A decimal as a clean string, treating undefined / 0 as absent (so "0 g/m²" never shows) — the
 // same rule the shared materialSpec uses, kept local so the spec tab can render one row per field.

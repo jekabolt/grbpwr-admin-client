@@ -1,8 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, Select, Text } from 'ui';
 import { TaskInsert } from '../api/types';
 import {
   archiveConfig,
@@ -34,9 +32,9 @@ export type LinkField =
   | 'productionRunId'
   | 'projectTopicId';
 
-type LinkType = { field: LinkField; label: string; config: EntityConfig };
+export type LinkType = { field: LinkField; label: string; config: EntityConfig };
 
-const LINK_TYPES: LinkType[] = [
+export const LINK_TYPES: LinkType[] = [
   { field: 'techCardId', label: 'tech card', config: techCardConfig },
   { field: 'productId', label: 'product', config: productConfig },
   { field: 'orderUuid', label: 'order', config: orderConfig },
@@ -49,7 +47,7 @@ const LINK_TYPES: LinkType[] = [
 
 const typeItems = LINK_TYPES.map((t) => ({ value: t.field, label: t.label }));
 
-function isSet(value: number | string, empty: number | string) {
+export function isSet(value: number | string, empty: number | string) {
   return !(value === empty || value === 0 || value === '');
 }
 
@@ -71,7 +69,7 @@ function SetLinkChip({
   });
   const name = data?.label ?? `#${value}`;
   return (
-    <Chip onRemove={onRemove} title={`${type.label}: ${name}`}>
+    <Chip onRemove={onRemove} title={`${type.label}: ${name}`} className='min-h-11 sm:min-h-0'>
       <span className='max-w-[18ch] truncate'>
         {type.label}: {name}
       </span>
@@ -115,8 +113,8 @@ export function LinkEditor({
           >
             add link
           </Text>
-          <div className='w-40'>
-            <SelectComponent
+          <div className='min-w-0 flex-1 sm:w-40 sm:flex-none'>
+            <Select
               name='link-type'
               items={typeItems}
               value={type.field}
@@ -124,6 +122,7 @@ export function LinkEditor({
                 setType(LINK_TYPES.find((t) => t.field === v) ?? LINK_TYPES[0])
               }
               placeholder='link type'
+              className='min-h-11 sm:min-h-0'
               fullWidth
             />
           </div>

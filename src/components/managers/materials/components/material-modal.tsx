@@ -12,11 +12,7 @@ import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   inputToDecimal,
@@ -1097,16 +1093,11 @@ export function MaterialModal({
                           value={r.value}
                           onChange={(e) => setKvRow(i, { value: e.target.value })}
                         />
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          className='shrink-0'
+                        <Close
+                          size='sm'
                           aria-label='remove attribute'
                           onClick={() => removeKvRow(i)}
-                        >
-                          ✕
-                        </Button>
+                        />
                       </div>
                     ))
                   )}
@@ -1123,7 +1114,7 @@ export function MaterialModal({
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
                     legacy value — read-only
                   </Text>
-                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
+                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-pageBg px-[7px] py-[3px] text-micro text-labelColor'>
                     {d.otherAttrsRaw}
                   </div>
                 </div>
@@ -1216,7 +1207,7 @@ export function MaterialModal({
               <div className='flex flex-wrap gap-1'>
                 {compFilled.map((r, i) => (
                   <Pill key={i} tone='ink'>
-                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
+                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : <EmptyCell />}
                   </Pill>
                 ))}
               </div>

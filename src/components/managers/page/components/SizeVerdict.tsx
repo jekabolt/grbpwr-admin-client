@@ -1,7 +1,6 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { sizeVerdict } from '../productSignals';
 import { ProductNameLink } from './ProductNameLink';
 import { ActPill, ColHead, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';

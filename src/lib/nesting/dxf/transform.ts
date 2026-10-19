@@ -4,8 +4,10 @@
 import type { IBlock, IEntity, IInsertEntity } from 'dxf-parser';
 import type { Pt } from '../types';
 import { entityToChain } from './entities';
+import { carrySampleNotches } from './notch';
 
-export type LayeredChain = { pts: Pt[]; closed: boolean; layer: string };
+// `notch` — see Chain in entities.ts: an AAMA POINT notch, kept out of grain and contour logic.
+export type LayeredChain = { pts: Pt[]; closed: boolean; layer: string; notch?: true };
 
 export type EntityGroup = {
   // Block name when the group came from an INSERT; null for loose model-space entities.
@@ -39,7 +41,13 @@ function applyXform(p: Pt, t: Xform): Pt {
   return t.mirror ? { x: -x, y } : { x, y };
 }
 
-function insertXform(ins: IInsertEntity, block: IBlock, u: number, col: number, row: number): Xform {
+function insertXform(
+  ins: IInsertEntity,
+  block: IBlock,
+  u: number,
+  col: number,
+  row: number,
+): Xform {
   return {
     baseX: (block.position?.x ?? 0) * u,
     baseY: (block.position?.y ?? 0) * u,
@@ -130,7 +138,9 @@ function expandInto(
           if (budget.left <= 0) {
             if (!budget.warned) {
               budget.warned = true;
-              warnings.push(`too many nested block inserts (> ${MAX_INSTANCES}) — some are skipped`);
+              warnings.push(
+                `too many nested block inserts (> ${MAX_INSTANCES}) — some are skipped`,
+              );
             }
             // Управление тем же `return`, что и раньше (бросаем и остаток сущностей этого уровня);
             // добавлен только счёт неразвёрнутых инстансов ЭТОЙ вставки.
@@ -140,7 +150,18 @@ function expandInto(
           placed++;
           budget.left--;
           const t = insertXform(ins, block, u, ci, ri);
-          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1, budget, tally);
+          expandInto(
+            block.entities,
+            blocks,
+            u,
+            tolCm,
+            [...transforms, t],
+            group,
+            warnings,
+            depth + 1,
+            budget,
+            tally,
+          );
         }
       }
       continue;
@@ -153,7 +174,12 @@ function expandInto(
       const t = transforms[i];
       pts = pts.map((p) => applyXform(p, t));
     }
-    group.chains.push({ pts, closed: chain.closed, layer: String(e.layer ?? '0') });
+    group.chains.push({
+      pts,
+      closed: chain.closed,
+      layer: String(e.layer ?? '0'),
+      ...(chain.notch ? { notch: true as const } : {}),
+    });
   }
 }
 
@@ -182,6 +208,9 @@ export function expandGroups(
   u: number,
   tolCm: number,
   warnings: string[],
+  // The file was written by our converter (its manifest prologue was found): its blocks' AAMA
+  // `QUANTITY:` labels are the cut count — see `labelCopies`.
+  opts: { converter?: boolean } = {},
 ): { groups: EntityGroup[]; skippedBlocks: number; blockNames: string[] } {
   const groups: EntityGroup[] = [];
   const loose: EntityGroup = { blockName: null, chains: [] };
@@ -215,7 +244,18 @@ export function expandGroups(
           placed++;
           budget.left--;
           const group: EntityGroup = { blockName: ins.name, chains: [] };
-          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1, budget, tally);
+          expandInto(
+            block.entities,
+            blocks,
+            u,
+            tolCm,
+            [insertXform(ins, block, u, ci, ri)],
+            group,
+            warnings,
+            1,
+            budget,
+            tally,
+          );
           if (group.chains.length > 0) groups.push(group);
         }
       }
@@ -232,9 +272,89 @@ export function expandGroups(
     }
     const chain = entityToChain(e, u, tolCm);
     if (!chain || chain.pts.length < 2) continue;
-    loose.chains.push({ pts: chain.pts, closed: chain.closed, layer: String(e.layer ?? '0') });
+    loose.chains.push({
+      pts: chain.pts,
+      closed: chain.closed,
+      layer: String(e.layer ?? '0'),
+      ...(chain.notch ? { notch: true as const } : {}),
+    });
   }
 
+  // AAMA R12 draws notches in the sample-size block only (K2 pitfall 3) — needs every block of the
+  // file at once, which is here.
+  carrySampleNotches(groups, warnings);
+  if (opts.converter || modelEntities.some(isConverterAuthor)) labelCopies(groups, blocks);
   if (loose.chains.length > 0) groups.push(loose);
   return { groups, skippedBlocks: tally.blocks, blockNames: [...seenBlocks] };
+}
+
+// ── W1: the AAMA quantity of a converter-written block ─────────────────────────────────────────
+//
+// Everything downstream of the parse (the piece-match dialog's × per garment, the marker's
+// instances per garment, the batch queue) counts a piece by its PieceDTOs — one per top-level
+// INSERT. AAMA/ASTM D6673 carries the cut count as the block's `Quantity:` text instead, with ONE
+// insert per block; an AAMA importer multiplies the two. Our converter used to insert a block
+// × per garment times AND label it `QUANTITY: N` (N×N in every other CAD); since W1 it writes one
+// insert and the label only. So for a file WE wrote, a block is cut max(inserts, label) times:
+//   • a new file — 1 insert + `QUANTITY: N`  → N   (the missing N − 1 instances are added here);
+//   • an old file — N inserts + `QUANTITY: N` → N   (never N×N, never 1);
+//   • no label → the inserts, as before.
+// The added instances are geometric copies of the first one (same position: the old copy columns
+// only ever existed to make the count visible). Foreign files are left exactly as they were read:
+// their labels are other CADs' statements (CLO-AAMA writes `QUANTITY: 1` everywhere) and their
+// meaning for a pair (one block, ×2 mirrored) is not ours to guess here.
+const QUANTITY_LABEL = /^\s*(?:quantity|qty)\s*:\s*(\d+)\s*$/i;
+const CONVERTER_AUTHOR = /^\s*author\s*:\s*grbpwr\b/i;
+/** Copies a converter label may ask for — a typo'd label must not flood the marker. */
+export const MAX_LABEL_COPIES = 100;
+
+function textOf(e: IEntity): string {
+  const t = (e as unknown as { text?: unknown }).text;
+  return typeof t === 'string' ? t : '';
+}
+
+function isConverterAuthor(e: IEntity): boolean {
+  return e.type === 'TEXT' && CONVERTER_AUTHOR.test(textOf(e));
+}
+
+/** The block's own `QUANTITY: n` label (TEXT directly in the block), or null. */
+export function blockQuantityLabel(block: IBlock | undefined): number | null {
+  for (const e of block?.entities ?? []) {
+    if (e.type !== 'TEXT' && e.type !== 'MTEXT') continue;
+    const m = QUANTITY_LABEL.exec(textOf(e));
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+function labelCopies(groups: EntityGroup[], blocks: Record<string, IBlock>): void {
+  const order: string[] = [];
+  const firstOf = new Map<string, EntityGroup>();
+  const count = new Map<string, number>();
+  for (const g of groups) {
+    if (g.blockName == null) continue;
+    if (!firstOf.has(g.blockName)) {
+      firstOf.set(g.blockName, g);
+      order.push(g.blockName);
+    }
+    count.set(g.blockName, (count.get(g.blockName) ?? 0) + 1);
+  }
+  const want = new Map<string, number>();
+  for (const name of order) {
+    const q = blockQuantityLabel(blocks[name]);
+    if (q != null && q > (count.get(name) ?? 0)) want.set(name, Math.min(q, MAX_LABEL_COPIES));
+  }
+  // Appended in rounds, as the old writer's copy columns were (every block's copy 2, then copy 3…),
+  // so a file re-read keeps the piece order an old file of the same pieces had.
+  const most = Math.max(0, ...want.values());
+  for (let k = 1; k < most; k++)
+    for (const name of order) {
+      const q = want.get(name);
+      if (q == null || k < (count.get(name) ?? 0) || k >= q) continue;
+      const g = firstOf.get(name)!;
+      groups.push({
+        blockName: g.blockName,
+        chains: g.chains.map((c) => ({ ...c, pts: c.pts.map((p) => ({ x: p.x, y: p.y })) })),
+      });
+    }
 }

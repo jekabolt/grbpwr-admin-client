@@ -21,10 +21,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, Pill, Stat, StatGrid, Text, EmptyCell } from 'ui';
 
 /**
  * Человеческий перевод кодов причин. Источник — закрытый словарь `internal/techcardarchive/
@@ -238,7 +235,7 @@ export function ApplyColorwaysAction({
   }
 
   return (
-    <div className='flex flex-col gap-1.5 border border-textInactiveColor p-2.5'>
+    <div className='flex flex-col gap-1.5 border border-borderColor p-2.5'>
       <div className='flex flex-wrap items-center gap-2.5'>
         <Text size='control'>
           {pending} colour(s) from the archive are not on this card
@@ -272,9 +269,9 @@ export function ApplyColorwaysAction({
 export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[] }) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>entity</th>
             <th className={TH}>ref</th>
             <th className={TH}>status</th>
@@ -298,14 +295,14 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
               return (
                 <tr
                   key={`${l.entity ?? ''}-${l.ref ?? ''}-${reason}-${i}`}
-                  className='border-b border-textInactiveColor align-top last:border-b-0'
+                  className='border-b border-borderColor align-top last:border-b-0'
                 >
-                  <td className='px-2 py-1.5 uppercase'>{l.entity || '—'}</td>
+                  <td className='px-2 py-1.5 uppercase'>{l.entity || <EmptyCell />}</td>
                   <td className={`${REF_CELL} py-1.5`} title={l.ref || undefined}>
-                    {l.ref || '—'}
+                    {l.ref || <EmptyCell />}
                   </td>
                   <td className='px-2 py-1.5'>
-                    {status ? <Pill tone={statusTone(status)}>{status}</Pill> : '—'}
+                    {status ? <Pill tone={statusTone(status)}>{status}</Pill> : <EmptyCell />}
                   </td>
                   <td className='px-2 py-1.5'>
                     {reason ? (
@@ -327,7 +324,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                         </Text>
                       </>
                     ) : (
-                      '—'
+                      <EmptyCell />
                     )}
                     {l.detail ? (
                       <Text size='micro' variant='label'>
@@ -339,9 +336,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                     {l.action ? (
                       <Text size='control'>{l.action}</Text>
                     ) : (
-                      <Text size='control' variant='inactive'>
-                        —
-                      </Text>
+                      <Text size='control' variant='inactive'><EmptyCell /></Text>
                     )}
                   </td>
                 </tr>

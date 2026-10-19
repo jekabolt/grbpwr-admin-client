@@ -34,6 +34,13 @@ export type PieceShapes = {
    * иначе экран, за который заплатили скачиванием, молча остаётся вчерашним.
    */
   foundCount: number;
+  /**
+   * Сколько контуров в разобранных файлах и у скольких из них есть имя блока (null — разбора нет).
+   * Ноль контуров — пустой файл (`*.usdz.dxf`); контуры без единого имени — файл, где деталь не
+   * с чем сопоставить. Это два разных «не прочитать», и каждое говорится своими словами.
+   */
+  parsedPieces?: number | null;
+  namedBlocks?: number | null;
   /** Разбор идёт прямо сейчас — свой или заказанный соседним экраном: запрос-то один на пачку. */
   isLoading: boolean;
   error: Error | null;
@@ -66,6 +73,8 @@ export function usePieceShapes(enabled: boolean): PieceShapes {
     // числе такая, чей блок в файлах не нашёлся, — и `size > 0` означал бы «контуры есть» ровно
     // там, где их нет ни одного.
     foundCount: shapeByKey ? [...shapeByKey.values()].filter(Boolean).length : 0,
+    parsedPieces: geometry.data ? geometry.data.pieces.length : null,
+    namedBlocks: index ? index.byKey.size : null,
     // isFetching, а не isLoading: разбор мог уже идти по заказу вкладки PATTERNS, и тогда
     // предлагать нажать «показать силуэты» бессмысленно — надо сказать «идёт».
     isLoading: geometry.isFetching,

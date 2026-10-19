@@ -1,7 +1,7 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import Text from './text';
+import { Arrow } from '../icons/arrow';
 
 // КОМБОБОКС — ВЫБОР ПОИСКОМ, А НЕ СКАНИРОВАНИЕМ СПИСКА.
 //
@@ -162,7 +162,7 @@ export function Combobox({
         )}
       >
         <span
-          className={cn('min-w-0 flex-1 truncate uppercase', !valueLabel && 'text-textInactiveColor')}
+          className={cn('min-w-0 flex-1 truncate uppercase', !valueLabel && 'text-borderColor')}
         >
           {valueLabel || placeholder}
         </span>
@@ -174,7 +174,7 @@ export function Combobox({
       {open && (
         <div
           ref={popRef}
-          className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-textInactiveColor bg-bgColor'
+          className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-borderColor bg-bgColor'
         >
           <input
             ref={inputRef}
@@ -189,7 +189,7 @@ export function Combobox({
               setActive(e.target.value.trim() ? 0 : -1);
             }}
             onKeyDown={onKeyDown}
-            className='block min-h-[22px] w-full appearance-none rounded-none border-0 border-b border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:outline-none'
+            className='block min-h-[22px] w-full appearance-none rounded-none border-0 border-b border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-borderColor focus:outline-none'
           />
           <div ref={listRef} className='max-h-[280px] overflow-auto' role='listbox'>
             {groups.length === 0 && (

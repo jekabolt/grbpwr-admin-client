@@ -1,5 +1,5 @@
 import { FC, ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 export interface ShareBarRow {
   label: string;
@@ -26,7 +26,7 @@ export const ShareBars: FC<{ rows: ShareBarRow[]; note?: ReactNode }> = ({ rows,
           className='grid grid-cols-[minmax(84px,110px)_1fr_54px] items-center gap-3 py-1'
         >
           <Text className='truncate text-textBaseSize font-bold'>{r.label}</Text>
-          <div className='h-3 w-full bg-bgSecondary'>
+          <div className='h-3 w-full bg-pageBg'>
             <div
               className={`h-3 ${r.highlight ? 'bg-success' : 'bg-textColor'}`}
               style={{ width: `${Math.min(100, (r.sharePct / max) * 100)}%` }}

@@ -1,18 +1,24 @@
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
-import { FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
-import DecimalField from 'ui/form/fields/decimal-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  Button,
+  Chip,
+  Close,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Select,
+  Text,
+  Tiles,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  DecimalField,
+  InputField,
+  SelectField,
+} from 'ui';
 import { ulid } from 'utils/ulid';
 import {
   automationLevelOptions,
@@ -297,7 +303,7 @@ function machineRetypeImpact(
   const dropped = new Set(machineStepsToDetach(operations, key, to));
   const at = (t: string) => rows.map((r, i) => (i === index ? { ...r, machineType: t } : r));
   return machineImpact(operations, at(from), at(to), (op, i) =>
-    dropped.has(i) ? '' : (op.machineProfileKey ?? ''),
+    dropped.has(i) ? '' : op.machineProfileKey ?? '',
   );
 }
 
@@ -312,7 +318,7 @@ function pressReequipImpact(
   const dropped = new Set(pressStepsToDetach(operations, key, to));
   const at = (e: string) => rows.map((r, i) => (i === index ? { ...r, pressEquipment: e } : r));
   return pressImpact(operations, at(from), at(to), (op, i) =>
-    dropped.has(i) ? '' : (op.pressProfileKey ?? ''),
+    dropped.has(i) ? '' : op.pressProfileKey ?? '',
   );
 }
 
@@ -491,16 +497,12 @@ function ProfileTile({
   const total = totalUses(uses);
   return (
     <div className='relative'>
-      <Button
-        type='button'
-        size='xs'
-        variant='secondary'
+      <Close
+        size='sm'
         aria-label={removeLabel}
         onClick={onRemove}
         className='absolute right-1 top-1 z-10'
-      >
-        ✕
-      </Button>
+      />
       {/*
         A SPAN, NOT A BUTTON, and this is the one place it is not pedantry. Opening a profile to READ
         it is a read action — but a RELEASED tech card renders its whole form inside
@@ -1172,7 +1174,8 @@ function PressProfiles({
         onConfirm={() => {
           if (pending?.kind === 'remove') remove(pending.index);
           if (pending?.kind === 'retype') {
-            const key = ((getValues(PRESSES) ?? []) as PressProfileRow[])[pending.index]?.profileKey;
+            const key = ((getValues(PRESSES) ?? []) as PressProfileRow[])[pending.index]
+              ?.profileKey;
             detachStepsOfOtherEquipment(key ?? '', pending.to ?? '');
           }
           setPending(null);
@@ -1411,7 +1414,8 @@ function machineTakes(s: MachineAdoptable) {
     threadTension: tensionSet ? s.threadTension : undefined,
     // Only ever alongside the scale it explains: the server refuses a note with no tension, and a
     // note moved without its scale would be refused on the profile instead of on the step.
-    threadTensionNote: tensionSet && s.threadTensionNote.trim() ? s.threadTensionNote.trim() : undefined,
+    threadTensionNote:
+      tensionSet && s.threadTensionNote.trim() ? s.threadTensionNote.trim() : undefined,
     stitchWidthMm: s.stitchWidthMm.trim() || undefined,
     stitchesPerCm: s.stitchesPerCm.trim() || undefined,
     // THE FOOT MOVES ONLY WHEN NOTHING IS MEASURED AGAINST IT. `attachmentSizeMm` has no counterpart
@@ -1461,11 +1465,11 @@ export function AdoptMachineIntoProfile({
     // ladder picked, and patching the wrong profile is a silent, unrecoverable edit. `indexOf` over
     // the very array the resolver read cannot be wrong. Re-resolving also closes the gap between
     // render and click — the park is editable on the same screen.
-    const { dangling, effectiveKey, target: hit } = machineAdoptTarget(
-      rows,
-      step.machineType,
-      step.machineProfileKey,
-    );
+    const {
+      dangling,
+      effectiveKey,
+      target: hit,
+    } = machineAdoptTarget(rows, step.machineType, step.machineProfileKey);
     const at = hit ? rows.indexOf(hit) : -1;
     const s = `operations.${index}` as const;
 
@@ -1475,7 +1479,8 @@ export function AdoptMachineIntoProfile({
       const p = `${MACHINES}.${at}` as const;
       if (takes.threadCount !== undefined) setValue(`${p}.threadCount`, takes.threadCount, DIRTY);
       if (takes.needleType !== undefined) setValue(`${p}.needleType`, takes.needleType, DIRTY);
-      if (takes.needleSizeNm !== undefined) setValue(`${p}.needleSizeNm`, takes.needleSizeNm, DIRTY);
+      if (takes.needleSizeNm !== undefined)
+        setValue(`${p}.needleSizeNm`, takes.needleSizeNm, DIRTY);
       if (takes.threadTension !== undefined) {
         // THE SCALE AND ITS NOTE MOVE AS ONE. Leaving the profile's old note under a new scale is
         // the worst of the three options: «tighter — dial 4» becoming «looser — dial 4» reads as a
@@ -1490,9 +1495,12 @@ export function AdoptMachineIntoProfile({
           setValue(`${p}.threadTensionNote`, '', DIRTY);
         }
       }
-      if (takes.stitchWidthMm !== undefined) setValue(`${p}.stitchWidthMm`, takes.stitchWidthMm, DIRTY);
-      if (takes.stitchesPerCm !== undefined) setValue(`${p}.stitchesPerCm`, takes.stitchesPerCm, DIRTY);
-      if (takes.attachmentKind !== undefined) setValue(`${p}.attachmentKind`, takes.attachmentKind, DIRTY);
+      if (takes.stitchWidthMm !== undefined)
+        setValue(`${p}.stitchWidthMm`, takes.stitchWidthMm, DIRTY);
+      if (takes.stitchesPerCm !== undefined)
+        setValue(`${p}.stitchesPerCm`, takes.stitchesPerCm, DIRTY);
+      if (takes.attachmentKind !== undefined)
+        setValue(`${p}.attachmentKind`, takes.attachmentKind, DIRTY);
       // The broken pointer goes with it: the profile it named is gone, this one was reached by type,
       // and leaving the key would have the step resolve to nothing while its settings sat in a
       // profile it cannot see.
@@ -1577,20 +1585,22 @@ export function AdoptPressIntoProfile({ index, step }: { index: number; step: Pr
     const rows = (getValues(PRESSES) ?? []) as PressProfileRow[];
     // By identity off a fresh resolve, and a dangling key demoted to «no key» — see the machine twin
     // for both arguments.
-    const { dangling, effectiveKey, target: hit } = pressAdoptTarget(
-      rows,
-      step.pressEquipment,
-      step.pressProfileKey,
-      step.operationType,
-    );
+    const {
+      dangling,
+      effectiveKey,
+      target: hit,
+    } = pressAdoptTarget(rows, step.pressEquipment, step.pressProfileKey, step.operationType);
     const at = hit ? rows.indexOf(hit) : -1;
     const s = `operations.${index}` as const;
 
     if (at >= 0) {
       const p = `${PRESSES}.${at}` as const;
-      if (takes.pressTemperatureC !== undefined) setValue(`${p}.pressTemperatureC`, takes.pressTemperatureC, DIRTY);
-      if (takes.pressDwellSec !== undefined) setValue(`${p}.pressDwellSec`, takes.pressDwellSec, DIRTY);
-      if (takes.pressPressureNCm2 !== undefined) setValue(`${p}.pressPressureNCm2`, takes.pressPressureNCm2, DIRTY);
+      if (takes.pressTemperatureC !== undefined)
+        setValue(`${p}.pressTemperatureC`, takes.pressTemperatureC, DIRTY);
+      if (takes.pressDwellSec !== undefined)
+        setValue(`${p}.pressDwellSec`, takes.pressDwellSec, DIRTY);
+      if (takes.pressPressureNCm2 !== undefined)
+        setValue(`${p}.pressPressureNCm2`, takes.pressPressureNCm2, DIRTY);
       if (takes.pressSteam !== undefined) setValue(`${p}.pressSteam`, takes.pressSteam, DIRTY);
       if (takes.pressCloth !== undefined) setValue(`${p}.pressCloth`, takes.pressCloth, DIRTY);
       if (dangling) setValue(`${s}.pressProfileKey`, '', DIRTY);
@@ -1611,7 +1621,12 @@ export function AdoptPressIntoProfile({ index, step }: { index: number; step: Pr
       if (takes.pressCloth !== undefined) row.pressCloth = takes.pressCloth;
       const next = [...rows, row];
       setValue(PRESSES, next, DIRTY);
-      const resolved = resolvePressProfile(next, step.pressEquipment, effectiveKey, step.operationType);
+      const resolved = resolvePressProfile(
+        next,
+        step.pressEquipment,
+        effectiveKey,
+        step.operationType,
+      );
       if (dangling || resolved?.profileKey !== row.profileKey) {
         setValue(`${s}.pressProfileKey`, row.profileKey, DIRTY);
       }

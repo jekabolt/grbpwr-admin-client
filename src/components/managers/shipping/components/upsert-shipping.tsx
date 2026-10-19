@@ -10,12 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import TextareaField from 'ui/form/fields/textarea-field';
-import ToggleField from 'ui/form/fields/toggle-field';
-import ToggleGroupField from 'ui/form/fields/toggle-group-field';
+import { GroupLabel, Form, InputField, TextareaField, ToggleField, ToggleGroupField } from 'ui';
 import { shippingSchema, ShippingSchema, transformDictionaryToShipping } from './schema';
 import { UpsertShippingModal } from './upsert-modal';
 

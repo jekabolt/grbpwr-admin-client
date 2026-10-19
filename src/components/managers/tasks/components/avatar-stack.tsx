@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
+import { Avatar } from 'ui';
 
 /**
  * РЯД ИСПОЛНИТЕЛЕЙ ВНАХЛЁСТ. При ОДНОМ имени выглядит ровно как одиночный `Avatar`, который

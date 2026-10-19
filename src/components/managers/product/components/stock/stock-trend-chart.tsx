@@ -11,7 +11,7 @@ import {
 import { format } from 'date-fns';
 import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { useMemo } from 'react';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 interface StockTrendChartProps {
   changes: common_StockChange[];

@@ -1,9 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMemo } from 'react';
 import { type Resolver, useForm } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
+import { Button, Text, Form } from 'ui';
 import { downloadCsv, stockChangesToCsv } from './stock-csv';
 import { StockHistoryFilters, type StockHistorySizeOption } from './stock-history-filters';
 import {
@@ -79,7 +77,7 @@ export function StockHistory({ productId, sizes = [] }: Props) {
             <StockHistoryFilters sizes={sizes} />
             <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
               <div className='mb-2 flex shrink-0 items-center justify-between gap-2'>
-                <Text variant='uppercase' className='text-textInactiveColor'>
+                <Text variant='uppercase' className='text-borderColor'>
                   {isPending
                     ? 'Loading…'
                     : `${changes.length} row${changes.length === 1 ? '' : 's'}`}

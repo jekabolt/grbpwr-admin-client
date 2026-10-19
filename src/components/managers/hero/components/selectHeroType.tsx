@@ -4,8 +4,7 @@ import { cn } from 'lib/utility';
 import React, { FC, useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Input, Text } from 'ui';
 import { HeroSchema } from './schema';
 
 interface SelectHeroTypeProps {
@@ -122,7 +121,7 @@ export const SelectHeroType: FC<SelectHeroTypeProps> = ({ append, form, entityRe
         type='button'
         onClick={() => addEntity(value)}
         className={cn(
-          'group flex h-full flex-col items-start gap-1 border border-textInactiveColor p-3 text-left transition-colors',
+          'group flex h-full flex-col items-start gap-1 border border-borderColor p-3 text-left transition-colors',
           'hover:bg-textColor hover:text-bgColor',
           'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         )}

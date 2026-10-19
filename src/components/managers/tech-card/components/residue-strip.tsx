@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // ПОЛОСА ОСТАТКОВ — ГДЕ ЖИВЁТ ЗАПОЛНЕННОЕ, КОТОРОГО НОСИТЕЛЬ НЕ НЕСЁТ.
 //

@@ -1,10 +1,7 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSyncExternalStore } from 'react';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { Tile } from 'ui/components/tiles';
+import { Pill, Text, TILE_CORNER, TILE_QUIET, Tile } from 'ui';
 
 import { runHandle } from '../handles';
 import { isCancelling, overdueWord, runStatus } from './run-state';
@@ -181,7 +178,7 @@ export function LiveTiles({
           dashed
           media={
             <div
-              className='group relative flex w-full items-center justify-center bg-bgSecondary'
+              className='group relative flex w-full items-center justify-center bg-pageBg'
               style={{ aspectRatio: '4 / 5' }}
               data-live-tile={runId || undefined}
             >

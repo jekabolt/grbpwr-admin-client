@@ -1,7 +1,6 @@
 import type { InventoryHealthRow } from 'api/proto-http/admin';
 import { FC, useMemo, useState } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { DAYS_ON_HAND_NO_SALES_SENTINEL, formatDaysOnHand, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -115,7 +114,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
               const daysOnHand = row.daysOnHand ?? 0;
               const isVeryHigh = daysOnHand > 90 && daysOnHand < DAYS_ON_HAND_NO_SALES_SENTINEL;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

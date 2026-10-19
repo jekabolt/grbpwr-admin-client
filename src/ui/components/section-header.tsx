@@ -1,5 +1,6 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Button } from './button';
+import Text from './text';
 
 /**
  * The reference's section grammar: a RULE, not a box.
@@ -126,5 +127,38 @@ export function HeaderCount({
     <HeaderNote {...rest}>
       {total != null ? `${count} of ${total} ${word}` : `${count} ${word}`}
     </HeaderNote>
+  );
+}
+
+/**
+ * `→ next: link shell fabric ›` — the one step to press next (TABS-LITE R1). Ink, never a count,
+ * one per view: the stage bar, the active tab and nothing else carry it. `lead` is the plain part
+ * (`next: fit ·`, `→ next:`); the door is the underlined verb + object. `door` replaces the
+ * button when the step is a link (`+ fitting` opens another page).
+ */
+export function HeaderNext({
+  lead = '→ next:',
+  label,
+  onClick,
+  door,
+  className,
+  ...rest
+}: {
+  lead?: string;
+  label: string;
+  onClick?: () => void;
+  door?: React.ReactNode;
+  className?: string;
+  [k: string]: unknown;
+}) {
+  return (
+    <span {...rest} className={cn('flex min-w-0 items-baseline gap-1.5', className)} data-next=''>
+      <HeaderNote tone='ink'>{lead}</HeaderNote>
+      {door ?? (
+        <Button type='button' variant='underline' size='xs' className='truncate' onClick={onClick}>
+          {label} ›
+        </Button>
+      )}
+    </span>
   );
 }

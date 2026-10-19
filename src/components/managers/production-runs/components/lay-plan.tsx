@@ -10,11 +10,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { AddDoor, Button, CalloutBox, ConfirmationModal, Section, Text } from 'ui';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import {
   ClothReport,
@@ -476,16 +472,9 @@ export function LayPlan({
           uncoveredPairs.length === 0 &&
           slotOptions.length > 0 &&
           colorwayIds.length > 0 ? (
-            <div>
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                onClick={() => setEditing({ colorwayId: colorwayIds[0], bomLineKey: '' })}
-              >
-                + another lay
-              </Button>
-            </div>
+            <AddDoor onClick={() => setEditing({ colorwayId: colorwayIds[0], bomLineKey: '' })}>
+              lay
+            </AddDoor>
           ) : null}
 
           {locked && canEdit ? (

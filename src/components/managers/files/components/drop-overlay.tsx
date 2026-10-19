@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSnackBarStore } from 'lib/stores/store';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { MAX_UPLOAD_BYTES } from '../api/filesService';
 import { describeDropTarget, swallowsDrag } from '../upload/drop';
 import { plural } from '../upload/text';

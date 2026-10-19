@@ -2,8 +2,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { ListArchive } from './components/archive-list';
 
 export function Archives() {
@@ -23,7 +22,7 @@ export function Archives() {
 
   return (
     <div className='flex flex-col gap-gutter pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='large'>
             timeline

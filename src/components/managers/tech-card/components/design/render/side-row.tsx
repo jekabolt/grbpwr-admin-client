@@ -8,13 +8,8 @@ import type {
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { mediaFullToViewerItem } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { AddDoor, Button, GroupLabel, Pill, Section, HeaderNote, Text } from 'ui';
+import { mediaFullToViewerItem } from 'components/shared/media-viewer/media-viewer';
 
 import { COLORWAY_NONE, refColorwayFor } from '../bench-kinds';
 import { InertDoor, UndoRemoval, pictureUrl, useRemovalUndo } from '../bench-slot';
@@ -1150,15 +1145,14 @@ export function SidesSection({
               `columns.length + 3` дорожки, и дыра в шапке сдвинула бы их авто-размещением. */}
           <div data-side-plus-head='' className='flex min-w-0 self-stretch'>
             {canWrite ? (
-              <button
-                type='button'
+              <AddDoor
+                shape='inline'
                 data-side-add-colourway=''
                 onClick={onCreateColorway}
                 title='name a new colourway — it becomes a column here and the target of the next run'
-                className='flex shrink-0 items-center self-start whitespace-nowrap border border-dashed border-borderColor px-2 py-px text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
               >
-                + colourway
-              </button>
+                colourway
+              </AddDoor>
             ) : (
               <div
                 data-side-add-colourway-inert=''

@@ -3,7 +3,7 @@ import {
   simplifyPath,
   simplifyToLimit,
   type ShapePoint,
-} from 'ui/components/annotation/geometry';
+} from 'components/managers/tech-card/annotation/geometry';
 
 /**
  * THE VECTOR LAYER'S OWN FORMAT — the only reader and the only writer of `DesignEditLayer.strokes`.

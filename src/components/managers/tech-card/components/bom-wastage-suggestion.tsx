@@ -8,11 +8,7 @@ import {
   MATERIAL_UNIT_LABEL,
   stampWhen,
 } from 'components/managers/production-runs/components/useLays';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Pill, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (T7, волна 2).
@@ -311,7 +307,7 @@ export function BomWastageSuggestion({
               разные основания применять медиану к СВОЕЙ модели, число без состава непроверяемо. */}
           <Stat
             label='goes over netto'
-            value={median || '—'}
+            value={median || <EmptyCell />}
             sub={`median · across ${layCount} ${plural(layCount, 'lay')}${
               drifts.length > layCount ? ` of ${drifts.length} measured` : ''
             } · ${modelsText}`}

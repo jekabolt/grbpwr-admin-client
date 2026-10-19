@@ -25,35 +25,13 @@
 }
 
 @theme {
-  /* COLORS
-     One committed palette. Neutrals: black ink, white ground, one gray for every
-     border (#ccc) and one readable gray for secondary text (#666). Accents:
-     red / blue / purple only. Green + "warning" (blue) are reserved for status
-     semantics, never decoration. */
+  /* COLORS — four greys, semantic accents only. */
   --color-textColor: #000; /* black — ink */
   --color-bgColor: #fff; /* white — ground */
-  /* Second surface layer: the panel/tint one step off white for KPI cards, stat
-     grids and section headers. Referenced app-wide as bg-bgSecondary (often at
-     /20–/50 opacity), so it must read as a panel even at low opacity over white.
-     labelColor (#666) on this stays ~5:1 (AA). */
-  --color-bgSecondary: #ededed;
-  /* The single border gray. Every outline in the app is this color. */
   --color-borderColor: #cccccc;
-  --color-textInactiveColor: #cccccc; /* == borderColor; also disabled/placeholder ink */
-  /* Readable secondary text for labels/hints. #666 on #fff is ~5.7:1 (WCAG AA),
-     unlike textInactiveColor (#ccc ≈ 1.6:1, decorative only). */
   --color-labelColor: #666666; /* gray — secondary ink */
-
-  /* SURFACES
-     Two greys do two different jobs and must never be swapped:
-       borderColor #ccc — the OUTER outline of every box.
-       hairline   #e6e6e6 — the INNER rule between rows inside a box.
-     Getting this backwards is the most visible way to miss the reference. */
   --color-hairline: #e6e6e6;
   --color-pageBg: #f2f2f2; /* the canvas every panel sits on */
-  --color-bgZebra: #fafafa; /* stat cells, accordion headers, sub-rows */
-  --color-trackBg: #f0f0f0; /* bar tracks */
-  --color-progressBg: #e2e2e2;
 
   /* SPACING — the block grammar. See DESIGN.md → "5. Components → The Block".
      gutter — the grey gap BETWEEN blocks. It is the divider; never draw a line instead.
@@ -66,14 +44,9 @@
   --spacing-block: 16px;
   --spacing-stack: 10px;
 
-  /* Accents */
-  --color-red: #ff0000;
-  --color-error: #ff0000; /* == red */
-  --color-blue: #2323ff;
-  --color-purple: #311eee;
-  --color-highlightColor: #311eee; /* == purple (legacy alias) */
-
-  /* Status-only (semantic, not accents) */
+  /* Semantic accents */
+  --color-error: #ff0000;
+  --color-highlightColor: #311eee;
   --color-success: #0f7a34; /* green, ~4.6:1 on white */
   /* Blue, deliberately — do not "fix" this to orange. Mid-flight states (in review,
      round 2, unsaved, changed-after-approval, stale) read blue in this system.
@@ -107,6 +80,7 @@
   --text-micro: 10px; /* labels, pills, table headers, hints */
   --text-nano: 9px; /* badges, pin numbers, band labels */
   --text-stat: 16px; /* stat value */
+  --text-reading: 16px; /* public QR pages + email canvas — read on a phone */
   --text-statBig: 22px; /* hero stat value */
   --text-lg: 18px; /* heading */
   --text-giantSmall: 110px; /* display (login/hero only) */
@@ -169,7 +143,6 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   * {
     --color-hairline: #cccccc;
     --color-pageBg: #ffffff;
-    --color-bgZebra: #ffffff;
   }
 
   /* Print ONE region, in place.
@@ -325,7 +298,7 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   font-weight: 700;
 }
 .rdp-outside .rdp-day_button {
-  color: var(--color-textInactiveColor);
+  color: var(--color-borderColor);
 }
 .rdp-disabled {
   opacity: 0.3;
@@ -390,9 +363,33 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 .drawer-panel[data-state='closed'] {
   animation: drawerOut 140ms ease-in;
 }
+@keyframes drawerBottomIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes drawerBottomOut {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+.drawer-panel-bottom[data-state='open'] {
+  animation: drawerBottomIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.drawer-panel-bottom[data-state='closed'] {
+  animation: drawerBottomOut 140ms ease-in;
+}
 @media (prefers-reduced-motion: reduce) {
   .drawer-panel[data-state='open'],
-  .drawer-panel[data-state='closed'] {
+  .drawer-panel[data-state='closed'],
+  .drawer-panel-bottom[data-state='open'],
+  .drawer-panel-bottom[data-state='closed'] {
     animation: none;
   }
 }

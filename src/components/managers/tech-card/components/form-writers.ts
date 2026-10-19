@@ -1,5 +1,6 @@
 import type { UseFormGetValues, UseFormSetValue } from 'react-hook-form';
 import { ulid } from 'utils/ulid';
+import { wireInt } from './wire-int';
 
 import { UNSET_KIND } from './bom-kind';
 import { UNSET_PURPOSE } from './bom-purpose-labels';
@@ -363,4 +364,53 @@ export function setCareLabelColorway(
       ? [...list.slice(0, k), merged, ...list.slice(k + 1)]
       : [...list, merged];
   setValue('careLabel', { ...cur, colorways: next } as never, { shouldDirty: true });
+}
+
+/**
+ * RELEASE EVERY FORM REF TO A BOM LINE THAT IS ABOUT TO GO — the same cleanup the BOM tab's
+ * `removeArticle` does, for the two other places that drop a line (material slots, the
+ * construction draft's undo). Operations lose the key from `bomLineKeys`, piece materials lose
+ * `bomLineKey`/`fusingBomLineKey`, labels lose `bomItemId` (an invisible referrer: left behind it
+ * fails the save with a bare FK error). Refs to other lines are untouched. Call BEFORE the line
+ * leaves `bomItems`. Colourway recipes are not form state and are not touched here — callers block.
+ */
+export function releaseBomLineRefs(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  line: { lineKey?: string; id?: unknown },
+): void {
+  const key = line.lineKey?.trim() ?? '';
+  if (key) {
+    const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+    (operations ?? []).forEach((o, oi) => {
+      const keys = (o.bomLineKeys ?? []).filter(Boolean);
+      if (keys.includes(key)) {
+        setValue(
+          `operations.${oi}.bomLineKeys`,
+          keys.filter((k) => k !== key),
+          { shouldDirty: true },
+        );
+      }
+    });
+    const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+    (pieces ?? []).forEach((p, pi) => {
+      (p.materials ?? []).forEach((m, mi) => {
+        if (m.bomLineKey === key) {
+          setValue(`pieces.${pi}.materials.${mi}.bomLineKey`, '', { shouldDirty: true });
+        }
+        if (m.fusingBomLineKey === key) {
+          setValue(`pieces.${pi}.materials.${mi}.fusingBomLineKey`, '', { shouldDirty: true });
+        }
+      });
+    });
+  }
+  const id = wireInt(line.id);
+  if (id > 0) {
+    const labels = (getValues('labels') ?? []) as Array<{ bomItemId?: number }>;
+    labels.forEach((l, li) => {
+      if (wireInt(l.bomItemId) === id) {
+        setValue(`labels.${li}.bomItemId` as never, 0 as never, { shouldDirty: true });
+      }
+    });
+  }
 }

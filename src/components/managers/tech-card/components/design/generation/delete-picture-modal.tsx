@@ -3,8 +3,7 @@ import { adminService, requestHandler } from 'api/api';
 import type { common_DesignPicture } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 
 import { refusalReason } from '../head/use-draft-idea';
 import { designKeys } from '../use-design-band';

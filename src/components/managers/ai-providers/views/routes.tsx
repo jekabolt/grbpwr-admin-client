@@ -6,11 +6,7 @@ import type {
   GetAiProvidersConfigResponse,
 } from 'api/proto-http/admin';
 import { useId, useState } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Section } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { GroupLabel, Input, Section, Select, Text, EmptyCell } from 'ui';
 import { useSetAiDefaults, useSetAiRoute } from '../utils/hooks';
 import { WriteError } from './write-error';
 
@@ -164,7 +160,7 @@ export function RoutesView({
     <Section title='routes' question='which model answers which job'>
       {!config ? (
         <Text size='micro' variant='label'>
-          {loading ? 'loading…' : '—'}
+          {loading ? 'loading…' : <EmptyCell />}
         </Text>
       ) : (
         <>
@@ -276,7 +272,7 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
     <div data-route-defaults='' className='flex flex-col gap-1'>
       <div className='flex flex-wrap items-start gap-x-4 gap-y-1.5'>
         <Labelled label='default for chat'>
-          <SelectComponent
+          <Select
             name='ai-default-chat'
             placeholder='default for chat'
             value={chat}
@@ -292,7 +288,7 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
           <WriteError text={failedOn === 'chat' ? save.failure?.text : null} id='default-chat' />
         </Labelled>
         <Labelled label='default for images'>
-          <SelectComponent
+          <Select
             name='ai-default-image'
             placeholder='default for images'
             value={image}
@@ -562,7 +558,7 @@ function CandidateControls({
         {role}
       </Text>
       <div className='flex flex-wrap items-center gap-1'>
-        <SelectComponent
+        <Select
           name={`ai-route-${role}`}
           placeholder={selected ? `${purposeLabel} ${role}` : 'choose a provider'}
           value={selected}

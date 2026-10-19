@@ -1,0 +1,246 @@
+{
+  "_doc": "A9: recorded answers of the AI page-role call (ClassifyPatternPages) for the corpus PDFs the call is made for (a page set aside that holds line work). Filled BY EYE from the rendered pages on 11.10 (no paid call): role, confidence, evidence. Only pages that were looked at are recorded (polupalto: the 41 pages the call sends). Keys are 1-based page numbers or ranges a-b. Read by scripts/pattern-import/page-roles-fixture.ts (the probes' PageRoleDeps).",
+  "files": {
+    "robe.pdf": {
+      "1-2": [
+        "cover",
+        0.97,
+        "full-page photo of the dress, brand marks, no drawing"
+      ],
+      "3": [
+        "instructions",
+        0.9,
+        "measurement chart (Målskema) with size tables and figure sketches, pattern preparation text"
+      ],
+      "4": [
+        "instructions",
+        0.95,
+        "garment flats, fabric requirements and sewing steps (SYVEJLEDNING)"
+      ],
+      "5": [
+        "instructions",
+        0.9,
+        "measurement chart (Målskema, NO) with size tables and figure sketches"
+      ],
+      "6": [
+        "instructions",
+        0.95,
+        "garment flats, fabric requirements and sewing steps (NO)"
+      ],
+      "7": [
+        "instructions",
+        0.87,
+        "glossary of the words printed on the pattern sheets (Ordliste)"
+      ],
+      "8": [
+        "instructions",
+        0.9,
+        "measurement chart (Målschema, SE) with size tables and figure sketches"
+      ],
+      "9": [
+        "instructions",
+        0.95,
+        "garment flats, fabric requirements and sewing steps (SE)"
+      ],
+      "10": [
+        "instructions",
+        0.87,
+        "glossary of the words printed on the pattern sheets (Ordlista)"
+      ],
+      "11": [
+        "overview",
+        0.95,
+        "the whole sheet reduced with the tile grid over it"
+      ],
+      "12-32": [
+        "pattern_tile",
+        0.96,
+        "numbered tile of the full-size sheet: pattern lines cut at the page edge, assembly triangles"
+      ]
+    },
+    "palto.pdf": {
+      "1": [
+        "instructions",
+        0.95,
+        "burda instruction page: size table, garment flats, fabric layout and sewing text"
+      ],
+      "2": [
+        "overview",
+        0.96,
+        "burda Download-Schnitt: the sheet reduced with the tile grid"
+      ],
+      "3-37": [
+        "pattern_tile",
+        0.96,
+        "tile with a/b/c joining marks, pattern lines cut at the page edge"
+      ]
+    },
+    "reef.pdf": {
+      "1": [
+        "cover",
+        0.88,
+        "title, front/back flats, print-at-100 % and trimming instructions, the A1–F5 page map"
+      ],
+      "2": [
+        "table",
+        0.92,
+        "body and finished garment measurement charts, QR code, social links"
+      ],
+      "3": [
+        "overview",
+        0.86,
+        "PATTERN PIECES: index of pieces A–J with cut counts and small reduced outlines"
+      ],
+      "4-35": [
+        "pattern_tile",
+        0.96,
+        "tile A1…F5 with corner marks, nested size lines cut at the page edge"
+      ]
+    },
+    "zhaket.pdf": {
+      "1": [
+        "overview",
+        0.96,
+        "burda Download-Schnitt: the sheet reduced with the tile grid"
+      ],
+      "2-29": [
+        "pattern_tile",
+        0.96,
+        "tile with a/b/c joining marks, pattern lines cut at the page edge"
+      ]
+    },
+    "blazer.pdf": {
+      "1": [
+        "overview",
+        0.86,
+        "cover photo and title on the left; the 24 tiles laid out reduced with the pieces on the right"
+      ],
+      "2-25": [
+        "pattern_tile",
+        0.96,
+        "big tile number, pieces with seam lines cut at the page edge, watermark"
+      ]
+    },
+    "r4454.pdf": {
+      "1": [
+        "instructions",
+        0.93,
+        "title, technical flats, size table, materials and cutting text"
+      ],
+      "2": [
+        "cutting_layout",
+        0.9,
+        "layout of the pieces on the main fabric (150 × 290) and the cutting lists"
+      ],
+      "3": [
+        "cover",
+        0.95,
+        "photos of the finished duffle coat"
+      ],
+      "4-39": [
+        "pattern_tile",
+        0.95,
+        "numbered tile, nested size lines, watermark"
+      ]
+    },
+    "44.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-21": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "46.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-22": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "48.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-22": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "50.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-22": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "52.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-23": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "54.pdf": {
+      "1": [
+        "instructions",
+        0.87,
+        "print-check page: test square 8×8 cm, printing notes, file metadata — no garment"
+      ],
+      "2-25": [
+        "pattern_tile",
+        0.95,
+        "tile with the 1 cm print grid, corner brackets and pattern lines"
+      ]
+    },
+    "polupalto.pdf": {
+      "1": [
+        "instructions",
+        0.95,
+        "burda 7142: size tables, garment flats, cutting layouts and general instructions"
+      ],
+      "2-4": [
+        "instructions",
+        0.97,
+        "sewing step illustrations with numbered steps"
+      ],
+      "5": [
+        "overview",
+        0.96,
+        "burda Download-Schnitt Bogen A: the sheet reduced with the tile grid"
+      ],
+      "56": [
+        "overview",
+        0.96,
+        "burda Download-Schnitt Bogen B: the sheet reduced with the tile grid"
+      ],
+      "6-40": [
+        "pattern_tile",
+        0.95,
+        "tile of Bogen A with a/b/c joining marks, pattern lines cut at the page edge"
+      ]
+    }
+  }
+}

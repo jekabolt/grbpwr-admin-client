@@ -1,10 +1,4 @@
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import CheckboxField from 'ui/form/fields/checkbox-field';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { Button, Text, Form, CheckboxField, InputField, SelectField, TextareaField } from 'ui';
 import { StockModal } from './stock-modal';
 import { UpdateStockData } from './update-stock-schema';
 import { useUpdateStock } from './useUpdateStock';
@@ -92,7 +86,7 @@ export function UpdateStock({
               placeholder={commentPlaceholder}
               showCharCount
               maxLength={1500}
-              className='placeholder:uppercase placeholder:text-textInactiveColor'
+              className='placeholder:uppercase placeholder:text-borderColor'
             />
           </div>
           <Button

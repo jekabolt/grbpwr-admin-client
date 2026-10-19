@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Button, Chip, ChipRow, ConfirmationModal, Input, Text, Tile, Tiles } from 'ui';
 import { useFileTopics, useLibraryFiles } from '../hooks/useFiles';
 import { extensionOf, formatBytes } from '../utils/format';
 import { canShowInText } from './file-refs';
@@ -166,10 +161,10 @@ export function NoteFilePicker({
                         src={f.previewUrl}
                         alt=''
                         loading='lazy'
-                        className='aspect-square w-full bg-bgSecondary object-contain'
+                        className='aspect-square w-full bg-pageBg object-contain'
                       />
                     ) : (
-                      <div className='flex aspect-square w-full items-center justify-center bg-bgSecondary'>
+                      <div className='flex aspect-square w-full items-center justify-center bg-pageBg'>
                         <Text size='micro' variant='label' className='uppercase'>
                           {extensionOf(f.fileName ?? '')}
                         </Text>

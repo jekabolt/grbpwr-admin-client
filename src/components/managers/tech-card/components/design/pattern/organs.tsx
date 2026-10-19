@@ -1,7 +1,6 @@
 import { cn } from 'lib/utility';
 import type { JSX, ReactNode } from 'react';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { Placeholder, Text } from 'ui';
 
 import { BENCH_CELL_PX } from '../bench-slot';
 import { useElapsed } from '../generation';

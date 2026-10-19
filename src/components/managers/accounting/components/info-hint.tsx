@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
 import { ReactNode } from 'react';
-import Tooltip from 'ui/components/tooltip';
+import { Tooltip } from 'ui';
 
 type Props = {
   // The explanation. Keep it to one or two plain sentences — longer copy belongs in a screen intro,
@@ -26,7 +26,7 @@ export function InfoHint({ children, label, side = 'top', className }: Props) {
           type='button'
           aria-label={label ? `what is ${label}?` : 'explanation'}
           className={cn(
-            'inline-flex size-4 shrink-0 cursor-help items-center justify-center border border-textInactiveColor align-middle text-[10px] font-bold leading-none text-textInactiveColor hover:border-textColor hover:text-textColor',
+            'inline-flex size-4 shrink-0 cursor-help items-center justify-center border border-borderColor align-middle text-[10px] font-bold leading-none text-borderColor hover:border-textColor hover:text-textColor',
             className,
           )}
         >

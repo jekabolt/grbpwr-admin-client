@@ -2,11 +2,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
+import { Button, Close, Media, Pill, RatioGlyph, Text } from 'ui';
 import { calculateAspectRatio, isKnownAspectRatio } from '../utils/calculate-aspect';
 import { formatBytes, formatMegapixels, type PreviewItem } from '../utils/usePendingFiles';
 import { MediaCropper } from './cropper';
@@ -218,9 +214,8 @@ function QueueRow({
             crop
           </Button>
         )}
-        <Button
-          size='xs'
-          variant='secondary'
+        <Close
+          size='sm'
           aria-label={`remove ${item.name} from the queue`}
           title={
             item.status === 'sending'
@@ -229,9 +224,7 @@ function QueueRow({
           }
           disabled={item.status === 'sending'}
           onClick={() => onDrop(index)}
-        >
-          ×
-        </Button>
+        />
       </div>
     </div>
   );
@@ -461,15 +454,11 @@ export function PendingMediaPlate({
                   <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
                     {cropping.name}
                   </Text>
-                  <Button
-                    size='xs'
-                    variant='secondary'
+                  <Close
                     className='ml-auto'
                     aria-label='close cropping'
                     onClick={() => setCroppingId(null)}
-                  >
-                    ×
-                  </Button>
+                  />
                 </div>
                 <MediaCropper
                   key={cropping.id}

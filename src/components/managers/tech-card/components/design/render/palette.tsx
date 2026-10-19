@@ -7,14 +7,17 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { FoldCaret } from 'ui/components/fold-caret';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import {
+  Button,
+  FoldCaret,
+  Chip,
+  ConfirmationModal,
+  GroupLabel,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+  Tiles,
+} from 'ui';
 
 import {
   ASSET_FABRIC,

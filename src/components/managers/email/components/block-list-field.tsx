@@ -2,8 +2,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { emailBlockTypes } from 'constants/email-campaign';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { AddDoor, Text, Close } from 'ui';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { CampaignSchema } from './schema';
@@ -32,7 +31,7 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
   const typeLabel = (t: string) => emailBlockTypes.find((x) => x.value === t)?.label ?? t;
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
+    <div className='space-y-3 border border-borderColor p-3'>
       <Text variant='uppercase' size='small'>
         {side} column
       </Text>
@@ -46,8 +45,8 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
       {fa.fields.map((f, i) => {
         const child = items[i];
         return (
-          <div key={f.id} className='border border-textInactiveColor'>
-            <div className='flex items-center justify-between gap-2 border-b border-textInactiveColor px-2 py-1'>
+          <div key={f.id} className='border border-borderColor'>
+            <div className='flex items-center justify-between gap-2 border-b border-borderColor px-2 py-1'>
               <Text variant='uppercase' size='small' className='truncate'>
                 #{i + 1} {typeLabel(child?.type)}
               </Text>
@@ -57,7 +56,7 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
                   aria-label='move up'
                   disabled={i === 0}
                   onClick={() => fa.move(i, i - 1)}
-                  className='px-1.5 leading-none text-textInactiveColor hover:text-textColor disabled:opacity-30'
+                  className='px-1.5 leading-none text-borderColor hover:text-textColor disabled:opacity-30'
                 >
                   ↑
                 </button>
@@ -66,18 +65,11 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
                   aria-label='move down'
                   disabled={i === items.length - 1}
                   onClick={() => fa.move(i, i + 1)}
-                  className='px-1.5 leading-none text-textInactiveColor hover:text-textColor disabled:opacity-30'
+                  className='px-1.5 leading-none text-borderColor hover:text-textColor disabled:opacity-30'
                 >
                   ↓
                 </button>
-                <button
-                  type='button'
-                  aria-label='delete block'
-                  onClick={() => fa.remove(i)}
-                  className='px-1.5 leading-none text-textInactiveColor hover:text-textColor'
-                >
-                  ×
-                </button>
+                <Close size='sm' aria-label='delete block' onClick={() => fa.remove(i)} />
               </div>
             </div>
             <div className='p-2'>
@@ -93,19 +85,12 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
         );
       })}
 
-      <Button
-        type='button'
-        variant='secondary'
-        className='w-full px-2 py-1 uppercase'
-        onClick={() => setAddOpen(true)}
-      >
-        + add to {side}
-      </Button>
+      <AddDoor onClick={() => setAddOpen(true)}>{side}</AddDoor>
 
       <DialogPrimitives.Root open={addOpen} onOpenChange={setAddOpen}>
         <DialogPrimitives.Portal>
           <DialogPrimitives.Overlay className='fixed inset-0 z-[60] h-screen bg-overlay' />
-          <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-[60] flex flex-col overflow-y-auto border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[80vh] lg:w-[90vw] lg:max-w-[800px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
+          <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-[60] flex flex-col overflow-y-auto border border-borderColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[80vh] lg:w-[90vw] lg:max-w-[800px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
             <DialogPrimitives.Title className='mb-3 shrink-0'>
               <Text variant='uppercase' size='large'>
                 add to {side} column

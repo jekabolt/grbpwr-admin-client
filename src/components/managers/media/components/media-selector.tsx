@@ -3,10 +3,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
+import { Button, Close, Pill, RatioGlyph, Text } from 'ui';
 import { MediaManager } from '..';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
 import { mergeQueue } from '../utils/intake-queue';
@@ -366,7 +363,7 @@ export function MediaSelector({
                 }
               : undefined
           }
-          className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'
+          className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-borderColor bg-bgColor p-2.5'
         >
           <div className='flex flex-shrink-0 flex-wrap items-center gap-2'>
             {/* ХЛЕБНЫЕ КРОШКИ ВМЕСТО ПОДМЕНЫ ЗАГОЛОВКА. Кроп не отдельный экран, а второй шаг
@@ -417,9 +414,7 @@ export function MediaSelector({
 
             <div className='ml-auto flex items-center gap-2'>
               <DialogPrimitive.Close asChild>
-                <Button className='py-1' aria-label='close'>
-                  ×
-                </Button>
+                <Close />
               </DialogPrimitive.Close>
             </div>
           </div>
@@ -493,19 +488,17 @@ export function MediaSelector({
                       <img
                         src={m.media?.thumbnail?.mediaUrl}
                         alt=''
-                        className='size-10 border border-borderColor bg-bgZebra object-cover'
+                        className='size-10 border border-borderColor bg-pageBg object-cover'
                       />
-                      <button
-                        type='button'
+                      <Close
+                        size='sm'
                         aria-label={`remove ${m.id} from the tray`}
                         // Снимается ЗДЕСЬ, и сетка узнаёт об этом сразу: набор у неё тот же самый.
                         onClick={() =>
                           setSelectedMedia((prev) => prev.filter((x) => x.id !== m.id))
                         }
-                        className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:bg-textColor hover:text-bgColor'
-                      >
-                        ×
-                      </button>
+                        className='absolute -right-1 -top-1 bg-bgColor'
+                      />
                     </span>
                   ))}
                 </div>

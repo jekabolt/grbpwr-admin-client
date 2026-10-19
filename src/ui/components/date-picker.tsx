@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { cn } from 'lib/utility';
+import { Close } from './close';
 
 interface DatePickerProps {
   value?: Date;
@@ -31,25 +32,23 @@ export function DatePicker({
           type='button'
           disabled={disabled}
           className={cn(
-            'flex w-full items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
+            'flex w-full items-center justify-between gap-2 border-b border-borderColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
           )}
         >
           <span className={cn(!value && 'text-labelColor')}>
             {value ? format(value, 'PPP') : placeholder}
           </span>
           {value ? (
-            <span
-              role='button'
+            <Close
+              asChild
+              size='sm'
               tabIndex={-1}
               aria-label='clear date'
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(undefined);
               }}
-              className='shrink-0 px-1 text-labelColor hover:text-textColor'
-            >
-              ×
-            </span>
+            />
           ) : (
             <span aria-hidden className='shrink-0 text-labelColor'>
               ▾
@@ -61,7 +60,7 @@ export function DatePicker({
         <Popover.Content
           align='start'
           sideOffset={4}
-          className='z-[var(--z-popover)] border border-textInactiveColor bg-bgColor p-2 text-textColor shadow-[var(--shadow-popover)]'
+          className='z-[var(--z-popover)] border border-borderColor bg-bgColor p-2 text-textColor shadow-[var(--shadow-popover)]'
         >
           <DayPicker
             mode='single'

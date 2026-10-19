@@ -1,7 +1,6 @@
 import { useState, type JSX, type ReactNode } from 'react';
 
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderNote } from 'ui/components/section-header';
+import { GroupLabel, HeaderNote } from 'ui';
 
 import { Fold } from '../../head/mood-organs';
 import { FieldGlyph, InfoTip, type FieldGlyphName } from './glyphs';

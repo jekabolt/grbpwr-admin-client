@@ -1,7 +1,6 @@
 import { common_SupportTicket } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { TicketDetail } from './components/ticket-detail';
 import { TicketsTable } from './components/tickets-table';
 import { TicketFilters, useInfiniteTickets } from './components/utils';

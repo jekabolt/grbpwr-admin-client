@@ -5,8 +5,8 @@ import {
   collectPictures,
   MarkdownDoc,
   parse,
-} from 'ui/markdown/doc';
-import { MarkdownRefsProvider, type MarkdownRefs } from 'ui/markdown/refs';
+} from 'components/shared/markdown/doc';
+import { MarkdownRefsProvider, type MarkdownRefs } from 'components/shared/markdown/refs';
 import { FileRefImage, FileRefsProvider } from './file-refs';
 import { NoteImage, NotePicturesProvider, useNotePictures } from './note-pictures';
 

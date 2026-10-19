@@ -5,8 +5,7 @@ import type {
   TooltipComponentFormatterCallbackParams,
 } from 'echarts';
 import { FC, useMemo } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import {
   ChartCard,
   EChart,
@@ -282,7 +281,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
                   pctRowKey(row.productId, row.sizeId, row.sizeName),
                 ) ?? 0;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

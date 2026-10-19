@@ -5,10 +5,7 @@ import { addMonths, format, parseISO } from 'date-fns';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Loader } from 'ui/components/loader';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Loader, Text } from 'ui';
 import { Callout, CheckRow, GroupHeader, Note } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
 import { formatBase } from '../utils/format';
@@ -209,13 +206,13 @@ export function AcctPeriodsPage() {
           <div className='flex flex-wrap gap-4'>
             <Link
               to={`${ROUTES.accountingReports}?tab=recon`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               open reconciliation →
             </Link>
             <Link
               to={`${ROUTES.accounting}?new=1`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               add manual entry →
             </Link>

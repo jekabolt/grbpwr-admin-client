@@ -1,7 +1,7 @@
 // Модальная обёртка просмотра DXF для авторизованных экранов. Тело живёт в dxf-sheet-view.tsx:
 // его же показывает публичный вьюер выкроек (/p/:token), только токены размеров там строятся из
 // манифеста карты, а здесь — из словаря (useDictionarySizeTokens, за авторизацией).
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { ConfirmationModal } from 'ui';
 import { DxfSheetView } from './dxf-sheet-view';
 import { useDictionarySizeTokens } from './use-block-sizes';
 import { type NestingFile } from './use-nesting';

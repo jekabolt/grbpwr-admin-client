@@ -3,19 +3,13 @@ import { adminService } from 'api/api';
 import {
   BatchIssueMaterialStockRequest,
   common_Fitting,
-  common_Material,
   common_MaterialMovement,
   common_MaterialStockRow,
+  common_AdminColorwayRef,
   common_TechCard,
+  common_TechCardBomItem,
+  common_TechCardColorwayUsage,
 } from 'api/proto-http/admin';
-import {
-  formatFittingDate,
-  statusLabel,
-  verdictLabel,
-} from 'components/managers/fittings/components/utils';
-import { MaterialPicker } from 'components/managers/materials/components/material-picker';
-import { resolveMaterialPurpose } from 'components/managers/materials/components/purpose-options';
-import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
   useIssueMaterialStock,
@@ -23,119 +17,20 @@ import {
   useMaterialStock,
   warehouseKeys,
 } from 'components/managers/materials/components/useWarehouse';
-import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
-import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { Button, GroupLabel, Row, Text } from 'ui';
+import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { wireInt } from './schema';
-import { sampleKeys, useSampleFittings } from './useSamples';
+import { sampleKeys } from './useSamples';
 
 // ---------------------------------------------------------------------------
-// Shared form grammar for the samples area (reference `.f`): a 10px uppercase grey
-// label sitting 1px above a full 1px control box. `ui/form/fields/*` are RHF-bound and
-// these screens hold plain local state, so the samples area carries its own thin
-// wrapper rather than re-deriving the label metrics at every call site.
+// Sample write-off (10.5 → samples-lite). Nobody issues one material at a time when a sample is
+// sewn — the whole BOM goes out at once, through BatchIssueMaterialStock: ONE atomic call, every
+// line lands or none does.
+// Pre-filled by default (owner 16.10, reverses «nothing is pre-filled»): every linked BOM line goes
+// out at min(spec, on hand) when the sample is created; shortfalls surface as warnings, not errors.
 // ---------------------------------------------------------------------------
-
-export const selectCell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
-
-// Same box, fixed-width and right-aligned, for a quantity cell inside a table. Deliberately
-// carries no `w-full` so a width utility at the call site cannot collide with it.
-const qtyCell =
-  'ml-auto block min-h-[22px] w-20 appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-right text-textBaseSize transition-colors focus:border-textColor focus:outline-none aria-[invalid=true]:border-error disabled:bg-bgZebra disabled:text-labelColor';
-
-export function Field({
-  label,
-  hint,
-  error,
-  className,
-  children,
-}: {
-  label: React.ReactNode;
-  hint?: React.ReactNode;
-  error?: React.ReactNode;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className={`flex min-w-0 flex-col ${className ?? ''}`}>
-      <Text
-        size='micro'
-        variant='label'
-        tracking='label'
-        component='span'
-        className='mb-px uppercase'
-      >
-        {label}
-      </Text>
-      {children}
-      {hint ? (
-        <Text size='micro' variant='label' className='mt-px'>
-          {hint}
-        </Text>
-      ) : null}
-      {error ? (
-        <Text size='micro' variant='error' className='mt-px'>
-          {error}
-        </Text>
-      ) : null}
-    </label>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Batch material write-off (10.5). Nobody issues one material at a time when a sample
-// is sewn — the whole BOM goes out at once. So the sample's write-off is ONE SHEET of
-// the style's BOM lines (spec · actual · on hand · cost), not a pick-a-material →
-// modal → repeat loop.
-//
-// The sheet posts through BatchIssueMaterialStock, ONE atomic call: every line lands or
-// none does, and a rejection names the offending line without leaving anything on the
-// ledger. So the outcome is binary — there is no per-line verdict to report, no partial
-// state to reconcile, and a retry re-sends the whole sheet rather than a failed subset.
-// ---------------------------------------------------------------------------
-
-export type WriteoffRow = {
-  // Stable across re-renders: BOM lines key by their server id, off-BOM extras by material.
-  key: string;
-  materialId: number;
-  label: string;
-  material?: common_Material;
-  unit: string;
-  /** Spec consumption for this line, '' when the colourway recipe has no norm for it. */
-  spec: string;
-  onHand: number;
-  onHandText: string;
-  avgUnitCost: number;
-  /** Material purpose is sample|both — i.e. "помечен как для семпла". */
-  sampleMarked: boolean;
-  /** Added by hand through the MaterialPicker rather than read off the BOM. */
-  offBom: boolean;
-};
-
-export type WriteoffLineState = { checked: boolean; actual: string };
-
-export type WriteoffSelection = {
-  key: string;
-  materialId: number;
-  label: string;
-  unit: string;
-  quantity: string;
-  qty: number;
-  over: boolean;
-  overBy: number;
-  cost: number;
-};
 
 /** One line as the batch will see it — after the per-material fold below. */
 export type WriteoffLine = {
@@ -156,10 +51,7 @@ export type WriteoffOutcome =
   | { ok: true; lines: WriteoffPostedLine[] }
   | { ok: false; error: string };
 
-const materialText = (m?: common_Material): string =>
-  `${m?.code ? `${m.code} · ` : ''}${m?.name ?? `#${m?.id ?? '?'}`}`;
-
-function todayISO(): string {
+export function todayISO(): string {
   // Local wall-clock date (not toISOString) — mirrors the warehouse movement modals so a
   // write-off is dated the operator's "today", not a UTC day-off around midnight.
   const d = new Date();
@@ -168,292 +60,106 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
-// The spec quantity of one BOM line: the colourway recipe's consumption norm
-// (TechCardColorwayUsage), preferring the sample's own colourway and its own size before
-// falling back to any colourway that has a norm for the line. '' when the style has no
-// recipe yet — the sheet then asks the operator to type the actual.
-function specQuantity(
+// The colourway's GARMENT-LEVEL usage of a BOM line (piece-level usages are per-piece norms, not the
+// line's). A real colourway answers only for itself; the `sample` colourway (0) borrows the first
+// colourway that has a garment-level usage for the line.
+function garmentUsage(
+  techCard: common_TechCard | undefined,
+  bomItemId: number,
+  colorwayId: number,
+): common_TechCardColorwayUsage | undefined {
+  if (!bomItemId) return undefined;
+  const usageOf = (cw: common_AdminColorwayRef) =>
+    (cw.usages ?? []).find(
+      (u) =>
+        wireInt(u.bomItemId) === bomItemId &&
+        !(u.pieceLineKey ?? '').trim() &&
+        u.pieceIndex === undefined &&
+        !wireInt(u.pieceId),
+    );
+  const colorways = techCard?.colorways ?? [];
+  if (colorwayId > 0) {
+    const own = colorways.find((cw) => wireInt(cw.colorwayId) === colorwayId);
+    return own ? usageOf(own) : undefined;
+  }
+  for (const cw of colorways) {
+    const u = usageOf(cw);
+    if (u) return u;
+  }
+  return undefined;
+}
+
+/** The article a line is cut from in this colourway: the usage's pinned material, else the line's. */
+export function lineMaterialId(
+  techCard: common_TechCard | undefined,
+  bomItem: common_TechCardBomItem,
+  colorwayId: number,
+): number {
+  return (
+    wireInt(garmentUsage(techCard, wireInt(bomItem.id), colorwayId)?.materialId) ||
+    wireInt(bomItem.materialId)
+  );
+}
+
+// The spec quantity of one BOM line: the colourway's garment-level consumption norm. A per-size
+// recipe answers only for the size ('' when that size has none); otherwise the scalar norm. ''
+// when there is no recipe.
+export function specQuantity(
   techCard: common_TechCard | undefined,
   bomItemId: number,
   colorwayId: number,
   sizeId: number,
 ): string {
-  if (!bomItemId) return '';
-  const colorways = techCard?.colorways ?? [];
-  const usageOf = (cw: (typeof colorways)[number]) =>
-    (cw.usages ?? []).find((u) => wireInt(u.bomItemId) === bomItemId);
-  const own = colorwayId
-    ? colorways.find((cw) => wireInt(cw.colorwayId) === colorwayId)
-    : undefined;
-  let usage = own ? usageOf(own) : undefined;
-  if (!usage) {
-    for (const cw of colorways) {
-      usage = usageOf(cw);
-      if (usage) break;
-    }
-  }
+  const usage = garmentUsage(techCard, bomItemId, colorwayId);
   if (!usage) return '';
-  const bySize = sizeId
-    ? (usage.sizeConsumptions ?? []).find((s) => wireInt(s.sizeId) === sizeId)
-    : undefined;
-  return (
-    decimalToInput(bySize?.consumption) ||
-    decimalToInput(usage.consumption) ||
-    decimalToInput(usage.quantity) ||
-    ''
-  );
+  const sizes = usage.sizeConsumptions ?? [];
+  if (sizes.length) {
+    const bySize = sizeId ? sizes.find((s) => wireInt(s.sizeId) === sizeId) : undefined;
+    return decimalToInput(bySize?.consumption);
+  }
+  return decimalToInput(usage.consumption) || decimalToInput(usage.quantity) || '';
 }
 
 /**
- * Rows + editable state for one write-off sheet. Shared by the creation form (10.2) and
- * the open sample's MATERIALS area (10.5) so both issue stock through exactly the same
- * derivation of spec / on-hand / cost.
+ * The warehouse's stock rows keyed by a COERCED material id. Material.id is int64, which
+ * grpc-gateway serialises as a STRING while the generated type claims `number` — keying on the raw
+ * value builds a Map of "12" that `.get(12)` can never hit.
  */
-export function useSampleWriteoff({
-  techCard,
-  colorwayId = 0,
-  sizeId = 0,
-  canReadCosting,
-}: {
-  techCard?: common_TechCard;
-  colorwayId?: number;
-  sizeId?: number;
-  canReadCosting: boolean;
-}) {
-  // Sample-marked stock: one row per catalog material with its on-hand balance and
-  // moving-average valuation. Money fields are absent without costing:read; the write-off
-  // itself does not need them.
-  const {
-    data: stockData,
-    isLoading: stockLoading,
-    isError: stockError,
-  } = useMaterialStock({ withStockOnly: false });
-
-  // Keyed by a COERCED id. Material.id is int64, which grpc-gateway serialises as a STRING
-  // while the generated type claims `number` — keying on the raw value builds a Map of "12"
-  // that `.get(12)` can never hit (the same trap that once broke BOM material linking).
+export function useStockIndex() {
+  const { data, isLoading, isError, isSuccess, refetch } = useMaterialStock({
+    withStockOnly: false,
+  });
   const rowByMaterial = useMemo(() => {
     const m = new Map<number, common_MaterialStockRow>();
-    for (const r of stockData?.rows ?? []) {
+    for (const r of data?.rows ?? []) {
       const id = wireInt(r.material?.id);
       if (id) m.set(id, r);
     }
     return m;
-  }, [stockData]);
-
-  const baseCurrency = (stockData?.rows ?? []).find((r) => r.baseCurrency)?.baseCurrency ?? '';
-
-  const bomItems = useMemo(() => techCard?.techCard?.bomItems ?? [], [techCard]);
-  // A BOM line with no catalog material cannot move stock — count them so the sheet can say
-  // so out loud instead of silently listing fewer lines than the BOM tab shows.
-  const unlinkedBomCount = bomItems.filter((b) => !wireInt(b.materialId)).length;
-
-  const bomRows = useMemo<WriteoffRow[]>(
-    () =>
-      bomItems
-        .filter((b) => wireInt(b.materialId) > 0)
-        .map((b, i) => {
-          const materialId = wireInt(b.materialId);
-          const stock = rowByMaterial.get(materialId);
-          const material = stock?.material;
-          return {
-            key: `bom-${wireInt(b.id) || b.lineKey || i}`,
-            materialId,
-            label: b.name?.trim() || materialText(material),
-            material,
-            unit: b.unit?.trim() || material?.unit || '',
-            spec: specQuantity(techCard, wireInt(b.id), colorwayId, sizeId),
-            onHand: parseDecimalNumber(decimalToInput(stock?.onHand)),
-            onHandText: stock ? decimalToInput(stock.onHand) || '0' : '—',
-            avgUnitCost: parseDecimalNumber(decimalToInput(stock?.avgUnitCostBase)),
-            sampleMarked:
-              resolveMaterialPurpose(material?.purpose) !== 'MATERIAL_PURPOSE_PRODUCTION',
-            offBom: false,
-          };
-        }),
-    [bomItems, rowByMaterial, techCard, colorwayId, sizeId],
-  );
-
-  // Off-BOM additions: "issue something the BOM does not carry" stays possible (a one-off
-  // trim, a replacement fabric) — the MaterialPicker feeds this list.
-  const [extras, setExtras] = useState<WriteoffRow[]>([]);
-  const extraRows = useMemo<WriteoffRow[]>(
-    () =>
-      extras.map((e) => {
-        const stock = rowByMaterial.get(e.materialId);
-        const material = stock?.material ?? e.material;
-        return {
-          ...e,
-          material,
-          unit: material?.unit || e.unit,
-          onHand: parseDecimalNumber(decimalToInput(stock?.onHand)),
-          onHandText: stock ? decimalToInput(stock.onHand) || '0' : '—',
-          avgUnitCost: parseDecimalNumber(decimalToInput(stock?.avgUnitCostBase)),
-          sampleMarked: resolveMaterialPurpose(material?.purpose) !== 'MATERIAL_PURPOSE_PRODUCTION',
-        };
-      }),
-    [extras, rowByMaterial],
-  );
-
-  const rows = useMemo(() => [...bomRows, ...extraRows], [bomRows, extraRows]);
-
-  // Overrides only, so a late-arriving stock/recipe read can fill the reference columns without
-  // clobbering anything already typed.
-  //
-  // NOTHING is pre-filled. A sample is not a production run: it is routinely cut from sample
-  // yardage, a substitute fabric or a leftover, so the colourway's material and its consumption
-  // norm are a REFERENCE (the spec column), never a claim about what was actually spent. Ticking
-  // BOM lines by default and copying spec into actual meant an operator who just pressed save
-  // issued the recipe rather than the truth — and an unnoticed default is indistinguishable from
-  // a deliberate entry once it is stock movement. Every line is ticked and typed by hand.
-  const [edits, setEdits] = useState<Record<string, Partial<WriteoffLineState>>>({});
-  const stateOf = (r: WriteoffRow): WriteoffLineState => {
-    const fallback: WriteoffLineState = {
-      // An off-BOM row exists only because someone just picked that material for this sample —
-      // adding it IS the tick, so making them tick it again would be a second confirmation of the
-      // action they only just took.
-      checked: r.offBom,
-      actual: '',
-    };
-    const e = edits[r.key];
-    return { checked: e?.checked ?? fallback.checked, actual: e?.actual ?? fallback.actual };
-  };
-
-  const toggle = (r: WriteoffRow) =>
-    setEdits((prev) => ({ ...prev, [r.key]: { ...prev[r.key], checked: !stateOf(r).checked } }));
-  const setActual = (r: WriteoffRow, actual: string) =>
-    setEdits((prev) => ({ ...prev, [r.key]: { ...prev[r.key], actual } }));
-
-  const addOther = (materialId: number, material?: common_Material) => {
-    if (!materialId) return;
-    if (rows.some((r) => r.materialId === materialId)) return;
-    setExtras((prev) => [
-      ...prev,
-      {
-        key: `mat-${materialId}`,
-        materialId,
-        label: materialText(material),
-        material,
-        unit: material?.unit ?? '',
-        spec: '',
-        onHand: NaN,
-        onHandText: '—',
-        avgUnitCost: NaN,
-        sampleMarked: true,
-        offBom: true,
-      },
-    ]);
-  };
-  const removeRow = (r: WriteoffRow) => {
-    if (r.offBom) setExtras((prev) => prev.filter((x) => x.key !== r.key));
-    else setEdits((prev) => ({ ...prev, [r.key]: { ...prev[r.key], checked: false } }));
-  };
-
-  // Called after a successful issue: leaving the sheet ticked invites issuing the same lines
-  // twice, which silently doubles a write-off.
-  const clearSelection = () => {
-    setExtras([]);
-    setEdits(() => {
-      const next: Record<string, Partial<WriteoffLineState>> = {};
-      for (const r of rows) next[r.key] = { checked: false };
-      return next;
-    });
-  };
-
-  // A ticked line only counts once its quantity is a real positive number; a ticked-but-blank
-  // line blocks the issue so it cannot be silently dropped.
-  const ticked = rows.filter((r) => stateOf(r).checked);
-  const selected: WriteoffSelection[] = ticked
-    .map((r) => {
-      const { actual } = stateOf(r);
-      const qty = parseDecimalNumber(actual);
-      const over = Number.isFinite(qty) && Number.isFinite(r.onHand) && qty > r.onHand;
-      const cost = Number.isFinite(qty) && Number.isFinite(r.avgUnitCost) ? qty * r.avgUnitCost : 0;
-      return {
-        key: r.key,
-        materialId: r.materialId,
-        label: r.label,
-        unit: r.unit,
-        quantity: actual,
-        qty,
-        over,
-        overBy: over ? qty - r.onHand : 0,
-        cost,
-      };
-    })
-    .filter((s) => Number.isFinite(s.qty) && s.qty > 0);
-
-  const incomplete = ticked.length - selected.length;
-  // Ticked rows that repeat a material already on the sheet — one fabric can sit on two BOM lines.
-  // The batch takes one line per material, so those are summed on the way out (mergeWriteoffLines).
-  // Counted here so the sheet can say it BEFORE the issue, instead of the receipt reporting fewer
-  // lines than were ticked and looking like it dropped some.
-  const mergedRowCount = selected.length - new Set(selected.map((s) => s.materialId)).size;
-  // Over-stock is a WARNING, never a block — sampling legitimately overdraws.
-  const overLines = selected.filter((s) => s.over);
-  const totalCost = selected.reduce((sum, s) => sum + s.cost, 0);
-  const hasCost =
-    canReadCosting &&
-    selected.some((s) => {
-      const r = rows.find((x) => x.key === s.key);
-      return !!r && Number.isFinite(r.avgUnitCost) && r.avgUnitCost > 0;
-    });
-
-  const money = (n: number) => `${Number(n.toFixed(2))}${baseCurrency ? ` ${baseCurrency}` : ''}`;
-
-  // One-line preview for the collapsed write-off block on the creation form.
-  const summary = selected
-    .slice(0, 3)
-    .map((s) => `${s.label} ${s.quantity}${s.unit ? ` ${s.unit}` : ''}`)
-    .join(', ');
-
+  }, [data]);
+  const baseCurrency = (data?.rows ?? []).find((r) => r.baseCurrency)?.baseCurrency ?? '';
   return {
-    rows,
-    stateOf,
-    toggle,
-    setActual,
-    addOther,
-    removeRow,
-    clearSelection,
-    selected,
-    incomplete,
-    mergedRowCount,
-    overLines,
-    totalCost,
-    hasCost,
-    money,
+    rowByMaterial,
+    rows: data?.rows ?? [],
     baseCurrency,
-    summary,
-    unlinkedBomCount,
-    stockLoading,
-    stockError,
-    canReadCosting,
+    isLoading,
+    isError,
+    isSuccess,
+    refetch,
   };
 }
 
-export type SampleWriteoff = ReturnType<typeof useSampleWriteoff>;
-
-// How many stock movements this sample carries — the editor's "issued N lines" row, readable
-// WITHOUT opening the materials panel (10.3: seeing the counts without a click is the point of the
-// two-column editor). Deliberately the same filter/limit pair MovementsList uses, so React Query
-// serves both from one request instead of firing a second, count-only read.
-export function useSampleMovementCount(sampleId?: number): number {
-  const { data } = useMaterialMovements({ sampleId: sampleId ?? 0 }, 50);
-  return data?.pages?.[0]?.total ?? 0;
-}
-
-// Sum two sheet quantities. The inputs are already clamped to 3 decimals by sanitizeDecimal, so
-// rounding back to 3 can only undo float noise (0.1 + 0.2 = 0.30000000000000004), never precision.
+export const stockOnHand = (r?: common_MaterialStockRow): number =>
+  parseDecimalNumber(decimalToInput(r?.onHand));
+// Sum two sheet quantities, rounding back to 3 decimals to undo float noise only.
 function addQuantities(a: string, b: string): string {
   const sum = (parseDecimalNumber(a) || 0) + (parseDecimalNumber(b) || 0);
   return Number.isFinite(sum) ? String(Number(sum.toFixed(3))) : a;
 }
 
 /**
- * Fold the sheet's rows by material. BatchIssueMaterialStock rejects a duplicate materialId across
- * lines BEFORE it writes anything, and a BOM legitimately carries one catalog material on two lines
- * (the same fabric on the shell and the hood). Summing here is what the operator means anyway —
- * "issue 2.4 m of this fabric", not "two separate 1.2 m issues of it".
+ * Fold the lines by material. BatchIssueMaterialStock rejects a duplicate materialId across lines
+ * BEFORE it writes anything, and a BOM legitimately carries one catalog material on two lines.
  */
 export function mergeWriteoffLines(lines: WriteoffLine[]): WriteoffLine[] {
   const out: WriteoffLine[] = [];
@@ -476,9 +182,8 @@ export function mergeWriteoffLines(lines: WriteoffLine[]): WriteoffLine[] {
   return out;
 }
 
-// The batch write. It sits here rather than beside useWarehouse's movement hooks because those wrap
-// the single-movement RPCs and this is the sample sheet's only writer; it invalidates the same two
-// trees a single issue does — balances move, and so does the sample's composed cost.
+// The batch write; invalidates the same two trees a single issue does — balances move, and so does
+// the sample's composed cost.
 function useBatchIssueMaterialStock() {
   const qc = useQueryClient();
   return useMutation({
@@ -491,7 +196,7 @@ function useBatchIssueMaterialStock() {
 }
 
 /**
- * The whole sheet in ONE atomic call. Never throws: a rejection resolves to `{ ok: false }` and
+ * The whole write-off in ONE atomic call. Never throws: a rejection resolves to `{ ok: false }` and
  * means the ledger is untouched, so the caller has nothing to reconcile and can re-send as-is.
  */
 export function useWriteoffBatch() {
@@ -527,538 +232,57 @@ export function useWriteoffBatch() {
   return { run, isPending: batch.isPending };
 }
 
-/** The sheet itself: one row per BOM line, plus the `+ other material` escape hatch. */
-export function WriteoffSheet({
-  wo,
-  canEdit,
-  action,
-}: {
-  wo: SampleWriteoff;
-  canEdit: boolean;
-  /** Trailing action bar (issue / create) — the caller owns the verb. */
-  action?: React.ReactNode;
-}) {
-  if (wo.stockError) {
-    return (
-      <CalloutBox tone='error'>
-        <Text size='micro'>
-          Stock is unavailable — the warehouse backend may not be reachable. The sample can still be
-          created or edited; issue its materials later from here.
-        </Text>
-      </CalloutBox>
-    );
-  }
-
-  return (
-    <div className='flex flex-col gap-1.5'>
-      <DataTable>
-        <thead>
-          <tr>
-            <th>BOM line</th>
-            <th>spec</th>
-            <th>actual</th>
-            <th>on hand</th>
-            <th>cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          {wo.rows.length === 0 ? (
-            <tr>
-              <td colSpan={5}>
-                <Text size='micro' variant='label'>
-                  {wo.stockLoading
-                    ? 'loading stock…'
-                    : 'no BOM line links a catalog material — link materials in the BOM tab, or add one below'}
-                </Text>
-              </td>
-            </tr>
-          ) : (
-            wo.rows.map((r) => {
-              const st = wo.stateOf(r);
-              const qty = parseDecimalNumber(st.actual);
-              const over =
-                st.checked && Number.isFinite(qty) && Number.isFinite(r.onHand) && qty > r.onHand;
-              const cost =
-                st.checked && Number.isFinite(qty) && Number.isFinite(r.avgUnitCost)
-                  ? qty * r.avgUnitCost
-                  : NaN;
-              const blank = st.checked && !(Number.isFinite(qty) && qty > 0);
-              return (
-                <tr key={r.key}>
-                  <td>
-                    <span className='flex items-center gap-2'>
-                      <CheckboxCommon
-                        name={`wo-${r.key}`}
-                        checked={st.checked}
-                        disabled={!canEdit}
-                        onChange={() => wo.toggle(r)}
-                      />
-                      <span className='flex min-w-0 flex-col'>
-                        <Text size='micro' className={st.checked ? '' : 'text-labelColor'}>
-                          {r.label}
-                        </Text>
-                        {r.offBom ? (
-                          <Text size='nano' variant='label' className='uppercase'>
-                            not on the BOM
-                          </Text>
-                        ) : !r.sampleMarked ? (
-                          <Text size='nano' variant='label' className='uppercase'>
-                            production-only material
-                          </Text>
-                        ) : null}
-                      </span>
-                      {r.offBom && canEdit ? (
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          aria-label={`remove ${r.label}`}
-                          onClick={() => wo.removeRow(r)}
-                        >
-                          ✕
-                        </Button>
-                      ) : null}
-                    </span>
-                  </td>
-                  <td>{r.spec ? `${r.spec}${r.unit ? ` ${r.unit}` : ''}` : <EmptyCell />}</td>
-                  <td>
-                    {st.checked ? (
-                      <input
-                        className={qtyCell}
-                        inputMode='decimal'
-                        aria-label={`actual quantity for ${r.label}`}
-                        aria-invalid={blank || undefined}
-                        placeholder={r.unit || 'qty'}
-                        disabled={!canEdit}
-                        value={st.actual}
-                        onChange={(e) => wo.setActual(r, sanitizeDecimal(e.target.value))}
-                      />
-                    ) : (
-                      <EmptyCell />
-                    )}
-                  </td>
-                  <td className={over ? 'text-error' : undefined}>
-                    {r.onHandText}
-                    {over ? ' !' : ''}
-                  </td>
-                  <td>
-                    {Number.isFinite(cost) && wo.canReadCosting ? wo.money(cost) : <EmptyCell />}
-                  </td>
-                </tr>
-              );
-            })
-          )}
-          {wo.selected.length > 0 && (
-            <TotalRow>
-              <td>
-                {wo.selected.length} line{wo.selected.length === 1 ? '' : 's'}
-                {wo.overLines.length > 0 ? ` · ${wo.overLines.length} over stock` : ''}
-              </td>
-              <td />
-              <td />
-              <td />
-              <td>{wo.hasCost ? wo.money(wo.totalCost) : <EmptyCell />}</td>
-            </TotalRow>
-          )}
-        </tbody>
-      </DataTable>
-
-      {/* Off-BOM issue: the MaterialPicker stays available for the one-off that the style's
-          BOM does not carry. */}
-      {canEdit && (
-        <div className='flex flex-wrap items-end gap-2'>
-          <div className='w-64'>
-            <Field label='+ other material'>
-              <MaterialPicker
-                value={0}
-                onChange={(id, m) => wo.addOther(id, m)}
-                placeholder='issue something not on the BOM'
-              />
-            </Field>
-          </div>
-          {wo.unlinkedBomCount > 0 ? (
-            <Text size='micro' variant='label'>
-              {wo.unlinkedBomCount} BOM line(s) link no catalog material — they cannot move stock
-              until they do.
-            </Text>
-          ) : null}
-        </div>
-      )}
-
-      {wo.incomplete > 0 ? (
-        <Text size='micro' variant='error'>
-          enter a quantity ( &gt; 0 ) for every ticked line, or untick it
-        </Text>
-      ) : null}
-
-      {wo.mergedRowCount > 0 ? (
-        <Text size='micro' variant='label'>
-          {wo.mergedRowCount} ticked line(s) repeat a material already on the sheet — a material is
-          issued once, with those quantities summed
-        </Text>
-      ) : null}
-
-      {/* Over-stock is a WARNING, not a block — sampling legitimately overdraws. */}
-      {wo.overLines.length > 0 ? (
-        <CalloutBox tone='warning'>
-          <Text size='micro'>
-            {wo.overLines
-              .map(
-                (s) =>
-                  `${s.label} exceeds on-hand by ${Number(s.overBy.toFixed(3))}${s.unit ? ` ${s.unit}` : ''}`,
-              )
-              .join(' · ')}
-            {' — issuing anyway is allowed; the balance goes negative.'}
-          </Text>
-        </CalloutBox>
-      ) : null}
-
-      {action ? <div className='flex flex-wrap items-center gap-2'>{action}</div> : null}
-    </div>
-  );
-}
-
-/** Receipt for a posted batch: what moved and where each balance landed. No verdict column — a
- *  rendered receipt means the whole batch went through. */
-export function WriteoffReceipt({
-  lines,
-  money,
-  canReadCosting,
-}: {
-  lines: WriteoffPostedLine[];
-  money: (n: number) => string;
-  canReadCosting: boolean;
-}) {
-  if (!lines.length) return null;
-  const lineCost = (l: WriteoffPostedLine): number => {
-    const qn = Number(l.movement?.quantity?.value);
-    const cn = Number(l.movement?.unitCostBase?.value);
-    return Number.isFinite(qn) && Number.isFinite(cn) ? qn * cn : NaN;
-  };
-  const posted = lines.reduce(
-    (sum, l) => sum + (Number.isFinite(lineCost(l)) ? lineCost(l) : 0),
-    0,
-  );
-  const postedHasCost = canReadCosting && lines.some((l) => l.movement?.unitCostBase);
-
-  return (
-    <div className='flex flex-col'>
-      {lines.map((l) => {
-        const cost = lineCost(l);
-        return (
-          <Row
-            key={l.key}
-            label={
-              <span className='flex min-w-0 flex-col'>
-                <Text size='micro'>{l.label}</Text>
-                <Text size='nano' variant='label'>
-                  {l.quantity} {l.unit}
-                  {l.movement
-                    ? ` · on hand ${decimalToInput(l.movement.onHandBefore) || '0'} → ${
-                        decimalToInput(l.movement.onHandAfter) || '0'
-                      }`
-                    : ''}
-                  {l.mergedRows ? ` · ${l.mergedRows} sheet lines on this material` : ''}
-                </Text>
-              </span>
-            }
-            value={
-              canReadCosting && Number.isFinite(cost) ? (
-                <Text size='micro'>{money(cost)}</Text>
-              ) : (
-                <EmptyCell />
-              )
-            }
-          />
-        );
-      })}
-      <Row
-        emphasis
-        label={`${lines.length} line${lines.length === 1 ? '' : 's'} issued`}
-        value={postedHasCost ? money(posted) : <EmptyCell />}
-      />
-    </div>
-  );
-}
-
-// Material issued to / returned from this sample (NF-01). Replaces the old
-// pick-a-material → IssueStockModal → repeat loop with the batch sheet: the style's BOM,
-// pre-filled, issued in one action. `IssueStockModal` still exists for one-off corrections
-// from the materials manager — this is the sample path only.
 /**
- * What this sample ATE, folded by material rather than listed by movement.
- *
- * Three reasons the fold is the honest unit. One catalog material legitimately sits on two BOM
- * lines (the same fabric on the shell and the hood) and the warehouse moved it once — that is the
- * very fold `mergeWriteoffLines` applies on the way out, so reporting it any other way makes the
- * receipt disagree with the ledger. A sample is also issued in several goes (cut it, run short,
- * issue more), and «1.2 m then 0.45 m» is not a fact anybody needs. And spec-versus-actual only
- * means anything per cloth: two lines of the same twill are one question about one bolt.
- *
- * Actuals come from the LEDGER (issues minus returns), never from the sheet above — the sheet is
- * an intention until it posts.
+ * Net quantity and cost of every material issued to a sample (issues minus returns), read off the
+ * ledger — the amount actually consumed, folded by material. Same filter/limit as MovementsList so
+ * react-query serves both from one request.
  */
-export function SampleMaterialsRollup({
-  sampleId,
-  techCard,
-  colorwayId,
-  sizeId,
-  canReadCosting,
-}: {
-  sampleId: number;
-  techCard?: common_TechCard;
-  colorwayId?: number;
-  sizeId?: number;
-  canReadCosting: boolean;
-}) {
-  const wo = useSampleWriteoff({ techCard, colorwayId, sizeId, canReadCosting });
-  const { data } = useMaterialMovements({ sampleId }, 50);
-
-  const rows = useMemo(() => {
-    // Spec + identity per material, summed across the BOM lines that share one material.
-    const byMaterial = new Map<
-      number,
-      { label: string; unit: string; spec: number; actual: number; cost: number; offBom: boolean }
-    >();
-    for (const r of wo.rows) {
-      if (!r.materialId) continue;
-      const seat = byMaterial.get(r.materialId) ?? {
-        label: r.label,
-        unit: r.unit,
-        spec: 0,
-        actual: 0,
-        cost: 0,
-        offBom: r.offBom,
-      };
-      const spec = parseDecimalNumber(r.spec);
-      if (Number.isFinite(spec)) seat.spec += spec;
-      seat.unit = seat.unit || r.unit;
-      byMaterial.set(r.materialId, seat);
-    }
-
+export function useSampleIssued(sampleId: number) {
+  const { data, isLoading } = useMaterialMovements({ sampleId }, 50);
+  return useMemo(() => {
+    const byMaterial = new Map<number, { qty: number; cost: number }>();
+    let firstAt = '';
     for (const page of data?.pages ?? []) {
       for (const m of page.movements) {
         const id = wireInt(m.materialId);
-        if (!id) continue;
         const qty = parseDecimalNumber(decimalToInput(m.quantity));
-        if (!Number.isFinite(qty)) continue;
-        // A return puts cloth back; netting it here is what makes «actual» the amount consumed.
-        const signed =
-          m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE'
-            ? -Math.abs(qty)
-            : Math.abs(qty);
+        if (!id || !Number.isFinite(qty)) continue;
+        const isReturn = m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE';
+        const signed = isReturn ? -Math.abs(qty) : Math.abs(qty);
         const unitCost = parseDecimalNumber(decimalToInput(m.unitCostBase));
-        const seat = byMaterial.get(id) ?? {
-          // Issued against this sample but on no BOM line — it still moved, so it is still reported.
-          label: `material #${id}`,
-          unit: '',
-          spec: NaN,
-          actual: 0,
-          cost: 0,
-          offBom: true,
-        };
-        seat.actual += signed;
+        const seat = byMaterial.get(id) ?? { qty: 0, cost: 0 };
+        seat.qty += signed;
         if (Number.isFinite(unitCost)) seat.cost += signed * unitCost;
         byMaterial.set(id, seat);
+        if (!isReturn && m.occurredAt && (!firstAt || m.occurredAt < firstAt))
+          firstAt = m.occurredAt;
       }
     }
-
-    // Only materials that actually moved, or that the recipe expects — a BOM line with neither is
-    // noise on a sheet about one sewn sample.
-    return [...byMaterial.entries()]
-      .map(([materialId, v]) => ({ materialId, ...v }))
-      .filter((r) => r.actual !== 0 || (Number.isFinite(r.spec) && r.spec > 0));
-  }, [wo.rows, data?.pages]);
-
-  const totalCost = rows.reduce((s, r) => s + (Number.isFinite(r.cost) ? r.cost : 0), 0);
-  const overCount = rows.filter(
-    (r) => Number.isFinite(r.spec) && r.spec > 0 && r.actual > r.spec,
-  ).length;
-
-  if (rows.length === 0) {
-    return (
-      <Text size='micro' variant='label'>
-        nothing issued against this sample yet
-      </Text>
-    );
-  }
-
-  return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex flex-col'>
-        {rows.map((r) => {
-          const hasSpec = Number.isFinite(r.spec) && r.spec > 0;
-          const delta = hasSpec ? r.actual - r.spec : NaN;
-          const over = Number.isFinite(delta) && delta > 0;
-          const unit = r.unit ? ` ${r.unit}` : '';
-          return (
-            <div
-              key={r.materialId}
-              className='flex items-start justify-between gap-2.5 border-b border-hairline py-1 last:border-b-0'
-            >
-              <span className='min-w-0'>
-                <Text size='micro' component='span'>
-                  {r.label}
-                </Text>
-                <Text size='nano' variant='label' className='uppercase'>
-                  {r.offBom ? 'not on the BOM · ' : ''}
-                  {hasSpec ? `spec ${Number(r.spec.toFixed(3))}${unit}` : 'no norm'}
-                  {Number.isFinite(delta) && delta !== 0
-                    ? ` · ${over ? '+' : ''}${Number(delta.toFixed(3))}`
-                    : hasSpec
-                      ? ' · on norm'
-                      : ''}
-                </Text>
-              </span>
-              <span className='shrink-0 text-right tabular-nums'>
-                <Text size='micro' component='span' variant={over ? 'error' : undefined}>
-                  {Number(r.actual.toFixed(3))}
-                  {unit}
-                </Text>
-                {canReadCosting && r.cost > 0 && (
-                  <Text size='nano' variant='label' className='uppercase'>
-                    {wo.money(r.cost)}
-                  </Text>
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className='flex flex-wrap items-center gap-1.5'>
-        <Pill tone='mut'>
-          {rows.length} material{rows.length === 1 ? '' : 's'}
-        </Pill>
-        {overCount > 0 && <Pill tone='attention'>{overCount} over the norm</Pill>}
-        {canReadCosting && totalCost > 0 && <Pill tone='mut'>{wo.money(totalCost)}</Pill>}
-      </div>
-    </div>
-  );
-}
-
-export function SampleMovements({
-  sampleId,
-  techCard,
-  colorwayId,
-  sizeId,
-  canEdit,
-  canReadCosting,
-  scrapped = false,
-}: {
-  sampleId: number;
-  techCard?: common_TechCard;
-  colorwayId?: number;
-  sizeId?: number;
-  canEdit: boolean;
-  canReadCosting: boolean;
-  /** Статус семпла — «списан». Возврат материала по такому семплу склад не принимает. */
-  scrapped?: boolean;
-}) {
-  const wo = useSampleWriteoff({ techCard, colorwayId, sizeId, canReadCosting });
-  const issuer = useWriteoffBatch();
-  const [posted, setPosted] = useState<WriteoffPostedLine[]>([]);
-  const [failure, setFailure] = useState('');
-
-  const issueSheet = async () => {
-    if (!wo.selected.length || issuer.isPending) return;
-    const res = await issuer.run(sampleId, wo.selected, 'sample write-off');
-    if (!res.ok) {
-      // The batch wrote nothing, so the sheet is still exactly what it was — leave it ticked and
-      // let the same button re-send it whole.
-      setPosted([]);
-      setFailure(res.error);
-      return;
-    }
-    setFailure('');
-    setPosted(res.lines);
-    // Untick what went out so the same sheet cannot be issued a second time by accident.
-    wo.clearSelection();
-  };
-
-  return (
-    <div className='flex flex-col gap-2'>
-      <GroupLabel>write off the BOM</GroupLabel>
-      <WriteoffSheet
-        wo={wo}
-        canEdit={canEdit}
-        action={
-          canEdit ? (
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              disabled={!wo.selected.length || issuer.isPending}
-              onClick={issueSheet}
-            >
-              {issuer.isPending ? 'issuing…' : `issue ${wo.selected.length} line(s)`}
-            </Button>
-          ) : null
-        }
-      />
-
-      {/* No retry button of its own: the batch left nothing behind, so retrying IS re-sending the
-          sheet, and the sheet's own issue button — still ticked, directly above — already does it. */}
-      {failure ? (
-        <CalloutBox tone='error'>
-          <Text size='micro'>
-            <b>Nothing was written off.</b> The write-off posts as one transaction, so a rejected
-            line leaves the ledger and every balance untouched. Fix the offending line and press
-            issue again to re-send the whole sheet. {failure}
-          </Text>
-        </CalloutBox>
-      ) : null}
-
-      {posted.length > 0 ? (
-        <WriteoffReceipt lines={posted} money={wo.money} canReadCosting={canReadCosting} />
-      ) : null}
-
-      <SampleReturns sampleId={sampleId} canEdit={canEdit} scrapped={scrapped} />
-
-      <GroupLabel>ledger</GroupLabel>
-      <MovementsList filter={{ sampleId }} />
-    </div>
-  );
+    return { byMaterial, firstAt, isLoading, count: data?.pages?.[0]?.total ?? 0 };
+  }, [data, isLoading]);
 }
 
 /**
- * ВОЗВРАТ МАТЕРИАЛА С СЕМПЛА НА СКЛАД.
- *
- * Раньше эта панель умела только выдавать. Вернуть было можно лишь со ЭКРАНА МАТЕРИАЛОВ: найти
- * материал, открыть модалку выдачи, поставить галочку «return» и вписать id семпла руками — то есть
- * знать id строки, которую оператор на экране семпла даже не видит.
- *
- * Теперь это половина ответа на отказ удаления: сервер удаляет семпл ⟺ чистый расход по каждому
- * материалу равен нулю, и говорит «верните материал на склад из панели МАТЕРИАЛЫ этого семпла».
- * Кнопка обязана быть ровно здесь, иначе совет ссылается на место, которого нет.
- *
- * ЧТО ПОКАЗЫВАЕМ — не список движений, а ОСТАТОК по материалу: выдано минус возвращено. Это ровно
- * то, чем меряет и сервер (тот же предикат в вердикте удаления, тот же потолок в самом складе),
- * поэтому строка отсюда не может попросить больше, чем склад готов принять. Ноль в списке не
- * показываем: вернувшийся материал — это не задача.
+ * Return material from the sample to stock — half of the answer to a refused delete: the server
+ * deletes a sample only when its net consumption of every material is zero. Shows the OUTSTANDING
+ * balance per material (issued minus returned), the same predicate the server measures by.
  */
-function SampleReturns({
+export function SampleReturns({
   sampleId,
   canEdit,
   scrapped,
 }: {
   sampleId: number;
   canEdit: boolean;
-  /** Семпл списан. Склад НЕ примет по нему возврат (checkSampleOpen), поэтому кнопки здесь нет —
-      иначе она была бы кнопкой, отвечающей серверной ошибкой на каждое нажатие. */
+  /** A scrapped sample takes no return (checkSampleOpen) — no button that only answers an error. */
   scrapped: boolean;
 }) {
   const { showMessage } = useSnackBarStore();
   const issue = useIssueMaterialStock();
-  // Тот же фильтр и лимит, что у MovementsList прямо под этим блоком, — React Query отдаёт обоим
-  // один ответ, второго запроса не будет.
   const { data } = useMaterialMovements({ sampleId }, 50);
   const { data: matData } = useMaterials('', true);
   const [pending, setPending] = useState(0);
 
-  // Имя и ЕДИНИЦА материала: «2.4» без единицы — это не количество, а число, и оператор не сможет
-  // сверить его ни с накладной, ни с рулоном. Единица в справочнике необязательна, и тогда её
-  // просто нет — «шт» по догадке было бы хуже пустоты.
   const materialInfo = useMemo(() => {
     const map = new Map<number, { label: string; unit: string }>();
     (matData?.materials ?? []).forEach((m) => {
@@ -1071,13 +295,8 @@ function SampleReturns({
     return map;
   }, [matData]);
 
-  // Остаток по материалу — по ВСЕМ загруженным страницам ленты. Хвост за 50-й строкой (столько
-  // движений на одном семпле — уже аномалия) сюда не попадёт, и ошибка от этого может быть только
-  // В ОДНУ СТОРОНУ: лента отдаётся новыми строками вперёд, а возврат всегда новее своей выдачи,
-  // поэтому окно способно потерять старую ВЫДАЧУ, но не её возврат. То есть посчитанный остаток
-  // бывает занижен, и тогда кнопка вернёт меньше, чем числится, — склад это примет (он режет
-  // возврат по СВОЕМУ остатку, а меньший возврат законен), строка просто не исчезнет и позовёт
-  // нажать ещё раз. Завысить остаток это окно не может, поэтому лишнего возврата отсюда не будет.
+  // Across every loaded page. The window can only UNDER-count (returns are newer than their issue),
+  // so a return from here can never exceed what stock will accept.
   const outstanding = useMemo(() => {
     const net = new Map<number, number>();
     for (const p of data?.pages ?? []) {
@@ -1112,8 +331,6 @@ function SampleReturns({
         productionRunId: 0,
         sampleId,
         isReturn: true,
-        // Датой возврата ставим сегодня — как во всех остальных движениях склада. Пустая строка
-        // тоже принимается, но кладёт в ленту строку без даты, и она встаёт в порядок иначе.
         occurredAt: todayISO(),
         comment: 'return from the sample',
         productId: 0,
@@ -1129,7 +346,7 @@ function SampleReturns({
 
   return (
     <div className='flex flex-col gap-1'>
-      <GroupLabel>on the sample right now</GroupLabel>
+      <GroupLabel>on the sample</GroupLabel>
       {outstanding.map((r) => {
         const info = materialInfo.get(r.materialId);
         return (
@@ -1150,8 +367,7 @@ function SampleReturns({
                     type='button'
                     variant='secondary'
                     size='sm'
-                    // Пока летит один возврат, остальные кнопки тоже заперты: два возврата подряд
-                    // считаются от ОДНОГО остатка, и второй ушёл бы с цифрой, которой уже нет.
+                    // One return at a time: two in a row would both count from ONE balance.
                     disabled={pending !== 0}
                     onClick={() => returnAll(r.materialId, r.qty)}
                   >
@@ -1163,41 +379,20 @@ function SampleReturns({
           />
         );
       })}
-      {/* Зачем это здесь вообще: пока строка не обнулится, семпл не удаляется. Сказать это надо
-          в том месте, где действие, а не только в диалоге удаления, куда оператор ещё не дошёл. */}
-      <Text size='micro' variant='label'>
-        {scrapped
-          ? 'the sample is scrapped — stock takes no return against it: the material left together with the sample. while that is so, the sample is not deleted, and it is itself the record of the fabric that was eaten.'
-          : 'while anything is left here, the sample is not deleted — the material is still charged to it. if the fabric really has been consumed, the sample is precisely the record of that, and there is nothing to delete.'}
-      </Text>
     </div>
   );
 }
 
 // Verdict → Pill tone. Approved is done (green), rejected is broken (red), needs-rework is
 // mid-flight and waiting on a human (blue — never amber).
-function verdictTone(v?: string): 'ok' | 'warn' | 'attention' | 'mut' {
+export function verdictTone(v?: string): 'ok' | 'warn' | 'attention' | 'mut' {
   if (v === 'FITTING_VERDICT_APPROVED') return 'ok';
   if (v === 'FITTING_VERDICT_REJECTED') return 'warn';
-  if (v === 'FITTING_VERDICT_NEEDS_REWORK') return 'attention';
+  if (v === 'FITTING_VERDICT_NEEDS_REWORK' || v === 'FITTING_VERDICT_PENDING') return 'attention';
   return 'mut';
 }
 
-// Plural agreement for "fitting" (1 fitting, 2 fittings) — two forms, not a naive trailing -s.
-function fittingsWord(n: number): string {
-  return n === 1 ? 'fitting' : 'fittings';
-}
-
-// Card-board summary text (owner decision 1, quoted verbatim): "N fittings · last verdict" —
-// read without opening the sample. Fittings arrive newest-first (ListFittings ORDER_FACTOR_DESC,
-// preserved by useSampleFittings' grouping), so the first entry is the latest.
-export function fittingsSummary(fittings: common_Fitting[]): string {
-  if (!fittings.length) return 'no fittings';
-  const n = fittings.length;
-  return `${n} ${fittingsWord(n)} · last verdict: ${verdictLabel(fittings[0].fitting?.verdict)}`;
-}
-
-/** Unresolved change requests across a sample's fittings — the editor's "N open" pill. */
+/** Unresolved change requests across a sample's fittings. */
 export function openChangeRequests(fittings: common_Fitting[]): number {
   return fittings.reduce(
     (n, f) => n + (f.fitting?.changeRequests ?? []).filter((c) => !c.resolved).length,
@@ -1205,93 +400,9 @@ export function openChangeRequests(fittings: common_Fitting[]): number {
   );
 }
 
-/** The two facts the editor's FITTINGS rows show without any click. */
-export function FittingRows({ fittings }: { fittings: common_Fitting[] }) {
-  if (!fittings.length) {
-    return <Row label='no fittings yet' tone='label' value={<EmptyCell />} />;
-  }
-  const open = openChangeRequests(fittings);
-  return (
-    <>
-      {fittings.slice(0, 3).map((f) => (
-        <Row
-          key={f.id}
-          label={`${formatFittingDate(f.fitting?.fittingDate)} — ${verdictLabel(f.fitting?.verdict)}`}
-          value={
-            <Pill tone={verdictTone(f.fitting?.verdict)}>
-              round {f.fitting?.roundNumber ?? '—'}
-            </Pill>
-          }
-        />
-      ))}
-      <Row
-        label={`${fittings.length} ${fittingsWord(fittings.length)}`}
-        value={open > 0 ? <Pill tone='attention'>{open} open</Pill> : <EmptyCell />}
-      />
-    </>
-  );
-}
-
-// Fittings that tried this sample on (NF-04): a sample:fittings 1:N link that already existed but
-// was invisible (only reachable by filtering the card's whole fitting list). This is the FITTINGS
-// area's expand body — the summary lives in the editor's always-visible rows.
-export function SampleFittings({
-  sampleId,
-  techCardId,
-  returnTo,
-}: {
-  sampleId: number;
-  techCardId: number;
-  returnTo: string;
-}) {
-  const { bySample } = useSampleFittings(techCardId);
-  const fittings = bySample.get(sampleId) ?? [];
-  const addHref = `${ROUTES.addFitting}?techCardId=${techCardId}&sampleId=${sampleId}&returnTo=${encodeURIComponent(
-    returnTo,
-  )}`;
-
-  return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Text size='micro' variant='label'>
-          {fittingsSummary(fittings)}
-        </Text>
-        <Button asChild variant='secondary' size='sm'>
-          <Link to={addHref}>+ fitting on this sample</Link>
-        </Button>
-      </div>
-      {fittings.length > 0 && (
-        <div className='flex flex-col'>
-          {fittings.map((f) => (
-            // The link is the list item: it carries the rule between fittings, none under the last.
-            <Link
-              key={f.id}
-              to={`/fittings/${f.id}`}
-              className='block border-b border-hairline last:border-b-0'
-            >
-              <Row
-                className='border-b-0'
-                label={
-                  <span className='flex min-w-0 flex-col'>
-                    <Text size='micro'>
-                      round {f.fitting?.roundNumber ?? '—'} ·{' '}
-                      {formatFittingDate(f.fitting?.fittingDate)}
-                    </Text>
-                    <Text size='nano' variant='label'>
-                      {statusLabel(f.fitting?.status)} · {f.media?.length ?? 0} photo(s)
-                    </Text>
-                  </span>
-                }
-                value={
-                  <Pill tone={verdictTone(f.fitting?.verdict)}>
-                    {verdictLabel(f.fitting?.verdict)}
-                  </Pill>
-                }
-              />
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
+/** Fittings newest first, by fitting date (the list order is not a contract). */
+export function fittingsNewestFirst(fittings: common_Fitting[]): common_Fitting[] {
+  return [...fittings].sort((a, b) =>
+    (b.fitting?.fittingDate ?? '').localeCompare(a.fitting?.fittingDate ?? ''),
   );
 }

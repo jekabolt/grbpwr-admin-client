@@ -17,14 +17,20 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row, RowTotal } from 'ui/components/row';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import {
+  BackLink,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  RowTotal,
+  Section,
+  SectionStack,
+  Text,
+  EmptyCell,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { CutReceipts } from './components/cut-receipts';
@@ -309,9 +315,7 @@ export function ProductionRunDetail() {
   if (isError || !run)
     return (
       <div className='flex flex-col gap-3 pb-16'>
-        <Link to={ROUTES.productionRuns} className='underline'>
-          ← production runs
-        </Link>
+        <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
         <Text size='small'>Run not found.</Text>
       </div>
     );
@@ -535,9 +539,9 @@ export function ProductionRunDetail() {
                         className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0 ${isReversed ? 'opacity-50' : ''}`}
                       >
                         <Text size='small'>#{rc.id}</Text>
-                        <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
+                        <Text size='small'>{runDate(rc.receivedAt) || <EmptyCell />}</Text>
                         {isReversalRow ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversal of receipt #{rc.reversalOf}
                           </span>
                         ) : (
@@ -553,14 +557,14 @@ export function ProductionRunDetail() {
                                 final
                               </span>
                             ) : (
-                              <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                              <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                                 partial
                               </span>
                             )}
                           </>
                         )}
                         {isReversed ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversed · #{rc.reversedBy}
                           </span>
                         ) : null}
@@ -693,7 +697,7 @@ export function ProductionRunDetail() {
                       className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
                     >
                       <Text size='small' variant='inactive'>
-                        {runDate(e.createdAt) || '—'}
+                        {runDate(e.createdAt) || <EmptyCell />}
                       </Text>
                       <Text size='small'>{e.eventType}</Text>
                       {e.actor ? (
@@ -733,9 +737,7 @@ export function ProductionRunDetail() {
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <Link to={ROUTES.productionRuns} className='text-textInactiveColor underline'>
-        ← production runs
-      </Link>
+      <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
 
       {/* Identity — what this run is, at a glance: id + lifecycle status, its tech card, and a
           one-line description of what it produces. Actions live beside it, not buried below. */}
@@ -762,7 +764,8 @@ export function ProductionRunDetail() {
           {/* The planning window beside the identity: an operator asking "is this batch late" should
               not have to open the edit modal to find the date it was promised for. */}
           <Text variant='inactive' size='small'>
-            plan {runDate(ins?.plannedStartAt) || '—'} → promised {runDate(ins?.promisedAt) || '—'}
+            plan {runDate(ins?.plannedStartAt) || <EmptyCell />} → promised{' '}
+            {runDate(ins?.promisedAt) || <EmptyCell />}
             {late > 0 ? (
               <span className='ml-2 uppercase text-error'>
                 {late} {late === 1 ? 'day' : 'days'} late
@@ -867,22 +870,26 @@ export function ProductionRunDetail() {
             <Row
               label='received good'
               value={
-                hasReceivedAny
-                  ? `${receivedQtyTotal}${
-                      plannedQtyTotal > 0
-                        ? ` · ${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}%`
-                        : ''
-                    }`
-                  : '—'
+                hasReceivedAny ? (
+                  `${receivedQtyTotal}${
+                    plannedQtyTotal > 0
+                      ? ` · ${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}%`
+                      : ''
+                  }`
+                ) : (
+                  <EmptyCell />
+                )
               }
             />
             <Row
               label='defect'
               tone={defectQtyTotal > 0 ? 'error' : undefined}
               value={
-                hasReceivedAny
-                  ? `${defectQtyTotal}${defectQtyTotal > 0 ? ` · ${defectPct.toFixed(1)}%` : ''}`
-                  : '—'
+                hasReceivedAny ? (
+                  `${defectQtyTotal}${defectQtyTotal > 0 ? ` · ${defectPct.toFixed(1)}%` : ''}`
+                ) : (
+                  <EmptyCell />
+                )
               }
             />
             {canReadCosting ? <CostLedger run={run} actuals={actuals} /> : null}
@@ -1184,9 +1191,11 @@ function CostLedger({
       <Row
         label='unit cost · plan'
         value={
-          run.plannedUnitCost?.value
-            ? `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
-            : '—'
+          run.plannedUnitCost?.value ? (
+            `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
+          ) : (
+            <EmptyCell />
+          )
         }
       />
       <Row
@@ -1207,9 +1216,11 @@ function CostLedger({
       <Row
         label='total · plan'
         value={
-          actuals?.plannedTotalBase?.value
-            ? `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
-            : '—'
+          actuals?.plannedTotalBase?.value ? (
+            `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
+          ) : (
+            <EmptyCell />
+          )
         }
       />
       <RowTotal
@@ -1323,7 +1334,7 @@ function CostLedger({
 // Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
 // for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
 // without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
-const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cwCell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 // Colourway identity for the label lookup below (R1: a colourway is a product) — sourced from the
 // run's tech card (techCard?.colorways) by the caller, the same as lines-grid.tsx.
 type ColorwayLabelRef = { productId?: number; code?: string; name?: string };
@@ -1371,22 +1382,30 @@ function ColorwayCostBlock({
                 </td>
                 <td className={`${cwCell} text-right`}>{r.receivedQty ?? 0}</td>
                 <td className={`${cwCell} text-right`}>
-                  {r.materialsFromStockBase?.value ? decimalToInput(r.materialsFromStockBase) : '—'}{' '}
+                  {r.materialsFromStockBase?.value ? (
+                    decimalToInput(r.materialsFromStockBase)
+                  ) : (
+                    <EmptyCell />
+                  )}{' '}
                   {r.materialsFromStockBase?.value ? cur : ''}
                 </td>
                 <td className={`${cwCell} text-right`}>
-                  {r.materialsUnitCost?.value ? decimalToInput(r.materialsUnitCost) : '—'}
+                  {r.materialsUnitCost?.value ? decimalToInput(r.materialsUnitCost) : <EmptyCell />}
                 </td>
               </tr>
             ))}
             {unattributed?.value && Number(unattributed.value) !== 0 ? (
               <tr>
                 <td className={cwCell}>(unattributed)</td>
-                <td className={`${cwCell} text-right`}>—</td>
+                <td className={`${cwCell} text-right`}>
+                  <EmptyCell />
+                </td>
                 <td className={`${cwCell} text-right`}>
                   {decimalToInput(unattributed)} {cur}
                 </td>
-                <td className={`${cwCell} text-right`}>—</td>
+                <td className={`${cwCell} text-right`}>
+                  <EmptyCell />
+                </td>
               </tr>
             ) : null}
           </tbody>
@@ -1427,9 +1446,9 @@ function RunStockChanges({ runId, createdAt }: { runId: number; createdAt?: stri
           className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
         >
           <Text size='small' variant='inactive'>
-            {runDate(r.date) || '—'}
+            {runDate(r.date) || <EmptyCell />}
           </Text>
-          <Text size='small'>{r.sku || '—'}</Text>
+          <Text size='small'>{r.sku || <EmptyCell />}</Text>
           <Text size='small' className='tabular-nums'>
             {r.amountChanged?.value ?? ''}
           </Text>

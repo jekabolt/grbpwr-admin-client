@@ -46,10 +46,10 @@ export default function SegmentedField({
                   aria-pressed={selected}
                   onClick={() => field.onChange(item.value)}
                   className={cn(
-                    '-ml-px flex-1 border border-textInactiveColor px-2 py-1 text-textBaseSize uppercase first:ml-0 disabled:opacity-50',
+                    '-ml-px flex-1 border border-borderColor px-2 py-1 text-textBaseSize uppercase first:ml-0 disabled:opacity-50',
                     selected
                       ? 'border-textColor bg-textColor text-bgColor'
-                      : 'bg-bgColor text-textColor hover:bg-textInactiveColor/20',
+                      : 'bg-bgColor text-textColor hover:bg-borderColor/20',
                   )}
                 >
                   {item.label}

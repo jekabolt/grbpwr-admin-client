@@ -21,6 +21,7 @@ import {
 import { garmentLabelKinds, kindLabel, packagingItemKinds } from './tech-card-options';
 import { wireInt } from './wire-int';
 import { useLabelDictionary } from '../care-labels/use-label-dictionary';
+import { EmptyCell } from 'ui';
 
 /**
  * Строки составника колорвея по умолчанию для печати. Страна живёт в самом колорвее, поэтому
@@ -174,7 +175,7 @@ export function TechPackLabelSheets({
                             })}
                           </div>
                         ) : l.value.length === 0 ? (
-                          '—'
+                          <EmptyCell />
                         ) : (
                           <div
                             className={

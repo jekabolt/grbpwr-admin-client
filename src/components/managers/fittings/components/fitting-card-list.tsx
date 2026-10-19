@@ -5,12 +5,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Close, ConfirmationModal, Pill, Placeholder, Text, Tile, Tiles } from 'ui';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
 import { useModelsByIds, useSamplesByIds, useTechCardsByIds } from './useResolvers';
 import { formatFittingDate, statusLabel } from './utils';
@@ -150,19 +145,15 @@ export function FittingCardList() {
                 </Tile>
                 {canEdit && (
                   <div className='absolute top-1 right-1'>
-                    <Button
-                      type='button'
-                      size='xs'
-                      variant='secondary'
+                    <Close
+                      size='sm'
                       aria-label='delete fitting'
                       className='bg-bgColor'
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         setPendingDelete({ id });
                       }}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </div>
                 )}
               </div>

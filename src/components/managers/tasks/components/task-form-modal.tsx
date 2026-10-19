@@ -1,33 +1,34 @@
-import { useEffect, useMemo } from 'react';
-import { Controller, useForm, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DatePicker } from 'ui/components/date-picker';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { Button, ConfirmationModal, Input, Text } from 'ui';
 import { orderedMedia } from '../api/tasksService';
 import { TaskFormValues } from '../api/types';
-import {
-  BOARD_LABEL,
-  BOARDS,
-  PRIORITIES,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  STATUSES,
-  toOptions,
-} from '../utils/meta';
-import { AssigneesPicker } from './assignees-picker';
+import { FINE_POINTER_QUERY, PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
+import { clearTaskDraft, loadTaskDraft, saveTaskDraft } from '../hooks/useTaskDraft';
 import { DescriptionEditor } from './description-editor';
-import { LinkEditor } from './link-editor';
-import { FileAttachments } from './file-attachments';
-import { MediaAttachments } from './media-attachments';
+import { isSet, LINK_TYPES, type LinkField } from './link-editor';
+import {
+  AssigneesPick,
+  AttachField,
+  BoardPick,
+  DatePick,
+  LabelsField,
+  PriorityPick,
+  StatusPick,
+} from './task-form-fields';
+import { TaskPageShell } from './task-form-shell';
 
 /**
- * tskForm v2 — a real two-column editor inside the app's one modal shell
- * (ConfirmationModal). Title is the full-width headline; the left column carries the
- * writing (description / priority / dates), the right column the associations
- * (placement / assignee / labels / links / media). Links are the single type-first
- * picker (tskLinks v2), not seven stacked fields.
+ * tskForm v3 — one column, phone first (mockup OK 19.10).
+ *
+ * Title → description → four property chips (status, assignees, due, priority) → a folded
+ * «more» (labels, planned start, links & files) with the count of what is filled inside. Only
+ * the title is required. Below 768px the form is a full-screen page (← back, board, one CREATE
+ * at the bottom) and the chips open bottom sheets; on desktop it stays inside the one modal
+ * shell (`ConfirmationModal`) and the chips open popovers. What is sent is unchanged.
+ *
+ * Create mode with a `draftKey` autosaves to localStorage, restores on reopen and clears on a
+ * successful create; closing with unsaved content asks keep / discard.
  */
 
 interface Props {
@@ -37,14 +38,12 @@ interface Props {
   initial: TaskFormValues;
   saving?: boolean;
   onSubmit: (values: TaskFormValues) => void;
+  /**
+   * Create only: autosave the form under this key (per board) and restore it on reopen. Callers
+   * that seed links (tech card panel, project page) leave it out — their seed must win.
+   */
+  draftKey?: string;
 }
-
-const boardOptions = toOptions(BOARDS, BOARD_LABEL);
-const statusOptions = toOptions(STATUSES, STATUS_LABEL);
-const priorityOptions = [
-  { value: 'TASK_PRIORITY_UNKNOWN', label: 'no priority' },
-  ...toOptions(PRIORITIES, PRIORITY_LABEL),
-];
 
 /**
  * Как называется сочетание сохранения НА ЭТОЙ машине.
@@ -73,321 +72,386 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className='flex flex-col gap-1'>
-      <FieldLabel>{label}</FieldLabel>
-      {children}
-    </label>
-  );
+/**
+ * Поля, которые считаются «содержимым» для черновика и для вопроса «keep / discard». Доска и
+ * статус сюда не входят: их засевает точка входа (вкладка доски, колонка «+»), а не человек.
+ */
+const CONTENT_FIELDS: (keyof TaskFormValues)[] = [
+  'title',
+  'description',
+  'assignees',
+  'priority',
+  'dueDate',
+  'startDate',
+  'labels',
+  'mediaIds',
+  'fileIds',
+  'mediaAnnotations',
+  ...LINK_TYPES.map((t) => t.field),
+];
+
+function sameContent(a: TaskFormValues, b: TaskFormValues): boolean {
+  return CONTENT_FIELDS.every((k) => {
+    const x = a[k];
+    const y = b[k];
+    if (typeof x === 'string' && typeof y === 'string') return x.trim() === y.trim();
+    return JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
+  });
 }
 
-export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSubmit }: Props) {
-  const {
-    handleSubmit,
-    control,
-    reset,
-    setValue,
-    formState: { errors },
-  } = useForm<TaskFormValues>({ defaultValues: initial });
+export function TaskFormModal({
+  open,
+  onOpenChange,
+  mode,
+  initial,
+  saving,
+  onSubmit,
+  draftKey,
+}: Props) {
+  const phone = useMediaQuery(PHONE_QUERY);
+  const finePointer = useMediaQuery(FINE_POINTER_QUERY);
+  const draftOn = mode === 'create' && !!draftKey;
+  const verb = mode === 'create' ? 'create' : 'save';
+
+  const { handleSubmit, control, reset, setValue, getValues, watch } = useForm<TaskFormValues>({
+    defaultValues: initial,
+  });
+  const values = watch();
+
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  /** Засев открытия — с ним сравнивается «есть ли несохранённое». */
+  const seedRef = useRef<TaskFormValues>(initial);
+  /**
+   * Была попытка создать. Если после неё форму закрывает РОДИТЕЛЬ (а не человек через
+   * back / ✕ / cancel), значит создание прошло — и черновик стирается.
+   */
+  const submittedRef = useRef(false);
 
   /**
    * ПЕРЕСЕВ ЧЕРНОВИКА — ТОЛЬКО НА ОТКРЫТИЕ. Раньше эффект висел ещё и на `initial`, а тот
    * пересобирается от содержимого карточки: значит любое перечитывание с изменившимся полем
    * делало `reset` ПОД ОТКРЫТОЙ МОДАЛКОЙ и стирало всё набранное, молча и без отмены по ⌘Z.
-   *
-   * Люк был и раньше, но редко срабатывал — карточка почти не перечитывалась сама. Теперь у
-   * чтения есть `refetchOnWindowFocus` (инлайн-правка без него жила бы с часовой несвежестью),
-   * и «отошёл, вернулся» стало обычным поводом для перечитывания. Цена люка выросла, поэтому
-   * зависимость снята: модалку открывают закрытой, и каждое открытие засеивает её заново.
+   * Модалку открывают закрытой, и каждое открытие засеивает её заново (из черновика, если он
+   * есть).
    */
   useEffect(() => {
-    if (open) reset(initial);
+    if (open) {
+      const draft = draftOn && draftKey ? loadTaskDraft(draftKey) : null;
+      seedRef.current = initial;
+      reset(draft ? { ...initial, ...draft } : initial);
+      submittedRef.current = false;
+      setMoreOpen(false);
+      setConfirmClose(false);
+    } else if (submittedRef.current) {
+      if (draftOn && draftKey) clearTaskDraft(draftKey);
+      submittedRef.current = false;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // The combined type-first link picker edits all eight FKs at once, so it reads them
-  // via useWatch and writes them back through setValue rather than one Controller each.
-  const links = {
-    techCardId: useWatch({ control, name: 'techCardId' }),
-    productId: useWatch({ control, name: 'productId' }),
-    orderUuid: useWatch({ control, name: 'orderUuid' }),
-    archiveId: useWatch({ control, name: 'archiveId' }),
-    fittingId: useWatch({ control, name: 'fittingId' }),
-    sampleId: useWatch({ control, name: 'sampleId' }),
-    productionRunId: useWatch({ control, name: 'productionRunId' }),
-    projectTopicId: useWatch({ control, name: 'projectTopicId' }),
+  const dirty = mode === 'create' && !sameContent(values, seedRef.current);
+
+  // Автосохранение черновика, с паузой, только пока форма открыта.
+  useEffect(() => {
+    if (!open || !draftOn || !draftKey) return;
+    const t = setTimeout(() => {
+      const v = getValues();
+      if (sameContent(v, seedRef.current)) clearTaskDraft(draftKey);
+      else saveTaskDraft(draftKey, v);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [values, open, draftOn, draftKey, getValues]);
+
+  const title = values.title ?? '';
+  const canSubmit = !saving && !!title.trim();
+
+  const submit = () => {
+    if (!canSubmit) return;
+    handleSubmit((v) => {
+      submittedRef.current = true;
+      onSubmit(v);
+    })();
   };
 
-  const mediaIds = useWatch({ control, name: 'mediaIds' });
-  const attachments = useMemo(() => orderedMedia(mediaIds ?? []), [mediaIds]);
-  const mediaAnnotations = useWatch({ control, name: 'mediaAnnotations' }) ?? [];
+  /** back / ✕ / Escape / cancel — с несохранённым содержимым сначала спрашиваем. */
+  const requestClose = () => {
+    if (dirty) {
+      setConfirmClose(true);
+      return;
+    }
+    submittedRef.current = false;
+    if (draftOn && draftKey) clearTaskDraft(draftKey);
+    onOpenChange(false);
+  };
+  const keepDraft = () => {
+    if (draftKey) saveTaskDraft(draftKey, getValues());
+    submittedRef.current = false;
+    onOpenChange(false);
+  };
+  const discard = () => {
+    if (draftKey) clearTaskDraft(draftKey);
+    submittedRef.current = false;
+    setConfirmClose(false);
+    onOpenChange(false);
+  };
 
   /**
-   * ⌘/CTRL+ENTER СОХРАНЯЕТ КАРТОЧКУ.
-   *
-   * Голый Enter отправителем здесь не будет: половина формы — многострочное описание, и
-   * «сохранить» на той же клавише, что «новая строка», двусмысленно по построению. Раньше
-   * неявная отправка тут была, но случайной: первой кнопкой формы оказывалась «attach», и
-   * Enter в заголовке ОДНОВРЕМЕННО открывал пикер и отправлял карточку.
-   *
-   * Обработчик висит НА ФОРМЕ, а не на двух полях: клавиатурное обещание раздела — про всю
-   * форму, и заводить его отдельно на заголовке, описании и метках значило бы три копии
-   * одной проверки. Проверка перед отправкой — та же, что у кнопки подвала
-   * (`confirmDisabled={saving}`), иначе клавиша умеет то, чего не умеет кнопка.
+   * ⌘/CTRL+ENTER СОХРАНЯЕТ КАРТОЧКУ. Голый Enter отправителем не будет: половина формы —
+   * многострочное описание. Проверка перед отправкой — та же, что у кнопки.
    */
   const onModEnter = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
-    // ПОРТАЛ — НЕ ПОДДЕРЕВО ФОРМЫ В DOM, НО ВСПЛЫВАЕТ СЮДА. События react'а идут по дереву
-    // КОМПОНЕНТОВ, а пикер файлов, библиотека медиа и редактор указаний рисуются
-    // `<Portal>`ами внутри этой формы: без проверки ⌘Enter в поиске пикера сохранял бы
-    // карточку ПОД ним и закрывал форму из-под открытого поверх неё окна. По DOM же
-    // портал лежит в `body`, и `contains` отсекает ровно его.
+    // ПОРТАЛ — НЕ ПОДДЕРЕВО ФОРМЫ В DOM, НО ВСПЛЫВАЕТ СЮДА: пикеры и шторки рисуются порталами
+    // внутри формы, и ⌘Enter в их поиске не должен сохранять карточку под ними.
     if (!e.currentTarget.contains(e.target as Node)) return;
     e.preventDefault();
-    if (saving) return;
-    handleSubmit(onSubmit)();
+    submit();
   };
 
-  return (
-    <ConfirmationModal
-      open={open}
-      onOpenChange={onOpenChange}
-      onConfirm={() => handleSubmit(onSubmit)()}
-      title={mode === 'create' ? 'new task' : 'edit task'}
-      confirmLabel={mode === 'create' ? 'create' : 'save'}
-      confirmDisabled={saving}
-      // Неподписанное сочетание — то же, что отсутствующее: о нём узнают только те, кто
-      // читал этот файл. Место — у самой кнопки, которую оно заменяет.
-      footerHint={`${SAVE_HOTKEY} ${mode === 'create' ? 'creates' : 'saves'}`}
-      closeOnConfirm={false}
-      width='lg'
+  const links: Record<LinkField, number | string> = {
+    techCardId: values.techCardId,
+    productId: values.productId,
+    orderUuid: values.orderUuid,
+    archiveId: values.archiveId,
+    fittingId: values.fittingId,
+    sampleId: values.sampleId,
+    productionRunId: values.productionRunId,
+    projectTopicId: values.projectTopicId,
+  };
+  const mediaIds = values.mediaIds ?? [];
+  const fileIds = values.fileIds ?? [];
+  const attachments = useMemo(() => orderedMedia(mediaIds), [mediaIds]);
+  const moreCount =
+    (values.labels?.length ?? 0) +
+    (values.startDate ? 1 : 0) +
+    LINK_TYPES.filter((t) => isSet(links[t.field], t.config.empty)).length +
+    fileIds.length +
+    mediaIds.length;
+
+  const board = (
+    <Controller
+      control={control}
+      name='board'
+      render={({ field }) => (
+        <BoardPick phone={phone} value={field.value} onChange={field.onChange} />
+      )}
+    />
+  );
+
+  const body = (
+    <form
+      // Неявной отправки по Enter нет: создаёт только кнопка и ⌘/Ctrl+Enter.
+      onSubmit={(e) => e.preventDefault()}
+      onKeyDown={onModEnter}
+      className='flex min-w-0 flex-col gap-4'
     >
-      <form
-        onSubmit={handleSubmit(onSubmit)}
-        onKeyDown={onModEnter}
-        className='flex flex-col gap-4'
-      >
-        <div className='flex flex-col gap-1'>
-          <Controller
-            control={control}
-            name='title'
-            rules={{ required: true }}
-            render={({ field }) => (
-              <Input
-                placeholder='task title'
-                aria-label='task title'
-                autoFocus
-                className='text-lg'
-                value={field.value}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  field.onChange(e.target.value)
-                }
-                onBlur={field.onBlur}
-              />
-            )}
+      <Controller
+        control={control}
+        name='title'
+        rules={{ validate: (v) => !!v.trim() }}
+        render={({ field }) => (
+          <Input
+            name='task-title'
+            placeholder='what needs doing'
+            aria-label='task title'
+            autoFocus
+            autoComplete='off'
+            className='min-h-11 text-lg'
+            value={field.value}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(e.target.value)}
+            onBlur={field.onBlur}
           />
-          {errors.title && (
-            <Text size='micro' variant='error' component='span'>
-              title is required
-            </Text>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name='description'
+        render={({ field }) => (
+          <DescriptionEditor
+            compactTools
+            ariaLabel='task description'
+            placeholder='details'
+            media={attachments}
+            value={field.value}
+            onChange={(next) => field.onChange(next)}
+          />
+        )}
+      />
+
+      <div className='flex flex-wrap gap-2'>
+        <Controller
+          control={control}
+          name='status'
+          render={({ field }) => (
+            <StatusPick phone={phone} value={field.value} onChange={field.onChange} />
           )}
-        </div>
+        />
+        {/* ИСПОЛНИТЕЛЕЙ МОЖЕТ БЫТЬ НЕСКОЛЬКО; один `Controller` на весь список. */}
+        <Controller
+          control={control}
+          name='assignees'
+          render={({ field }) => (
+            <AssigneesPick phone={phone} value={field.value} onChange={field.onChange} />
+          )}
+        />
+        <Controller
+          control={control}
+          name='dueDate'
+          render={({ field }) => (
+            <DatePick
+              phone={phone}
+              name='due'
+              title='due'
+              emptyLabel='—'
+              showName
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name='priority'
+          render={({ field }) => (
+            <PriorityPick phone={phone} value={field.value} onChange={field.onChange} />
+          )}
+        />
+      </div>
 
-        <div className='grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2'>
-          {/* Left — the writing */}
-          <div className='flex min-w-0 flex-col gap-3'>
-            <div className='flex flex-col gap-1'>
-              {/* ПОДПИСЬ, А НЕ `<label>`: внутри редактора живут кнопки (панель форматирования,
-                  «preview», ряд `▣`), а кнопка внутри подписи к полю — это второй адресат одного
-                  клика. Ряд `▣` и панель переехали ВНУТРЬ редактора: они нужны и здесь, и на
-                  инлайн-правке детальной, и две копии разошлись бы на первой правке. */}
-              <FieldLabel>description</FieldLabel>
-              <Controller
-                control={control}
-                name='description'
-                render={({ field }) => (
-                  <DescriptionEditor
-                    ariaLabel='task description'
-                    media={attachments}
-                    value={field.value}
-                    onChange={(next) => field.onChange(next)}
-                  />
-                )}
-              />
-            </div>
-            <Field label='priority'>
-              <Controller
-                control={control}
-                name='priority'
-                render={({ field }) => (
-                  <SelectComponent
-                    name='priority'
-                    items={priorityOptions}
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    placeholder='priority'
-                    fullWidth
-                  />
-                )}
-              />
-            </Field>
-            <div className='grid grid-cols-2 gap-3'>
-              <Field label='planned start'>
-                <Controller
-                  control={control}
-                  name='startDate'
-                  render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
-                  )}
-                />
-              </Field>
-              <Field label='due date'>
-                <Controller
-                  control={control}
-                  name='dueDate'
-                  render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
-                  )}
-                />
-              </Field>
-            </div>
+      <Button
+        type='button'
+        variant='default'
+        aria-expanded={moreOpen}
+        onClick={() => setMoreOpen((v) => !v)}
+        className='flex min-h-11 w-full items-center justify-between border-y border-hairline text-micro uppercase tracking-label md:min-h-8'
+      >
+        <span>
+          more
+          {moreCount > 0 && <span className='text-labelColor'> · {moreCount}</span>}
+        </span>
+        <span aria-hidden>{moreOpen ? '▴' : '▾'}</span>
+      </Button>
+
+      {moreOpen && (
+        <div className='flex flex-col gap-4'>
+          <div className='flex flex-col gap-1.5'>
+            <FieldLabel>labels</FieldLabel>
+            <Controller
+              control={control}
+              name='labels'
+              render={({ field }) => <LabelsField value={field.value} onChange={field.onChange} />}
+            />
           </div>
-
-          {/* Right — the associations */}
-          <div className='flex min-w-0 flex-col gap-3'>
-            <div className='grid grid-cols-2 gap-3'>
-              <Field label='board'>
-                <Controller
-                  control={control}
-                  name='board'
-                  render={({ field }) => (
-                    <SelectComponent
-                      name='board'
-                      items={boardOptions}
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      placeholder='board'
-                      fullWidth
-                    />
-                  )}
+          <div className='flex flex-col items-start gap-1.5'>
+            <FieldLabel>planned start</FieldLabel>
+            <Controller
+              control={control}
+              name='startDate'
+              render={({ field }) => (
+                <DatePick
+                  phone={phone}
+                  name='planned start'
+                  title='planned start'
+                  emptyLabel='pick a date'
+                  value={field.value}
+                  onChange={field.onChange}
                 />
-              </Field>
-              <Field label='column'>
-                <Controller
-                  control={control}
-                  name='status'
-                  render={({ field }) => (
-                    <SelectComponent
-                      name='status'
-                      items={statusOptions}
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      placeholder='column'
-                      fullWidth
-                    />
-                  )}
-                />
-              </Field>
-            </div>
-            {/* ИСПОЛНИТЕЛЕЙ МОЖЕТ БЫТЬ НЕСКОЛЬКО, и поле формы — настоящий список. «Главного»
-                в модели нет: порядок — это порядок показа аватарок, не старшинство.
-
-                ОДИН `Controller`, А НЕ ДВА `useFieldArray`. Мутаторы field array не вещают друг
-                другу, и два массива на одно имя расходятся молча — для списка исполнителей это
-                прямая ловушка.
-
-                ПОДПИСЬ, А НЕ `<label>`: внутри пикера живут кнопка-триггер и поле поиска, и
-                обёртка-подпись сделала бы клик по слову «assignees» вторым нажатием триггера. */}
-            <div className='flex flex-col gap-1'>
-              <FieldLabel>assignees</FieldLabel>
-              <Controller
-                control={control}
-                name='assignees'
-                render={({ field }) => (
-                  <AssigneesPicker
-                    value={field.value}
-                    onChange={(next) => field.onChange(next)}
-                  />
-                )}
-              />
-            </div>
-            <Field label='labels (comma separated)'>
-              <Controller
-                control={control}
-                name='labels'
-                render={({ field }) => (
-                  <Input
-                    name='labels'
-                    placeholder='fw26, urgent, drop-3'
-                    value={field.value.join(', ')}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      field.onChange(
-                        e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      )
-                    }
-                  />
-                )}
-              />
-            </Field>
-            <Field label='links'>
-              <LinkEditor
-                links={links}
-                setLink={(f, v) => setValue(f, v as never, { shouldDirty: true })}
-              />
-            </Field>
-            {/* Одно поле «attachments» на два источника. Разделение публичного медиа-бакета
-                и приватной библиотеки — факт хранилища, а не различие, которое человек
-                должен держать в голове, заполняя карточку. Подпись «site media» говорит
-                единственное, что здесь практически важно: это уедет на CDN.
-
-                ЯЗЫК ЭКРАНА, А НЕ ЯЗЫК ВОЛНЫ: раздел задач английский целиком, и подписи
-                блока, пришедшего сюда из русского раздела «файлы», английские — как у
-                плиток вложений на самой карточке (`task-detail/attachment-tiles.tsx`). */}
-            <Field label='attachments'>
-              <div className='flex flex-col gap-2.5'>
-                <div className='flex flex-col gap-1'>
-                  <Text size='micro' variant='label' className='uppercase'>
-                    site media · public
-                  </Text>
-                  <Controller
-                    control={control}
-                    name='mediaIds'
-                    render={({ field }) => (
-                      <MediaAttachments
-                        value={field.value}
-                        onChange={field.onChange}
-                        // Указания живут в СВОЁМ поле формы, а не внутри списка вложений: сервер
-                        // заменяет их вместе с содержимым карточки, и сохраняет их та же кнопка.
-                        annotations={mediaAnnotations}
-                        onAnnotationsChange={(next) =>
-                          setValue('mediaAnnotations', next, { shouldDirty: true })
-                        }
-                      />
-                    )}
-                  />
-                </div>
-                <Controller
-                  control={control}
-                  name='fileIds'
-                  render={({ field }) => (
-                    <FileAttachments value={field.value} onChange={field.onChange} />
-                  )}
-                />
-              </div>
-            </Field>
+              )}
+            />
+          </div>
+          <div className='flex flex-col gap-1.5'>
+            <FieldLabel>links &amp; files</FieldLabel>
+            {/* Ссылки правятся все восемь разом, поэтому пишутся через setValue. Указания на
+                медиа живут в своём поле формы и сохраняются той же кнопкой. */}
+            <AttachField
+              phone={phone}
+              links={links}
+              setLink={(f, v) => setValue(f, v as never, { shouldDirty: true })}
+              fileIds={fileIds}
+              setFileIds={(ids) => setValue('fileIds', ids, { shouldDirty: true })}
+              mediaIds={mediaIds}
+              setMediaIds={(ids) => setValue('mediaIds', ids, { shouldDirty: true })}
+              annotations={values.mediaAnnotations ?? []}
+              setAnnotations={(next) => setValue('mediaAnnotations', next, { shouldDirty: true })}
+            />
           </div>
         </div>
-      </form>
+      )}
+    </form>
+  );
+
+  const confirm = (
+    <ConfirmationModal
+      open={confirmClose}
+      onOpenChange={setConfirmClose}
+      onConfirm={discard}
+      onCancel={draftOn ? keepDraft : undefined}
+      title='unsaved task'
+      confirmLabel='discard'
+      cancelLabel={draftOn ? 'keep draft' : 'keep editing'}
+      width='sm'
+    >
+      {null}
     </ConfirmationModal>
+  );
+
+  if (phone) {
+    return (
+      <>
+        <TaskPageShell
+          open={open}
+          onRequestClose={requestClose}
+          title={mode === 'create' ? 'new task' : 'edit task'}
+          headerRight={
+            <div className='flex shrink-0 items-center gap-2'>
+              {draftOn && dirty && (
+                <Text size='nano' variant='label' component='span' className='uppercase'>
+                  draft ✓
+                </Text>
+              )}
+              {board}
+            </div>
+          }
+          footer={
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              className='min-h-12 w-full uppercase'
+              disabled={!canSubmit}
+              onClick={submit}
+            >
+              {verb}
+            </Button>
+          }
+        >
+          {body}
+        </TaskPageShell>
+        {confirm}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ConfirmationModal
+        open={open}
+        onOpenChange={(o) => (o ? onOpenChange(true) : requestClose())}
+        onConfirm={submit}
+        title={mode === 'create' ? 'new task' : 'edit task'}
+        headerActions={board}
+        confirmLabel={verb}
+        confirmDisabled={!canSubmit}
+        // Сочетание подписано только там, где есть клавиатура с мышью: на тач-экране это шум.
+        footerHint={finePointer ? `${SAVE_HOTKEY} · ${verb}` : undefined}
+        closeOnConfirm={false}
+        width='md'
+      >
+        {body}
+      </ConfirmationModal>
+      {confirm}
+    </>
   );
 }

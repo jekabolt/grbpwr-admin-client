@@ -1,9 +1,7 @@
 import { AcctBankTxn } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text, EmptyCell } from 'ui';
 import { EntryDetailModal } from '../components/entry-detail-modal';
 import { Callout, GroupHeader, Note, Pill, RowLine, Verdict } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
@@ -85,7 +83,7 @@ function ToFileCard({
       </p>
       <div className='mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px]'>
         <span className='uppercase tracking-wide'>
-          {txn.bookedAt ? formatAcctDate(txn.bookedAt) : '—'}
+          {txn.bookedAt ? formatAcctDate(txn.bookedAt) : <EmptyCell />}
         </span>
         {txn.counterparty && txn.description ? (
           <span className='break-words'>{txn.description}</span>
@@ -154,11 +152,13 @@ function HandledRow({
       className={cn(ignored && 'text-labelColor')}
       label={
         <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5'>
-          <Pill tone={pillTone}>{txn.state || '—'}</Pill>
+          <Pill tone={pillTone}>{txn.state || <EmptyCell />}</Pill>
           <span className='whitespace-nowrap text-[11px] uppercase tracking-wide text-labelColor'>
-            {txn.bookedAt ? formatAcctDate(txn.bookedAt) : '—'}
+            {txn.bookedAt ? formatAcctDate(txn.bookedAt) : <EmptyCell />}
           </span>
-          <span className='break-words'>{txn.counterparty || txn.description || '—'}</span>
+          <span className='break-words'>
+            {txn.counterparty || txn.description || <EmptyCell />}
+          </span>
           {reason ? (
             <span className='break-words text-[11px] italic text-labelColor'>“{reason}”</span>
           ) : null}
@@ -180,7 +180,7 @@ function HandledRow({
               post
             </Button>
           ) : (
-            <span className='text-labelColor'>—</span>
+            <EmptyCell />
           )}
         </span>
       }
@@ -268,7 +268,7 @@ export function AcctBankPage() {
                   'border px-3 py-1.5 text-textBaseSize uppercase transition-colors',
                   active
                     ? 'border-textColor text-textColor'
-                    : 'border-textInactiveColor text-textInactiveColor hover:text-textColor',
+                    : 'border-borderColor text-borderColor hover:text-textColor',
                 )}
               >
                 {s.label}
@@ -382,7 +382,7 @@ export function AcctBankPage() {
               why? (saved on the line — an ignored line books nothing, so this is its only trace)
             </Text>
             <input
-              className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
+              className='w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize'
               value={ignoreReason}
               maxLength={255}
               placeholder='e.g. EXCHANGE leg — EUR side posted as #123'

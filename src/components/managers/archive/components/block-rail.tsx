@@ -17,9 +17,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { AddDoor, Section, Text, Close } from 'ui';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import { ARCHIVE_ITEM_TYPE_LABEL } from './item-types';
 import { ArchiveFormData } from './schema';
@@ -201,7 +199,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         <div
                           ref={setRefs}
                           style={style}
-                          className='flex items-center justify-between gap-2 border border-dashed border-textInactiveColor px-2 py-1.5'
+                          className='flex items-center justify-between gap-2 border border-dashed border-borderColor px-2 py-1.5'
                         >
                           <Text variant='inactive' size='small'>
                             #{index + 1} deleted
@@ -226,14 +224,12 @@ export const BlockRail: FC<BlockRailProps> = ({
                           // Selection reads as INK, the way `Chip selected` does — not as a
                           // thicker grey. Keeping both states at 1px also stops the row
                           // reflowing by a pixel the moment you select it.
-                          isSelected
-                            ? 'border border-textColor'
-                            : 'border border-borderColor',
+                          isSelected ? 'border border-textColor' : 'border border-borderColor',
                         )}
                       >
                         <button
                           type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-borderColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                           aria-label='drag to reorder block'
                           {...dragHandleProps}
                         >
@@ -248,10 +244,10 @@ export const BlockRail: FC<BlockRailProps> = ({
                             <img
                               src={preview.thumb}
                               alt=''
-                              className='h-8 w-8 shrink-0 border border-textInactiveColor object-cover'
+                              className='h-8 w-8 shrink-0 border border-borderColor object-cover'
                             />
                           ) : (
-                            <div className='h-8 w-8 shrink-0 border border-dashed border-textInactiveColor' />
+                            <div className='h-8 w-8 shrink-0 border border-dashed border-borderColor' />
                           )}
                           <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
                             <span className='flex items-center gap-1.5'>
@@ -280,14 +276,11 @@ export const BlockRail: FC<BlockRailProps> = ({
                             )}
                           </span>
                         </button>
-                        <button
-                          type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        <Close
+                          size='sm'
                           aria-label='delete block'
                           onClick={() => handleRemove(uid)}
-                        >
-                          ×
-                        </button>
+                        />
                       </div>
                     );
                   }}
@@ -299,22 +292,14 @@ export const BlockRail: FC<BlockRailProps> = ({
       </DndContext>
 
       {liveCount === 0 && (
-        <div className='border border-dashed border-textInactiveColor px-3 py-6 text-center'>
+        <div className='border border-dashed border-borderColor px-3 py-6 text-center'>
           <Text variant='label' size='small' className='leading-snug'>
             no blocks yet. add media, text, or products below to build the entry.
           </Text>
         </div>
       )}
 
-      <Button
-        type='button'
-        variant='main'
-        size='lg'
-        className='w-full cursor-pointer uppercase'
-        onClick={onAddClick}
-      >
-        + add block
-      </Button>
+      <AddDoor onClick={onAddClick}>block</AddDoor>
     </Section>
   );
 };

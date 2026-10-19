@@ -1,5 +1,5 @@
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { ToggleSwitch } from 'ui';
 
 interface Props {
   /** RHF path of the media slot, e.g. `entities.3.statement`, `entities.3.main`. */

@@ -3,10 +3,7 @@ import { adminService } from 'api/api';
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
+import { Button, GroupLabel, Section, HeaderNote } from 'ui';
 
 import { ColourwayCreatePopover } from '../colourway-create';
 import { ColourwayStrip } from '../colourway-strip';

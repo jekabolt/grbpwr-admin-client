@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { useFormContext } from 'react-hook-form';
-import Input from 'ui/components/input';
+import Input from '../../components/input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = {

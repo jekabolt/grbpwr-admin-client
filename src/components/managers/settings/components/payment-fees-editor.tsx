@@ -4,13 +4,11 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 
 const label = (m: string) => m.replace('PAYMENT_METHOD_NAME_ENUM_', '').replace(/_/g, ' ');
 const cellClass =
-  'w-24 border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'w-24 border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Estimated processing-fee model per payment method — feeds contribution margin for
 // non-Stripe methods. Blind write: the contract has no read RPC, so current values are never

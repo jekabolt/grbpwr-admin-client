@@ -1,10 +1,6 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Close, Pill, RatioGlyph, Text } from 'ui';
 import {
   calculateAspectRatio,
   cropLoss,
@@ -196,7 +192,7 @@ export function useReorder(onMove: (from: number, to: number) => void): ReorderA
 }
 
 const ICON_BUTTON =
-  'flex size-4 shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-textInactiveColor disabled:hover:text-textInactiveColor';
+  'flex size-4 shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-borderColor disabled:hover:text-borderColor';
 
 /**
  * Подвал плитки: ручка, номер, стрелки, форма кадра и удаление.
@@ -277,15 +273,12 @@ export function TileFooter({
         )}
       </span>
       {onRemove && (
-        <Button
-          type='button'
+        <Close
+          size='sm'
           aria-label={`remove ${unit} ${index + 1}`}
           title={removeTitle}
           onClick={onRemove}
-          className={ICON_BUTTON}
-        >
-          ×
-        </Button>
+        />
       )}
     </div>
   );
@@ -389,7 +382,10 @@ export function RemovedNotice({
   className?: string;
 }) {
   return (
-    <CalloutBox tone='note' className={cn('flex flex-wrap items-center gap-x-2 gap-y-1', className)}>
+    <CalloutBox
+      tone='note'
+      className={cn('flex flex-wrap items-center gap-x-2 gap-y-1', className)}
+    >
       <Text size='micro' variant='label' component='span'>
         <b>removed:</b> {what}, position {place}.
       </Text>

@@ -4,9 +4,7 @@ import {
 } from 'components/managers/tech-card/components/colourway-palette';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useFormContext } from 'react-hook-form';
-import FieldsGroupContainer from 'ui/components/fields-group';
-import InputField from 'ui/form/fields/input-field';
-import Text from 'ui/components/text';
+import { FieldsGroupContainer, InputField, Text } from 'ui';
 
 import type { ProductFormData } from '../utility/schema';
 

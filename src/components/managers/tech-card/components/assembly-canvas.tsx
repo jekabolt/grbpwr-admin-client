@@ -11,8 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
@@ -1603,10 +1602,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   /**
    * РАМКА НОДЫ — ТРИ СОСТОЯНИЯ, ТРИ РАЗНЫХ РАМКИ. Приоритет: цель живого жеста > выделение > ховер.
    *
-   * До этой правки выделение не рисовало НИЧЕГО: единственным его признаком был фон шапки
-   * `bg-bgZebra` — тот же самый цвет, которым красится шапка под курсором. Замерено: контраст
-   * «выделено» ↔ «под курсором» = 1.000, то есть буквально один цвет, и выделенный блок выглядел
-   * как случайно задетый мышью, только хуже — у задетого хотя бы была обводка.
+   * Раньше выделение и ховер делили один слабый фон. Теперь их различают обводки.
    *
    * ПОЧЕМУ РАМКИ РАЗНЫЕ, А НЕ РАЗНОГО ЦВЕТА. Монохром: состояние никогда не несётся одним цветом.
    * Различают толщина и штрих:
@@ -1767,7 +1763,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 // набирает выделение маркиза.
                 headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep, onOpenUnit)))}
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
-                tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
+                tokenProps={(k) =>
+                  activate(
+                    clickGuard(() => goToNode(k)),
+                    true,
+                  )
+                }
                 surfaceWords='on the canvas'
                 // ЧИП КЛАДЁТ ШАГ ВНУТРЬ БЛОКА, а не в низ листа: позицию и обещание попадания в
                 // узел считает `unitAddPrefill` — та же арифметика, что у хвостовой точки вставки

@@ -4,16 +4,19 @@ import { common_TechCardListItem } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import { Toolbar } from 'ui/components/toolbar';
+import {
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  Input,
+  Media,
+  Pill,
+  Placeholder,
+  Text,
+  Tile,
+  Tiles,
+  Toolbar,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // Shared building blocks for the LABELS & PKG tab (assembly-field + packaging-recipe-field): the
@@ -213,7 +216,6 @@ export function AuxCardPickerModal({
   busyId,
   selectedId,
   title = 'pick an auxiliary item',
-  hint,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -224,6 +226,7 @@ export function AuxCardPickerModal({
   /** The card the calling row already holds, pre-selected on open. */
   selectedId?: number;
   title?: string;
+  /** @deprecated Not rendered: the picker has no prose line. Kept so callers still compile. */
   hint?: ReactNode;
 }) {
   const { data, isLoading } = useAuxTechCards();
@@ -275,7 +278,8 @@ export function AuxCardPickerModal({
       onOpenChange={onOpenChange}
       onConfirm={confirm}
       title={title}
-      confirmLabel={busy ? 'resolving…' : 'use this'}
+      confirmLabel={busy ? 'resolving…' : 'use item'}
+      hideCancel
       confirmDisabled={!pending || busy}
       width='lg'
       // The caller closes the dialog once its own resolve/patch succeeded — auto-closing here would
@@ -283,12 +287,6 @@ export function AuxCardPickerModal({
       closeOnConfirm={false}
     >
       <div className='flex flex-col gap-2'>
-        {hint ? (
-          <Text size='micro' variant='label'>
-            {hint}
-          </Text>
-        ) : null}
-
         <Toolbar>
           <Input
             name='aux-card-search'
@@ -324,14 +322,7 @@ export function AuxCardPickerModal({
             loading…
           </Text>
         ) : filtered.length === 0 ? (
-          <CalloutBox tone='note'>
-            <Text size='micro' component='span'>
-              <b>no auxiliary cards</b>
-              {subtype !== 'all' ? ` of type “${auxSubtypeLabel(subtype)}”` : ''} found — create one
-              as an auxiliary tech card (purpose = auxiliary) with an output material — or a colour
-              variant per colour it produces — set.
-            </Text>
-          </CalloutBox>
+          <Placeholder className='h-16' label='no items yet' />
         ) : (
           <Tiles min={140} className='max-h-[52vh] overflow-y-auto'>
             {filtered.map((c) => {
@@ -373,7 +364,6 @@ export function AuxCardMultiPickerModal({
   onPick,
   alreadyAddedIds = [],
   title = 'pick auxiliary items',
-  hint,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -382,6 +372,7 @@ export function AuxCardMultiPickerModal({
   /** Cards already on the bill — still shown, but marked and not selectable (no re-adding). */
   alreadyAddedIds?: number[];
   title?: string;
+  /** @deprecated Not rendered: the picker has no prose line. Kept so callers still compile. */
   hint?: ReactNode;
 }) {
   const { data, isLoading } = useAuxTechCards();
@@ -437,17 +428,12 @@ export function AuxCardMultiPickerModal({
       onOpenChange={onOpenChange}
       onConfirm={confirm}
       title={title}
-      confirmLabel={selected.size ? `add ${selected.size}` : 'add'}
+      confirmLabel={selected.size ? `add ${selected.size} items` : 'add items'}
+      hideCancel
       confirmDisabled={selected.size === 0}
       width='lg'
     >
       <div className='flex flex-col gap-2'>
-        {hint ? (
-          <Text size='micro' variant='label'>
-            {hint}
-          </Text>
-        ) : null}
-
         <Toolbar>
           <Input
             name='aux-card-multi-search'
@@ -483,14 +469,7 @@ export function AuxCardMultiPickerModal({
             loading…
           </Text>
         ) : filtered.length === 0 ? (
-          <CalloutBox tone='note'>
-            <Text size='micro' component='span'>
-              <b>no auxiliary cards</b>
-              {subtype !== 'all' ? ` of type “${auxSubtypeLabel(subtype)}”` : ''} found — create one
-              as an auxiliary tech card (purpose = auxiliary) with an output material — or a colour
-              variant per colour it produces — set.
-            </Text>
-          </CalloutBox>
+          <Placeholder className='h-16' label='no items yet' />
         ) : (
           <Tiles min={140} className='max-h-[52vh] overflow-y-auto'>
             {filtered.map((c) => {

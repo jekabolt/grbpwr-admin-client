@@ -2,8 +2,7 @@ import { AdminAccount } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
 import { ResetPasswordModal } from './components/reset-password-modal';
@@ -48,7 +47,7 @@ export function Accounts() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-16'>
-      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex flex-col gap-1'>
           <Text variant='uppercase' size='large'>
             admin accounts{accounts.length > 0 && ` · ${accounts.length}`}

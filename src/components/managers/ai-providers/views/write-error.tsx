@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // THE REFUSAL STANDS BESIDE THE CONTROL THAT MADE IT. A write refused by the server says why in one
 // micro line directly under that control — the switch, the key field, the select, the route — and

@@ -1,11 +1,8 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import ToggleField from 'ui/form/fields/toggle-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { GroupLabel, Text, InputField, ToggleField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { CommonEntity } from './common-entity';
 import { DoubleEditor } from './double-editor';
@@ -750,7 +747,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
   return (
     <div>
       {variant}
-      <div className='space-y-3 border-t border-textInactiveColor p-3 lg:p-4'>
+      <div className='space-y-3 border-t border-borderColor p-3 lg:p-4'>
         <TargetingFields index={index} />
       </div>
     </div>

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import FilesPage from '../src/components/managers/files/page';
-import { SnackBar } from '../src/ui/components/snackbar';
+import { SnackBar } from '../src/components/shell/snackbar';
 
 declare global {
   interface Window {

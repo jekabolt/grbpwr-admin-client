@@ -1,12 +1,12 @@
 import { ReactNode } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { opexCategorySelectOptions, opexCurrencyOptions } from '../utils/options';
 
 // Shared OPEX form primitives, used by both the creation wizard and the edit modals so the two
 // creation/edit paths can never drift (same category set, same currency list, same styling).
 
 // Square control on the page canvas — same box grammar as ui/Input (1px borderColor, focus goes
-// ink). Tokens only: no textInactiveColor.
+// ink). Tokens only: no borderColor.
 export const fieldCls =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize text-textColor transition-colors focus:border-textColor focus:outline-none';
 

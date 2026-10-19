@@ -1,9 +1,8 @@
 import { LANGUAGES } from 'constants/constants';
 import { useEffect, useMemo, useState } from 'react';
 import { Control, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { LanguageButtons } from 'ui/components/language-buttons';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
+import { LanguageButtons } from 'components/shared/translation/language-buttons';
 import { mapFormToCampaignInsert } from './map-schema-to-campaign';
 import { CampaignSchema } from './schema';
 import { useRenderPreview } from './useCampaign';
@@ -49,9 +48,7 @@ export function CampaignPreviewPanel({
   useEffect(() => {
     if (!values) return;
     const t = setTimeout(() => {
-      const liveBody = (values.body || []).filter(
-        (b: any) => !deletedUids?.has(b?._uid),
-      );
+      const liveBody = (values.body || []).filter((b: any) => !deletedUids?.has(b?._uid));
       const draft = mapFormToCampaignInsert({ ...values, body: liveBody });
       render.mutate(
         { draft, languageId, variantId: 0, device },
@@ -127,13 +124,13 @@ export function CampaignPreviewPanel({
         </div>
       )}
 
-      <div className='flex justify-center overflow-x-auto border border-textInactiveColor bg-textInactiveColor/10 p-4'>
+      <div className='flex justify-center overflow-x-auto border border-borderColor bg-borderColor/10 p-4'>
         {html ? (
           <iframe
             title='email preview'
             srcDoc={html}
             sandbox='allow-same-origin'
-            className='h-[70vh] shrink-0 border border-textInactiveColor bg-white'
+            className='h-[70vh] shrink-0 border border-borderColor bg-white'
             style={{ width: DEVICE_WIDTH[device] }}
           />
         ) : (

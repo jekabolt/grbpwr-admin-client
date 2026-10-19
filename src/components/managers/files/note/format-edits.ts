@@ -5,7 +5,7 @@ import {
   parseTable,
   serializeTable,
   type TableModel,
-} from 'ui/markdown/table';
+} from 'components/shared/markdown/table';
 import type { NoteFileInsert } from './file-picker';
 import { fileCardPath } from './file-refs';
 

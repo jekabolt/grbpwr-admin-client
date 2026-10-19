@@ -1,21 +1,34 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_Material } from 'api/proto-http/admin';
+import { common_Material, googletype_Decimal } from 'api/proto-http/admin';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Close,
+  ConfirmationModal,
+  Input,
+  Media,
+  Placeholder,
+  Select,
+  Text,
+  Tile,
+  Tiles,
+  Tooltip,
+  TooltipProvider,
+  EmptyCell,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
-import { materialSpec } from './material-code';
+import {
+  TrimPictogram,
+  trimPictogramKind,
+} from 'components/managers/tech-card/components/design/pattern/trim-pictograms';
+import { materialCompositionText, materialSpec } from './material-code';
 import { MaterialThumb, materialImageUrl } from './material-thumb';
 import { useMaterials } from './useMaterials';
 
@@ -135,8 +148,9 @@ function computeAnchor(el: HTMLElement): Anchor {
 //   variant="combo" (default) — a portalled searchable combobox. Fast, keyboard-first, 280px. This
 //     is what the packaging recipe, the aux output material, sample write-offs, substitutions and
 //     the movements ledger use: you already know the code and you want speed.
-//   variant="grid" — the same catalog as a swatch DIALOG with filters. Used by the BOM's link
-//     action only, because choosing a fabric is a visual decision and choosing a zip by code is not.
+//   variant="grid" — the same catalog as a swatch DIALOG with filters, one click picks. Used by the
+//     BOM's link action only, because choosing a fabric is a visual decision and choosing a zip by
+//     code is not.
 //
 // Props are otherwise unchanged from the former native <select> so every call site keeps working.
 export function MaterialPicker({
@@ -148,6 +162,7 @@ export function MaterialPicker({
   includeArchived = false,
   variant = 'combo',
   onCreate,
+  initialSection,
 }: {
   value: number;
   onChange: (materialId: number, material?: common_Material) => void;
@@ -160,7 +175,9 @@ export function MaterialPicker({
   variant?: 'combo' | 'grid';
   // grid only: renders the "+ create" tile. The dialog closes first so the create modal is never
   // stacked on top of it; the caller's own onCreated then auto-selects the new material.
-  onCreate?: () => void;
+  onCreate?: (query?: string) => void;
+  // grid only: preselects this section's chip over the whole catalog (see MaterialPickerDialog).
+  initialSection?: string;
 }) {
   const { data, isLoading } = useMaterials(section, includeArchived);
   const materials = useMemo(() => data?.materials ?? [], [data]);
@@ -329,7 +346,7 @@ export function MaterialPicker({
           // Same box as <Input> / <Select> — a picker must read as a field, not as an underline.
           'flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize transition-colors',
           'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-          'disabled:cursor-not-allowed disabled:bg-bgZebra disabled:text-labelColor',
+          'disabled:cursor-not-allowed disabled:bg-pageBg disabled:text-labelColor',
         )}
       >
         {selected ? <MaterialThumb material={selected} size='sm' className='h-5 w-5' /> : null}
@@ -358,15 +375,18 @@ export function MaterialPicker({
       {isGrid && open ? (
         <MaterialGridDialog
           materials={materials}
+          loading={isLoading}
           value={value}
           section={section}
+          initialSection={initialSection}
+          clearable
           onPick={choose}
           onClose={() => closeMenu()}
           onCreate={
             onCreate
-              ? () => {
+              ? (query) => {
                   setOpen(false);
-                  onCreate();
+                  onCreate(query);
                 }
               : undefined
           }
@@ -410,16 +430,16 @@ export function MaterialPicker({
 
               <div id={listId} role='listbox' className='min-h-0 flex-1 overflow-auto'>
                 {numId(value) > 0 ? (
-                  <button
-                    type='button'
-                    onClick={() => choose(undefined)}
-                    className='flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor hover:bg-bgZebra'
-                  >
-                    <span className='flex h-6 w-6 shrink-0 items-center justify-center'>✕</span>
+                  <div className='flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor'>
+                    <Close
+                      size='sm'
+                      aria-label='clear material selection'
+                      onClick={() => choose(undefined)}
+                    />
                     <Text component='span' variant='label' size='micro'>
                       clear selection
                     </Text>
-                  </button>
+                  </div>
                 ) : null}
 
                 {filtered.length === 0 ? (
@@ -446,7 +466,7 @@ export function MaterialPicker({
                         onClick={() => choose(m)}
                         className={cn(
                           'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                          idx === activeIndex && 'bg-bgZebra',
+                          idx === activeIndex && 'bg-pageBg',
                         )}
                       >
                         <MaterialThumb material={m} size='sm' className='h-6 w-6' />
@@ -458,7 +478,7 @@ export function MaterialPicker({
                             </Text>
                           ) : null}
                           <Text variant='label' size='micro' className='truncate'>
-                            {meta || '—'}
+                            {meta || <EmptyCell />}
                           </Text>
                         </span>
                         {current ? (
@@ -486,70 +506,205 @@ export function MaterialPicker({
 export function MaterialPickerDialog({
   open,
   section = '',
+  initialSection = '',
   value = 0,
   includeArchived = false,
+  clearable = true,
   title,
   confirmLabel,
   onPick,
   onClose,
   onCreate,
+  preferredIds,
 }: {
   open: boolean;
+  // HARD scope: the catalog query itself is narrowed to this section and no section chips render.
   section?: string;
+  // SOFT scope: the whole catalog loads and this section's chip starts selected, so the operator
+  // can widen to "all" or hop to a neighbouring section without reopening. Ignored when `section`
+  // is set.
+  initialSection?: string;
   value?: number;
   includeArchived?: boolean;
+  // Offers "unlink" (onPick(undefined)) while `value` is set. Callers that unlink elsewhere pass
+  // false so the dialog does not grow a second door with the same meaning.
+  clearable?: boolean;
   title?: string;
+  // No footer any more (a tile click picks); this verb now names the tile action for screen readers.
   confirmLabel?: string;
   onPick: (material?: common_Material) => void;
   onClose: () => void;
-  onCreate?: () => void;
+  // Receives the current search text so a create flow can prefill the name from it.
+  onCreate?: (query?: string) => void;
+  // Suggested articles, best first: sorted to the front of the grid and marked `suggested`.
+  preferredIds?: readonly number[];
 }) {
   // Only fetched while open — the caller mounts this permanently next to its button.
-  const { data } = useMaterials(section, includeArchived, open);
+  const { data, isLoading } = useMaterials(section, includeArchived, open);
   if (!open) return null;
   return (
     <MaterialGridDialog
       materials={data?.materials ?? []}
+      loading={isLoading}
       value={value}
       section={section}
+      initialSection={initialSection}
+      clearable={clearable}
       title={title}
       confirmLabel={confirmLabel}
       onPick={onPick}
       onClose={onClose}
       onCreate={onCreate}
+      preferredIds={preferredIds}
     />
   );
 }
 
-// The BOM's link dialog (11.3): the same catalog, but as swatches you can actually read a fabric
-// off. Selection is STAGED — a tile click only arms the pick, "link" commits it — so a mis-click in
-// a grid never silently rewrites a BOM line.
+// ─── tile facts ────────────────────────────────────────────────────────────────────────────────
+
+// A decimal as a short clean number, treating undefined / 0 as absent ("0 g/m²" never shows).
+const dec = (d?: googletype_Decimal): string => {
+  const s = decimalToInput(d).trim();
+  const n = Number(s);
+  if (!s || !Number.isFinite(n) || n === 0) return '';
+  return String(Math.round(n * 100) / 100);
+};
+
+const qty = (s?: string): string => {
+  const n = Number(s);
+  return Number.isFinite(n) ? String(Math.round(n * 100) / 100) : s ?? '';
+};
+
+const isFabricLike = (m: common_Material): boolean =>
+  !['MATERIAL_CLASS_THREAD', 'MATERIAL_CLASS_HARDWARE', 'MATERIAL_CLASS_PACKAGING'].includes(
+    m.materialClass ?? '',
+  );
+
+const fabricGsm = (m: common_Material) => dec(m.fabricAttrs?.weightGsm) || dec(m.fabricWeightGsm);
+const fabricWidth = (m: common_Material) => dec(m.fabricAttrs?.widthCm) || dec(m.fabricWidth);
+
+// The one line an operator chooses by, per class: a cloth by weight and width, a thread by tex, a
+// fitting by size and finish, packaging by size. Composition and stock sit on their own lines.
+function keyFacts(m: common_Material): string {
+  const parts: string[] = [];
+  switch (m.materialClass) {
+    case 'MATERIAL_CLASS_THREAD': {
+      const tex = m.threadAttrs?.ticketTex?.trim();
+      if (tex) parts.push(`tex ${tex}`);
+      break;
+    }
+    case 'MATERIAL_CLASS_HARDWARE': {
+      const size = m.hardwareAttrs?.dimensions?.trim();
+      const dia = dec(m.hardwareAttrs?.diameterMm);
+      if (size) parts.push(size);
+      else if (dia) parts.push(`Ø${dia} mm`);
+      if (m.hardwareAttrs?.finish?.trim()) parts.push(m.hardwareAttrs.finish.trim());
+      break;
+    }
+    case 'MATERIAL_CLASS_PACKAGING': {
+      const size = m.packagingAttrs?.dimensions?.trim();
+      const gsm = dec(m.packagingAttrs?.gsm);
+      if (size) parts.push(size);
+      if (gsm) parts.push(`${gsm} g/m²`);
+      break;
+    }
+    default: {
+      const gsm = fabricGsm(m);
+      const width = fabricWidth(m);
+      if (gsm) parts.push(`${gsm} g/m²`);
+      if (width) parts.push(`${width} cm`);
+    }
+  }
+  if (!parts.length && m.spec?.trim()) parts.push(m.spec.trim());
+  return parts.join(' · ');
+}
+
+const CSS_KEYWORDS = new Set([
+  'inherit',
+  'initial',
+  'unset',
+  'revert',
+  'currentcolor',
+  'transparent',
+]);
+
+// The article's own colour as a paintable CSS value, when its free-text colour IS one ("black",
+// "navy", "#1a1a1a", "1a1a1a"). Anything else ("чёрный меланж", a pantone code) is not guessed at:
+// it is printed as text on the strip instead.
+export function materialSwatchColour(m: common_Material): string {
+  const c = m.color?.trim() ?? '';
+  if (!c || CSS_KEYWORDS.has(c.toLowerCase())) return '';
+  const v = /^[0-9a-f]{6}$/i.test(c) ? `#${c}` : c;
+  return typeof CSS !== 'undefined' && CSS.supports('color', v) ? v : '';
+}
+
+// ─── dialog ────────────────────────────────────────────────────────────────────────────────────
+
+// The catalog as a dense swatch grid. ONE CLICK on an article picks it: the tile is the action, so
+// there is no staged selection and no footer (✕ closes). A mis-click is undone the same way it was
+// made, by opening the picker again, which is cheaper than a second click on every correct pick.
+//
+// Keyboard: the search owns focus on open; ↓ steps into the grid, arrows move between tiles, Enter
+// picks, ↑ from the top row returns to the search, and any printable key goes back to the search.
+// Enter in the search picks the first hit, so "code + Enter" is the fastest path.
 function MaterialGridDialog({
   materials,
+  loading,
   value,
   section,
+  initialSection,
+  clearable,
   title,
   confirmLabel,
   onPick,
   onClose,
   onCreate,
+  preferredIds,
 }: {
   materials: common_Material[];
+  loading?: boolean;
   value: number;
   section: string;
+  initialSection?: string;
+  clearable?: boolean;
   title?: string;
-  // Overrides the link/unlink commit label — the "add BOM article" flow creates a line rather than
-  // relinking one, so "unlink" is not a thing it can mean.
   confirmLabel?: string;
   onPick: (m?: common_Material) => void;
   onClose: () => void;
-  onCreate?: () => void;
+  onCreate?: (query?: string) => void;
+  preferredIds?: readonly number[];
 }) {
   const [q, setQ] = useState('');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [supplier, setSupplier] = useState('');
-  const [pending, setPending] = useState(numId(value));
+  const [sectionFilter, setSectionFilter] = useState(section ? '' : initialSection ?? '');
   const stockFacts = useMaterialStockFacts();
+  const hasStock = stockFacts.size > 0;
+  const current = numId(value);
+
+  const searchRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const preferredRank = (id: number): number => {
+    const i = preferredIds?.indexOf(id) ?? -1;
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
+
+  const onHand = (m: common_Material): number | undefined => {
+    if (!hasStock) return undefined;
+    const n = Number(stockFacts.get(numId(m.id))?.onHand);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Section chips only when the catalog was not already scoped by the caller, and only for
+  // sections that actually hold articles (plus the preselected one, so an empty preselect still
+  // reads as the reason the grid is empty).
+  const sectionChips = useMemo(() => {
+    if (section) return [];
+    const present = new Set<string>(materials.map((m) => m.section ?? ''));
+    if (initialSection) present.add(initialSection);
+    return techCardBomSectionOptions.filter((o) => present.has(o.value));
+  }, [materials, section, initialSection]);
 
   const suppliers = useMemo(
     () =>
@@ -561,19 +716,79 @@ function MaterialGridDialog({
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return materials.filter((m) => {
+    const rows = materials.filter((m) => {
+      if (sectionFilter && m.section !== sectionFilter) return false;
       if (supplier && (m.supplier ?? '').trim() !== supplier) return false;
-      if (inStockOnly && !(Number(stockFacts.get(numId(m.id))?.onHand) > 0)) return false;
+      if (inStockOnly && !((onHand(m) ?? 0) > 0)) return false;
       if (!needle) return true;
-      return (
-        (m.name ?? '').toLowerCase().includes(needle) ||
-        (m.code ?? '').toLowerCase().includes(needle) ||
-        (m.supplierRef ?? '').toLowerCase().includes(needle)
+      return [m.name, m.code, m.supplierRef, m.supplier, m.color].some((s) =>
+        (s ?? '').toLowerCase().includes(needle),
       );
     });
-  }, [materials, q, supplier, inStockOnly, stockFacts]);
+    // Suggested first (in their order), then in stock, then by name: what can be cut today is
+    // what is usually being looked for.
+    return rows.sort((a, b) => {
+      const pa = preferredRank(numId(a.id));
+      const pb = preferredRank(numId(b.id));
+      if (pa !== pb) return pa - pb;
+      const sa = (onHand(a) ?? 0) > 0 ? 0 : 1;
+      const sb = (onHand(b) ?? 0) > 0 ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materials, q, sectionFilter, supplier, inStockOnly, stockFacts, preferredIds]);
 
-  const commit = () => onPick(materials.find((m) => numId(m.id) === pending));
+  const pick = (m: common_Material) => onPick(m);
+  const create = onCreate ? () => onCreate(q.trim() || undefined) : undefined;
+
+  const tileButtons = (): HTMLElement[] =>
+    Array.from(gridRef.current?.querySelectorAll<HTMLElement>('[data-mp-tile] > button') ?? []);
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      tileButtons()[0]?.focus();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filtered[0]) pick(filtered[0]);
+      else create?.();
+    }
+  };
+
+  const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Typing anywhere in the grid continues the search: focus moves before the key lands, so the
+    // character is typed into the field rather than lost.
+    if (e.key.length === 1 || e.key === 'Backspace') {
+      searchRef.current?.focus();
+      return;
+    }
+    const buttons = tileButtons();
+    const idx = buttons.findIndex((b) => b === document.activeElement);
+    if (idx < 0 || !gridRef.current) return;
+    const cols =
+      getComputedStyle(gridRef.current.querySelector('.mp-grid') ?? gridRef.current)
+        .gridTemplateColumns.split(' ')
+        .filter(Boolean).length || 1;
+    const step: Record<string, number> = {
+      ArrowRight: 1,
+      ArrowLeft: -1,
+      ArrowDown: cols,
+      ArrowUp: -cols,
+    };
+    let next: number | undefined;
+    if (e.key in step) next = idx + step[e.key];
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = buttons.length - 1;
+    if (next === undefined) return;
+    e.preventDefault();
+    if (next < 0) searchRef.current?.focus();
+    else buttons[Math.min(next, buttons.length - 1)]?.focus();
+  };
+
+  const verb = confirmLabel ?? 'link';
+  const query = q.trim();
 
   return (
     <ConfirmationModal
@@ -581,113 +796,309 @@ function MaterialGridDialog({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      onConfirm={commit}
-      closeOnConfirm={false}
+      onConfirm={() => undefined}
+      hideActions
       width='lg'
       title={`${title ?? 'link a material'}${section ? ` · ${sectionShortLabel(section)}` : ''}`}
-      confirmLabel={confirmLabel ?? (pending ? 'link' : 'unlink')}
-      confirmDisabled={pending === numId(value)}
+      onOpenAutoFocus={(e) => {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }}
     >
-      <div className='flex flex-col gap-2.5'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <div className='min-w-[10rem] flex-1'>
-            <Input
-              name='material-grid-q'
-              value={q}
-              autoComplete='off'
-              placeholder='search name / code…'
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
-            />
-          </div>
-          <ChipRow>
-            {/* The section is fixed by the BOM line this dialog was opened from — the catalog query
-                itself is already scoped to it, so it reads as state, not as a toggle. */}
-            {section ? <Chip selected>{sectionShortLabel(section)}</Chip> : null}
-            <Chip
-              selected={inStockOnly}
-              pressed={inStockOnly}
-              onClick={() => setInStockOnly((v) => !v)}
-            >
-              in stock
-            </Chip>
-            {suppliers.map((s) => (
-              <Chip
-                key={s}
-                selected={supplier === s}
-                pressed={supplier === s}
-                onClick={() => setSupplier((cur) => (cur === s ? '' : s))}
-              >
-                {s}
-              </Chip>
-            ))}
-          </ChipRow>
-          {/* Условие смотрит на `pending` — на то, что кнопка ЧИСТИТ, а не на закоммиченное
-              значение строки. Пока оно смотрело на `value`, на пустой строке (`value = 0`)
-              ошибочный клик по плитке был неотменяем: плитка здесь не переключатель (клик только
-              взводит выбор), повторный клик — пустая операция, кнопки сброса нет, а подтверждение
-              уже горит «link». Выйти можно было только через «cancel», то есть промах нельзя было
-              исправить, не потеряв диалог. У комбо-варианта выше внешне такой же гейт на `value`
-              ВЕРЕН и остаётся как есть: там строка «clear selection» чистит именно закоммиченное
-              значение (`choose(undefined)`), а не черновик. */}
-          {pending > 0 ? (
-            <Button type='button' size='xs' variant='secondary' onClick={() => setPending(0)}>
-              clear selection
-            </Button>
-          ) : null}
-        </div>
-
-        {filtered.length === 0 ? (
-          <Text variant='label' size='micro'>
-            no material matches these filters
-          </Text>
-        ) : null}
-
-        {filtered.length === 0 && !onCreate ? (
-          <Placeholder label='nothing to show' className='h-20' />
-        ) : (
-          <Tiles min={110}>
-            {filtered.map((m) => {
-              const id = numId(m.id);
-              const url = materialImageUrl(m);
-              const stock = stockFacts.get(id)?.onHand;
-              const sub = [
-                materialSpec(m),
-                materialPriceLabel(m),
-                stock ? `${stock}${m.unit?.trim() ? ` ${m.unit.trim()}` : ''}` : '',
-              ]
-                .filter(Boolean)
-                .join(' · ');
-              return (
-                <Tile
-                  key={id}
-                  selected={pending === id}
-                  onClick={() => setPending(id)}
-                  media={
-                    url ? (
-                      <Media src={url} alt={m.name || 'material'} aspectRatio='1/1' fit='cover' />
-                    ) : (
-                      <Placeholder aspect='square' label='no image' />
-                    )
-                  }
-                  name={m.name || `#${id}`}
-                  sub={sub || m.code || '—'}
+      <TooltipProvider delayDuration={450} skipDelayDuration={150}>
+        <div className='flex min-h-[50vh] flex-col gap-2.5'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='min-w-[12rem] flex-1'>
+              <Input
+                ref={searchRef}
+                name='material-grid-q'
+                value={q}
+                autoComplete='off'
+                placeholder='search name / code / supplier'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+                onKeyDown={onSearchKeyDown}
+              />
+            </div>
+            {suppliers.length > 1 ? (
+              <div className='w-[11rem]'>
+                <Select
+                  name='material-grid-supplier'
+                  value={supplier}
+                  onValueChange={setSupplier}
+                  items={[
+                    { value: '', label: 'all suppliers' },
+                    ...suppliers.map((s) => ({ value: s, label: s })),
+                  ]}
+                  fullWidth
                 />
-              );
-            })}
-            {onCreate ? (
-              <Tile
-                dashed
-                onClick={onCreate}
-                className='flex min-h-[96px] flex-col items-center justify-center'
-              >
-                <Text size='micro' variant='label' className='uppercase'>
-                  + create
-                </Text>
-              </Tile>
+              </div>
             ) : null}
-          </Tiles>
-        )}
-      </div>
+            {clearable && current > 0 ? (
+              <Button type='button' size='xs' variant='secondary' onClick={() => onPick(undefined)}>
+                unlink
+              </Button>
+            ) : null}
+          </div>
+
+          {sectionChips.length > 1 || hasStock ? (
+            <ChipRow>
+              {sectionChips.length > 1
+                ? sectionChips.map((o) => (
+                    <Chip
+                      key={o.value}
+                      selected={sectionFilter === o.value}
+                      pressed={sectionFilter === o.value}
+                      onClick={() => setSectionFilter((cur) => (cur === o.value ? '' : o.value))}
+                    >
+                      {o.label}
+                    </Chip>
+                  ))
+                : null}
+              {hasStock ? (
+                <Chip
+                  dashed={!inStockOnly}
+                  selected={inStockOnly}
+                  pressed={inStockOnly}
+                  onClick={() => setInStockOnly((v) => !v)}
+                  className={sectionChips.length > 1 ? 'ml-2' : undefined}
+                >
+                  in stock
+                </Chip>
+              ) : null}
+            </ChipRow>
+          ) : null}
+
+          {loading ? (
+            <Placeholder label='loading' className='h-20' />
+          ) : (
+            <div ref={gridRef} onKeyDown={onGridKeyDown} className='flex flex-col gap-2'>
+              {filtered.length === 0 ? (
+                <Placeholder
+                  label={query ? `no articles match “${query}”` : 'no articles'}
+                  className='h-16'
+                />
+              ) : null}
+              {filtered.length > 0 || create ? (
+                <Tiles min={132} className='mp-grid'>
+                  {filtered.map((m, i) => (
+                    <ArticleTile
+                      key={numId(m.id)}
+                      m={m}
+                      verb={verb}
+                      selected={numId(m.id) === current}
+                      armed={i === 0 && !!query}
+                      stock={onHand(m)}
+                      facts={stockFacts.get(numId(m.id))}
+                      suggested={preferredRank(numId(m.id)) !== Number.MAX_SAFE_INTEGER}
+                      onPick={() => pick(m)}
+                    />
+                  ))}
+                  {create ? (
+                    <div data-mp-tile>
+                      <Tile
+                        dashed
+                        onClick={create}
+                        className='min-h-[118px] items-center justify-center'
+                      >
+                        <Text
+                          component='span'
+                          size='micro'
+                          variant='label'
+                          className='text-center uppercase'
+                        >
+                          + create
+                        </Text>
+                      </Tile>
+                    </div>
+                  ) : null}
+                </Tiles>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </TooltipProvider>
     </ConfirmationModal>
+  );
+}
+
+function ArticleTile({
+  m,
+  verb,
+  selected,
+  armed,
+  stock,
+  facts,
+  suggested,
+  onPick,
+}: {
+  m: common_Material;
+  verb: string;
+  selected: boolean;
+  // The first hit while searching: Enter in the field picks this one, so it is drawn as such.
+  armed: boolean;
+  stock?: number;
+  facts?: MaterialStockFacts;
+  suggested?: boolean;
+  onPick: () => void;
+}) {
+  const url = materialImageUrl(m);
+  const colour = materialSwatchColour(m);
+  const name = m.name || `#${numId(m.id)}`;
+  const line = keyFacts(m);
+  const composition = materialCompositionText(m);
+  const unit = m.unit?.trim() ?? '';
+  // Квадрат, как плитка матрицы колорвеев: фото, иначе цвет артикула, иначе бледная пиктограмма
+  // секции. Серой плашки с названием секции больше нет.
+  const strip = url ? (
+    <Media src={url} alt='' aspectRatio='auto' fit='cover' />
+  ) : colour ? (
+    <span aria-hidden className='block h-full w-full' style={{ background: colour }} />
+  ) : (
+    <span aria-hidden className='flex h-full w-full items-center justify-center text-textColor'>
+      <TrimPictogram
+        kind={trimPictogramKind({
+          family: isFabricLike(m) ? 'fabric' : 'hardware',
+          kind: m.materialClass ?? '',
+          section: m.section ?? '',
+          name: m.name ?? '',
+        })}
+        className='size-1/2 opacity-20'
+      />
+    </span>
+  );
+
+  return (
+    <Tooltip
+      side='right'
+      align='start'
+      className='w-[260px] p-0'
+      trigger={
+        <div data-mp-tile>
+          <Tile
+            selected={selected}
+            onClick={onPick}
+            className={cn('gap-0.5', armed && !selected && 'border-textColor')}
+          >
+            <span className='sr-only'>{verb} </span>
+            <span className='block aspect-square w-full overflow-hidden border border-hairline'>
+              {strip}
+            </span>
+            {suggested ? (
+              <Text component='span' size='micro' variant='label' className='mt-1 block uppercase'>
+                suggested
+              </Text>
+            ) : null}
+            <Text
+              component='span'
+              size='micro'
+              className='mt-1 line-clamp-2 min-h-[2lh] break-words font-bold uppercase'
+            >
+              {name}
+            </Text>
+            <Text component='span' size='micro' className='block truncate tabular-nums'>
+              {line || '\u00a0'}
+            </Text>
+            {composition ? (
+              <Text component='span' size='nano' variant='label' className='block truncate'>
+                {composition}
+              </Text>
+            ) : null}
+            {stock !== undefined ? (
+              <Text
+                component='span'
+                size='nano'
+                variant={stock > 0 ? 'label' : 'inactive'}
+                className='mt-auto self-end tabular-nums'
+              >
+                {qty(String(stock))}
+                {unit ? ` ${unit}` : ''}
+              </Text>
+            ) : null}
+          </Tile>
+        </div>
+      }
+    >
+      <MaterialHoverCard m={m} url={url} colour={colour} stock={stock} facts={facts} />
+    </Tooltip>
+  );
+}
+
+// The full article on hover / keyboard focus: everything the tile had to leave out. Exported: the
+// colourways matrix shows the same card on a filled material tile.
+export function MaterialHoverCard({
+  m,
+  url,
+  colour,
+  stock,
+  facts,
+}: {
+  m: common_Material;
+  url?: string;
+  colour: string;
+  stock?: number;
+  facts?: MaterialStockFacts;
+}) {
+  const unit = m.unit?.trim() ?? '';
+  const supplier = [m.supplier?.trim(), m.supplierRef?.trim()].filter(Boolean).join(' · ');
+  const direction = m.fabricAttrs?.fabricDirection?.trim();
+  const rows: Array<[string, string]> = [
+    ['code', m.code?.trim() ?? ''],
+    ['section', sectionLabel(m.section)],
+    ['supplier', supplier],
+    ['composition', materialCompositionText(m)],
+    ['weight', fabricGsm(m) ? `${fabricGsm(m)} g/m²` : ''],
+    ['width', fabricWidth(m) ? `${fabricWidth(m)} cm` : ''],
+    ['direction', direction ?? ''],
+    ['details', isFabricLike(m) ? '' : keyFacts(m)],
+    ['spec', m.spec?.trim() ?? ''],
+    ['colour', [m.color?.trim(), m.pantone?.trim()].filter(Boolean).join(' · ')],
+    ['price', materialPriceLabel(m)],
+    ['stock', stock !== undefined ? `${qty(String(stock))}${unit ? ` ${unit}` : ''}` : ''],
+    [
+      'avg cost',
+      facts?.avgUnitCostBase
+        ? `${facts.avgUnitCostBase} ${facts.baseCurrency}${unit ? ` / ${unit}` : ''}`
+        : '',
+    ],
+    ['lead time', m.leadTimeDays ? `${m.leadTimeDays} d` : ''],
+  ];
+  return (
+    <div className='flex flex-col'>
+      {url ? (
+        <div className='h-[140px] w-full overflow-hidden border-b border-borderColor'>
+          <Media src={url} alt={m.name || 'material'} aspectRatio='auto' fit='cover' />
+        </div>
+      ) : colour ? (
+        <span
+          aria-hidden
+          className='block h-16 w-full border-b border-borderColor'
+          style={{ background: colour }}
+        />
+      ) : null}
+      <div className='flex flex-col gap-1 p-2'>
+        <Text component='span' size='micro' className='font-bold uppercase'>
+          {m.name || `#${numId(m.id)}`}
+          {m.archived ? ' · archived' : ''}
+        </Text>
+        <dl className='grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5'>
+          {rows
+            .filter(([, v]) => v)
+            .map(([k, v]) => (
+              <Fragment key={k}>
+                <dt>
+                  <Text component='span' size='micro' variant='label'>
+                    {k}
+                  </Text>
+                </dt>
+                <dd className='min-w-0'>
+                  <Text component='span' size='micro' className='break-words tabular-nums'>
+                    {v}
+                  </Text>
+                </dd>
+              </Fragment>
+            ))}
+        </dl>
+      </div>
+    </div>
   );
 }

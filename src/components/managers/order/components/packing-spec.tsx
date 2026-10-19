@@ -3,14 +3,9 @@ import { auxSubtypeLabel } from 'components/managers/tech-card/components/labels
 import { useOrderPackingSpec } from 'components/managers/tech-card/components/useAssemblyPacking';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, Pill, Section, Text, EmptyCell } from 'ui';
 
-const TH =
-  'border border-borderColor bg-bgZebra px-2 py-1 text-left text-micro uppercase tracking-label';
+const TH = 'border border-borderColor px-2 py-1 text-left text-micro uppercase tracking-label';
 const TD = 'border border-hairline px-2 py-1 align-top text-micro';
 
 // An empty tick box the packer marks off by hand once the line is picked/verified. Printed
@@ -76,7 +71,7 @@ function Resolution({
     !!code &&
     !!garmentCode &&
     code.toUpperCase() !== garmentCode.toUpperCase();
-  if (!code && !material) return <>—</>;
+  if (!code && !material) return <EmptyCell />;
   return (
     <span className='flex flex-col items-start gap-0.5'>
       {code ? (
@@ -237,9 +232,9 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                                         hexByCode={hexByCode}
                                       />
                                     </td>
-                                    <td className={TD}>{a.qty?.value ?? '—'}</td>
-                                    <td className={TD}>{a.printNote || '—'}</td>
-                                    <td className={TD}>{a.positionNote || '—'}</td>
+                                    <td className={TD}>{a.qty?.value ?? <EmptyCell />}</td>
+                                    <td className={TD}>{a.printNote || <EmptyCell />}</td>
+                                    <td className={TD}>{a.positionNote || <EmptyCell />}</td>
                                   </tr>
                                 );
                               })}

@@ -11,13 +11,9 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
-import { ArtworkImage } from 'ui/components/annotation/insets';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { useRailScroll } from 'ui/components/focused-annotator';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { ArtworkImage } from 'components/managers/tech-card/annotation/insets';
+import { Button, Chip, Close, GroupLabel, Pill, Text } from 'ui';
+import { useRailScroll } from 'components/managers/tech-card/annotation/focused-annotator';
 
 import { placementsOnPicture } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
@@ -203,7 +199,7 @@ const HANDLE = 8;
 const ROT_OFF = 22;
 const NEW_MIN = 12;
 /** T66 · the ✕ of the selected box, the tile corner's 16px. */
-const REMOVE_SIZE = 16;
+const REMOVE_SIZE = 32;
 
 type Drag = {
   mode: 'new' | 'move' | 'corner' | 'rotate';
@@ -507,8 +503,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
             Math.max(0, Math.min(...q.map((v) => v.y)) - REMOVE_SIZE - 6),
           );
           return (
-            <button
-              type='button'
+            <Close
               aria-label='take the artwork off this side'
               title='take off this side · ⌫'
               data-artwork-remove={selected.placementId}
@@ -517,11 +512,9 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
                 e.stopPropagation();
                 art.onRemove();
               }}
-              className='absolute flex items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-              style={{ left: x, top: y, width: REMOVE_SIZE, height: REMOVE_SIZE }}
-            >
-              ✕
-            </button>
+              className='absolute bg-bgColor'
+              style={{ left: x, top: y }}
+            />
           );
         })()}
     </div>

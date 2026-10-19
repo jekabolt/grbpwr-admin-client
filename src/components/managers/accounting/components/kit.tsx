@@ -3,8 +3,8 @@ import { CSSProperties, ReactNode } from 'react';
 
 // Shared presentational kit for the accounting module — the vocabulary from the design
 // configurator (the brutalist-monochrome picker the owner approved), rebuilt on the app's own
-// tokens (textColor #000 / bgColor #fff / textInactiveColor #ccc borders / labelColor #666 /
-// bgSecondary #ededed / success green / error red, FeatureMono). Every screen composes these so
+// tokens (textColor #000 / bgColor #fff / borderColor #ccc borders / labelColor #666 /
+// pageBg #ededed / success green / error red, FeatureMono). Every screen composes these so
 // the whole section reads identically to the picker. Money still formats through utils/format
 // (AmountCell); the client never recomputes a reported figure — the only arithmetic here is on the
 // bar/segment WIDTHS a caller passes in (a display proportion of server-sent numbers), the same
@@ -15,7 +15,7 @@ type Tone = 'ok' | 'warn' | 'muted' | 'default';
 const PILL_TONE: Record<Tone, string> = {
   ok: 'border-success text-success',
   warn: 'border-error text-error',
-  muted: 'border-textInactiveColor text-labelColor',
+  muted: 'border-borderColor text-labelColor',
   default: 'border-textColor text-textColor',
 };
 
@@ -52,7 +52,7 @@ export function GroupHeader({ children, className }: { children: ReactNode; clas
   return (
     <div
       className={cn(
-        'mb-1 mt-3 border-b border-textInactiveColor pb-0.5 text-[10px] font-bold uppercase tracking-wide text-labelColor',
+        'mb-1 mt-3 border-b border-borderColor pb-0.5 text-[10px] font-bold uppercase tracking-wide text-labelColor',
         className,
       )}
     >
@@ -75,7 +75,7 @@ export function Callout({
     <div
       className={cn(
         'border p-2.5 text-labelColor',
-        tone === 'attention' ? 'border-error' : 'border-textInactiveColor',
+        tone === 'attention' ? 'border-error' : 'border-borderColor',
         className,
       )}
     >
@@ -125,7 +125,7 @@ export function StatTile({
   big?: boolean;
 }) {
   return (
-    <div className='border-b border-r border-textInactiveColor p-2.5'>
+    <div className='border-b border-r border-borderColor p-2.5'>
       <div className='text-[10px] uppercase tracking-wide text-labelColor'>{label}</div>
       <div
         className={cn(
@@ -160,7 +160,7 @@ export function RowLine({
     <div
       className={cn(
         'flex items-center justify-between gap-2.5 py-1',
-        total ? 'border-t border-textColor font-bold' : 'border-b border-textInactiveColor',
+        total ? 'border-t border-textColor font-bold' : 'border-b border-borderColor',
         bold && 'font-bold',
         className,
       )}
@@ -217,15 +217,15 @@ export function CheckRow({ done, children }: { done?: boolean; children: ReactNo
 // Two-column T-account frame (.tacct) with column + line helpers.
 export function TAccount({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('grid grid-cols-2 border border-textInactiveColor', className)}>
+    <div className={cn('grid grid-cols-2 border border-borderColor', className)}>
       {children}
     </div>
   );
 }
 export function TColumn({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
-    <div className='border-r border-textInactiveColor last:border-r-0'>
-      <h4 className='border-b border-textInactiveColor bg-bgSecondary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
+    <div className='border-r border-borderColor last:border-r-0'>
+      <h4 className='border-b border-borderColor bg-pageBg px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
         {title}
       </h4>
       {children}
@@ -245,7 +245,7 @@ export function TLine({
 }) {
   if (sub) {
     return (
-      <div className='border-b border-textInactiveColor bg-bgSecondary/40 px-2.5 py-1 text-[10px] uppercase tracking-wide text-labelColor'>
+      <div className='border-b border-borderColor bg-pageBg/40 px-2.5 py-1 text-[10px] uppercase tracking-wide text-labelColor'>
         {label}
       </div>
     );
@@ -254,7 +254,7 @@ export function TLine({
     <div
       className={cn(
         'flex justify-between gap-2.5 px-2.5 py-1',
-        total ? 'border-t border-textColor font-bold' : 'border-b border-textInactiveColor',
+        total ? 'border-t border-textColor font-bold' : 'border-b border-borderColor',
       )}
     >
       <span>{label}</span>
@@ -288,7 +288,7 @@ export function WaterfallRow({
   return (
     <div className='grid grid-cols-[minmax(120px,1.3fr)_2fr_96px] items-center gap-2.5 py-0.5'>
       <span className={cn(keyRow ? 'font-bold text-textColor' : 'text-labelColor')}>{label}</span>
-      <span className='relative block h-[15px] bg-bgSecondary'>
+      <span className='relative block h-[15px] bg-pageBg'>
         <span
           className={cn('absolute top-0 h-[15px]', bar)}
           style={{ left: `${clampPct(left)}%`, width: `${clampPct(width)}%` }}
@@ -348,7 +348,7 @@ export function BarRow({
   return (
     <div className='grid grid-cols-[130px_1fr_120px] items-center gap-2.5 py-1'>
       <span className='truncate font-bold'>{name}</span>
-      <span className='block h-[14px] bg-bgSecondary'>
+      <span className='block h-[14px] bg-pageBg'>
         <span
           className={cn('block h-[14px]', green ? 'bg-success' : 'bg-textColor')}
           style={{ width: `${clampPct(pct)}%` }}

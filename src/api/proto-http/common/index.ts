@@ -1764,6 +1764,36 @@ export type AssemblyResolutionBasis =
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
   | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
+// TechCardSeamStatus is the technologist's decision on a seam.
+export type TechCardSeamStatus =
+  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
+  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
+  | "TECH_CARD_SEAM_STATUS_REJECTED";
+// TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
+// walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
+// closure (zip / button front) that is NOT sewn shut.
+export type TechCardSeamKind =
+  | "TECH_CARD_SEAM_KIND_UNKNOWN"
+  | "TECH_CARD_SEAM_KIND_EDGE"
+  | "TECH_CARD_SEAM_KIND_PARTIAL"
+  | "TECH_CARD_SEAM_KIND_COMPOSITE"
+  | "TECH_CARD_SEAM_KIND_SURFACE"
+  | "TECH_CARD_SEAM_KIND_CLOSURE";
+// TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
+// (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
+// is legal on write: the reader then picks the pairing itself.
+export type TechCardSeamDirection =
+  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
+  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
+  | "TECH_CARD_SEAM_DIRECTION_SAME";
+// TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
+export type TechCardSeamSource =
+  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
+  | "TECH_CARD_SEAM_SOURCE_GRAPH"
+  | "TECH_CARD_SEAM_SOURCE_DOLL"
+  | "TECH_CARD_SEAM_SOURCE_ORDER"
+  | "TECH_CARD_SEAM_SOURCE_MANUAL"
+  | "TECH_CARD_SEAM_SOURCE_AI";
 // TechCardMarkerPieceSetStatus compares a раскладка's stored fingerprint of the card's cut-piece set
 // against the set the card carries TODAY (Ф3.6).
 // Three states and not a bool, because two are not enough: a marker taken before Ф3 carries no
@@ -1784,6 +1814,11 @@ export type TechCardMarkerPieceSetStatus =
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
+// TechCardMarkerSpreadMode is how the plies of the настил face each other.
+export type TechCardMarkerSpreadMode =
+  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type TechCardMediaItem = {
   mediaId: number | undefined;
@@ -3333,6 +3368,12 @@ export type TechCardOperation = {
   // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
   // жест, а не потеря.
   bomQuantities: TechCardOperationBomQty[] | undefined;
+  // ЧЕРНОВИК КАРКАСА СБОРКИ (0410). true = шаг записал каркас сборки (OPERATIONS → build from pattern
+  // → apply), и его ещё никто не проверил. Снимает первая смысловая правка строки или клик по чипу
+  // «draft» (reviewed). В ДАЙДЖЕСТ НЕ ВХОДИТ: проверка шага не меняет того, что карточка говорит цеху,
+  // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
+  // сборки — это пометка для команды, а не инструкция.
+  draft: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -3999,6 +4040,14 @@ export type TechCardInsert = {
   // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   labelsAware: boolean | undefined;
+  // ЩИТ ЧЕРНОВИКА КАРКАСА (0410) для TechCardOperation.draft (68). draft — bool без присутствия, а
+  // операции пишутся полной заменой без стабильного ключа: payload бандла, который поля не знает,
+  // неотличим от «все шаги проверены», и открытая старая вкладка стёрла бы каждую метку первой же
+  // правкой. Без флага UpdateTechCard ОТКАЗЫВАЕТ (FailedPrecondition, «обнови админку»), если у
+  // сохранённой карточки есть хоть один draft-шаг, и любая запись отказывает, если payload без
+  // флага несёт draft = true (эхо). Флаг не фильтрует разбор. Серверные пути (клон сезона,
+  // импорт архива) ставят его явно. ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест.
+  operationDraftAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -4100,6 +4149,11 @@ export type TechCard = {
   // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
   // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
   guided: boolean | undefined;
+  // OUTPUT-ONLY: the technologist's seam decisions (confirmed / rejected / connected by hand), with
+  // the server's staleness verdict resolved on this read. Written ONLY through UpsertTechCardSeams /
+  // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
+  // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
+  seams: TechCardSeam[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -4365,6 +4419,68 @@ export type TechCardPieceArea = {
   ambiguousPick: boolean | undefined;
 };
 
+// TechCardSeam is one stored seam decision, keyed by a client-minted ULID.
+export type TechCardSeam = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  seamKey: string | undefined;
+  status: TechCardSeamStatus | undefined;
+  kind: TechCardSeamKind | undefined;
+  direction: TechCardSeamDirection | undefined;
+  source: TechCardSeamSource | undefined;
+  sideA: TechCardSeamSide | undefined;
+  sideB: TechCardSeamSide | undefined;
+  // Size code the anchors were written on — honesty for display; the resolver compares by ratio.
+  anchoredSize: string | undefined;
+  // The technologist's words («eased at the yoke», «CF is a zip»), ≤ 255 chars.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance.
+  // stale = the SOURCE of the seam's pieces moved since the row was written: the fingerprint of the
+  // sheets AND block→piece links of the pieces' fabric scopes, computed now, differs from the one
+  // stamped on write (a DXF re-uploaded, a block re-aliased). A stale row must not be applied as is
+  // — the client shows it and offers re-confirm, which rewrites it and clears the flag.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSeamSide is one side of a seam: its anchors in walk order (1..8).
+export type TechCardSeamSide = {
+  parts: TechCardSeamAnchor[] | undefined;
+};
+
+// TechCardSeamAnchor is one run of one piece taking part in a seam side.
+export type TechCardSeamAnchor = {
+  // tech_card_piece.line_key — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
+  samples: TechCardSeamSample[] | undefined;
+  // Share of the sewing-line perimeter covered by the run, (0, 1].
+  perimShare: number | undefined;
+  // Run length at the size it was anchored on, mm (> 0).
+  lenMm: number | undefined;
+  // Notch count on the run, ends excluded.
+  notches: number | undefined;
+  // Signed turn of the run, degrees (+ convex).
+  turnDeg: number | undefined;
+  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
+  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
+  rangeFrom: number | undefined;
+  rangeTo: number | undefined;
+  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
+  // 'BP#3+4') and the piece contour's signature then.
+  edgeHint: string | undefined;
+  contourSig: string | undefined;
+};
+
+// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
+// (u, v ∈ [0, 1]).
+export type TechCardSeamSample = {
+  u: number | undefined;
+  v: number | undefined;
+};
+
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.
 export type TechCardMarker = {
   summary: TechCardMarkerSummary | undefined;
@@ -4404,6 +4520,13 @@ export type TechCardMarkerLayout = {
   // outlive the used_length it was derived from — and would be indistinguishable from a измеренное
   // one to every future reader.
   composition: TechCardMarkerCompositionEntry[] | undefined;
+  // НАСТИЛ the раскладка was planned for on the cutting table: plies, end loss, spread mode and the
+  // PHYSICAL table length. ABSENT = not recorded (every blob saved before this field, and every
+  // stale bundle). Replaces the old client hack that stuffed the usable table length into
+  // params.target_length_cm and wrote a «cutting table:» line into warnings — readers keep decoding
+  // that hack for blobs that predate this field. No schema_version bump: the field is additive and
+  // readers branch on its PRESENCE.
+  spread: TechCardMarkerSpread | undefined;
 };
 
 // TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
@@ -4486,6 +4609,19 @@ export type TechCardMarkerPlacement = {
   // editor must compose this exact expression, and the order matters as much as the axis:
   // M · R(θ) = R(−θ) · M, so mirroring after rotating differs by 2θ, not by a sign.
   flipped: boolean | undefined;
+};
+
+// TechCardMarkerSpread is the cutting-table half of the conditions a раскладка was taken under.
+// Validated on save (SaveTechCardMarker refuses out-of-range values with InvalidArgument):
+// plies 1..1000, end_loss_cm 0..100, table_length_cm 0 (= not recorded) or 50..5000, mode a known
+// value.
+export type TechCardMarkerSpread = {
+  plies: number | undefined;
+  endLossCm: number | undefined;
+  mode: TechCardMarkerSpreadMode | undefined;
+  // The PHYSICAL length of the cutting table, cm; 0 = not recorded. Its own field — NOT
+  // params.target_length_cm, which is the engine's target and stays what the search was asked for.
+  tableLengthCm: number | undefined;
 };
 
 // TechCardMarkerInsert is the writable payload of SaveTechCardMarker. Geometry is SELF-CONTAINED

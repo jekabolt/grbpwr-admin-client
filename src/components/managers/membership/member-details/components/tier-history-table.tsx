@@ -1,5 +1,5 @@
 import { TierHistoryEntry } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import { formatEur } from '../../utils/tier-utils';
 
@@ -20,13 +20,13 @@ const COLUMNS: {
 export function TierHistoryTable({ entries }: { entries: TierHistoryEntry[] }) {
   return (
     <div className='overflow-x-auto w-full'>
-      <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
-        <thead className='bg-textInactiveColor h-9'>
-          <tr className='border-b border-textInactiveColor'>
+      <table className='w-full border-collapse border border-borderColor min-w-max'>
+        <thead className='bg-borderColor h-9'>
+          <tr className='border-b border-borderColor'>
             {COLUMNS.map((col) => (
               <th
                 key={col.key}
-                className='text-center h-9 min-w-20 border border-textInactiveColor px-2'
+                className='text-center h-9 min-w-20 border border-borderColor px-2'
               >
                 <Text variant='uppercase' size='small'>
                   {col.label}
@@ -44,9 +44,9 @@ export function TierHistoryTable({ entries }: { entries: TierHistoryEntry[] }) {
             </tr>
           ) : (
             entries.map((e) => (
-              <tr key={e.id} className='border-b border-textInactiveColor last:border-b-0 h-9'>
+              <tr key={e.id} className='border-b border-borderColor last:border-b-0 h-9'>
                 {COLUMNS.map((col) => (
-                  <td key={col.key} className='border border-textInactiveColor text-center px-2'>
+                  <td key={col.key} className='border border-borderColor text-center px-2'>
                     <Text size='small'>{col.accessor(e)}</Text>
                   </td>
                 ))}

@@ -6,21 +6,43 @@
 // dxf-parser/clipper2-js/воркер живут только в чанке раскладки.
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_TechCardMarker } from 'api/proto-http/admin';
+import type { common_TechCardMarker, googletype_Decimal } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { extractFieldViolations } from 'utils/field-errors';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Selector from 'ui/components/selector';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { parseDecimalNumber } from 'utils/decimal';
+import {
+  Button,
+  CheckboxCommon,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Selector,
+  Text,
+  HeaderWarnings,
+  type HeaderWarning,
+  type HeaderWarningAction,
+  GenericPopover,
+  Progress,
+  EmptyCell,
+} from 'ui';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { ROUTES, SECTION } from 'constants/routes';
+import {
+  CLEAR_SETTING,
+  useUpdateWorkshopSettings,
+  useWorkshopSettings,
+} from 'components/managers/workshop/useWorkshopSettings';
+import {
+  autoPlies,
+  estimateGarmentsPerPly,
+  extraWithinTolerance,
+  overCutOf,
+  perPlyQuantities,
+  spreadFigures,
+  type SpreadMode,
+} from 'lib/nesting/spread';
 import type {
   FabricDirection,
   NestConfig,
@@ -30,13 +52,21 @@ import type {
   Unit,
 } from 'lib/nesting/types';
 import { NEST_DEFAULTS, allowsFlip } from 'lib/nesting/types';
-import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
+import {
+  STORED_LAYOUT_TOLERANCE,
+  checkLayout,
+  measureLayout,
+  type Violation,
+} from 'lib/nesting/geom/clearance';
 // БЮДЖЕТ ДО ЗАПУСКА (Ф2.3). Та же модель, что решает внутри движка, какой точности контуры он
 // потянет: экран зовёт ровно её, а не свою копию.
 import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
-import { LayoutEditor } from './layout-editor';
+import { drawingFromMarker } from 'lib/pattern-export/drawing';
+import { plotFromMarker } from 'lib/pattern-export/plot-drawing';
+import { PatternExportItems } from '../pattern-export/export-menu';
+import { CANVAS_ICON_BTN, LayoutEditor } from './layout-editor';
 import { isFetchFailure } from './dxf-warnings';
 import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
 import {
@@ -51,22 +81,21 @@ import {
   isDraftMarker,
   refusalWord,
   scalarNormRefusal,
+  spreadToWire,
+  storedSpreadOf,
   type MarkerBomLine,
   type MarkerCompositionEntry,
 } from './marker-io';
 import { markerScopeLines, strictestDirection } from '../bom-purpose';
 import {
-  MAX_SEAM_ALLOWANCE_MM,
   blocksMissingOnLayer,
   clampSeamAllowanceMm,
   defaultContourLayer,
-  layerAllowanceLabel,
   layerOptions,
   seamAllowancePrefill,
-  seamLineLayer,
+  contourIsCutLine as contourCarriesCutLine,
 } from './contour-layer';
 import {
-  allowanceLabel,
   allowanceUnknownText,
   buildAllowanceIndex,
   type ContourAllowance,
@@ -82,7 +111,6 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { ModalRailSection, type RailSectionStatus } from './modal-sections';
 import { uniConflictReason } from './block-code';
 import {
   dedupeUniPieces,
@@ -93,6 +121,55 @@ import {
 } from './piece-selection';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
+import {
+  FACT_ROW,
+  Fact,
+  FactLabel,
+  FactList,
+  MarkerQuiz,
+  QuizSummary,
+  useMarkerQuiz,
+  type QuizRow,
+  type QuizWarning,
+} from './marker-quiz/marker-quiz';
+import { useQuizDone } from './marker-quiz/use-quiz-done';
+import { useLayMode } from './use-lay-mode';
+import { useGoToBomLineField } from './go-to-card-field';
+
+// Units are asked by a dialog at upload: the parse's note about them is not repeated here.
+const UNITS_NOT_SET = /units are not set in the file/;
+// Перенос надсечек с базового размера — служебная заметка разбора, не дело оператора раскладки.
+// ТОЛЬКО легаси-заметка об УСПЕШНОМ переносе («— N carried …»). Отказ переноса («could not be
+// carried … those sizes have no notches») — настоящая потеря надсечек и остаётся видимым.
+const NOTCH_CARRY = /^notches are drawn only in the sample size — \d+ carried/;
+// Упрощение контуров под бюджет — не дело оператора: движок компенсирует его зазором (gap + 2·eps)
+// и проверяет зазоры по НЕупрощённым контурам, рез безопасен. Скрыто и в прогоне, и в блобах.
+const SIMPLIFIED_NOTE = /contours are simplified to .* so the search can finish in time/;
+// ЗАМЕТКИ, КОТОРЫЕ ЭТА МОДАЛКА НЕ ПОКАЗЫВАЕТ НИГДЕ — ни из свежего разбора, ни из блоба сохранённой
+// раскладки (туда разбор пишет их вместе с остальными). Фильтр стоит в одном месте — на сборке шапки.
+const isHiddenNote = (w: string): boolean =>
+  UNITS_NOT_SET.test(w) || NOTCH_CARRY.test(w) || SIMPLIFIED_NOTE.test(w);
+// Записи о припуске в блобе — протокол съёмки, а не предупреждение: вердикт о недоборе модалка
+// выносит сама, по полям раскладки (см. storedNoAllowance), а не по тексту, который раньше писался
+// «SEAM LINE was nested» на ЛЮБОМ нуле, в том числе на линии кроя.
+const SEAM_NOTE_PREFIX = 'seam allowance:';
+// ЗАПИСЬ О СТОЛЕ В БЛОБЕ — ЛЕГАСИ, только на ЧТЕНИЕ. Новые маркеры несут настил своим полем
+// layout.spread (слои, запас, режим, физическая длина стола), а targetLengthCm — снова честная цель
+// прогона. Маркеры, снятые до этого поля, хранили полезную U в params.targetLengthCm и признак этого
+// протоколом в warnings: есть запись — targetLengthCm читается концом стола; нет — старой целью (до
+// ae74b7da поле писалось из ручной «целевой длины»). Оба чтения живы, пока живы такие блобы.
+const TABLE_NOTE_PREFIX = 'cutting table:';
+const NO_ALLOWANCE_TEXT = 'nested without seam allowance · consumption too low';
+
+// Направление ворса не задано на строке BOM (вкладка BOM карточки), см. directionUnset.
+const DIRECTION_UNSET_TEXT = 'fabric direction not set on the BOM line';
+const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&material=${materialId}`;
+
+// ОДНА КОРОБКА НА ВЕСЬ РЯД ТУЛБАРА: поле ввода, селект, переключатель и дверь деталей — одной
+// ширины (FIELD), одной высоты и одной рамки (владелец: ряд полей ввода = один размер плиток).
+const BOX =
+  'flex h-6 w-full min-w-0 items-center rounded-none border border-borderColor bg-bgColor px-[7px] text-textBaseSize tabular-nums transition-colors hover:border-textColor focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
+const BOX_LABEL = 'block h-[14px] truncate uppercase leading-[14px]';
 
 // Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.
 //
@@ -112,11 +189,24 @@ const isManualNote = (w: string): boolean =>
 // она ЕДИНСТВЕННАЯ (обычное состояние до первого прогона), красный список не рендерится —
 // error-бокс при только что открытой модалке девальвировал бы тон, — а причина уезжает в
 // тултип кнопки. Константа, потому что это сравнение по идентичности строки.
-const TERMINAL_SAVE_REASON =
-  'only a complete marker, one that every piece fitted into, can be saved';
+const TERMINAL_SAVE_REASON = 'run a complete marker first';
 
 // Нарушение словами. У кромочного (otherIndex отсутствует) required — это отступ, и при
 // отступе 0 «0.00 см < 0.00 см» звучало бы бессмыслицей: деталь просто вышла за полотно.
+/** Блокеры и предупреждения одной группы настроек: что кроим (1), как кладём (2), детали (3). */
+type RailSectionStatus = {
+  blockers: string[];
+  warnings: string[];
+};
+
+/** Одна ширина на все поля тулбара (правило владельца: поля в ряд одного размера). */
+const FIELD = 'w-[84px] shrink-0';
+// Число без рамки в строке ведомости шага «run» (ширина полотна): линия снизу — только под курсором.
+const CELL_INPUT =
+  'w-16 min-w-0 border-b border-transparent bg-transparent p-0 text-right text-textBaseSize tabular-nums hover:border-hairline focus:border-textColor focus:outline-none disabled:text-labelColor';
+// Строка ведомости — триггер поповера: та же строка плюс кольцо фокуса с клавиатуры.
+const FACT_TRIGGER = `${FACT_ROW} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:text-labelColor`;
+
 function violationText(v: Violation): string {
   if (v.otherIndex == null) {
     return v.required > 0
@@ -127,6 +217,58 @@ function violationText(v: Violation): string {
 }
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
+
+// Запас на конец настила с каждой стороны, см (как LAY_END_LOSS_DEFAULT_CM формы настила).
+const END_LOSS_DEFAULT_CM = 2;
+// «fit to the table»: пробные прогоны коротким бюджетом, не больше стольких попыток.
+const FIT_PROBE_BUDGET_MS = 4000;
+const FIT_MAX_ATTEMPTS = 6;
+
+// СНИМОК ТОГО, С ЧЕМ ЗАПУЩЕН ПРОГОН. Сохранение и холст читают его, а не текущие поля: настройки
+// цеха и артикул догружаются асинхронно и могли сменить припуск или ширину посреди прогона, и
+// маркер записал бы не те числа, по которым движок укладывал.
+type RunSnap = {
+  config: NestConfig;
+  pieces: PieceDTO[];
+  composition: MarkerCompositionEntry[];
+  allowanceMm: number;
+  widthCm: number;
+  gapCm: number;
+  marginCm: number;
+  crossGrain: boolean;
+  // Стол прогона: полезная U (null = стол не задан), сам стол и запас — на момент СТАРТА. Сохраняется
+  // именно это, а не сегодняшнее значение поля: правка стола после прогона результат не меняет.
+  usableCm: number | null;
+  tableCm: number | null;
+  endLossCm: number;
+  // Прогон шёл в режиме стола (настил слоями): только такой маркер записывает layout.spread.
+  // Одиночный настил стола не знает — настил не пишется вовсе.
+  layTable: boolean;
+  // Режим настила на старте — часть идентичности прогона: переключение table↔single после
+  // прогона меняет, пишется ли layout.spread, поэтому такой снимок устарел.
+  layMode: 'single' | 'table';
+};
+
+// Заголовок без авто-хвоста: сохранённое имя вида «XS×9 · main fabric main fabric · 140 cm» — это
+// подпись по умолчанию, не имя от человека; показывается «xs ×9 · main fabric». Своё имя — как есть.
+const AUTO_NAME_TAIL = /\s·\s\d+(?:[.,]\d+)?\s?cm$/;
+function cleanMarkerTitle(name: string): string {
+  if (!AUTO_NAME_TAIL.test(name)) return name;
+  return name
+    .replace(AUTO_NAME_TAIL, '')
+    .split(' · ')
+    .map((part) => {
+      const w = part.trim().split(/\s+/);
+      if (w.length % 2 === 0) {
+        const h = w.length / 2;
+        const a = w.slice(0, h).join(' ');
+        if (a.toLowerCase() === w.slice(h).join(' ').toLowerCase()) part = a;
+      }
+      return part.replace(/(\S+)×(\d+)/g, (_m, s: string, q: string) => `${s.toLowerCase()} ×${q}`);
+    })
+    .filter(Boolean)
+    .join(' · ');
+}
 
 function PieceThumb({ piece }: { piece: PieceDTO }) {
   const path = useMemo(() => {
@@ -143,6 +285,94 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
 function numOr(v: string, fallback: number): number {
   const n = Number(v.replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
+}
+
+// ЧИСЛОВОЕ ПОЛЕ ТУЛБАРА. Пока поле в фокусе, в нём живёт СТРОКА: стёртый ноль остаётся пустым, а
+// не прыгает обратно в «0» (иначе ввод «1» давал «01»). Число уходит наружу на каждом валидном
+// вводе (или только на blur — `commitOnBlur`), пустое поле становится `emptyAs` на blur (без него
+// — откат к прежнему значению). Фокус выделяет всё: набор заменяет число, а не дописывается к нему.
+// type=text + inputMode — без нативных стрелок, которые ломали ряд одинаковых коробок.
+function NumBox({
+  name,
+  value,
+  onCommit,
+  decimal = false,
+  emptyAs,
+  commitOnBlur = false,
+  disabled,
+  onClear,
+  className = BOX,
+  arrowStep = false,
+}: {
+  name: string;
+  // null = не задано: пустая коробка, а не ноль.
+  value: number | null;
+  onCommit: (n: number) => void;
+  decimal?: boolean;
+  emptyAs?: number;
+  commitOnBlur?: boolean;
+  disabled?: boolean;
+  // Пустое поле без emptyAs — «очистить» (стол, предел стопки).
+  onClear?: () => void;
+  className?: string;
+  // ↑/↓ меняют целое на 1 (ячейки состава настила).
+  arrowStep?: boolean;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const parse = (raw: string): number | null => {
+    const t = raw.trim().replace(',', '.');
+    if (t === '' || t === '.' || !(decimal ? /^\d*\.?\d*$/ : /^\d+$/).test(t)) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+  return (
+    <input
+      id={name}
+      name={name}
+      type='text'
+      inputMode={decimal ? 'decimal' : 'numeric'}
+      autoComplete='off'
+      className={className}
+      value={draft ?? (value == null ? '' : String(value))}
+      onKeyDown={
+        arrowStep
+          ? (e) => {
+              if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              const cur = parse(draft ?? '') ?? value ?? 0;
+              const next = Math.max(0, cur + (e.key === 'ArrowUp' ? 1 : -1));
+              setDraft(String(next));
+              onCommit(next);
+            }
+          : undefined
+      }
+      disabled={disabled}
+      onFocus={(e) => {
+        setDraft(value == null ? '' : String(value));
+        const el = e.currentTarget;
+        requestAnimationFrame(() => el.select());
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        if (commitOnBlur) return;
+        const n = parse(raw);
+        if (n != null) onCommit(n);
+      }}
+      onBlur={() => {
+        const raw = draft ?? '';
+        setDraft(null);
+        const n = parse(raw);
+        if (n != null) {
+          if (commitOnBlur) onCommit(n);
+        } else if (raw.trim() === '' && emptyAs != null) {
+          onCommit(emptyAs);
+        } else if (raw.trim() === '' && onClear) {
+          onClear();
+        }
+      }}
+    />
+  );
 }
 
 // ПЕРЕСОБРАННЫЙ ЧЕРТЁЖ ДЕТАЛИ (Ф3.5) — состояние, а не булево. Четыре ответа, и каждый решает
@@ -176,6 +406,8 @@ export function NestingModal({
   requiredSeamAllowanceMm,
   workshopDefaultSeamAllowanceMm,
   productionRunId = 0,
+  autoRun = false,
+  initialColorwayId,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -228,6 +460,11 @@ export function NestingModal({
   // выкройки несут линию кроя»), и спутать её с «не настроено» значит объявить каждую раскладку с
   // припуском нарушающей эталон, которого никто не задавал.
   requiredSeamAllowanceMm?: number | null;
+  // Deep link (colourways → `?marker=<lineKey>&auto=1`): press «run» once by itself as soon as the
+  // parse is ready and nothing blocks the run. Blocked = nothing happens; the header says why.
+  autoRun?: boolean;
+  // Колорвей, выбранный при открытии (deep link из COLOURWAYS). Только начальное значение.
+  initialColorwayId?: number;
   // Припуск цеха по умолчанию, мм (admin.WorkshopSettings.default_seam_allowance_mm). Тот же
   // договор: `null` = не настроено, и это НЕ ноль.
   workshopDefaultSeamAllowanceMm?: number | null;
@@ -246,9 +483,8 @@ export function NestingModal({
   // сегодняшними умолчаниями. Отдать те же файлы ещё и сюда значило бы скачать их дважды и
   // дважды разобрать в двух воркерах — ради `allPieces`, которых в этом режиме не читает никто:
   // геометрию даёт блоб, левая колонка скрыта, прогон недоступен.
-  const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(
-    view ? null : files,
-  );
+  const { parse, run, start, stop, resetRun, reparse, unitOverride, probe, cancelProbe } =
+    useNesting(view ? null : files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
   // Отказ выдать скалярную норму у ОТКРЫТОГО маркера — слово сервера, если он его сказал.
   // Показывается вместо числа: «средняя по составу» и настоящая норма выглядят одинаково.
@@ -261,7 +497,11 @@ export function NestingModal({
   // Raw keystrokes; the min-clamp lands on BLUR (clamping per keystroke makes 90 unreachable
   // — typing «9» snaps to 10).
   const [widthRaw, setWidthRaw] = useState<string | null>(null);
-  const [targetCm, setTargetCm] = useState<number | ''>('');
+  // Ширины нет НИГДЕ (ни у пина колорвея, ни у строки BOM): коробка пустая, прогон закрыт, в шапке
+  // дверь туда, где её задают. 140 по умолчанию здесь была бы правдоподобной и неверной длиной.
+  const [widthUnset, setWidthUnset] = useState(false);
+  // Целевая длина движком не используется (только SVG/вердикт) — поле скрыто, состояние осталось.
+  const [targetCm] = useState<number | ''>('');
   const [gapCm, setGapCm] = useState<number>(NEST_DEFAULTS.gapCm);
   const [marginCm, setMarginCm] = useState<number>(NEST_DEFAULTS.edgeMarginCm);
   // Припуск на шов: контур из DXF — линия ШВА, а кроят по линии КРОЯ. Это вход алгоритма, а не
@@ -272,7 +512,8 @@ export function NestingModal({
     engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
   );
   const [crossGrain, setCrossGrain] = useState<boolean>(NEST_DEFAULTS.allowCrossGrain);
-  const [budgetS, setBudgetS] = useState<number>(NEST_DEFAULTS.timeBudgetMs / 1000);
+  // Бюджет поиска — дефолт (селектор убран, patterns-lite).
+  const [budgetS] = useState<number>(NEST_DEFAULTS.timeBudgetMs / 1000);
   const [sel, setSel] = useState<PieceSel>({});
   // СОСТАВ РАСКЛАДКИ (Ф2): размерный ТОКЕН файла → сколько ИЗДЕЛИЙ этого размера кроит настил.
   //
@@ -327,7 +568,8 @@ export function NestingModal({
     () => pieceLineKeysByPieceId(allPieces, split, pieceAliases),
     [pieceAliases, allPieces, split],
   );
-  const [activeLayer, setActiveLayer] = useState<string | null>(null);
+  // Выбор контурного слоя убран из UI (patterns-lite): всегда defaultContourLayer.
+  const [activeLayer] = useState<string | null>(null);
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
     ? (activeLayer as string)
     : defaultContourLayer(layerOpts);
@@ -343,7 +585,6 @@ export function NestingModal({
   const contourMeasure: ContourAllowance | null =
     layerOpts.find((o) => o.layer === contourLayer)?.allowance ?? null;
   // Слой, на котором ЗАМЕРЕНА линия шва, — второй из двух выходов, которые обязан назвать отказ.
-  const seamLayerPick = useMemo(() => seamLineLayer(layerOpts), [layerOpts]);
   // UNI-ДУБЛИ: одна неградуируемая деталь, приехавшая из по-размерных выгрузок несколькими
   // именами, кроится ОДИН раз. Считается ДО списка размеров и до отбора деталей, потому что
   // исключённые копии не должны попадать НИ В ОДИН счёт: увидев «6 деталей без размера» вместо
@@ -444,7 +685,13 @@ export function NestingModal({
 
   // Строки состава с количеством. sizeId 0 = токен не резолвится: считать такую раскладку
   // можно, сохранить — нет (тот же отказ, что был у одиночного размера, только построчно).
-  const compRows = useMemo(
+  //
+  // ЯЧЕЙКИ ≠ СОСТАВ МАРКЕРА В РЕЖИМЕ СТОЛА. В «single lay» ячейка — сколько изделий лежит в маркере.
+  // В «table» ячейка — сколько изделий КРОИТЬ всего, а маркер — ОДИН слой настила: его состав
+  // q_s = ⌈total_s / plies⌉ (слои режут стопкой). XS 10 при 10 слоях — один XS на столе, а не
+  // десять. compRows/activeRows/ungradedUnits ниже — всегда состав МАРКЕРА (то, что нестит движок
+  // и что сохраняется); cellRows/cellUngraded — то, что в ячейках.
+  const cellRows = useMemo(
     () =>
       foldedRows.map((r) => ({
         ...r,
@@ -453,10 +700,46 @@ export function NestingModal({
       })),
     [foldedRows, qtyByToken],
   );
-  const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
   // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
-  const ungradedUnits = Math.max(1, Math.round(qtyByToken[''] ?? 1));
-  const graded = compRows.length > 0;
+  const cellUngraded = Math.max(1, Math.round(qtyByToken[''] ?? 1));
+  const graded = cellRows.length > 0;
+  // Слои: null = авто (НОД итогов под пределом стопки, см. autoPlies); число — своё значение
+  // оператора, пока он не вернёт «auto».
+  const [pliesEdit, setPlies] = useState<number | null>(null);
+  const [spreadMode, setSpreadMode] = useState<SpreadMode>('face_up');
+  // РЕЖИМ НАСТИЛА (раунд 6): «single lay» — один настил без стола, граница стола в движок не
+  // уходит; «table» — настил слоями под стол. Режим помнит браузер.
+  const [layMode, setLayMode] = useLayMode();
+  const tableMode = layMode === 'table';
+  // Предел стопки в СЛОЯХ считается ниже (толщина живёт у слота ткани) и зеркалится сюда эффектом.
+  const [stackCapPlies, setStackCapPlies] = useState<number | null>(null);
+  const cutTotals = useMemo(
+    () => (graded ? cellRows.map((r) => r.qty) : [cellUngraded]),
+    [graded, cellRows, cellUngraded],
+  );
+  const autoPliesN = useMemo(
+    () => autoPlies(cutTotals, stackCapPlies, spreadMode === 'face_to_face'),
+    [cutTotals, stackCapPlies, spreadMode],
+  );
+  const plies = pliesEdit ?? autoPliesN;
+  const pliesAuto = pliesEdit == null;
+  // Лицом к лицу слои идут парами: нечётное число закрывает прогон и сохранение.
+  const pliesParityBad = tableMode && spreadMode === 'face_to_face' && plies % 2 === 1;
+  const perPly = useMemo(
+    () => (tableMode ? perPlyQuantities(cutTotals, plies) : cutTotals),
+    [tableMode, cutTotals, plies],
+  );
+  // Перекрой по размерам: plies·q − total (только в режиме стола).
+  const overCut = useMemo(
+    () => (tableMode ? overCutOf(cutTotals, plies) : cutTotals.map(() => 0)),
+    [tableMode, cutTotals, plies],
+  );
+  const compRows = useMemo(
+    () => (graded ? cellRows.map((r, i) => ({ ...r, qty: perPly[i] ?? 0 })) : cellRows),
+    [graded, cellRows, perPly],
+  );
+  const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
+  const ungradedUnits = graded ? cellUngraded : Math.max(1, perPly[0] ?? 1);
   // ТИРАЖ НАСТИЛА И ФОРМУЛА БЛОБА — из общего модуля (piece-selection.ts), а не выражением здесь.
   // Ту же формулу собирает очередь раскроя партии на вкладке костинга, БЕЗ этой модалки, и вторая
   // её копия была бы вторым ответом на вопрос «сколько экземпляров этой детали кроят».
@@ -527,7 +810,8 @@ export function NestingModal({
   const autoGrainLayer = useMemo(() => defaultGrainLayer(grainLayers), [grainLayers]);
   // null = следовать автоопределению; '' = не разворачивать. Слой можно и ПЕРЕБРАТЬ, а не
   // только выключить: опознание — эвристика, и молча ошибиться она может в обе стороны.
-  const [grainPick, setGrainPick] = useState<string | null>(null);
+  // Выбор слоя долевой убран из UI (patterns-lite): всегда авто.
+  const [grainPick] = useState<string | null>(null);
   const grainLayer =
     grainPick === null
       ? autoGrainLayer
@@ -560,15 +844,10 @@ export function NestingModal({
   // одно и то же, и клиентская проверка нужна затем, чтобы отказ не приходил ПОСЛЕ оплаченного
   // бюджета — на прогон уходят десятки секунд, и узнать в конце, что норму не примут, значит
   // выбросить их.
-  const contourIsCutLine =
-    contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
+  const contourIsCutLine = contourCarriesCutLine(contourMeasure);
   const doubleAllowanceRefusal =
     !viewData && contourIsCutLine && allowanceMm > 0 && contourMeasure
-      ? `layer ${contourMeasure.layer || '—'} is the CUT LINE: it was measured lying ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm outside the seam line (agreed on ${contourMeasure.stats.accepted} blocks). the marker will add another ${allowanceMm.toFixed(1)} mm of offset — the allowance would be counted TWICE, and the length overstated by roughly ${allowanceMm.toFixed(1)} mm around the perimeter of every piece. there are two ways out: set the allowance to 0 (the contour already carries it) or ${
-          seamLayerPick
-            ? `pick contour layer ${seamLayerPick} — the seam line was measured on it`
-            : 'pick a contour layer with the seam line'
-        }.`
+      ? `double allowance: contour already has ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm, set allowance to 0`
       : null;
   // УЛИК НЕТ — И ЭТО НЕ ПОВОД ЗАПРЕЩАТЬ (§5.4). Улики отсутствуют ЗАКОНОМЕРНО: у блока один
   // замкнутый контур, второй контур пересекает первый, блоков меньше трёх. Такая раскладка
@@ -584,6 +863,96 @@ export function NestingModal({
   // не эталон, а признание: `NEST_DEFAULTS.seamAllowanceCm` перестал быть источником истины и
   // остался последним фолбэком, у которого в подписи так и сказано, что его никто не задавал.
   const [allowanceTouched, setAllowanceTouched] = useState(false);
+  // Дверь в артикул открыта в другой вкладке → на возврате перечитать материалы (см. ниже).
+  const articleOpenedRef = useRef(false);
+  const qcEarly = useQueryClient();
+  const qcRef = useRef(qcEarly);
+  qcRef.current = qcEarly;
+  // ПРИПУСК ЦЕХА — прямо из настроек, если вызывающий его не передал. Раньше ни одна точка входа
+  // его не передавала, и предзаполнение модалки шло мимо цеха, тогда как планировщик
+  // (batch-marker-plan) брал его всегда: две раскладки одной ткани мерили разные контуры.
+  // Читается всегда: кроме припуска отсюда же длина стола и предел стопки (ряд «table»).
+  const workshopQuery = useWorkshopSettings();
+  const updateWorkshop = useUpdateWorkshopSettings();
+  const { canWrite } = usePermissions();
+  const canWriteWorkshop = canWrite(SECTION.production);
+  const settingCm = (d?: googletype_Decimal): number | null => {
+    const n = parseDecimalNumber(decimalToInput(d));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const wsTableCm = settingCm(workshopQuery.data?.settings?.cuttingTableLengthCm);
+  const wsStackCm = settingCm(workshopQuery.data?.settings?.maxStackHeightCm);
+  // Ширина стола (0413): рисуется на пиктограмме в масштабе; не задана — вердикта по ширине нет.
+  const wsTableWidthCm = settingCm(workshopQuery.data?.settings?.cuttingTableWidthCm);
+  // undefined = следовать цеху; null = очищено здесь; число = своё значение до «save for the workshop».
+  const [tableEdit, setTableEdit] = useState<number | null | undefined>(undefined);
+  const [stackEdit, setStackEdit] = useState<number | null | undefined>(undefined);
+  const [tableWidthEdit, setTableWidthEdit] = useState<number | null | undefined>(undefined);
+  const tableCm = tableEdit === undefined ? wsTableCm : tableEdit;
+  const tableWidthCm = tableWidthEdit === undefined ? wsTableWidthCm : tableWidthEdit;
+  const stackLimitCm = stackEdit === undefined ? wsStackCm : stackEdit;
+  const [endLossCm, setEndLossCm] = useState<number>(END_LOSS_DEFAULT_CM);
+  // null = по умолчанию: укладывать в стол, когда длина стола задана.
+  const [keepOnTableEdit, setKeepOnTable] = useState<boolean | null>(null);
+  // Полезная длина стола U = стол − 2·запас.
+  const usableCm =
+    tableCm != null && tableCm - 2 * endLossCm > 0
+      ? Math.round((tableCm - 2 * endLossCm) * 100) / 100
+      : null;
+  const keepOnTable = tableMode && usableCm != null && (keepOnTableEdit ?? true);
+  const workshopDirty =
+    (tableEdit !== undefined && tableEdit !== wsTableCm) ||
+    (tableWidthEdit !== undefined && tableWidthEdit !== wsTableWidthCm) ||
+    (stackEdit !== undefined && stackEdit !== wsStackCm);
+  const [savingWorkshop, setSavingWorkshop] = useState(false);
+  const saveForWorkshop = async (): Promise<boolean> => {
+    if (!workshopDirty) return true;
+    if (!canWriteWorkshop || savingWorkshop) return false;
+    const asSetting = (v: number | null): googletype_Decimal =>
+      v == null ? CLEAR_SETTING : { value: String(Math.round(v * 100) / 100) };
+    setSavingWorkshop(true);
+    try {
+      await updateWorkshop.mutateAsync({
+        cuttingTableLengthCm:
+          tableEdit !== undefined && tableEdit !== wsTableCm ? asSetting(tableEdit) : undefined,
+        maxStackHeightCm:
+          stackEdit !== undefined && stackEdit !== wsStackCm ? asSetting(stackEdit) : undefined,
+        cuttingTableWidthCm:
+          tableWidthEdit !== undefined && tableWidthEdit !== wsTableWidthCm
+            ? asSetting(tableWidthEdit)
+            : undefined,
+        defaultSeamAllowanceMm: undefined,
+      });
+      setTableEdit(undefined);
+      setTableWidthEdit(undefined);
+      setStackEdit(undefined);
+      showMessage('saved for the workshop', 'success');
+      return true;
+    } catch (e) {
+      showMessage(failMessage(e, "couldn't save for the workshop"), 'error');
+      return false;
+    } finally {
+      setSavingWorkshop(false);
+    }
+  };
+  const workshopSeamMm = (() => {
+    if (workshopDefaultSeamAllowanceMm != null) return workshopDefaultSeamAllowanceMm;
+    const n = parseDecimalNumber(
+      decimalToInput(workshopQuery.data?.settings?.defaultSeamAllowanceMm),
+    );
+    return Number.isFinite(n) ? n : null;
+  })();
+  // Чем чинить «без припуска»: эталон карточки → цех → умолчание движка; первое НЕНУЛЕВОЕ.
+  const fixAllowanceMm = (() => {
+    for (const v of [
+      requiredSeamAllowanceMm,
+      workshopSeamMm,
+      engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
+    ]) {
+      if (v != null && Number.isFinite(v) && v > 0) return clampSeamAllowanceMm(v);
+    }
+    return 0;
+  })();
   const allowancePrefill = useMemo(() => {
     // Пока файл не разобран, подставлять нечего: замера ещё нет, а без него порядок §5.5 отвечал
     // бы эталоном на вопрос, на который сперва обязан ответить файл.
@@ -591,16 +960,10 @@ export function NestingModal({
     return seamAllowancePrefill({
       measured: contourMeasure,
       cardRequiredMm: requiredSeamAllowanceMm,
-      workshopDefaultMm: workshopDefaultSeamAllowanceMm,
+      workshopDefaultMm: workshopSeamMm,
       fallbackMm: engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
     });
-  }, [
-    viewData,
-    parse.phase,
-    contourMeasure,
-    requiredSeamAllowanceMm,
-    workshopDefaultSeamAllowanceMm,
-  ]);
+  }, [viewData, parse.phase, contourMeasure, requiredSeamAllowanceMm, workshopSeamMm]);
   useEffect(() => {
     // Введённое руками не перебивается НИКОГДА — ровно как ширина полотна рядом. Свой номер
     // оператор ставит осознанно, и подставить поверх него «правильный» значит спорить с
@@ -613,7 +976,11 @@ export function NestingModal({
   // припуска.
   const allowanceSourceText = (() => {
     const m = contourMeasure;
-    if (!m || parse.phase !== 'ready') return 'the DXF contour is the seam line; the cut line is what gets laid';
+    if (!m || parse.phase !== 'ready')
+      return 'the DXF contour is the seam line; the cut line is what gets laid';
+    if (m.verdict === 'cut' && m.source === 'manifest') {
+      return `layer ${m.layer}: FINAL CUT LINE — declared by the converter's manifest, the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour`;
+    }
     if (m.verdict === 'cut') {
       return `layer ${m.layer}: CUT LINE — the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour (measured on ${m.stats.accepted} blocks)`;
     }
@@ -645,6 +1012,16 @@ export function NestingModal({
   const stopping = running && run.stopping;
   const result: NestResult | null =
     run.phase === 'done' ? run.result : run.phase === 'running' ? run.best : null;
+  const [snap, setSnap] = useState<RunSnap | null>(null);
+  // Подбор под стол идёт пробными прогонами мимо run-состояния — отдельный признак занятости.
+  const [fitting, setFitting] = useState<{ attempt: number } | null>(null);
+  const fitAbort = useRef(false);
+  // Слои, которые выставил «fit to the table» в режиме стола: если их больше предела стопки,
+  // итоги одним настилом не закрыть — шапка говорит «needs N lays», а не «set plies to max».
+  const [fitPlies, setFitPlies] = useState<number | null>(null);
+  const busy = running || fitting != null;
+  // Результат прогона рисуется и сохраняется по СНИМКУ его входов.
+  const runView = !viewData && result && snap ? snap : null;
 
   // ── ручная доводка (Ф5) ────────────────────────────────────────────────────────────────
   // manual = hand-edited placements overriding the engine/blob result; null = untouched.
@@ -687,6 +1064,8 @@ export function NestingModal({
     // Состав — параметр прогона наравне с шириной: он решает, какие детали и в скольких
     // экземплярах ложатся на полосу. Готовый результат после его правки описывал бы другой настил.
     qtyByToken,
+    // Ширина «не задана» — результат на прежней ширине больше ничего не описывает.
+    widthUnset,
     contourLayer,
     grainLayer,
     allowanceMm,
@@ -793,14 +1172,24 @@ export function NestingModal({
       ? drawing.pieces
       : viewData
         ? viewData.pieces
-        : pieces;
+        : runView
+          ? runView.pieces
+          : pieces;
   const displayResult = viewData ? viewData.result : result;
-  const displayWidth = viewData ? viewData.widthCm : widthCm;
+  const displayWidth = viewData ? viewData.widthCm : runView ? runView.widthCm : widthCm;
   const displayTarget = viewData ? viewData.targetCm : target;
   // Validation parameters follow the layout's own params in view mode.
-  const displayGap = viewData ? decNum(view?.summary?.gapCm) : gapCm;
-  const displayMargin = viewData ? decNum(view?.summary?.edgeMarginCm) : marginCm;
-  const displayCross = viewData ? !!view?.summary?.allowCrossGrain : crossGrain;
+  const displayGap = viewData ? decNum(view?.summary?.gapCm) : runView ? runView.gapCm : gapCm;
+  const displayMargin = viewData
+    ? decNum(view?.summary?.edgeMarginCm)
+    : runView
+      ? runView.marginCm
+      : marginCm;
+  const displayCross = viewData
+    ? !!view?.summary?.allowCrossGrain
+    : runView
+      ? runView.crossGrain
+      : crossGrain;
 
   // The effective layout: manual placements override, length/efficiency re-measured from
   // true contours; untouched layouts keep the engine's own accounting verbatim.
@@ -831,12 +1220,59 @@ export function NestingModal({
       widthCm: displayWidth,
       gapCm: displayGap,
       marginCm: displayMargin,
+      ...(viewData ? STORED_LAYOUT_TOLERANCE : {}),
     });
-  }, [effective, running, displayPieces, displayWidth, displayGap, displayMargin]);
+  }, [effective, running, displayPieces, displayWidth, displayGap, displayMargin, viewData]);
   const violatingIdx = useMemo(() => new Set(violations.map((v) => v.index)), [violations]);
   const worstViolation = violations.length
     ? violations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
     : null;
+  // «show» в шапке: худшая деталь ЗА КРАЕМ полотна (её и видно красной), иначе худший зазор.
+  const outsideViolations = violations.filter((v) => v.otherIndex == null);
+  const showViolation = outsideViolations.length
+    ? outsideViolations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
+    : worstViolation;
+  const outsideCount = new Set(outsideViolations.map((v) => v.index)).size;
+  const tooCloseCount = new Set(
+    violations.filter((v) => v.otherIndex != null).flatMap((v) => [v.index, v.otherIndex!]),
+  ).size;
+  const [focusReq, setFocusReq] = useState<{ index: number; nonce: number } | null>(null);
+
+  // НЕДОБОР ПРИПУСКА У СОХРАНЁННОЙ РАСКЛАДКИ — по полям раскладки, а не по тексту блоба: тот на
+  // любом нуле писал «SEAM LINE was nested», в том числе когда уложен был контур КРОЯ. Тревога
+  // только когда припуск записан нулём И ни одно из свидетельств не говорит «контур — линия кроя»:
+  // замер в записи (contour_allowance_mm > 0), новая заметка блоба или сегодняшний замер того же
+  // слоя по выкройкам этой ткани. Незаписанный припуск (легаси) — не ноль, тревоги нет.
+  const storedNoAllowance = useMemo(() => {
+    const sm = view?.summary;
+    if (!viewData || !sm) return false;
+    const seamMm = parseDecimalNumber(decimalToInput(sm.seamAllowanceMm));
+    if (!Number.isFinite(seamMm) || seamMm > 0) return false;
+    const contourMm = parseDecimalNumber(decimalToInput(sm.contourAllowanceMm));
+    if (Number.isFinite(contourMm) && contourMm > 0) return false;
+    const note = (view?.layout?.warnings ?? []).find((w) => w.startsWith(SEAM_NOTE_PREFIX)) ?? '';
+    if (/the contour is the CUT line/.test(note)) return false;
+    const layer = sm.contourLayer ?? '';
+    if (layer && allPieces.length > 0) {
+      const opt = layerOptions(allPieces, split.codeById, buildAllowanceIndex(allPieces)).find(
+        (o) => o.layer === layer,
+      );
+      if (contourCarriesCutLine(opt?.allowance)) return false;
+    }
+    return true;
+  }, [view, viewData, allPieces, split]);
+
+  // Вернулись из карточки артикула — перечитать материалы: ширина и толщина пина колорвея идут
+  // из каталога. Только если дверь в артикул открывали: фокус окна случается постоянно.
+  useEffect(() => {
+    const onFocus = () => {
+      if (!articleOpenedRef.current) return;
+      articleOpenedRef.current = false;
+      void qcRef.current.invalidateQueries({ queryKey: ['materials'] });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   const manualNote =
     manual && violations.length && worstViolation
       ? `${MANUAL_NOTE_PREFIX} ${violations.length} ${violations.length === 1 ? 'violation' : 'violations'} (worst — ${violationText(worstViolation)})`
@@ -862,8 +1298,19 @@ export function NestingModal({
     !!effective && effective.totalCount > 0 && effective.placedCount !== effective.totalCount;
   const viewIsDraft = isDraftMarker(view?.summary);
   const partialExportRefusal = partialGeometry
-    ? `${effective?.placedCount ?? 0} of ${effective?.totalCount ?? 0} pieces placed: exporting a partial marker is forbidden — a garment cut from such a file would come out without the missing pieces. raise the search budget and recompute${viewIsDraft ? ' (this is a DRAFT)' : ''}`
+    ? `${viewIsDraft ? 'draft: ' : ''}${effective?.placedCount ?? 0} of ${effective?.totalCount ?? 0} placed, export off`
     : '';
+  // РЕЖИМ СТОЛА: прогон шёл с maxLengthCm (обычный прогон с «within table» или финал «fit to the
+  // table»), и легли НЕ ВСЕ детали — по любой причине, не только 'table-full'. Это ОДНА ошибка в
+  // шапке (дверь — «fit to the table»), она же причина выключенного «save marker»; строки «did not
+  // fit» и «… placed, export off» в этом режиме не дублируют её.
+  const tableRun = !viewData && runView?.config.maxLengthCm != null;
+  const tableShortText =
+    tableRun && !running && !!effective && effective.placedCount < effective.totalCount
+      ? `${effective.totalCount - effective.placedCount} of ${effective.totalCount} ${
+          effective.totalCount === 1 ? "piece doesn't" : "pieces don't"
+        } fit on the table`
+      : '';
 
   // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
   //
@@ -878,7 +1325,10 @@ export function NestingModal({
   // a glance instead of after a 20-second search — which is the better place to say it. What
   // survives here is the engine's own guarantee: whatever reaches the placer and does not land is
   // named. The two are not redundant, they are the pre-flight and the black box.
-  const unplaced = !running ? displayResult?.unplaced ?? [] : [];
+  // 'table-full' — отдельный вердикт стола (с действием), не «did not fit».
+  const unplaced = (!running ? displayResult?.unplaced ?? [] : []).filter(
+    (u) => u.reason !== 'table-full',
+  );
   const unplacedText = useMemo(() => {
     if (unplaced.length === 0) return '';
     const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `piece ${id}`;
@@ -973,16 +1423,6 @@ export function NestingModal({
   const overCap = checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS;
   const MAX_MARKER_COMPOSITION_SIZES = 32;
 
-  // Source-file groups for the per-fabric one-click filter (each fabric is its own DXF).
-  const sources = useMemo(() => {
-    const m = new Map<string, PieceDTO[]>();
-    for (const p of pieces) {
-      if (!m.has(p.source)) m.set(p.source, []);
-      m.get(p.source)!.push(p);
-    }
-    return [...m.entries()];
-  }, [pieces]);
-
   const downloadTimer = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -1026,6 +1466,16 @@ export function NestingModal({
   const dxfReady =
     !partialGeometry &&
     ((viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done');
+  // Одна короткая причина выключенного экспорта — тултип у ссылок SVG/DXF.
+  const exportBlockReason =
+    partialExportRefusal ||
+    (viewDegraded
+      ? 'geometry unreadable'
+      : drawing.phase === 'running'
+        ? 'restoring the drawing…'
+        : drawing.phase === 'error'
+          ? `drawing not restored: ${rebuildText}`
+          : '');
   const downloadDxf = () => {
     if (!dxfReady || !effective) return;
     download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf');
@@ -1065,7 +1515,7 @@ export function NestingModal({
   // Колорвей, ПОД КОТОРЫЙ считается раскладка. 0 = общая, «ширина у всех одинаковая». Он выбран
   // до запуска, а не при сохранении: от него зависит ширина полотна, а ширина — это вход
   // алгоритма, а не подпись к результату.
-  const [colorwayId, setColorwayId] = useState<number>(0);
+  const [colorwayId, setColorwayId] = useState<number>(initialColorwayId ?? 0);
 
   // A slot added in the UI but never saved (id 0) cannot be linked — the server resolves
   // bom_line_key against SAVED rows and would reject the whole marker after a paid nest.
@@ -1129,13 +1579,15 @@ export function NestingModal({
   // на кромку.
   const slotCutWidth = (b?: MarkerBomLine): number => {
     if (!b) return NaN;
+    // Пин колорвея АВТОРИТЕТЕН: приколотый артикул без ширины — это «ширина не задана» (NaN),
+    // а не повод тихо взять ширину строки BOM — та описывает другое полотно.
     const pin = chosenColorway?.widthByLine.get(b.lineKey);
-    if (pin && Number.isFinite(pin.cutCm)) return pin.cutCm;
+    if (pin) return pin.cutCm;
     return slotCutWidthOf(b).cutCm;
   };
   const slotSelvedge = (b?: MarkerBomLine): number => {
     const pin = b ? chosenColorway?.widthByLine.get(b.lineKey) : undefined;
-    if (pin && Number.isFinite(pin.cutCm)) return pin.selvedgeCm;
+    if (pin) return pin.selvedgeCm;
     return b ? slotCutWidthOf(b).selvedgeCm : 0;
   };
   const slotWidth = slotCutWidth(slot);
@@ -1207,6 +1659,21 @@ export function NestingModal({
     const scope = markerScopeLines(key, bomLines ?? []);
     return scope.length > 0 ? strictestDirection(scope) : fabricDirection;
   }, [viewData, fabricDirection, lockedSlot, slotKey, bomLines]);
+  // ЛИЦОМ К ЛИЦУ НЕЛЬЗЯ: нечётные слои (пары не сложатся) ИЛИ полотно, которое нельзя
+  // переворачивать (ворс одного направления или направление не задано, allowsFlip). Один предикат
+  // на fit, прогон и сохранение — схема красит ту же строку ограничений.
+  const ftfNoFlip =
+    !viewData && tableMode && spreadMode === 'face_to_face' && !allowsFlip(effectiveDirection);
+  const faceToFaceInvalid = pliesParityBad || ftfNoFlip;
+  // ПОЛОТНО ШИРЕ СТОЛА: рулон (раскройная ширина + 2 кромки) против ширины стола. Ширина стола
+  // не задана — вердикта нет (не ошибка), пиктограмма рисует только длину. Только режим стола.
+  const clothRollCm = Math.round((widthCm + 2 * slotSelvedge(lockedSlot ?? slot)) * 10) / 10;
+  const clothWiderThanTable =
+    !viewData &&
+    tableMode &&
+    !widthUnset &&
+    tableWidthCm != null &&
+    clothRollCm > tableWidthCm + 0.05;
 
   // ЗАДАНИЕ ПРОГОНА — собирается ОДИН РАЗ и уезжает в две стороны: в воркер, который его считает,
   // и в оценку, которая говорит его цену ДО запуска (Ф2.3). Раньше конфиг строился внутри
@@ -1233,6 +1700,8 @@ export function NestingModal({
         })),
       fabricWidthCm: widthCm,
       targetLengthCm: target,
+      // Длина стола — граница укладки ТОЛЬКО при «within table» (или из «fit to the table»).
+      maxLengthCm: keepOnTable && usableCm != null ? usableCm : undefined,
       gapCm,
       edgeMarginCm: marginCm,
       allowCrossGrain: crossGrain,
@@ -1268,6 +1737,8 @@ export function NestingModal({
       grainLayer,
       allowanceMm,
       budgetS,
+      keepOnTable,
+      usableCm,
     ],
   );
 
@@ -1294,12 +1765,220 @@ export function NestingModal({
     if (manual) setRunConfirm(true);
     else startRun();
   };
-  const startRun = () => {
-    if (parse.phase !== 'ready') return;
+  const launch = (
+    config: NestConfig,
+    comp: MarkerCompositionEntry[],
+    // Полезная длина, под которую прогон стартует; «fit to the table» передаёт свою U явно.
+    runUsableCm: number | null = usableCm,
+  ) => {
+    if (parse.phase !== 'ready' || widthUnset || faceToFaceInvalid || clothWiderThanTable) return;
     setManual(null);
     setRunConfirm(false);
     setSaveError(null);
-    start(parse.parseId, runConfig);
+    setSnap({
+      config,
+      pieces,
+      composition: comp,
+      allowanceMm,
+      widthCm,
+      gapCm,
+      marginCm,
+      crossGrain,
+      usableCm: runUsableCm,
+      tableCm,
+      endLossCm,
+      layTable: runUsableCm != null || layMode === 'table',
+      layMode: layMode === 'table' ? 'table' : 'single',
+    });
+    start(parse.parseId, config);
+  };
+  // Один настил (single lay) стола не знает: ни капа, ни отметки стола в сохранённом маркере.
+  const startRun = () => launch(runConfig, composition, layMode === 'table' ? usableCm : null);
+
+  // ── «fit to the table» ─────────────────────────────────────────────────────────────────
+  // Целые изделия, пропорции размеров сохраняются: k изделий раскладываются по долям текущего
+  // состава (наибольший остаток), минимум одно изделие.
+  const qtyMapForK = (k: number): Record<string, number> | null => {
+    const want = Math.max(1, Math.round(k));
+    if (!graded) return { ...qtyByToken, '': want };
+    const total = activeRows.reduce((s, r) => s + r.qty, 0);
+    if (total <= 0) return null;
+    const parts = activeRows.map((r) => {
+      const exact = (r.qty * want) / total;
+      return { key: r.key, qty: r.qty, n: Math.floor(exact), frac: exact - Math.floor(exact) };
+    });
+    let left = want - parts.reduce((s, p) => s + p.n, 0);
+    for (const p of [...parts].sort((a, b) => b.frac - a.frac || b.qty - a.qty)) {
+      if (left <= 0) break;
+      p.n += 1;
+      left -= 1;
+    }
+    const next = { ...qtyByToken };
+    for (const p of parts) next[p.key] = p.n;
+    return next;
+  };
+  // Минус одно изделие — у самого многочисленного размера.
+  const minusOneGarment = (m: Record<string, number>): Record<string, number> | null => {
+    const keys = graded ? activeRows.map((r) => r.key) : [''];
+    let best: string | null = null;
+    for (const k of keys) {
+      if ((m[k] ?? 0) >= 1 && (best == null || (m[k] ?? 0) > (m[best] ?? 0))) best = k;
+    }
+    if (best == null) return null;
+    const next = { ...m, [best]: (m[best] ?? 0) - 1 };
+    return keys.reduce((s, k) => s + (next[k] ?? 0), 0) >= 1 ? next : null;
+  };
+  // Конфиг и состав для гипотетических количеств — та же формула, что у runConfig/composition.
+  const derivedFor = (m: Record<string, number>) => {
+    const rows = compRows
+      .map((r) => ({ ...r, qty: Math.max(0, Math.round(m[r.key] ?? 0)) }))
+      .filter((r) => r.qty >= 1);
+    const ung = Math.max(1, Math.round(m[''] ?? 1));
+    const u = markerUnits({ graded, rows, ungradedUnits: ung });
+    const uop = unitsOfPieces(allPieces, (id) => split.codeById.get(id)?.size ?? '', u);
+    const comp: MarkerCompositionEntry[] = graded
+      ? rows
+          .filter((r) => r.sizeId > 0)
+          .map((r) => ({ sizeId: r.sizeId, quantity: r.qty }))
+          .sort((a, b) => a.sizeId - b.sizeId)
+      : sizeId
+        ? [{ sizeId, quantity: ung }]
+        : [];
+    const config: NestConfig = {
+      ...runConfig,
+      pieces: runConfig.pieces
+        .map((c) => ({
+          ...c,
+          quantity: Math.max(1, Math.round(sel[c.pieceId]?.qty ?? 1)) * (uop.get(c.pieceId) ?? 0),
+        }))
+        .filter((c) => c.quantity > 0),
+    };
+    return { config, comp };
+  };
+  async function fitToTable() {
+    if (parse.phase !== 'ready' || usableCm == null || busy) return;
+    const parseId = parse.parseId;
+    const U = usableCm;
+    const areaById = new Map(pieces.map((p) => [p.id, p.areaCm2]));
+    const totalArea = runConfig.pieces.reduce(
+      (s, c) => s + (areaById.get(c.pieceId) ?? 0) * c.quantity,
+      0,
+    );
+    const garments = Math.max(1, unitsTotal);
+    let k = estimateGarmentsPerPly({
+      garmentAreaCm2: totalArea / garments,
+      fabricWidthCm: widthCm - 2 * marginCm,
+      usableLengthCm: U,
+    });
+    const perGarment = instanceCount / garments;
+    if (perGarment > 0)
+      k = Math.max(1, Math.min(k, Math.floor(MAX_MARKER_PLACEMENTS / perGarment)));
+    if (tableMode) {
+      await fitPliesToTable(parseId, U, k);
+      return;
+    }
+    let m = qtyMapForK(k);
+    if (!m) return;
+    fitAbort.current = false;
+    let fitted: Record<string, number> | null = null;
+    let lastTried: Record<string, number> = m;
+    try {
+      for (let attempt = 1; attempt <= FIT_MAX_ATTEMPTS && m; attempt++) {
+        setFitting({ attempt });
+        lastTried = m;
+        const { config } = derivedFor(m);
+        if (config.pieces.length === 0) break;
+        const res = await probe(parseId, {
+          ...config,
+          maxLengthCm: U,
+          timeBudgetMs: Math.min(FIT_PROBE_BUDGET_MS, config.timeBudgetMs),
+        });
+        if (fitAbort.current) return;
+        if (!res.unplaced.some((u) => u.reason === 'table-full')) {
+          fitted = m;
+          break;
+        }
+        m = minusOneGarment(m);
+      }
+    } catch {
+      return;
+    } finally {
+      setFitting(null);
+    }
+    // Не влезло за все попытки — финальный прогон берёт следующее меньшее (или последнее
+    // испробованное): полный бюджет укладывает плотнее пробы, а остаток покажет вердикт.
+    const final = fitted ?? m ?? lastTried;
+    const { config, comp } = derivedFor(final);
+    if (config.pieces.length === 0) return;
+    setQtyByToken(final);
+    setKeepOnTable(true);
+    launch({ ...config, maxLengthCm: U }, comp, U);
+  }
+  // РЕЖИМ СТОЛА: итоги неприкосновенны, ужимается СЛОЙ. Состав слоя — функция слоёв
+  // (⌈total/plies⌉), поэтому перебираются слои: от текущих вверх, каждый раз до наименьшего N,
+  // при котором слой становится меньше. Наименьшее такое N — наименьший перекрой при том же слое.
+  // Укрупнять слой «fit» не берётся: он подгоняет под стол, а не заполняет стол.
+  async function fitPliesToTable(parseId: number, U: number, estimate: number) {
+    const sumAt = (n: number) => perPlyQuantities(cutTotals, n).reduce((s, q) => s + q, 0);
+    const mapAt = (n: number): Record<string, number> => {
+      const q = perPlyQuantities(cutTotals, n);
+      return graded
+        ? Object.fromEntries(cellRows.map((r, i) => [r.key, q[i] ?? 0]))
+        : { '': Math.max(1, q[0] ?? 1) };
+    };
+    // Лицом к лицу — только чётные N (слои парами).
+    const step = spreadMode === 'face_to_face' ? 2 : 1;
+    const evenUp = (n: number) => (step === 2 && n % 2 === 1 ? n + 1 : n);
+    const pMax = evenUp(Math.max(1, ...cutTotals));
+    // Следующее N, при котором слой строго меньше; null — меньше некуда (по одному изделию).
+    // Шаг по N, а не по слою: сумма слоя ступенчатая, и первое N новой ступени — наименьший
+    // перекрой при этом слое. Предел перебора pMax ≤ max итог: дальше слой уже по одному.
+    const nextSmaller = (n: number): number | null => {
+      const cur = sumAt(n);
+      let x = n;
+      while (x < pMax && sumAt(x) >= cur) x += step;
+      return sumAt(x) < cur ? x : null;
+    };
+    let p: number | null = evenUp(plies);
+    while (p != null && sumAt(p) > estimate) p = nextSmaller(p);
+    if (p == null) p = pMax;
+    fitAbort.current = false;
+    let fitted: number | null = null;
+    let lastTried = p;
+    try {
+      for (let attempt = 1; attempt <= FIT_MAX_ATTEMPTS && p != null; attempt++) {
+        setFitting({ attempt });
+        lastTried = p;
+        const { config } = derivedFor(mapAt(p));
+        if (config.pieces.length === 0) break;
+        const res = await probe(parseId, {
+          ...config,
+          maxLengthCm: U,
+          timeBudgetMs: Math.min(FIT_PROBE_BUDGET_MS, config.timeBudgetMs),
+        });
+        if (fitAbort.current) return;
+        if (!res.unplaced.some((u) => u.reason === 'table-full')) {
+          fitted = p;
+          break;
+        }
+        p = nextSmaller(p);
+      }
+    } catch {
+      return;
+    } finally {
+      setFitting(null);
+    }
+    const finalP = evenUp(fitted ?? p ?? lastTried);
+    const { config, comp } = derivedFor(mapAt(finalP));
+    if (config.pieces.length === 0) return;
+    setPlies(finalP);
+    setFitPlies(finalP);
+    setKeepOnTable(true);
+    launch({ ...config, maxLengthCm: U }, comp, U);
+  }
+  const stopFit = () => {
+    fitAbort.current = true;
+    cancelProbe();
   };
 
   // Какой именно артикул подставил колорвей — иначе «ширина взялась откуда-то» и проверить нечем.
@@ -1366,14 +2045,53 @@ export function NestingModal({
   // чем не подставлять вовсе.
   const [widthTouched, setWidthTouched] = useState(false);
   const resolvedSlot = fabricLines.find((b) => b.lineKey === slotKey);
+  const widthSrcLine =
+    resolvedSlot ??
+    (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
+  const widthPin = widthSrcLine ? chosenColorway?.widthByLine.get(widthSrcLine.lineKey) : undefined;
+  // Владелец: выбор колорвея (и слота) ВСЕГДА заново берёт ширину из BOM — ручное число живёт
+  // только до следующего выбора. Смена источника и ширины — ОДНО действие под guardManual: отказ
+  // выбросить ручные правки оставляет и прежний источник, и прежнюю ширину; согласие сразу кладёт
+  // новую ширину (или «не задана») и сбрасывает готовый результат.
+  const chooseSource = (next: { colorwayId?: number; slotKey?: string }) => {
+    const cw = next.colorwayId ?? colorwayId;
+    const key = next.slotKey ?? slotKey;
+    const line =
+      fabricLines.find((b) => b.lineKey === key) ??
+      (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
+    const pin = line
+      ? cwOptions.find((c) => c.colorwayId === cw)?.widthByLine.get(line.lineKey)
+      : undefined;
+    const w = line ? (pin ? pin.cutCm : slotCutWidthOf(line).cutCm) : null;
+    guardManual(() => {
+      setColorwayId(cw);
+      setSlotKey(key);
+      setWidthTouched(false);
+      setWidthRaw(null);
+      if (w == null) {
+        setWidthUnset(false);
+      } else if (!Number.isFinite(w) || w < 10) {
+        setWidthUnset(true);
+      } else {
+        setWidthUnset(false);
+        setWidthCm(Math.round(w * 10) / 10);
+      }
+      resetRun();
+    });
+  };
   useEffect(() => {
     if (viewData || widthTouched) return;
-    const src =
-      resolvedSlot ??
-      (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
-    if (!src) return;
+    const src = widthSrcLine;
+    if (!src) {
+      setWidthUnset(false);
+      return;
+    }
     const w = slotCutWidth(src);
-    if (!Number.isFinite(w) || w < 10) return;
+    if (!Number.isFinite(w) || w < 10) {
+      setWidthUnset(true);
+      return;
+    }
+    setWidthUnset(false);
     const next = Math.round(w * 10) / 10;
     // Ширина — параметр прогона: её смена сбрасывает результат и стирает ручные правки
     // размещений. Поэтому, во-первых, ставим только если число реально другое (иначе любая
@@ -1397,8 +2115,7 @@ export function NestingModal({
 
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
-  const fetchFailed =
-    parse.phase === 'ready' && parse.warnings.some(isFetchFailure);
+  const fetchFailed = parse.phase === 'ready' && parse.warnings.some(isFetchFailure);
   // Размер, НА КОТОРЫЙ пишется маркер, — тот, что выбран в диалоге, а не тот, в чей слот файл
   // когда-то положили. Один DXF несёт весь ряд, и раскладка размера XS, записанная как маркер
   // размера M, испортила бы костинг молча: длина есть, размер не тот.
@@ -1448,11 +2165,25 @@ export function NestingModal({
   const directionRefusal =
     !viewData && layoutFlipsPiece && !allowsFlip(effectiveDirection)
       ? effectiveDirection === 'unknown'
-        ? 'the marker lays a piece upside down (180° or mirrored), and the fabric direction of the chosen slot is not set — the server will not accept such a norm: set the direction on the fabric line on the BOM tab, or rebuild the marker without flips'
-        : 'the marker lays a piece upside down (180° or mirrored), and the chosen fabric is marked one-way — on a napped fabric it cannot be laid that way: change the slot, rebuild the marker without flips, or fix the fabric direction if it is not actually napped'
+        ? 'a piece is flipped, fabric direction not set on the BOM line'
+        : 'a piece is flipped on a one-way fabric'
       : null;
+  // ИДЕНТИЧНОСТЬ ПРОГОНА ДЛЯ СОХРАНЕНИЯ: режим настила и состав слоя на старте должны совпадать
+  // с текущими — иначе сохранение записало бы layout.spread не того настила (или не записало
+  // бы вовсе) при составе, который движок не укладывал.
+  const compKey = (c: readonly MarkerCompositionEntry[]) =>
+    c.map((e) => `${e.sizeId}:${e.quantity}`).join(',');
+  const spreadStale =
+    !viewData &&
+    run.phase === 'done' &&
+    snap != null &&
+    (snap.layMode !== layMode || compKey(snap.composition) !== compKey(composition));
   const canSave =
     !viewData &&
+    !widthUnset &&
+    !spreadStale &&
+    !faceToFaceInvalid &&
+    !clothWiderThanTable &&
     canEdit &&
     !fetchFailed &&
     !noSlotChosen &&
@@ -1485,45 +2216,33 @@ export function NestingModal({
   const saveRefusals: string[] = (() => {
     if (viewData || canSave) return [];
     const out: string[] = [];
-    if (!canEdit) out.push('no rights to change the card, or it is released');
-    if (fetchFailed)
-      out.push("some of the DXF didn't download — the marker is incomplete, and such a marker would understate consumption");
-    if (directionRefusal)
-      out.push(
-        'refused on fabric direction — the full text is in section “3 · how we lay”, at the direction row',
-      );
-    if (doubleAllowanceRefusal)
-      out.push(
-        'double allowance — the search will not start; the full text is in section “2 · how we read the file”, at the contour layer picker',
-      );
+    if (!canEdit) out.push('no rights to edit the card');
+    if (widthUnset) out.push('cloth width not set');
+    if (spreadStale) out.push('lay or plies changed after the run: run again');
+    if (pliesParityBad) out.push('face to face needs an even number of plies');
+    if (ftfNoFlip) out.push('face to face needs a fabric that can be flipped');
+    if (clothWiderThanTable) out.push('cloth wider than the table');
+    if (fetchFailed) out.push("some DXF files didn't download");
+    if (directionRefusal) out.push(directionRefusal);
+    if (doubleAllowanceRefusal) out.push(doubleAllowanceRefusal);
     // Полный текст стоит в секции «1 · что кроим», у состава: там же лежат счётчики, которые
     // этот конфликт делает недостоверными. Второй экземпляр абзаца на том же экране был бы дублем.
-    if (uniRefusal)
-      out.push(
-        'copies of an ungraded piece disagree in the patterns — the full text is in section “1 · what we cut”, under the composition',
-      );
+    if (uniRefusal) out.push('copies of an ungraded piece disagree');
     // Не было в цепочке вовсе: отказ по невыбранной ткани блокировал сохранение молча, а тултип
     // падал в терминальную ветку про «завершённую раскладку». Формулировка — та же, что в рейле.
-    if (noSlotChosen)
-      out.push(
-        "pick a fabric — otherwise the marker is saved unbound and its consumption won't reach the costing",
-      );
+    if (noSlotChosen) out.push('pick a fabric');
     if (sizeUnresolved)
       out.push(
         unresolvedTokens.length > 0
-          ? `sizes are missing from the card's size range: ${unresolvedTokens.join(', ')} — add them to the card or drop them from the composition`
-          : "the marker's size is unknown — the block names carry no sizes, and the slot does not name one",
+          ? `sizes not on the card: ${unresolvedTokens.join(', ')}`
+          : 'size unknown',
       );
-    if (sizeUnsaved)
-      out.push('the size was added — the card is not saved yet');
+    if (sizeUnsaved) out.push('save the card first: new size');
     if (sizesWithoutPieces.length > 0)
-      out.push(
-        `the composition took sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`,
-      );
+      out.push(`no pieces picked for: ${sizesWithoutPieces.join(', ')}`);
     if (composition.length > MAX_MARKER_COMPOSITION_SIZES)
-      out.push(
-        `the composition holds ${composition.length} sizes, the server's cap is ${MAX_MARKER_COMPOSITION_SIZES}`,
-      );
+      out.push(`${composition.length} sizes, cap ${MAX_MARKER_COMPOSITION_SIZES}`);
+    if (tableShortText) out.push(tableShortText);
     // Терминальная ветка прежней цепочки — она же покрывает незавершённый прогон, пустой
     // состав и отсутствие серверного контекста (compute-only).
     if (
@@ -1540,8 +2259,6 @@ export function NestingModal({
   // при только что открытой модалке не рендерится (см. TERMINAL_SAVE_REASON), причина остаётся
   // в тултипе кнопки. Инвариант «массив непуст ⇔ disabled» это не трогает.
   const onlyTerminal = saveRefusals.length === 1 && saveRefusals[0] === TERMINAL_SAVE_REASON;
-  // «1 reason / 2 reasons» — заголовок списка не должен врать числом.
-  const reasonWord = (n: number) => (n === 1 ? 'reason' : 'reasons');
 
   // Отказ сохранения, разобранный по полям (Ф1.8). Сервер отвергает норму, у ткани которой не
   // задано направление, и делает это ПОЛЕВЫМ нарушением с описанием, называющим строку BOM. Тост
@@ -1567,7 +2284,7 @@ export function NestingModal({
       composition.length === 0
     )
       return;
-    if (!effective) return;
+    if (!effective || !snap) return;
     const name = nameValue.trim();
     if (!name) return;
     // Отказ прошлой попытки снимается ЗДЕСЬ, на входе в новую. Он держится на панели намеренно
@@ -1578,7 +2295,7 @@ export function NestingModal({
     setSaving(true);
     try {
       const perSetQty = new Map<number, number>();
-      for (const p of pieces) {
+      for (const p of snap.pieces) {
         const s = sel[p.id];
         if (s?.checked) perSetQty.set(p.id, Math.max(1, Math.round(s.qty)));
       }
@@ -1587,7 +2304,7 @@ export function NestingModal({
       // explicit warning when the operator accepted clearance violations (cutter's call —
       // never blocked, always on the record).
       const layout = buildMarkerLayout({
-        pieces,
+        pieces: snap.pieces,
         perSetQty,
         pieceLineKeyById,
         urlBySource,
@@ -1599,21 +2316,25 @@ export function NestingModal({
           // каждый сантиметр записанного расхода.
           warnings: [
             ...effective.warnings,
-            allowanceMm > 0
-              ? `seam allowance: ${allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
-              : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
+            snap.allowanceMm > 0
+              ? `seam allowance: ${snap.allowanceMm.toFixed(1)} mm — the CUT contour was saved, the seam line lies on a separate SEAM layer. ASSUMPTION: the allowance is taken even around the whole contour, whereas along the hem it is usually wider`
+              : contourIsCutLine
+                ? `seam allowance: 0 — the contour is the CUT line (layer ${contourLayer || '—'}), its allowance is already in it`
+                : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
             ...(manualNote ? [manualNote] : []),
           ],
         },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: {
-          targetLengthCm: target,
+          // ЦЕЛЬ ПРОГОНА как она была — не стол. Стол едет своим полем layout.spread (ниже); до
+          // него сюда писалась полезная U с записью TABLE_NOTE_PREFIX, и такие блобы читаются.
+          targetLengthCm: snap.config.targetLengthCm,
           // The eps the run ACTUALLY used, not the one it asked for. The engine raises it when
           // the job is too big to precompute at the requested fidelity (Ф0), and storing the
           // request would make params.rdpEpsCm a lie — read by exactly the person trying to
           // reproduce this marker, who would reproduce a different one.
           rdpEpsCm: effective?.telemetry?.rdpEpsCm ?? NEST_DEFAULTS.rdpEpsCm,
-          timeBudgetMs: budgetS * 1000,
+          timeBudgetMs: snap.config.timeBudgetMs,
         },
         tol: NEST_DEFAULTS.tol,
         tolChain: NEST_DEFAULTS.tolChain,
@@ -1621,8 +2342,19 @@ export function NestingModal({
         // Состав и размеры деталей. buildMarkerLayout сам решает, писать ли их в блоб: на
         // однородной раскладке состав выражается легаси-парой ниже, и блоб остаётся байт в байт
         // прежним — иначе каждый пересохранённый старый маркер «дрожал» бы без единого отличия.
-        composition,
+        composition: snap.composition,
         sizeIdByPieceId,
+        // НАСТИЛ. Стол и запас — из СНИМКА прогона: результат и вердикт «за столом» считались под
+        // них (правка после прогона помечает его устаревшим). Слои и режим — из полей на момент
+        // сохранения: на укладку они не влияют, и сохраняется то, что оператор видит в строке цифр.
+        spread: snap.layTable
+          ? spreadToWire({
+              plies,
+              endLossCm: snap.endLossCm,
+              mode: spreadMode,
+              tableCm: snap.tableCm,
+            })
+          : undefined,
       });
       await adminService.SaveTechCardMarker({
         id: 0,
@@ -1641,7 +2373,7 @@ export function NestingModal({
           // Смешанная раскладка шлёт нули: сервер увидит состав в блобе и запишет size_id/sets
           // как NULL. Однородная шлёт пару — и сохраняется ровно так же, как до Ф2. Решение
           // живёт в legacyPairOf (marker-io), а не выражением здесь, — чтобы его проверял зонд.
-          sizeId: legacyPairOf(composition).sizeId,
+          sizeId: legacyPairOf(snap.composition).sizeId,
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
@@ -1649,17 +2381,17 @@ export function NestingModal({
           // раскладки одного слота на разных ширинах неразличимы, и «применить маркер» в рецепте
           // предложит длину, снятую на чужом полотне.
           colorwayId,
-          fabricWidthCm: dec(widthCm),
-          gapCm: dec(gapCm),
-          edgeMarginCm: dec(marginCm),
+          fabricWidthCm: dec(snap.widthCm),
+          gapCm: dec(snap.gapCm),
+          edgeMarginCm: dec(snap.marginCm),
           // Снимок кромки эффективного артикула на момент сохранения: разложение отходов
           // (кромка / межлекальные выпады) должно оставаться проверяемым и после того, как
           // материал слота отредактируют.
           selvedgeCm: dec(slotSelvedge(slot)),
-          allowCrossGrain: crossGrain,
+          allowCrossGrain: snap.crossGrain,
           // ПРИПУСК, КОТОРЫМ РАЗДУВАЛИ КОНТУРЫ ЭТОГО ПРОГОНА. Это вход алгоритма, а не подпись:
           // длина снята по линии кроя, и без числа её не воспроизвести.
-          seamAllowanceMm: dec(allowanceMm),
+          seamAllowanceMm: dec(snap.allowanceMm),
           // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ (Ф3.3), и оно уезжает ровно
           // тогда, когда состоялось. `undefined` едет как NULL, то есть «не мерялось»; ноль
           // значит «померили, и его нет» — контур был линией шва. Спутать их нельзя ни в одну
@@ -1690,8 +2422,8 @@ export function NestingModal({
           // Направление у полотна меняется, а маркер судят по условиям, при которых он снят.
           // Вывести это из геометрии нельзя: «ни одна деталь не перевёрнута» не значит «переворот
           // был запрещён», и такой вывод завысил бы строгость.
-          allowFlip: allowsFlip(effectiveDirection),
-          sets: legacyPairOf(composition).sets,
+          allowFlip: allowsFlip(snap.config.fabricDirection ?? effectiveDirection),
+          sets: legacyPairOf(snap.composition).sets,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
           placedCount: effective.placedCount,
@@ -1699,7 +2431,7 @@ export function NestingModal({
           layout,
         },
       });
-      showMessage('marker saved — the consumption is visible in the costing', 'success');
+      showMessage('marker saved', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       // marker_count rides the list rows too.
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
@@ -1737,9 +2469,7 @@ export function NestingModal({
     setSaveError(null); // см. saveMarker: отказ прошлой попытки не должен пережить удачную
     setSaving(true);
     try {
-      const keptWarnings = (view.layout?.warnings ?? []).filter(
-        (w) => !isManualNote(w),
-      );
+      const keptWarnings = (view.layout?.warnings ?? []).filter((w) => !isManualNote(w));
       // ВЕРСИЯ СХЕМЫ БЛОБА: сохранённая — пока в раскладке нет зеркала, ровно 3 — как только есть.
       //
       // Сохранять чужую версию правильно: она делает легаси-маркер переименовываемым, а штамп 3 на
@@ -1837,6 +2567,8 @@ export function NestingModal({
               flipped: pl.flipped === true,
             })),
             warnings: [...keptWarnings, ...(manualNote ? [manualNote] : [])],
+            // Настил эхом, как params: правка размещения не должна стирать, под какой стол снято.
+            spread: view.layout?.spread,
           },
         },
       });
@@ -1865,143 +2597,1020 @@ export function NestingModal({
   // иначе каждый (пере)разбор мигал бы ложными отказами о непрочитанном файле и дёргал
   // авто-открытие секций (до трёх прыжков за один разбор).
   const selSeeded = parse.phase === 'ready' && pieces.some((p) => sel[p.id] != null);
+  const unfitCount = pieces.filter((p) => !fitsWidth.get(p.id)).length;
+  const sizeUnknown = selSeeded && !graded && !sizeId;
+  // ДВЕРЬ В АРТИКУЛ. Направление, кромка и ширина — поля АРТИКУЛА (карточка материала), и чинятся
+  // они там; ссылка открывает его карточку в НОВОЙ вкладке, чтобы раскладка с ручными правками
+  // осталась жить. Артикул ширины — пин колорвея, если он дал ширину, иначе артикул слота.
+  const activeSlot = lockedSlot ?? slot;
+  const widthArticleId = (() => {
+    const pin = activeSlot ? chosenColorway?.widthByLine.get(activeSlot.lineKey) : undefined;
+    if (pin && Number.isFinite(pin.cutCm)) return pin.materialId;
+    return activeSlot?.materialId;
+  })();
+  const goToBomLineField = useGoToBomLineField();
+  // Направление — поле СТРОКИ BOM (ворс: any / one way / two way), не артикула: туда и ведём.
+  const directionFix = (): HeaderWarningAction | undefined => {
+    const run = goToBomLineField(activeSlot?.lineKey, 'fabricDirection', onClose);
+    return run ? { label: 'set on the BOM line', onClick: run } : undefined;
+  };
+  const openArticle = (materialId: number | undefined): HeaderWarningAction | undefined =>
+    materialId && materialId > 0
+      ? {
+          label: 'set on the article',
+          href: articleUrl(materialId),
+          onClick: () => {
+            articleOpenedRef.current = true;
+          },
+        }
+      : undefined;
+  // НАПРАВЛЕНИЕ — поле СТРОКИ BOM (tech_card_bom_item.fabric_direction: any/one_way/two_way), а не
+  // артикула: у артикула своё fabricAttrs.fabricDirection — это ДОЛЕВАЯ (lengthwise/crosswise/any),
+  // про ворс оно ничего не говорит, и сервер судит маркер только по строке
+  // (ValidateMarkerFabricDirection). Поэтому дверь в артикул здесь не ставится: там это не чинится.
+  const directionUnset = effectiveDirection === 'unknown';
+
+  // ── настил под раскроечный стол: толщина, цифры, вердикты ───────────────────────────────
+  const thicknessSlot = viewData
+    ? fabricLines.find((b) => b.lineKey === view?.summary?.bomLineKey)
+    : activeSlot;
+  const thicknessPin = thicknessSlot
+    ? (viewData
+        ? cwOptions.find((c) => c.colorwayId === (view?.summary?.colorwayId ?? 0))
+        : chosenColorway
+      )?.widthByLine.get(thicknessSlot.lineKey)
+    : undefined;
+  const thicknessFromPin = !!thicknessPin && Number.isFinite(thicknessPin.cutCm);
+  const bomThicknessMm =
+    (thicknessFromPin ? thicknessPin?.fabricThicknessMm : thicknessSlot?.fabricThicknessMm) ?? null;
+  // Толщины нет ни у пина, ни у слота — её спрашивает шаг «layers» квиза. Только на эту сессию:
+  // толщина — поле артикула, и писать её отсюда значило бы завести вторую дверь в материал.
+  const [thicknessEdit, setThicknessEdit] = useState<number | null>(null);
+  const thicknessMm = bomThicknessMm ?? (viewData ? null : thicknessEdit);
+  // Предел стопки в слоях — вход авто-слоёв, которые считаются выше (до слота ткани): зеркало.
+  const stackCapNow = viewData
+    ? null
+    : spreadFigures({ plies: 1, thicknessMm, stackLimitCm, mode: spreadMode }).maxPlies;
+  useEffect(() => {
+    setStackCapPlies(stackCapNow);
+  }, [stackCapNow]);
+  // Конец стола на холсте: в прогоне — U из ряда table; у сохранённого — U из блоба.
+  // У сохранённого — только если блоб несёт запись о столе: без неё targetLengthCm — старая ручная
+  // цель (до ae74b7da), она рисуется нейтральной пунктирной целью и вердиктом «за столом» не служит.
+  // У готового прогона — стол из его снимка (как ширина): результат считался под него.
+  // Новый маркер: настил своим полем (layout.spread), конец стола = стол − 2·запас.
+  const storedSpread = viewData ? storedSpreadOf(view?.layout) : null;
+  // «norm from a 1·2·2·1 lay × 10 plies» — у маркера, снятого под настил больше одного слоя.
+  const storedNormLabel =
+    storedSpread && storedSpread.plies > 1 && view?.summary
+      ? `norm from a ${compositionOf(view.summary)
+          .map((c) => c.quantity)
+          .join('·')} lay × ${storedSpread.plies} plies`
+      : '';
+  const storedUsableCm =
+    storedSpread?.tableCm != null && storedSpread.tableCm - 2 * storedSpread.endLossCm > 0
+      ? Math.round((storedSpread.tableCm - 2 * storedSpread.endLossCm) * 100) / 100
+      : null;
+  // Старый маркер (до layout.spread): U в targetLengthCm + запись TABLE_NOTE_PREFIX.
+  const storedTableEnd =
+    !!viewData &&
+    !storedSpread &&
+    (view?.layout?.warnings ?? []).some((w) => w.startsWith(TABLE_NOTE_PREFIX));
+  const tableEndCm = viewData
+    ? storedSpread
+      ? storedUsableCm
+      : storedTableEnd
+        ? viewData.targetCm ?? null
+        : null
+    : runView
+      ? // Стол на холсте — у прогона со столом или в режиме стола; одиночный настил стола не знает.
+        runView.config.maxLengthCm != null || tableMode
+        ? runView.usableCm
+        : null
+      : tableMode
+        ? usableCm
+        : null;
+  const spread = spreadFigures({
+    // У сохранённого — слои из layout.spread; у старого маркера их нет — всё, что от них
+    // зависит, прочерк.
+    plies: viewData ? storedSpread?.plies ?? NaN : plies,
+    thicknessMm,
+    stackLimitCm,
+    compositionTotal: viewData ? viewData.totalUnits || 1 : unitsTotal,
+    markerLengthCm: effective?.usedLengthCm ?? null,
+    endLossCm: viewData && storedSpread ? storedSpread.endLossCm : endLossCm,
+    mode: viewData && storedSpread ? storedSpread.mode : spreadMode,
+  });
+  const overTableCm =
+    effective && tableEndCm != null && !running ? effective.usedLengthCm - tableEndCm : 0;
+  const tableFullCount =
+    !viewData && !running
+      ? (displayResult?.unplaced ?? []).filter((u) => u.reason === 'table-full').length
+      : 0;
+  const fitAvailable =
+    !viewData &&
+    canEdit &&
+    parse.phase === 'ready' &&
+    usableCm != null &&
+    checkedCount > 0 &&
+    !overCap &&
+    !doubleAllowanceRefusal &&
+    !uniRefusal &&
+    !widthUnset &&
+    !ftfNoFlip &&
+    !clothWiderThanTable;
+  const fitAction: HeaderWarningAction | undefined = fitAvailable
+    ? {
+        label: 'fit to the table',
+        onClick: () => guardManual(() => void fitToTable()),
+        disabled: busy,
+      }
+    : undefined;
+  // ── КВИЗ РАСКЛАДКИ: вопросы по одному вместо прежней шапки. Своих чисел у квиза нет — ответы
+  // пишут в состояние выше, «Run» зовёт тот же requestRun, что и прежняя кнопка.
+  const [quizDone, markQuizDone] = useQuizDone(techCardId, lockedSlot?.lineKey || slotKey);
+  const quiz = useMarkerQuiz({
+    slotKey: lockedSlot?.lineKey || slotKey,
+    mode: layMode,
+    // Стол цеха сохранён целиком — его подтверждают, а не вводят.
+    tableSaved: wsTableCm != null && wsTableWidthCm != null && wsStackCm != null,
+    // Квиз уже пройден для этой ткани или открыт сохранённый маркер — сразу шаг «run».
+    startAtRun: !!viewData || quizDone,
+    busy,
+  });
+  const spreadWarnings: HeaderWarning[] = [];
+  if (clothWiderThanTable && tableWidthCm != null) {
+    spreadWarnings.push({
+      text: `cloth ${clothRollCm} cm wider than the table ${tableWidthCm} cm`,
+      error: true,
+      action: { label: 'table size', onClick: () => quiz.open('size') },
+    });
+  }
+  if (overTableCm > 0.05) {
+    spreadWarnings.push({
+      text: `longer than the table by ${overTableCm.toFixed(1)} cm`,
+      error: true,
+      action: fitAction,
+    });
+  }
+  if (tableShortText) {
+    spreadWarnings.push({
+      // Прочие причины (шире полотна, зеркало…) дописываются в ту же строку: дверь стола их не
+      // чинит, и молча проглотить их нельзя.
+      text: unplaced.length > 0 ? `${tableShortText} · ${unplacedText}` : tableShortText,
+      error: true,
+      action: fitAction,
+    });
+  } else if (tableFullCount > 0) {
+    spreadWarnings.push({
+      text: `${tableFullCount} ${tableFullCount === 1 ? "piece doesn't" : "pieces don't"} fit on the table`,
+      error: true,
+      action: fitAction,
+    });
+  }
+  // «fit to the table» поднял слои выше стопки: маркер тот же, просто настилов несколько.
+  const needsLays =
+    !viewData && tableMode && spread.overStack && spread.maxPlies != null && spread.maxPlies >= 1
+      ? fitPlies === plies
+        ? Math.ceil(plies / spread.maxPlies)
+        : 0
+      : 0;
+  if (needsLays > 1) {
+    spreadWarnings.push({ text: `needs ${needsLays} lays: stack limit`, error: true });
+  } else if (!viewData && tableMode && spread.overStack && spread.maxPlies != null) {
+    const max = spread.maxPlies;
+    spreadWarnings.push({
+      text: `${plies} plies over the stack limit, max ${max}`,
+      error: true,
+      action: {
+        label: 'max layers',
+        onClick: () => guardManual(() => setPlies(Math.max(1, max))),
+      },
+    });
+  }
+  if (ftfNoFlip) {
+    spreadWarnings.push(
+      effectiveDirection === 'unknown'
+        ? {
+            text: 'face to face: fabric direction not set on the BOM line',
+            error: true,
+            action: directionFix(),
+          }
+        : {
+            text: 'face to face on a one-way fabric',
+            error: true,
+            action: {
+              label: 'face up',
+              onClick: () => guardManual(() => setSpreadMode('face_up')),
+            },
+          },
+    );
+  }
+  if (!viewData && tableMode && spread.oddFaceToFace) {
+    spreadWarnings.push({
+      text: 'face to face needs an even number of plies',
+      error: true,
+      action: {
+        label: 'make even',
+        onClick: () =>
+          guardManual(() =>
+            setPlies(
+              spread.maxPlies != null && plies + 1 > spread.maxPlies
+                ? Math.max(2, plies - 1)
+                : plies + 1,
+            ),
+          ),
+      },
+    });
+  }
+  if (!viewData && tableMode && parse.phase === 'ready' && tableCm == null) {
+    spreadWarnings.push({
+      text: 'table length not set',
+      action: { label: 'set', onClick: () => quiz.open('size') },
+    });
+  }
+  // Перекрой: в допуске (≤ +1 на размер или ≤ 10 % итога) молчит; сверх — строка с дверью
+  // «fit plies» (вернуть авто-слои), если слои свои; у авто дверь ничего бы не поменяла.
+  const extraTotal = overCut.reduce((a, v) => a + v, 0);
+  const cutTotal = cutTotals.reduce((a, v) => a + v, 0);
+  const extraDetail = cutTotals
+    .map((t, i) => ({
+      t,
+      o: overCut[i] ?? 0,
+      label: graded ? cellRows[i]?.label ?? '' : sizeLabel || 'garments',
+    }))
+    .filter((x) => x.o > 0)
+    .map((x) => `${x.label.toLowerCase()}: cuts ${x.t + x.o} for ${x.t} (+${x.o})`)
+    .join(' · ');
+  if (
+    !viewData &&
+    tableMode &&
+    extraTotal > 0 &&
+    cutTotal > 0 &&
+    !extraWithinTolerance(cutTotals, plies)
+  ) {
+    spreadWarnings.push({
+      text: `+${extraTotal} extra (${Math.round((extraTotal / cutTotal) * 100)} %) · ${extraDetail}`,
+      action:
+        !pliesAuto && plies !== autoPliesN
+          ? { label: 'fit plies', onClick: () => guardManual(() => setPlies(null)) }
+          : undefined,
+    });
+  }
+  if (!viewData && tableMode && thicknessSlot && thicknessMm == null) {
+    spreadWarnings.push({
+      text: 'max plies unknown: thickness not set',
+      action: { label: 'set', onClick: () => quiz.open('layers') },
+    });
+  }
+  // Припуск/ширина сменились (догрузка цеха или артикула) уже после старта прогона.
+  const snapStale =
+    !viewData &&
+    run.phase === 'done' &&
+    snap != null &&
+    (snap.allowanceMm !== allowanceMm ||
+      snap.widthCm !== widthCm ||
+      snap.gapCm !== gapCm ||
+      snap.marginCm !== marginCm ||
+      snap.crossGrain !== crossGrain ||
+      // Стол и запас (через полезную U): вердикт «за столом» и сохраняемый стол — от прогона.
+      snap.usableCm !== (tableMode ? usableCm : null) ||
+      spreadStale);
+  const figure = (v: number | null, digits = 0) =>
+    v == null ? '—' : digits > 0 ? String(Math.round(v * 10 ** digits) / 10 ** digits) : String(v);
   const railS1: RailSectionStatus = {
     blockers: [
-      noSlotChosen ? 'no fabric picked' : '',
-      unresolvedTokens.length > 0
-        ? `sizes missing from the card's size range: ${unresolvedTokens.join(', ')}`
-        : '',
-      selSeeded && !graded && !sizeId ? "the marker's size is unknown" : '',
-      sizeUnsaved ? 'the size was added but the card is not saved' : '',
+      noSlotChosen ? 'pick a fabric' : '',
+      unresolvedTokens.length > 0 ? `sizes not on the card: ${unresolvedTokens.join(', ')}` : '',
+      sizeUnknown ? 'size unknown' : '',
+      sizeUnsaved ? 'save the card first: new size' : '',
       selSeeded && sizesWithoutPieces.length > 0
-        ? `sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`
+        ? `no pieces picked for: ${sizesWithoutPieces.join(', ')}`
         : '',
       composition.length > MAX_MARKER_COMPOSITION_SIZES
-        ? `the composition holds ${composition.length} sizes — the server's cap is ${MAX_MARKER_COMPOSITION_SIZES}`
+        ? `${composition.length} sizes, cap ${MAX_MARKER_COMPOSITION_SIZES}`
         : '',
-      // Не про выбор оператора, а про файл, — но стоит здесь, потому что ломает именно счёт
-      // изделий и деталей, который живёт в этой секции.
-      uniRefusal ? 'copies of an ungraded piece disagree with each other' : '',
+      uniRefusal ? 'copies of an ungraded piece disagree' : '',
     ].filter(Boolean),
     warnings: [
-      colorwayNoPin ? `colourway “${chosenColorway?.label}” has not assigned an article to this fabric` : '',
-      mixed ? 'mixed composition — the per-unit consumption is not written into the recipe' : '',
+      colorwayNoPin
+        ? `colourway ${chosenColorway?.label ?? ''} has no article for this fabric`
+        : '',
+      mixed ? 'mixed composition: no per-unit consumption' : '',
     ].filter(Boolean),
   };
   const railS2: RailSectionStatus = {
-    blockers: [
-      parse.phase === 'error' ? 'DXF parse error' : '',
-      fetchFailed ? "some of the DXF didn't download — the marker is incomplete" : '',
-      doubleAllowanceRefusal ? 'double allowance: the chosen layer carries the cut line' : '',
-    ].filter(Boolean),
+    blockers: [directionRefusal ?? '', doubleAllowanceRefusal ?? ''].filter(Boolean),
     warnings: [
-      parse.phase === 'ready' && parse.warnings.length > 0
-        ? `parse warnings: ${parse.warnings.length}`
-        : '',
-      missingOnLayer.length > 0
-        ? `layer ${contourLayer || '—'} has no contour for ${missingOnLayer.length} blocks`
-        : '',
-      grainLayer !== '' && oriented.missing.length > 0
-        ? `the grainline is undetermined on ${oriented.missing.length} pieces`
-        : '',
-      grainLayer === '' ? 'the pieces will lie as they are drawn in the file' : '',
-      parse.phase === 'ready' && unitOverride !== 'auto' && unitOverride !== parse.detectedUnit
-        ? 'DXF units: manual override'
-        : '',
+      allowanceMm === 0 && !contourIsCutLine ? NO_ALLOWANCE_TEXT : '',
+      allowanceUnconfirmed ? 'allowance not confirmed by the file' : '',
+      seam.hulled.length > 0 ? `defective contour on ${seam.hulled.length} pieces` : '',
+      !viewData && effectiveDirection === 'unknown' ? DIRECTION_UNSET_TEXT : '',
     ].filter(Boolean),
   };
   const railS3: RailSectionStatus = {
     blockers: [
-      // Две ветки отказа — два разных факта: у unknown направление не «запрещает», оно
-      // просто не проставлено, и сказать «ткань не допускает» было бы неправдой.
-      directionRefusal
-        ? effectiveDirection === 'unknown'
-          ? 'the marker lays a piece upside down, and the fabric direction is not set'
-          : 'the marker lays a piece upside down, and the fabric does not allow it'
+      overCap
+        ? `over the cap: ${MAX_MARKER_PIECES} pieces / ${MAX_MARKER_PLACEMENTS} placements`
         : '',
-      doubleAllowanceRefusal ? 'double allowance — the search will not start' : '',
-    ].filter(Boolean),
-    warnings: [
-      allowanceMm === 0 && !contourIsCutLine ? 'allowance 0 — the consumption will be understated' : '',
-      allowanceUnconfirmed ? 'the allowance is not confirmed by the file' : '',
-      seam.hulled.length > 0 ? `a defective contour on ${seam.hulled.length} pieces` : '',
-      !viewData && effectiveDirection === 'unknown' ? 'the fabric direction is not set' : '',
-    ].filter(Boolean),
-  };
-  const unfitCount = pieces.filter((p) => !fitsWidth.get(p.id)).length;
-  const railS4: RailSectionStatus = {
-    blockers: [
-      overCap ? "over the server's cap — the search will not start" : '',
-      // Только после засева `sel` (см. selSeeded) — иначе секция «детали» вспыхивала бы
-      // открытой на один кадр после каждого разбора. Когда ни одна деталь не влезает в
-      // ширину, чекбоксы выключены и «не выбрана» была бы ложью: выбирать нечего.
+      // Только после засева `sel` (см. selSeeded) — иначе секция мигала бы открытой после разбора.
       selSeeded && checkedCount === 0
         ? pieces.length > 0 && unfitCount === pieces.length
-          ? 'not a single piece fits the cloth width'
-          : 'not a single piece is picked'
+          ? 'no piece fits the width'
+          : 'no piece picked'
         : '',
     ].filter(Boolean),
-    warnings: [unfitCount > 0 ? `wider than the cloth: ${unfitCount} pieces` : ''].filter(Boolean),
+    warnings: [unfitCount > 0 ? `too wide: ${unfitCount} pieces` : ''].filter(Boolean),
   };
-  // Сводка-ответ секции — то, что видно в свёрнутой шапке. Не новые вычисления, а те же числа,
-  // что стоят внутри, свёрнутые в одну строку-ответ.
-  const s1Summary = [
-    cwOptions.length > 0 ? chosenColorway?.label ?? 'shared' : '',
-    lockedSlot
-      ? slotLabel(lockedSlot)
-      : slot
-        ? slotLabel(slot)
-        : fabricLines.length > 0
-          ? 'no fabric picked'
-          : '',
-    graded
-      ? activeRows.map((r) => `${r.label}×${r.qty}`).join(' ') || 'composition is empty'
-      : `${ungradedUnits} garments${sizeLabel ? ` ${sizeLabel}` : ''}`,
-    pieces.length > 0 ? `${pieces.length} pieces` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const unitWord = (u: Unit) => (u === 'mm' ? 'mm' : u === 'cm' ? 'cm' : 'inches');
-  const s2Summary =
-    parse.phase === 'loading'
-      ? 'downloading and parsing DXF…'
-      : parse.phase === 'error'
-        ? 'parse error'
-        : parse.phase === 'ready'
-          ? [
-              unitOverride === 'auto'
-                ? `auto (${unitWord(parse.detectedUnit)})`
-                : unitWord(unitOverride),
-              `contour: layer ${contourLayer || '—'}`,
-              grainLayer === '' ? 'grainline: as drawn' : `grainline: layer ${grainLayer}`,
-              sources.length > 1 ? `files: ${sources.length}` : '',
-            ]
-              .filter(Boolean)
-              .join(' · ')
-          : '';
-  // Единица у КАЖДОГО числа: ширина и зазор — сантиметры, припуск — миллиметры, и в свёрнутой
-  // строке они стоят вплотную. Пока припуск шёл без подписи, «10» рядом с «160 см» читалось как
-  // сантиметры — та же ошибка на порядок, только в голове у оператора.
-  const s3Summary = `${widthCm} cm · gap ${gapCm} cm · allowance ${allowanceMm.toFixed(1)} mm`;
-  // Размещения — в свёрнутой сводке тоже: приближение к потолку 5000 должно быть видно и при
-  // закрытой секции, а не открываться вместе с ней.
-  const s4Summary =
-    parse.phase === 'ready' ? `${checkedCount} / ${pieces.length} · ${instanceCount} placements` : '—';
-  // Открыта ОДНА секция за раз. Явный выбор оператора — в railPick; null = авто: первая секция
-  // с блокером, иначе первая; 0 = все свёрнуты (повторный клик по открытой шапке).
-  const [railPick, setRailPick] = useState<number | null>(null);
-  const railStatuses = [railS1, railS2, railS3, railS4];
-  const firstBlocked = railStatuses.findIndex((s) => s.blockers.length > 0);
-  const railOpen = railPick ?? (firstBlocked >= 0 ? firstBlocked + 1 : 1);
-  const toggleRail = (n: number) => setRailPick(railOpen === n ? 0 : n);
-  // Первое взаимодействие с СОДЕРЖИМЫМ открытой секции пинит авто-выбор. Без этого правка поля
-  // внутри авто-открытой секции кончалась бы её схлопыванием: оператор трогает «зазор» →
-  // resetRun сбрасывает прогон → directionRefusal исчезает → firstBlocked уезжает → секция
-  // размонтируется посреди набора, фокус улетает на body, недобранные цифры теряются.
-  const pinRail = (n: number) => {
-    if (railPick == null) setRailPick(n);
+  // Двери «show» у блокеров: поле, которое чинит отказ, получает фокус; детали открывают поповер.
+  const [piecesOpen, setPiecesOpen] = useState(false);
+  // Поле тихого ряда шага «run» (ткань): открыть квиз там и поставить фокус после рендера.
+  const focusOnRun = (id: string) => {
+    quiz.open('run');
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      const target = el?.matches('input, button, select')
+        ? el
+        : el?.querySelector<HTMLElement>('button, input, select');
+      target?.focus();
+    });
+  };
+  // Дверь у блокера: детали — поповер шага «run», ткань — её поле там же, состав — шаг «what».
+  const showFix = (section: number, text: string): HeaderWarningAction | undefined => {
+    if (section === 3) {
+      return {
+        label: 'show',
+        onClick: () => {
+          quiz.open('run');
+          setPiecesOpen(true);
+        },
+      };
+    }
+    if (section === 1) {
+      return noSlotChosen && text === 'pick a fabric'
+        ? { label: 'show', onClick: () => focusOnRun('nest-fabric') }
+        : { label: 'show', onClick: () => quiz.open('what') };
+    }
+    return undefined;
   };
 
+  // ПРЕДУПРЕЖДЕНИЯ И ОТКАЗЫ — В ШАПКЕ МОДАЛКИ (patterns-lite, п. 11). Чтение файла (единицы,
+  // контур, долевая, файлы) идёт по умолчаниям; всё, что из него пошло не так, — здесь.
+  const setAllowanceZero = () =>
+    guardManual(() => {
+      setAllowanceTouched(true);
+      setAllowanceMm(0);
+    });
+  // The article's cutting width, back in the field; the width follows the article again.
+  const applyArticleWidth = () => {
+    if (!Number.isFinite(slotWidth) || slotWidth < 10) return;
+    setSaveOpen(false);
+    guardManual(() => {
+      setWidthTouched(false);
+      setWidthUnset(false);
+      setWidthRaw(null);
+      setWidthCm(Math.round(slotWidth * 10) / 10);
+    });
+  };
+  const topWarningsRaw: Array<HeaderWarning | HeaderWarning[] | ''> = [
+    ...(parse.phase === 'error' ? [{ text: parse.message, error: true }] : []),
+    ...(parse.phase === 'ready'
+      ? parse.warnings
+          .filter((w) => !isHiddenNote(w))
+          .map((w) =>
+            isFetchFailure(w)
+              ? {
+                  text: w,
+                  error: true,
+                  action: { label: 'retry', onClick: () => guardManual(reparse) },
+                }
+              : w,
+          )
+      : []),
+    ...(!viewData
+      ? [
+          missingOnLayer.length > 0
+            ? `no contour on layer ${contourLayer || '—'} for ${missingOnLayer.length} blocks`
+            : '',
+          grainLayer !== '' && oriented.missing.length > 0
+            ? `grainline unclear on ${oriented.missing.length} pieces`
+            : '',
+          parse.phase === 'ready' && grainLayer === '' ? 'no grainline: pieces lie as drawn' : '',
+        ]
+      : []),
+    // Статусы рейла — только в режиме расчёта: у сохранённого маркера рейл скрыт.
+    ...(viewData
+      ? []
+      : [
+          // A blocker's fix lives in a toolbar field: «show» focuses it (pieces open their
+          // popover). Double allowance has a direct fix.
+          ...[railS1, railS2, railS3].flatMap((sec, i) =>
+            sec.blockers.map(
+              (text): HeaderWarning => ({
+                text,
+                error: true,
+                action:
+                  text === doubleAllowanceRefusal
+                    ? { label: 'set allowance to 0', onClick: setAllowanceZero }
+                    : text === directionRefusal && directionUnset
+                      ? directionFix()
+                      : showFix(i + 1, text),
+              }),
+            ),
+          ),
+          ...railS1.warnings,
+          ...railS2.warnings.map((text): HeaderWarning => {
+            if (text === NO_ALLOWANCE_TEXT && fixAllowanceMm > 0) {
+              return {
+                text,
+                action: {
+                  label: `set allowance to ${fixAllowanceMm} mm`,
+                  onClick: () =>
+                    guardManual(() => {
+                      setAllowanceTouched(true);
+                      setAllowanceMm(fixAllowanceMm);
+                    }),
+                },
+              };
+            }
+            return text;
+          }),
+          ...railS3.warnings.map(
+            (text): HeaderWarning =>
+              text === DIRECTION_UNSET_TEXT ? { text, action: directionFix() } : text,
+          ),
+        ]),
+    !viewData && !running && saveRefusals.length > 0 && !onlyTerminal
+      ? saveRefusals
+          .filter((r) => r !== TERMINAL_SAVE_REASON && r !== tableShortText)
+          .map((text) => ({
+            text,
+            error: true,
+          }))
+      : [],
+    ...spreadWarnings,
+    snapStale
+      ? {
+          text: 'settings changed after the run',
+          action: { label: 'run again', onClick: requestRun },
+        }
+      : '',
+    forecast?.outlook === 'starved' && !running ? 'geometry too heavy for the time budget' : '',
+    unplaced.length > 0 && !tableShortText
+      ? { text: `did not fit: ${unplaced.length} · ${unplacedText}`, error: true }
+      : '',
+    partialGeometry && !tableShortText ? { text: partialExportRefusal, error: true } : '',
+    drawing.phase === 'error' ? { text: `drawing not restored: ${rebuildText}`, error: true } : '',
+    ...(drawing.phase === 'ok' ? drawing.warnings : []),
+    !running && displayResult?.cancelled && displayResult.placements.length === 0
+      ? 'stopped before the first result'
+      : '',
+    violations.length > 0 && !running
+      ? {
+          text: [
+            outsideCount > 0
+              ? `${outsideCount} ${outsideCount === 1 ? 'piece' : 'pieces'} outside the cloth`
+              : '',
+            tooCloseCount > 0 ? `${tooCloseCount} pieces closer than the gap` : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          error: true,
+          action: showViolation
+            ? {
+                label: 'show',
+                onClick: () => setFocusReq({ index: showViolation.index, nonce: Date.now() }),
+              }
+            : undefined,
+        }
+      : '',
+    // Ручные правки откатываются из шапки: красные детали почти всегда — результат перетаскивания.
+    violations.length > 0 && !running && manual
+      ? {
+          text: 'pieces moved by hand',
+          action: { label: 'reset edits', onClick: () => setManual(null) },
+        }
+      : '',
+    viewData && storedNoAllowance
+      ? `${NO_ALLOWANCE_TEXT} — re-run the marker from the patterns with an allowance`
+      : '',
+    greedyOnly ? 'no search ran: greedy placement' : '',
+    ...(displayResult ? displayResult.warnings : []),
+    saveError ? { text: `saving failed: ${saveError}`, error: true } : '',
+    !viewData && widthUnset
+      ? {
+          text: chosenColorway
+            ? `cloth width not set for ${chosenColorway.label}`
+            : 'cloth width not set',
+          error: true,
+          // Пин колорвея есть — ширину чинят в его артикуле; нет — на строке BOM (её артикул).
+          action: widthPin?.materialId
+            ? openArticle(widthPin.materialId)
+            : (() => {
+                const run = goToBomLineField(widthSrcLine?.lineKey, 'materialId', onClose);
+                return run
+                  ? { label: 'set on the BOM line', onClick: run }
+                  : openArticle(widthSrcLine?.materialId);
+              })(),
+        }
+      : '',
+  ];
+  const runBlocked =
+    (!viewData && (widthUnset || faceToFaceInvalid || clothWiderThanTable)) ||
+    parse.phase !== 'ready' ||
+    checkedCount === 0 ||
+    overCap ||
+    !!doubleAllowanceRefusal ||
+    !!uniRefusal ||
+    fitting != null;
+  // autoRun: the same `startRun` the «run» button calls, at most once. It is decided ONE task after
+  // the parse settles (ready or error), so the prefill effects (slot → width) of that commit land
+  // first; the gate is re-read from the LATEST render through a ref. Blocked at that moment = the
+  // offer lapses for good — fixing the width later does not start a run behind the user's back.
+  const autoRunFired = useRef(false);
+  const autoRunLatest = useRef({ startRun, runBlocked, running, fitting, effective, manual });
+  autoRunLatest.current = { startRun, runBlocked, running, fitting, effective, manual };
+  const parseSettled = parse.phase === 'ready' || parse.phase === 'error';
+  useEffect(() => {
+    if (!autoRun || autoRunFired.current || viewData || !parseSettled) return;
+    const t = window.setTimeout(() => {
+      const l = autoRunLatest.current;
+      if (autoRunFired.current) return;
+      autoRunFired.current = true;
+      if (l.runBlocked || l.running || l.fitting || l.effective || l.manual) return;
+      l.startRun();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [autoRun, viewData, parseSettled, runBlocked, widthCm, widthUnset]);
+  // ЕДИНСТВЕННОЕ МЕСТО, где собирается шапка: служебные заметки разбора, протокол припуска и
+  // прежняя заметка о ручной правке (её заменяет живая проверка выше) отсюда не выходят — ни из
+  // свежего разбора, ни из блоба сохранённой раскладки.
+  const topWarnings = topWarningsRaw
+    .flat()
+    .filter((w): w is HeaderWarning => w !== '')
+    .filter((w) => {
+      const t = typeof w === 'string' ? w : w.text;
+      return (
+        !isHiddenNote(t) &&
+        !t.startsWith(SEAM_NOTE_PREFIX) &&
+        !t.startsWith(TABLE_NOTE_PREFIX) &&
+        !isManualNote(t)
+      );
+    });
+  const titleFabric = (lockedSlot ?? slot)?.name?.trim();
+  // Выгрузка: та же кнопка 28×28, что «по ширине» и «весь маркер», в той же группе угла холста.
+  const downloadButton =
+    effective && !running ? (
+      <GenericPopover
+        noTail
+        className='w-[190px]'
+        contentProps={{ align: 'end', side: 'top', sideOffset: 4 }}
+        triggerProps={{
+          'aria-label': 'download',
+          className: CANVAS_ICON_BTN,
+        }}
+        openElement={
+          <svg width='14' height='14' viewBox='0 0 14 14' aria-hidden fill='none'>
+            <path
+              d='M7 1.5v8M3.5 6 7 9.5 10.5 6M2 12.5h10'
+              stroke='currentColor'
+              strokeWidth='1.2'
+            />
+          </svg>
+        }
+      >
+        <div className='flex flex-col items-start gap-1'>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={viewDegraded || drawingBlocked || partialGeometry}
+            title={exportBlockReason || undefined}
+            onClick={downloadSvg}
+          >
+            SVG
+          </Button>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={!dxfReady}
+            title={exportBlockReason || undefined}
+            onClick={downloadDxf}
+          >
+            DXF
+          </Button>
+          {/* The marker at 1:1 on paper (one sheet / tiles) — the EFFECTIVE placements, as DXF. */}
+          <PatternExportItems
+            disabled={!dxfReady}
+            title={exportBlockReason || undefined}
+            drawing={() =>
+              drawingFromMarker(
+                effective,
+                displayPieces,
+                displayWidth,
+                fileParts()
+                  .filter((x): x is string => !!x && !!x.trim())
+                  .join('-') || 'marker',
+              )
+            }
+            plot={async () => ({
+              plot: plotFromMarker(effective, displayPieces, { fabricWidthCm: displayWidth }),
+              title:
+                fileParts()
+                  .filter((x): x is string => !!x && !!x.trim())
+                  .join('-') || 'marker',
+            })}
+          />
+          {/* Плоттерный выход без чертежа — только когда чертёж не восстановлен (решение Р4). */}
+          {drawing.phase === 'error' && !viewDegraded && (
+            <Button
+              type='button'
+              variant='underline'
+              disabled={partialGeometry}
+              title={partialExportRefusal || undefined}
+              onClick={downloadContoursOnly}
+            >
+              DXF contours
+            </Button>
+          )}
+        </div>
+      </GenericPopover>
+    ) : null;
+
+  // ── оценка до прогона и входы квиза ──────────────────────────────────────────────────────
+  // Оценка длины по площади: Σ площадь·тираж / (ширина · 0.8) — картинка и цифры шага «run».
+  const areaOfPiece = new Map(pieces.map((p) => [p.id, p.areaCm2]));
+  let areaTotal = 0;
+  for (const c of runConfig.pieces) areaTotal += (areaOfPiece.get(c.pieceId) ?? 0) * c.quantity;
+  const estLengthCm = areaTotal > 0 && widthCm > 0 ? areaTotal / (widthCm * 0.8) : null;
+  // Цифры настила квиза и сводки: до прогона — по оценке длины, после — по маркеру. Один настил
+  // (single) — один слой без запаса на концы: шага «ends» у него нет.
+  const layFigures = spreadFigures({
+    plies: tableMode ? plies : 1,
+    thicknessMm,
+    stackLimitCm,
+    compositionTotal: unitsTotal,
+    markerLengthCm: effective?.usedLengthCm ?? estLengthCm,
+    endLossCm: tableMode ? endLossCm : 0,
+    mode: spreadMode,
+  });
+  const quizRows: QuizRow[] = graded
+    ? cellRows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        qty: r.qty,
+        bad: (!r.resolvable || r.sizeId <= 0) && r.qty >= 1,
+        min: 0,
+      }))
+    : [{ key: '', label: sizeLabel || 'garments', qty: cellUngraded, bad: sizeUnknown, min: 1 }];
+  // Те же предупреждения, что в шапке: строкой на шаге «run», ошибки первыми, без повторов.
+  const quizWarnings: QuizWarning[] = topWarnings
+    .map((w) =>
+      typeof w === 'string'
+        ? { text: w, error: false }
+        : { text: w.text, error: !!w.error, fix: w.action },
+    )
+    .filter((w, k, all) => all.findIndex((o) => o.text === w.text) === k)
+    .sort((a, b) => Number(b.error) - Number(a.error));
+  // Квиз на экране, пока результата нет (или его открыли «edit»); прогон и подбор — холст.
+  const quizOpen = !viewData && !running && fitting == null && (quiz.reopened || !effective);
+  const metres = (cm: number | null) => (cm == null ? '—' : `${(cm / 100).toFixed(2)} m`);
+  // Свёрнутый квиз: в строке над холстом — норма сохранённого маркера, «edit» и предупреждения;
+  // факты настила и итог прогона — одной ведомостью под холстом (та же грамматика, что шаг «run»).
+  const summaryFacts: Array<[string, React.ReactNode]> = [];
+  type LayFact = { label: string; value: React.ReactNode; error?: boolean };
+  const layFacts: LayFact[] = [];
+  if (viewData) {
+    if (storedNormLabel) summaryFacts.push(['', storedNormLabel]);
+    if (storedSpread) {
+      layFacts.push(
+        { label: 'layers', value: storedSpread.plies },
+        { label: 'face', value: storedSpread.mode === 'face_up' ? 'up' : 'to face' },
+        { label: 'table', value: `${figure(storedSpread.tableCm, 1)} cm` },
+        { label: 'stack', value: `${figure(spread.stackCm, 1)} cm` },
+        { label: 'fabric', value: metres(spread.fabricCm) },
+      );
+    } else if (tableEndCm != null) {
+      layFacts.push({ label: 'on table', value: `${figure(tableEndCm, 1)} cm` });
+    }
+  } else {
+    layFacts.push({
+      label: 'garments',
+      value: extraTotal > 0 ? `${cutTotal} +${extraTotal}` : cutTotal,
+    });
+    if (tableMode) {
+      layFacts.push(
+        { label: 'layers', value: plies },
+        {
+          label: 'stack',
+          value: `${figure(layFigures.stackCm, 1)} / ${figure(stackLimitCm, 1)} cm`,
+          error: layFigures.overStack,
+        },
+      );
+    }
+    layFacts.push({ label: 'fabric', value: metres(layFigures.fabricCm) });
+  }
+  // ТИХИЙ РЯД ШАГА «run»: выбор ткани и настройки раскладки — прежние поля и поповеры шапки как
+  // есть; панель раскладки стала поповером «nesting». Ширина полотна и детали — ячейки полосы.
+  const quizExtras = !lockedSlot && fabricLines.length > 0 && (
+    <div className='flex items-end gap-1'>
+      {
+        <div
+          id='nest-fabric'
+          className={`${FIELD} relative`}
+          title={[slot ? slotLabel(slot) : 'not picked', pinArticle ? `article: ${pinArticle}` : '']
+            .filter(Boolean)
+            .join(' · ')}
+        >
+          <select
+            name='nest-fabric-select'
+            className={`${BOX} cursor-pointer appearance-none truncate pr-5 ${
+              noSlotChosen ? 'text-error' : ''
+            }`}
+            disabled={busy}
+            value={slotKey}
+            onChange={(e) => chooseSource({ slotKey: e.target.value })}
+          >
+            <option value=''>not picked</option>
+            {fabricLines.map((b) => (
+              <option key={b.lineKey} value={b.lineKey}>
+                {slotLabel(b)}
+              </option>
+            ))}
+          </select>
+          <span
+            aria-hidden
+            className='pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 text-labelColor'
+          >
+            ▾
+          </span>
+        </div>
+      }
+    </div>
+  );
+  // Настройки раскладки одной строкой: «auto», пока всё по умолчанию, иначе только изменённое.
+  const nestingShort =
+    [
+      gapCm !== NEST_DEFAULTS.gapCm && `gap ${gapCm}`,
+      marginCm !== NEST_DEFAULTS.edgeMarginCm && `margin ${marginCm}`,
+      allowanceTouched && `allowance ${allowanceMm} mm`,
+      crossGrain !== NEST_DEFAULTS.allowCrossGrain && `rotate ${crossGrain ? 'on' : 'off'}`,
+    ]
+      .filter(Boolean)
+      .join(' · ') || 'auto';
+  const quizNesting = (
+    <GenericPopover
+      contentProps={{ align: 'end' }}
+      triggerProps={{
+        name: 'nest-lay',
+        title: `gap ${gapCm} · margin ${marginCm} · allowance ${allowanceMm} mm · rotate ${crossGrain ? 'on' : 'off'}`,
+        className: FACT_TRIGGER,
+      }}
+      openElement={(isOpen) => (
+        <>
+          <FactLabel error={!!doubleAllowanceRefusal}>nesting</FactLabel>
+          <span className='min-w-0 truncate'>
+            {nestingShort}
+            <span aria-hidden className='text-labelColor'>
+              {isOpen ? ' ▴' : ' ▾'}
+            </span>
+          </span>
+        </>
+      )}
+    >
+      <div id='nest-lay-panel' className='grid grid-cols-2 gap-x-2 gap-y-1.5 p-2'>
+        <label className={`${FIELD} space-y-0.5`}>
+          <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+            gap cm
+          </Text>
+          <NumBox
+            name='nest-gap'
+            decimal
+            value={gapCm}
+            emptyAs={0}
+            onCommit={(n) => {
+              const next = Math.max(0, n);
+              if (next !== gapCm) guardManual(() => setGapCm(next));
+            }}
+            disabled={busy}
+          />
+        </label>
+        <label className={`${FIELD} space-y-0.5`}>
+          <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+            margin cm
+          </Text>
+          <NumBox
+            name='nest-margin'
+            decimal
+            value={marginCm}
+            emptyAs={0}
+            onCommit={(n) => {
+              const next = Math.max(0, n);
+              if (next !== marginCm) guardManual(() => setMarginCm(next));
+            }}
+            disabled={busy}
+          />
+        </label>
+        {/* Припуск на шов — ВХОД алгоритма: раздувает контур до линии кроя до укладки. */}
+        <label
+          className={`${FIELD} space-y-0.5`}
+          title={
+            [
+              allowanceSourceText,
+              !allowanceTouched && allowancePrefill ? `prefilled: ${allowancePrefill.why}` : '',
+            ]
+              .filter(Boolean)
+              .join(' · ') || undefined
+          }
+        >
+          <Text
+            size='micro'
+            variant={doubleAllowanceRefusal ? undefined : 'label'}
+            component='span'
+            className={doubleAllowanceRefusal ? `${BOX_LABEL} text-error` : BOX_LABEL}
+          >
+            allowance mm
+          </Text>
+          <NumBox
+            name='nest-allowance'
+            decimal
+            value={allowanceMm}
+            emptyAs={0}
+            onCommit={(n) => {
+              // Потолок (MAX_SEAM_ALLOWANCE_MM) живёт в contour-layer.ts рядом с предзаполнением.
+              const next = clampSeamAllowanceMm(n);
+              if (next !== allowanceMm) {
+                // Флаг «ввели руками» — ВНУТРИ apply, как у ширины.
+                guardManual(() => {
+                  setAllowanceTouched(true);
+                  setAllowanceMm(next);
+                });
+              }
+            }}
+            disabled={busy}
+          />
+        </label>
+        <div className={`${FIELD} space-y-0.5`}>
+          <Text size='micro' variant='label' component='span' className={BOX_LABEL}>
+            rotate 90°
+          </Text>
+          {/* Переключатель той же коробкой, что и поля: нажатое состояние — заливка чернилом. */}
+          <button
+            type='button'
+            id='nest-crossgrain'
+            name='nest-crossgrain'
+            aria-pressed={crossGrain}
+            disabled={busy}
+            onClick={() => guardManual(() => setCrossGrain(!crossGrain))}
+            className={`${BOX} justify-center uppercase ${
+              crossGrain ? 'border-textColor bg-textColor text-bgColor hover:opacity-80' : ''
+            }`}
+          >
+            {crossGrain ? 'on' : 'off'}
+          </button>
+        </div>
+      </div>
+    </GenericPopover>
+  );
+  const quizCloth = (
+    <label className={FACT_ROW} title={widthSource || 'cloth width'}>
+      <FactLabel error={noSlotChosen}>cloth</FactLabel>
+      <span className='flex items-center gap-1'>
+        <NumBox
+          name='nest-width'
+          className={CELL_INPUT}
+          decimal
+          value={widthUnset ? null : widthCm}
+          // Ширина уходит на blur: каждая промежуточная цифра («1», «14») иначе стирала бы
+          // ручные правки и пересчитывала бы раскладку на ткани шириной в сантиметр.
+          commitOnBlur
+          onCommit={(n) => {
+            const next = Math.max(10, n);
+            // Флаг «ввели руками» ставится ВНУТРИ apply: отказ выбросить ручные правки
+            // не должен молча выключать автоподстановку ширины по колорвею.
+            if (next !== widthCm || widthUnset) {
+              guardManual(() => {
+                setWidthTouched(true);
+                setWidthUnset(false);
+                setWidthRaw(null);
+                setWidthCm(next);
+              });
+            }
+          }}
+          disabled={busy}
+        />
+        cm
+      </span>
+    </label>
+  );
+  const piecesError = railS3.blockers.length > 0;
+  const quizPieces = (
+    <GenericPopover
+      open={piecesOpen}
+      onOpenChange={setPiecesOpen}
+      className='w-[320px]'
+      contentProps={{ align: 'end' }}
+      triggerProps={{
+        className: FACT_TRIGGER,
+        disabled: parse.phase !== 'ready' || pieces.length === 0,
+      }}
+      openElement={(isOpen) => (
+        <>
+          <FactLabel error={piecesError}>pieces</FactLabel>
+          <span className={piecesError ? 'text-error' : undefined}>
+            {parse.phase === 'ready' ? `${checkedCount} / ${pieces.length}` : <EmptyCell />}
+            <span aria-hidden className='text-labelColor'>
+              {isOpen ? ' ▴' : ' ▾'}
+            </span>
+          </span>
+        </>
+      )}
+    >
+      <div className='max-h-[46vh] space-y-1 overflow-y-auto'>
+        <div className='flex items-center justify-between gap-2'>
+          <Text size='micro' variant='label' component='span'>
+            {checkedCount}/{pieces.length}
+            {instanceCount !== checkedCount ? ` · placements ${instanceCount}` : ''}
+            {graded && ungradedCount > 0
+              ? ` · ${ungradedAllUni ? 'UNI' : 'no size'} ${ungradedCount}`
+              : ''}
+          </Text>
+          <button
+            type='button'
+            className='text-micro uppercase underline hover:opacity-70'
+            disabled={busy}
+            onClick={() =>
+              guardManual(() => {
+                // Слитно, а не заменой: замена стёрла бы выбор деталей других размеров.
+                const next: PieceSel = { ...sel };
+                for (const p of pieces) {
+                  next[p.id] = {
+                    checked: !!fitsWidth.get(p.id),
+                    qty: sel[p.id]?.qty ?? 1,
+                  };
+                }
+                setSel(next);
+              })
+            }
+          >
+            select all
+          </button>
+        </div>
+        {pieces.map((p) => {
+          const fits = fitsWidth.get(p.id) ?? false;
+          const s = sel[p.id] ?? { checked: false, qty: 1 };
+          return (
+            <div key={p.id} className='flex items-center gap-1.5'>
+              <CheckboxCommon
+                name={`nest-piece-${p.id}`}
+                checked={s.checked && fits}
+                disabled={!fits || busy}
+                onChange={(c: boolean) =>
+                  guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
+                }
+              />
+              <PieceThumb piece={p} />
+              <div className='min-w-0 flex-1'>
+                <Text size='micro' component='p' className='truncate'>
+                  {p.name}
+                </Text>
+                {/* Размер детали и её тираж в этом настиле: в списке лежат детали
+                            нескольких размеров, у которых имена различаются одним хвостом. */}
+                <Text size='nano' variant='label' component='p'>
+                  {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
+                  {graded
+                    ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
+                      // размера» читалось бы про неё как недостача.
+                      ` · ${
+                        split.codeById.get(p.id)?.size ||
+                        (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
+                      } · ×${Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)}`
+                    : ''}
+                </Text>
+              </div>
+              {!fits && <Pill tone='warn'>too wide</Pill>}
+              <Input
+                name={`nest-qty-${p.id}`}
+                type='number'
+                value={s.qty}
+                min={1}
+                disabled={!fits || busy}
+                className='w-12 shrink-0'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSel((m) => ({
+                    ...m,
+                    [p.id]: {
+                      ...s,
+                      qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
+                    },
+                  }))
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+    </GenericPopover>
+  );
   return (
     <ConfirmationModal
       open={files != null || view != null}
@@ -2011,1164 +3620,224 @@ export function NestingModal({
       onConfirm={requestClose}
       title={
         viewData
-          ? `marker — ${view?.summary?.name ?? ''}`
-          : `DXF marker${sizeLabel ? ` — ${sizeLabel}` : ''}`
+          ? `marker · ${cleanMarkerTitle(view?.summary?.name ?? '')}`
+          : [
+              'marker',
+              graded
+                ? composition
+                    .map((c) => `${sizeNameOfId(c.sizeId).toLowerCase()} ×${c.quantity}`)
+                    .join(' ')
+                : sizeLabel || (ungradedUnits > 1 ? `×${ungradedUnits}` : ''),
+              titleFabric,
+            ]
+              .filter(Boolean)
+              .join(' · ')
       }
       width='lg'
       hideActions
     >
-      <div className='flex flex-col gap-2.5 lg:flex-row'>
-        {/* Left rail: четыре секции-аккордеона — «что кроим», «как читаем файл», «как кладём»,
-            «детали». Открыта одна за раз; свёрнутая шапка несёт сводку-ответ секции и парный к
-            слову индикатор состояния, так что рейл перестаёт конкурировать по высоте с холстом.
-            A stored marker has nothing to configure — the rail is hidden. */}
-        <div className={viewData ? 'hidden' : 'w-full shrink-0 space-y-2.5 lg:w-[300px]'}>
-          <ModalRailSection
-            index={1}
-            title='what we cut'
-            summary={s1Summary}
-            status={railS1}
-            open={railOpen === 1}
-            onToggle={() => toggleRail(1)}
-            onPin={() => pinRail(1)}
-          >
-            {/* ИЗ ЧЕГО КРОИМ — до параметров прогона, потому что от этой пары берётся ширина, а
-              ширина есть вход алгоритма. Колорвей называет артикул, слот называет роль; вместе они
-              дают полотно, на котором раскладка меряется. */}
-            {(cwOptions.length > 0 || fabricLines.length > 0) && (
-              <div className='space-y-1.5 border border-hairline p-1.5'>
-                {cwOptions.length > 0 && (
-                  <label className='block space-y-0.5'>
-                    <Text size='nano' variant='label' component='span'>
-                      colourway — whose article we cut
-                    </Text>
-                    <Selector
-                      label=''
-                      value={String(colorwayId)}
-                      options={[
-                        { value: '0', label: 'shared — the width is the same for all' },
-                        ...cwOptions.map((c) => ({
-                          value: String(c.colorwayId),
-                          label: c.label,
-                        })),
-                      ]}
-                      onChange={(v: string | number) => setColorwayId(Number(v) || 0)}
-                    />
-                  </label>
-                )}
-                {!lockedSlot && fabricLines.length > 0 && (
-                  <label className='block space-y-0.5'>
-                    <Text size='nano' variant='label' component='span'>
-                      fabric — where the consumption goes
-                    </Text>
-                    <Selector
-                      label=''
-                      value={slotKey}
-                      options={[
-                        { value: '', label: 'not picked' },
-                        ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
-                      ]}
-                      onChange={(v: string | number) => setSlotKey(String(v))}
-                    />
-                  </label>
-                )}
-                {lockedSlot && (
-                  <Text size='nano' variant='label' component='p'>
-                    fabric: {slotLabel(lockedSlot)} — from the DXF binding
-                  </Text>
-                )}
-                {pinArticle && (
-                  <Text size='nano' variant='label' component='p'>
-                    colourway article: {pinArticle}
-                  </Text>
-                )}
-                {noSlotChosen && (
-                  <Text size='nano' component='p' className='text-error'>
-                    pick a fabric — otherwise the marker is saved unbound and its consumption
-                    won't reach the costing
-                  </Text>
-                )}
-                {colorwayNoPin && (
-                  <Text size='nano' component='p' className='text-error'>
-                    colourway “{chosenColorway?.label}” has not assigned an article to this
-                    fabric — the width was taken by default from the BOM line, and the marker
-                    will not describe its cloth
-                  </Text>
-                )}
-              </div>
-            )}
+      {quizOpen ? (
+        <MarkerQuiz
+          quiz={quiz}
+          busy={busy}
+          layMode={layMode}
+          onLayMode={(m) => {
+            if (m === layMode) quiz.afterSpread(m);
+            else
+              guardManual(() => {
+                setLayMode(m);
+                quiz.afterSpread(m);
+              });
+          }}
+          tableCm={tableCm}
+          tableWidthCm={tableWidthCm}
+          stackLimitCm={stackLimitCm}
+          onTableCm={setTableEdit}
+          onTableWidthCm={setTableWidthEdit}
+          onStackCm={(v) => {
+            if (v !== stackLimitCm) guardManual(() => setStackEdit(v));
+          }}
+          onSaveTable={saveForWorkshop}
+          savingTable={savingWorkshop}
+          colourways={cwOptions.map((c) => ({ id: c.colorwayId, label: c.label }))}
+          colourwayId={colorwayId}
+          onColourway={(id) => chooseSource({ colorwayId: id })}
+          rows={quizRows}
+          onQty={(key, n) => guardManual(() => setQtyByToken((m) => ({ ...m, [key]: n })))}
+          spreadMode={spreadMode}
+          onSpreadMode={(m) => guardManual(() => setSpreadMode(m))}
+          plies={plies}
+          pliesAuto={pliesAuto}
+          onPlies={(n) => guardManual(() => setPlies(n))}
+          perPly={perPly}
+          thicknessMm={thicknessMm}
+          thicknessFromBom={bomThicknessMm != null}
+          onThickness={setThicknessEdit}
+          cutTotal={cutTotal}
+          extraTotal={extraTotal}
+          stackCm={layFigures.stackCm}
+          stackOk={!layFigures.overStack}
+          endLossCm={endLossCm}
+          onEndLoss={setEndLossCm}
+          clothWidthCm={clothRollCm}
+          markerLengthCm={effective?.usedLengthCm ?? estLengthCm ?? 0}
+          markerEstimate={!effective}
+          cloth={quizCloth}
+          pieces={quizPieces}
+          nesting={quizNesting}
+          fabricCm={layFigures.fabricCm}
+          warnings={quizWarnings}
+          extras={quizExtras}
+          runDisabled={runBlocked}
+          onRun={() => {
+            markQuizDone();
+            quiz.close();
+            requestRun();
+          }}
+          onShowResult={effective ? quiz.close : undefined}
+        />
+      ) : (
+        <QuizSummary
+          facts={summaryFacts}
+          onEdit={viewData ? undefined : () => quiz.open('run')}
+          editDisabled={busy}
+          aside={topWarnings.length > 0 ? <HeaderWarnings items={topWarnings} /> : undefined}
+        />
+      )}
 
-            {/* СОСТАВ НАСТИЛА — то, чем раскладка теперь описывается вместо «размер + комплекты».
-              Смешанный настил ложится плотнее однородного, и пока состав был скаляром, снять
-              такую норму было нечем. Таблица заменила и переключатель размеров, и поле
-              «комплектов»: размер с количеством 0 просто не кроится. */}
-            {!viewData && (
-              <div className='space-y-1 border border-borderColor p-1.5'>
-                <Text size='nano' variant='label' component='p'>
-                  lay composition — how many garments of each size we cut at once
-                </Text>
-                {graded ? (
-                  compRows.map((r) => {
-                    const bad = !r.resolvable || r.sizeId <= 0;
-                    return (
-                      <div key={r.key} className='flex items-center gap-1.5'>
-                        {/* Подпись — ВСЕ написания размера из файла («M / m»): строка их слила,
-                          и оператор должен видеть, что обе графики кроятся одним тиражом. */}
-                        <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                          {r.label}
-                        </Text>
-                        <Text size='nano' variant='label' component='span'>
-                          {r.count} pieces
-                        </Text>
-                        {bad && r.qty >= 1 && <Pill tone='warn'>not on the card</Pill>}
-                        <Input
-                          name={`nest-comp-${r.key}`}
-                          type='number'
-                          value={r.qty}
-                          min={0}
-                          disabled={running}
-                          className='w-14 shrink-0 px-1 py-0 text-micro'
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
-                            if (next !== r.qty) {
-                              guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
-                            }
-                          }}
-                        />
-                      </div>
-                    );
-                  })
-                ) : (
-                  <label className='flex items-center gap-1.5'>
-                    <Text size='micro' component='span' className='min-w-0 flex-1'>
-                      garments, pcs{sizeLabel ? ` · size ${sizeLabel}` : ''}
-                    </Text>
-                    <Input
-                      name='nest-units'
-                      type='number'
-                      value={ungradedUnits}
-                      min={1}
-                      disabled={running}
-                      className='w-14 shrink-0 px-1 py-0 text-micro'
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        const next = Math.max(1, Math.round(numOr(e.target.value, ungradedUnits)));
-                        if (next !== ungradedUnits) {
-                          guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
-                        }
-                      }}
-                    />
-                  </label>
-                )}
-                {graded && ungradedCount > 0 && (
-                  <Text size='nano' variant='label' component='p'>
-                    {ungradedAllUni
-                      ? `${ungradedCount} UNI pieces — they are not graded, they are cut for every garment (${unitsTotal} pcs each)`
-                      : `${ungradedCount} pieces with no size in the block name — they are cut for EVERY garment of the composition, that is ${unitsTotal} pcs each`}
-                  </Text>
-                )}
-                {/* Отказ, а не предупреждение: пока копии спорят, любое число здесь описывает
-                    раскладку, которой мы не выбирали. Прогон и сохранение выключены. */}
-                {uniRefusal && <CalloutBox tone='error'>{uniRefusal}</CalloutBox>}
-                {/* Здесь стояла строка «итог: изделий · уникальных деталей · экземпляров» — третья
-                  копия одного и того же счёта. Канонический счёт теперь один: шапка списка в
-                  секции «детали» (изделия, выбранные, к раскладке) и её свёрнутая сводка. */}
-                {mixed && (
-                  <Text size='nano' component='p' className='text-warning'>
-                    mixed composition: the PER-UNIT consumption of such a marker is a mean over
-                    the composition (it overstates small sizes and understates large ones), and it
-                    is not written into the recipe. the lay length itself and the requirement from
-                    it are correct; per-size consumption arrives with phase 2.4
-                  </Text>
-                )}
-                {unresolvedTokens.length > 0 && (
-                  <Text size='nano' component='p' className='text-error'>
-                    sizes are missing from the card's size range: {unresolvedTokens.join(', ')} —
-                    the marker can be computed but not saved: add the size to the card, or drop it
-                    from the composition (quantity 0)
-                  </Text>
-                )}
-                {sizesWithoutPieces.length > 0 && (
-                  <Text size='nano' component='p' className='text-error'>
-                    the composition took sizes with not a single piece picked:{' '}
-                    {sizesWithoutPieces.join(', ')} — the lay length would be divided by garments
-                    it does not cut
-                  </Text>
-                )}
-                {!graded && !sizeId && (
-                  <Text size='nano' component='p' className='text-error'>
-                    the block names carry no sizes, and the slot's size is unknown — there is
-                    nothing to save such a marker with
-                  </Text>
-                )}
-              </div>
-            )}
-          </ModalRailSection>
-
-          <ModalRailSection
-            index={2}
-            title='how we read the file'
-            summary={s2Summary}
-            status={railS2}
-            open={railOpen === 2}
-            onToggle={() => toggleRail(2)}
-            onPin={() => pinRail(2)}
-          >
-            <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-              <Selector
-                label='DXF units'
-                compact
-                value={unitOverride}
-                options={[
-                  {
-                    value: 'auto',
-                    // The detected unit stays visible even on 'авто' — a file whose header
-                    // lies about units is caught by the operator seeing «авто (см)» on a
-                    // sleeve that should be in mm.
-                    label:
-                      parse.phase === 'ready'
-                        ? `auto (${parse.detectedUnit === 'mm' ? 'mm' : parse.detectedUnit === 'cm' ? 'cm' : 'inches'})`
-                        : 'auto',
-                  },
-                  { value: 'mm', label: 'mm' },
-                  { value: 'cm', label: 'cm' },
-                  { value: 'in', label: 'inches' },
-                ]}
-                onChange={(v: string | number) =>
-                  guardManual(() => setUnitOverride(String(v) as Unit))
-                }
-                disabled={running || parse.phase === 'loading'}
+      {/* Холст на всю ширину модалки. Готовая/сохранённая раскладка идёт через интерактивный
+          редактор; потоковое превью GA остаётся дешёвым строковым SVG. */}
+      {!quizOpen && (
+        <div className='space-y-2'>
+          <div className='relative'>
+            {running && liveSvg ? (
+              <div
+                // Потоковое превью: ширина ткани = высота холста, длина — горизонтальный скролл.
+                className='h-[60vh] min-h-[320px] w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-bgColor [&_svg]:h-full [&_svg]:w-auto [&_svg]:max-w-none'
+                dangerouslySetInnerHTML={{ __html: liveSvg }}
               />
-            </div>
-
-            {parse.phase === 'ready' &&
-              unitOverride !== 'auto' &&
-              unitOverride !== parse.detectedUnit && (
-                <Text size='nano' variant='label'>
-                  the file declares{' '}
-                  {parse.detectedUnit === 'mm'
-                    ? 'mm'
-                    : parse.detectedUnit === 'cm'
-                      ? 'cm'
-                      : 'inches'}{' '}
-                  — a manual override is chosen
-                </Text>
-              )}
-
-            {/* Что именно раскладываем: какой контур и какой размер. Один DXF несёт всю градацию,
-              а блок — контур на нескольких слоях, поэтому без этого выбора на полосу легла бы
-              вся градация разом, а длина маркера не относилась бы ни к одному размеру.
-              Слой по умолчанию — тот, что ГРАДУИРУЕТСЯ: контур, одинаковый во всех размерах,
-              это справочная линия, а не деталь. */}
-            {(layerOpts.length > 1 || missingOnLayer.length > 0) && (
-              <div className='space-y-1 border border-borderColor p-1.5'>
-                {layerOpts.length > 1 && (
-                  <div className='flex flex-wrap items-center gap-1'>
-                    <Text size='nano' variant='label' component='span'>
-                      contour:
-                    </Text>
-                    {layerOpts.map((o) => {
-                      // Замер — В САМОЙ КНОПКЕ, а не только в подсказке. Вопрос «крой или шов»
-                      // решает, нужен ли офсет вообще, и держать ответ на него под наведением мыши
-                      // значит прятать половину выбора от того, кто его делает.
-                      const measured = layerAllowanceLabel(o);
-                      return (
-                        <Button
-                          key={o.layer || '(none)'}
-                          type='button'
-                          variant={o.layer === contourLayer ? 'main' : 'secondary'}
-                          size='xs'
-                          disabled={running}
-                          title={[
-                            o.checked === 0
-                              ? `layer ${o.layer}: ${o.pieces} contours, nothing to compare sizes with`
-                              : `layer ${o.layer}: ${o.pieces} contours, graded on ${o.graded} of ${o.checked} pieces`,
-                            o.allowance ? allowanceLabel(o.allowance) : '',
-                            o.allowance?.verdict === 'unknown'
-                              ? allowanceUnknownText(o.allowance)
-                              : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                          onClick={() => guardManual(() => setActiveLayer(o.layer))}
-                        >
-                          layer {o.layer || '—'}
-                          {o.checked > 0 && o.graded === 0 ? ' (not graded)' : ''}
-                          {measured ? ` · ${measured}` : ''}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                )}
-                {missingOnLayer.length > 0 && (
-                  <Text size='nano' component='p' className='text-error'>
-                    layer {contourLayer || '—'} has no contour for {missingOnLayer.length} blocks —
-                    they will not enter the marker: {missingOnLayer.slice(0, 6).join(', ')}
-                    {missingOnLayer.length > 6 ? '…' : ''}
-                  </Text>
-                )}
-              </div>
-            )}
-
-            {/* ДВОЙНОЙ ПРИПУСК — ДО ПРОГОНА, а не после, и РЯДОМ с выбором слоя, который его
-              вызвал (раньше этот отказ жил стопкой на правой панели, среди новостей про
-              результат). Панель, а не тост: тост исчезает, а чинится это двумя кликами здесь
-              же — в списке слоёв или в поле припуска (секция «как кладём»). */}
-            {doubleAllowanceRefusal && (
-              <CalloutBox tone='error'>
-                double allowance — the search will not start: {doubleAllowanceRefusal}
-              </CalloutBox>
-            )}
-
-            {/* Долевая — СВОЯ панель, а не часть выбора слоя и размера. Пока она жила внутри той,
-              на файле с одним контурным слоем и одним размером панель не рендерилась вовсе:
-              выключатель, счётчик повёрнутых и список деталей без долевой исчезали, а разворот
-              всё равно происходил — то есть обе обещанные страховки пропадали ровно там, где
-              проверить было нечем. */}
-            <div className='space-y-1 border border-borderColor p-1.5'>
-              <div className='flex flex-wrap items-center gap-1'>
-                <Text size='nano' variant='label' component='span'>
-                  grainline:
-                </Text>
-                {grainLayers.map((o) => (
-                  <Button
-                    key={o.layer}
-                    type='button'
-                    variant={o.layer === grainLayer ? 'main' : 'secondary'}
-                    size='xs'
-                    disabled={running}
-                    title={`layer ${o.layer}: exactly one segment on ${o.exactlyOne} of ${o.seen} pieces, typical length ${o.medianLengthCm.toFixed(1)} cm`}
-                    onClick={() => guardManual(() => setGrainPick(o.layer))}
-                  >
-                    layer {o.layer}
-                  </Button>
-                ))}
-                <Button
-                  type='button'
-                  variant={grainLayer === '' ? 'main' : 'secondary'}
-                  size='xs'
-                  disabled={running}
-                  title='lay the pieces as they are drawn'
-                  onClick={() => guardManual(() => setGrainPick(''))}
-                >
-                  do not rotate
-                </Button>
-                {grainLayer !== '' && (
-                  <Text size='nano' variant='label' component='span'>
-                    rotated: {oriented.rotated} of {pieces.length}
-                  </Text>
-                )}
-              </div>
-              {grainLayer !== '' && oriented.missing.length > 0 && (
-                <Text size='nano' component='p' className='text-error'>
-                  the grainline is not unambiguous on {oriented.missing.length} pieces — they will
-                  lie as they are drawn: {oriented.missing.slice(0, 6).join(', ')}
-                  {oriented.missing.length > 6 ? '…' : ''}
-                </Text>
-              )}
-              {grainLayer === '' && (
-                <Text size='nano' component='p' className='text-error'>
-                  the pieces will lie as they are drawn in the file — which may turn out to be
-                  across the grainline
-                </Text>
-              )}
-            </div>
-
-            {/* One chip per source DXF: each fabric is its own file, so «выбрать одну ткань»
-              must be one click, not fifteen. Indeterminate = partially selected. */}
-            {sources.length > 1 && (
-              <div className='space-y-1'>
-                {sources.map(([source, ps]) => {
-                  const fitting = ps.filter((p) => fitsWidth.get(p.id));
-                  const checkedN = fitting.filter((p) => sel[p.id]?.checked).length;
-                  const state: boolean | 'indeterminate' =
-                    fitting.length > 0 && checkedN === fitting.length
-                      ? true
-                      : checkedN > 0
-                        ? 'indeterminate'
-                        : false;
-                  return (
-                    <label key={source} className='flex cursor-pointer items-center gap-1.5'>
-                      <CheckboxCommon
-                        name={`nest-src-${source}`}
-                        checked={state}
-                        disabled={running || fitting.length === 0}
-                        className='[&>span[data-state=indeterminate]]:opacity-40'
-                        onChange={(c: boolean) =>
-                          guardManual(() =>
-                            setSel((m) => {
-                              const next = { ...m };
-                              for (const p of fitting) {
-                                next[p.id] = { checked: c, qty: m[p.id]?.qty ?? 1 };
-                              }
-                              return next;
-                            }),
-                          )
-                        }
-                      />
-                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        file: {source}
-                      </Text>
-                      <Text size='nano' variant='label' component='span' className='shrink-0'>
-                        {checkedN}/{ps.length} pieces
-                      </Text>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-
-            {parse.phase === 'loading' && (
-              <Text size='micro' variant='label'>
-                downloading and parsing DXF…
-              </Text>
-            )}
-            {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
-            {parse.phase === 'ready' && parse.warnings.length > 0 && (
-              <CalloutBox tone='note' className='max-h-24 space-y-0.5 overflow-y-auto'>
-                {parse.warnings.map((w, i) => (
-                  <Text key={i} size='nano' component='p'>
-                    {w}
-                  </Text>
-                ))}
-              </CalloutBox>
-            )}
-          </ModalRailSection>
-
-          <ModalRailSection
-            index={3}
-            title='how we lay'
-            summary={s3Summary}
-            status={railS3}
-            open={railOpen === 3}
-            onToggle={() => toggleRail(3)}
-            onPin={() => pinRail(3)}
-          >
-            <div className='grid grid-cols-2 gap-1.5'>
-              <label className='space-y-0.5'>
-                <Text size='nano' variant='label' component='span'>
-                  cutting width, cm
-                </Text>
-                <Input
-                  name='nest-width'
-                  type='number'
-                  value={widthRaw ?? String(widthCm)}
-                  min={10}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
-                  onBlur={() => {
-                    const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
-                    setWidthRaw(null);
-                    // Флаг «ввели руками» ставится ВНУТРИ apply: если оператор откажется выбрасывать
-                    // ручные правки, ширина не изменилась — и считать её введённой руками нельзя,
-                    // иначе автоподстановка по колорвею молча выключится навсегда.
-                    if (next !== widthCm) {
-                      guardManual(() => {
-                        setWidthTouched(true);
-                        setWidthCm(next);
-                      });
-                    }
-                  }}
-                  disabled={running}
-                />
-                {widthSource && (
-                  <Text size='nano' variant='label' component='span'>
-                    {widthSource}
-                  </Text>
-                )}
-              </label>
-              <label className='space-y-0.5'>
-                <Text size='nano' variant='label' component='span'>
-                  target length, cm
-                </Text>
-                <Input
-                  name='nest-target'
-                  type='number'
-                  value={targetCm}
-                  placeholder='no target'
-                  min={0}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const v = e.target.value.trim();
-                    setTargetCm(v === '' ? '' : Math.max(0, numOr(v, 0)));
-                  }}
-                  disabled={running}
-                />
-              </label>
-              <label className='space-y-0.5'>
-                <Text size='nano' variant='label' component='span'>
-                  gap, cm
-                </Text>
-                <Input
-                  name='nest-gap'
-                  type='number'
-                  value={gapCm}
-                  min={0}
-                  step={0.1}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const next = Math.max(0, numOr(e.target.value, gapCm));
-                    if (next !== gapCm) guardManual(() => setGapCm(next));
-                  }}
-                  disabled={running}
-                />
-              </label>
-              <label className='space-y-0.5'>
-                <Text size='nano' variant='label' component='span'>
-                  margin from the selvedge, cm
-                </Text>
-                <Input
-                  name='nest-margin'
-                  type='number'
-                  value={marginCm}
-                  min={0}
-                  step={0.5}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const next = Math.max(0, numOr(e.target.value, marginCm));
-                    if (next !== marginCm) guardManual(() => setMarginCm(next));
-                  }}
-                  disabled={running}
-                />
-              </label>
-              {/* Припуск на шов — ВХОД алгоритма, а не подпись к результату: он раздувает контур
-                до линии кроя ещё до укладки, поэтому и длина, и SVG, и плоттерный DXF описывают
-                то, что цех действительно вырежет. */}
-              <label className='space-y-0.5'>
-                <Text size='nano' variant='label' component='span'>
-                  seam allowance, mm
-                </Text>
-                <Input
-                  name='nest-allowance'
-                  type='number'
-                  value={allowanceMm}
-                  min={0}
-                  max={MAX_SEAM_ALLOWANCE_MM}
-                  step={0.1}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    // Потолок 10 см — не физика, а защита от промаха по точке: «11» вместо «1.1»
-                    // даёт совершенно правдоподобный маркер, просто вчетверо длиннее, и заметить
-                    // это можно только по счёту от поставщика. Число живёт в contour-layer.ts, где
-                    // его применяет и предзаполнение: два потолка на одно поле однажды разойдутся.
-                    const next = clampSeamAllowanceMm(numOr(e.target.value, allowanceMm));
-                    if (next !== allowanceMm) {
-                      // Флаг «ввели руками» ставится ВНУТРИ apply — ровно как у ширины: если
-                      // оператор откажется выбрасывать ручные правки, припуск не изменился, и
-                      // считать его введённым руками нельзя, иначе предзаполнение по замеру и по
-                      // эталону карточки молча выключится навсегда.
-                      guardManual(() => {
-                        setAllowanceTouched(true);
-                        setAllowanceMm(next);
-                      });
-                    }
-                  }}
-                  disabled={running}
-                />
-                {/* ЧТО ЛЕЖИТ НА ВЫБРАННОМ СЛОЕ — замером, а не утверждением. Здесь стояло «контур
-                  DXF — линия шва; кладётся линия кроя», и это правда ровно до тех пор, пока слой
-                  выбран правильно: на файле с четырьмя контурными слоями та же строка спокойно
-                  стоит над линией КРОЯ и подтверждает оператору, что офсет нужен. */}
-                <Text size='nano' variant='label' component='span'>
-                  {allowanceSourceText}
-                </Text>
-                {!allowanceTouched && allowancePrefill && (
-                  <Text size='nano' variant='label' component='span'>
-                    prefilled: {allowancePrefill.why}
-                  </Text>
-                )}
-              </label>
-              {/* Поле «комплектов» жило здесь и умело выразить только N одинаковых изделий одного
-                размера. Его заменила таблица состава ниже — там же, где выбирается, что кроим. */}
-            </div>
-
-            {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
-              всему контуру, а настоящий подгиб низа шире. Молчаливое допущение здесь стоило бы
-              метров ткани, а увидеть его на картинке нельзя. */}
-            {allowanceMm > 0 ? (
-              <CalloutBox tone='note'>
-                <Text size='nano' component='p'>
-                  the {allowanceMm.toFixed(1)} mm allowance is laid EVENLY around the whole contour
-                  of every piece and is the same for the whole kit. in real life the hem is wider
-                  and the neckline narrower — the marker does not know that. the seam line stays
-                  drawn inside the cut line.
-                </Text>
-                {/* ЧЕСТНАЯ ВЕТКА «УЛИК НЕТ» (§5.4). Замер не удался — и это законно, а не
-                  недосмотр: у блока один замкнутый контур, второй контур пересекает первый,
-                  принятых блоков меньше трёх. Сохранение не блокируется, но и молчать нельзя:
-                  маркер уедет с contour_allowance_cm = NULL, то есть «припуск не подтверждён
-                  файлом», и гейт готовности прочитает это как непроверенное происхождение
-                  факта — не как двойной припуск. */}
-                {allowanceUnconfirmed && (
-                  <Text size='nano' component='p'>
-                    the file does NOT CONFIRM that the contour carries no allowance: {''}
-                    {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. the marker is
-                    computed and saved — it will be marked “allowance not confirmed by the
-                    file”.
-                  </Text>
-                )}
-              </CalloutBox>
-            ) : contourIsCutLine ? (
-              // Ноль ЗДЕСЬ ПРАВИЛЬНЫЙ, и прежний безусловный красный текст ниже утверждал обратное.
-              // На слое с линией кроя припуск уже в контуре: добавить его значит посчитать дважды.
-              <CalloutBox tone='note'>
-                <Text size='nano' component='p'>
-                  allowance 0 — and that is right for the chosen layer: it carries the CUT LINE,{' '}
-                  the {(engineCmToMm(contourMeasure?.allowanceCm) ?? 0).toFixed(1)} mm allowance is
-                  already built into the contour. the marker lays it as it is.
-                </Text>
-              </CalloutBox>
+            ) : effective && !running ? (
+              <LayoutEditor
+                pieces={displayPieces}
+                placements={effective.placements}
+                widthCm={displayWidth}
+                usedLengthCm={effective.usedLengthCm}
+                targetCm={viewData && storedTableEnd ? undefined : displayTarget}
+                tableEndCm={tableEndCm ?? undefined}
+                marginCm={displayMargin}
+                allowCrossGrain={displayCross}
+                // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
+                //
+                // Здесь стояло 'unknown' для сохранённого маркера, «чтобы не перечёркивать снятое до
+                // Ф1». Перечёркивать оно и не могло: rotsFor всегда оставляет ТЕКУЩИЙ поворот детали
+                // в цикле, так что лежащие в блобе 180° никуда не деваются. Зато вместе с прежним
+                // allowsFlip (где unknown разрешал переворот) оно ПРЕДЛАГАЛО оператору поставить
+                // деталь на 180° на ворсовой ткани — и такая правка старого маркера УХОДИЛА В БАЗУ:
+                // сервер милует строки с поколением политики младше 3, и поколение это остаётся
+                // прежним, так что строка остаётся помилованной навсегда. То есть ровно там, где
+                // помилование должно было защищать старые замеры, оно молча узаконивало новый брак.
+                fabricDirection={effectiveDirection}
+                editable={editingActive}
+                violating={violatingIdx}
+                focus={focusReq}
+                onChange={(next) => setManual(next)}
+                corner={downloadButton}
+              />
             ) : (
-              <CalloutBox tone='error'>
-                <Text size='nano' component='p'>
-                  allowance 0 — the SEAM LINE is nested, while the workshop cuts wider. the
-                  consumption will be understated.
+              <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
+                <Text size='micro' variant='label'>
+                  {running ? (
+                    'computing…'
+                  ) : fitting ? (
+                    `fitting to the table… attempt ${fitting.attempt}`
+                  ) : (
+                    <EmptyCell />
+                  )}
                 </Text>
-              </CalloutBox>
-            )}
-            {/* Полный текст отказа живёт ровно в одном месте — в секции «как читаем файл», рядом с
-              выбором слоя, который его вызвал. Здесь, у поля припуска, — только ссылка-строка. */}
-            {doubleAllowanceRefusal && (
-              <Text size='nano' component='p' className='text-error'>
-                double allowance — the search will not start; the full text and both ways out are in
-                section “2 · how we read the file”, next to the contour layer picker
-              </Text>
-            )}
-            {seam.hulled.length > 0 && (
-              <Text size='nano' component='p' className='text-error'>
-                a defective contour on {seam.hulled.length} pieces — the allowance was computed on
-                the convex hull (with room to spare): {seam.hulled.slice(0, 6).join(', ')}
-                {seam.hulled.length > 6 ? '…' : ''}
-              </Text>
-            )}
-
-            {/* НАПРАВЛЕНИЕ ТКАНИ. Не настройка раскладки, а факт про полотно — поэтому показывается,
-              а не спрашивается: правится оно на вкладке BOM, у строки материала. Единственное, что
-              оно решает здесь, — переворот детали на 180°: на ворсовой ткани перевёрнутая деталь
-              ложится ворсом против соседки, и готовое изделие выходит двухцветным под лампами.
-              Заметить это на раскладке нечем — контур перевёрнутой детали выглядит ровно так же. */}
-            {!viewData && (
-              <Text size='nano' variant='label' component='p'>
-                fabric direction:{' '}
-                {effectiveDirection === 'one_way'
-                  ? 'napped (one-way) — a 180° flip is forbidden'
-                  : effectiveDirection === 'two_way'
-                    ? 'two-way — flipping is allowed'
-                    : effectiveDirection === 'any'
-                      ? 'no nap — flipping is allowed'
-                      : 'NOT SET'}
-                {/* Прежний текст здесь обещал безусловный отказ: «сохранить нельзя, пока направление
-                  не проставлено». Сервер строже НЕ настолько — он отказывает только раскладке,
-                  которая реально кладёт деталь вверх ногами (180° или зеркало), а раскладку без
-                  переворотов принимает при любом направлении, включая непроставленное. Обещание
-                  отказа, которого не будет, стоит того же, что и умолчание о настоящем: оператор
-                  перестаёт верить плашке. Поэтому теперь тут сказано, что делает КЛИЕНТ — он
-                  считает без 180°, — и почему это не блокирует сохранение. */}
-                {effectiveDirection === 'unknown'
-                  ? ' — while nobody has answered, the marker is computed WITHOUT the 180° flip: such a norm is accepted on any fabric. set the direction on the fabric line on the BOM tab, and on a non-directional fabric the marker will pack tighter'
-                  : ''}
-              </Text>
-            )}
-
-            {/* Тот же отказ, что вынес бы сервер, но ДО отправки и рядом со строкой направления,
-              которой он вызван (раньше жил стопкой на правой панели, среди новостей про
-              результат). Слот и прогон разнесены во времени, поэтому расхождение появляется уже
-              после того, как ждать перестали. */}
-            {directionRefusal && (
-              <CalloutBox tone='error'>cannot be saved: {directionRefusal}</CalloutBox>
-            )}
-
-            <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-              <label className='flex cursor-pointer items-center gap-1.5'>
-                <CheckboxCommon
-                  name='nest-crossgrain'
-                  checked={crossGrain}
-                  onChange={(c: boolean) => guardManual(() => setCrossGrain(c))}
-                  disabled={running}
-                />
-                <Text size='micro' component='span'>
-                  allow a 90° rotation
-                </Text>
-              </label>
-              <Selector
-                label='time'
-                compact
-                value={budgetS}
-                options={[
-                  { value: 5, label: '5 s' },
-                  { value: 20, label: '20 s' },
-                  { value: 60, label: '60 s' },
-                ]}
-                onChange={(v: string | number) => setBudgetS(Number(v))}
-                disabled={running}
-              />
-            </div>
-          </ModalRailSection>
-
-          <ModalRailSection
-            index={4}
-            title='pieces'
-            summary={s4Summary}
-            status={railS4}
-            open={railOpen === 4}
-            onToggle={() => toggleRail(4)}
-            onPin={() => pinRail(4)}
-          >
-            {/* Piece list: checkbox · thumb · name · размеры · qty. */}
-            {pieces.length > 0 && (
-              <div className='max-h-[46vh] space-y-1 overflow-y-auto border border-borderColor p-1.5'>
-                <div className='flex items-center justify-between'>
-                  <Text size='nano' variant='label'>
-                    pieces: {pieces.length} · picked {checkedCount}
-                    {instanceCount !== checkedCount ? ` · to the marker: ${instanceCount}` : ''}
-                    {` · ${unitsTotal} garments`}
-                    {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
-                      ? ` · OVER THE CAP (${MAX_MARKER_PIECES} pieces / ${MAX_MARKER_PLACEMENTS} placements) — the server will not save such a marker`
-                      : ''}
-                  </Text>
-                  <button
-                    type='button'
-                    className='text-nano uppercase underline hover:opacity-70'
-                    onClick={() =>
-                      guardManual(() => {
-                        // Слитно, а не заменой: замена стёрла бы выбор деталей ДРУГИХ размеров
-                        // и слоёв, и переключение размера показало бы всё снятым.
-                        const next: PieceSel = { ...sel };
-                        for (const p of pieces) {
-                          next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
-                        }
-                        setSel(next);
-                      })
-                    }
-                  >
-                    select all
-                  </button>
-                </div>
-                {pieces.map((p) => {
-                  const fits = fitsWidth.get(p.id) ?? false;
-                  const s = sel[p.id] ?? { checked: false, qty: 1 };
-                  return (
-                    <div key={p.id} className='flex items-center gap-1.5'>
-                      <CheckboxCommon
-                        name={`nest-piece-${p.id}`}
-                        checked={s.checked && fits}
-                        disabled={!fits || running}
-                        onChange={(c: boolean) =>
-                          guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
-                        }
-                      />
-                      <PieceThumb piece={p} />
-                      <div className='min-w-0 flex-1'>
-                        <Text size='micro' component='p' className='truncate'>
-                          {p.name}
-                        </Text>
-                        {/* Размер детали и её тираж в этом настиле. До состава список показывал
-                          ровно один размер, и подпись была бы шумом; теперь в нём лежат детали
-                          нескольких размеров, у которых имена различаются одним хвостом. */}
-                        <Text size='nano' variant='label' component='p'>
-                          {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} cm
-                          {graded
-                            ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
-                              // размера» читалось бы про неё как недостача. Подпись берётся с
-                              // самой детали, а не с группы: в списке они лежат вперемешку.
-                              ` · ${
-                                split.codeById.get(p.id)?.size ||
-                                (split.codeById.get(p.id)?.uni ? 'UNI' : 'no size')
-                              } · ×${
-                                Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
-                              }`
-                            : ''}
-                        </Text>
-                      </div>
-                      {!fits && <Pill tone='warn'>wider than the cloth</Pill>}
-                      <Input
-                        name={`nest-qty-${p.id}`}
-                        type='number'
-                        value={s.qty}
-                        min={1}
-                        disabled={!fits || running}
-                        className='w-12 shrink-0 px-1 py-0 text-micro'
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setSel((m) => ({
-                            ...m,
-                            [p.id]: {
-                              ...s,
-                              qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                  );
-                })}
               </div>
             )}
-          </ModalRailSection>
-        </div>
+          </div>
+          {running && (
+            <Progress
+              className='h-px'
+              value={
+                run.nfp
+                  ? (run.nfp.done / Math.max(1, run.nfp.total)) * 100
+                  : run.best
+                    ? (run.best.elapsedMs / Math.max(1, budgetS * 1000)) * 100
+                    : 0
+              }
+            />
+          )}
 
-        {/* Right pane: the strip to scale + stats. Finished/stored layouts render through
-            the interactive editor (drag/rotate when editing is allowed); the GA's streaming
-            preview keeps the cheap string-SVG path. */}
-        <div className='min-w-0 flex-1 space-y-2'>
-          {running && liveSvg ? (
-            <div
-              className='max-h-[56vh] w-full overflow-auto border border-borderColor bg-bgColor [&_svg]:h-auto [&_svg]:w-full'
-              dangerouslySetInnerHTML={{ __html: liveSvg }}
-            />
-          ) : effective && !running ? (
-            <LayoutEditor
-              pieces={displayPieces}
-              placements={effective.placements}
-              widthCm={displayWidth}
-              usedLengthCm={effective.usedLengthCm}
-              targetCm={displayTarget}
-              marginCm={displayMargin}
-              allowCrossGrain={displayCross}
-              // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
-              //
-              // Здесь стояло 'unknown' для сохранённого маркера, «чтобы не перечёркивать снятое до
-              // Ф1». Перечёркивать оно и не могло: rotsFor всегда оставляет ТЕКУЩИЙ поворот детали
-              // в цикле, так что лежащие в блобе 180° никуда не деваются. Зато вместе с прежним
-              // allowsFlip (где unknown разрешал переворот) оно ПРЕДЛАГАЛО оператору поставить
-              // деталь на 180° на ворсовой ткани — и такая правка старого маркера УХОДИЛА В БАЗУ:
-              // сервер милует строки с поколением политики младше 3, и поколение это остаётся
-              // прежним, так что строка остаётся помилованной навсегда. То есть ровно там, где
-              // помилование должно было защищать старые замеры, оно молча узаконивало новый брак.
-              fabricDirection={effectiveDirection}
-              editable={editingActive}
-              violating={violatingIdx}
-              onChange={(next) => setManual(next)}
-            />
-          ) : (
-            <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
-              <Text size='micro' variant='label'>
-                {running
-                  ? 'computing the marker…'
-                  : pieces.length > 0
-                    ? 'pick pieces and press “run”'
-                    : '—'}
-              </Text>
-            </div>
-          )}
-          {!running && displayResult?.cancelled && displayResult.placements.length === 0 && (
-            <CalloutBox tone='warning'>
-              stopped before the first ready marker — there is nothing to show. a marker computed
-              already AFTER the “stop” used to appear here: nobody was waiting for it, and its
-              length was real, so there was no telling it apart from a result.
-            </CalloutBox>
-          )}
-          {saveError && <CalloutBox tone='error'>saving failed: {saveError}</CalloutBox>}
-          {/* Отказы по ВВОДУ (направление ткани, двойной припуск) жили здесь стопкой — их полные
-              тексты теперь стоят в своих секциях рейла, рядом с полями, которые их вызвали.
-              Здесь — новости про результат прогона и сохранение/экспорт, плюс сводный список
-              причин отказа сохранения ниже (эти две причины входят и в него, но короткими
-              строками-ссылками, без второго экземпляра полного текста). */}
-          {/* ПЕРЕСБОРКА ЧЕРТЕЖА НЕ УДАЛАСЬ (§7.4). Панель, потому что чинить это надо на другой
-              вкладке — перезалить выкройку, — а тост до туда не доживёт. */}
-          {drawing.phase === 'error' && (
-            <CalloutBox tone='error'>
-              <Text size='nano' component='p'>
-                the piece drawing was not restored: {rebuildText}
-              </Text>
-              <Text size='nano' component='p'>
-                “download DXF” and “download SVG” are switched off: a file without the seam line
-                and notches is read by the workshop as “the garment has none”. the plotter export
-                stayed — the “DXF: contours only” button, and the file name says so.
-              </Text>
-            </CalloutBox>
-          )}
-          {drawing.phase === 'running' && (
-            <Text size='nano' variant='label' component='p'>
-              restoring the piece drawing from the card's patterns — the export will open when the
-              contour of the rebuilt piece agrees with the saved one
-            </Text>
-          )}
-          {drawing.phase === 'ok' && drawing.warnings.length > 0 && (
-            <CalloutBox tone='note'>
-              {drawing.warnings.map((w, i) => (
-                <Text key={i} size='nano' component='p'>
-                  drawing rebuild: {w}
-                </Text>
+          {(layFacts.length > 0 || effective) && (
+            <FactList wide>
+              {layFacts.map((f) => (
+                <Fact key={f.label} label={f.label} error={f.error}>
+                  {f.value}
+                </Fact>
               ))}
-            </CalloutBox>
-          )}
-          {unplaced.length > 0 && (
-            <CalloutBox tone='error'>
-              did not fit: {unplaced.length} — {unplacedText}. these pieces are NOT on the marker,
-              the length was computed without them; the norm cannot be saved until every piece
-              has been laid.
-            </CalloutBox>
-          )}
-          {/* ЧЕРНОВИК НАЗЫВАЕТСЯ ЧЕРНОВИКОМ В ЕДИНСТВЕННОМ ОКНЕ, ГДЕ ЕГО ГЕОМЕТРИЮ ВИДНО.
-              Открытая раскладка выглядит нормальной: контуры на месте, длина и КПД напечатаны — а
-              то, что это 30 деталей из 45, читалось только по счётчику «размещено», который рядом
-              с «эффективность» выглядит бухгалтерской подробностью. Здесь же сказано, что экспорта
-              не будет: печать и плоттер — это дорога в цех. */}
-          {partialGeometry && (
-            <CalloutBox tone='error'>
-              {viewIsDraft ? 'DRAFT: ' : 'partial marker: '}
-              {partialExportRefusal}
-            </CalloutBox>
-          )}
-          {violations.length > 0 && !running && (
-            <CalloutBox tone='warning'>
-              violations: {violations.length}
-              {worstViolation ? ` · worst — ${violationText(worstViolation)}` : ''} — the export and
-              the save are not blocked, the decision is the cutter's
-            </CalloutBox>
-          )}
-
-          {effective && (
-            <StatGrid min={120}>
-              <Stat
-                label='used'
-                value={`${effective.usedLengthCm.toFixed(1)} cm`}
-                sub={manual ? 'with a manual edit' : undefined}
-              />
-              <Stat
-                label='efficiency'
-                value={`${effPct.toFixed(1)} %`}
-                sub={`fabric ${displayWidth} cm`}
-              />
-              <Stat
-                label='placed'
-                value={`${effective.placedCount}/${effective.totalCount}`}
-                tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
-              />
-              {viewData && view?.summary && (
+              {effective && (
+                <>
+                  <Fact label='used'>
+                    {effective.usedLengthCm.toFixed(1)} cm
+                    {manual && <span className='text-labelColor'> · edited</span>}
+                  </Fact>
+                  <Fact label='efficiency'>{effPct.toFixed(1)} %</Fact>
+                  <Fact label='placed' error={effective.placedCount !== effective.totalCount}>
+                    {effective.placedCount} / {effective.totalCount}
+                  </Fact>
+                  <Fact label='cloth'>{displayWidth} cm</Fact>
+                </>
+              )}
+              {effective && viewData && view?.summary && (
                 // РАСХОД НА ИЗДЕЛИЕ ДЕЛИТСЯ НА ИЗДЕЛИЯ, А НЕ НА КОМПЛЕКТЫ. Здесь стояло
                 // usedLength / max(1, sets), и на маркере с составом sets приезжает нулём
                 // (proto3 роняет умолчание) — то есть весь настил показывался как норма одного
                 // изделия. Смешанному составу число не показывается вовсе: у него нормы нет.
-                <Stat
-                  label='consumption / unit'
-                  value={
-                    viewRefusal
-                      ? '—'
-                      : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} cm`
-                  }
-                  sub={
-                    viewRefusal
-                      ? // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
-                        // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
-                        // отправить оператора чинить не то. До правки черновик здесь представлялся
-                        // «смешанным составом» или «состав не читается» — то есть единственное
-                        // место, где короткая длина видна рядом с КПД, про черновик молчало.
-                        //
-                        // Читается ТЕМ ЖЕ источником, что и сам отказ, — сводкой строки. viewData
-                        // берёт состав из БЛОБА в первую очередь, и у маркера, чья проекция
-                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом.
-                        `${refusalWord(view.summary)} — no norm`
-                      : `garments: ${viewData.totalUnits || 1}`
-                  }
-                />
+                // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
+                // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
+                // отправить оператора чинить не то. Читается ТЕМ ЖЕ источником, что и сам
+                // отказ, — сводкой строки.
+                <Fact
+                  label='per unit'
+                  title={viewRefusal ? undefined : `garments: ${viewData.totalUnits || 1}`}
+                >
+                  {viewRefusal ? (
+                    <>
+                      —<span className='text-labelColor'> · {refusalWord(view.summary)}</span>
+                    </>
+                  ) : (
+                    `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} cm`
+                  )}
+                </Fact>
               )}
-              {verdict && (
-                <Stat
-                  label='verdict'
-                  value={
-                    <Pill tone={verdict.ok ? 'ok' : 'warn'}>
-                      {verdict.ok ? 'fits' : 'does not fit'}
-                    </Pill>
-                  }
-                  sub={verdict.text}
-                />
+              {effective && verdict && (
+                <Fact label='verdict' error={!verdict.ok} title={verdict.text}>
+                  {verdict.ok ? 'fits' : 'does not fit'}
+                </Fact>
               )}
-              {!viewData && displayResult && (
-                <Stat
-                  label='generation'
-                  value={
-                    displayResult.generation === 0 ? (
-                      <Pill tone='warn'>there was no search</Pill>
-                    ) : (
-                      String(displayResult.generation)
-                    )
-                  }
-                  sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} s${run.phase === 'done' && run.stopped ? ' · stopped' : ''}`}
-                />
+              {effective && running && displayResult && (
+                <Fact label='generation'>
+                  {displayResult.generation}
+                  <span className='text-labelColor'>
+                    {' '}
+                    · {(displayResult.elapsedMs / 1000).toFixed(1)} s
+                  </span>
+                </Fact>
               )}
-            </StatGrid>
-          )}
-          {/* Готовность мерится ПОКОЛЕНИЯМИ, а не секундами: бюджет говорит, сколько мы ждали,
-              и ничего — сколько успели. Ноль поколений значит, что на экране лежит затравка. */}
-          {greedyOnly && (
-            <CalloutBox tone='warning'>
-              the search never started — this is a greedy “big pieces first” placement, not an optimum.
-              {displayResult?.telemetry
-                ? ` preparing the geometry ate ${(displayResult.telemetry.prepassMs / 1000).toFixed(1)} s of the budget (${displayResult.telemetry.nfpDone}/${displayResult.telemetry.nfpTotal} pairs).`
-                : ''}{' '}
-              give it more time, or capture the marker with a smaller composition.
-            </CalloutBox>
-          )}
-          {simplified && (
-            <Text size='nano' variant='label' component='p'>
-              contours were simplified to {simplified.rdpEpsCm} cm instead of {simplified.requestedRdpEpsCm} cm
-              — otherwise preparing the geometry would not have fitted the budget and the search
-              would not have started at all. the pieces lie a little looser because of it.
-            </Text>
-          )}
-          {displayResult && displayResult.warnings.length > 0 && (
-            <CalloutBox tone='note'>
-              {displayResult.warnings.map((w, i) => (
-                <Text key={i} size='nano' component='p'>
-                  {w}
-                </Text>
-              ))}
-            </CalloutBox>
+            </FactList>
           )}
 
-          {/* БЮДЖЕТ ДО ЗАПУСКА (Ф2.3) — рядом с кнопкой, до того как за прогон заплачено.
-              Оператор до сих пор узнавал цену только постфактум: жал «запустить», ждал весь
-              бюджет и читал в телеметрии, что предрасчёт съел его целиком, а поиска не было.
-              Здесь то же самое сказано ЗАРАНЕЕ и той же моделью, которой движок будет считать.
-              Потолки сервера стоят тут же: бюджет и потолки — два ответа на один вопрос «пойдёт
-              ли этот прогон вообще», и разносить их по разным углам экрана значит заставлять
-              оператора складывать их в голове.
-
-              Строки идут ПЛОСКО, соседями остальных заметок этой панели: рамка вокруг них была
-              бы блоком внутри блока (DESIGN.md), а единственная рамка здесь принадлежит той
-              новости, ради которой блок и заведён, — «поиска не будет». */}
-          {!viewData && !running && parse.phase === 'ready' && checkedCount > 0 && (
-            <>
-              {/* Счёт деталей/размещений здесь больше не печатается — канонический счёт живёт в
-                  шапке списка деталей (секция 4). В бюджете осталось только то, чего больше нигде
-                  нет: прогноз предрасчёта и пары NFP; потолки сервера названы в шапке списка и в
-                  тексте отказа ниже. */}
-              {forecast && (
-                <Text size='nano' variant='label' component='p'>
-                  before the start: geometry prepass ~
-                  {(forecast.predictedPrepassMs / 1000).toFixed(1)} s against a cap of{' '}
-                  {(forecast.prepassCapMs / 1000).toFixed(1)} s out of a budget of{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)} s · NFP pairs {forecast.nfpRecords}
-                </Text>
-              )}
-              {overCap && (
-                <Text size='nano' component='p' className='text-error'>
-                  over the server's cap ({MAX_MARKER_PIECES} pieces / {MAX_MARKER_PLACEMENTS}{' '}
-                  placements) — the search will not start, because such a marker cannot be saved:
-                  {checkedCount > MAX_MARKER_PIECES
-                    ? ` remove ${checkedCount - MAX_MARKER_PIECES} pieces`
-                    : ''}
-                  {checkedCount > MAX_MARKER_PIECES && instanceCount > MAX_MARKER_PLACEMENTS
-                    ? ' and'
-                    : ''}
-                  {instanceCount > MAX_MARKER_PLACEMENTS
-                    ? ` shrink the composition by ${instanceCount - MAX_MARKER_PLACEMENTS} placements`
-                    : ''}
-                </Text>
-              )}
-              {forecast?.coarsened && (
-                <Text size='nano' variant='label' component='p'>
-                  contours will be simplified to {forecast.effectiveEps} cm instead of {forecast.requestedEps} —
-                  {forecast.mirrorPairs
-                    ? ' mirrored pairs double the prepass'
-                    : ` there are many pieces (${forecast.uniquePieces})`}
-                  , otherwise no time would be left for the search; the marker gets a little looser
-                </Text>
-              )}
-              {/* Три исхода, и путать их нельзя: у первых двух поиск идёт, у третьего его
-                  практически нет. СКОЛЬКО ПОКОЛЕНИЙ успеет поиск — не печатается ни в одном из
-                  них: измеренной цены поколения у движка нет (см. expectedGenerations в
-                  nest/estimate.ts), а выдуманное число хуже отсутствующего — по нему принимают
-                  решения. Экран говорит то, что модель знает: сколько секунд достанется поиску. */}
-              {forecast?.outlook === 'starved' ? (
-                <CalloutBox tone='error'>
-                  <Text size='nano' component='p'>
-                    <b>the prepass will not fit the budget</b> — ~
-                    {(forecast.predictedPrepassMs / 1000).toFixed(1)} s against{' '}
-                    {(forecast.timeBudgetMs / 1000).toFixed(0)} s. it will be cut off by time, the
-                    search will get undercomputed geometry and an emergency 2 s: this is exactly the
-                    search that returns ZERO GENERATIONS and a greedy placement. the wait will be
-                    longer than the budget, and by how much there is nothing to say: the search
-                    finishes the missing geometry inside itself, and it can only break between
-                    individuals (in the measured case a 20 s budget turned into 51 seconds).
-                  </Text>
-                  <Text size='nano' component='p'>
-                    what to do: set a budget of at least {Math.ceil(forecast.budgetToFitMs / 1000)} s
-                    {forecast.effectiveEps >= 0.9
-                      ? ' (there is nowhere further for the engine to simplify contours — it is on the coarsest step)'
-                      : ''}
-                    , or remove the most complex pieces
-                    {forecast.heaviest.length > 0
-                      ? ` (the most expensive: ${forecast.heaviest
-                          .map(
-                            (h) =>
-                              `${pieces.find((p) => p.id === h.id)?.name ?? h.id} — ${h.parts} convex parts`,
-                          )
-                          .join(', ')})`
-                      : ''}
-                    , or shrink the composition.
-                  </Text>
-                </CalloutBox>
-              ) : forecast?.outlook === 'squeezed' ? (
-                <Text size='nano' component='p' className='text-warning'>
-                  the prepass will eat more than its share — only ~
-                  {(forecast.searchMsLeft / 1000).toFixed(1)} s of{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)} will be left for the search. a budget of{' '}
-                  {Math.ceil(forecast.budgetToFitMs / 1000)} s would have covered the full prepass.
-                </Text>
-              ) : forecast ? (
-                <Text size='nano' variant='label' component='p'>
-                  ~{(forecast.searchMsLeft / 1000).toFixed(1)} s of{' '}
-                  {(forecast.timeBudgetMs / 1000).toFixed(0)} will be left for the search — how many
-                  generations that comes to depends on the number of instances and on the machine, and nobody has measured it in advance
-                </Text>
-              ) : null}
-              {/* ПРОГНОЗ ПРОТИВ ФАКТА, когда факт уже есть. Правка любого параметра прогона
-                  сбрасывает результат (эффект выше), поэтому телеметрия здесь всегда от ТОГО ЖЕ
-                  задания — сравнение честное. Модель, которую видно рядом с её же промахом, —
-                  единственная, которую можно поймать на вранье. */}
-              {forecast && displayResult?.telemetry && (
-                <Text size='nano' variant='label' component='p'>
-                  previous search: prepass {(displayResult.telemetry.prepassMs / 1000).toFixed(1)}{' '}
-                  s against a forecast of ~{(displayResult.telemetry.predictedPrepassMs / 1000).toFixed(1)} s
-                  · generations {displayResult.generation}
-                </Text>
-              )}
-            </>
-          )}
-
-          {/* ПОЧЕМУ НЕ СОХРАНИТЬ — ВИДИМЫМ СПИСКОМ, а не цепочкой в тултипе кнопки: все
-              активные причины разом. Кнопка выключена ровно пока массив непуст; сам бокс при
-              этом НЕ рендерится, когда причина одна и она терминальная («прогон ещё не
-              завершён») — красный error под пустым плейсхолдером девальвировал бы тон. */}
-          {!viewData && !running && saveRefusals.length > 0 && !onlyTerminal && (
-            <CalloutBox tone='error'>
-              <Text size='nano' component='p'>
-                <b>
-                  cannot be saved — {saveRefusals.length} {reasonWord(saveRefusals.length)}:
-                </b>
-              </Text>
-              <ul className='list-disc space-y-0.5 pl-4'>
-                {saveRefusals.map((r, i) => (
-                  <li key={i}>
-                    <Text size='nano' component='span'>
-                      {r}
-                    </Text>
-                  </li>
-                ))}
-              </ul>
-            </CalloutBox>
-          )}
-
-          {/* Footer: own actions (the shell's are hidden). */}
-          <div className='flex flex-wrap items-center justify-end gap-1.5 border-t border-hairline pt-2'>
-            {running && run.nfp && (
-              <Text size='nano' variant='label' className='mr-auto'>
-                preparing the geometry {run.nfp.done}/{run.nfp.total}
-              </Text>
-            )}
-            {running && !run.nfp && run.best && (
-              <Text size='nano' variant='label' className='mr-auto'>
-                generation {run.generation} · best length {run.best.usedLengthCm.toFixed(1)} cm
-              </Text>
-            )}
+          {/* Одно главное действие: run → stop → save marker; остальное тихо рядом. */}
+          <div className='flex flex-wrap items-center justify-end gap-3'>
             {manual && !running && (
-              <Button
-                type='button'
-                variant='secondary'
-                title='return the marker to its original result'
-                onClick={() => setManual(null)}
-              >
-                reset the edits
+              <Button type='button' variant='underline' onClick={() => setManual(null)}>
+                reset edits
               </Button>
             )}
             {viewData && !viewDegraded && canEdit && !editView && (
-              <Button type='button' variant='secondary' onClick={() => setEditView(true)}>
+              <Button type='button' variant='secondary' size='sm' onClick={() => setEditView(true)}>
                 edit
               </Button>
             )}
@@ -3176,139 +3845,61 @@ export function NestingModal({
               <Button
                 type='button'
                 variant='main'
+                size='sm'
                 disabled={!canSaveView || saving}
-                title={
-                  canSaveView
-                    ? 'overwrite the marker with the manual edits (source: manual)'
-                    : 'move or rotate a piece — saving will switch on'
-                }
                 onClick={updateViewMarker}
               >
-                {saving ? 'saving…' : 'save the edits'}
+                {saving ? 'saving…' : 'save edits'}
               </Button>
             )}
-            {!viewData && (
-              <>
+            {!viewData &&
+              (running ? (
+                <Button type='button' variant='main' size='sm' disabled={stopping} onClick={stop}>
+                  {stopping ? 'stopping…' : 'stop'}
+                </Button>
+              ) : fitting ? (
+                <Button type='button' variant='main' size='sm' onClick={stopFit}>
+                  stop
+                </Button>
+              ) : effective ? (
+                <>
+                  <Button
+                    type='button'
+                    variant='underline'
+                    disabled={runBlocked}
+                    onClick={requestRun}
+                  >
+                    run again
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='sm'
+                    disabled={!canSave}
+                    title={
+                      !canSave
+                        ? tableShortText || (onlyTerminal ? TERMINAL_SAVE_REASON : undefined)
+                        : undefined
+                    }
+                    onClick={() => setSaveOpen(true)}
+                  >
+                    save marker
+                  </Button>
+                </>
+              ) : (
                 <Button
                   type='button'
                   variant='main'
-                  disabled={
-                    parse.phase !== 'ready' ||
-                    checkedCount === 0 ||
-                    running ||
-                    overCap ||
-                    !!doubleAllowanceRefusal ||
-                    !!uniRefusal
-                  }
-                  title={
-                    uniRefusal
-                      ? uniRefusal
-                      : doubleAllowanceRefusal
-                        ? doubleAllowanceRefusal
-                        : overCap
-                          ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
-                            // списка деталей и в тексте отказа на панели.
-                            "over the server's cap — such a marker cannot be saved: remove pieces or shrink the composition"
-                          : undefined
-                  }
+                  size='sm'
+                  disabled={runBlocked}
                   onClick={requestRun}
                 >
                   run
                 </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  disabled={!running || stopping}
-                  onClick={stop}
-                >
-                  {stopping ? 'stopping…' : 'stop'}
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  disabled={!canSave}
-                  // Прежде здесь была цепочка из девяти веток, повторявшая условия, уже
-                  // напечатанные в рейле, — и показывавшая одну причину за раз. Все активные
-                  // причины теперь стоят видимым списком на панели; тултип только отсылает к
-                  // нему — и не отсылает в никуда: во время прогона список скрыт, а до первого
-                  // прогона (одна терминальная причина) он не рендерится вовсе.
-                  title={
-                    canSave
-                      ? 'save the marker into the tech card — the consumption goes into the costing'
-                      : running
-                        ? 'a search is running — wait for it to finish'
-                        : onlyTerminal
-                          ? TERMINAL_SAVE_REASON
-                          : 'see the list of reasons below'
-                  }
-                  onClick={() => setSaveOpen(true)}
-                >
-                  save the marker
-                </Button>
-              </>
-            )}
-            <Button
-              type='button'
-              variant='secondary'
-              disabled={!effective || running || viewDegraded || drawingBlocked || partialGeometry}
-              title={
-                partialExportRefusal ||
-                (viewDegraded
-                  ? 'the marker geometry is unreadable — only the summary is available'
-                  : drawing.phase === 'running'
-                    ? 'restoring the piece drawing from the patterns…'
-                    : drawing.phase === 'error'
-                      ? `the drawing was not restored: ${rebuildText}`
-                      : undefined)
-              }
-              onClick={downloadSvg}
-            >
-              download SVG
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              disabled={!dxfReady}
-              title={
-                partialExportRefusal ||
-                (viewDegraded
-                  ? 'the marker geometry is unreadable — only the summary is available'
-                  : drawing.phase === 'running'
-                    ? 'restoring the piece drawing from the patterns…'
-                    : drawing.phase === 'error'
-                      ? `the drawing was not restored: ${rebuildText}`
-                      : 'DXF R12 for cutting — contours on the CUT layer, the drawing on INNER/SEAM, the selvedge on STRIP, the labels on LABELS')
-              }
-              onClick={downloadDxf}
-            >
-              download DXF
-            </Button>
-            {/* ЯВНАЯ ВТОРАЯ КНОПКА (решение Р4) — и появляется она ТОЛЬКО когда чертежа нет.
-                Постоянная кнопка «без чертежа» рядом с полной была бы приглашением выбрать
-                неправильную из двух одинаково доступных; здесь же она — единственный оставшийся
-                выход, и рядом сказано, из-за чего. */}
-            {drawing.phase === 'error' && !viewDegraded && (
-              <Button
-                type='button'
-                variant='secondary'
-                // Плоттерный выход — тот же запрет: контурный файл частичной раскладки режет ткань
-                // ровно так же, как полный, только изделие в нём неполное.
-                disabled={!effective || running || partialGeometry}
-                title={
-                  partialExportRefusal ||
-                  `the same as the system produced before the fix: contours and the selvedge, WITHOUT the seam line and notches. reason: ${rebuildText}`
-                }
-                onClick={downloadContoursOnly}
-              >
-                DXF: contours only
-              </Button>
-            )}
-            <Button type='button' variant='secondary' onClick={requestClose}>
-              close
-            </Button>
+              ))}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Save dialog: name + BOM fabric slot. Nested Radix dialogs portal independently. */}
       <ConfirmationModal
@@ -3320,15 +3911,59 @@ export function NestingModal({
         onCancel={() => {
           if (!saving) setSaveOpen(false);
         }}
-        title='save the marker as a marker'
+        title='save marker'
         confirmLabel={saving ? 'saving…' : 'save'}
         confirmDisabled={saving || !nameValue.trim()}
         closeOnConfirm={false}
       >
         <div className='space-y-2'>
+          <HeaderWarnings
+            className='block text-right'
+            items={[
+              lockDangling ? 'bound fabric is no longer on the BOM' : '',
+              lockedUnsaved ? 'fabric not saved on the card yet' : '',
+              widthMismatch
+                ? {
+                    text: `width ${widthCm} cm differs from the article (${slotWidth} cm)`,
+                    action:
+                      viewData || slotWidth < 10
+                        ? undefined
+                        : { label: 'use article width', onClick: applyArticleWidth },
+                  }
+                : '',
+              // Вторая дверь того же расхождения: неверна может быть и сама ширина артикула.
+              widthMismatch && !viewData && widthArticleId
+                ? { text: 'or the article width is wrong', action: openArticle(widthArticleId) }
+                : '',
+              slot && slotSelvedge(slot) === 0
+                ? { text: 'selvedge not set on the article', action: openArticle(widthArticleId) }
+                : '',
+              ...(parse.phase === 'ready'
+                ? parse.warnings
+                    .filter((w) => !isHiddenNote(w))
+                    .map((w) =>
+                      isFetchFailure(w)
+                        ? {
+                            text: w,
+                            error: true,
+                            action: {
+                              label: 'retry',
+                              onClick: () => {
+                                setSaveOpen(false);
+                                guardManual(reparse);
+                              },
+                            },
+                          }
+                        : w,
+                    )
+                : []),
+              manual && violations.length ? manualNote ?? '' : '',
+              mixed ? 'mixed composition: no per-unit consumption' : '',
+            ]}
+          />
           <label className='block space-y-0.5'>
             <Text size='nano' variant='label' component='span'>
-              marker name
+              name
             </Text>
             <Input
               name='marker-name'
@@ -3342,20 +3977,18 @@ export function NestingModal({
             />
           </label>
           {lockedSlot ? (
-            // The sheets carry their fabric, so there is nothing to choose — asking again would
-            // invite a marker linked to a cloth its own DXFs are not cut from.
             <div className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
-                BOM slot (fabric) — where the consumption goes
+                fabric
               </Text>
               <Text size='micro' component='p'>
-                {lockedSlot ? slotLabel(lockedSlot) : 'fabric'} — from the DXF binding
+                {slotLabel(lockedSlot)}
               </Text>
             </div>
           ) : (
             <label className='block space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
-                BOM slot (fabric) — where the consumption goes
+                fabric
               </Text>
               <Selector
                 label=''
@@ -3364,83 +3997,23 @@ export function NestingModal({
                   { value: '', label: 'not picked' },
                   ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
                 ]}
-                onChange={(v: string | number) => setSlotKey(String(v))}
+                onChange={(v: string | number) => chooseSource({ slotKey: String(v) })}
               />
             </label>
           )}
-          {lockDangling && (
-            <CalloutBox tone='warning'>
-              the fabric these DXF are bound to is no longer a fabric line of the card's BOM —
-              pick a slot by hand, otherwise the marker is saved unbound and the consumption will
-              not reach the costing
-            </CalloutBox>
-          )}
-          {lockedUnsaved && (
-            <CalloutBox tone='note'>
-              the fabric of these DXF is not saved on the card yet — once the card has saved, the
-              marker binds to it; right now it goes off unbound
-            </CalloutBox>
-          )}
-          {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (
-            <Text size='nano' variant='label' component='p'>
-              new BOM slots will appear here once the card is saved
-            </Text>
-          )}
-          {widthMismatch && (
-            <CalloutBox tone='warning'>
-              the cutting width ({widthCm} cm) differs from the cutting width of the slot's article (
-              {slotWidth} cm
-              {slotSelvedge(slot) > 0 ? `, selvedge 2×${slotSelvedge(slot)} cm already subtracted` : ''}) —
-              the consumption will only apply to this width
-            </CalloutBox>
-          )}
-          {slot && slotSelvedge(slot) === 0 && (
-            <CalloutBox tone='note'>
-              the slot's article has no selvedge set — the selvedge waste counts as zero; set it on
-              the material card so that the waste breakdown is complete
-            </CalloutBox>
-          )}
-          {parse.phase === 'ready' && parse.warnings.length > 0 && (
-            <CalloutBox tone='note' className='max-h-20 space-y-0.5 overflow-y-auto'>
-              <Text size='nano' component='p'>
-                the parse warnings will be saved together with the marker:
-              </Text>
-              {parse.warnings.map((w, i) => (
-                <Text key={i} size='nano' component='p'>
-                  {w}
-                </Text>
-              ))}
-            </CalloutBox>
-          )}
-          {manual && (
-            <CalloutBox tone={violations.length ? 'warning' : 'note'}>
-              {violations.length
-                ? `the marker was edited by hand — ${manualNote?.replace(MANUAL_NOTE_PREFIX, 'it has').trim()}; the warning will be saved in the marker`
-                : 'the marker was edited by hand — it will be saved as source: manual'}
-            </CalloutBox>
-          )}
-          {/* СОСТАВ И ЧТО ИЗ НЕГО СЛЕДУЕТ — последняя строка перед «сохранить», потому что
-              именно она отвечает на вопрос «а какое число уедет в костинг». */}
           <Text size='nano' variant='label' component='p'>
-            composition:{' '}
             {graded
               ? compositionLabel(composition, (id) => sizeNameOfId(id))
               : sizeLabel || 'one size'}{' '}
-            · {unitsTotal} garments in total · per-unit consumption:{' '}
-            {mixed
-              ? 'not produced — a mean over the composition'
-              : effective
-                ? `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} cm`
-                : '—'}
+            · {unitsTotal} garments · per unit:{' '}
+            {mixed ? (
+              <EmptyCell />
+            ) : effective ? (
+              `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} cm`
+            ) : (
+              <EmptyCell />
+            )}
           </Text>
-          {mixed && (
-            <CalloutBox tone='note'>
-              a mixed marker is saved whole — the length, the composition and the piece sizes. the
-              only thing not saved is the PER-UNIT consumption: on a mixed lay it is a mean over the
-              composition, and such a number, once in the recipe, is indistinguishable from a
-              measured one. per-size consumption arrives with phase 2.4; until then the norm is a homogeneous marker.
-            </CalloutBox>
-          )}
         </div>
       </ConfirmationModal>
 
@@ -3452,12 +4025,11 @@ export function NestingModal({
         }}
         onConfirm={startRun}
         onCancel={() => setRunConfirm(false)}
-        title='restart the marker?'
+        title='run again?'
         confirmLabel='restart'
       >
         <Text size='micro' component='p'>
-          the marker has manual edits — a new run will wipe them. export or save the marker
-          first, if you need the edits.
+          manual edits will be lost
         </Text>
       </ConfirmationModal>
 
@@ -3474,15 +4046,11 @@ export function NestingModal({
           pending?.apply();
         }}
         onCancel={() => setWipeConfirm(null)}
-        title={
-          wipeConfirm?.kind === 'close' ? 'close without saving?' : 'reset the manual edits?'
-        }
+        title={wipeConfirm?.kind === 'close' ? 'close without saving?' : 'reset manual edits?'}
         confirmLabel={wipeConfirm?.kind === 'close' ? 'close' : 'reset'}
       >
         <Text size='micro' component='p'>
-          {wipeConfirm?.kind === 'close'
-            ? 'the marker has manual edits — closing will lose them. save the marker or download the SVG/DXF if you need the edits.'
-            : 'changing a parameter recomputes the marker from scratch — the manual edits will be lost.'}
+          manual edits will be lost
         </Text>
       </ConfirmationModal>
     </ConfirmationModal>

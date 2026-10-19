@@ -10,19 +10,27 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { HeaderCount, HeaderNote } from 'ui/components/section-header';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Close,
+  ConfirmationModal,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  Pill,
+  Section,
+  HeaderCount,
+  HeaderNote,
+  Select,
+  Text,
+  FoldCaret,
+  EmptyCell,
+} from 'ui';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import { kindsForSection } from '../../bom-kind';
 import { isRollGoodsSection } from '../../bom-purpose';
-import { bornBomLine, upsertDetailText } from '../../form-writers';
+import { bornBomLine, releaseBomLineRefs, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { anyDirty } from '../../useTechCardAutosave';
 import {
@@ -110,7 +118,6 @@ import {
   type ParkedDraft,
 } from './use-draft-fills';
 import { draftIdeaRefusal, refusalReason, useDraftDesignIdea } from './use-draft-idea';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * «DRAFT THE CONSTRUCTION» — ОДНА КНОПКА, ОДИН ПЛАТНЫЙ ПРОГОН, ОДИН ОТВЕТ НА ЧЕТЫРЕ ГРУППЫ.
@@ -240,8 +247,7 @@ type Receipt = 'added' | 'replaced' | 'restored';
  * НАВЕДЕНИЕ НА СТРОКУ ЖУРНАЛА (O-39, 26.09). Владелец: «при ховере на строчки во WRITTEN, DISMISSED,
  * HINTS затемняй её немного, чтобы было понятно, куда мы смотрим». Тон — грунт страницы (`pageBg`,
  * #f2f2f2): на белом материале блока это «немного», и цвет на экране уже есть (`style-projects`
- * ведёт строки списка тем же). `bgZebra` (#fafafa) на этом мониторе не отличим от белого — он
- * подсветка ячейки, а не ответ на вопрос «где курсор». Строки TO DECIDE не трогаются: там строка —
+ * ведёт строки списка тем же). Строки TO DECIDE не трогаются: там строка —
  * работа с отметкой и раскрытием, а не запись для чтения.
  */
 const ROW_HOVER = 'hover:bg-pageBg';
@@ -1024,7 +1030,10 @@ export function ConstructionDraft({
         .catch(() => {});
       return;
     } else {
-      const cur = (getValues('bomItems') ?? []) as { lineKey?: string }[];
+      const cur = (getValues('bomItems') ?? []) as { lineKey?: string; id?: unknown }[];
+      // Те же ссылки, что чистит вкладка BOM при удалении строки: операции, детали, лейблы.
+      const gone = cur.find((r) => r.lineKey === t.lineKey);
+      if (gone) releaseBomLineRefs(getValues, setValue, gone);
       setValue('bomItems', cur.filter((r) => r.lineKey !== t.lineKey) as never, {
         shouldDirty: true,
       });
@@ -1135,6 +1144,23 @@ export function ConstructionDraft({
     () => live.filter((f) => !f.restore && !(f.target.kind === 'fit' && !fitWritable)),
     [live, fitWritable],
   );
+  /**
+   * ОТКАТ, КОТОРЫЙ СНОСИТ СЛОТ BOM, СПРАШИВАЕТ (владелец: «why can we remove a material slot
+   * without a single warning»). `✕` строки слота и `undo all` открывают одно окно; `✕` скаляра
+   * (fit, concept, деталь) по-прежнему откатывает сразу — он возвращает прежние слова, не сносит.
+   */
+  const [confirmUndo, setConfirmUndo] = useState<{ fills: Fill[]; all: boolean } | null>(null);
+  const confirmSlots = (confirmUndo?.fills ?? []).filter((f) => f.target.kind === 'slot');
+  const slotRole = (f: Fill | undefined): string => {
+    if (!f || f.target.kind !== 'slot') return '';
+    const key = f.target.lineKey;
+    const line = ((getValues('bomItems') ?? []) as { lineKey?: string; name?: string }[]).find(
+      (r) => r.lineKey === key,
+    );
+    return line?.name?.trim() || 'unnamed';
+  };
+  const askUndo = (fill: Fill) =>
+    fill.target.kind === 'slot' ? setConfirmUndo({ fills: [fill], all: false }) : undo(fill);
   /**
    * Прежние слова, которые черновик переписал, а человек поправил поверх (BLK-1), — и слова, которые
    * запись несёт после новой записи поверх правки (M-A). По строке `restore previous ↶` на каждые.
@@ -2157,6 +2183,30 @@ export function ConstructionDraft({
             подписи нет. */}
         {showLog && (
           <div className='mt-5' data-c19-draft-log=''>
+            <ConfirmationModal
+              open={!!confirmUndo}
+              onOpenChange={(o) => {
+                if (!o) setConfirmUndo(null);
+              }}
+              onConfirm={() => {
+                for (const f of confirmUndo?.fills ?? []) undo(f);
+                setConfirmUndo(null);
+              }}
+              title={
+                confirmUndo?.all
+                  ? `undo ${confirmUndo.fills.length} changes?`
+                  : `remove slot ${slotRole(confirmSlots[0])}?`
+              }
+              confirmLabel={confirmUndo?.all ? `undo ${confirmUndo.fills.length}` : 'remove slot'}
+              width='sm'
+              hideCancel
+            >
+              <Text size='micro' variant='label'>
+                {confirmSlots.length > 0
+                  ? `${confirmUndo?.all ? `removes ${confirmSlots.length} bom slot${confirmSlots.length === 1 ? '' : 's'} · ` : ''}links in operations, pieces and labels are cleared`
+                  : 'no bom slot is removed'}
+              </Text>
+            </ConfirmationModal>
             <button
               type='button'
               aria-expanded={logOpen}
@@ -2188,7 +2238,7 @@ export function ConstructionDraft({
                         receipt={fill.restore ? 'restored' : receiptByFill[fill.id]}
                         readOnly={readOnly || fitBarred(fill)}
                         busy={busy}
-                        onUndo={() => undo(fill)}
+                        onUndo={() => askUndo(fill)}
                       />
                     ))}
                     {/* ПРЕЖНИЕ СЛОВА, ПЕРЕПИСАННЫЕ ЧЕРНОВИКОМ И ПОПРАВЛЕННЫЕ ПОТОМ ЧЕЛОВЕКОМ (BLK-1), И
@@ -2222,7 +2272,7 @@ export function ConstructionDraft({
                             // заменённую (M-A) или — у заведённой детали — забывает после успеха
                             // сервера. Прежний `forgetMany` поверх цикла стирал бы поставленные на
                             // место записи вместе со словами, которые они несут.
-                            for (const f of undoable) undo(f);
+                            setConfirmUndo({ fills: undoable, all: true });
                           }}
                         >
                           undo all {undoable.length} ▸
@@ -2395,7 +2445,7 @@ function DecideRow({
              `aria-label` триггера, и прежнее «pick a section» оставалось именем выбора навсегда —
              и после выбора, и одинаковым у каждой такой строки. Длинное имя режется многоточием. */
           <div className='w-[160px] shrink-0' data-c19-draft-section={row.id}>
-            <SelectComponent
+            <Select
               name={`draft-section-${row.id}`}
               items={techCardBomSectionOptions}
               value={section ?? ''}
@@ -2616,7 +2666,7 @@ function WrittenRow({
           className='ml-2'
           data-c19-fill-before={fill.id}
         >
-          was: {fill.before || '—'}
+          was: {fill.before || <EmptyCell />}
         </Text>
       </Text>
       {receipt && (
@@ -2626,10 +2676,8 @@ function WrittenRow({
       )}
       <Pill tone='mut'>{areaOf(fill.target)}</Pill>
       {!readOnly && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
+        <Close
+          size='sm'
           data-c19-undo={fill.id}
           disabled={busy}
           onClick={onUndo}
@@ -2645,9 +2693,7 @@ function WrittenRow({
               ? 'your previous words, restored — ✕ puts back the edited draft'
               : 'written by the draft — ✕ puts back what stood here'
           }
-        >
-          ✕
-        </Button>
+        />
       )}
     </div>
   );
@@ -2714,18 +2760,14 @@ function RestoreRow({
           >
             restore previous ↶
           </Button>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
+          <Close
+            size='sm'
             data-c19-restore-dismiss={fill.id}
             disabled={busy}
             onClick={onDismiss}
             aria-label={`drop the ${fill.label} that stood before the draft: ${cutTo(offer.words, 40)}`}
             title='drop these words — undo stays for 10 seconds'
-          >
-            ✕
-          </Button>
+          />
         </>
       )}
     </div>

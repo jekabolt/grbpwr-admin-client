@@ -19,11 +19,17 @@ import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filte
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row, RowTotal } from 'ui/components/row';
+import {
+  Button,
+  CalloutBox,
+  DataTable,
+  EmptyCell,
+  GroupLabel,
+  Row,
+  RowTotal,
+  SectionHeader,
+  Text,
+} from 'ui';
 import {
   isMachineStepType,
   isPressStepType,
@@ -45,19 +51,12 @@ import {
   stepDiscriminatorText,
   stepPressText,
 } from './operation-options';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AnnotationCanvas } from './annotation-canvas';
 import { printCutSymmetryCaption } from 'components/managers/print/labels';
 import { fusingPrintCaption } from './piece-codes';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
-import {
-  annotationFromWire,
-  annotationKindFromWire,
-  wireInt,
-  type AnnotationForm,
-} from './schema';
+import { annotationFromWire, annotationKindFromWire, wireInt, type AnnotationForm } from './schema';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 const bomSectionLabel = (v?: string) =>
@@ -145,7 +144,7 @@ function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
 const seamClassLabel = (v?: string) =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''
-    : (seamClassOptions.find((o) => o.value === v)?.label ?? v);
+    : seamClassOptions.find((o) => o.value === v)?.label ?? v;
 
 function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   if (!c) return null;
@@ -483,7 +482,7 @@ function SnapshotOperations({
                     if (!parts && !out) return null;
                     return (
                       <Text size='nano' variant='label' component='span' className='block'>
-                        {parts || '—'}
+                        {parts || <EmptyCell />}
                         {out ? ` → ${out}` : ''}
                       </Text>
                     );
@@ -580,8 +579,8 @@ function ReleaseSnapshot({
   return (
     <div className='border border-borderColor p-2'>
       <GroupLabel className='mt-0'>
-        Rev.{head?.releaseNumber ?? '—'} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
-        {head?.releasedBy || '—'}
+        Rev.{head?.releaseNumber ?? <EmptyCell />} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
+        {head?.releasedBy || <EmptyCell />}
       </GroupLabel>
 
       {isLoading ? (
@@ -763,11 +762,11 @@ export function ReleasesField({
                   className={cn(
                     'flex w-full cursor-pointer flex-col gap-0.5 border-b border-hairline px-2 py-1.5 text-left last:border-b-0',
                     'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-                    active ? 'bg-textColor text-bgColor' : 'hover:bg-bgZebra',
+                    active ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg',
                   )}
                 >
                   <Text size='micro' component='span' className='font-bold uppercase'>
-                    Rev.{r.releaseNumber ?? '—'}
+                    Rev.{r.releaseNumber ?? <EmptyCell />}
                   </Text>
                   <Text
                     size='nano'

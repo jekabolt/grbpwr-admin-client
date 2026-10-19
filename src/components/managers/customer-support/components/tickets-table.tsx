@@ -3,8 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { Filter } from './filter';
 import {
@@ -125,7 +124,7 @@ export function TicketsTable({
                 <th
                   key={col.key}
                   className={cn(
-                    'h-10 min-w-20 border border-r border-borderColor bg-bgSecondary px-2 text-center',
+                    'h-10 min-w-20 border border-r border-borderColor bg-pageBg px-2 text-center',
                     {
                       'sticky left-0 z-10': col.key === 'id',
                     },

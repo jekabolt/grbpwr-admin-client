@@ -1,7 +1,7 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { FC, ReactNode, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Section, SectionStack } from 'ui/components/section';
+import { Section, SectionStack } from 'ui';
 import {
   ClearList,
   CogsStructureTable,
@@ -33,7 +33,7 @@ const has = (n?: number) => (n ?? 0) > 0;
 const Drilldown: FC<{ summary: string; children: ReactNode }> = ({ summary, children }) => (
   <Section className='p-0'>
     <details>
-      <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-2 text-textBaseSize font-bold uppercase text-labelColor hover:bg-bgSecondary/50'>
+      <summary className='cursor-pointer select-none bg-pageBg/30 px-4 py-2 text-textBaseSize font-bold uppercase text-labelColor hover:bg-pageBg/50'>
         {summary}
       </summary>
       <div className='space-y-6 p-4'>{children}</div>

@@ -1,6 +1,6 @@
 import type { FunnelSection } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { formatNumber } from '../utils';
 
 // Same 3 trustworthy steps as FunnelChart; the 10-step GA4 funnel is noise at boutique traffic.
@@ -42,7 +42,7 @@ export const FunnelDropoff: FC<{ funnel: FunnelSection | undefined }> = ({ funne
   return (
     <div className='space-y-3'>
       {worst && worst.lostPct > 0 && (
-        <div className='border border-error bg-bgSecondary p-2'>
+        <div className='border border-error bg-pageBg p-2'>
           <Text className='text-textBaseSize text-error'>
             <span className='font-bold'>
               Biggest leak: {worst.from} → {worst.to}
@@ -63,7 +63,7 @@ export const FunnelDropoff: FC<{ funnel: FunnelSection | undefined }> = ({ funne
                 −{t.lostPct.toFixed(0)}% · {formatNumber(t.lost)} lost
               </Text>
             </div>
-            <div className='h-3 w-full bg-bgSecondary/60'>
+            <div className='h-3 w-full bg-pageBg/60'>
               <div className='h-3 bg-error' style={{ width: `${Math.min(100, t.lostPct)}%` }} />
             </div>
           </div>

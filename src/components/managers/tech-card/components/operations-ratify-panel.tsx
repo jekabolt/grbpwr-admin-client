@@ -2,14 +2,16 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import Text from 'ui/components/text';
+import { Button, Chip, Close, Combobox, type ComboboxGroup, Text } from 'ui';
 
 import { KIND_BY_WORK_TOKEN } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';
-import { ratifyCard, type RatifyProposal, type RatifyRow, type RatifyStep } from './operation-ratify';
+import {
+  ratifyCard,
+  type RatifyProposal,
+  type RatifyRow,
+  type RatifyStep,
+} from './operation-ratify';
 import {
   groupWorks,
   searchWorks,
@@ -218,7 +220,11 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
   // бы дырявую карточку и лишала бы человека контекста «а как названы соседи»; ярус `named` для
   // того и заведён, чтобы такую строку было чем приглушить.
   const rows = useMemo(
-    () => ratifyCard(operations.map((o) => toRatifyStep(o, bomKindByKey)), catalog),
+    () =>
+      ratifyCard(
+        operations.map((o) => toRatifyStep(o, bomKindByKey)),
+        catalog,
+      ),
     [operations, bomKindByKey, catalog],
   );
 
@@ -275,7 +281,11 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
         }));
         if (work && !query.trim()) {
           return [
-            { key: '__unset__', label: 'this step', options: [{ value: '', label: '— no kind —' }] },
+            {
+              key: '__unset__',
+              label: 'this step',
+              options: [{ value: '', label: '— no kind —' }],
+            },
             ...groups,
           ];
         }
@@ -408,6 +418,15 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
   };
 
   const unnamed = rows.filter((r) => r.tier !== 'named').length;
+  // RATIFY ALL UNIQUE (23-AUTO #7): a not-yet-named row whose record answers with ONE proposal is
+  // recorded in one press; ties (two or more proposals) and silent tiers stay per row.
+  const unique = rows.filter(
+    (r) => r.tier !== 'named' && r.proposals.length === 1 && !str(operations[r.index]?.work),
+  );
+  const ratifyUnique = () => {
+    if (frozen) return;
+    for (const r of unique) apply(r, r.proposals[0]);
+  };
 
   return (
     <Dialog.Root
@@ -439,7 +458,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
             // «панель Escape не перехватывает» было записано в коде, а не в чьей-то памяти.
           }}
         >
-          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
             <Dialog.Title asChild>
               <Text
                 size='micro'
@@ -448,7 +467,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
                 component='span'
                 className='font-bold'
               >
-                ratify the kinds
+                name the steps
               </Text>
             </Dialog.Title>
             <Text
@@ -458,12 +477,10 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
               className='tabular-nums'
               data-ratify-count={unnamed}
             >
-              {unnamed} of {rows.length} {rows.length === 1 ? 'step' : 'steps'} not named yet
+              {unnamed} of {rows.length} not named
             </Text>
             <Dialog.Close asChild>
-              <button type='button' aria-label='close' className='ml-auto text-labelColor'>
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </Dialog.Close>
           </div>
           <Dialog.Description className='sr-only'>
@@ -482,7 +499,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
                 className='mb-1.5'
                 data-ratify-fallback='1'
               >
-                offline list — the catalogue did not load, so most jobs search by English name only
+                offline list · english names only
               </Text>
             )}
             {rows.length === 0 && (
@@ -510,9 +527,20 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
 
           <div className='flex shrink-0 items-center gap-2 border-t border-borderColor px-2.5 py-1.5'>
             <Text size='micro' variant='label' component='span' data-ratify-hint='1'>
-              enter — record the first suggestion and move on · esc — close · what you record saves
-              with the card once it validates, like any edit
+              enter: take the first suggestion
             </Text>
+            {!frozen && unique.length > 0 && (
+              <Button
+                type='button'
+                variant='main'
+                size='sm'
+                className='ml-auto'
+                onClick={ratifyUnique}
+                data-ratify-unique={unique.length}
+              >
+                ratify {unique.length} unique
+              </Button>
+            )}
           </div>
         </Dialog.Content>
       </Dialog.Portal>

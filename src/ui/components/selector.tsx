@@ -85,7 +85,7 @@ export default function Selector({
         <Select.Trigger
           className={`inline-flex items-center justify-between w-full px-2 ${
             compact ? 'py-0.5 text-textBaseSize' : 'py-2'
-          } bg-bgColor border border-textInactiveColor focus:outline-none disabled:bg-textInactiveColor/20 disabled:text-labelColor`}
+          } bg-bgColor border border-borderColor focus:outline-none disabled:bg-borderColor/20 disabled:text-labelColor`}
         >
           <Select.Value placeholder={placeholder}>
             <Text>{getDisplayValue()}</Text>
@@ -96,7 +96,7 @@ export default function Selector({
         </Select.Trigger>
 
         <Select.Portal>
-          <Select.Content className='overflow-hidden bg-bgColor border border-textInactiveColor z-50'>
+          <Select.Content className='overflow-hidden bg-bgColor border border-borderColor z-50'>
             <Select.ScrollUpButton className='flex items-center justify-center h-6 bg-bgColor cursor-default'>
               <ChevronUpIcon />
             </Select.ScrollUpButton>
@@ -111,7 +111,7 @@ export default function Selector({
                     <Select.Item
                       key={option.value}
                       value={option.value.toString()}
-                      className='relative flex items-center px-8 py-2 cursor-pointer select-none hover:bg-textInactiveColor/40 focus:outline-none'
+                      className='relative flex items-center px-8 py-2 cursor-pointer select-none hover:bg-borderColor/40 focus:outline-none'
                     >
                       <Select.ItemText>
                         <Text>{option.label}</Text>

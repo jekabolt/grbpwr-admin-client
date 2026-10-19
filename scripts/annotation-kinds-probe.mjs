@@ -21,7 +21,7 @@ import { rmSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const entry = resolve(root, 'src/ui/components/annotation/kinds.ts');
+const entry = resolve(root, 'src/components/managers/tech-card/annotation/kinds.ts');
 const outfile = resolve(tmpdir(), `annotation-kinds-${process.pid}.mjs`);
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent' });
 const {

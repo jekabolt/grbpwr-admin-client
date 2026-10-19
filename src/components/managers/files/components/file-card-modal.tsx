@@ -4,19 +4,9 @@ import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, ConfirmationModal, GroupLabel, Input, Text } from 'ui';
 import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
-import {
-  isProjectTopic,
-  useFileRoles,
-  useFilesMutations,
-  useLibraryFile,
-} from '../hooks/useFiles';
+import { isProjectTopic, useFileRoles, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FailureText } from './failure-text';
@@ -440,7 +430,7 @@ export function FileCardModal({
       ) : (
         <div className='flex flex-col gap-2.5'>
           <div className='flex flex-wrap gap-2.5'>
-            <div className='flex size-40 flex-none items-center justify-center border border-borderColor bg-bgSecondary'>
+            <div className='flex size-40 flex-none items-center justify-center border border-borderColor bg-pageBg'>
               {file.previewUrl ? (
                 <img src={file.previewUrl} alt='' className='size-full object-contain' />
               ) : (
@@ -509,7 +499,9 @@ export function FileCardModal({
                         : "read-only — the projects can't be moved around"
                     }
                     onClick={() =>
-                      setSelected((p) => (p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid]))
+                      setSelected((p) =>
+                        p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid],
+                      )
                     }
                   >
                     {t.name}

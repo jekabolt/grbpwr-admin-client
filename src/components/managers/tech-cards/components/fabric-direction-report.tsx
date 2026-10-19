@@ -4,19 +4,26 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Accordion } from 'ui/components/accordion';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Row, RowTotal } from 'ui/components/row';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Accordion,
+  Button,
+  CalloutBox,
+  Chip,
+  GroupLabel,
+  Input,
+  Pill,
+  Row,
+  RowTotal,
+  Section,
+  Stat,
+  StatGrid,
+  Text,
+  Tile,
+  Tiles,
+  Toolbar,
+  ToolbarSpacer,
+  EmptyCell,
+} from 'ui';
 import {
   GapCard,
   GapExclusion,
@@ -286,7 +293,7 @@ export function FabricDirectionReport() {
         <Stat
           big
           label='lines to answer'
-          value={report.isPending ? '—' : totalOpenLines}
+          value={report.isPending ? <EmptyCell /> : totalOpenLines}
           sub={
             report.isPending
               ? 'reading'
@@ -298,7 +305,7 @@ export function FabricDirectionReport() {
         />
         <Stat
           label='deferred'
-          value={report.isPending ? '—' : withheldLines}
+          value={report.isPending ? <EmptyCell /> : withheldLines}
           sub={
             withheldLines > 0
               ? `${plural(withheldCards, 'card')} withheld — counted above`
@@ -633,7 +640,7 @@ function GapCardTile({
             <Link
               key={line.lineKey || String(line.bomItemId)}
               to={bomHref(id, line.lineKey)}
-              className='block border-b border-hairline py-1 last:border-b-0 hover:bg-bgZebra'
+              className='block border-b border-hairline py-1 last:border-b-0 hover:bg-pageBg'
             >
               <div className='flex items-center gap-1.5'>
                 <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>

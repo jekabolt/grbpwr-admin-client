@@ -1,8 +1,7 @@
 import { cn } from 'lib/utility';
 import { Fragment, useMemo } from 'react';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
-import { autolinkNodes } from 'ui/markdown/autolink';
+import { Chip, Text } from 'ui';
+import { autolinkNodes } from 'components/shared/markdown/autolink';
 import type { TaskMedia } from '../api/types';
 
 /**
@@ -94,7 +93,7 @@ function MediaRefChip({
     <Chip
       title={`open attachment ${index + 1}`}
       onClick={onOpen ? () => onOpen(refr) : undefined}
-      className='cursor-pointer align-baseline'
+      className='min-h-11 cursor-pointer align-baseline sm:min-h-0'
     >
       {label}
     </Chip>

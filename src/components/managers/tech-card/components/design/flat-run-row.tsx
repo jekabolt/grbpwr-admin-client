@@ -11,10 +11,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Chip, Text, Select } from 'ui';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
@@ -73,7 +70,6 @@ import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, setBoardRole, type BoardItem } from './mood-board';
-import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import type { CalloutLike } from './render/what-model-gets';
 import { staleShown } from './stale-details';

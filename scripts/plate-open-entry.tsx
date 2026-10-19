@@ -4,7 +4,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { SurfaceCallout } from 'ui/components/annotation/surface';
+import type { SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
 import {
   PlateGrid,
   type DocumentPlate,

@@ -4,9 +4,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { formatSizeName } from '../utility/sizes';
 
@@ -150,7 +148,7 @@ export function VariantsPanel({
   }
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-2 border-t border-borderColor pt-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           sellable sizes &amp; stock
@@ -181,7 +179,7 @@ export function VariantsPanel({
           {activeVariants.map((v) => (
             <span
               key={v.variantId}
-              className='flex items-center gap-2 border border-textInactiveColor px-2 py-1'
+              className='flex items-center gap-2 border border-borderColor px-2 py-1'
             >
               <Text size='small' variant='uppercase'>
                 {sizeName(v.sizeId)}
@@ -205,11 +203,11 @@ export function VariantsPanel({
       )}
 
       {showArchived && archivedVariants.length > 0 && (
-        <div className='flex flex-wrap gap-2 border-t border-textInactiveColor pt-2'>
+        <div className='flex flex-wrap gap-2 border-t border-borderColor pt-2'>
           {archivedVariants.map((v) => (
             <span
               key={v.variantId}
-              className='flex items-center gap-2 border border-dashed border-textInactiveColor px-2 py-1 opacity-70'
+              className='flex items-center gap-2 border border-dashed border-borderColor px-2 py-1 opacity-70'
             >
               <Text size='small' variant='uppercase'>
                 {sizeName(v.sizeId)}
@@ -237,7 +235,7 @@ export function VariantsPanel({
           value={sizeToAdd}
           onChange={(e) => setSizeToAdd(e.target.value)}
           disabled={busy || availableSizes.length === 0}
-          className='border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize'
+          className='border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize'
         >
           <option value=''>
             {availableSizes.length === 0 ? 'no sizes available' : 'add size…'}

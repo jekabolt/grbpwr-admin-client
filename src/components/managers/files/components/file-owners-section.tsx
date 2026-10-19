@@ -3,13 +3,7 @@ import type { AdminRef, LibraryFile } from 'api/proto-http/admin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Avatar, Button, CalloutBox, ConfirmationModal, GroupLabel, Input, Text } from 'ui';
 import { filesService } from '../api/filesService';
 import { invalidateFileViews } from '../hooks/useFiles';
 import { formatWhen } from '../utils/format';
@@ -388,7 +382,7 @@ export function FileOwnersSection({
                       prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
                     )
                   }
-                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                 >
                   <span
                     aria-hidden

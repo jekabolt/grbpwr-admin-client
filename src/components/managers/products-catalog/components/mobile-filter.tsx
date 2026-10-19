@@ -5,8 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import useFilter from 'lib/useFilter';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Close, Text } from 'ui';
 
 import Color from './color';
 import FilterOptionButtons from './filter-buttons';
@@ -65,13 +64,13 @@ export function MobileFilter() {
       </DialogPrimitives.Trigger>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 border border-textInactiveColor bg-bgColor p-2.5 text-textColor lg:hidden'>
+        <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 border border-borderColor bg-bgColor p-2.5 text-textColor lg:hidden'>
           <DialogPrimitives.Title className='sr-only'>mobile menu</DialogPrimitives.Title>
           <div className='flex h-full flex-col justify-between'>
             <DialogPrimitives.Close asChild>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button>[x]</Button>
+                <Close />
               </div>
             </DialogPrimitives.Close>
             <div className='h-full space-y-10 overflow-y-scroll pt-10'>

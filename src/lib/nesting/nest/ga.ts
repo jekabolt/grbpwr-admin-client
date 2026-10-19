@@ -39,6 +39,8 @@ export type GaOptions = {
   fabricWidthCm: number;
   edgeMarginCm: number;
   lMaxCm: number;
+  // lMaxCm — кап стола (см. NestConfig.maxLengthCm): «не влезло по длине» = 'table-full'.
+  lengthCapped?: boolean;
   nfps: NfpCache;
   // Absolute epoch-ms deadline (the NFP prepass has already eaten into the budget).
   deadlineMs: number;
@@ -81,7 +83,7 @@ function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): Plac
   // rots are indexed by GENE, not by slot — they survive order crossover intact and can
   // never assign a piece a rotation outside its own allowed set.
   const genes = ind.order.map((gi) => ({ ...opts.genesBase[gi], rot: ind.rots[gi] }));
-  const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort);
+  const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort, opts.lengthCapped);
   if (res) ind.fitness = fitnessOf(res, opts.lMaxCm);
   return res;
 }

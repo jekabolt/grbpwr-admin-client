@@ -9,16 +9,13 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Close, GroupLabel, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
 import { crPieceIds, FittingFormData } from './schema';
 import { fittingZoneOptions, normalizeFittingZone } from './zone-options';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 const statusOptions = [
   { value: 'open', label: 'open' },
   { value: 'resolved', label: 'resolved' },
@@ -268,14 +265,7 @@ function CreateModeList({
             <GroupLabel
               flush={index === 0}
               action={
-                <Button
-                  type='button'
-                  variant='secondary'
-                  aria-label='remove change request'
-                  onClick={() => remove(index)}
-                >
-                  ✕
-                </Button>
+                <Close size='sm' aria-label='remove change request' onClick={() => remove(index)} />
               }
             >
               {`change #${index + 1}`}
@@ -471,7 +461,7 @@ function EditModeList({
         ))
       )}
 
-      <div className='border-t border-textInactiveColor pt-3'>
+      <div className='border-t border-borderColor pt-3'>
         <Text variant='uppercase' size='small'>
           add change request
         </Text>

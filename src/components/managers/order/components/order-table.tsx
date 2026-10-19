@@ -3,8 +3,7 @@ import { common_OrderItem } from 'api/proto-http/frontend';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text } from 'ui';
 
 const HIDDEN_ON_MOBILE_STYLE = 'hidden lg:table-cell';
 
@@ -145,7 +144,7 @@ export function OrderTable({
     <div className='w-full'>
       <div className='overflow-x-auto w-full bg-bgColor'>
         <table className='w-full border-collapse min-w-max print:border-separate print:border-spacing-0'>
-          <thead className='bg-bgZebra'>
+          <thead>
             <tr>
               {showPartialRefundCheckboxes && (
                 <th className='w-10 border-b border-borderColor px-1.5 py-1 text-center'>
@@ -226,7 +225,7 @@ export function OrderTable({
                               isDataCell &&
                               'relative after:content-[""] after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:bg-current',
                             {
-                              'bg-bgZebra': orderDetails?.refundedOrderItems?.some(
+                              'bg-pageBg': orderDetails?.refundedOrderItems?.some(
                                 (refundedItem) => refundedItem.id === orderItemId,
                               ),
                             },

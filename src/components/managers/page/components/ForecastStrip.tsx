@@ -1,8 +1,7 @@
 import type { RevenueForecast } from 'api/proto-http/admin';
 import { format, subYears } from 'date-fns';
 import { FC } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatCurrency, formatCurrencyWhole, parseDecimal } from '../utils';
 
 interface ForecastStripProps {
@@ -100,7 +99,7 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
       </div>
 
       {/* Bullet bar: interval band (faint) · projected remainder (hatched) · actual (solid) · LY tick. */}
-      <div className='relative mt-4 h-3 w-full bg-bgSecondary/60' role='img' aria-label={ariaLabel}>
+      <div className='relative mt-4 h-3 w-full bg-pageBg/60' role='img' aria-label={ariaLabel}>
         {!isClosed && high > low && (
           <div
             className='absolute inset-y-0 bg-textColor/10'

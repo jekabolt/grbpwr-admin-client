@@ -5,9 +5,7 @@ import {
 } from 'constants/garment-composition';
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { Button, Text, FormLabel, EmptyCell } from 'ui';
 import { CompositionModal } from './composition-modal/composition-modal';
 import { compositionToValue } from './composition-modal/utils';
 
@@ -106,9 +104,9 @@ export function CompositionPicker({
       <div className='flex items-center gap-1.5'>
         {/* The value is composed in the dialog, never typed — so it is a read-only PLATE, not an
             input that merely refuses keystrokes. */}
-        <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-bgZebra px-[7px] py-[3px]'>
-          <Text className={display ? 'truncate' : 'truncate text-textInactiveColor'}>
-            {display || '—'}
+        <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-pageBg px-[7px] py-[3px]'>
+          <Text className={display ? 'truncate' : 'truncate text-borderColor'}>
+            {display || <EmptyCell />}
           </Text>
         </div>
         {editMode && (

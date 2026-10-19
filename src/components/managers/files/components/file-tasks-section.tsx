@@ -6,14 +6,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { tasksService } from 'components/managers/tasks/api/tasksService';
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { SECTION } from 'constants/routes';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Avatar, Button, CalloutBox, ConfirmationModal, GroupLabel, Input, Pill, Text } from 'ui';
 import { fileTasksService } from '../api/fileTasksService';
 import { isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';
@@ -383,7 +376,7 @@ export function FileTasksSection({
                   type='button'
                   disabled={attach.isPending}
                   onClick={() => attach.mutate(t.id)}
-                  className='flex items-center gap-1.5 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
+                  className='flex items-center gap-1.5 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
                 >
                   <Pill tone='ink' className='flex-none tabular-nums'>
                     #{t.id}

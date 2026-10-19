@@ -45,22 +45,27 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import { Section, SectionStack } from 'ui/components/section';
-import { SectionHeader } from 'ui/components/section-header';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Drawer } from 'ui/components/drawer';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import {
+  BackLink,
+  Button,
+  Pill,
+  Section,
+  SectionStack,
+  HeaderNext,
+  SectionHeader,
+  GroupLabel,
+  Row,
+  CalloutBox,
+  Drawer,
+  ConfirmationModal,
+  Text,
+  Form,
+} from 'ui';
 import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
-import { CompositionEntries } from './composition-entries';
+import { LabDipTab } from './lab-dip-tab';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
@@ -79,12 +84,11 @@ import {
 } from './output-variants-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
-import { PiecesTab } from './pieces-tab';
 import { DevExpensesField } from './dev-expenses-field';
 import { ReleasesField } from './releases-field';
 import { RevisionsField } from './revisions-field';
 import { SignoffsField } from './signoffs-field';
-import { useEditHistory } from 'ui/components/annotation/history';
+import { useEditHistory } from 'components/managers/tech-card/annotation/history';
 import { gateTechCardPayload, isDesignOnlyMediaKind } from './design/payload-gate';
 import { useDesignBand } from './design/use-design-band';
 import { CardDetails } from './design/card-details';
@@ -101,6 +105,7 @@ import {
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
+import { BaseModelFields } from './header-meta-fields';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
 import { CompositionLabelBlock } from './composition-label/composition-label-block';
@@ -152,7 +157,13 @@ import {
 } from './save-history';
 import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
-import { decideAutoStage, StageProgress, stageLabel, type FormErrorRow } from './stage-progress';
+import {
+  decideAutoStage,
+  resolveNextStep,
+  StageProgress,
+  stageLabel,
+  type FormErrorRow,
+} from './stage-progress';
 
 // U-2 / C-5: the fit select and its `FIT_OPTIONS` import left this file with the classification FKs
 // — they render in GENERAL INFORMATION on CONSTRUCTION now (construction-general-info.tsx, which
@@ -172,6 +183,7 @@ const TABS = [
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
   { id: 'construction', label: 'construction' },
+  { id: 'sizes', label: 'sizes' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
   { id: 'production', label: 'production' },
@@ -191,7 +203,7 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // остался порядком работы: сначала смотрят, потом морозят.
   { band: 'design', tabs: ['studio', 'artifacts'] },
   // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
-  // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
+  // The DXF sheets and the раскладки (the size range and chart moved to SIZES) are the first artefacts
   // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
   // leads the band because everything under it is downstream of a pattern: a sample is cut from
   // these sheets, and the marker on this tab is what the BOM's fabric consumption is measured from.
@@ -207,7 +219,14 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // DEFINES those lines belongs next to the tab that reads them — two entries apart it read as an
   // unrelated stop. Samples follow both, which is also the order the work happens in: you cannot
   // cut a sample before there is a pattern and a fabric to cut it from.
-  { band: 'develop', tabs: ['patterns', 'bom', 'samples', 'colorways', 'construction'] },
+  // SIZES opens develop, ahead of patterns (owner, 15.10): the size range and the measurement chart
+  // are worked out together with the pattern — every sheet, marker, norm and run is filed against
+  // that range, so it is set first. They used to head PATTERNS; the pattern panels still read the
+  // range from the same form, they just no longer host its editor.
+  {
+    band: 'develop',
+    tabs: ['sizes', 'patterns', 'bom', 'samples', 'colorways', 'construction'],
+  },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
   // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
@@ -227,6 +246,8 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 // landing on the header with no explanation.
 const FOLDED_TABS: Record<string, TabId> = {
   dev: 'costing',
+  // LAB DIP was its own tab for one beta round (17.10); it is back under the colourways matrix.
+  'lab-dip': 'colorways',
   pieces: 'patterns',
   // ОБЕ СТАРЫЕ ВКЛАДКИ СВЁРНУТЫ, и свёрнуты только теперь, когда за каждую отнятую способность
   // отвечает названное место. Мудборд студия заменила сразу: её доска пишет `moodboardMedia` и
@@ -271,7 +292,8 @@ const ERROR_TAB: Record<string, TabId> = {
   technicalMedia: 'artifacts',
   callouts: 'studio',
   patterns: 'patterns',
-  sizeIds: 'patterns',
+  // The size range moved to its own SIZES tab (spec band), with the measurement chart.
+  sizeIds: 'sizes',
   bomItems: 'bom',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
@@ -331,7 +353,7 @@ const ERROR_TAB: Record<string, TabId> = {
 // где его чинят.
 const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   style_number: 'studio',
-  size_range: 'patterns',
+  size_range: 'sizes',
   bom_fabric: 'bom',
   bom_linked: 'bom',
   costing: 'costing',
@@ -341,6 +363,9 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   lab_dip: 'colorways',
   signoffs: 'signoff',
 };
+
+// Tabs whose first block is drawn here: their `→ next:` sits in that block's header slot.
+const TAB_NEXT_IN_HEADER = new Set<TabId>(['sizes', 'patterns', 'costing']);
 
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 const DRAFT = 'TECH_CARD_APPROVAL_STATE_DRAFT';
@@ -447,16 +472,6 @@ function FormWithAutosave({
   );
 }
 
-function PreSaveTile({ label }: { label: string }) {
-  return (
-    <div className='flex aspect-square flex-col items-center justify-center gap-1 border border-dashed border-textInactiveColor p-2 text-center'>
-      <Text variant='inactive' size='small'>
-        {label}
-      </Text>
-    </div>
-  );
-}
-
 // Shown on the LABELS & PKG tab for a brand-new (unsaved) card: the assembly bill, packaging recipe
 // and dust-bag option are per-style and need a saved card id (their own RPCs, not the main insert),
 // so instead of silently hiding them we say so and offer Save — which lands the user right back
@@ -470,30 +485,14 @@ function PreSavePrompt({
   saving: boolean;
   onSave: () => void;
 }) {
+  // Secondary, not main: on a new card the header's `add` is the one main action of the screen.
   return (
-    <div className='flex flex-col items-start gap-4 border border-textInactiveColor bg-textColor/5 p-4'>
-      <div className='space-y-1'>
-        <Text variant='uppercase'>save the tech card first</Text>
-        <Text variant='inactive' size='small'>
-          on-garment items (labels / tags), the packaging recipe and the “goes in a dust bag” option
-          are stored per style — they need a saved card to attach to. Save now and they unlock right
-          here.
-        </Text>
-      </div>
-      <div className='grid w-full max-w-md grid-cols-3 gap-2'>
-        <PreSaveTile label='on-garment items' />
-        <PreSaveTile label='packaging recipe' />
-        <PreSaveTile label='dust bag' />
-      </div>
+    <div className='flex items-center gap-2.5'>
+      <Text variant='inactive' size='small'>
+        save the card first
+      </Text>
       {canWrite && (
-        <Button
-          type='button'
-          variant='main'
-          size='lg'
-          className='uppercase'
-          loading={saving}
-          onClick={onSave}
-        >
+        <Button type='button' variant='secondary' size='sm' loading={saving} onClick={onSave}>
           save tech card
         </Button>
       )}
@@ -575,6 +574,11 @@ export function TechCardForm({
   // filled (`createReady`), lands on its own address without a remount and walks the studio's guide.
   // Every other new card («new idea», a typed /add-tech-card) keeps its `add` button (A5).
   const guidedCreate = !isEditMode && params.get('guided') === '1';
+  // The chip quiz CARD DETAILS opens with on a guided create. Owned here, not in CardDetails, because
+  // the studio's step footer (`next · moodboard ›`) must stay away while it is open: the quiz has its
+  // own `create`, and a disabled second door under it read as a dead end.
+  const [createQuizDone, setCreateQuizDone] = useState(false);
+  const createQuizOpen = guidedCreate && !createQuizDone;
   // One key per create session of this mount: a lost answer or a doubled trigger replays the card the
   // first call made instead of minting a second one (CreateTechCard `client_request_id`).
   const clientRequestId = useRef<string>(
@@ -613,6 +617,11 @@ export function TechCardForm({
   // cut-piece table moved to PATTERNS the alias is unconditional.
   const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'studio';
+  // The PATTERNS block header: PatternsField portals its counts and warnings into it.
+  const [patternsHeaderEl, setPatternsHeaderEl] = useState<HTMLSpanElement | null>(null);
+  const [bomHeaderEl, setBomHeaderEl] = useState<HTMLSpanElement | null>(null);
+  // The STYLE PLAN block header: CostingField portals its calculation problems (`! N`) into it.
+  const [costingHeaderEl, setCostingHeaderEl] = useState<HTMLSpanElement | null>(null);
   // Whether this page is still on screen — for the side effects of a write that outlives it (R-13).
   // m6: true from the first render — a child's mount effect runs BEFORE this one, and a tab it asks
   // for on mount must not be dropped as «the page is gone».
@@ -806,6 +815,7 @@ export function TechCardForm({
     materialId?: number;
     id?: number;
     lineKey?: string;
+    name?: string;
   }>;
   // ONE release-blocker list, rendered three ways (the header's release organ, the blockers
   // modal, the ReleasesField gate). Its spine is now the SERVER's release checklist —
@@ -825,9 +835,12 @@ export function TechCardForm({
     // states an unfixable requirement. Dropped, not failed.
     (r) => !(isAux && (r.key === 'colorway_linked' || r.key === 'lab_dip')),
   );
-  const releaseBlockers: (ReleaseBlocker & { tab: TabId })[] = serverReleaseRows
+  // `key` names the row (a server key, or one of the client rules below) so the next-step line can
+  // word it as an action instead of the server's statement.
+  const releaseBlockers: (ReleaseBlocker & { tab: TabId; key?: string })[] = serverReleaseRows
     .filter((r) => !r.met)
     .map((r) => ({
+      key: r.key,
       label: r.label ?? 'a release requirement is unmet',
       detail: r.detail,
       tab: RELEASE_BLOCKER_TAB[r.key ?? ''] ?? 'studio',
@@ -836,11 +849,13 @@ export function TechCardForm({
   // handed yet, and issues are not part of the readiness facts at all.
   if (isIdea)
     releaseBlockers.push({
+      key: 'idea',
       label: 'advance the stage (an IDEA draft can’t be released)',
       tab: 'studio',
     });
   if (openIssues > 0)
     releaseBlockers.push({
+      key: 'issues',
       label: `resolve ${openIssues} open issue${openIssues > 1 ? 's' : ''}`,
       tab: 'issues',
     });
@@ -870,8 +885,10 @@ export function TechCardForm({
       ),
     );
   };
-  if (bomItemsW.some((b) => !slotCovered(b)))
+  const firstUncoveredSlot = bomItemsW.findIndex((b) => !slotCovered(b));
+  if (firstUncoveredSlot >= 0)
     releaseBlockers.push({
+      key: 'bom_slots',
       label: 'every BOM slot needs an article — a default, or a pin in every live colourway',
       tab: 'bom',
     });
@@ -883,6 +900,7 @@ export function TechCardForm({
   // justifies falling back to the weaker client-side rule.
   if ((readiness?.releaseRequirements?.length ?? 0) === 0 && !signoffsApproved)
     releaseBlockers.push({
+      key: 'signoffs',
       label:
         signoffs.length === 0
           ? 'sign off every required section first'
@@ -933,6 +951,9 @@ export function TechCardForm({
   const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
   const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
   const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
+  // The measurement chart lives outside react-hook-form (its own Get/UpdateStyleSizeChart), so the
+  // SIZES glyph hears about it from the grid itself: true once any cell of the range holds a value.
+  const [sizeChartFilled, setSizeChartFilled] = useState(false);
   // Watched for the patterns glyph only. Cheap in practice: a rename commits on blur/Enter and a
   // rebind on select, so this re-renders the form on an upload or a deliberate edit — not per
   // keystroke (the inline rename holds its draft in the panel's own state).
@@ -960,6 +981,8 @@ export function TechCardForm({
     // second implementation to keep in step (and would peg a card whose sheets are still on paper
     // below done for good). This is the cheap, strictly-less-wrong half: the range AND a sheet.
     patterns: len(sizeIdsW) > 0 && len(patternsW) > 0,
+    // A range alone is a list of names; the tab is done when the chart also measures at least one.
+    sizes: len(sizeIdsW) > 0 && sizeChartFilled,
     bom: len(bomItemsW) > 0,
     // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
     // Cut pieces are deliberately NOT part of any tab's test (they answer for `patterns` now): no
@@ -1023,6 +1046,56 @@ export function TechCardForm({
     if (t === 'production' && !isEditMode) return false;
     return true;
   };
+  // ═══ NEXT STEP (TABS-LITE R1) ═══════════════════════════════════════════════════════════════
+  // One step for the whole page, three views: the stage bar's `next:` line, the `›` box on its tab
+  // in the rail, the `→ next:` line over that tab. Nothing to press on a released card or a new one.
+  const uncoveredSlot = firstUncoveredSlot >= 0 ? bomItemsW[firstUncoveredSlot] : undefined;
+  const slotStep = uncoveredSlot
+    ? {
+        label: `link ${uncoveredSlot.name?.trim() || `bom slot ${firstUncoveredSlot + 1}`}`,
+        field: `bomItems.${firstUncoveredSlot}.materialId`,
+      }
+    : undefined;
+  const nextStep =
+    isEditMode && numId && !frozen
+      ? resolveNextStep({
+          readiness,
+          isAux,
+          blockers: releaseBlockers,
+          concrete: { bom_linked: slotStep, bom_slots: slotStep },
+          visible: (t) => isTabVisible(t as TabId),
+        })
+      : null;
+  const goNext = () => {
+    if (!nextStep) return;
+    const { action, field } = nextStep;
+    leaveFullscreen();
+    if (action === 'sample') return navTo('samples', { sample: 'new' });
+    if (action === 'fittings-unresolved') return navTo('history', { fits: 'unresolved' });
+    if (action === 'fitting') {
+      const back = window.location.pathname + window.location.search;
+      return navigate(
+        `${ROUTES.addFitting}?techCardId=${numId}&returnTo=${encodeURIComponent(back)}`,
+      );
+    }
+    if (action === 'run') return navigate(`${ROUTES.productionRuns}?techCardId=${numId}&new=1`);
+    setActiveTab(nextStep.tab as TabId);
+    if (field) setFocusTarget((prev) => ({ path: field, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+  // The style has SOME cost: the plan rollup carries a figure. The tech-card payload has no
+  // per-colourway product cost_price, so this is the style-level signal.
+  const costingW = techCard?.techCard?.costing;
+  const hasCost = !!(
+    costingW?.unitCost?.value ||
+    costingW?.materialsPerUnit?.value ||
+    (costingW?.colorwayCosts?.length ?? 0) > 0 ||
+    (costingW?.materialsTotal?.length ?? 0) > 0
+  );
+  // The tab-level door: shown over the active tab only when the step lives there.
+  const tabNext =
+    nextStep && nextStep.tab === activeTab ? (
+      <HeaderNext label={nextStep.label} onClick={goNext} />
+    ) : null;
   // Rewrite a legacy ?tab=dev / ?tab=pieces to the tab that absorbed it, so the URL matches what is
   // rendered (the alias above already resolves it; this cleans the address bar / a bookmark).
   useEffect(() => {
@@ -2925,10 +2998,12 @@ export function TechCardForm({
             : undefined
         }
         onGoColourways={() => navTo('colorways')}
+        quizOpen={createQuizOpen}
+        onQuizDone={() => setCreateQuizDone(true)}
       />
 
       {isAux && (
-        <Section title='output material'>
+        <Section title='output material' question='needed before the first run'>
           {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
             the single picker below stops being the answer — showing both would offer two
             contradictory places to say where the goods land. The variants are their own
@@ -2942,10 +3017,6 @@ export function TechCardForm({
             />
           ) : (
             <>
-              <Text variant='inactive' size='small'>
-                runs of this card receipt into material stock, not product stock. Pick the packaging
-                material this card produces (required before its first run).
-              </Text>
               <div className='max-w-md'>
                 <MaterialPicker
                   value={outputMaterialId}
@@ -3000,11 +3071,7 @@ export function TechCardForm({
           under the header stays whenever a link exists). */}
       <div className='-mx-2.5 border-b border-borderColor bg-bgColor'>
         <div className='flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2'>
-          <Button asChild variant='secondary' size='sm'>
-            <Link to={ROUTES.techCards} aria-label='back to tech cards'>
-              ←
-            </Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
           <div className='min-w-0'>
             <Text variant='uppercase' className='truncate font-bold'>
               {styleNumber || (isEditMode ? 'tech card' : 'new tech card')}
@@ -3109,14 +3176,14 @@ export function TechCardForm({
             readiness={readiness}
             readinessPending={readinessPending}
             readinessError={readinessError}
-            isAux={isAux}
             canEdit={canWrite(SECTION.techCards)}
             // An auxiliary run needs somewhere to BOOK its output, and there are two ways to have
             // one: the single output material, or at least one live colour variant (each colour
             // owns its own bucket). Only a card with neither cannot be planned.
             planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
             planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
-            blockers={releaseBlockers}
+            next={nextStep}
+            onNext={goNext}
             canRelease={canRelease}
             releasing={saving || converting}
             // Enabled even when blocked: pressing it explains WHY, which is the one moment the
@@ -3128,7 +3195,6 @@ export function TechCardForm({
             onBackToDraft={() => void submitWithApproval(DRAFT)}
             formErrors={formErrorRows}
             onRevealError={revealError}
-            onGoTab={(t) => navTo(t as TabId)}
             onAddSample={() => navTo('samples', { sample: 'new' })}
             onGoFittings={(unresolvedOnly) =>
               navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
@@ -3193,19 +3259,14 @@ export function TechCardForm({
       >
         <Row label='your version' value={`v${base.current.version} · edited here`} />
         <Row label='on the server' value='newer' />
-        <Text size='micro' variant='label' className='mt-2'>
-          Someone saved this card while you were editing. Reloading fetches their version and
-          discards your unsaved changes; keeping yours re-reads their version number and saves your
-          values straight over theirs.
-        </Text>
       </ConfirmationModal>
 
       {/* NF-07 guided convert. Intercepts the flip BEFORE the request — the 412 it would otherwise
           come back as names the obstacle but offers no way past it. closeOnConfirm=false: the
           handler closes this itself, after the archive loop has either finished or reported.
           D-59: it opens at the gesture (the purpose field), with colourways to retire or without —
-          confirming is the one place a switch to auxiliary is decided — and dismissing it (✕, Esc,
-          «keep sellable») puts the purpose back. O-60 r4: dismissing works while it waits for a write
+          confirming is the one place a switch to auxiliary is decided — and dismissing it (✕, Esc)
+          puts the purpose back. O-60 r4: dismissing works while it waits for a write
           already on the wire too; only the archive loop and the write after it hold it shut. */}
       <ConfirmationModal
         open={!!convert}
@@ -3223,9 +3284,10 @@ export function TechCardForm({
               ? 'waiting for the save…'
               : convertArchives
                 ? 'archive & switch'
-                : 'switch to auxiliary'
+                : 'switch'
         }
-        cancelLabel='keep sellable'
+        // ✕ / Esc keep the card sellable (onOpenChange puts the purpose back): no second door.
+        hideCancel
         confirmDisabled={converting || convertWaiting}
         closeOnConfirm={false}
         onConfirm={confirmConvert}
@@ -3235,14 +3297,23 @@ export function TechCardForm({
             {convertRefusal}
           </Text>
         )}
-        {convertArchives && (
-          <>
-            <Row label='live colourways' value={convert?.colorways.length ?? 0} />
-            {(convert?.colorways ?? []).map((c) => (
-              <Row key={c.colorwayId} label={colorwayLabel(c)} value='→ archive' />
-            ))}
-          </>
-        )}
+        {/* The consequences as rows: what the card makes, what happens to its colourways, whether
+            it comes back. Runs, sold colourways and assembly usage pin the purpose too — the
+            server refuses those on its own and names what it found (convertRefusal above). */}
+        <Row label='produces' value='a material, not products' />
+        <Row
+          label='live colourways'
+          value={
+            convertArchives ? (
+              <span title={(convert?.colorways ?? []).map((c) => colorwayLabel(c)).join(', ')}>
+                {convert?.colorways.length ?? 0} → archive
+              </span>
+            ) : (
+              'none'
+            )
+          }
+        />
+        <Row label='undo' value='one-way once switched' />
         {/* 0252: the colours survive the flip even though the colourways do not — as warehouse
             buckets rather than sellable articles. Offered here because this is the one moment the
             card's colour range is still on screen. */}
@@ -3255,42 +3326,9 @@ export function TechCardForm({
               onChange={(e) => setSeedColours(e.target.checked)}
             />
             <Text size='micro' variant='label' component='span'>
-              register each archived colourway’s colour as a colour variant (auto-creates materials)
-              — {seedableCodes.join(', ')}
+              keep colours as colour variants · {seedableCodes.join(', ')}
             </Text>
           </label>
-        )}
-        {convertArchives ? (
-          <>
-            <Text size='micro' variant='label' className='mt-2'>
-              An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
-              {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is
-              saved as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and
-              order history is untouched.
-            </Text>
-            <Text size='micro' variant='label' className='mt-2'>
-              Restoring an archived colourway works while this card is still SELLABLE — after the
-              flip lands it is one-way. If a step fails, nothing is rolled back and you are told
-              exactly where it stopped.
-            </Text>
-            <Text size='micro' variant='label' className='mt-2'>
-              Live colourways are only one of the things that pin the purpose — runs, sold
-              colourways, assembly usage and anything else the card is registered in do too.
-              Archiving clears none of those; the server refuses them on its own and names what it
-              found.
-            </Text>
-          </>
-        ) : (
-          <>
-            <Text size='micro' variant='label' className={seedableCodes.length > 0 ? 'mt-2' : ''}>
-              An auxiliary card produces a material, not products: its runs receipt into material
-              stock, and it cannot own colourways.
-            </Text>
-            <Text size='micro' variant='label' className='mt-2'>
-              Runs, sold colourways, assembly usage and anything else the card is registered in also
-              pin the purpose; the server refuses the switch on its own and names what it found.
-            </Text>
-          </>
         )}
       </ConfirmationModal>
 
@@ -3359,14 +3397,8 @@ export function TechCardForm({
         />
       )}
 
-      {/* Frozen stays inline — it is context, not a decision. */}
-      {frozen && (
-        <CalloutBox tone='note' className='mt-2.5'>
-          <Text size='micro'>
-            Released and frozen — the factory spec is locked. Use “Re-open to draft” to edit.
-          </Text>
-        </CalloutBox>
-      )}
+      {/* No «released and frozen» callout: the header already says `released · frozen` beside
+          its `re-open to draft` button (TABS-LITE: no repeated statuses). */}
 
       {/* LEFT SIDEBAR RAIL + content. All 14 sections are visible at once on a laptop
           instead of scrolling sideways; the checkbox column doubles as the completion
@@ -3400,17 +3432,24 @@ export function TechCardForm({
                   {groupTabs.map((tab) => {
                     const active = activeTab === tab.id;
                     const errorCount = errorCountByTab.get(tab.id) ?? 0;
-                    const filled = isFilled(tab.id);
+                    // The tab holding the next step: an empty ink box with `›`, the label in ink. It
+                    // wins over ✓ — a tab with content can still hold the one thing left to do.
+                    const isNext = nextStep?.tab === tab.id;
+                    const filled = !isNext && isFilled(tab.id);
                     return (
                       <button
                         key={tab.id}
                         type='button'
                         onClick={() => setActiveTab(tab.id)}
                         aria-current={active ? 'page' : undefined}
+                        data-next-tab={isNext ? '' : undefined}
+                        title={isNext ? `next: ${nextStep?.label}` : undefined}
                         className={`flex w-full items-center gap-1.5 border-b-2 px-2 py-1 text-left text-control whitespace-nowrap uppercase transition-colors lg:border-b-0 lg:px-0 ${
                           active
                             ? 'border-textColor font-bold text-textColor'
-                            : 'border-transparent text-labelColor hover:text-textColor'
+                            : isNext
+                              ? 'border-transparent text-textColor'
+                              : 'border-transparent text-labelColor hover:text-textColor'
                         }`}
                       >
                         <span
@@ -3419,8 +3458,9 @@ export function TechCardForm({
                             filled ? 'bg-textColor text-bgColor' : ''
                           }`}
                         >
-                          {filled ? '✓' : ''}
+                          {filled ? '✓' : isNext ? '›' : ''}
                         </span>
+                        {isNext && <span className='sr-only'>(next step)</span>}
                         <span className='min-w-0 flex-1 truncate'>{tab.label}</span>
                         {tab.id === 'issues' && openIssues > 0 && (
                           <Pill tone='mut'>{openIssues}</Pill>
@@ -3452,6 +3492,12 @@ export function TechCardForm({
             void save();
           }}
         >
+          {/* `→ next:` over the active tab. Tabs whose first block this file draws carry it in that
+              block's header instead (sizes, patterns, costing); the rest open with a child's own
+              block, so the door stands on the ground just above it. */}
+          {tabNext && !TAB_NEXT_IN_HEADER.has(activeTab) && (
+            <div className='mb-2 flex justify-end'>{tabNext}</div>
+          )}
           <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
             {/* ШАПКА СТУДИИ — `topRowHtml` прототипа (`proto.html:3172`).
                 Прототип не даёт карточной шапке вкладки вовсе: identification, classification,
@@ -3534,7 +3580,11 @@ export function TechCardForm({
                 /* THE GUIDE (onboarding S4): the server's flag once the card exists, the address's
                    promise (`?guided=1`) before it does. */
                 guided={techCard?.guided ?? guidedCreate}
-                onCreate={guidedCreate ? () => createGuided('mood', true) : undefined}
+                /* No create door while the quiz is open: `onCreate` unset on a new card means no
+                   step footer at all (studio-tab), and the quiz's own `create` is the door. */
+                onCreate={
+                  guidedCreate && !createQuizOpen ? () => createGuided('mood', true) : undefined
+                }
                 onExitGuide={
                   numId
                     ? () =>
@@ -3585,9 +3635,10 @@ export function TechCardForm({
               />
             )}
 
-            {/* PATTERNS (size range + DXF выкройки по материалам) */}
-            <SectionStack hidden={activeTab !== 'patterns'}>
-              <Section title='size range'>
+            {/* SIZES (size range + size chart measurements). Moved off PATTERNS; a hidden panel like
+                every other SectionStack, so both fields stay mounted and registered on any tab. */}
+            <SectionStack hidden={activeTab !== 'sizes'}>
+              <Section title='size range' action={tabNext}>
                 {/* The colourways AS READ: their recipes grade per-size consumption, and that is
                     what makes removing a size destructive beyond this form. */}
                 {/* Здесь стоял «size run (order qty)» — типовой калькуляционный тираж карты.
@@ -3597,12 +3648,35 @@ export function TechCardForm({
                     на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
               </Section>
-              <Section title='size chart (measurements) — shared by every colourway of the style'>
-                <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+              {/* A second view of the STUDIO header's base fields (owner, 15.10: «duplicate and keep
+                  in both places»). Same form fields through Controller, so both read and write one
+                  value; ERROR_TAB keeps pointing at studio, where the fields were first. */}
+              <Section title='base model & sample size'>
+                <BaseModelFields />
               </Section>
-              <Section title='patterns (DXF) — by material'>
+              <Section title='size chart measurements'>
+                <SizeChartField
+                  styleId={numId}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  onFilledChange={setSizeChartFilled}
+                />
+              </Section>
+            </SectionStack>
+
+            {/* PATTERNS (DXF выкройки по материалам + markers); the size range is on SIZES */}
+            <SectionStack hidden={activeTab !== 'patterns'}>
+              <Section
+                title='patterns'
+                action={
+                  <>
+                    {tabNext}
+                    <span ref={setPatternsHeaderEl} className='flex items-center gap-1.5' />
+                  </>
+                }
+              >
                 <PatternsField
                   techCardId={numId || undefined}
+                  headerEl={patternsHeaderEl}
                   // Разбор DXF стартует сам, но только на ОТКРЫТОЙ вкладке: этот SectionStack
                   // смонтирован всегда и прячется через `hidden`, так что без явного ответа
                   // карточка качала бы все выкройки всякому, кто зашёл править BOM.
@@ -3615,13 +3689,7 @@ export function TechCardForm({
                   savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
                 />
               </Section>
-              {/* Cut pieces sit directly under the sheets they come out of: «↔ детали кроя» on the
-                  panel above creates them, and until now it wrote into a table on another tab. Its
-                  own block, not a nested one — a block never contains a block (DESIGN.md). Mounted
-                  ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
-                  set of [data-field] anchors for revealField to walk to. */}
-              <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
-              <Section title='markers — fabric consumption by size'>
+              <Section title='markers'>
                 <MarkersSection
                   techCard={techCard}
                   techCardId={numId || 0}
@@ -3630,26 +3698,23 @@ export function TechCardForm({
               </Section>
             </SectionStack>
 
-            {/* BOM */}
+            {/* BOM — слоты × колорвеи (вид SIDES). Состава стиля в шапке нет: колорвеи законно берут
+                разные артикулы, и состав стоит в шапке столбца каждого колорвея. */}
             <div hidden={activeTab !== 'bom'}>
-              <Section title='bill of materials — the article reference'>
-                {/* Structured style fibre composition (S17/M1) — typed composition_entries, read-only. */}
-                {(techCard?.compositionEntries?.length ?? 0) > 0 && (
-                  <div className='border-b border-textInactiveColor pb-3'>
-                    <CompositionEntries
-                      entries={techCard?.compositionEntries}
-                      label='style fibre composition'
-                    />
-                  </div>
-                )}
+              <Section
+                title='bom'
+                action={<span ref={setBomHeaderEl} className='flex items-center gap-1.5' />}
+              >
                 {/* The colourways as READ: their recipes are the one reference to a BOM article
-                    this form cannot clear itself, so the delete has to check them first.
-                    Раскладки — тоже как READ: лестница у поля процента раскроя говорит «снимите
-                    норму с раскладки» только когда раскладка этого слота правда существует. */}
+                    this form cannot clear itself (the delete checks them first), and the matrix
+                    columns. Раскладки — тоже как READ: «норма не снята с раскладки» в шапке. */}
                 <BomField
                   highlightComposition={bomHighlight}
                   colorways={techCard?.colorways}
                   markers={techCard?.markers}
+                  headerEl={bomHeaderEl}
+                  techCardId={numId || 0}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
                 />
               </Section>
             </div>
@@ -3664,22 +3729,33 @@ export function TechCardForm({
                 would keep ColorwayRecipes alive fetching the whole material catalogue for a card
                 that can never have a colourway. */}
             <SectionStack hidden={activeTab !== 'colorways' || isAux}>
-              {!isAux && (
-                <div>
-                  {isEditMode && numId ? (
-                    <ColorwayRecipes
-                      techCard={techCard}
-                      techCardId={numId}
-                      canEdit={canWrite(SECTION.techCards) && !frozen}
-                    />
-                  ) : (
+              {!isAux &&
+                (isEditMode && numId ? (
+                  <>
+                    <div>
+                      <ColorwayRecipes
+                        techCard={techCard}
+                        techCardId={numId}
+                        canEdit={canWrite(SECTION.techCards) && !frozen}
+                      />
+                    </div>
+                    {/* LAB DIP — under the matrix, one row per live colourway. Its drafts are
+                        staged into the card's one save; no material catalogue here. */}
+                    <div>
+                      <LabDipTab
+                        techCard={techCard}
+                        techCardId={numId}
+                        canEdit={canWrite(SECTION.techCards) && !frozen}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
                     <Text variant='inactive' size='small'>
-                      save the card first — colourways are products; their material recipes are
-                      edited here once the style exists.
+                      save the card first
                     </Text>
-                  )}
-                </div>
-              )}
+                  </div>
+                ))}
             </SectionStack>
 
             {/* CONSTRUCTION — how it's made: the assembly map and the operations. The cut list used
@@ -3781,7 +3857,7 @@ export function TechCardForm({
                   <TechCardFittings techCardId={numId} />
                 ) : (
                   <Text variant='inactive' size='small'>
-                    save this tech card first, then you can link fittings to it
+                    save the card first
                   </Text>
                 )}
               </div>
@@ -3811,11 +3887,7 @@ export function TechCardForm({
                         : undefined
                     }
                   />
-                ) : (
-                  <Text variant='inactive' size='small'>
-                    a frozen Rev.N snapshot is created when the card is saved as “released”
-                  </Text>
-                )}
+                ) : null}
               </div>
             </SectionStack>
           </fieldset>
@@ -3836,42 +3908,38 @@ export function TechCardForm({
             `cost estimate (per colourway — plan vs actual)` / `R&D development cost`, which named
             the feature and not the figure — so nothing on screen said that «plan 48.60» in the
             second block is the same number as «unit cost 48.60» in the first, or that R&D is in
-            neither. The `question` clause is the whole fix. */}
+            neither. The short `question` clause says which money each block holds (TABS-LITE: ≤ 6 words). */}
           {canReadCosting && (
             <SectionStack hidden={activeTab !== 'costing'}>
               <Section
                 title='style plan'
-                question='— what the garment should cost by BOM and by line items'
+                question='cost per unit'
+                action={
+                  <>
+                    {tabNext ??
+                      (!hasCost && (
+                        // No cost set: the door to where one comes from — consumption on the
+                        // colourways (the BOM on an auxiliary card, which has none).
+                        <HeaderNext
+                          label={
+                            isAux ? 'link articles in the bom' : 'set consumption on colorways'
+                          }
+                          onClick={() => navTo(isAux ? 'bom' : 'colorways')}
+                        />
+                      ))}
+                    <span ref={setCostingHeaderEl} className='flex items-center gap-1.5' />
+                  </>
+                }
               >
-                {/* Costing gap at the point of action. The tech-card payload only carries the plan
-                  costing rollup (not each colorway's product cost_price), so this is a style-level
-                  signal; per-colorway precision lives on each product's detail page. */}
-                {!(
-                  techCard?.techCard?.costing?.unitCost?.value ||
-                  techCard?.techCard?.costing?.materialsPerUnit?.value ||
-                  (techCard?.techCard?.costing?.colorwayCosts?.length ?? 0) > 0 ||
-                  (techCard?.techCard?.costing?.materialsTotal?.length ?? 0) > 0
-                ) && (
-                  <CalloutBox tone='warning' className='mb-2.5'>
-                    <Text size='micro'>
-                      this style has no cost set — there is nothing to compute the margin, the
-                      payback and the economics of its colourways from, and goods sold are counted
-                      in analytics as “without a cost” and drag the shop's coverage down. add
-                      materials to the BOM or write a line item below.
-                    </Text>
-                  </CalloutBox>
-                )}
-                <CostingField techCard={techCard} frozen={frozen} />
+                <CostingField techCard={techCard} frozen={frozen} headerEl={costingHeaderEl} />
               </Section>
               {/* Эти две секции — СОДЕРЖИМОЕ КАРТОЧКИ (статьи разработки, расчёт по колорвею), и
                 заморозку релиза они несут по-прежнему; свой fieldset заменяет им внешний, из-под
                 которого выехал весь блок. */}
               <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
-                {isEditMode && numId && (
-                  <Section
-                    title='estimate by colourway'
-                    question='— the same calculation line by line, with the actual from the runs next to the plan'
-                  >
+                {/* Hidden until a cost exists: without one every cell is `…`. */}
+                {isEditMode && numId && hasCost && (
+                  <Section title='estimate by colourway' question='plan vs actual'>
                     {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
                       at once and merely CSS-hidden, so without this the matrix would fire one
                       GetStyleCostEstimate per colourway on every tech-card open, on every tab. */}
@@ -3886,15 +3954,12 @@ export function TechCardForm({
                   separate rail entry. Placed after the unit-cost blocks because it is amortised
                   style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
                   RPC needs a saved card id). */}
-                <Section
-                  title='R&D'
-                  question="— the style's period money: never part of the unit cost or of COGS"
-                >
+                <Section title='R&D' question='not in the unit cost'>
                   {isEditMode && numId ? (
                     <DevExpensesField techCardId={numId} />
                   ) : (
                     <Text variant='inactive' size='small'>
-                      save the tech card first — then development expenses can be written here
+                      save the card first
                     </Text>
                   )}
                 </Section>

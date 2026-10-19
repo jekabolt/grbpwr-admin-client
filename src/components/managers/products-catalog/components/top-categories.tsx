@@ -1,6 +1,6 @@
 import { getTopCategoryName } from 'lib/features/categories';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { useSearchParams } from 'react-router-dom';
 import { isCategoryDisabled } from './categories';
 import { CategoryButton } from './category-btn';

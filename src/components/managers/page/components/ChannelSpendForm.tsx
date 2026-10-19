@@ -2,10 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { FC, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Input, Text } from 'ui';
 import { tabMetricsKeys } from '../useTabMetricsQuery';
 
 const EMPTY = { date: '', utmSource: '', utmMedium: '', utmCampaign: '', amount: '' };
@@ -93,7 +90,7 @@ export const ChannelSpendForm: FC = () => {
 
 const Field: FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className='flex flex-col gap-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+    <Text variant='uppercase' className='text-borderColor text-[10px]'>
       {label}
     </Text>
     {children}

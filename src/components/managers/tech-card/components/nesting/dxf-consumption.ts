@@ -39,6 +39,7 @@ import {
 } from './block-code';
 import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
+import { manifestFactsOf } from './manifest-facts';
 
 /** Деталь кроя карточки в терминах этого расчёта: сколько её на изделие и чем она нарисована. */
 export type DxfNormPiece = {
@@ -194,7 +195,10 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     };
   }
   if (input.sizeIds.length === 0) {
-    return { ok: false, reason: 'the card declares no size range — there is nobody to compute the norm for' };
+    return {
+      ok: false,
+      reason: 'the card declares no size range — there is nobody to compute the norm for',
+    };
   }
   if (input.unaliasedPieces.length > 0) {
     return {
@@ -370,7 +374,19 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const pickOnLayer = (
     list: readonly PieceDTO[],
   ): { contour: PieceDTO; multi: boolean } | null | 'ambiguous' => {
-    const on = list.filter((p) => (p.layer ?? '') === input.contourLayer);
+    // INSERT-КОПИИ ОДНОГО БЛОКА ФАЙЛА С МАНИФЕСТОМ — одна деталь, нарисованная столько раз, сколько
+    // её кроят (F14: конвертер вставляет блок «× на изделие» раз). Геометрия у копий одна — блок
+    // один, — поэтому выбора между ними нет и двусмысленностью они не считаются. Без манифеста —
+    // как прежде: копии чужого файла остаются в отчёте.
+    const seen = new Set<string>();
+    const on = list.filter((p) => {
+      if ((p.layer ?? '') !== input.contourLayer) return false;
+      if (!manifestFactsOf(p)) return true;
+      const k = `${p.fileIndex ?? p.source}|${p.blockName ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
     if (on.length === 0) return null;
     if (on.length > 1) {
       const min = Math.min(...on.map((p) => p.areaCm2));

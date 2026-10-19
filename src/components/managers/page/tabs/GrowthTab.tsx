@@ -1,9 +1,7 @@
 import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC, ReactNode } from 'react';
-import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import {
   CampaignAttributionTable,
   ChannelRoasTable,
@@ -145,7 +143,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
             }.`}
           </Text>
           {sampleSize > 0 && sampleSize < 30 && (
-            <div className='mb-3 border border-warning bg-bgSecondary p-2'>
+            <div className='mb-3 border border-warning bg-pageBg p-2'>
               <Text className='text-warning text-textBaseSize'>
                 Low sample (n={sampleSize}): directional only, not statistically reliable yet.
               </Text>
@@ -166,7 +164,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
                   {splitNewShare >= 20 ? `New revenue ${splitNewShare.toFixed(0)}%` : ''}
                 </div>
                 <div
-                  className='flex items-center justify-center overflow-hidden bg-textInactiveColor px-1 text-[10px] whitespace-nowrap'
+                  className='flex items-center justify-center overflow-hidden bg-borderColor px-1 text-[10px] whitespace-nowrap'
                   style={{ width: `${splitRetShare}%` }}
                 >
                   {splitRetShare >= 14 ? `Repeat ${splitRetShare.toFixed(0)}%` : ''}
@@ -204,7 +202,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
             {topPairs.map((p, i) => (
               <span
                 key={i}
-                className='border border-textInactiveColor px-2.5 py-1.5 text-textBaseSize'
+                className='border border-borderColor px-2.5 py-1.5 text-textBaseSize'
               >
                 <span className='font-bold'>{p.productAName}</span> +{' '}
                 <span className='font-bold'>{p.productBName}</span>
@@ -235,7 +233,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
           <StatGrid min={130}>
             <Stat
               label='Blended MER'
-              value={mer != null ? `${mer.toFixed(1)}×` : '—'}
+              value={mer != null ? `${mer.toFixed(1)}×` : <EmptyCell />}
               sub='revenue / ad spend'
               tone={mer != null && mer >= BREAK_EVEN_ROAS ? 'up' : 'default'}
             />
@@ -247,7 +245,7 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               {roasBars.map((b, i) => (
                 <div key={i} className='grid grid-cols-[130px_1fr_52px] items-center gap-2'>
                   <span className='truncate font-bold'>{b.label}</span>
-                  <span className='h-3 bg-bgSecondary'>
+                  <span className='h-3 bg-pageBg'>
                     <span
                       className={`block h-3 ${b.roas >= BREAK_EVEN_ROAS ? 'bg-success' : 'bg-textColor'}`}
                       style={{ width: `${(b.roas / maxRoas) * 100}%` }}

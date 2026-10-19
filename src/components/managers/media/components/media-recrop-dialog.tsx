@@ -2,10 +2,10 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
+import { EditorScreen, useIsMobileEditor } from './editor-mobile';
 
 /**
  * Кадрирование снимка, который УЖЕ лежит в бакете.
@@ -21,6 +21,7 @@ export function MediaRecropDialog({
   open,
   onOpenChange,
   onCropped,
+  onSaved,
 }: {
   media: common_MediaFull | undefined;
   open: boolean;
@@ -35,7 +36,10 @@ export function MediaRecropDialog({
    * побайтово прежнее. `frame` — где прошёл рез в исходнике (доли), для указаний, приколотых к нему.
    */
   onCropped?: (media: common_MediaFull, frame?: CropFrame) => void;
+  /** Новая копия загружена — тот же объект, что получает `onCropped`, без рамки. */
+  onSaved?: (media: common_MediaFull) => void;
 }) {
+  const mobile = useIsMobileEditor();
   const [source, setSource] = useState<string | undefined>(undefined);
   const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -77,10 +81,13 @@ export function MediaRecropDialog({
     setBusy(true);
     try {
       const uploaded = await uploadMedia.mutateAsync(croppedDataUrl);
-      showMessage('cropped copy uploaded', 'success');
+      showMessage(uploaded?.id ? `${uploaded.id} saved` : 'saved', 'success');
       // Извещение ПОСЛЕ успешной загрузки и ДО закрытия: слушатель ставит копию себе, а окно
       // закрывается уже над сделанным. Порядок наоборот отдавал бы объект в размонтированное окно.
-      if (uploaded) onCropped?.(uploaded, frame);
+      if (uploaded) {
+        onCropped?.(uploaded, frame);
+        onSaved?.(uploaded);
+      }
       onOpenChange(false);
     } catch (error) {
       showMessage(error instanceof Error ? error.message : 'the upload failed', 'error');
@@ -90,6 +97,22 @@ export function MediaRecropDialog({
   };
 
   if (!media) return null;
+
+  if (mobile) {
+    return (
+      <EditorScreen open={open} onOpenChange={onOpenChange} title={`crop ${media.id}`}>
+        <MediaCropper
+          layout='mobile'
+          title='crop'
+          selectedFile={source}
+          busy={busy}
+          saveLabel='save copy'
+          saveCroppedImage={handleSave}
+          onCancel={() => onOpenChange(false)}
+        />
+      </EditorScreen>
+    );
+  }
 
   return (
     <ConfirmationModal

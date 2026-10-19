@@ -2,8 +2,7 @@
 //
 // Единственный источник тиража во всём наряде: кат-лист и настилы ниже считаются от него. Ни
 // выпущенного, ни брака здесь нет и быть не может — наряд это задание на партию, а не отчёт по ней.
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Text } from 'ui';
 import { lineKeyOf, lineLabelOf } from './labels';
 import { RpLine, RpSize } from './manifest';
 import { DESC_CELL, RUNPACK_GRID } from './table';
@@ -24,7 +23,7 @@ export function LinesMatrix({
 }) {
   if (lines.length === 0 || axis.length === 0) {
     return (
-      <Text component='p'>
+      <Text size='reading' component='p'>
         the selected subset has no “colourway × size” cell at all. until it has one, there is nothing
         for the cut list below to be counted from.
       </Text>

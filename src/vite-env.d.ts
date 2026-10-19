@@ -23,6 +23,12 @@ interface ImportMetaEnv {
    *  (localhost / bare IP / *.vercel.app) — there the address and its copy button are
    *  hidden instead of handing out a link that dies off this machine. */
   readonly VITE_FILE_SHARE_ORIGIN?: string;
+  /** "import pattern" door on the card's Patterns tab: on unless set to '0'. */
+  readonly VITE_PATTERN_IMPORT?: string;
+  /** '1' starts the import wizard on fixture data (and builds the fixture chunk); off by default. */
+  readonly VITE_PATTERN_IMPORT_STUB?: string;
+  /** 'stub' turns the AI namer off on the real worker (no paid calls, no names). */
+  readonly VITE_PATTERN_IMPORT_AI?: string;
 }
 
 interface ImportMeta {

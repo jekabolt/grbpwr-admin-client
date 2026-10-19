@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { FC, useState } from 'react';
 import { DateRange, DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import { PERIOD_OPTIONS } from '../useMetricsQuery';
 import { compareModeHintLine } from '../utils';
@@ -116,7 +116,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
           <select
             value={period}
             onChange={(e) => onPeriodChange(e.target.value as MetricsPeriod)}
-            className='h-9 w-32 border border-textInactiveColor bg-bgColor px-2 text-textBaseSize uppercase'
+            className='h-9 w-32 border border-borderColor bg-bgColor px-2 text-textBaseSize uppercase'
           >
             {PERIOD_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -129,13 +129,13 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
               <Popover.Trigger asChild>
                 <button
                   type='button'
-                  className='h-9 px-3 flex items-center gap-2 border border-textInactiveColor bg-bgColor text-textBaseSize text-left min-w-[200px] hover:border-textInactiveColor transition-colors'
+                  className='h-9 px-3 flex items-center gap-2 border border-borderColor bg-bgColor text-textBaseSize text-left min-w-[200px] transition-colors'
                 >
                   {formatDateRange(customFrom, customTo)}
                 </button>
               </Popover.Trigger>
               <Popover.Content
-                className='z-50 bg-bgColor p-4 rounded-none border border-textInactiveColor shadow-lg'
+                className='z-50 bg-bgColor p-4 rounded-none border border-borderColor shadow-lg'
                 align='start'
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 onInteractOutside={(e) => {
@@ -167,7 +167,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
           <select
             value={compareChoice}
             onChange={(e) => handleCompareChoice(e.target.value as CompareChoice)}
-            className='h-9 min-w-[180px] border border-textInactiveColor bg-bgColor px-2 text-textBaseSize uppercase'
+            className='h-9 min-w-[180px] border border-borderColor bg-bgColor px-2 text-textBaseSize uppercase'
           >
             {COMPARE_CHOICES.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -180,13 +180,13 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
               <Popover.Trigger asChild>
                 <button
                   type='button'
-                  className='h-9 flex items-center border border-textInactiveColor bg-bgColor px-3 text-textBaseSize text-left min-w-[200px] hover:border-textInactiveColor transition-colors'
+                  className='h-9 flex items-center border border-borderColor bg-bgColor px-3 text-textBaseSize text-left min-w-[200px] transition-colors'
                 >
                   {hasBaseline ? formatDateRange(compareFrom, compareTo) : 'Select baseline'}
                 </button>
               </Popover.Trigger>
               <Popover.Content
-                className='z-50 bg-bgColor p-4 rounded-none border border-textInactiveColor shadow-lg'
+                className='z-50 bg-bgColor p-4 rounded-none border border-borderColor shadow-lg'
                 align='start'
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 onInteractOutside={(e) => {

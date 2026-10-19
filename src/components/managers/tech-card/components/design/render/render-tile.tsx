@@ -15,9 +15,11 @@ import {
   type JSX,
   type ReactNode,
 } from 'react';
-import { Button } from 'ui/components/button';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
-import Text from 'ui/components/text';
+import { Button, Text, FoldCaret } from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import {
   COLORWAY_NONE,
@@ -56,7 +58,6 @@ import {
 } from './model';
 import { SAMPLE_LABEL, colourwayColumns, picturesOnSides } from './side-row';
 import { StripCell } from './strip-cell';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ONE FABRIC RENDER, WITH THE DOORS THAT PUT IT INTO A SIDE (27.09, O-63 step 1, D-62) ═══════

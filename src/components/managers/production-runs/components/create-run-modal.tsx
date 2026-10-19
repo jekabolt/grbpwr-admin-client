@@ -8,18 +8,17 @@ import {
   common_ProductionRunLine,
   common_ProductionRunStatus,
 } from 'api/proto-http/admin';
-import { techCardKeys, useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  techCardKeys,
+  useTechCard,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Close, GroupLabel, Pill, Text } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -52,7 +51,7 @@ import { useRunReadiness, useSaveProductionRun } from './useProductionRuns';
 // значит пересъёмку нормы между открытием модалки и отправкой клиент обнаружить не может в принципе.
 // Поэтому отказ create разбирается здесь как ПЕРВОКЛАССНЫЙ результат, а не как «неожиданная ошибка».
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
 type Draft = {
@@ -375,15 +374,11 @@ export function CreateRunModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>
-              new run
-            </DialogPrimitives.Title>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
+            <DialogPrimitives.Title className='text-lg uppercase'>new run</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
@@ -442,9 +437,7 @@ export function CreateRunModal({
                     СНАРУЖИ <label>, а не внутри: у строки есть ссылка «починить», а клик по ссылке
                     внутри label браузер вдобавок переадресует контролу — то есть открыл бы список
                     релизов за только что открытой вкладкой. */}
-                {releaseRow ? (
-                  <FindingRow finding={releaseRow} techCardId={d.techCardId} />
-                ) : null}
+                {releaseRow ? <FindingRow finding={releaseRow} techCardId={d.techCardId} /> : null}
               </div>
             </div>
 
@@ -601,12 +594,9 @@ export function CreateRunModal({
                                 {colorwayLabel(cw)}
                               </td>
                               {sizeIds.map((s) => (
-                                <td
-                                  key={s}
-                                  className='border border-hairline px-2 py-1 text-right'
-                                >
+                                <td key={s} className='border border-hairline px-2 py-1 text-right'>
                                   <input
-                                    className='w-14 border border-textInactiveColor bg-bgColor px-1 text-right text-textBaseSize'
+                                    className='w-14 border border-borderColor bg-bgColor px-1 text-right text-textBaseSize'
                                     inputMode='numeric'
                                     value={qty[runGridKey(cw, s)] ?? ''}
                                     onChange={(e) => setCell(cw, s, e.target.value)}
@@ -822,7 +812,7 @@ export function CreateRunModal({
             ) : null}
           </div>
 
-          <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Text size='micro' variant='label' className='mr-auto'>
               {totalUnits > 0
                 ? `${totalUnits} ${totalUnits === 1 ? 'garment' : 'garments'} in the plan`

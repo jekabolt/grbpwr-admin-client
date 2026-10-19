@@ -2,7 +2,7 @@ import { common_MediaFull, common_ColorwayFull } from 'api/proto-http/admin';
 import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { ProductFormData } from '../utility/schema';
 
 function getMediaUrl(media: common_MediaFull | undefined): string | undefined {

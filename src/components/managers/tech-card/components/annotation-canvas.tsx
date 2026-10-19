@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 import {
   AnnotationCanvas as UiAnnotationCanvas,
   type AnnotationValue,
-} from 'ui/components/annotation/canvas';
-import { ALL_KIND_KEYS, kindDef } from 'ui/components/annotation/kinds';
+} from 'components/managers/tech-card/annotation/canvas';
+import { ALL_KIND_KEYS, kindDef } from 'components/managers/tech-card/annotation/kinds';
 
 import type { AnnotationForm } from './schema';
 

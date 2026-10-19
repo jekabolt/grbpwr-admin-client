@@ -10,9 +10,7 @@
 //             the field resets operator + values; changing the operator resizes values.
 
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Close, Select, Text } from 'ui';
 import {
   defaultOperatorForField,
   FIELDS,
@@ -50,7 +48,7 @@ function AndOrToggle({
   disabled?: boolean;
 }) {
   return (
-    <div className='flex border border-textInactiveColor'>
+    <div className='flex border border-borderColor'>
       {(['AND', 'OR'] as const).map((op) => (
         <button
           key={op}
@@ -104,7 +102,7 @@ function LeafRow({
       <div
         className={cn(
           'flex flex-col gap-2 border bg-bgColor p-2 lg:flex-row lg:items-start',
-          issue ? 'border-error' : 'border-textInactiveColor',
+          issue ? 'border-error' : 'border-borderColor',
         )}
       >
         <div className='shrink-0 lg:w-[190px]'>
@@ -140,16 +138,12 @@ function LeafRow({
           />
         </div>
         {!disabled && (
-          <button
-            type='button'
+          <Close
+            size='sm'
             onClick={onRemove}
             aria-label='remove condition'
             className='shrink-0 self-start leading-none lg:pt-1'
-          >
-            <Text size='small' variant='inactive'>
-              [x]
-            </Text>
-          </button>
+          />
         )}
       </div>
       {issue && (
@@ -192,18 +186,27 @@ function GroupNodeCard({
     <div
       className={cn(
         'flex flex-col gap-3 border p-3',
-        isRoot ? 'border-textColor' : 'border-textInactiveColor',
+        isRoot ? 'border-textColor' : 'border-borderColor',
       )}
     >
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
-          <AndOrToggle value={node.op} onChange={(op) => onChange({ ...node, op })} disabled={disabled} />
+          <AndOrToggle
+            value={node.op}
+            onChange={(op) => onChange({ ...node, op })}
+            disabled={disabled}
+          />
           <Text size='small' variant='inactive'>
             {node.op === 'AND' ? 'match ALL of' : 'match ANY of'}
           </Text>
         </div>
         {!isRoot && !disabled && onRemove && (
-          <button type='button' onClick={onRemove} aria-label='remove group' className='leading-none'>
+          <button
+            type='button'
+            onClick={onRemove}
+            aria-label='remove group'
+            className='leading-none'
+          >
             <Text size='small' variant='inactive'>
               remove group
             </Text>
@@ -216,7 +219,7 @@ function GroupNodeCard({
           no conditions — matches everyone. add a condition to narrow the audience.
         </Text>
       ) : (
-        <div className='flex flex-col gap-2 border-l border-textInactiveColor pl-3'>
+        <div className='flex flex-col gap-2 border-l border-borderColor pl-3'>
           {node.children.map((child) =>
             child.kind === 'leaf' ? (
               <LeafRow

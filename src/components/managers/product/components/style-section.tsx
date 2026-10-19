@@ -3,11 +3,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import FieldsGroupContainer from 'ui/components/fields-group';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { Button, FieldsGroupContainer, Text, InputField, SelectField } from 'ui';
 import { ProductFormData } from '../utility/schema';
 import { getFilteredSizes } from '../utility/sizes';
 import { TechCardLink } from './read-only-field';
@@ -102,7 +98,7 @@ export function StyleSection({
     <FieldsGroupContainer
       title='model presentation'
       isOpen={hasModelWears}
-      className='border border-textInactiveColor p-4'
+      className='border border-borderColor p-4'
       childrenSpacingClass='space-y-3'
       headerContentGapClass='space-y-3'
       preview={

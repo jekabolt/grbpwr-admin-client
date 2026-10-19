@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { common_OrderFull } from 'api/proto-http/admin';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Avatar, Button, Text, Textarea } from 'ui';
 import { useAddOrderComment, useOrderComments } from '../hooks/useOrderComments';
 
 /**
@@ -75,7 +72,7 @@ export function Comment({
             name='newOrderComment'
             variant='secondary'
             placeholder='leave a comment…'
-            className='mb-0 min-h-16 border border-borderColor placeholder:uppercase placeholder:text-textInactiveColor'
+            className='mb-0 min-h-16 border border-borderColor placeholder:uppercase placeholder:text-borderColor'
             value={body}
             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBody(e.target.value)}
           />

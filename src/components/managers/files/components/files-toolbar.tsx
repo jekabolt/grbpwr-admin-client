@@ -1,13 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { ROUTES } from 'constants/routes';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Toolbar } from 'ui/components/toolbar';
+import { Avatar, Button, Chip, Input, Select, Text, Toolbar } from 'ui';
 import {
   PERSON_ROLE_CHIP,
   PERSON_ROLE_HINT,
@@ -77,7 +71,7 @@ function PersonFilter({
 
   return (
     <>
-      <SelectComponent
+      <Select
         name='person'
         value={String(personId)}
         onValueChange={(v: string) => onPerson(Number(v) || 0)}
@@ -184,7 +178,7 @@ export function FilesToolbar({
       <Text size='micro' variant='label' className='max-w-[40ch]'>
         searches by names, topics and people, not by the contents of a file
       </Text>
-      <SelectComponent
+      <Select
         name='sort'
         value={sort}
         onValueChange={(v: string) => onSort(v as FilesSort)}

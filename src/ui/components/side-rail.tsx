@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel } from './group-label';
+import Text from './text';
 
 /**
  * The reference's sticky left column: a bordered panel of grouped rows, each with an

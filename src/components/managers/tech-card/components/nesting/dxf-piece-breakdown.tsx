@@ -25,11 +25,7 @@
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { HEADER_TEXT } from 'ui/components/section-header';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { DataTable, EmptyCell, TotalRow, Pill, HEADER_TEXT, Stat, StatGrid, Text } from 'ui';
 import { PieceSilhouette } from '../piece-silhouette';
 import { nettoLengthCm, type DxfNormAreas, type DxfNormPiece } from './dxf-consumption';
 import { findPiece, type DxfIndex, type FoundPiece } from './dxf-geometry';
@@ -175,7 +171,10 @@ export function BreakdownSizeChips({
               tabIndex={0}
               className={
                 quiet
-                  ? cn(sizeQuiet, on ? 'text-textColor' : 'text-labelColor underline hover:text-textColor')
+                  ? cn(
+                      sizeQuiet,
+                      on ? 'text-textColor' : 'text-labelColor underline hover:text-textColor',
+                    )
                   : cn(sizeChip, on ? sizeChipOn : sizeChipOff)
               }
               onClick={() => onChange(id)}
@@ -252,12 +251,12 @@ export function NettoFormula({
       <Stat label='Σ piece area' value={fmtInt(areaCm2)} sub={`cm² · size ${sizeLabel}`} />
       <Stat
         label='÷ cutting width'
-        value={cuttingWidthCm > 0 ? fmtInt(cuttingWidthCm) : '—'}
+        value={cuttingWidthCm > 0 ? fmtInt(cuttingWidthCm) : <EmptyCell />}
         sub='cm · roll − 2×selvedge'
       />
       <Stat
         label='= netto per unit'
-        value={netto != null ? netto : '—'}
+        value={netto != null ? netto : <EmptyCell />}
         sub={unit ? `${unit} · without the waste between pieces` : 'slot unit not set'}
       />
     </StatGrid>
@@ -390,11 +389,11 @@ export function DxfPieceBreakdown({
                   {/* Доля — числом И полосой. Полоса отвечает на «какая деталь тут главная» без
                       чтения цифр; она монохромна, потому что цвет в этой системе носит состояние,
                       а доля — не состояние. Трек и заливка — те же, что у ранжированной полосы
-                      системы (BarRow): трек `trackBg`, заливка ИНК. Заливка светло-серым
-                      (`progressBg`) на светло-сером треке не читалась вовсе — проверено на экране. */}
+                      системы (BarRow): трек `pageBg`, заливка ИНК. Заливка светло-серым
+                      (`hairline`) на светло-сером треке не читалась вовсе — проверено на экране. */}
                   <span className='flex flex-col items-end gap-0.5'>
                     <span>{(share * 100).toFixed(share < 0.1 ? 1 : 0)}%</span>
-                    <span aria-hidden className='block h-[3px] w-full bg-trackBg'>
+                    <span aria-hidden className='block h-[3px] w-full bg-pageBg'>
                       <span
                         className='block h-full bg-textColor'
                         style={{ width: `${Math.min(100, Math.max(2, share * 100))}%` }}

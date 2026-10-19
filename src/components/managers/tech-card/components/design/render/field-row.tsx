@@ -1,7 +1,6 @@
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { PLACEHOLDER_SURFACE, Text } from 'ui';
 
 /**
  * A LABELLED CONTROL ROW — the `#e6e6e6` hairline weight of the ladder, with a control in it.

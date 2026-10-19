@@ -1,7 +1,8 @@
 import { cva, VariantProps } from 'class-variance-authority';
 
 import { cn } from 'lib/utility';
-import { HEADER_TEXT } from 'ui/components/section-header';
+import { Close } from './close';
+import { HEADER_TEXT } from './section-header';
 
 /**
  * Interactive counterpart of `Pill` — filters, toggles, removable selections.
@@ -121,8 +122,8 @@ export function Chip({
               selected ? 'text-textColor' : 'text-labelColor underline hover:text-textColor',
               tone === 'error' && 'text-error',
               tone === 'attention' && 'text-warning',
-              'disabled:cursor-not-allowed disabled:text-textInactiveColor',
-              nonForm && disabled && 'text-textInactiveColor',
+              'disabled:cursor-not-allowed disabled:text-borderColor',
+              nonForm && disabled && 'text-borderColor',
             )
           : chipVariants({ selected, tone, dashed }),
         spanRole.className,
@@ -134,18 +135,17 @@ export function Chip({
           span-варианте гейт приходится ставить руками, иначе ✕ остаётся живым на выключенном
           чипе. */}
       {onRemove && !(nonForm && disabled) && (
-        <span
-          role='button'
+        <Close
+          asChild
+          size='sm'
           tabIndex={-1}
           aria-label='remove'
           onClick={(e: React.MouseEvent) => {
             e.stopPropagation();
             onRemove();
           }}
-          className='cursor-pointer leading-none'
-        >
-          ✕
-        </span>
+          className='cursor-pointer'
+        />
       )}
     </Component>
   );

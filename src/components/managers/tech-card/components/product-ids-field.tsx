@@ -2,10 +2,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
 import { Link, useParams } from 'react-router-dom';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Media, Placeholder, Text, Tile, Tiles } from 'ui';
 
 function productName(product?: common_Colorway): string {
   return product?.display?.translations?.[0]?.name ?? `product #${product?.id ?? ''}`;

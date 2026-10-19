@@ -1,0 +1,68 @@
+{
+  "id": "darts-skirt",
+  "note": "Skirt: one waist dart (open V, ends on the waist line) on the front and on the back \u2014 one dart each.",
+  "category": "skirt",
+  "pieces": [
+    {
+      "key": "SKIRT_FRONT",
+      "poly": [
+        [0, 0],
+        [30, 0],
+        [30, 60],
+        [0, 60]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [10, 60],
+            [11.25, 49],
+            [12.5, 60]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "SKIRT_BACK",
+      "poly": [
+        [0, 0],
+        [30, 0],
+        [30, 60],
+        [0, 60]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [17.5, 60],
+            [18.75, 48],
+            [20, 60]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "WAISTBAND",
+      "poly": [
+        [0, 0],
+        [62, 0],
+        [62, 8],
+        [0, 8]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {
+    "SKIRT_FRONT": 1,
+    "SKIRT_BACK": 1
+  },
+  "notchWarnings": 0
+}

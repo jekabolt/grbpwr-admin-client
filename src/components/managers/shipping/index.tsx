@@ -5,11 +5,7 @@ import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import { Section } from 'ui/components/section';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Button, CopyToClipboard, Section, Selector, Text } from 'ui';
 import { UpsertShipping } from './components/upsert-shipping';
 
 const currencyOptions = SELLING_CURRENCIES.map((c) => ({ value: c.value, label: c.label }));
@@ -104,7 +100,7 @@ export function Shipping() {
                 <th
                   key={col.label}
                   className={cn(
-                    'h-10 border border-r border-borderColor bg-bgSecondary px-2 text-center',
+                    'h-10 border border-r border-borderColor bg-pageBg px-2 text-center',
                     col.width ?? 'min-w-26',
                   )}
                 >
@@ -135,8 +131,8 @@ export function Shipping() {
                   className={cn(
                     'h-10 border-b border-borderColor last:border-b-0',
                     isAllowed
-                      ? 'cursor-pointer hover:bg-textInactiveColor/20'
-                      : 'cursor-default bg-textInactiveColor/60',
+                      ? 'cursor-pointer hover:bg-borderColor/20'
+                      : 'cursor-default bg-borderColor/60',
                   )}
                   onClick={() => handleRowClick(carrier)}
                 >

@@ -11,18 +11,23 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { SECTION } from 'constants/routes';
-import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  HeaderWarnings,
+  Section,
+  Select,
+  Text,
+  Tooltip,
+  EmptyCell,
+} from 'ui';
 import { colorwayFullKey } from '../../care-labels/adapter';
 import { overrideRowsOf } from '../../care-labels/composition-override';
 import { isBlocking, type Hole } from '../../care-labels/holes';
@@ -60,7 +65,6 @@ import {
 } from './regions';
 import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
 import { useCompositionLabel, useShaper } from './use-composition-label';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 const EMPTY_PICKS: ReadonlyMap<number, string> = new Map();
 
@@ -151,6 +155,15 @@ export function CompositionLabelBlock({
   // The picker offers active countries only; a stored code still resolves to its name when inactive.
   const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
+  // WORKSHOP COUNTRY OF ORIGIN (0414) — a SUGGESTION for a colourway with no country, never a pick.
+  // «Made in» is legal text: the suggestion is shown on the ribbon and in the strip, but it only
+  // becomes a staged write when a person confirms it, so the `no-country` hole keeps counting the
+  // colourway as needing someone until then. An inactive / unknown code suggests nothing.
+  const { data: workshopData } = useWorkshopSettings();
+  const workshopCountryCode = (workshopData?.settings?.countryOfOrigin ?? '').trim().toUpperCase();
+  const workshopCountry = workshopCountryCode
+    ? pickableCountries.find((c) => c.code === workshopCountryCode)
+    : undefined;
   const titleOf = (id: number) => {
     const c = colorways.find((x) => x.id === id);
     return c?.baseSku || c?.colourName || `#${id}`;
@@ -225,8 +238,6 @@ export function CompositionLabelBlock({
   }, [readiness, cw]);
   const blockedCw = (id: number) =>
     !!readiness?.colorways.find((r) => r.colorwayId === id)?.blocked;
-  const nBlock = holes.filter(isBlocking).length;
-  const nWarn = holes.length - nBlock;
 
   // ── ленты выбранного варианта ────────────────────────────────────────────────────────────
   const sku = cw ? labelSku(cw, size) : '';
@@ -429,6 +440,9 @@ export function CompositionLabelBlock({
   const s = setValue;
   const edit = canEdit;
   const picked = cw ? picks.get(cw.id) : undefined;
+  // По КОДУ, не по имени: код, которого нет в словаре, даёт пустое имя, но страна на этикетке задана —
+  // предложение мастерской затёрло бы юридическое происхождение.
+  const suggested = cw && !cw.countryCode && !picked ? workshopCountry : undefined;
 
   const overriddenOf = (line: LineKey): boolean => {
     switch (line) {
@@ -497,12 +511,14 @@ export function CompositionLabelBlock({
           ...base,
           label: cw?.countryName
             ? `made in ${cw.countryName}`
-            : 'made in: country missing, click to set it',
+            : suggested
+              ? `made in: country missing, the workshop suggests ${suggested.name}, click to confirm`
+              : 'made in: country missing, click to set it',
           disabled: !edit || !techCardId || unavailable,
           title,
           placeholder: !cw?.countryName ? (
             <span className='flex h-full items-center justify-end whitespace-nowrap px-1 text-nano uppercase leading-none text-error'>
-              ! set country
+              {suggested ? `! confirm ${suggested.code}` : '! set country'}
             </span>
           ) : null,
         };
@@ -604,7 +620,7 @@ export function CompositionLabelBlock({
                   onClose={close}
                 />
               </div>
-              <span className='text-labelColor'>/ [{size?.label ?? '—'}]</span>
+              <span className='text-labelColor'>/ [{size?.label ?? <EmptyCell />}]</span>
             </div>
           </EditorStrip>
         );
@@ -654,7 +670,9 @@ export function CompositionLabelBlock({
                 ? 'staged · saves with the card'
                 : cw.countryName
                   ? 'from the colourway · a new pick saves with the card'
-                  : 'missing · set it here'
+                  : suggested
+                    ? 'missing · workshop suggests one'
+                    : 'missing · set it here'
             }
           >
             <MadeInValue
@@ -663,6 +681,7 @@ export function CompositionLabelBlock({
               unavailable={isUnavailable(cw)}
               countries={pickableCountries}
               othersWithout={othersWithout}
+              suggested={suggested}
               disabled={!edit || !techCardId}
               onPick={pickCountry}
             />
@@ -772,8 +791,6 @@ export function CompositionLabelBlock({
   };
 
   // ── список дыр (за счётчиком) ─────────────────────────────────────────────────────────────
-  const [holesOpen, setHolesOpen] = useState(false);
-  useEffect(() => setHolesOpen(false), [cw?.id]);
   const goToHole = (h: Hole) => {
     const line = holeLine(h);
     if (!line) return;
@@ -837,7 +854,7 @@ export function CompositionLabelBlock({
     const region = openHere?.regions.find((r) => r.key === open?.key);
     return (
       <div key={row.label} className='flex flex-col' data-ribbon-row={row.label}>
-        <div className='group/bench bg-bgSecondary' style={{ padding: pad }} data-bench={row.label}>
+        <div className='group/bench bg-pageBg' style={{ padding: pad }} data-bench={row.label}>
           <div className='grid' style={grid}>
             {sides.map((sd) => (
               <Ribbon
@@ -879,7 +896,7 @@ export function CompositionLabelBlock({
   return (
     <Section
       title='composition label'
-      question='— sewn into every garment; click a printed value to change it'
+      question={<LegendHelp />}
       action={printDoor}
       className='w-full'
     >
@@ -897,7 +914,7 @@ export function CompositionLabelBlock({
                 >
                   colourway
                 </Text>
-                <SelectComponent
+                <Select
                   name='composition-colourway'
                   className='min-w-[200px]'
                   value={String(cw?.id ?? '')}
@@ -918,7 +935,7 @@ export function CompositionLabelBlock({
                   >
                     size
                   </Text>
-                  <SelectComponent
+                  <Select
                     name='composition-size'
                     className='min-w-[96px]'
                     value={String(size?.id ?? '')}
@@ -946,59 +963,22 @@ export function CompositionLabelBlock({
                     no holes · prints as shown
                   </Text>
                 ) : (
-                  <button
-                    type='button'
-                    data-hole-count=''
-                    aria-expanded={holesOpen}
-                    onClick={() => setHolesOpen((v) => !v)}
-                    className={cn(
-                      'cursor-pointer text-micro uppercase tracking-label underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                      nBlock ? 'text-error' : 'text-warning',
-                    )}
-                  >
-                    {[
-                      nBlock ? `! ${nBlock} blocking` : '',
-                      nWarn ? `${nWarn} ${nWarn === 1 ? 'warning' : 'warnings'}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    <FoldCaret open={holesOpen} />
-                  </button>
+                  // Дыры — дверь `! N` (HeaderWarnings): блокирующие красным и первыми, клик по
+                  // дыре с адресом ведёт к её строке на ленте.
+                  <span data-hole-count=''>
+                    <HeaderWarnings
+                      items={holes.map((h) => ({
+                        text: h.message,
+                        error: isBlocking(h),
+                        action: holeLine(h)
+                          ? { label: 'go to the line', onClick: () => goToHole(h) }
+                          : undefined,
+                      }))}
+                    />
+                  </span>
                 )}
               </div>
             </div>
-            {holesOpen && holes.length > 0 ? (
-              <ul className='flex flex-col gap-1.5' data-composition-holes=''>
-                {holes.map((h) => {
-                  const line = holeLine(h);
-                  const body = (
-                    <>
-                      <Pill tone={isBlocking(h) ? 'warn' : 'attention'}>
-                        {isBlocking(h) ? 'blocks' : 'warn'}
-                      </Pill>
-                      <Text size='micro' component='span' className='min-w-0'>
-                        {h.message}
-                      </Text>
-                    </>
-                  );
-                  return (
-                    <li key={`${h.code}|${h.message}`} data-hole={h.code}>
-                      {line ? (
-                        <button
-                          type='button'
-                          onClick={() => goToHole(h)}
-                          className='flex cursor-pointer items-start gap-2 text-left hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
-                        >
-                          {body}
-                        </button>
-                      ) : (
-                        <span className='flex items-start gap-2'>{body}</span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
           </div>
         )}
 
@@ -1022,9 +1002,7 @@ export function CompositionLabelBlock({
             <>
               {aRow ? (
                 <div className='flex flex-col'>
-                  <GroupLabel flush action={<LabelNote>duplex · flip on the short edge</LabelNote>}>
-                    ribbon A · main label · 100 × 30 mm
-                  </GroupLabel>
+                  <GroupLabel flush>ribbon A · main label · 100 × 30 mm</GroupLabel>
                   <div className='pt-2'>{bench(aRow)}</div>
                 </div>
               ) : null}
@@ -1073,7 +1051,6 @@ export function CompositionLabelBlock({
               {shownRow && shown ? bench(shownRow, shown) : null}
             </div>
           )}
-          {rows.length > 0 && width > 0 ? <Legend /> : null}
         </div>
       </div>
     </Section>
@@ -1088,37 +1065,54 @@ function LabelNote({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Одна тихая строка под лентами: что значат линии. */
-function Legend() {
+/** `?` у заголовка: что это за лента и что значат линии — по наведению, не строкой на экране. */
+function LegendHelp() {
   const item = (glyph: React.ReactNode, text: string) => (
     <span className='flex items-center gap-2'>
       <svg aria-hidden width={18} height={10} className='shrink-0'>
         {glyph}
       </svg>
-      <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-        {text}
-      </Text>
+      {text}
     </span>
   );
   return (
-    <div className='flex flex-wrap items-center gap-x-8 gap-y-2' data-composition-legend=''>
-      {item(
-        <rect x={0.5} y={0.5} width={17} height={9} fill='#fff' stroke='var(--color-labelColor)' />,
-        'solid · cut edge',
-      )}
-      {item(
-        <line x1={9} y1={0} x2={9} y2={10} stroke='#000' strokeDasharray='2 2' />,
-        'dash · fold / sew',
-      )}
-      {item(
-        <g stroke='var(--color-borderColor)'>
-          {[0, 5, 10, 15, 20].map((x) => (
-            <line key={x} x1={x - 6} y1={10} x2={x + 4} y2={0} />
-          ))}
-        </g>,
-        'hatch · 10 mm seam, sewn in',
-      )}
-    </div>
+    <Tooltip
+      side='bottom'
+      align='start'
+      trigger={
+        <button type='button' aria-label='about the label' className='text-labelColor'>
+          ?
+        </button>
+      }
+    >
+      <div className='flex flex-col gap-1 uppercase' data-composition-legend=''>
+        <span>sewn into every garment; click a printed value to change it</span>
+        {item(
+          <rect
+            x={0.5}
+            y={0.5}
+            width={17}
+            height={9}
+            fill='#fff'
+            stroke='var(--color-labelColor)'
+          />,
+          'solid · cut edge',
+        )}
+        {item(
+          <line x1={9} y1={0} x2={9} y2={10} stroke='#000' strokeDasharray='2 2' />,
+          'dash · fold / sew',
+        )}
+        {item(
+          <g stroke='var(--color-borderColor)'>
+            {[0, 5, 10, 15, 20].map((x) => (
+              <line key={x} x1={x - 6} y1={10} x2={x + 4} y2={0} />
+            ))}
+          </g>,
+          'hatch · 10 mm seam, sewn in',
+        )}
+        <span>ribbon A: duplex, flip on the short edge</span>
+      </div>
+    </Tooltip>
   );
 }
 

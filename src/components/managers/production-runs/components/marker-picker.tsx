@@ -1,10 +1,7 @@
 import { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, GroupLabel, GenericPopover, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 export type MarkerFitness = { eligible: boolean; reason: string };
@@ -122,7 +119,7 @@ export function MarkerPicker({
       )}
     >
       {/* Список во всю ширину поповера — тот же приём, что у пикера слота в рецепте колорвея:
-          текущий вариант помечается зеброй и галочкой, а не заливкой чернилами (заливка — контракт
+          текущий вариант помечается галочкой, а не заливкой чернилами (заливка — контракт
           Chip, кликабельного токена, а не строки списка). */}
       <div role='listbox' aria-label='section marker' className='-mx-2 -my-1.5'>
         {runMarkers.length === 0 ? (
@@ -148,7 +145,7 @@ export function MarkerPicker({
                 }}
                 className={cn(
                   'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                  current && 'bg-bgZebra',
+                  current && 'bg-pageBg',
                   !fit.eligible && 'cursor-not-allowed',
                 )}
               >

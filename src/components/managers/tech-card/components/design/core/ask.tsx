@@ -1,5 +1,4 @@
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 
 /**
  * THE ONE PRINTER OF A DESTRUCTIVE QUESTION — a sentence, a verb, and the line `there is no undo`.

@@ -6934,6 +6934,23 @@ export type WorkshopSettings = {
   // the check is common.Material.fabric_thickness_mm; either one absent ⇒ UNKNOWN, and the screen
   // says which of the two is missing rather than printing a height nobody can trust.
   maxStackHeightCm: googletype_Decimal | undefined;
+  // Usable WIDTH of the cutting/spreading table, in CENTIMETRES (0413) — the length's partner, so the
+  // marker modal can draw the table to scale. ABSENT = not configured ⇒ no width verdict, never 0.
+  cuttingTableWidthCm: googletype_Decimal | undefined;
+  // 0414 — costing / label DEFAULTS, read only to PREFILL a new costing and the «made in» line.
+  // Each is ABSENT when not configured ⇒ no prefill (never a zero or an empty string on the wire).
+  // ISO 4217 code every money default here is in (any expense currency, e.g. EUR; USDT legal).
+  costingCurrency?: string;
+  // Cost of one production minute (SAM), in costing_currency.
+  labourRatePerMin: googletype_Decimal | undefined;
+  // Overhead as a percentage of direct cost, 0..1000.
+  overheadPct: googletype_Decimal | undefined;
+  // Брак / запас allowance, percent 0..100 (same band as TechCardCosting.defect_percent).
+  defectPercent: googletype_Decimal | undefined;
+  // Gross-margin target, percent 0..100 (same band as TechCardCosting.target_margin_pct).
+  targetMarginPct: googletype_Decimal | undefined;
+  // ISO 3166-1 alpha-2 country of origin («made in»), upper-case, e.g. "PT".
+  countryOfOrigin?: string;
 };
 
 export type GetWorkshopSettingsRequest = {
@@ -6981,6 +6998,18 @@ export type UpdateWorkshopSettingsRequest = {
   // clearing the setting (send the empty message), which withholds the verdict instead of failing
   // it. Same floor argument as the table length, opposite to the seam allowance's legal zero.
   maxStackHeightCm: googletype_Decimal | undefined;
+  // 0413 — table width, CENTIMETRES, band [50, 1000] (entity.Min/MaxCuttingTableWidthCm). Tri-state
+  // like the length: absent = leave alone, empty message = clear, number = set.
+  cuttingTableWidthCm: googletype_Decimal | undefined;
+  // 0414 — costing / label defaults, all tri-state. Decimals: absent = leave alone, empty message =
+  // clear, number = set. Strings are proto3 `optional` for the same presence: absent = leave alone,
+  // "" = clear, value = set (trimmed, upper-cased server-side).
+  costingCurrency?: string;
+  labourRatePerMin: googletype_Decimal | undefined;
+  overheadPct: googletype_Decimal | undefined;
+  defectPercent: googletype_Decimal | undefined;
+  targetMarginPct: googletype_Decimal | undefined;
+  countryOfOrigin?: string;
 };
 
 export type UpdateWorkshopSettingsResponse = {
@@ -8209,6 +8238,14 @@ export type common_TechCardInsert = {
   // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   labelsAware: boolean | undefined;
+  // ЩИТ ЧЕРНОВИКА КАРКАСА (0410) для TechCardOperation.draft (68). draft — bool без присутствия, а
+  // операции пишутся полной заменой без стабильного ключа: payload бандла, который поля не знает,
+  // неотличим от «все шаги проверены», и открытая старая вкладка стёрла бы каждую метку первой же
+  // правкой. Без флага UpdateTechCard ОТКАЗЫВАЕТ (FailedPrecondition, «обнови админку»), если у
+  // сохранённой карточки есть хоть один draft-шаг, и любая запись отказывает, если payload без
+  // флага несёт draft = true (эхо). Флаг не фильтрует разбор. Серверные пути (клон сезона,
+  // импорт архива) ставят его явно. ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест.
+  operationDraftAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -9201,6 +9238,12 @@ export type common_TechCardOperation = {
   // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
   // жест, а не потеря.
   bomQuantities: common_TechCardOperationBomQty[] | undefined;
+  // ЧЕРНОВИК КАРКАСА СБОРКИ (0410). true = шаг записал каркас сборки (OPERATIONS → build from pattern
+  // → apply), и его ещё никто не проверил. Снимает первая смысловая правка строки или клик по чипу
+  // «draft» (reviewed). В ДАЙДЖЕСТ НЕ ВХОДИТ: проверка шага не меняет того, что карточка говорит цеху,
+  // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
+  // сборки — это пометка для команды, а не инструкция.
+  draft: boolean | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -10367,6 +10410,11 @@ export type common_TechCard = {
   // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
   // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
   guided: boolean | undefined;
+  // OUTPUT-ONLY: the technologist's seam decisions (confirmed / rejected / connected by hand), with
+  // the server's staleness verdict resolved on this read. Written ONLY through UpsertTechCardSeams /
+  // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
+  // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
+  seams: common_TechCardSeam[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -10923,6 +10971,98 @@ export type common_TechCardPieceArea = {
   // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
   // разные и ведут к разным фразам на экране.
   ambiguousPick: boolean | undefined;
+};
+
+// TechCardSeam is one stored seam decision, keyed by a client-minted ULID.
+export type common_TechCardSeam = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  seamKey: string | undefined;
+  status: common_TechCardSeamStatus | undefined;
+  kind: common_TechCardSeamKind | undefined;
+  direction: common_TechCardSeamDirection | undefined;
+  source: common_TechCardSeamSource | undefined;
+  sideA: common_TechCardSeamSide | undefined;
+  sideB: common_TechCardSeamSide | undefined;
+  // Size code the anchors were written on — honesty for display; the resolver compares by ratio.
+  anchoredSize: string | undefined;
+  // The technologist's words («eased at the yoke», «CF is a zip»), ≤ 255 chars.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance.
+  // stale = the SOURCE of the seam's pieces moved since the row was written: the fingerprint of the
+  // sheets AND block→piece links of the pieces' fabric scopes, computed now, differs from the one
+  // stamped on write (a DXF re-uploaded, a block re-aliased). A stale row must not be applied as is
+  // — the client shows it and offers re-confirm, which rewrites it and clears the flag.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSeamStatus is the technologist's decision on a seam.
+export type common_TechCardSeamStatus =
+  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
+  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
+  | "TECH_CARD_SEAM_STATUS_REJECTED";
+// TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
+// walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
+// closure (zip / button front) that is NOT sewn shut.
+export type common_TechCardSeamKind =
+  | "TECH_CARD_SEAM_KIND_UNKNOWN"
+  | "TECH_CARD_SEAM_KIND_EDGE"
+  | "TECH_CARD_SEAM_KIND_PARTIAL"
+  | "TECH_CARD_SEAM_KIND_COMPOSITE"
+  | "TECH_CARD_SEAM_KIND_SURFACE"
+  | "TECH_CARD_SEAM_KIND_CLOSURE";
+// TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
+// (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
+// is legal on write: the reader then picks the pairing itself.
+export type common_TechCardSeamDirection =
+  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
+  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
+  | "TECH_CARD_SEAM_DIRECTION_SAME";
+// TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
+export type common_TechCardSeamSource =
+  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
+  | "TECH_CARD_SEAM_SOURCE_GRAPH"
+  | "TECH_CARD_SEAM_SOURCE_DOLL"
+  | "TECH_CARD_SEAM_SOURCE_ORDER"
+  | "TECH_CARD_SEAM_SOURCE_MANUAL"
+  | "TECH_CARD_SEAM_SOURCE_AI";
+// TechCardSeamSide is one side of a seam: its anchors in walk order (1..8).
+export type common_TechCardSeamSide = {
+  parts: common_TechCardSeamAnchor[] | undefined;
+};
+
+// TechCardSeamAnchor is one run of one piece taking part in a seam side.
+export type common_TechCardSeamAnchor = {
+  // tech_card_piece.line_key — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
+  samples: common_TechCardSeamSample[] | undefined;
+  // Share of the sewing-line perimeter covered by the run, (0, 1].
+  perimShare: number | undefined;
+  // Run length at the size it was anchored on, mm (> 0).
+  lenMm: number | undefined;
+  // Notch count on the run, ends excluded.
+  notches: number | undefined;
+  // Signed turn of the run, degrees (+ convex).
+  turnDeg: number | undefined;
+  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
+  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
+  rangeFrom: number | undefined;
+  rangeTo: number | undefined;
+  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
+  // 'BP#3+4') and the piece contour's signature then.
+  edgeHint: string | undefined;
+  contourSig: string | undefined;
+};
+
+// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
+// (u, v ∈ [0, 1]).
+export type common_TechCardSeamSample = {
+  u: number | undefined;
+  v: number | undefined;
 };
 
 export type UpdateTechCardRequest = {
@@ -13327,6 +13467,260 @@ export type PutTechCardPatternSizeIndexResponse = {
   resolvedSizeCount: number | undefined;
 };
 
+// PatternPieceEvidence is what the client measured and read on one marked piece.
+export type PatternPieceEvidence = {
+  mark: number | undefined;
+  textInside: string[] | undefined;
+  quantityText: string | undefined;
+  areaCm2: number | undefined;
+  bboxWMm: number | undefined;
+  bboxHMm: number | undefined;
+  isSymmetricHint: boolean | undefined;
+  hasFoldLineHint: boolean | undefined;
+};
+
+// PatternPieceCrop is a close-up picture of one marked piece.
+export type PatternPieceCrop = {
+  mark: number | undefined;
+  mediaId: number | undefined;
+};
+
+// PatternPiecesContext is what the card and the pattern's own pages say around the pieces.
+export type PatternPiecesContext = {
+  sizeNames: string[] | undefined;
+  fabricPurposesInBom: string[] | undefined;
+  existingCardPieceNames: string[] | undefined;
+  instructionsTextExcerpt: string | undefined;
+  languageHint: string | undefined;
+};
+
+// PatternPieceCodeOption is one allowed code prefix and its English name.
+export type PatternPieceCodeOption = {
+  code: string | undefined;
+  name: string | undefined;
+};
+
+export type SuggestPatternPiecesRequest = {
+  techCardId: number | undefined;
+  overviewMediaId: number | undefined;
+  crops: PatternPieceCrop[] | undefined;
+  pieces: PatternPieceEvidence[] | undefined;
+  context: PatternPiecesContext | undefined;
+  // allowed_codes — the code prefixes the answer may use; empty = the server's default vocabulary
+  // (FP BP SL CLR CUF PLK WB PCK YK FAC LIN SP FL GST BLT WS).
+  allowedCodes: PatternPieceCodeOption[] | undefined;
+  // allowed_modifiers — the letter/symbol modifiers a code may carry; empty = L R F B #. A part
+  // number 1..20 is always allowed.
+  allowedModifiers: string[] | undefined;
+  force: boolean | undefined;
+};
+
+// PatternPieceSuggestion is the model's proposal for one marked piece, validated by the server.
+export type PatternPieceSuggestion = {
+  mark: number | undefined;
+  // code — PREFIX[_L|_R][_F|_B][_n][_#], uppercase, no size tail; "" when the model's code was
+  // refused (the reason is in warnings) or the model gave none.
+  code: string | undefined;
+  humanNameEn: string | undefined;
+  fabricPurposes: string[] | undefined;
+  cutQuantity: number | undefined;
+  fold: boolean | undefined;
+  pair: boolean | undefined;
+  variant: string | undefined;
+  confidence: number | undefined;
+  evidence: string[] | undefined;
+};
+
+export type SuggestPatternPiecesResponse = {
+  suggestions: PatternPieceSuggestion[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  warnings: string[] | undefined;
+  cached: boolean | undefined;
+};
+
+// PatternPageEvidence is one page of the pattern file: its picture and what the client measured on it.
+export type PatternPageEvidence = {
+  pageNo: number | undefined;
+  mediaId: number | undefined;
+  widthMm: number | undefined;
+  heightMm: number | undefined;
+  textExcerpt: string | undefined;
+  lineLengthM: number | undefined;
+  pieceSizedOutlines: number | undefined;
+  hasTileMarks: boolean | undefined;
+  textChars: number | undefined;
+};
+
+export type ClassifyPatternPagesRequest = {
+  techCardId: number | undefined;
+  fileName: string | undefined;
+  pages: PatternPageEvidence[] | undefined;
+  languageHint: string | undefined;
+  force: boolean | undefined;
+};
+
+// PatternPageRole is the model's reading of one page, validated by the server.
+export type PatternPageRole = {
+  pageNo: number | undefined;
+  // role — pattern_tile, pattern_sheet, overview, instructions, cutting_layout, cover, table or
+  // other. A page the model gave a role outside this list is not in the answer at all.
+  role: string | undefined;
+  confidence: number | undefined;
+  evidence: string[] | undefined;
+};
+
+export type ClassifyPatternPagesResponse = {
+  pages: PatternPageRole[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  warnings: string[] | undefined;
+  cached: boolean | undefined;
+};
+
+// AssemblySkeletonPiece is one cut piece of the garment as the skeleton read it.
+export type AssemblySkeletonPiece = {
+  key: string | undefined;
+  name: string | undefined;
+  cloth: string | undefined;
+  hand: string | undefined;
+  count: number | undefined;
+  fused: boolean | undefined;
+};
+
+// AssemblySkeletonSeam is one edge pair the client matched (or could not decide).
+export type AssemblySkeletonSeam = {
+  a: string | undefined;
+  b: string | undefined;
+  score: number | undefined;
+  kind: string | undefined;
+  evidence: string | undefined;
+};
+
+// AssemblySkeletonReading is one way an ambiguous join can be read.
+export type AssemblySkeletonReading = {
+  inputs: string[] | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonDecision is an ambiguous join: two or more readings, one chosen by the client.
+export type AssemblySkeletonDecision = {
+  id: string | undefined;
+  readings: AssemblySkeletonReading[] | undefined;
+  chosen: number | undefined;
+};
+
+// AssemblySkeletonStep is one step of the client's proposed order.
+export type AssemblySkeletonStep = {
+  id: string | undefined;
+  inputs: string[] | undefined;
+  outputUnit: string | undefined;
+  outputName: string | undefined;
+  operation: string | undefined;
+  label: string | undefined;
+  confidence: number | undefined;
+  decisionId: string | undefined;
+  follows: string | undefined;
+};
+
+export type SuggestAssemblySkeletonRequest = {
+  techCardId: number | undefined;
+  category: string | undefined;
+  templateStages: string[] | undefined;
+  pieces: AssemblySkeletonPiece[] | undefined;
+  seams: AssemblySkeletonSeam[] | undefined;
+  decisions: AssemblySkeletonDecision[] | undefined;
+  steps: AssemblySkeletonStep[] | undefined;
+  force: boolean | undefined;
+  // the garment category ids the client has a template for (tee, sweat, hoodie, trousers, skirt,
+  // dress, jumpsuit, shirt, jacket-lined, coat-lined, generic), ≤ 24 × 32 runes, unique; empty = the
+  // model is not asked for a category
+  categoryOptions: string[] | undefined;
+  // house style for the units: assembly trees this workshop's technologist made for OTHER garments,
+  // ≤ 4; EMPTY = the server picks up to 3 itself from the card base (other cards with ≥ 4 joins,
+  // the same category as tech_card_id's card first, then the most recently updated; none when
+  // tech_card_id is 0)
+  examples: AssemblySkeletonExample[] | undefined;
+};
+
+// AssemblySkeletonExample is one assembly tree of another garment, shown to the model as house style.
+export type AssemblySkeletonExample = {
+  label: string | undefined;
+  units: AssemblySkeletonExampleUnit[] | undefined;
+};
+
+// AssemblySkeletonExampleUnit is one join of an example: the unit it makes and what goes into it.
+export type AssemblySkeletonExampleUnit = {
+  name: string | undefined;
+  // PIECE NAMES or NAMES of earlier units of the same example (names, not keys), 1..16, each
+  // non-empty, ≤ 80 runes
+  parts: string[] | undefined;
+};
+
+// AssemblySkeletonOrderItem is one step in the model's suggested order.
+export type AssemblySkeletonOrderItem = {
+  stepId: string | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonPick is the model's reading of one decision.
+export type AssemblySkeletonPick = {
+  decisionId: string | undefined;
+  reading: number | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonWarning is one plausibility doubt about the skeleton.
+export type AssemblySkeletonWarning = {
+  // order (a step before what it needs: sleeve before shoulder), lining (lining or facing order),
+  // missing (a piece in no step, a step the garment needs), closure, pressing, other
+  kind: string | undefined;
+  message: string | undefined;
+  stepIds: string[] | undefined;
+  pieceKeys: string[] | undefined;
+};
+
+// AssemblySkeletonCategoryPick is the model's reading of the garment category, judged by the pieces.
+export type AssemblySkeletonCategoryPick = {
+  id: string | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonUnitHint is one subassembly a workshop makes: a set of piece keys that is a single
+// join's result. Two hints of one answer are nested or disjoint, never partially overlapping.
+export type AssemblySkeletonUnitHint = {
+  pieceKeys: string[] | undefined;
+  name: string | undefined;
+  reason: string | undefined;
+};
+
+export type SuggestAssemblySkeletonResponse = {
+  // order — the ordered steps (every step without `follows`), each exactly once; EMPTY when the
+  // model gave no usable order (the reason is in notes). A rider follows its join.
+  order: AssemblySkeletonOrderItem[] | undefined;
+  picks: AssemblySkeletonPick[] | undefined;
+  warnings: AssemblySkeletonWarning[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  notes: string[] | undefined;
+  cached: boolean | undefined;
+  calls: number | undefined;
+  unknownCalls: number | undefined;
+  // ai_category — the category the model reads off the pieces; unset = keep the draft's (no options
+  // offered, none given, or not one of the options — the reason is in notes)
+  aiCategory: AssemblySkeletonCategoryPick | undefined;
+  // units — the model's subassemblies, smallest set first, nested or disjoint; EMPTY = keep the
+  // draft's grouping. Unknown keys, sets of < 2 pieces, repeats and partial overlaps are dropped
+  // with a note.
+  units: AssemblySkeletonUnitHint[] | undefined;
+};
+
 export type SaveTechCardPieceAreasRequest = {
   techCardId: number | undefined;
   // The fabric scope: назначение (0265) when the card has been sorted, else the BOM line's line_key —
@@ -13348,6 +13742,27 @@ export type SaveTechCardPieceAreasRequest = {
 export type SaveTechCardPieceAreasResponse = {
   sheetFingerprint: string | undefined;
   stored: number | undefined;
+};
+
+export type UpsertTechCardSeamsRequest = {
+  techCardId: number | undefined;
+  // Rows to insert or replace whole, by seam_key. Output-only fields (stale, *_by, *_at) are ignored.
+  seams: common_TechCardSeam[] | undefined;
+};
+
+export type UpsertTechCardSeamsResponse = {
+  seams: common_TechCardSeam[] | undefined;
+  written: number | undefined;
+};
+
+export type DeleteTechCardSeamsRequest = {
+  techCardId: number | undefined;
+  seamKeys: string[] | undefined;
+};
+
+export type DeleteTechCardSeamsResponse = {
+  seams: common_TechCardSeam[] | undefined;
+  deleted: number | undefined;
 };
 
 export type ReceiveMaterialStockRequest = {
@@ -13913,6 +14328,13 @@ export type common_TechCardMarkerLayout = {
   // outlive the used_length it was derived from — and would be indistinguishable from a измеренное
   // one to every future reader.
   composition: common_TechCardMarkerCompositionEntry[] | undefined;
+  // НАСТИЛ the раскладка was planned for on the cutting table: plies, end loss, spread mode and the
+  // PHYSICAL table length. ABSENT = not recorded (every blob saved before this field, and every
+  // stale bundle). Replaces the old client hack that stuffed the usable table length into
+  // params.target_length_cm and wrote a «cutting table:» line into warnings — readers keep decoding
+  // that hack for blobs that predate this field. No schema_version bump: the field is additive and
+  // readers branch on its PRESENCE.
+  spread: common_TechCardMarkerSpread | undefined;
 };
 
 // TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
@@ -13997,6 +14419,24 @@ export type common_TechCardMarkerPlacement = {
   flipped: boolean | undefined;
 };
 
+// TechCardMarkerSpread is the cutting-table half of the conditions a раскладка was taken under.
+// Validated on save (SaveTechCardMarker refuses out-of-range values with InvalidArgument):
+// plies 1..1000, end_loss_cm 0..100, table_length_cm 0 (= not recorded) or 50..5000, mode a known
+// value.
+export type common_TechCardMarkerSpread = {
+  plies: number | undefined;
+  endLossCm: number | undefined;
+  mode: common_TechCardMarkerSpreadMode | undefined;
+  // The PHYSICAL length of the cutting table, cm; 0 = not recorded. Its own field — NOT
+  // params.target_length_cm, which is the engine's target and stays what the search was asked for.
+  tableLengthCm: number | undefined;
+};
+
+// TechCardMarkerSpreadMode is how the plies of the настил face each other.
+export type common_TechCardMarkerSpreadMode =
+  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
 export type SaveTechCardMarkerResponse = {
   id: number | undefined;
 };
@@ -19541,6 +19981,68 @@ export interface AdminService {
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
   PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
+  // SuggestPatternPieces (pattern import, F9) — ONE sync vision+JSON call (chat.pattern_pieces) that
+  // NAMES the pieces of an imported sewing pattern. The client finds the pieces itself (geometry is
+  // deterministic and never comes from the model), renders the assembled sheet with a number on
+  // every piece (Set-of-Mark, overview_media_id), optionally crops of single pieces, and sends its
+  // own evidence per mark (text inside the contour, quantity note, area, bbox, symmetry and fold
+  // hints) plus the card's context. The model proposes, per mark: a piece code of the card's grammar
+  // (PREFIX[_modifiers], uppercase, NO size tail), an English name, fabric purposes, cut quantity,
+  // fold, pair, a variant label, a confidence and short evidence quotes. The server validates the
+  // answer: unknown marks are dropped, the confidence is clamped to 0..1, the code is normalised to
+  // the grammar and refused (code "", a warning) when its prefix is not allowed or it carries a size
+  // tail or an unknown modifier. Nothing is stored; an identical request within an hour is answered
+  // from process memory (cached) unless force. tech_card_id is optional (0 = no card yet).
+  // InvalidArgument: no overview, 0 or more than 80 pieces, more than 12 crops, a duplicate mark, a
+  // crop of a mark not in pieces. FailedPrecondition: a picture not uploaded within the last 2 hours,
+  // a picture off this store's storage, an image is not a picture.
+  SuggestPatternPieces(request: SuggestPatternPiecesRequest): Promise<SuggestPatternPiecesResponse>;
+  // ClassifyPatternPages (pattern import, A9) — ONE sync vision+JSON call (chat.pattern_pages) that
+  // says WHAT each page of an imported pattern PDF is, from a small picture of the page (media_id, a
+  // PNG of ≤ 1024 px on its long side) and the client's own page statistics (size, line length,
+  // piece-sized outlines, tile marks, amount of text, a text excerpt). One call per file, so the
+  // model sees the neighbouring pages. role is one of: pattern_tile (a 1:1 part of an assembled
+  // sheet), pattern_sheet (a whole 1:1 sheet), overview (a reduced layout of the pieces),
+  // instructions (sewing steps, diagrams), cutting_layout (the pieces laid on the fabric), cover,
+  // table (sizes, consumption), other. The server validates the answer: unknown pages are dropped, a
+  // page whose role is outside the list is asked once more and then LEFT OUT of pages (a warning
+  // says so; never turned into "other"), the confidence is clamped to 0..1, the evidence is kept to
+  // 3 quotes of ≤ 120 runes. The model never moves geometry: the client decides, the answer is one
+  // piece of evidence. Nothing is stored; an identical request within an hour is answered from
+  // process memory (cached) unless force. tech_card_id is optional (0 = no card yet). Every paid
+  // attempt (a retry, a provider fallback) spends one call of the hourly per-admin window.
+  // InvalidArgument: 0 or more than 40 pages, a page_no outside 1..999 or listed twice, a page
+  // without media_id, a media_id sent twice, an excerpt over 600 runes, a picture over 1024 px on
+  // its long side (or of unknown size), more than 32 M pixels of pictures in one call.
+  // FailedPrecondition: a picture not uploaded within the last 2 hours, a picture off this store's
+  // storage, a file that is not a picture.
+  ClassifyPatternPages(request: ClassifyPatternPagesRequest): Promise<ClassifyPatternPagesResponse>;
+  // SuggestAssemblySkeleton (assembly skeleton, lane E) — ONE sync JSON call (chat.assembly_skeleton)
+  // that gives a SECOND OPINION on the assembly skeleton the client read off the pattern. The client
+  // builds the skeleton itself (pieces → seams → units → order, deterministic) and sends it here as
+  // data: the pieces (name, cloth, hand, ×n), the seams it found with their scores, the ambiguous
+  // joins as decisions with their readings, the category and its template's stage order, and the
+  // steps in the order it proposes. Text only: no picture is sent. The model returns: a suggested
+  // order of the steps (each with a reason), a pick per decision (each with a reason) and
+  // plausibility warnings (a sleeve set before the shoulders are joined, a lining bagged
+  // before its facings, a piece in no step…) and, in the same call, the structure it reads off the
+  // pieces: a garment category out of the offered category_options and the subassemblies (units)
+  // as nested or disjoint sets of piece keys, in the house style of the examples (the request's, or
+  // up to 3 assembly trees of other cards the server picks). The server validates the answer against the request:
+  // unknown step, decision and piece ids are dropped, a pick outside a decision's readings is
+  // dropped, and an order that is not a complete permutation of the ordered steps or that sews a
+  // unit before the step that makes it is returned EMPTY with a note. Nothing is stored and nothing
+  // is applied: the client shows the answer marked AI and applies it only on a press. An identical
+  // request within an hour is answered from process memory (cached) unless force. One press may make
+  // more than one provider call (a fallback after an engaged timeout, one retry of an unusable
+  // answer): the response sums every call (calls, unknown_calls, cost_usd), and a refusal after a
+  // call carries the same figures as an ErrorInfo detail (reason AI_SPEND, metadata calls,
+  // unknown_calls, cost_usd).
+  // InvalidArgument: 0 or more than 80 pieces, 0 or more than 240 steps, more than 400 seams or 60
+  // decisions, more than 24 category_options or an empty or repeated one, more than 4 examples, 60
+  // units per example or 16 parts per unit, an empty label, name or part, a duplicate or unknown
+  // id, a field above its bound.
+  SuggestAssemblySkeleton(request: SuggestAssemblySkeletonRequest): Promise<SuggestAssemblySkeletonResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
   // type one.
@@ -19566,6 +20068,22 @@ export interface AdminService {
   // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
   // patterns, from the patterns tab, and it feeds costing and the release gate.
   SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
+  // UpsertTechCardSeams stores the technologist's seam decisions — confirmed / rejected seams and
+  // seams connected by hand on the pieces map — so every reader resolves ONE list.
+  // KEYED AND PARTIAL: a row per seam_key is inserted or replaced whole; rows not named are
+  // untouched. A reviewer decides one seam at a time, and two reviewers on one card must not clobber
+  // each other's rows.
+  // The server stamps each row's source fingerprint from ITS OWN tables (sheets + block→piece links
+  // of the pieces' fabric scopes) — the client cannot supply it — and echoes the card's full current
+  // list with `stale` resolved, so the client re-syncs instead of trusting its optimistic copy.
+  // NO lock_version BUMP and NO section digest: seams are a side table; the form's autosave keeps
+  // working while somebody confirms a seam. A released card refuses (the frozen wording).
+  // wr(tech_cards), the same right as the piece areas.
+  UpsertTechCardSeams(request: UpsertTechCardSeamsRequest): Promise<UpsertTechCardSeamsResponse>;
+  // DeleteTechCardSeams removes seam decisions by seam_key (an orphan row whose piece left the card,
+  // or a decision the technologist takes back). Unknown keys are not an error. Same lock, same
+  // released-card refusal, same echo of the full list as UpsertTechCardSeams.
+  DeleteTechCardSeams(request: DeleteTechCardSeamsRequest): Promise<DeleteTechCardSeamsResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -25962,6 +26480,57 @@ export function createAdminServiceClient(
         method: "PutTechCardPatternSizeIndex",
       }) as Promise<PutTechCardPatternSizeIndexResponse>;
     },
+    SuggestPatternPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/pattern-import/pieces:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPatternPieces",
+      }) as Promise<SuggestPatternPiecesResponse>;
+    },
+    ClassifyPatternPages(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/pattern-import/pages:classify`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ClassifyPatternPages",
+      }) as Promise<ClassifyPatternPagesResponse>;
+    },
+    SuggestAssemblySkeleton(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/assembly-skeleton:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestAssemblySkeleton",
+      }) as Promise<SuggestAssemblySkeletonResponse>;
+    },
     SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
         throw new Error("missing required field request.tech_card_id");
@@ -25981,6 +26550,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SaveTechCardPieceAreas",
       }) as Promise<SaveTechCardPieceAreasResponse>;
+    },
+    UpsertTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seams`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardSeams",
+      }) as Promise<UpsertTechCardSeamsResponse>;
+    },
+    DeleteTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seams:delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardSeams",
+      }) as Promise<DeleteTechCardSeamsResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes

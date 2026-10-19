@@ -1,7 +1,7 @@
 import { common_AdminColorwayRef, common_TechCard } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { useTechCard } from './useTechCardQuery';
 
 // Ховер плитки в гриде (как в Zedonk): основная ткань и свотчи живых колорвеев. Листинг этого не

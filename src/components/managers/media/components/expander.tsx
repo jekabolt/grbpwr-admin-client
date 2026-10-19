@@ -1,16 +1,22 @@
 import { ASPECT_RATIOS } from 'constants/constants';
 import { cn } from 'lib/utility';
-import { FC, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import { Row } from 'ui/components/row';
-import { SideRailGroup, SideRailItem } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+import { FC, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Button,
+  CalloutBox,
+  Input,
+  RatioGlyph,
+  Row,
+  SideRailGroup,
+  SideRailItem,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 
 import {
   DEFAULT_BACKGROUND,
+  FILL_SWATCHES,
   loadSourcePixels,
   marginsForRatio,
   normaliseHex,
@@ -19,6 +25,7 @@ import {
   type SourcePixels,
 } from '../utils/getExpanded';
 import { MAX_IMAGE_MEGAPIXELS } from '../utils/useUploadMedia';
+import { EditorTopBar, RATIO_CHIPS, RatioChips } from './editor-mobile';
 
 /**
  * ОБРАТНЫЙ КРОП — «расширить рамку и залить поля цветом».
@@ -74,6 +81,13 @@ interface ExpanderProps {
   /** Снять собственную шапку, когда экран уже озаглавлен диалогом. */
   hideHeader?: boolean;
   footerNote?: ReactNode;
+  /**
+   * `mobile` — полноэкранная раскладка ниже `lg` (MEDIA-MOBILE, кадр 3'): шапка, сцена, чипы
+   * пропорций и строка заливки. По умолчанию — прежняя настольная раскладка.
+   */
+  layout?: 'default' | 'mobile';
+  /** Заголовок мобильной шапки. */
+  title?: string;
 }
 
 export const MediaExpander: FC<ExpanderProps> = ({
@@ -85,6 +99,8 @@ export const MediaExpander: FC<ExpanderProps> = ({
   saveLabel = 'create expanded copy',
   hideHeader,
   footerNote,
+  layout = 'default',
+  title = 'expand',
 }) => {
   const [pixels, setPixels] = useState<SourcePixels | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -97,7 +113,6 @@ export const MediaExpander: FC<ExpanderProps> = ({
   const [hoverHex, setHoverHex] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const stageRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 0, h: 0 });
 
   // ── источник ────────────────────────────────────────────────────────────────────────────────
@@ -128,14 +143,18 @@ export const MediaExpander: FC<ExpanderProps> = ({
     setSaveError(null);
   }, [selectedFile]);
 
-  useLayoutEffect(() => {
-    const el = stageRef.current;
+  // Callback-ref, а не эффект с пустыми зависимостями: у экспанда две раскладки (настольная и
+  // мобильная), и сцена меняет узел, когда меняется раскладка. Замер привязан к самому узлу.
+  const roRef = useRef<ResizeObserver | null>(null);
+  const stageRef = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
     if (!el) return;
     const read = () => setStage({ w: el.clientWidth, h: el.clientHeight });
     read();
     const ro = new ResizeObserver(read);
     ro.observe(el);
-    return () => ro.disconnect();
+    roRef.current = ro;
   }, []);
 
   // ── геометрия ───────────────────────────────────────────────────────────────────────────────
@@ -161,7 +180,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
   const uniformMax = srcW && srcH ? Math.round(Math.min(srcW, srcH) * UNIFORM_MAX_FRACTION) : 0;
   /** Равномерное поле показывается числом только когда все четыре стороны равны. */
   const uniform =
-    margins.top === margins.right && margins.right === margins.bottom && margins.bottom === margins.left
+    margins.top === margins.right &&
+    margins.right === margins.bottom &&
+    margins.bottom === margins.left
       ? margins.top
       : null;
 
@@ -267,6 +288,170 @@ export const MediaExpander: FC<ExpanderProps> = ({
     { key: 'bottom', label: 'bottom' },
   ];
 
+  /**
+   * Нативный `input[type=color]` прозрачным поверх квадрата — одна точка входа для обеих
+   * раскладок: на настольной это квадрат рядом с hex, на мобильной — образец `+`.
+   */
+  const colourWell = (className: string, face: ReactNode) => (
+    <span
+      className={cn(
+        'relative inline-flex shrink-0 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2',
+        className,
+      )}
+    >
+      {face}
+      <input
+        type='color'
+        aria-label='background colour'
+        data-probe='colour-input'
+        value={background}
+        disabled={!pixels}
+        className='absolute inset-0 h-full w-full cursor-pointer opacity-0'
+        onChange={(e) => commit(e.target.value)}
+      />
+    </span>
+  );
+
+  if (layout === 'mobile') {
+    const noChange = !!pixels && sum(margins) === 0;
+    const over = !!pixels && megapixels > MAX_IMAGE_MEGAPIXELS;
+    const selectedChip =
+      outH > 0
+        ? RATIO_CHIPS.find(
+            (o) => o.value !== undefined && Math.abs(outW / outH - o.value) < RATIO_EPSILON,
+          )?.key
+        : undefined;
+    const custom = !(FILL_SWATCHES as readonly string[]).includes(background);
+    return (
+      <div className='flex h-full min-h-0 w-full flex-col'>
+        <EditorTopBar
+          title={title}
+          onCancel={onCancel}
+          onSave={handleSave}
+          saveDisabled={blocked}
+          busy={busy}
+          saveLabel={saveLabel}
+        />
+        <div className='relative min-h-0 flex-1 touch-none overflow-hidden p-6'>
+          <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
+            {pixels && disp && !loadError ? (
+              <div
+                data-probe='result-frame'
+                className='relative outline outline-1 outline-bgColor/40'
+                style={{ width: disp.w, height: disp.h, background }}
+              >
+                <img
+                  src={selectedFile}
+                  alt=''
+                  draggable={false}
+                  data-probe='source-frame'
+                  className='absolute select-none'
+                  style={{
+                    left: margins.left * scale,
+                    top: margins.top * scale,
+                    width: srcW * scale,
+                    height: srcH * scale,
+                    maxWidth: 'none',
+                    maxHeight: 'none',
+                  }}
+                />
+                {/* Край исходного фото: белый пунктир в режиме «разница» виден на любой заливке. */}
+                <span
+                  aria-hidden
+                  className='pointer-events-none absolute border border-dashed border-bgColor mix-blend-difference'
+                  style={{
+                    left: margins.left * scale,
+                    top: margins.top * scale,
+                    width: srcW * scale,
+                    height: srcH * scale,
+                  }}
+                />
+              </div>
+            ) : loadError ? null : (
+              <span className='text-micro uppercase text-bgColor'>loading the image</span>
+            )}
+          </div>
+        </div>
+        {(loadError || saveError) && (
+          <div className='shrink-0 px-2.5 pb-2'>
+            <CalloutBox tone='error'>
+              <Text size='micro' component='span'>
+                {loadError ? 'the source will not load' : saveError}
+              </Text>
+              {loadError && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  className='ml-2 inline-block cursor-pointer align-middle'
+                  onClick={() => setReloadKey((k) => k + 1)}
+                >
+                  load again
+                </Button>
+              )}
+            </CalloutBox>
+          </div>
+        )}
+        <div className='flex shrink-0 flex-col gap-2.5 border-t border-bgColor/20 pt-2.5 pb-3'>
+          <RatioChips
+            options={RATIO_CHIPS}
+            selected={selectedChip}
+            disabled={!pixels || busy}
+            onSelect={(o) => o.value && applyRatio(o.value)}
+          />
+          <div className='flex items-center gap-0.5 px-2.5'>
+            <span className='mr-1 text-control text-bgColor/70'>fill</span>
+            {FILL_SWATCHES.map((hex) => (
+              <Button
+                key={hex}
+                type='button'
+                variant={null}
+                aria-label={`fill ${hex}`}
+                aria-pressed={background === hex}
+                disabled={!pixels || busy}
+                className='flex size-11 cursor-pointer items-center justify-center'
+                onClick={() => commit(hex)}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'size-6 border border-bgColor/40',
+                    background === hex && 'outline outline-2 outline-offset-2 outline-bgColor',
+                  )}
+                  style={{ background: hex }}
+                />
+              </Button>
+            ))}
+            {colourWell(
+              'size-11 items-center justify-center focus-within:outline-bgColor',
+              <span
+                aria-hidden
+                className={cn(
+                  'flex size-6 items-center justify-center border border-bgColor/40 text-control text-bgColor',
+                  custom && 'outline outline-2 outline-offset-2 outline-bgColor',
+                )}
+                style={custom ? { background } : undefined}
+              >
+                {custom ? '' : '+'}
+              </span>,
+            )}
+            <span className='ml-auto text-control tabular-nums text-bgColor'>
+              {!pixels ? (
+                <EmptyCell />
+              ) : noChange ? (
+                'no change'
+              ) : over ? (
+                `${megapixels.toFixed(0)} MP · too big`
+              ) : (
+                `${outW}×${outH} · ${selectedChip ?? ratioLabel(outW, outH)}`
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className='flex flex-col gap-3.5'>
       {!hideHeader && (
@@ -274,15 +459,13 @@ export const MediaExpander: FC<ExpanderProps> = ({
           <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
             expand image
           </Text>
-          <Button className='cursor-pointer py-1' onClick={onCancel}>
-            [x]
-          </Button>
+          <Close onClick={onCancel} />
         </div>
       )}
 
       <div className='grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_224px] lg:items-start'>
         <div className='min-w-0'>
-          <div className='relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-bgSecondary p-3'>
+          <div className='relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-3'>
             <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
               {pixels && disp && !loadError ? (
                 // РАМКА РЕЗУЛЬТАТА, залитая выбранным цветом. Это не подложка сцены, а сам файл,
@@ -410,7 +593,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
               variant='secondary'
               size='xs'
               className='cursor-pointer'
-              onClick={() => applyUniform((uniform ?? 0) - Math.max(1, Math.round(uniformMax / 20)))}
+              onClick={() =>
+                applyUniform((uniform ?? 0) - Math.max(1, Math.round(uniformMax / 20)))
+              }
               disabled={!pixels || (uniform ?? 0) <= 0}
             >
               −
@@ -431,7 +616,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
               variant='secondary'
               size='xs'
               className='cursor-pointer'
-              onClick={() => applyUniform((uniform ?? 0) + Math.max(1, Math.round(uniformMax / 20)))}
+              onClick={() =>
+                applyUniform((uniform ?? 0) + Math.max(1, Math.round(uniformMax / 20)))
+              }
               disabled={!pixels || (uniform ?? 0) >= uniformMax}
             >
               +
@@ -492,18 +679,10 @@ export const MediaExpander: FC<ExpanderProps> = ({
             {/* Тот же приём, что у палитры полосы DESIGN: нативный `input[type=color]` лежит
                 прозрачным поверх квадрата в 1px обводке. Своего пикера цвета в системе нет и
                 быть не должно — нативный приносит с собой и клавиатуру, и системную пипетку. */}
-            <span className='relative inline-flex h-[22px] w-[22px] shrink-0 border border-borderColor focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-textColor'>
-              <span aria-hidden className='h-full w-full' style={{ background }} />
-              <input
-                type='color'
-                aria-label='background colour'
-                data-probe='colour-input'
-                value={background}
-                disabled={!pixels}
-                className='absolute inset-0 h-full w-full cursor-pointer opacity-0'
-                onChange={(e) => commit(e.target.value)}
-              />
-            </span>
+            {colourWell(
+              'h-[22px] w-[22px] border border-borderColor focus-within:outline-textColor',
+              <span aria-hidden className='h-full w-full' style={{ background }} />,
+            )}
             <Input
               type='text'
               value={hexDraft}
@@ -601,7 +780,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
 
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {pixels ? `${outW}×${outH}` : '—'}
+            {pixels ? `${outW}×${outH}` : <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-center gap-2'>
             {blockedReason && (

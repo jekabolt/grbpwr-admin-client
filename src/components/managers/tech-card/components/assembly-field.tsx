@@ -1,16 +1,25 @@
-import { StyleAssemblyItem, StyleAssemblyLine, common_TechCardListItem } from 'api/proto-http/admin';
+import {
+  StyleAssemblyItem,
+  StyleAssemblyLine,
+  common_TechCardListItem,
+} from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  Close,
+  Input,
+  Pill,
+  GenericPopover,
+  Select,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+  EmptyCell,
+} from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import {
@@ -210,7 +219,7 @@ function AssemblyTile({
       ) : null}
       <div className='mt-0.5 flex min-w-0 items-center gap-1'>
         <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-          {sizeLabel} · ×{row.qty.trim() || '—'}
+          {sizeLabel} · ×{row.qty.trim() || <EmptyCell />}
         </Text>
         {canEdit && (
           <Text component='span' variant='inactive' className='ml-auto shrink-0'>
@@ -252,7 +261,9 @@ function AssemblyTile({
           name={`assembly-print-${row.key}`}
           value={row.printNote}
           disabled={!canEdit}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPatch({ printNote: e.target.value })}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onPatch({ printNote: e.target.value })
+          }
         />
       </Field>
       <Field label='position note'>
@@ -297,18 +308,19 @@ function AssemblyTile({
 
   return (
     // relative so the remove ✕ sits at the top-right OUTSIDE the popover trigger.
-    <div className={cn('relative border bg-bgColor', rowInvalid ? 'border-error' : 'border-borderColor')}>
+    <div
+      className={cn(
+        'relative border bg-bgColor',
+        rowInvalid ? 'border-error' : 'border-borderColor',
+      )}
+    >
       {canEdit && (
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
+        <Close
+          size='sm'
           aria-label='remove assembly line'
           onClick={onRemove}
           className='absolute right-1 top-1 z-10'
-        >
-          ✕
-        </Button>
+        />
       )}
 
       {canEdit ? (
@@ -333,7 +345,6 @@ function AssemblyTile({
           onOpenChange={setPickerOpen}
           selectedId={row.componentTechCardId}
           title='change the on-garment auxiliary item'
-          hint='labels, tags and any other auxiliary card that ships attached to the garment'
           onPick={(card) => {
             onPatch({
               componentTechCardId: card.id ?? 0,
@@ -429,7 +440,9 @@ export function AssemblyField({
   // at all-sizes is a distinct line).
   const alreadyAddedIds = useMemo(
     () =>
-      rows.filter((r) => r.sizeId === 0 && r.componentTechCardId > 0).map((r) => r.componentTechCardId),
+      rows
+        .filter((r) => r.sizeId === 0 && r.componentTechCardId > 0)
+        .map((r) => r.componentTechCardId),
     [rows],
   );
 
@@ -504,9 +517,6 @@ export function AssemblyField({
   return (
     <div className='flex flex-col gap-2'>
       <Toolbar>
-        <Text size='micro' variant='label' component='span'>
-          auxiliary items attached on or into the garment — per size, or all sizes
-        </Text>
         <ToolbarSpacer />
         {canEdit && (
           <Button
@@ -541,7 +551,6 @@ export function AssemblyField({
       ) : rows.length === 0 ? (
         <Text size='micro' variant='label'>
           no assembly lines yet
-          {canEdit ? ' — pick the auxiliary items that ship on this garment' : ''}
         </Text>
       ) : (
         <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'>
@@ -581,7 +590,6 @@ export function AssemblyField({
           onOpenChange={setPickerOpen}
           alreadyAddedIds={alreadyAddedIds}
           title='pick the on-garment auxiliary items'
-          hint='labels, tags and any other auxiliary card that ships attached to the garment'
           onPick={(cards) => {
             addCards(cards);
             setPickerOpen(false);

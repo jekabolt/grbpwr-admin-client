@@ -6,15 +6,10 @@ import { useBlockNavigation } from 'hooks/useBlockNavigation';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { BackLink, Button, ConfirmationModal, Section, Text, Form, InputField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { useCreateArchive, useUpdateArchive } from '../../archives/components/useArchiveQuery';
 import { HeroSectionModal } from '../../hero/components/hero-section-modal';
 import { useProductSelection } from '../../hero/components/useProductSelection';
@@ -246,14 +241,9 @@ export function ArchiveForm({
         className='flex flex-col gap-gutter px-2 pt-0 pb-12 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, onError)}
       >
-        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
+        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.archives} aria-label='back to timeline'>
-                <span className='sm:hidden'>←</span>
-                <span className='hidden sm:inline'>← timeline</span>
-              </Link>
-            </Button>
+            <BackLink to={ROUTES.archives}>timeline</BackLink>
             <Text variant='uppercase' size='large'>
               {isAddingArchive ? 'new timeline entry' : 'edit timeline entry'}
             </Text>

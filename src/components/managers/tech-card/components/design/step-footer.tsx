@@ -1,6 +1,5 @@
 import { useRef, useState, type JSX, type ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 import { InertDoor } from './bench-slot';
 import type { StepId } from './core/chain';

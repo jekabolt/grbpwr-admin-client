@@ -1,6 +1,4 @@
-import { Button } from 'ui/components/button';
-import Checkbox from 'ui/components/checkbox';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, Text } from 'ui';
 
 interface Props {
   selectionMode: boolean;
@@ -25,7 +23,7 @@ export function SelectionToolbar({
 }: Props) {
   if (!selectionMode) {
     return (
-      <div className='flex items-center justify-end border-b border-textInactiveColor pb-3'>
+      <div className='flex items-center justify-end border-b border-borderColor pb-3'>
         <Button variant='secondary' size='lg' className='uppercase' onClick={onEnter}>
           select
         </Button>
@@ -37,7 +35,7 @@ export function SelectionToolbar({
     <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textColor pb-3'>
       <div className='flex flex-wrap items-center gap-4'>
         <div className='flex items-center gap-2'>
-          <Checkbox
+          <CheckboxCommon
             name='catalog-select-all'
             className='h-4 w-4'
             checked={allOnPageSelected}

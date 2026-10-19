@@ -1,11 +1,7 @@
 import { adminService } from 'api/api';
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, Pill, Text } from 'ui';
 
 import { displayDetailName, readBench } from './bench-slot';
 import { findLayerForMedia, uploadRaster } from './modals/use-edit-layer';

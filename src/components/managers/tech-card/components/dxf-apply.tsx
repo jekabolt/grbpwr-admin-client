@@ -14,8 +14,7 @@
 // расхождения.
 import { lazy, Suspense, useState } from 'react';
 import { type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import type { WeightBasisResolution } from './nesting/fabric-weight';
 import type { TechCardFormData } from './schema';
 import { useFabricDxfPieces, type RecipePieceLink } from './use-fabric-dxf-pieces';
@@ -26,7 +25,6 @@ export function DxfApplyHint({
   control,
   lineKey,
   unit,
-  wastagePercent,
   articleWidth,
   weightBasis,
   sizeIds,
@@ -42,8 +40,8 @@ export function DxfApplyHint({
   control: Control<TechCardFormData>;
   lineKey: string;
   unit: string;
-  /** Процент раскроя слота. Пустой = применять нельзя (netto без него занижает закупку). */
-  wastagePercent: string;
+  /** Не используется: процент раскроя ушёл из BOM. Оставлен опциональным для вызывающих. */
+  wastagePercent?: string;
   /** РАСКРОЙНАЯ ширина эффективного артикула, см (рулон − 2×кромка). '' = неизвестна. */
   articleWidth: string;
   /** Основа веса кг-слота (Ф3) — резолвит строка рецепта, сюда приходит готовой. */
@@ -111,8 +109,8 @@ export function DxfApplyHint({
     return (
       <Text size='nano' variant='label' component='p'>
         {sizeIds.length === 0
-          ? "consumption can't be computed from the patterns: the card has no size range declared — the norm is written per size, and there is nobody to write it for yet"
-          : "consumption can't be computed from the patterns: no cut piece is assigned to this fabric — neither by a recipe line (“assign pieces” on this fabric's card, just below), nor by a piece's material on the cut pieces tab. without that there is nothing to add the garment's area up from"}
+          ? 'no norm from patterns: no size range'
+          : 'no norm from patterns: no pieces assigned to this fabric'}
       </Text>
     );
   }
@@ -127,15 +125,11 @@ export function DxfApplyHint({
         variant={compact ? 'underline' : 'secondary'}
         size='xs'
         className={compact ? 'text-labelColor hover:text-textColor' : undefined}
+        title='piece area ÷ cutting width, net'
         onClick={() => setOpen(true)}
       >
         from the patterns…
       </Button>
-      {!compact && (
-        <Text size='nano' variant='label' component='span'>
-          piece area ÷ cutting width — net, without the waste between pieces
-        </Text>
-      )}
       {open && (
         <Suspense fallback={null}>
           <DxfApplyDialog
@@ -143,7 +137,6 @@ export function DxfApplyHint({
             pieces={pieces}
             unaliasedPieces={unaliasedPieces}
             unit={unit}
-            wastagePercent={wastagePercent}
             articleWidth={articleWidth}
             weightBasis={weightBasis}
             sizeIds={sizeIds}

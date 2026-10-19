@@ -91,10 +91,7 @@ import {
   topstitchModeNeedsWidth,
   topstitchModeRefusesWidth,
 } from './operation-options';
-import {
-  isMachineStepType,
-  isWeldMachineType,
-} from './equipment-options';
+import { isMachineStepType, isWeldMachineType } from './equipment-options';
 import { wireInt } from './wire-int';
 import {
   careLabelOut,
@@ -121,7 +118,7 @@ import {
   type AnnotationCapsKey,
   type AnnotationColorKey,
   type AnnotationKindKey,
-} from 'ui/components/annotation/kinds';
+} from 'components/managers/tech-card/annotation/kinds';
 import {
   annotationCapsOut,
   annotationColorFromWire,
@@ -129,8 +126,8 @@ import {
   annotationKindFromWire,
   annotationKindToWire,
   readAnnotationCaps,
-} from 'ui/components/annotation/wire';
-import { parseSpec, specWire } from 'ui/components/annotation/purpose';
+} from 'components/managers/tech-card/annotation/wire';
+import { parseSpec, specWire } from 'components/managers/tech-card/annotation/purpose';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -565,7 +562,7 @@ const bomItemSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "a kind belongs to hardware, thread, trim, decoration and packaging — for fabric it is the purpose, for a label it is its type",
+          'a kind belongs to hardware, thread, trim, decoration and packaging — for fabric it is the purpose, for a label it is its type',
         path: ['kind'],
       });
     }
@@ -1199,11 +1196,7 @@ export function referencedCalloutNumbers(data: {
   issues?: { calloutNumber?: number }[];
 }): Set<number> {
   const out = new Set<number>();
-  for (const row of [
-    ...(data.pieces ?? []),
-    ...(data.operations ?? []),
-    ...(data.issues ?? []),
-  ]) {
+  for (const row of [...(data.pieces ?? []), ...(data.operations ?? []), ...(data.issues ?? [])]) {
     const n = row.calloutNumber ?? 0;
     if (Number.isFinite(n) && n > 0) out.add(n);
   }
@@ -1244,200 +1237,208 @@ export function operationFieldNames(): string[] {
   return shape ? Object.keys(shape) : [];
 }
 
-const operationSchema = z.object({
-  // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
-  // («Node is required») is why: a mandatory field with free input has no right answer, so the
-  // operator invents one and no two cards say the same thing the same way.
-  operationType: z.string().min(1).default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
-  zone: z.string().min(1).default('TECH_CARD_GARMENT_ZONE_UNKNOWN'),
+const operationSchema = z
+  .object({
+    // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
+    // («Node is required») is why: a mandatory field with free input has no right answer, so the
+    // operator invents one and no two cards say the same thing the same way.
+    operationType: z.string().min(1).default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
+    zone: z.string().min(1).default('TECH_CARD_GARMENT_ZONE_UNKNOWN'),
 
-  // КАКАЯ ЭТО РАБОТА — третья ось шага (0330), СТРОКОЙ-ТОКЕНОМ, а не членом словаря.
-  //
-  // ПОЧЕМУ `z.string()` БЕЗ СПИСКА ДОПУСТИМЫХ ЗНАЧЕНИЙ, И ЭТО НЕ ЛЕНЬ. Словарь работ — ДАННЫЕ на
-  // сервере (`operation_work`, 0329), а не контракт: он растёт INSERT-миграцией, без единой
-  // перегенерации клиента. Закрытый список здесь превратил бы каждую новую работу в невалидную
-  // строку формы — то есть в карточку, которую этот бандл отказывается открывать, — а токен
-  // новее бандла обязан ДОЕХАТЬ ДО ЭКРАНА ТЕКСТОМ и уехать обратно тем же токеном.
-  //
-  // ПУСТО = «ВИД НЕ НАЗНАЧЕН», и это законное состояние надолго: сто прод-строк свалки размечает
-  // человек, автоматического переписывания нет ни на одной стороне. Такая строка продолжает жить
-  // по старой деривации (`kindOf`) — двоекодье переходного периода.
-  work: z.string().optional().default(''),
+    // КАКАЯ ЭТО РАБОТА — третья ось шага (0330), СТРОКОЙ-ТОКЕНОМ, а не членом словаря.
+    //
+    // ПОЧЕМУ `z.string()` БЕЗ СПИСКА ДОПУСТИМЫХ ЗНАЧЕНИЙ, И ЭТО НЕ ЛЕНЬ. Словарь работ — ДАННЫЕ на
+    // сервере (`operation_work`, 0329), а не контракт: он растёт INSERT-миграцией, без единой
+    // перегенерации клиента. Закрытый список здесь превратил бы каждую новую работу в невалидную
+    // строку формы — то есть в карточку, которую этот бандл отказывается открывать, — а токен
+    // новее бандла обязан ДОЕХАТЬ ДО ЭКРАНА ТЕКСТОМ и уехать обратно тем же токеном.
+    //
+    // ПУСТО = «ВИД НЕ НАЗНАЧЕН», и это законное состояние надолго: сто прод-строк свалки размечает
+    // человек, автоматического переписывания нет ни на одной стороне. Такая строка продолжает жить
+    // по старой деривации (`kindOf`) — двоекодье переходного периода.
+    work: z.string().optional().default(''),
 
-  // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
-  operationNumber: z.number().optional().default(0),
-  // Standard minute value, the ONLY time field. The legacy SAM (`timeNorm`) that used to sit beside
-  // it is gone: two time inputs with no rule about which to fill guarantee half the cards are timed
-  // in the wrong one.
-  smv: z.string().optional().default(''),
-  calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
+    // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
+    operationNumber: z.number().optional().default(0),
+    // Standard minute value, the ONLY time field. The legacy SAM (`timeNorm`) that used to sit beside
+    // it is gone: two time inputs with no rule about which to fill guarantee half the cards are timed
+    // in the wrong one.
+    smv: z.string().optional().default(''),
+    calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
+    // DRAFT (0410): the assembly skeleton wrote this step and nobody has reviewed it yet. A team mark,
+    // not an instruction: the server keeps it out of the card digest. The first meaningful edit of the
+    // row, or a click on its «draft» chip in the rail, sets it false.
+    draft: z.boolean().optional().default(false),
 
-  // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
-  // inherited value. That is exactly what the old operation-type preset did, and it made «the
-  // technologist chose 4 st/cm» indistinguishable from «it defaulted to 4».
-  seamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
-  stitchesPerCm: z.string().optional().default(''), // stitches per CENTIMETRE, not part of the mm switch
-  seamAllowanceMm: z.string().optional().default(''), // millimetres; '0' is a REAL value, '' is inherit
-  topstitchMode: z.string().optional().default('TECH_CARD_TOPSTITCH_MODE_UNKNOWN'),
-  topstitchWidthMm: z.string().optional().default(''),
-  topstitchRows: z.number().optional().default(0),
-  attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
-  attachmentSizeMm: z.string().optional().default(''),
+    // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
+    // inherited value. That is exactly what the old operation-type preset did, and it made «the
+    // technologist chose 4 st/cm» indistinguishable from «it defaulted to 4».
+    seamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    stitchesPerCm: z.string().optional().default(''), // stitches per CENTIMETRE, not part of the mm switch
+    seamAllowanceMm: z.string().optional().default(''), // millimetres; '0' is a REAL value, '' is inherit
+    topstitchMode: z.string().optional().default('TECH_CARD_TOPSTITCH_MODE_UNKNOWN'),
+    topstitchWidthMm: z.string().optional().default(''),
+    topstitchRows: z.number().optional().default(0),
+    attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
+    attachmentSizeMm: z.string().optional().default(''),
 
-  // --- «НА ЧЁМ»: the machine block, for operationType = MACHINE (0306) ---------------------------
-  //
-  // The second axis. `operationType` says what the step does, this says what it does it on — the two
-  // used to collide in one enum, which is why the old type list read like a machine catalogue.
-  //
-  // EVERY FIELD BELOW IS AN OVERRIDE and unset means INHERIT (step → the profile it names → the
-  // single profile of its type → card defaults). The form must never fill one in from the inherited
-  // value: that is exactly what the removed operation-type preset did, and it made «the technologist
-  // chose 4 threads» indistinguishable from «it defaulted to 4». `0` and `_UNKNOWN` ARE the unset
-  // states here (the wire has no presence on a bare int32 and every range starts above zero).
-  //
-  // THE BLOCK BELONGS TO ITS STEP TYPE AND NOWHERE ELSE — the server refuses a thread count on a
-  // handwork step by name, refusing the WHOLE card with it. The editor clears hidden controls (TC2);
-  // the save mapper gates the block on the type as a belt, so a draft restored from localStorage
-  // cannot make a card unsavable with values nobody can see.
-  machineType: z.string().optional().default('TECH_CARD_MACHINE_TYPE_UNKNOWN'),
-  // Points at ONE profile of the card's park BY KEY, because «the overlock» is not an answer on a
-  // card with two. '' = resolve by type (used only when the card holds exactly one of that type).
-  machineProfileKey: z.string().optional().default(''),
-  threadCount: z.number().optional().default(0),
-  needleType: z.string().optional().default('TECH_CARD_NEEDLE_TYPE_UNKNOWN'),
-  needleSizeNm: z.number().optional().default(0),
-  threadTension: z.string().optional().default('TECH_CARD_THREAD_TENSION_UNKNOWN'),
-  threadTensionNote: z.string().optional().default(''),
-  stitchWidthMm: z.string().optional().default(''),
-  // NO bedType / automation: those are machine identity, not step settings (see machineProfileSchema).
+    // --- «НА ЧЁМ»: the machine block, for operationType = MACHINE (0306) ---------------------------
+    //
+    // The second axis. `operationType` says what the step does, this says what it does it on — the two
+    // used to collide in one enum, which is why the old type list read like a machine catalogue.
+    //
+    // EVERY FIELD BELOW IS AN OVERRIDE and unset means INHERIT (step → the profile it names → the
+    // single profile of its type → card defaults). The form must never fill one in from the inherited
+    // value: that is exactly what the removed operation-type preset did, and it made «the technologist
+    // chose 4 threads» indistinguishable from «it defaulted to 4». `0` and `_UNKNOWN` ARE the unset
+    // states here (the wire has no presence on a bare int32 and every range starts above zero).
+    //
+    // THE BLOCK BELONGS TO ITS STEP TYPE AND NOWHERE ELSE — the server refuses a thread count on a
+    // handwork step by name, refusing the WHOLE card with it. The editor clears hidden controls (TC2);
+    // the save mapper gates the block on the type as a belt, so a draft restored from localStorage
+    // cannot make a card unsavable with values nobody can see.
+    machineType: z.string().optional().default('TECH_CARD_MACHINE_TYPE_UNKNOWN'),
+    // Points at ONE profile of the card's park BY KEY, because «the overlock» is not an answer on a
+    // card with two. '' = resolve by type (used only when the card holds exactly one of that type).
+    machineProfileKey: z.string().optional().default(''),
+    threadCount: z.number().optional().default(0),
+    needleType: z.string().optional().default('TECH_CARD_NEEDLE_TYPE_UNKNOWN'),
+    needleSizeNm: z.number().optional().default(0),
+    threadTension: z.string().optional().default('TECH_CARD_THREAD_TENSION_UNKNOWN'),
+    threadTensionNote: z.string().optional().default(''),
+    stitchWidthMm: z.string().optional().default(''),
+    // NO bedType / automation: those are machine identity, not step settings (see machineProfileSchema).
 
-  // --- the ВТО block, for operationType = PRESS / PRESS_OPEN / FUSING ----------------------------
-  // Required server-side on those three types once the client declares itself machine-aware, which
-  // this one always does: an iron, a fusing press and a steamer are three different instructions.
-  pressEquipment: z.string().optional().default('TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'),
-  pressProfileKey: z.string().optional().default(''),
-  pressTemperatureC: z.number().optional().default(0),
-  pressDwellSec: z.number().optional().default(0),
-  pressPressureNCm2: z.string().optional().default(''),
-  // Three-valued and deliberately without a default — see pressProfileSchema for the whole argument.
-  pressSteam: z.boolean().optional(),
-  pressCloth: z.string().optional().default('TECH_CARD_PRESS_CLOTH_UNKNOWN'),
+    // --- the ВТО block, for operationType = PRESS / PRESS_OPEN / FUSING ----------------------------
+    // Required server-side on those three types once the client declares itself machine-aware, which
+    // this one always does: an iron, a fusing press and a steamer are three different instructions.
+    pressEquipment: z.string().optional().default('TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'),
+    pressProfileKey: z.string().optional().default(''),
+    pressTemperatureC: z.number().optional().default(0),
+    pressDwellSec: z.number().optional().default(0),
+    pressPressureNCm2: z.string().optional().default(''),
+    // Three-valued and deliberately without a default — see pressProfileSchema for the whole argument.
+    pressSteam: z.boolean().optional(),
+    pressCloth: z.string().optional().default('TECH_CARD_PRESS_CLOTH_UNKNOWN'),
 
-  // --- ВИДЫ ОПЕРАЦИЙ (0324): 32 поля девяти новых глаголов и двух новых машинок -----------------
-  //
-  // ПЛОСКО, А НЕ ВЛОЖЕННО — и это решение, а не удобство. На проводе тут десять блок-сообщений
-  // (`stitching`, `hardware`, `print`, …), и парк карточки в этом же файле МИРРОИТ свою проводную
-  // вложенность именно ради ошибок: сервер тегирует нарушение полным путём, а applyServerFieldErrors
-  // пришпиливает его camelCase-конверсией ЭТОГО пути на контрол — уплощённый park потерял бы
-  // контрол и выродился в неатрибутируемый тост. Здесь наоборот: сервер этой волны тегирует
-  // нарушения ПЛОСКО — `operations[i].attach_method`, `operations[i].cut_length_mm` (приём взят у
-  // topstitch, который форма держит плоско и который поэтому плоско и репортится). Значит плоская
-  // форма — это и есть та, чей путь совпадёт с серверным; вложенная промахнулась бы мимо контрола
-  // на каждом из 32 полей.
-  //
-  // ДИСЦИПЛИНА ПУСТОТЫ — та же, что у всей формы: enum → `*_UNKNOWN`, int32 → `0`, decimal → `''`
-  // (на проводе `inputToDecimal('')` = undefined, ключ выпадает, колонка остаётся NULL). NULL —
-  // это «не указано», а НЕ ноль и НЕ «нет»: явное «нет» везде, где оно есть, — отдельный ответ
-  // `NONE` в словаре.
-  //
-  // ВСЕ ENUM'Ы — `z.string()`, ни одного `z.enum`/`z.nativeEnum`: nativeEnum отверг бы легаси-токен
-  // из архивного релизного снапшота и уронил бы чтение целой карточки (довод — equipment-options.ts).
-  //
-  // Порядок полей — канон §1 плана: S → PL → H → P → W → T → F → C → Q → WP, затем дельта. Тот же
-  // порядок держат ALTER, INSERT/SELECT стора и структура entity; разъезд порядка между четырьмя
-  // списками и есть тот дефект шва, ради которого канон назначен.
+    // --- ВИДЫ ОПЕРАЦИЙ (0324): 32 поля девяти новых глаголов и двух новых машинок -----------------
+    //
+    // ПЛОСКО, А НЕ ВЛОЖЕННО — и это решение, а не удобство. На проводе тут десять блок-сообщений
+    // (`stitching`, `hardware`, `print`, …), и парк карточки в этом же файле МИРРОИТ свою проводную
+    // вложенность именно ради ошибок: сервер тегирует нарушение полным путём, а applyServerFieldErrors
+    // пришпиливает его camelCase-конверсией ЭТОГО пути на контрол — уплощённый park потерял бы
+    // контрол и выродился в неатрибутируемый тост. Здесь наоборот: сервер этой волны тегирует
+    // нарушения ПЛОСКО — `operations[i].attach_method`, `operations[i].cut_length_mm` (приём взят у
+    // topstitch, который форма держит плоско и который поэтому плоско и репортится). Значит плоская
+    // форма — это и есть та, чей путь совпадёт с серверным; вложенная промахнулась бы мимо контрола
+    // на каждом из 32 полей.
+    //
+    // ДИСЦИПЛИНА ПУСТОТЫ — та же, что у всей формы: enum → `*_UNKNOWN`, int32 → `0`, decimal → `''`
+    // (на проводе `inputToDecimal('')` = undefined, ключ выпадает, колонка остаётся NULL). NULL —
+    // это «не указано», а НЕ ноль и НЕ «нет»: явное «нет» везде, где оно есть, — отдельный ответ
+    // `NONE` в словаре.
+    //
+    // ВСЕ ENUM'Ы — `z.string()`, ни одного `z.enum`/`z.nativeEnum`: nativeEnum отверг бы легаси-токен
+    // из архивного релизного снапшота и уронил бы чтение целой карточки (довод — equipment-options.ts).
+    //
+    // Порядок полей — канон §1 плана: S → PL → H → P → W → T → F → C → Q → WP, затем дельта. Тот же
+    // порядок держат ALTER, INSERT/SELECT стора и структура entity; разъезд порядка между четырьмя
+    // списками и есть тот дефект шва, ради которого канон назначен.
 
-  // S — параметры строчки. Только MACHINE.
-  needleCount: z.number().optional().default(0), // 1..12; 0 = не указано
-  needleGaugeMm: z.string().optional().default(''), // мм, 1.6..25.4; осмысленно при needleCount >= 2
-  seamSecuring: z.string().optional().default('TECH_CARD_SEAM_SECURING_UNKNOWN'),
-  rowSpacingMm: z.string().optional().default(''), // мм, 1..30 — между РЯДАМИ строчек
-  fullnessRatio: z.string().optional().default(''), // отношение, 0.6..4.0; пусто = посадки нет
+    // S — параметры строчки. Только MACHINE.
+    needleCount: z.number().optional().default(0), // 1..12; 0 = не указано
+    needleGaugeMm: z.string().optional().default(''), // мм, 1.6..25.4; осмысленно при needleCount >= 2
+    seamSecuring: z.string().optional().default('TECH_CARD_SEAM_SECURING_UNKNOWN'),
+    rowSpacingMm: z.string().optional().default(''), // мм, 1..30 — между РЯДАМИ строчек
+    fullnessRatio: z.string().optional().default(''), // отношение, 0.6..4.0; пусто = посадки нет
 
-  // PL — сколько раз и с каким шагом. MACHINE | HARDWARE_SET | PRINT.
-  placementCount: z.number().optional().default(0), // 1..99; 0 = один повтор
-  pitchMm: z.string().optional().default(''), // мм, 5..500; осмыслен при placementCount >= 2
+    // PL — сколько раз и с каким шагом. MACHINE | HARDWARE_SET | PRINT.
+    placementCount: z.number().optional().default(0), // 1..99; 0 = один повтор
+    pitchMm: z.string().optional().default(''), // мм, 5..500; осмыслен при placementCount >= 2
 
-  // H — установка фурнитуры. HARDWARE_SET целиком; на MACHINE с явной цикловой машинкой живут
-  // только holePrep / reinforcement / cycleStitchCount.
-  attachMethod: z.string().optional().default('TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'),
-  holePrep: z.string().optional().default('TECH_CARD_HOLE_PREP_UNKNOWN'),
-  reinforcement: z.string().optional().default('TECH_CARD_REINFORCEMENT_UNKNOWN'),
-  foldbackMm: z.string().optional().default(''), // мм, 10..80; только attachMethod = THREADED
-  cycleStitchCount: z.number().optional().default(0), // 8..64; 0 = штатная программа машины
+    // H — установка фурнитуры. HARDWARE_SET целиком; на MACHINE с явной цикловой машинкой живут
+    // только holePrep / reinforcement / cycleStitchCount.
+    attachMethod: z.string().optional().default('TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'),
+    holePrep: z.string().optional().default('TECH_CARD_HOLE_PREP_UNKNOWN'),
+    reinforcement: z.string().optional().default('TECH_CARD_REINFORCEMENT_UNKNOWN'),
+    foldbackMm: z.string().optional().default(''), // мм, 10..80; только attachMethod = THREADED
+    cycleStitchCount: z.number().optional().default(0), // 8..64; 0 = штатная программа машины
 
-  // P — печать и нанесение. Только PRINT. МЕТОД лежит полем шага, а не внутри блока: он REQUIRED,
-  // а обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе.
-  printMethod: z.string().optional().default('TECH_CARD_PRINT_METHOD_UNKNOWN'),
-  peelMode: z.string().optional().default('TECH_CARD_PEEL_MODE_UNKNOWN'),
-  secondPressSec: z.number().optional().default(0), // сек, 1..30; 0 = второго прижима нет
+    // P — печать и нанесение. Только PRINT. МЕТОД лежит полем шага, а не внутри блока: он REQUIRED,
+    // а обязательное поле не прячут в необязательное сообщение, которого может не быть вовсе.
+    printMethod: z.string().optional().default('TECH_CARD_PRINT_METHOD_UNKNOWN'),
+    peelMode: z.string().optional().default('TECH_CARD_PEEL_MODE_UNKNOWN'),
+    secondPressSec: z.number().optional().default(0), // сек, 1..30; 0 = второго прижима нет
 
-  // W — сварка и проклейка. MACHINE + ЯВНЫЙ seam_taping | ultrasonic_welder.
-  airTemperatureC: z.number().optional().default(0), // °C, 100..750; только seam_taping
-  feedSpeedMMin: z.string().optional().default(''), // м/мин, 0.3..10.0
+    // W — сварка и проклейка. MACHINE + ЯВНЫЙ seam_taping | ultrasonic_welder.
+    airTemperatureC: z.number().optional().default(0), // °C, 100..750; только seam_taping
+    feedSpeedMMin: z.string().optional().default(''), // м/мин, 0.3..10.0
 
-  // T — подрезка и выправка. Только TRIM.
-  trimAction: z.string().optional().default('TECH_CARD_TRIM_ACTION_UNKNOWN'),
-  residualAllowanceMm: z.string().optional().default(''), // мм, 1..10 — сколько ОСТАЁТСЯ
+    // T — подрезка и выправка. Только TRIM.
+    trimAction: z.string().optional().default('TECH_CARD_TRIM_ACTION_UNKNOWN'),
+    residualAllowanceMm: z.string().optional().default(''), // мм, 1..10 — сколько ОСТАЁТСЯ
 
-  // F — чистка концов ниток. Только THREAD_TRIM.
-  residualTailMaxMm: z.string().optional().default(''), // мм, 1..10; пусто = стандарт цеха
+    // F — чистка концов ниток. Только THREAD_TRIM.
+    residualTailMaxMm: z.string().optional().default(''), // мм, 1..10; пусто = стандарт цеха
 
-  // G — ВТО (0325): под-глагол и направление припуска. НЕ дискриминаторы — не required ни на
-  // одном глаголе: строка PRESS, записанная до этой волны, обязана читаться и сохраняться как
-  // есть, и обязательность здесь перекрыла бы кислород каждой существующей карточке задним
-  // числом. Направление законно ТОЛЬКО при `to_one_side` и там обязательно — обязательность,
-  // которая ретроактивной стать не может: значения `to_one_side` ни одна сохранённая строка не
-  // имеет. Оба правила зеркалятся ниже, в superRefine.
-  pressAction: z.string().optional().default('TECH_CARD_PRESS_ACTION_UNKNOWN'),
-  pressToward: z.string().optional().default('TECH_CARD_PRESS_TOWARD_UNKNOWN'),
+    // G — ВТО (0325): под-глагол и направление припуска. НЕ дискриминаторы — не required ни на
+    // одном глаголе: строка PRESS, записанная до этой волны, обязана читаться и сохраняться как
+    // есть, и обязательность здесь перекрыла бы кислород каждой существующей карточке задним
+    // числом. Направление законно ТОЛЬКО при `to_one_side` и там обязательно — обязательность,
+    // которая ретроактивной стать не может: значения `to_one_side` ни одна сохранённая строка не
+    // имеет. Оба правила зеркалятся ниже, в superRefine.
+    pressAction: z.string().optional().default('TECH_CARD_PRESS_ACTION_UNKNOWN'),
+    pressToward: z.string().optional().default('TECH_CARD_PRESS_TOWARD_UNKNOWN'),
 
-  // C / Q / WP — чистка, контроль, мокрая обработка: у каждого один факт, он же дискриминатор.
-  cleaningKind: z.string().optional().default('TECH_CARD_CLEANING_KIND_UNKNOWN'),
-  coverageMode: z.string().optional().default('TECH_CARD_INSPECT_COVERAGE_UNKNOWN'),
-  wetProcessKind: z.string().optional().default('TECH_CARD_WET_PROCESS_KIND_UNKNOWN'),
+    // C / Q / WP — чистка, контроль, мокрая обработка: у каждого один факт, он же дискриминатор.
+    cleaningKind: z.string().optional().default('TECH_CARD_CLEANING_KIND_UNKNOWN'),
+    coverageMode: z.string().optional().default('TECH_CARD_INSPECT_COVERAGE_UNKNOWN'),
+    wetProcessKind: z.string().optional().default('TECH_CARD_WET_PROCESS_KIND_UNKNOWN'),
 
-  // FA — петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при СВОЁМ явном типе
-  // машины. REQUIRED тут нет ни одного: эти глаголы и машинки живут в проде годами, и карточка
-  // «MACHINE + buttonhole» без единого нового поля обязана сохраняться как есть.
-  buttonholeStyle: z.string().optional().default('TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'),
-  cutLengthMm: z.string().optional().default(''), // мм, 4..120 — прорезь петли
-  buttonholeOrientation: z.string().optional().default('TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'),
-  bartackLengthMm: z.string().optional().default(''), // мм, 1..40
-  attachPattern: z.string().optional().default('TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'),
-  zipperApplication: z.string().optional().default('TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'),
+    // FA — петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при СВОЁМ явном типе
+    // машины. REQUIRED тут нет ни одного: эти глаголы и машинки живут в проде годами, и карточка
+    // «MACHINE + buttonhole» без единого нового поля обязана сохраняться как есть.
+    buttonholeStyle: z.string().optional().default('TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'),
+    cutLengthMm: z.string().optional().default(''), // мм, 4..120 — прорезь петли
+    buttonholeOrientation: z
+      .string()
+      .optional()
+      .default('TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'),
+    bartackLengthMm: z.string().optional().default(''), // мм, 1..40
+    attachPattern: z.string().optional().default('TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'),
+    zipperApplication: z.string().optional().default('TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'),
 
-  // S14 / S17 — дельта, живёт в блоке строчки: бейка при явном binding_taping, шов этикетки при
-  // любом MACHINE.
-  bindingStyle: z.string().optional().default('TECH_CARD_BINDING_STYLE_UNKNOWN'),
-  labelAttachStitch: z.string().optional().default('TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN'),
+    // S14 / S17 — дельта, живёт в блоке строчки: бейка при явном binding_taping, шов этикетки при
+    // любом MACHINE.
+    bindingStyle: z.string().optional().default('TECH_CARD_BINDING_STYLE_UNKNOWN'),
+    labelAttachStitch: z.string().optional().default('TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN'),
 
-  // The only free text on a step. `description` merged into it: two boxes side by side with no rule
-  // about which was which guaranteed two cards would fill them the opposite way round.
-  note: z.string().optional().default(''),
+    // The only free text on a step. `description` merged into it: two boxes side by side with no rule
+    // about which was which guaranteed two cards would fill them the opposite way round.
+    note: z.string().optional().default(''),
 
-  // ЕДИНЫЙ упорядоченный список входов шага: каждый ключ — либо TechCardPiece.line_key (деталь),
-  // либо output_unit_key более раннего шага (узел). Одно поле, а не два параллельных массива:
-  // два useFieldArray на одно имя не синхронизируются, и рассинхрон двух списков — ровно тот
-  // класс бага, который здесь уже ловили.
-  //
-  // Классификация «деталь или узел» НЕ хранится в форме: она выводится сравнением с line_key
-  // деталей карточки — той же функцией, что на сервере (assembly-frontier). Хранить её значило
-  // бы завести второй источник истины, который разъедется с первым при удалении детали.
-  inputKeys: z.array(z.string()).default([]),
-  // Код узла, который производит шаг («SHELL»). Пусто = шаг ничего не собирает: это обработка,
-  // её входы остаются доступными следующим шагам.
-  outputUnitKey: z.string().optional().default(''),
-  // Имя узла. Живёт на первом производящем шаге; поглощающие могут не повторять.
-  outputUnitName: z.string().optional().default(''),
-  // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
-  // went with the break — the chip row was always the real answer.
-  bomLineKeys: z.array(z.string()).default([]),
-  // Фотографии ЭТОГО шага с выносками поверх них. Операционные, а не карточные: указание
-  // «здесь припосадить 6 мм» относится к шагу, и адресовать его номером карточной выноски
-  // значило бы завести ссылку, которая рвётся при пересортировке шагов.
-  media: z.array(operationMediaSchema).max(10).default([]),
-})
+    // ЕДИНЫЙ упорядоченный список входов шага: каждый ключ — либо TechCardPiece.line_key (деталь),
+    // либо output_unit_key более раннего шага (узел). Одно поле, а не два параллельных массива:
+    // два useFieldArray на одно имя не синхронизируются, и рассинхрон двух списков — ровно тот
+    // класс бага, который здесь уже ловили.
+    //
+    // Классификация «деталь или узел» НЕ хранится в форме: она выводится сравнением с line_key
+    // деталей карточки — той же функцией, что на сервере (assembly-frontier). Хранить её значило
+    // бы завести второй источник истины, который разъедется с первым при удалении детали.
+    inputKeys: z.array(z.string()).default([]),
+    // Код узла, который производит шаг («SHELL»). Пусто = шаг ничего не собирает: это обработка,
+    // её входы остаются доступными следующим шагам.
+    outputUnitKey: z.string().optional().default(''),
+    // Имя узла. Живёт на первом производящем шаге; поглощающие могут не повторять.
+    outputUnitName: z.string().optional().default(''),
+    // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
+    // went with the break — the chip row was always the real answer.
+    bomLineKeys: z.array(z.string()).default([]),
+    // Фотографии ЭТОГО шага с выносками поверх них. Операционные, а не карточные: указание
+    // «здесь припосадить 6 мм» относится к шагу, и адресовать его номером карточной выноски
+    // значило бы завести ссылку, которая рвётся при пересортировке шагов.
+    media: z.array(operationMediaSchema).max(10).default([]),
+  })
   // The two required fields are checked HERE as well as on the server, and the wording is the same
   // on both sides. Without this the operator learns that a step needs a zone only after a failed
   // save of the whole card — which is precisely the shape of feedback that made the old mandatory
@@ -1820,7 +1821,8 @@ const operationSchema = z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['needleGaugeMm'],
-        message: 'a gauge measures the distance BETWEEN needles — say how many there are first (2+)',
+        message:
+          'a gauge measures the distance BETWEEN needles — say how many there are first (2+)',
       });
     }
     if (stepTextSet(o.pitchMm) && (o.placementCount ?? 0) < 2) {
@@ -1837,7 +1839,8 @@ const operationSchema = z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['foldbackMm'],
-        message: 'only threaded hardware has webbing folded back through it — clear it, or switch the method',
+        message:
+          'only threaded hardware has webbing folded back through it — clear it, or switch the method',
       });
     }
     // F7 (0328): ДВУХИГОЛЬНАЯ МАШИНА И `needleCount = 2` — ОДИН ФАКТ, СКАЗАННЫЙ ДВАЖДЫ.
@@ -1919,7 +1922,9 @@ const operationSchema = z.object({
     refineRangedDecimal(o.needleGaugeMm, STEP_KIND_DECIMAL_BANDS.needleGaugeMm, ctx, [
       'needleGaugeMm',
     ]);
-    refineRangedDecimal(o.rowSpacingMm, STEP_KIND_DECIMAL_BANDS.rowSpacingMm, ctx, ['rowSpacingMm']);
+    refineRangedDecimal(o.rowSpacingMm, STEP_KIND_DECIMAL_BANDS.rowSpacingMm, ctx, [
+      'rowSpacingMm',
+    ]);
     refineRangedDecimal(o.fullnessRatio, STEP_KIND_DECIMAL_BANDS.fullnessRatio, ctx, [
       'fullnessRatio',
     ]);
@@ -2595,7 +2600,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // вместо «я про ключ ничего не знаю».
       clientRef: c.clientRef ?? undefined,
       // '' и '{}' — одно «обычное»; форма держит пустое, чтобы прочитанное без правки не было грязным.
-      spec: parseSpec(c.spec) ? (c.spec ?? '') : '',
+      spec: parseSpec(c.spec) ? c.spec ?? '' : '',
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -2638,8 +2643,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     })),
     construction: insert?.construction
       ? {
-          defaultSeamClass:
-            insert.construction.defaultSeamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+          defaultSeamClass: insert.construction.defaultSeamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN',
           defaultStitchesPerCm: decimalToInput(insert.construction.defaultStitchesPerCm),
           hemFinish: insert.construction.hemFinish || '',
           notes: insert.construction.notes || '',
@@ -2691,7 +2695,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     operations: (insert?.operations ?? []).map((o) => ({
       // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
       // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
-      inputKeys: (o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])).filter(Boolean),
+      inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
       bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
@@ -2711,6 +2715,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // разметку владельца обновлением бандла.
       work: (o.work ?? '').trim(),
       smv: decimalToInput(o.smv),
+      draft: !!o.draft,
       calloutNumber: o.calloutNumber || 0,
       // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
       // empty control, not as 0 — 0 is the separate, real setting «cut on the line as drawn».
@@ -3108,6 +3113,20 @@ export function mapFormToTechCardInsert(
       .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
       .map((p) => p.lineKey!.trim().toLowerCase()),
   );
+  // The fabrics a DXF alias may be bound to (store: FabricScope.Live). A slot deleted on the BOM
+  // tab leaves its aliases behind; sending one is a field violation that blocks the WHOLE save
+  // («piece BP: not_found (used by interfacing)…», owner 17.10) over a material that is gone —
+  // so, like an alias whose piece left the card, it is dropped, not sent.
+  const rollLines = bomLines.filter((b) => isRollGoodsSection(b.section));
+  const livePurposes = new Set(
+    rollLines.map((b) => b.purpose?.trim()).filter((p): p is string => !!p && p !== UNSET_PURPOSE),
+  );
+  const liveRollKeys = new Set(rollLines.map((b) => b.lineKey.toLowerCase()));
+  const aliasLive = (a: { fabricPurpose?: string; bomLineKey?: string }) => {
+    const p = a.fabricPurpose?.trim();
+    if (p && p !== UNSET_PURPOSE) return livePurposes.has(p);
+    return liveRollKeys.has((a.bomLineKey ?? '').trim().toLowerCase());
+  };
   // K-3 · номера выносок, занятые ссылками детали / операции / дефекта. Считается ОДИН раз на
   // сохранение: предикат пустоты спрашивает его для каждого ряда, а сами списки за время одного
   // маппинга не меняются.
@@ -3182,9 +3201,8 @@ export function mapFormToTechCardInsert(
     // безусловно значило бы стирать чужую записку при каждом сохранении карточки, прочитанной
     // клиентом, который поле не заполнил. Человек, стерший записку руками, получает `''` и стирает —
     // это разные состояния, и разница выражается ключом, а не значением.
-    moodNote: data.moodNote === undefined || data.moodNote === null
-      ? undefined
-      : data.moodNote.trim(),
+    moodNote:
+      data.moodNote === undefined || data.moodNote === null ? undefined : data.moodNote.trim(),
     // ОПИСАНИЕ ИЗДЕЛИЯ — по той же дисциплине ключа, что и записка выше, и по тем же двум доводам:
     // человек его печатает и ждёт, что оно сохранится, а от откаченного бинаря его защищает не
     // молчание здесь, а ГЕЙТ ВОЗМОЖНОСТЕЙ на выходе (`design/payload-gate.ts`), который снимает
@@ -3257,35 +3275,35 @@ export function mapFormToTechCardInsert(
     callouts: (data.callouts ?? [])
       .filter((c) => !isBlankCallout(c, referencedCallouts))
       .map((c) => ({
-      number: c.number || 0,
-      // Первым элементом списка, а не сырым полем: сервер хранит `part` = parts[0], и разойтись
-      // им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатается тех-пак.
-      part: calloutPartsOut(c)[0] ?? '',
-      description: c.description?.trim() || '',
-      dimensions: c.dimensions?.trim() || '',
-      mediaId: c.mediaId || 0,
-      posX: inputToDecimal(c.posX),
-      posY: inputToDecimal(c.posY),
-      // ВИД ШЛЁТСЯ ВСЕГДА, круглым рейсом прочитанного. Присутствие поля и есть заявление «этот
-      // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
-      // именно поэтому промолчать здесь означало бы навсегда заморозить чужие мерки.
-      kind: annotationKindToWire(c.kind),
-      points: (c.points ?? []).map((pt) => ({
-        x: inputToDecimal(pt.x),
-        y: inputToDecimal(pt.y),
+        number: c.number || 0,
+        // Первым элементом списка, а не сырым полем: сервер хранит `part` = parts[0], и разойтись
+        // им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатается тех-пак.
+        part: calloutPartsOut(c)[0] ?? '',
+        description: c.description?.trim() || '',
+        dimensions: c.dimensions?.trim() || '',
+        mediaId: c.mediaId || 0,
+        posX: inputToDecimal(c.posX),
+        posY: inputToDecimal(c.posY),
+        // ВИД ШЛЁТСЯ ВСЕГДА, круглым рейсом прочитанного. Присутствие поля и есть заявление «этот
+        // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
+        // именно поэтому промолчать здесь означало бы навсегда заморозить чужие мерки.
+        kind: annotationKindToWire(c.kind),
+        points: (c.points ?? []).map((pt) => ({
+          x: inputToDecimal(pt.x),
+          y: inputToDecimal(pt.y),
+        })),
+        color: annotationColorToWire(c.color),
+        dashed: !!c.dashed,
+        filled: !!c.filled,
+        // Наконечник ШЛЁТСЯ ВСЕГДА, как и вид, — спредом, потому что поля в сгенерированном типе
+        // может ещё не быть (см. довод в `wire.ts`). Старый сервер незнакомое поле отбрасывает.
+        ...annotationCapsOut(c.caps),
+        // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
+        // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
+        parts: calloutPartsOut(c),
+        // ВСЕГДА ОБЪЕКТ, вместе с видом: '{}' — «обычное», '' сервер прочёл бы как «не прислано».
+        spec: specWire(c.spec),
       })),
-      color: annotationColorToWire(c.color),
-      dashed: !!c.dashed,
-      filled: !!c.filled,
-      // Наконечник ШЛЁТСЯ ВСЕГДА, как и вид, — спредом, потому что поля в сгенерированном типе
-      // может ещё не быть (см. довод в `wire.ts`). Старый сервер незнакомое поле отбрасывает.
-      ...annotationCapsOut(c.caps),
-      // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
-      // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
-      parts: calloutPartsOut(c),
-      // ВСЕГДА ОБЪЕКТ, вместе с видом: '{}' — «обычное», '' сервер прочёл бы как «не прислано».
-      spec: specWire(c.spec),
-    })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
     pieces: (data.pieces ?? [])
@@ -3398,7 +3416,8 @@ export function mapFormToTechCardInsert(
             (!!a.bomLineKey?.trim() || !!a.fabricPurpose?.trim()) &&
             !!a.blockName?.trim() &&
             !!a.pieceLineKey?.trim() &&
-            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
+            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()) &&
+            aliasLive(a),
         )
         .map((a) => ({
           bomLineKey: a.bomLineKey?.trim() || '',
@@ -3475,7 +3494,7 @@ export function mapFormToTechCardInsert(
         b.wastageSource === undefined
           ? undefined
           : b.wastageSource === 'lays'
-            ? (b.wastageLayCount ?? 0)
+            ? b.wastageLayCount ?? 0
             : 0,
       // Штамп применения ставит СЕРВЕР при смене тройки (source, count, percent); прислать его
       // отсюда значило бы датировать применение каждым сохранением карточки.
@@ -3553,6 +3572,10 @@ export function mapFormToTechCardInsert(
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
     operationWorkAware: true,
+    // ШЕСТОЙ — черновик каркаса (0410). Ставится ВСЕГДА: этот бандл везёт `draft` каждого шага, и
+    // `false` здесь — «проверено», а не «не знаю про поле». Без флага сервер отказывает записи
+    // поверх карточки с draft-шагами (старая вкладка стёрла бы метки полной заменой).
+    operationDraftAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3725,21 +3748,21 @@ export function mapFormToTechCardInsert(
             annotations: (m.annotations ?? [])
               .filter((a) => !isBlankAnnotation(a))
               .map((a) => ({
-              kind: annotationKindToWire(a.kind),
-              points: (a.points ?? []).map((pt) => ({
-                x: inputToDecimal(pt.x),
-                y: inputToDecimal(pt.y),
+                kind: annotationKindToWire(a.kind),
+                points: (a.points ?? []).map((pt) => ({
+                  x: inputToDecimal(pt.x),
+                  y: inputToDecimal(pt.y),
+                })),
+                text: (a.text ?? '').trim(),
+                labelX: inputToDecimal(a.labelX),
+                labelY: inputToDecimal(a.labelY),
+                color: annotationColorToWire(a.color),
+                dashed: !!a.dashed,
+                filled: !!a.filled,
+                ...annotationCapsOut(a.caps),
+                pieceLineKey: annotationPieceKeysOut(a)[0] ?? '',
+                pieceLineKeys: annotationPieceKeysOut(a),
               })),
-              text: (a.text ?? '').trim(),
-              labelX: inputToDecimal(a.labelX),
-              labelY: inputToDecimal(a.labelY),
-              color: annotationColorToWire(a.color),
-              dashed: !!a.dashed,
-              filled: !!a.filled,
-              ...annotationCapsOut(a.caps),
-              pieceLineKey: annotationPieceKeysOut(a)[0] ?? '',
-              pieceLineKeys: annotationPieceKeysOut(a),
-            })),
           })),
         // operation number is positional (server is authoritative); send (i+1)*10 so a
         // freshly-created card reads back sensibly before the server recomputes.
@@ -3753,6 +3776,8 @@ export function mapFormToTechCardInsert(
         // вид с единственной размеченной строки» было бы неотличимо от «сохраняет старый бандл».
         work: (o.work ?? '').trim(),
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
+        // DRAFT rides every write as it stands: a reviewed step must reach the server as false.
+        draft: !!o.draft,
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,
@@ -3794,7 +3819,8 @@ export function mapFormToTechCardInsert(
         // тот же случай: `!isWeldStep` стирал ниточно-игольные overrides сменой машинки.
         // Теперь заполненное едет, сервер отвечает ИМЕНЕМ поля, а на экране это строка полосы
         // остатков с [clear].
-        machineType: (o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
+        machineType: (o.machineType ||
+          'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
         machineProfileKey: o.machineProfileKey?.trim() || '',
         threadCount: o.threadCount || 0,
         needleType: (o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
@@ -3815,8 +3841,7 @@ export function mapFormToTechCardInsert(
         // undefined drops the key, which IS the wire shape of an unset optional bool — and the
         // server reads a present `false` as the stated instruction «without steam».
         pressSteam: o.pressSteam,
-        pressCloth: (o.pressCloth ||
-          'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
+        pressCloth: (o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
         // --- ВИДЫ ОПЕРАЦИЙ (0324): порядок — номера полей контракта 51..63 (дыры 50/62 обещаны) --
         printMethod,
         stitching,

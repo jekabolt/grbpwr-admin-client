@@ -1,8 +1,6 @@
 import type { LibraryFile } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Avatar } from 'ui/components/avatar';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Avatar, Pill, Text } from 'ui';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 import { isMarkdownNote } from '../utils/reader-find';
@@ -247,7 +245,7 @@ export function FileTile({
         // `min-w-0 max-w-full` — ЛОВУШКА ПРИМИТИВА, а не украшение: `button` меряется по
         // содержимому, вылезает за колонку грида и ложится поверх соседней плитки, а `truncate`
         // внутри неё при этом молчит — обрезать нечего, разъехалась сама коробка.
-        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (
           <img

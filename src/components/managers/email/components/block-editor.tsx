@@ -10,11 +10,8 @@ import {
 } from 'constants/email-campaign';
 import { useCallback } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { Button, Text, InputField, SelectField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { HeroProductPicker } from '../../hero/components/hero-product-picker';
 import { LinkField } from '../../hero/components/link-field';
 import { ReleaseDateField } from '../../hero/components/release-date-field';
@@ -99,7 +96,7 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
                 { name: 'subheading', label: 'subheading', required: false },
               ]}
             />
-            <div className='border border-dashed border-textInactiveColor p-2'>
+            <div className='border border-dashed border-borderColor p-2'>
               <Text variant='label' size='small'>
                 per-language header nav links (EmailBlockTranslation.links[]) — deferred to a later
                 pass.

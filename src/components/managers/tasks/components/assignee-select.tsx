@@ -1,6 +1,5 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
+import { Input, Select } from 'ui';
 
 // Radix Select forbids an empty-string item value, so "unassigned" uses a sentinel.
 const NONE = '__none__';
@@ -49,6 +48,7 @@ export function AssigneeSelect({
         placeholder='username (unassigned if empty)'
         value={value}
         disabled={disabled}
+        className='min-h-11 sm:min-h-0'
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       />
     );
@@ -62,13 +62,14 @@ export function AssigneeSelect({
   ];
 
   return (
-    <SelectComponent
+    <Select
       name='assignee'
       value={value === '' ? NONE : value}
       onValueChange={(v: string) => onChange(v === NONE ? '' : v)}
       placeholder='unassigned'
       items={items}
       disabled={disabled}
+      className='min-h-11 sm:min-h-0'
       fullWidth
     />
   );

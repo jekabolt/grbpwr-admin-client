@@ -1,7 +1,6 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -74,7 +73,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
               // Low sell-through on a wide run = real overbuy; single-digit runs are too small to judge.
               const isPoor = pct < 50 && totalSizes >= 4;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}
@@ -94,7 +93,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                           {formatNumber(row.unitsSold ?? 0)}/{formatNumber(bought)}
                         </Text>
                       ) : (
-                        <Text variant='label'>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}

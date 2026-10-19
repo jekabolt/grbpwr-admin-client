@@ -41,11 +41,8 @@ import { useParams } from 'react-router-dom';
 // не приезжает ничего, что умеет ходить в сеть. Если однажды туда попадёт импорт adminService —
 // этот импорт нужно будет разорвать копией, а не оставлять.
 import { formatBytes, kindWord } from 'components/managers/files/utils/format';
-import { MarkdownDoc, parse as parseMarkdown } from 'ui/markdown/doc';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { MarkdownDoc, parse as parseMarkdown } from 'components/shared/markdown/doc';
+import { Button, CalloutBox, Section, SectionStack, Text } from 'ui';
 import {
   downloadEndpoint,
   fetchShareMeta,

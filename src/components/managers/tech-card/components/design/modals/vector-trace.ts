@@ -1,4 +1,4 @@
-import { simplifyPath, type ShapePoint } from 'ui/components/annotation/geometry';
+import { simplifyPath, type ShapePoint } from 'components/managers/tech-card/annotation/geometry';
 
 import {
   MAX_STROKES_BYTES,

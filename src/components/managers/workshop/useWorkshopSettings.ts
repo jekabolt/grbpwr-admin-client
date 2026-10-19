@@ -40,8 +40,12 @@ export const CLEAR_SETTING: googletype_Decimal = { value: undefined };
 export function useUpdateWorkshopSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: UpdateWorkshopSettingsRequest) =>
-      adminService.UpdateWorkshopSettings(patch),
+    // Partial: the generated request lists every Decimal setting as a REQUIRED key typed
+    // `| undefined`, so each new setting (0414 added six) would otherwise force every caller to
+    // spell out all the others as `undefined`. An omitted key and an `undefined` one are the same
+    // bytes on the wire (JSON.stringify drops both): «leave alone».
+    mutationFn: (patch: Partial<UpdateWorkshopSettingsRequest>) =>
+      adminService.UpdateWorkshopSettings(patch as UpdateWorkshopSettingsRequest),
     // The response carries the RESULTING configuration, so seed the cache with it rather than
     // re-fetching: a partial patch that touched one setting must not leave the other reading stale.
     onSuccess: (res) => {

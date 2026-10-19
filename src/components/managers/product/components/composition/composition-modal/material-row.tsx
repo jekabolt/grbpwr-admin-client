@@ -1,6 +1,4 @@
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Close, Input, Text } from 'ui';
 import { fibreName } from './utils';
 
 interface FibreRowProps {
@@ -36,16 +34,7 @@ export function FibreRow({ code, percent, onPercentChange, onRemove }: FibreRowP
       <Text component='span' variant='label' size='micro' className='shrink-0'>
         %
       </Text>
-      <Button
-        type='button'
-        size='xs'
-        variant='secondary'
-        className='shrink-0'
-        aria-label={`remove ${name}`}
-        onClick={onRemove}
-      >
-        ✕
-      </Button>
+      <Close size='sm' aria-label={`remove ${name}`} onClick={onRemove} />
     </div>
   );
 }

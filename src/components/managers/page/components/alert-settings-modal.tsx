@@ -5,11 +5,10 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Text } from 'ui';
 
 const cell =
-  'w-24 border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'w-24 border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 type Draft = {
   coverageWarnPct: string;

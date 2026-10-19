@@ -1,9 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useFormContext } from 'react-hook-form';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { FormField, FormItem, FormLabel } from 'ui/form';
+import { Select, Text, FormField, FormItem, FormLabel } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { DraftedField, DraftedPill } from './core/drafted-field';
@@ -145,8 +143,8 @@ export function FitCell({
                 items={items}
                 value={value ? fitItem(value) : FIT_NONE}
                 disabled={locked}
-                // Reads as a dead control, like a disabled `Input` (zebra ground, label ink).
-                className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+                // Reads as a dead control, like a disabled `Input` (pageBg ground, label ink).
+                className={locked ? 'bg-pageBg text-labelColor' : undefined}
                 onValueChange={(v: string) => {
                   const next = fitOfItem(v);
                   field.onChange(next);

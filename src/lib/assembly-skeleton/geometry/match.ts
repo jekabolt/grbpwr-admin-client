@@ -1,0 +1,1546 @@
+// A3 — seam candidates and their assignment (port of probe/seamgraph.mjs + 00-FEASIBILITY §G).
+//
+// A candidate pairs two RUNS: a single edge or a chain of two neighbouring edges of one piece.
+// Score = 0.45·length + 0.45·notches + 0.1·curvature − penalties (chain, mirror twin, self seam,
+// and — with `ends` — up to 0.04 for seam ends that do not true up).
+// On top of the probe's scoring sit the §G rules, each switchable so the probe can show what each
+// one is worth (scripts/assembly-skeleton/seams.mjs):
+//   hand       — L never sews to R, except mirror twins on a centre edge;
+//   orient     — notches are read in the one direction the two pieces can meet in (face-up pieces
+//                walk a shared seam oppositely; stacked identical layers the same way);
+//   weak       — a mirror-twin pair only on a straight edge, and a mirror-twin pair or a self seam
+//                only where neither edge has a regular candidate (the «third candidate» rule);
+//   identical  — identical layers meet along ONE edge (the longest convex one, notched first);
+//   closure    — a straight centre pair with buttons/zip in the BOM or drills along it is a
+//                closure, never a seam;
+//   eased      — 1.5–8 % length difference only with agreeing notches: both end notches (ease
+//                spread over the middle) or all notches from one end (ease / pleat at the other);
+//   asymNotch  — equal length, one side carries one notch more: weak notch evidence, not a veto;
+//   shape      — a curved edge must fit its partner rigidly: the mirror image of a fit is the
+//                other hand's seam, not this one (a veto only: shaping seams — princess, sleeve —
+//                join curves that are NOT congruent, so curve agreement is no score term);
+//   ends       — at both seam ends the two pieces' corner angles add up to a straight line (a
+//                trued hem / neckline / armhole), which tells a shoulder from its mirror side;
+//   softChain  — two neighbouring edges match as one only across a soft corner;
+//   sides      — unnamed mirror pairs (numbered blazer pieces) get a side: twins sit on opposite
+//                sides, a confident unique notched seam puts two pieces on the same side; then the
+//                hand rule applies to the inferred sides as to named ones;
+//   equivRect / equivLayers — an alternative that differs only by the other long side of a
+//                rectangle, or by an identical layer of the same cloth, is the same answer and
+//                does not make the seam ambiguous (a technologist has nothing to choose).
+// Greedy assignment, each edge at most once; alternatives within SKELETON.ambiguity are kept on
+// the chosen seam as `ambiguousWith`.
+
+import {
+  SKELETON,
+  type Edge,
+  type EdgeId,
+  type PieceGeom,
+  type Pt2,
+  type SeamCandidate,
+  type SeamDecisions,
+  type SeamDecisionsInput,
+  type SeamEvidence,
+  type SeamGraph,
+  type SkeletonFacts,
+} from '../types';
+import { closureDrills, closureReason, type ClosureVerdict } from './closures';
+import { isMirroredPair, pieceMultiplicity } from '../cut';
+import { angleAt, dist, drillPoints } from './segment';
+import { surfaceSeams } from './surface';
+import { handSideOn, sameWayUp, xSideOf } from './plies';
+import { unprovenCopies } from './twins';
+import { crotchPair, legPanels, sameLeg, type LegPanel } from './legs';
+
+export type MatchRules = {
+  hand: boolean;
+  orient: boolean;
+  weak: boolean;
+  identical: boolean;
+  closure: boolean;
+  eased: boolean;
+  asymNotch: boolean;
+  shape: boolean;
+  ends: boolean;
+  softChain: boolean;
+  /** Hands of unnamed mirror pairs, inferred through confident seams, feed the hand rule. */
+  sides: boolean;
+  /** An alternative on the other long side of the same rectangle is the same answer. */
+  equivRect: boolean;
+  /** An alternative on an identical layer of the same cloth is the same answer. */
+  equivLayers: boolean;
+  /** Surface joins (P2 lane S): parts laid on a host's placement mark, added after the edges. */
+  surface: boolean;
+  /**
+   * Trouser legs read from the drawing (legs.ts): a leg's front and back are sewn inseam to inseam
+   * and outseam to outseam (the back eased onto the front, up to 5 % / 40 mm); the left and the
+   * right panel of the fronts (of the backs) meet at the rise — never along an inseam or outseam.
+   */
+  legs: boolean;
+};
+
+export const ALL_RULES: MatchRules = {
+  hand: true,
+  orient: true,
+  weak: true,
+  identical: true,
+  closure: true,
+  eased: true,
+  asymNotch: true,
+  shape: true,
+  ends: true,
+  softChain: true,
+  sides: true,
+  equivRect: true,
+  equivLayers: true,
+  surface: true,
+  legs: true,
+};
+
+/** The probe as it ran on 09.10 (hand rule only). */
+export const PROBE_RULES: MatchRules = {
+  hand: true,
+  orient: false,
+  weak: false,
+  identical: false,
+  closure: false,
+  eased: false,
+  asymNotch: false,
+  shape: false,
+  ends: false,
+  softChain: false,
+  sides: false,
+  equivRect: false,
+  equivLayers: false,
+  surface: false,
+  legs: false,
+};
+
+/** Probe's length band without notch requirement: score 0.5 up to 3.5 %. */
+const PROBE_LOOSE_REL = 0.035;
+/** Both edges turning more than this (deg) — two convex edges rarely sew flat. */
+const CONVEX_PAIR_DEG = 25;
+/** chord/len at or above this = a straight edge (centre seams and closures are straight). */
+const STRAIGHT = 0.98;
+/** Edges turning less than this (deg) inward still count as convex for the identical seam. */
+const CONVEX_TOL_DEG = 5;
+/** A centre seam runs the length of the piece: at least this share of its longest edge. */
+const CENTRE_MIN_SHARE = 0.5;
+/** Shape test: profile samples and the deviation (mm) below which an edge is «straight enough». */
+const PROFILE_SAMPLES = 24;
+const PROFILE_FLAT_MM = 3;
+/** The mirror reading must beat the rigid one by this factor to veto a pair. */
+const SHAPE_VETO_RATIO = 2;
+/** End angles: summed error (deg) at which the ends term reaches its full penalty. */
+const ENDS_SCALE_DEG = 60;
+const ENDS_WEIGHT = 0.04;
+/** A chain may only cross a corner turning less than this (deg). */
+const SOFT_CORNER_DEG = 60;
+/** A seam this sure (and notch-backed, and unrivalled) carries a side from piece to piece. */
+const SIDE_CONFIDENT = 0.9;
+/** Rejected list keeps candidates down to this score. */
+export const REJECTED_FLOOR = 0.4;
+
+// ── runs ────────────────────────────────────────────────────────────────────────────────────
+
+/** A single edge or two neighbouring edges of one piece, matched as one. */
+export type Run = {
+  id: EdgeId;
+  piece: PieceGeom;
+  edges: Edge[];
+  lenMm: number;
+  notchesMm: number[];
+  turnDeg: number;
+  chordMm: number;
+  pts: Pt2[];
+  chain: boolean;
+  /** Turn (deg, + convex) at the run's start / end corner. */
+  turnStart: number;
+  turnEnd: number;
+};
+
+/** Turn (deg, + convex) of the contour at resample index `idx`, over the corner window. */
+export const cornerTurn = (piece: PieceGeom, idx: number) =>
+  piece.rs.length
+    ? angleAt(
+        piece.rs,
+        idx % piece.rs.length,
+        Math.max(1, Math.round(SKELETON.cornerWinMm / SKELETON.resampleMm)),
+      )
+    : 0;
+
+export function runsOf(piece: PieceGeom, softOnly = true): Run[] {
+  const out: Run[] = piece.edges.map((e) => ({
+    id: e.id,
+    piece,
+    edges: [e],
+    lenMm: e.lenMm,
+    notchesMm: e.notchesMm,
+    turnDeg: e.turnDeg,
+    chordMm: e.chordMm,
+    pts: e.pts,
+    chain: false,
+    turnStart: cornerTurn(piece, e.s),
+    turnEnd: cornerTurn(piece, e.e),
+  }));
+  const es = piece.edges;
+  if (es.length >= 3) {
+    for (let i = 0; i < es.length; i++) {
+      const a = es[i];
+      const b = es[(i + 1) % es.length];
+      if (b.s !== a.e) continue;
+      if (softOnly && Math.abs(cornerTurn(piece, a.e)) > SOFT_CORNER_DEG) continue;
+      const pts = [...a.pts, ...b.pts.slice(1)];
+      out.push({
+        id: `${piece.pieceKey}#${a.k}+${b.k}`,
+        piece,
+        edges: [a, b],
+        lenMm: a.lenMm + b.lenMm,
+        notchesMm: [...a.notchesMm, ...b.notchesMm.map((d) => d + a.lenMm)],
+        turnDeg: a.turnDeg + b.turnDeg,
+        chordMm: dist(pts[0], pts[pts.length - 1]),
+        pts,
+        chain: true,
+        turnStart: cornerTurn(piece, a.s),
+        turnEnd: cornerTurn(piece, b.e),
+      });
+    }
+  }
+  return out;
+}
+
+/** Edge ids a run id stands for: `P#3` → [`P#3`], `P#3+4` → [`P#3`, `P#4`]. */
+export function edgeIdsOf(id: EdgeId): EdgeId[] {
+  const at = id.lastIndexOf('#');
+  const piece = id.slice(0, at);
+  return id
+    .slice(at + 1)
+    .split('+')
+    .map((k) => `${piece}#${k}`);
+}
+
+// ── evidence ────────────────────────────────────────────────────────────────────────────────
+
+const maxErr = (x: number[], y: number[]) => Math.max(...x.map((d, i) => Math.abs(d - y[i])));
+const ladder = (err: number): 0 | 0.3 | 0.7 | 1 =>
+  err <= SKELETON.notchTolMm ? 1 : err <= 8 ? 0.7 : err <= 15 ? 0.3 : 0;
+
+/** Notch positions of `v` read from its END (the direction two face-up pieces meet in). */
+const fromEnd = (v: Run) => v.notchesMm.map((d) => v.lenMm - d).reverse();
+
+/**
+ * Which way `v` is read against `u`. Two face-up pieces walk a shared seam in opposite directions
+ * ('rev'); so does a fold (self seam) and a straight centre seam of mirror twins. Identical layers
+ * stacked face to face run the SAME way ('same'). A piece cut as a mirrored pair has a reflected
+ * copy, which reads the other way — both are possible ('both').
+ */
+export type Reading = 'rev' | 'same' | 'both';
+
+const readings = (v: Run, dir: Reading): number[][] =>
+  dir === 'rev' ? [fromEnd(v)] : dir === 'same' ? [v.notchesMm] : [v.notchesMm, fromEnd(v)];
+
+/**
+ * Notch agreement in the allowed reading(s). null when the counts differ; 0.5 (internal) when
+ * neither edge carries a notch — the contract records that as `null`.
+ */
+function notchScore(u: Run, v: Run, dir: Reading): number | null {
+  if (u.notchesMm.length !== v.notchesMm.length) return null;
+  if (u.notchesMm.length === 0) return 0.5;
+  return ladder(Math.min(...readings(v, dir).map((b) => maxErr(u.notchesMm, b))));
+}
+
+/**
+ * Gathered / eased / pleated seam (lengths differ by lenRel…lenRelEased). Two ways the notches
+ * still agree:
+ *  - ease spread over the middle: the first notch from the start and the last from the end agree;
+ *  - ease or a pleat at ONE end: every notch of the shorter edge agrees with the longer edge when
+ *    both are measured from the other end (the longer may carry up to two extra pleat marks).
+ * Needs notches on both edges; 2+ agreeing notches score 0.7, one notch 0.3.
+ */
+function endNotchScore(u: Run, v: Run, dir: Reading): number | null {
+  if (u.notchesMm.length === 0 || v.notchesMm.length === 0) return null;
+  let best: number | null = null;
+  const bump = (x: number) => {
+    if (best === null || x > best) best = x;
+  };
+  for (const b of readings(v, dir)) {
+    // spread: both end notches
+    const eu = [u.notchesMm[0], u.lenMm - u.notchesMm[u.notchesMm.length - 1]];
+    const ev = [b[0], v.lenMm - b[b.length - 1]];
+    bump(ladder(maxErr(eu, ev)));
+    // one-ended: anchored at the start, or at the end
+    for (const anchor of ['start', 'end'] as const) {
+      const pu = anchor === 'start' ? u.notchesMm : u.notchesMm.map((d) => u.lenMm - d);
+      const pv = anchor === 'start' ? b : b.map((d) => v.lenMm - d);
+      const [short, long] = pu.length <= pv.length ? [pu, pv] : [pv, pu];
+      if (long.length - short.length > 2) continue;
+      const ok = short.every((d) => long.some((x) => Math.abs(x - d) <= SKELETON.notchTolMm));
+      if (ok) bump(short.length >= 2 ? 0.7 : 0.3);
+    }
+  }
+  return best;
+}
+
+/** One notch more on one side, the rest agreeing: a forgotten or extra notch, weak evidence. */
+function asymNotchScore(u: Run, v: Run, dir: Reading): number | null {
+  const nu = u.notchesMm.length;
+  const nv = v.notchesMm.length;
+  if (Math.abs(nu - nv) !== 1) return null;
+  if (Math.min(nu, nv) === 0) return 0.3;
+  const subset = (small: number[], big: number[]) =>
+    small.every((d) => big.some((x) => Math.abs(x - d) <= SKELETON.notchTolMm));
+  const ok = readings(v, dir).some((b) =>
+    nu < nv ? subset(u.notchesMm, b) : subset(b, u.notchesMm),
+  );
+  return ok ? 0.3 : null;
+}
+
+/**
+ * Signed offsets of a run from its chord at PROFILE_SAMPLES arc-length fractions, positive toward
+ * the piece (left of a CCW walk).
+ */
+function profile(r: Run): number[] {
+  const pts = r.pts;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const L = dist(a, b) || 1;
+  const nx = -(b[1] - a[1]) / L;
+  const ny = (b[0] - a[0]) / L;
+  const cum: number[] = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i], pts[i - 1]));
+  const total = cum[cum.length - 1] || 1;
+  const out: number[] = [];
+  let j = 0;
+  for (let s = 0; s < PROFILE_SAMPLES; s++) {
+    const t = ((s + 0.5) / PROFILE_SAMPLES) * total;
+    while (j < cum.length - 2 && cum[j + 1] < t) j++;
+    const f = (t - cum[j]) / (cum[j + 1] - cum[j] || 1);
+    const x = pts[j][0] + (pts[j + 1][0] - pts[j][0]) * f;
+    const y = pts[j][1] + (pts[j + 1][1] - pts[j][1]) * f;
+    out.push((x - a[0]) * nx + (y - a[1]) * ny);
+  }
+  return out;
+}
+
+const rms = (x: number[], y: number[]) =>
+  Math.sqrt(x.reduce((s, d, i) => s + (d - y[i]) ** 2, 0) / x.length);
+
+/**
+ * How two runs meet, which fixes how their profiles (and corner angles) must relate:
+ *  'join'  — two face-up pieces walk the shared curve oppositely, pieces on opposite sides:
+ *            p_u(t) ≈ −p_v(1−t);
+ *  'fold'  — one piece folded onto itself (self seam): p_u(t) ≈ p_v(1−t);
+ *  'stack' — identical layers face to face: p_u(t) ≈ p_v(t);
+ *  'any'   — a piece cut as a mirrored pair: 'join' or its reflection.
+ */
+type Meeting = 'join' | 'fold' | 'stack' | 'any';
+
+const reflectProfile = (pv: number[]) => pv.map((d) => -d);
+const joinProfile = (pv: number[]) => pv.map((_, i) => -pv[pv.length - 1 - i]);
+const foldProfile = (pv: number[]) => pv.map((_, i) => pv[pv.length - 1 - i]);
+
+function shapeRms(u: Run, v: Run, how: Meeting): number {
+  const pu = profile(u);
+  const pv = profile(v);
+  switch (how) {
+    case 'join':
+      return rms(pu, joinProfile(pv));
+    case 'fold':
+      return rms(pu, foldProfile(pv));
+    case 'stack':
+      return rms(pu, pv);
+    case 'any':
+      return Math.min(rms(pu, joinProfile(pv)), rms(pu, reflectProfile(pv)));
+  }
+}
+
+/**
+ * The other hand's seam: the pair fits only as a reflection (p_u(t) ≈ −p_v(t)), clearly better
+ * than as a face-up join. Straight edges carry no hand and are never vetoed.
+ */
+function mirrorOnly(u: Run, v: Run): boolean {
+  const pu = profile(u);
+  const pv = profile(v);
+  const dev = Math.max(...pu.map(Math.abs), ...pv.map(Math.abs));
+  if (dev < PROFILE_FLAT_MM) return false;
+  const rigid = rms(pu, joinProfile(pv));
+  const mirror = rms(pu, reflectProfile(pv));
+  return mirror * SHAPE_VETO_RATIO < rigid && rigid > PROFILE_FLAT_MM;
+}
+
+/**
+ * Corner angles at the seam ends. Pattern lines are trued across a seam: at each end the two
+ * pieces' interior angles add up to 180° (join), or are equal (fold, stacked layers).
+ */
+function endsError(u: Run, v: Run, how: Meeting): number {
+  const iu0 = 180 - u.turnStart;
+  const iu1 = 180 - u.turnEnd;
+  const iv0 = 180 - v.turnStart;
+  const iv1 = 180 - v.turnEnd;
+  const join = Math.abs(iu0 + iv1 - 180) + Math.abs(iu1 + iv0 - 180);
+  switch (how) {
+    case 'join':
+      return join;
+    case 'fold':
+      return Math.abs(iu0 - iv1) + Math.abs(iu1 - iv0);
+    case 'stack':
+      return Math.abs(iu0 - iv0) + Math.abs(iu1 - iv1);
+    case 'any':
+      return Math.min(join, Math.abs(iu0 + iv0 - 180) + Math.abs(iu1 + iv1 - 180));
+  }
+}
+
+// ── candidates ──────────────────────────────────────────────────────────────────────────────
+
+/** The terms a score was built from — for the probe and for «evidence in words». */
+export type ScoreParts = {
+  lenScore: number;
+  notch: number;
+  shapeRmsMm: number;
+  endsErrDeg: number;
+  meeting: 'join' | 'fold' | 'stack' | 'any';
+};
+
+export type Cand = {
+  u: Run;
+  v: Run;
+  score: number;
+  evidence: SeamEvidence;
+  kind: SeamCandidate['kind'];
+  regular: boolean;
+  parts: ScoreParts;
+  /** Why a rule dropped it (kept for `rejected`). */
+  dropped?: string;
+  closure?: ClosureVerdict['closure'];
+  /** A trouser-leg seam read from the drawing (legs.ts). */
+  legRole?: 'rise' | 'inseam' | 'outseam';
+};
+
+export const isStraight = (r: Run) => r.chordMm / r.lenMm >= STRAIGHT;
+const isCentreLong = (r: Run) =>
+  r.lenMm >= CENTRE_MIN_SHARE * Math.max(...r.piece.edges.map((e) => e.lenMm));
+/** A centre / tube edge runs UP the piece: its chord within this of the drawing's vertical. */
+const LENGTHWISE_DEG = 25;
+/** Straight enough for a tube seam (an underarm, a flared side is a slightly shaped line). */
+const r95 = (r: Run) => r.chordMm / r.lenMm >= 0.9;
+/** A tube seam (a piece sewn to itself) spans at least this share of the piece's height. */
+const TUBE_MIN_SHARE = 0.4;
+const yBox = (p: PieceGeom) => {
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  for (const [x, y] of p.rs) {
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+  }
+  return { x0, x1, y0, y1 };
+};
+/**
+ * Pieces are drawn upright (grain up — the convention lib/pom and the doll read pieces in): an
+ * edge that runs the piece lengthwise is near-vertical. A centre front / back is one; a hem, a
+ * wrist, a waist, a shoulder are not (11.10 corpus: FW26-001's two fronts were paired at the hem,
+ * its two sleeves at the wrist — straight, long, mirror twins, every other rule passed).
+ */
+export const isLengthwise = (r: Run) => {
+  const a = r.pts[0];
+  const b = r.pts[r.pts.length - 1];
+  return (
+    Math.atan2(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) <= (LENGTHWISE_DEG * Math.PI) / 180
+  );
+};
+/**
+ * A piece sewn to itself only along a TUBE seam: both runs straight-ish, lengthwise, each spanning
+ * most of the piece's height, on opposite sides of it (a sleeve's underarm, a one-piece body's side).
+ * Never two armholes, two halves of a waist round a dart, a hem onto a neckline.
+ */
+const TUBE_DEG = 35;
+const isTubeRun = (r: Run) => {
+  const a = r.pts[0];
+  const b = r.pts[r.pts.length - 1];
+  return Math.atan2(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) <= (TUBE_DEG * Math.PI) / 180;
+};
+export const isTubePair = (u: Run, v: Run) => {
+  if (u.piece !== v.piece) return false;
+  const b = yBox(u.piece);
+  const h = b.y1 - b.y0;
+  const cx = (b.x0 + b.x1) / 2;
+  const span = (r: Run) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [, y] of r.pts) {
+      lo = Math.min(lo, y);
+      hi = Math.max(hi, y);
+    }
+    return h > 0 ? (hi - lo) / h : 0;
+  };
+  const mx = (r: Run) => r.pts.reduce((t, q) => t + q[0], 0) / Math.max(1, r.pts.length);
+  return (
+    r95(u) &&
+    r95(v) &&
+    isTubeRun(u) &&
+    isTubeRun(v) &&
+    span(u) >= TUBE_MIN_SHARE &&
+    span(v) >= TUBE_MIN_SHARE &&
+    Math.sign(mx(u) - cx) * Math.sign(mx(v) - cx) < 0
+  );
+};
+
+export function twinKindOf(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' | null {
+  return a.twinOf.find((t) => t.key === b.pieceKey)?.kind ?? null;
+}
+
+/** The one edge along which identical layers are sewn: longest convex, notched ones first. */
+function identicalSeamEdge(p: PieceGeom): Edge | undefined {
+  const convex = p.edges.filter(
+    (e) => e.turnDeg > -CONVEX_TOL_DEG && e.lenMm >= SKELETON.minSeamMm,
+  );
+  const pool = convex.filter((e) => e.notchesMm.length > 0);
+  const from = pool.length ? pool : convex.length ? convex : p.edges;
+  return from.reduce<Edge | undefined>((m, e) => (!m || e.lenMm > m.lenMm ? e : m), undefined);
+}
+
+/** What scorePair needs beyond the two runs. */
+type PairCtx = {
+  /** Edges designated for the one identical-layer seam of their piece. */
+  designated: ReadonlySet<EdgeId>;
+  /** Pieces cut as a mirrored pair from one pattern (card cut symmetry MIRRORED). */
+  mirroredCut: ReadonlySet<string>;
+  /** Mirrored blocks cut twice (×2 MIRRORED): one key, both hands — so no hand of its own. */
+  bothHands?: ReadonlySet<string>;
+};
+
+function scorePair(u: Run, v: Run, rules: MatchRules, ctx: PairCtx): Cand | null {
+  const self = u.piece === v.piece;
+  if (self) {
+    if (u.chain || v.chain || u.piece.rect) return null;
+    if (u.edges.some((e) => v.edges.includes(e))) return null;
+    // Adjacent edges share a corner — a dart, not a seam.
+    if (u.edges[0].e === v.edges[0].s || v.edges[0].e === u.edges[0].s) return null;
+  }
+  const tk = self ? null : twinKindOf(u.piece, v.piece);
+  const hu = ctx.bothHands?.has(u.piece.pieceKey) ? null : u.piece.hand;
+  const hv = ctx.bothHands?.has(v.piece.pieceKey) ? null : v.piece.hand;
+  const cross = !!hu && !!hv && hu !== hv;
+  if (rules.hand && cross && tk !== 'mirror') return null;
+
+  if (rules.identical && tk === 'identical') {
+    if (u.chain || v.chain) return null;
+    if (!ctx.designated.has(u.edges[0].id) && !ctx.designated.has(v.edges[0].id)) return null;
+  }
+  const dir: Reading = !rules.orient
+    ? 'both'
+    : ctx.mirroredCut.has(u.piece.pieceKey) || ctx.mirroredCut.has(v.piece.pieceKey)
+      ? 'both'
+      : tk === 'identical'
+        ? 'same'
+        : 'rev';
+
+  if (Math.min(u.lenMm, v.lenMm) < SKELETON.minSeamMm) return null;
+  const dLenMm = Math.abs(u.lenMm - v.lenMm);
+  const relLen = dLenMm / Math.max(u.lenMm, v.lenMm);
+
+  let lenScore: number;
+  let ns: number | null;
+  let rule: string | undefined;
+  const exact = dLenMm <= SKELETON.lenAbsMm;
+  if (exact || relLen <= SKELETON.lenRel) {
+    lenScore = exact ? 1 : 0.8;
+    ns = notchScore(u, v, dir);
+    if (ns === null && rules.asymNotch && exact) {
+      ns = asymNotchScore(u, v, dir);
+      if (ns !== null) rule = 'one notch more on one side';
+    }
+  } else if (rules.eased && relLen <= SKELETON.lenRelEased) {
+    lenScore = 0.5;
+    ns = endNotchScore(u, v, dir);
+    if (ns === null || ns < 0.7) return null;
+    rule = `eased ${(relLen * 100).toFixed(1)} %: end notches agree`;
+  } else if (!rules.eased && relLen <= PROBE_LOOSE_REL) {
+    lenScore = 0.5;
+    ns = notchScore(u, v, dir);
+  } else {
+    return null;
+  }
+  if (ns === null) return null;
+
+  const reflectedCopy =
+    ctx.mirroredCut.has(u.piece.pieceKey) || ctx.mirroredCut.has(v.piece.pieceKey);
+  if (
+    rules.shape &&
+    !self &&
+    tk !== 'identical' &&
+    !reflectedCopy &&
+    !(u.piece.rect || v.piece.rect)
+  ) {
+    if (mirrorOnly(u, v)) return null;
+  }
+  const how: Meeting = self
+    ? 'fold'
+    : tk === 'identical'
+      ? 'stack'
+      : reflectedCopy || !rules.orient
+        ? 'any'
+        : 'join';
+
+  const bothConvex = u.turnDeg > CONVEX_PAIR_DEG && v.turnDeg > CONVEX_PAIR_DEG;
+  const complementary = (u.turnDeg > 10 && v.turnDeg < -10) || (u.turnDeg < -10 && v.turnDeg > 10);
+  const score =
+    0.45 * lenScore +
+    0.45 * ns +
+    0.1 * (bothConvex ? 0.75 : 1) -
+    (rules.ends ? ENDS_WEIGHT * Math.min(1, endsError(u, v, how) / ENDS_SCALE_DEG) : 0) -
+    (u.chain ? SKELETON.chainPenalty : 0) -
+    (v.chain ? SKELETON.chainPenalty : 0) -
+    (tk === 'mirror' ? SKELETON.twinMirrorPenalty : 0) -
+    (self ? SKELETON.selfPenalty : 0);
+
+  const parts: ScoreParts = {
+    lenScore,
+    notch: ns,
+    shapeRmsMm: shapeRms(u, v, how),
+    endsErrDeg: endsError(u, v, how),
+    meeting: how,
+  };
+  const notchEvidence: SeamEvidence['notchScore'] =
+    u.notchesMm.length === 0 && v.notchesMm.length === 0 ? null : (ns as 0 | 0.3 | 0.7 | 1);
+  if (tk === 'identical' && rules.identical) {
+    rule = 'identical layers: one seam along the longest convex edge';
+  }
+  return {
+    u,
+    v,
+    score,
+    parts,
+    regular: !self && tk !== 'mirror',
+    kind: 'edge',
+    evidence: {
+      dLenMm,
+      relLen,
+      notchScore: notchEvidence,
+      curvature: bothConvex ? 'both-convex' : complementary ? 'complementary' : 'flat',
+      hand: cross ? 'cross' : hu && hv ? 'same' : 'neutral',
+      twin: tk ?? 'none',
+      self,
+      rule,
+    },
+  };
+}
+
+/**
+ * Score two runs as one seam, or null when no rule lets them pair. Exported for the composite pass
+ * (A4): a unit's edge is a Run whose `pts` / `notchesMm` are the glued edges of its pieces.
+ */
+export function scoreRuns(
+  u: Run,
+  v: Run,
+  rules: MatchRules = ALL_RULES,
+): { score: number; evidence: SeamEvidence; parts: ScoreParts } | null {
+  const c = scorePair(u, v, rules, { designated: new Set(), mirroredCut: new Set() });
+  return c ? { score: c.score, evidence: c.evidence, parts: c.parts } : null;
+}
+
+// ── sides of unnamed mirror pairs ───────────────────────────────────────────────────────────
+
+/**
+ * Parity union-find over pieces: «same side» / «opposite side». Anchors: named hands (L ≠ R) and
+ * mirror twins (opposite). Then confident, notch-backed, unrivalled seams join their pieces on one
+ * side, best first, skipping any that would contradict what is already known. Returns a test that
+ * answers only when both pieces sit in one connected group.
+ */
+function inferSides(
+  pieces: readonly PieceGeom[],
+  cands: readonly Cand[],
+): (a: string, b: string) => boolean | undefined {
+  const parent = new Map<string, string>();
+  const parity = new Map<string, number>(); // parity to parent
+  const find = (k: string): [string, number] => {
+    if (!parent.has(k)) {
+      parent.set(k, k);
+      parity.set(k, 0);
+    }
+    let r = k;
+    let p = 0;
+    while (parent.get(r) !== r) {
+      p ^= parity.get(r) ?? 0;
+      r = parent.get(r) ?? r;
+    }
+    return [r, p];
+  };
+  /** Constrain parity(a) xor parity(b) = rel; false on contradiction. */
+  const link = (a: string, b: string, rel: number): boolean => {
+    const [ra, pa] = find(a);
+    const [rb, pb] = find(b);
+    if (ra === rb) return (pa ^ pb) === rel;
+    parent.set(ra, rb);
+    parity.set(ra, pa ^ pb ^ rel);
+    return true;
+  };
+  const L = '\u0000L';
+  const R = '\u0000R';
+  link(L, R, 1);
+  const inPlay = new Set<string>();
+  for (const p of pieces) {
+    if (p.hand) {
+      link(p.pieceKey, p.hand === 'L' ? L : R, 0);
+      inPlay.add(p.pieceKey);
+    }
+    for (const t of p.twinOf) {
+      if (t.kind !== 'mirror') continue;
+      link(p.pieceKey, t.key, 1);
+      inPlay.add(p.pieceKey);
+      inPlay.add(t.key);
+    }
+  }
+  for (const c of cands) {
+    if (c.score < SIDE_CONFIDENT) break;
+    if (!c.regular || c.evidence.notchScore === null || c.evidence.notchScore < 0.7) continue;
+    const a = c.u.piece.pieceKey;
+    const b = c.v.piece.pieceKey;
+    if (!inPlay.has(a) || !inPlay.has(b)) continue;
+    const mine = new Set([...c.u.edges, ...c.v.edges].map((e) => e.id));
+    const rivals = cands.some(
+      (q) =>
+        q !== c &&
+        q.score >= c.score - SKELETON.ambiguity &&
+        [...q.u.edges, ...q.v.edges].some((e) => mine.has(e.id)),
+    );
+    if (!rivals) link(a, b, 0);
+  }
+  return (a, b) => {
+    if (!inPlay.has(a) || !inPlay.has(b)) return undefined;
+    const [ra, pa] = find(a);
+    const [rb, pb] = find(b);
+    return ra === rb ? pa === pb : undefined;
+  };
+}
+
+// ── trouser legs ────────────────────────────────────────────────────────────────────────────
+
+/** Leg ease the back of a leg may carry over its front: share of the edge and absolute cap. */
+const LEG_EASE_REL = 0.05;
+const LEG_EASE_MM = 40;
+/** A notch of the front and one of the back agree within this when read from the waist end. */
+const LEG_NOTCH_MM = 20;
+
+/** Notch positions of an edge read from its upper end (the waist / crotch end of a leg seam). */
+const fromTop = (e: Edge) => {
+  const a = e.pts[0];
+  const b = e.pts[e.pts.length - 1];
+  return a[1] >= b[1] ? e.notchesMm : e.notchesMm.map((d) => e.lenMm - d).reverse();
+};
+
+/**
+ * TROUSER LEGS (11.10 prod corpus: SS26-007 had no leg seam at all — its inseams and outseams were
+ * paired left leg to right leg as mirror twins, the real pairs front ↔ back of one leg are 3 % apart
+ * (the back's ease) and so fell outside every length band; SS26-011's crotch seams were never
+ * candidates, mirror halves meeting on a curve). With the leg panels read from the drawing:
+ *  · a candidate between two panels of different legs (or twins) along an inseam / outseam is
+ *    dropped — legs meet only at the rise;
+ *  · the front and the back of one leg are sewn inseam ↔ inseam and outseam ↔ outseam, the back
+ *    eased onto the front up to LEG_EASE_REL / LEG_EASE_MM ('eased' in the rule's words);
+ *  · the left and the right panel of the fronts (the backs) are sewn rise ↔ rise — the crotch.
+ * An inseam onto an outseam, a rise onto a leg seam: dropped.
+ */
+function legCandidates(pieces: readonly PieceGeom[], runs: readonly Run[], all: Cand[]) {
+  const legs = legPanels(pieces);
+  if (legs.size < 2) return;
+  const roleOf = (r: Run): LegCandRole | null => {
+    if (r.chain) return null;
+    const L = legs.get(r.piece.pieceKey);
+    if (!L) return null;
+    const e = r.edges[0];
+    return e === L.rise ? 'rise' : e === L.inseam ? 'inseam' : e === L.outseam ? 'outseam' : null;
+  };
+  const runOf = new Map(runs.filter((r) => !r.chain).map((r) => [r.id, r]));
+  for (const c of all) {
+    const Lu = legs.get(c.u.piece.pieceKey);
+    const Lv = legs.get(c.v.piece.pieceKey);
+    if (!Lu || !Lv || Lu === Lv) continue;
+    const ru = roleOf(c.u);
+    const rv = roleOf(c.v);
+    const lengthwise = (r: LegCandRole | null) => r === 'inseam' || r === 'outseam';
+    if (sameLeg(Lu, Lv)) {
+      if (ru && ru === rv && ru !== 'rise') continue; // re-scored below
+      if (lengthwise(ru) || lengthwise(rv) || ru === 'rise' || rv === 'rise')
+        c.dropped =
+          'one leg is sewn inseam to inseam and outseam to outseam (front and back read from the drawing) — not this pair';
+    } else {
+      if (ru === 'rise' && rv === 'rise' && crotchPair(Lu, Lv)) continue; // re-scored below
+      if (lengthwise(ru) || lengthwise(rv))
+        c.dropped =
+          'the left and the right leg meet only at the rise (crotch) — never along an inseam or outseam (legs read from the drawing: crotch curves on the same side)';
+    }
+  }
+  const byId = new Map(all.map((c) => [candId(c), c]));
+  const add = (A: LegPanel, B: LegPanel, role: LegCandRole) => {
+    const eu = A[role];
+    const ev = B[role];
+    const u = runOf.get(eu.id);
+    const v = runOf.get(ev.id);
+    if (!u || !v) return;
+    const dLenMm = Math.abs(eu.lenMm - ev.lenMm);
+    const relLen = dLenMm / Math.max(eu.lenMm, ev.lenMm);
+    const crotch = role === 'rise';
+    const ok = crotch
+      ? dLenMm <= Math.max(SKELETON.lenAbsMm, 0.02 * Math.max(eu.lenMm, ev.lenMm))
+      : dLenMm <=
+        Math.max(
+          SKELETON.lenAbsMm,
+          Math.min(LEG_EASE_MM, LEG_EASE_REL * Math.max(eu.lenMm, ev.lenMm)),
+        );
+    if (!ok) return;
+    const exact = dLenMm <= SKELETON.lenAbsMm;
+    // Beyond the ordinary length band the difference is ease — and ease runs one way: the back
+    // of a leg is eased onto its front, never the front onto the back.
+    if (
+      !exact &&
+      relLen > SKELETON.lenRel &&
+      A.part &&
+      B.part &&
+      (eu.lenMm >= ev.lenMm ? A : B).part !== 'back'
+    )
+      return;
+    const lenScore = exact ? 1 : relLen <= SKELETON.lenRel ? 0.8 : 0.6;
+    const nu = fromTop(eu);
+    const nv = fromTop(ev);
+    let notch: 0 | 0.3 | 0.7 | 1 | null;
+    let ns: number;
+    if (!nu.length && !nv.length) {
+      notch = null;
+      ns = 0.5;
+    } else if (!nu.length || !nv.length) {
+      notch = 0;
+      ns = 0.4;
+    } else {
+      const [sh, lg] = nu.length <= nv.length ? [nu, nv] : [nv, nu];
+      const hits = sh.filter((d) => lg.some((x) => Math.abs(x - d) <= LEG_NOTCH_MM)).length;
+      const tight = sh.every((d) => lg.some((x) => Math.abs(x - d) <= SKELETON.notchTolMm));
+      notch = tight && nu.length === nv.length ? 1 : hits === sh.length ? 0.7 : hits ? 0.3 : 0;
+      ns = notch;
+    }
+    // Role-backed: the two edges are read as the same leg seam of a front and a back (or the two
+    // rises), which no length coincidence gives — the score starts at the accept line.
+    const score = Math.min(crotch ? 0.85 : 0.95, 0.6 + 0.15 * lenScore + 0.15 * ns);
+    const twin = A.piece.twinOf.some((t) => t.key === B.piece.pieceKey && t.kind === 'mirror');
+    const hu = A.piece.hand;
+    const hv = B.piece.hand;
+    const back = A.part === 'back' ? A : B.part === 'back' ? B : null;
+    const front = back === A ? B : back === B ? A : null;
+    const longer = eu.lenMm >= ev.lenMm ? A : B;
+    const easeWords =
+      exact || relLen <= SKELETON.lenRel
+        ? `${Math.round(eu.lenMm)} = ${Math.round(ev.lenMm)} mm`
+        : `eased ${(relLen * 100).toFixed(1)} %: the ${longer === back ? 'back' : longer.piece.name} is ${Math.round(dLenMm)} mm longer (${Math.round(eu.lenMm)} vs ${Math.round(ev.lenMm)} mm — leg ease up to ${LEG_EASE_REL * 100} % / ${LEG_EASE_MM} mm)`;
+    const rule = crotch
+      ? `crotch: the ${A.part ?? ''}${A.part ? ' ' : ''}rise of the left and the right leg (the centre ${A.part === 'back' ? 'back' : A.part === 'front' ? 'front' : ''} seam) · ${easeWords} · read from the drawing`
+      : `trouser leg: ${front ? `front ${front.piece.name}` : A.piece.name} ${role} ↔ ${back ? `back ${back.piece.name}` : B.piece.name} ${role} · ${easeWords} · one leg read from the drawing (crotch curves on opposite sides)`;
+    const own: Cand = {
+      u,
+      v,
+      score,
+      kind: 'edge',
+      regular: true,
+      legRole: role,
+      parts: {
+        lenScore,
+        notch: ns,
+        shapeRmsMm: shapeRms(u, v, 'join'),
+        endsErrDeg: endsError(u, v, 'join'),
+        meeting: 'join',
+      },
+      evidence: {
+        dLenMm,
+        relLen,
+        notchScore: notch,
+        curvature: 'flat',
+        hand: hu && hv ? (hu === hv ? 'same' : 'cross') : 'neutral',
+        twin: twin ? 'mirror' : 'none',
+        self: false,
+        rule,
+        aLenMm: eu.lenMm,
+        bLenMm: ev.lenMm,
+      },
+    };
+    const id = candId(own);
+    const prev = byId.get(id);
+    if (prev && !prev.dropped && prev.regular && prev.score > own.score) {
+      // The plain reading is stronger (equal lengths, notches agree): keep its score, say the role.
+      prev.legRole = role;
+      prev.evidence = { ...prev.evidence, rule };
+      return;
+    }
+    if (prev) all.splice(all.indexOf(prev), 1);
+    all.push(own);
+    byId.set(id, own);
+  };
+  const list = [...legs.values()].sort((a, b) => cmp(a.piece.pieceKey, b.piece.pieceKey));
+  for (let i = 0; i < list.length; i++)
+    for (let j = i + 1; j < list.length; j++) {
+      const A = list[i];
+      const B = list[j];
+      if (sameLeg(A, B)) {
+        add(A, B, 'inseam');
+        add(A, B, 'outseam');
+      } else if (crotchPair(A, B)) add(A, B, 'rise');
+    }
+}
+
+type LegCandRole = 'rise' | 'inseam' | 'outseam';
+
+// ── A3 ──────────────────────────────────────────────────────────────────────────────────────
+
+export const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** A candidate's identity regardless of which side was read first. */
+export const candId = (c: Cand) => [c.u.id, c.v.id].sort(cmp).join('~');
+
+export const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate => ({
+  a: c.u.id,
+  b: c.v.id,
+  score: Math.round(c.score * 1000) / 1000,
+  evidence: c.dropped ? { ...c.evidence, rule: c.dropped } : c.evidence,
+  kind: c.kind,
+  ...(c.closure ? { closure: c.closure } : {}),
+  ...(ambiguousWith && ambiguousWith.length ? { ambiguousWith } : {}),
+});
+
+/** A scored pair as the pool keeps it (the greedy's and the global solver's common input). */
+export type PoolCand = Cand;
+
+/**
+ * Everything A3 knows BEFORE any assignment: the runs, every scored pair with the rule that dropped
+ * it (if one did), closures told apart, stored decisions applied. The greedy (`greedyAssign`) and
+ * the operation-driven global solver (assignment/) both start from here, so they differ only in
+ * WHO gets WHICH edge — never in the evidence.
+ */
+export type CandidatePool = {
+  pieces: readonly PieceGeom[];
+  facts: SkeletonFacts;
+  rules: MatchRules;
+  decisions: SeamDecisions | undefined;
+  /** Pieces in canonical order (by key). */
+  byKey: PieceGeom[];
+  runs: Run[];
+  /** Edges designated for the one identical-layer seam of their piece. */
+  designated: Set<EdgeId>;
+  mirroredCut: Set<string>;
+  /** Mirrored blocks cut twice (×2 MIRRORED): one key, both hands. */
+  bothHands: Set<string>;
+  /** Every scored pair, best first (closures carry kind 'closure-not-seam', dropped ones `dropped`). */
+  all: Cand[];
+  /** Candidates a stored «not this seam» dropped (listed in `rejected` with the person's words). */
+  excluded: Set<Cand>;
+  warnings: string[];
+};
+
+export function matchSeams(
+  pieces: readonly PieceGeom[],
+  facts: SkeletonFacts,
+  rules: MatchRules = ALL_RULES,
+  decisionsIn?: SeamDecisionsInput,
+): SeamGraph {
+  return greedyAssign(candidatePool(pieces, facts, rules, decisionsIn));
+}
+
+export function candidatePool(
+  pieces: readonly PieceGeom[],
+  facts: SkeletonFacts,
+  rules: MatchRules = ALL_RULES,
+  decisionsIn?: SeamDecisionsInput,
+): CandidatePool {
+  const warnings: string[] = [];
+  // Seams stored on the card (lib/seams). Absent = the engine alone, exactly as before.
+  const decisions: SeamDecisions | undefined =
+    typeof decisionsIn === 'function' ? decisionsIn(pieces) : decisionsIn;
+  // CANONICAL ORDER. Pieces by key, candidates by score then by their edge ids: the graph must not
+  // depend on the order the card lists its pieces in (ties — equal unnotched edges, the two sides of
+  // a symmetric piece — were broken by input order, and a reversed card read 10/60 blazer seams
+  // differently).
+  const byKey = [...pieces].sort((a, b) => cmp(a.pieceKey, b.pieceKey));
+  const runs = byKey.flatMap((p) => runsOf(p, rules.softChain));
+
+  // Identical layers: one designated edge per piece that has an identical twin.
+  const designated = new Set<EdgeId>();
+  if (rules.identical) {
+    for (const p of pieces) {
+      if (!p.twinOf.some((t) => t.kind === 'identical')) continue;
+      const e = identicalSeamEdge(p);
+      if (e) designated.add(e.id);
+    }
+  }
+
+  const mirroredCut = new Set(
+    facts.pieces.filter((p) => /MIRROR/i.test(p.cutSymmetry ?? '')).map((p) => p.pieceKey),
+  );
+  const bothHands = new Set(facts.pieces.filter(isMirroredPair).map((p) => p.pieceKey));
+  // One shape, not proven twins: never a seam between the two (every edge would «fit»).
+  const copies = new Set(
+    unprovenCopies(byKey).flatMap(([a, b]) => [
+      `${a.pieceKey}\u0000${b.pieceKey}`,
+      `${b.pieceKey}\u0000${a.pieceKey}`,
+    ]),
+  );
+  for (const [a, b] of unprovenCopies(byKey))
+    warnings.push(
+      `${a.name} and ${b.name} have the same shape — a layer, the lining or a copy? not joined to each other`,
+    );
+  const all: Cand[] = [];
+  for (let i = 0; i < runs.length; i++) {
+    for (let j = i + 1; j < runs.length; j++) {
+      if (copies.has(`${runs[i].piece.pieceKey}\u0000${runs[j].piece.pieceKey}`)) continue;
+      const c = scorePair(runs[i], runs[j], rules, { designated, mirroredCut, bothHands });
+      if (c) all.push(c);
+    }
+  }
+  all.sort((a, b) => b.score - a.score || cmp(candId(a), candId(b)));
+  // (a garment with legs, or one the card does not name: a top's half front is tall and narrow
+  // too, its armhole a concave curve — the waist test in legs.ts and this keep tops out)
+  const legsCat = ['trousers', 'jumpsuit', 'bottom', 'generic'].includes(facts.category);
+  if (rules.legs && legsCat) {
+    const n0 = all.length;
+    legCandidates(byKey, runs, all);
+    if (all.length !== n0 || all.some((c) => c.legRole))
+      all.sort((a, b) => b.score - a.score || cmp(candId(a), candId(b)));
+  }
+  if (rules.sides && rules.hand) {
+    const sameSide = inferSides(
+      byKey.map((p) => (bothHands.has(p.pieceKey) ? { ...p, hand: null } : p)),
+      all,
+    );
+    for (const c of all) {
+      if (c.evidence.twin === 'mirror' || c.evidence.self || c.evidence.hand === 'cross') continue;
+      if (sameSide(c.u.piece.pieceKey, c.v.piece.pieceKey) === false) {
+        c.dropped = 'opposite sides (inferred from the mirror pair and its confident seams)';
+      }
+    }
+  }
+
+  // Weak kinds (mirror twins, self seams): only on a straight edge for mirrors, and only where
+  // neither edge has a regular candidate that would pass on its own.
+  const bestRegular = new Map<EdgeId, number>();
+  for (const c of all) {
+    if (!c.regular || c.dropped) continue;
+    for (const e of [...c.u.edges, ...c.v.edges]) {
+      bestRegular.set(e.id, Math.max(bestRegular.get(e.id) ?? -Infinity, c.score));
+    }
+  }
+  const drills = new Map<string, Pt2[]>();
+  for (const p of pieces) drills.set(p.pieceKey, closureDrills(p));
+
+  for (const c of all) {
+    if (c.regular) continue;
+    const mirror = c.evidence.twin === 'mirror';
+    if (rules.closure && mirror) {
+      const why0 = closureReason(c.u, c.v, isStraight(c.u) && isStraight(c.v), facts, drills);
+      // Buttons / a zip in the BOM say the garment HAS a front opening, not which edges it is:
+      // on that evidence alone only the centre front qualifies — a straight edge running the
+      // piece — never the two hems or the two shoulders of the left and right fronts.
+      const why =
+        (why0?.closure.evidence === 'bom+name' && !(isCentreLong(c.u) && isCentreLong(c.v))) ||
+        // an opening runs up the garment: never two hems or two shoulders of mirror halves
+        !isLengthwise(c.u) ||
+        !isLengthwise(c.v)
+          ? null
+          : why0;
+      // A closure is judged on the base score: the twin penalty is what makes it a closure.
+      const rivalled = [...c.u.edges, ...c.v.edges].some(
+        (e) => (bestRegular.get(e.id) ?? -Infinity) >= SKELETON.accept,
+      );
+      if (why && !rivalled && c.score + SKELETON.twinMirrorPenalty >= SKELETON.accept) {
+        c.kind = 'closure-not-seam';
+        c.evidence = { ...c.evidence, rule: why.rule };
+        c.closure = why.closure;
+        continue;
+      }
+    }
+    if (!rules.weak) continue;
+    if (mirror && (!isStraight(c.u) || !isStraight(c.v) || c.u.chain || c.v.chain)) {
+      c.dropped = 'mirror twins meet only along a straight centre edge';
+      continue;
+    }
+    if (mirror && (!isCentreLong(c.u) || !isCentreLong(c.v))) {
+      c.dropped = 'mirror twins meet only along a centre edge that runs the piece';
+      continue;
+    }
+    if (mirror && (!isLengthwise(c.u) || !isLengthwise(c.v))) {
+      c.dropped =
+        'mirror twins meet only along a centre edge that runs UP the piece — never two hems, two wrists, two waists or two shoulders';
+      continue;
+    }
+    if (c.evidence.self && !isTubePair(c.u, c.v)) {
+      c.dropped =
+        'a piece is sewn to itself only along a tube seam that runs its length (an underarm) — not across it';
+      continue;
+    }
+    const rival = [...c.u.edges, ...c.v.edges].some(
+      (e) => (bestRegular.get(e.id) ?? -Infinity) >= SKELETON.accept,
+    );
+    if (rival) {
+      c.dropped = `${mirror ? 'mirror-twin pair' : 'self seam'} loses to a regular candidate on the same edge`;
+    }
+  }
+
+  // Stored «not this seam»: a candidate meeting both sides of a rejected pair is dropped with the
+  // person's words, before the greedy (and before an engine closure could take it).
+  const excludedSet = new Set<Cand>();
+  for (const x of decisions?.excluded ?? []) {
+    if (x.surface) continue;
+    const A = new Set(x.aIds);
+    const B = new Set(x.bIds);
+    const hits = (r: Run, S: Set<EdgeId>) => r.edges.some((e) => S.has(e.id));
+    for (const c of all) {
+      if ((hits(c.u, A) && hits(c.v, B)) || (hits(c.u, B) && hits(c.v, A))) {
+        c.dropped = x.rule;
+        excludedSet.add(c);
+      }
+    }
+  }
+
+  return {
+    pieces,
+    facts,
+    rules,
+    decisions,
+    byKey,
+    runs,
+    designated,
+    mirroredCut,
+    bothHands,
+    all,
+    excluded: excludedSet,
+    warnings,
+  };
+}
+
+/**
+ * Surface joins (P2 lane S) over the pool's pieces, with the stored decisions applied: a rejected
+ * surface join goes to `rejected` with the person's words, a confirmed one carries who said so, a
+ * confirmed one not found on today's marks is said in `warnings`. Takes no edge.
+ */
+export function surfaceLayer(
+  P: CandidatePool,
+  rejected: SeamCandidate[],
+  warnings: string[],
+): SeamCandidate[] {
+  const { facts, byKey, decisions } = P;
+  const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
+  const s = surfaceSeams(byKey, copies);
+  let surfaceChosen = s.chosen;
+  if (decisions) {
+    const forcedSurface = (decisions.forced ?? []).filter((c) => c.kind === 'surface');
+    const noSurface = (decisions.excluded ?? []).filter((x) => x.surface);
+    const out: SeamCandidate[] = [];
+    for (const c of surfaceChosen) {
+      const x = noSurface.find(
+        (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+      );
+      if (x) rejected.push({ ...c, evidence: { ...c.evidence, rule: x.rule } });
+      else out.push(c);
+    }
+    surfaceChosen = out.map((c) => {
+      const f = forcedSurface.find(
+        (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+      );
+      return f?.provenance ? { ...c, provenance: f.provenance } : c;
+    });
+    for (const f of forcedSurface)
+      if (
+        !surfaceChosen.some(
+          (c) => c.surface?.host === f.surface?.host && c.surface?.part === f.surface?.part,
+        )
+      )
+        warnings.push(
+          `confirmed surface join ${f.surface?.part} on ${f.surface?.host} is not found on today's marks — not drawn`,
+        );
+  }
+  warnings.push(...s.warnings);
+  return surfaceChosen;
+}
+
+/** Greedy assignment over the pool — the engine as it ran before the global solver (A3 as shipped). */
+export function greedyAssign(P: CandidatePool): SeamGraph {
+  const { pieces, facts, rules, decisions, byKey, all, designated, bothHands, warnings } = P;
+  const excludedSet = P.excluded;
+  // Greedy: closures first (they take their edges out of play), then seams. Each edge is sewn
+  // once — except an edge of a mirrored block cut twice (×2 MIRRORED): its reflected copy is the
+  // other hand, so it may meet a SECOND edge of the same single piece it already meets (FRONT_L's
+  // shoulder onto both shoulders of the back). Never twice onto another ×2 block: two copies of a
+  // sleeve meet two copies of a cuff in one pair of edges, not two.
+  const usedBy = new Map<EdgeId, { piece: string; edge: EdgeId }[]>();
+  const sides = (c: Cand): [Run, Run][] => [
+    [c.u, c.v],
+    [c.v, c.u],
+  ];
+  const take = (c: Cand) => {
+    for (const [r, other] of sides(c))
+      for (const e of r.edges)
+        usedBy.set(e.id, [
+          ...(usedBy.get(e.id) ?? []),
+          { piece: other.piece.pieceKey, edge: other.edges[0].id },
+        ]);
+  };
+  const free = (c: Cand) =>
+    sides(c).every(([r, other]) =>
+      r.edges.every((e) => {
+        const uses = usedBy.get(e.id) ?? [];
+        if (uses.length === 0) return true;
+        return (
+          uses.length === 1 &&
+          bothHands.has(r.piece.pieceKey) &&
+          !bothHands.has(other.piece.pieceKey) &&
+          uses[0].piece === other.piece.pieceKey &&
+          uses[0].edge !== other.edges[0].id
+        );
+      }),
+    );
+  // Stored seams go FIRST: a confirmed seam never competes, its edges are out of play before the
+  // engine's closures and seams; a stored closure blocks its edges the same way.
+  const pieceOfId = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
+  const idsOfSide = (c: SeamCandidate, side: 'a' | 'b') =>
+    side === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b);
+  const forcedIn = (decisions?.forced ?? []).filter((c) => c.kind !== 'surface');
+  const decidedClosures = decisions?.closures ?? [];
+  const candById = new Map(all.map((c) => [candId(c), c]));
+  const forcedSame = new Set<Cand>();
+  const forced: SeamCandidate[] = [];
+  for (const c of [...forcedIn, ...decidedClosures]) {
+    const A = idsOfSide(c, 'a');
+    const B = idsOfSide(c, 'b');
+    for (const [x, y] of [
+      [A, B],
+      [B, A],
+    ])
+      for (const id of x)
+        usedBy.set(id, [...(usedBy.get(id) ?? []), { piece: pieceOfId(y[0]), edge: y[0] }]);
+    if (c.kind === 'closure-not-seam') continue;
+    // The engine scored the same two runs: keep its numbers (lengths, notches) under the human rule.
+    const same = candById.get([c.a, c.b].sort(cmp).join('~'));
+    if (same) forcedSame.add(same);
+    forced.push(
+      same && !c.aParts && !c.bParts
+        ? { ...c, evidence: { ...same.evidence, rule: c.evidence.rule } }
+        : c,
+    );
+  }
+  for (const c of decidedClosures)
+    warnings.push(`${c.a} ↔ ${c.b} is a closure, not a seam (${c.evidence.rule ?? 'stored'})`);
+
+  const closures: Cand[] = [];
+  for (const c of all) {
+    if (c.kind !== 'closure-not-seam' || c.dropped || !free(c)) continue;
+    closures.push(c);
+    take(c);
+    warnings.push(`${c.u.id} ↔ ${c.v.id} is a closure, not a seam (${c.evidence.rule})`);
+  }
+  const eligible = all.filter(
+    (c) => c.kind !== 'closure-not-seam' && !c.dropped && !forcedSame.has(c),
+  );
+  const chosenC: Cand[] = [];
+  for (const c of eligible) {
+    if (c.score < SKELETON.accept) break;
+    if (!free(c)) continue;
+    chosenC.push(c);
+    take(c);
+  }
+  // ONE SIDE OF A SYMMETRIC PIECE (11.10 prod corpus: SS26-004/005/006, FW26-001). A piece with
+  // no hand (a back, a yoke) carries its two shoulders — two armholes, two side seams — as mirror
+  // twins of one edge: flat, the greedy cannot tell which one a front's shoulder goes to, and on
+  // every shirt it took the far one (the front's side seam on the back's right, its shoulder on the
+  // back's left: a seam across the garment, 280–390 mm apart on the doll). A piece sewn to a
+  // handless piece along two or more edges sits on ONE side of it: its longest seam there sets the
+  // side (read from the drawing, plies.ts), and a seam on the other side moves to the mirror twin
+  // edge — when that pairing is a candidate as good and its edge is free, or freed by the twin's own
+  // move (the two fronts swap together).
+  if (rules.hand) {
+    const midOf = (e: Edge) => e.pts[Math.floor(e.pts.length / 2)] ?? [0, 0];
+    const twinEdgeOf = (P: PieceGeom, e: Edge): Edge | undefined => {
+      const b = yBox(P);
+      const c = (b.x0 + b.x1) / 2;
+      const m = midOf(e);
+      return P.edges.find((x) => {
+        if (x.id === e.id || x.kind !== 'edge') return false;
+        const q = midOf(x);
+        return (
+          Math.abs(x.lenMm - e.lenMm) <= Math.max(4, 0.02 * e.lenMm) &&
+          Math.abs(q[0] + m[0] - 2 * c) < 20 &&
+          Math.abs(q[1] - m[1]) < 20
+        );
+      });
+    };
+    const moves: { from: Cand; to: Cand; on: string }[] = [];
+    for (const P of byKey) {
+      if (P.hand || bothHands.has(P.pieceKey)) continue;
+      const byX = new Map<string, { c: Cand; pr: Run; xr: Run }[]>();
+      for (const c of chosenC) {
+        const [pr, xr] = c.u.piece === P ? [c.u, c.v] : c.v.piece === P ? [c.v, c.u] : [null, null];
+        if (!pr || !xr || xr.piece === P || pr.chain || xr.chain) continue;
+        if (twinKindOf(P, xr.piece)) continue;
+        const k = xr.piece.pieceKey;
+        byX.set(k, [...(byX.get(k) ?? []), { c, pr, xr }]);
+      }
+      for (const list of byX.values()) {
+        // Only a piece that sits on ONE side of the host itself (its seams there all on one side
+        // of it — a half front: side seam and shoulder): a whole front spanning the host's two
+        // side seams is sewn on both sides by design.
+        const X = list[0].xr.piece;
+        const xSides = new Set(list.map((x) => xSideOf(X, x.xr.edges[0])));
+        if (!X.hand && (xSides.size !== 1 || xSides.has(0))) continue;
+        const sided = list
+          .map((x) => ({ ...x, side: xSideOf(P, x.pr.edges[0]) }))
+          .filter((x) => x.side !== 0);
+        if (sided.length < 2) continue;
+        const anchor = sided.reduce((m, x) => (x.pr.lenMm > m.pr.lenMm ? x : m));
+        for (const x of sided) {
+          if (x === anchor || x.side === anchor.side) continue;
+          const twin = twinEdgeOf(P, x.pr.edges[0]);
+          if (!twin) continue;
+          const to = all.find(
+            (q) =>
+              !q.dropped &&
+              q.kind !== 'closure-not-seam' &&
+              ((q.u.id === x.xr.id && q.v.id === twin.id) ||
+                (q.v.id === x.xr.id && q.u.id === twin.id)),
+          );
+          if (!to || to.score < x.c.score - SKELETON.ambiguity) continue;
+          if (moves.some((m) => m.from === x.c || m.to === to)) continue;
+          moves.push({ from: x.c, to, on: P.name });
+        }
+      }
+    }
+    if (moves.length) {
+      const drop = (c: Cand) => {
+        for (const [r, other] of sides(c))
+          for (const e of r.edges) {
+            const left = (usedBy.get(e.id) ?? []).filter(
+              (u) => !(u.piece === other.piece.pieceKey && u.edge === other.edges[0].id),
+            );
+            if (left.length) usedBy.set(e.id, left);
+            else usedBy.delete(e.id);
+          }
+        const at = chosenC.indexOf(c);
+        if (at >= 0) chosenC.splice(at, 1);
+      };
+      for (const m of moves) drop(m.from);
+      for (const m of moves) {
+        if (free(m.to)) {
+          m.to.evidence = {
+            ...m.to.evidence,
+            rule: `one side of ${m.on}: ${m.from.u.id} ↔ ${m.from.v.id} crossed to its far side (the mirror twin edge, flat the same) — moved next to the piece's other seam there`,
+          };
+          chosenC.push(m.to);
+          take(m.to);
+        } else if (free(m.from)) {
+          chosenC.push(m.from);
+          take(m.from);
+        }
+      }
+    }
+  }
+  const touches = (a: Cand, b: Cand) => {
+    const ea = new Set([...a.u.edges, ...a.v.edges].map((e) => e.id));
+    return [...b.u.edges, ...b.v.edges].some((e) => ea.has(e.id));
+  };
+  const sameAnswer = (x: Run, y: Run) => {
+    if (x.chain || y.chain) return false;
+    if (Math.abs(x.lenMm - y.lenMm) > SKELETON.lenAbsMm) return false;
+    if (x.notchesMm.length !== y.notchesMm.length) return false;
+    if (x.piece === y.piece) return rules.equivRect && x.piece.rect;
+    // Only a PROVEN layer (identical twin) is the same answer; an unproven copy is a real choice.
+    return rules.equivLayers && twinKindOf(x.piece, y.piece) === 'identical';
+  };
+  const equivalent = (c: Cand, q: Cand) =>
+    (c.u.id === q.u.id && sameAnswer(c.v, q.v)) ||
+    (c.u.id === q.v.id && sameAnswer(c.v, q.u)) ||
+    (c.v.id === q.u.id && sameAnswer(c.u, q.v)) ||
+    (c.v.id === q.v.id && sameAnswer(c.u, q.u));
+  // PLY SANDWICH. Identical layers (proven twins — a double yoke, collar plies) are sewn to each
+  // other along their designated edge, and a straight designated edge usually carries a THIRD
+  // piece between the two plies (the back under a double yoke). The ply seam does not use that edge
+  // up for a single-layer piece: after the greedy, a straight designated edge sewn only to its ply
+  // partner takes the best free edge of a piece with no layer of its own — once per ply pair. A
+  // pattern without identical layers never gets here (the graph is unchanged).
+  if (rules.identical && designated.size) {
+    const geomByKey = new Map(pieces.map((p) => [p.pieceKey, p]));
+    const plyOf = (p: PieceGeom) =>
+      p.twinOf.filter((t) => t.kind === 'identical').map((t) => t.key);
+    const plyRun = (r: Run) =>
+      !r.chain &&
+      designated.has(r.edges[0].id) &&
+      isStraight(r) &&
+      plyOf(r.piece).length > 0 &&
+      (usedBy.get(r.edges[0].id) ?? []).length > 0 &&
+      (usedBy.get(r.edges[0].id) ?? []).every((u) => plyOf(r.piece).includes(u.piece));
+    const single = (r: Run) =>
+      plyOf(r.piece).length === 0 && r.edges.every((e) => !(usedBy.get(e.id) ?? []).length);
+    const untake = (c: Cand) => {
+      for (const [r, other] of sides(c))
+        for (const e of r.edges) {
+          const left = (usedBy.get(e.id) ?? []).filter(
+            (u) => !(u.piece === other.piece.pieceKey && u.edge === other.edges[0].id),
+          );
+          if (left.length) usedBy.set(e.id, left);
+          else usedBy.delete(e.id);
+        }
+    };
+    // The piece sandwiched under a ply pair (the back under the yoke) gives its neighbours' seams to
+    // the pair where the pair offers the same answer: a front's shoulder the greedy put on the
+    // back's armhole edge (a near tie) goes to the yoke's shoulder on the front's own side — the
+    // side of the back the pieces of its hand are sewn to (plies.ts: read from the drawing).
+    const rehome = (ply: Run, q: Run, names: string) => {
+      const up = sameWayUp(q.piece, q.edges[0], ply.piece, ply.edges[0]);
+      const linksOfQ = (skip: Cand) =>
+        chosenC.flatMap((x) => {
+          if (x === skip) return [];
+          const [qr, o] =
+            x.u.piece === q.piece ? [x.u, x.v] : x.v.piece === q.piece ? [x.v, x.u] : [null, null];
+          return qr && o && o.piece !== q.piece && !qr.chain
+            ? [{ qEdge: qr.edges[0], hand: o.piece.hand }]
+            : [];
+        });
+      for (const c of [...chosenC]) {
+        if (c.dropped) continue;
+        const [qr, sr] =
+          c.u.piece === q.piece ? [c.u, c.v] : c.v.piece === q.piece ? [c.v, c.u] : [null, null];
+        if (!qr || !sr || qr.chain || qr.edges[0] === q.edges[0]) continue;
+        if (sr.piece === q.piece || sr.piece === ply.piece || !sr.piece.hand) continue;
+        if (plyOf(ply.piece).includes(sr.piece.pieceKey)) continue;
+        const want = handSideOn(q.piece, linksOfQ(c), sr.piece.hand) * up;
+        if (want === 0) continue;
+        const alt = eligible.find((x) => {
+          if (x === c || x.dropped) return false;
+          const [pr, s2] =
+            x.u.piece === ply.piece
+              ? [x.u, x.v]
+              : x.v.piece === ply.piece
+                ? [x.v, x.u]
+                : [null, null];
+          if (!pr || !s2 || pr.chain || s2.id !== sr.id) return false;
+          if ((usedBy.get(pr.edges[0].id) ?? []).length) return false;
+          if (x.score < c.score - SKELETON.ambiguity) return false;
+          if (x.evidence.dLenMm > c.evidence.dLenMm) return false;
+          return xSideOf(ply.piece, pr.edges[0]) === want;
+        });
+        if (!alt) continue;
+        untake(c);
+        chosenC.splice(chosenC.indexOf(c), 1);
+        alt.evidence = {
+          ...alt.evidence,
+          rule: `through the plies ${names}: ${sr.piece.name} is sewn to the ply pair, not to ${q.piece.name} sandwiched under it (${c.u.id} ↔ ${c.v.id} was a near tie)`,
+        };
+        chosenC.push(alt);
+        take(alt);
+      }
+    };
+    const pairDone = new Set<string>();
+    for (const c of eligible) {
+      if (c.score < SKELETON.accept) break;
+      if (c.kind !== 'edge' || chosenC.includes(c)) continue;
+      const [ply, other] =
+        plyRun(c.u) && single(c.v)
+          ? [c.u, c.v]
+          : plyRun(c.v) && single(c.u)
+            ? [c.v, c.u]
+            : [null, null];
+      if (!ply || !other) continue;
+      // Only a clear answer: lengths equal, and no other reading of either edge comes close (a
+      // collar ply's straight edge «fits» a sleeve's underarm by length alone; a belt loop fits
+      // a dozen short edges).
+      if (c.evidence.dLenMm > SKELETON.lenAbsMm) continue;
+      if (
+        eligible.some(
+          (q) =>
+            q !== c &&
+            twinKindOf(q.u.piece, q.v.piece) !== 'identical' &&
+            Math.abs(q.score - c.score) <= SKELETON.ambiguity &&
+            touches(c, q) &&
+            !equivalent(c, q),
+        )
+      )
+        continue;
+      const pair = [ply.piece.pieceKey, ...plyOf(ply.piece)].sort(cmp).join('+');
+      if (pairDone.has(pair)) continue;
+      pairDone.add(pair);
+      const names = [ply.piece.pieceKey, ...plyOf(ply.piece)]
+        .map((k) => geomByKey.get(k)?.name ?? k)
+        .join(' + ');
+      c.evidence = {
+        ...c.evidence,
+        rule: `sandwich: ${other.piece.name} sewn between the two plies ${names} (the plies are stitched together along this edge)`,
+      };
+      chosenC.push(c);
+      take(c);
+      rehome(ply, other, names);
+    }
+  }
+
+  const chosenSet = new Set(chosenC);
+  const engineChosen = chosenC.map((c) => {
+    const alts = eligible.filter(
+      (q) =>
+        q !== c &&
+        // The other hand's copy of a ×2 mirrored block is sewn too, not an alternative.
+        !chosenSet.has(q) &&
+        Math.abs(q.score - c.score) <= SKELETON.ambiguity &&
+        touches(c, q) &&
+        !equivalent(c, q),
+    );
+    return toCandidate(
+      c,
+      alts.map((q) => toCandidate(q)),
+    );
+  });
+  const chosen = forced.length ? [...forced, ...engineChosen] : engineChosen;
+
+  const rejected = [
+    ...decidedClosures,
+    ...closures.map((c) => toCandidate(c)),
+    ...all
+      .filter(
+        (c) =>
+          excludedSet.has(c) ||
+          (!chosenSet.has(c) &&
+            !forcedSame.has(c) &&
+            c.kind !== 'closure-not-seam' &&
+            c.score >= REJECTED_FLOOR),
+      )
+      .map((c) => toCandidate(c)),
+  ];
+
+  // Surface joins (P2 lane S) — outside all-pairs and the greedy: they take no edge, so the host's
+  // edges stay free for its ordinary seams; added on top of them.
+  if (rules.surface) chosen.push(...surfaceLayer(P, rejected, warnings));
+
+  // Connected components over seams (closures do not join pieces; surface joins do).
+  const parent = new Map(pieces.map((p) => [p.pieceKey, p.pieceKey]));
+  const find = (k: string): string => {
+    let r = k;
+    while (parent.get(r) !== r) r = parent.get(r) ?? r;
+    parent.set(k, r);
+    return r;
+  };
+  for (const c of chosenC) parent.set(find(c.u.piece.pieceKey), find(c.v.piece.pieceKey));
+  for (const c of forced) {
+    const ks = [...idsOfSide(c, 'a'), ...idsOfSide(c, 'b')]
+      .map(pieceOfId)
+      .filter((k) => parent.has(k));
+    for (const k of ks) parent.set(find(k), find(ks[0]));
+  }
+  for (const c of chosen) if (c.surface) parent.set(find(c.surface.host), find(c.surface.part));
+  const groups = new Map<string, string[]>();
+  for (const p of pieces) {
+    const r = find(p.pieceKey);
+    groups.set(r, [...(groups.get(r) ?? []), p.pieceKey]);
+  }
+
+  const unnotched = pieces.filter((p) => p.notchIdx.length === 0).length;
+  if (pieces.length && unnotched === pieces.length) {
+    warnings.push('no notches in the pattern — every pair rests on length alone');
+  } else if (unnotched > 0) {
+    warnings.push(`${unnotched} of ${pieces.length} pieces carry no notches`);
+  }
+  if (decisions) warnings.push(...decisions.words);
+
+  return { pieces: [...pieces], chosen, rejected, components: [...groups.values()], warnings };
+}

@@ -1,17 +1,23 @@
 import { common_TechCardInsert } from 'api/proto-http/admin';
+import { useCurrentAccount } from 'components/managers/accounts/utils/hooks';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardSignoffSectionOptions, techCardSignoffStateOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  Button,
+  Close,
+  FoldCaret,
+  GroupLabel,
+  Input,
+  Pill,
+  SectionHeader,
+  Text,
+  InputField,
+  SelectField,
+} from 'ui';
 import { TechCardFormData } from './schema';
 
 const PENDING = 'TECH_CARD_SIGNOFF_STATE_PENDING';
@@ -84,7 +90,8 @@ function legacyKeyedSections(insert?: common_TechCardInsert): Set<string> {
 }
 
 // One canonical section (Sheet «Титул» coordination — one row per section, unique per card, per
-// the schema comment). Bound to its row when one exists; otherwise a dashed "not started" card.
+// the schema comment). Bound to its row when one exists; otherwise pending, and approve/reject
+// creates the row already decided (no separate «start review» step).
 // Approve/reject/reset are explicit actions rather than a bare state dropdown so the "changed
 // since sign-off" flag has a natural, obvious place to send the user. `re-approve` clears the
 // staleness in a single save: it blanks signedDigest, and an empty digest is exactly how the
@@ -101,6 +108,7 @@ function SignoffSectionCard({
   snapshot,
   currentDigest,
   legacyKeys,
+  me,
   onStart,
   onRemove,
   onChangedReport,
@@ -112,14 +120,20 @@ function SignoffSectionCard({
   currentDigest: string;
   // This section's content includes rows the server stored with no line_key — see legacyKeyedSections.
   legacyKeys: boolean;
-  onStart: () => void;
+  /** The signed-in account: it is who signs. No typed name. */
+  me: string;
+  /** Creates this section's row already decided — there is no separate «start review» step. */
+  onStart: (row: Partial<SignoffRowValue>) => void;
   onRemove: () => void;
   onChangedReport: (section: string, changed: boolean) => void;
 }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const bound = index >= 0;
-  const state = (useWatch({ control, name: `signoffs.${index}.state` }) ?? PENDING) as string;
+  const watchedState = useWatch({ control, name: `signoffs.${index}.state` }) as string | undefined;
+  const state = bound ? watchedState ?? PENDING : PENDING;
+  const signedBy = (useWatch({ control, name: `signoffs.${index}.signedBy` }) ?? '') as string;
   const signedAt = (useWatch({ control, name: `signoffs.${index}.signedAt` }) ?? '') as string;
+  const note = (useWatch({ control, name: `signoffs.${index}.note` }) ?? '') as string;
   const signedDigest = (useWatch({ control, name: `signoffs.${index}.signedDigest` }) ??
     '') as string;
 
@@ -151,40 +165,48 @@ function SignoffSectionCard({
     onChangedReport(section, changed);
   }, [changed, section, onChangedReport]);
 
-  if (!bound) {
-    return (
-      <div className='flex flex-wrap items-center gap-1.5 border border-dashed border-borderColor p-2'>
-        <Text size='micro' component='span' className='font-bold uppercase'>
-          {label}
-        </Text>
-        <Pill tone='mut'>not started</Pill>
-        <div className='ml-auto'>
-          <Button type='button' variant='secondary' size='xs' onClick={onStart}>
-            start review
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  // Одобренная и нетронутая секция свёрнута в одну строку: на ней нечего делать. Раскрыта всякая,
+  // что ждёт решения; стоит одобрению устареть — разворачивается сама.
+  const settled = state === APPROVED && !changed;
+  const [open, setOpen] = useState(!settled);
+  useEffect(() => {
+    if (!settled) setOpen(true);
+  }, [settled]);
 
+  // Отказ без причины не принимается: поле причины открывается по «reject», кнопка подтверждения
+  // молчит, пока поле пусто.
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+
+  // ОДИН КЛИК НА СЕКЦИЮ, никогда пачкой. Подписывает вошедший (`me`), дата — сегодня; имя руками
+  // не набирается. Пустой digest — это и есть «одобряю сейчас» на проводе: сервер снимет отпечаток
+  // с того, что сохраняется, так что `re-approve` на устаревшей секции чинит её одним сохранением.
   const approve = () => {
-    setValue(`signoffs.${index}.state`, APPROVED, { shouldDirty: true });
-    if (!signedAt) setValue(`signoffs.${index}.signedAt`, todayISODate(), { shouldDirty: true });
-    // Clearing the digest is what MAKES this an approval on the wire: an empty signedDigest asks the
-    // server to fingerprint the content being saved, while a present one means "ordinary save, do
-    // not re-bless". So `re-approve` on a stale section really does clear it, in one save — the user
-    // does not have to go the long way round through reset → save → approve → save.
-    setValue(`signoffs.${index}.signedDigest`, '', { shouldDirty: true });
+    const stamp = { state: APPROVED, signedBy: me, signedAt: todayISODate(), signedDigest: '' };
+    if (!bound) onStart(stamp);
+    else
+      for (const [k, v] of Object.entries(stamp))
+        setValue(`signoffs.${index}.${k as 'state'}`, v, { shouldDirty: true });
     setBaseline(snapshot);
   };
   const reject = () => {
-    setValue(`signoffs.${index}.state`, REJECTED, { shouldDirty: true });
+    const why = reason.trim();
+    if (!why) return;
+    const stamp = { state: REJECTED, signedBy: me, signedAt: todayISODate(), note: why };
+    if (!bound) onStart(stamp);
+    else
+      for (const [k, v] of Object.entries(stamp))
+        setValue(`signoffs.${index}.${k as 'state'}`, v, { shouldDirty: true });
     setBaseline(null);
+    setRejecting(false);
+    setReason('');
   };
   const resetPending = () => {
     setValue(`signoffs.${index}.state`, PENDING, { shouldDirty: true });
     setBaseline(null);
   };
+
+  const stampLine = [signedBy, signedAt].filter(Boolean).join(' · ');
 
   return (
     <div
@@ -194,73 +216,134 @@ function SignoffSectionCard({
       )}
     >
       <div className='flex flex-wrap items-center gap-1.5'>
-        <Text size='micro' component='span' className='font-bold uppercase'>
-          {label}
-        </Text>
+        <button
+          type='button'
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className='flex items-center'
+        >
+          <Text size='micro' component='span' className='font-bold uppercase'>
+            {label}
+          </Text>
+          <FoldCaret open={open} />
+        </button>
         {/* mid-flight, needs a human → blue. It replaces the state pill: "approved" next to
             "changed after approval" would be two answers to the same question. */}
         {changed ? (
           <Pill tone='attention'>changed after approval</Pill>
         ) : (
-          <Pill tone={stateTone(state)}>{stateLabel(state)}</Pill>
+          <Pill tone={stateTone(state)}>{bound ? stateLabel(state) : 'pending'}</Pill>
         )}
-        <div className='ml-auto'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            aria-label={`remove ${label} sign-off`}
-            onClick={onRemove}
-          >
-            ✕
-          </Button>
-        </div>
+        {bound && stampLine && state !== PENDING && (
+          <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
+            {stampLine}
+          </Text>
+        )}
+        {open && !settled && (
+          <div className='ml-auto'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={!me}
+              title={me ? undefined : 'loading your account…'}
+              onClick={approve}
+            >
+              {changed ? 're-approve' : 'approve'}
+            </Button>
+          </div>
+        )}
       </div>
 
-      <div className='flex flex-wrap gap-1'>
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          disabled={state === APPROVED && !changed}
-          onClick={approve}
-        >
-          {changed ? 're-approve' : 'approve'}
-        </Button>
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          disabled={state === REJECTED}
-          onClick={reject}
-        >
-          reject
-        </Button>
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          disabled={state === PENDING}
-          onClick={resetPending}
-        >
-          reset to pending
-        </Button>
-      </div>
+      {open && (
+        <>
+          {/* Advisory, never blocking: the mint is unavoidable and the save is legitimate — what
+              would otherwise be inexplicable is the section turning red for it. */}
+          {legacyKeys && state === APPROVED && (
+            <Text size='micro' variant='label'>
+              ! next save re-keys old rows and marks this approval changed
+            </Text>
+          )}
 
-      {/* Advisory, never blocking: the mint is unavoidable and the save is legitimate — what would
-          otherwise be inexplicable is the section turning red for it. */}
-      {legacyKeys && state === APPROVED && (
-        <Text size='micro' variant='label'>
-          ! legacy rows here carry no stable line key — the first save mints one, and that counts as
-          a content change against this approval
-        </Text>
+          {state === REJECTED && note && (
+            <Text size='micro' variant='error'>
+              {note}
+            </Text>
+          )}
+
+          {rejecting && (
+            <div className='flex items-center gap-1.5'>
+              <Input
+                name={`signoff-reason-${section}`}
+                value={reason}
+                autoFocus
+                autoComplete='off'
+                placeholder='reason'
+                className='min-w-0 flex-1'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    reject();
+                  }
+                }}
+              />
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={!reason.trim() || !me}
+                onClick={reject}
+              >
+                reject section
+              </Button>
+            </div>
+          )}
+
+          {/* Отказ, сброс и снятие — редкие ходы, свёрнуты; на виду только одобрение. */}
+          <details className='group'>
+            <summary className='flex cursor-pointer list-none items-center'>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                details
+              </Text>
+              <FoldCaret open='details' />
+            </summary>
+            <div className='mt-1 flex flex-wrap gap-1'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={state === REJECTED || rejecting}
+                onClick={() => setRejecting(true)}
+              >
+                reject
+              </Button>
+              {bound && (
+                <>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    disabled={state === PENDING}
+                    onClick={resetPending}
+                  >
+                    reset to pending
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    aria-label={`remove ${label} sign-off`}
+                    onClick={onRemove}
+                  >
+                    remove
+                  </Button>
+                </>
+              )}
+            </div>
+          </details>
+        </>
       )}
-
-      <div className='grid grid-cols-1 gap-1.5 sm:grid-cols-3'>
-        <InputField name={`signoffs.${index}.signedBy`} label='signed by' />
-        <InputField name={`signoffs.${index}.signedAt`} type='date' label='signed at' />
-        <InputField name={`signoffs.${index}.note`} label='note' />
-      </div>
     </div>
   );
 }
@@ -273,6 +356,8 @@ function SignoffSectionCard({
 export function SignoffsField() {
   const { control } = useFormContext<TechCardFormData>();
   const { append, remove } = useFieldArray({ control, name: 'signoffs' });
+  const { data: account } = useCurrentAccount();
+  const me = account?.account?.username ?? '';
   const watchedSignoffs = (useWatch({ control, name: 'signoffs' }) ?? []) as SignoffRowValue[];
 
   // The card's CURRENT per-section fingerprints, the other side of each row's signedDigest. Read
@@ -390,26 +475,19 @@ export function SignoffsField() {
     const idx = indexBySection.get(o.value);
     return idx != null && watchedSignoffs[idx]?.state === REJECTED;
   }).length;
-  const pendingCount = total - approvedCount - rejectedCount;
   const changedCount = Object.values(changedFlags).filter(Boolean).length;
 
   const summary = [
-    `— ${approvedCount} of ${total} approved`,
+    `${approvedCount} of ${total} approved`,
     rejectedCount ? `${rejectedCount} rejected` : '',
-    pendingCount ? `${pendingCount} pending` : '',
-    changedCount ? `${changedCount} invalidated by later edits` : '',
+    changedCount ? `${changedCount} changed` : '',
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
     <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
-      <SectionHeader title='every section signed before release' question={summary} />
-      <Text size='micro' variant='label' className='mb-2'>
-        each section is checked and approved by its responsible role — confirmation the sheet is
-        ready for production, not just that it has been filled in. A section that changed after
-        approval must re-open; all {total} must be approved to release.
-      </Text>
+      <SectionHeader title='sign-off' question={summary} />
 
       <div className='grid grid-cols-1 gap-1.5 sm:grid-cols-2'>
         {techCardSignoffSectionOptions.map((opt) => (
@@ -421,7 +499,8 @@ export function SignoffsField() {
             snapshot={sectionSnapshot[opt.value] ?? ''}
             currentDigest={currentDigests.get(opt.value) ?? ''}
             legacyKeys={legacySections.has(opt.value)}
-            onStart={() => append({ ...emptySignoff, section: opt.value })}
+            me={me}
+            onStart={(row) => append({ ...emptySignoff, ...row, section: opt.value })}
             onRemove={() => {
               const idx = indexBySection.get(opt.value);
               if (idx != null) remove(idx);
@@ -434,9 +513,6 @@ export function SignoffsField() {
       {extraIndices.length > 0 && (
         <>
           <GroupLabel>other entries</GroupLabel>
-          <Text size='micro' variant='label' className='mb-1'>
-            duplicate or unrecognised section entries — safe to remove if unintended.
-          </Text>
           <div className='flex flex-col gap-1.5'>
             {extraIndices.map((index) => (
               <div
@@ -459,15 +535,7 @@ export function SignoffsField() {
                   <div className='flex-1'>
                     <InputField name={`signoffs.${index}.note`} label='note' />
                   </div>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    aria-label='remove sign-off'
-                    onClick={() => remove(index)}
-                  >
-                    ✕
-                  </Button>
+                  <Close size='sm' aria-label='remove sign-off' onClick={() => remove(index)} />
                 </div>
               </div>
             ))}

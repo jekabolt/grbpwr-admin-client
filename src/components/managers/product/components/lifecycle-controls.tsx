@@ -2,12 +2,7 @@ import { adminService } from 'api/api';
 import { common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, Section, Pill, Text } from 'ui';
 
 // R6: the colourway lifecycle is a stored status with server-validated transitions, driven by
 // dedicated RPCs (not a raw `hidden` write). This block replaces the old visibility toggle:

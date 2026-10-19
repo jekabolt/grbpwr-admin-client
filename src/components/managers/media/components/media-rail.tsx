@@ -1,7 +1,4 @@
-import { Button } from 'ui/components/button';
-import { RatioGlyph } from 'ui/components/ratio-glyph';
-import { SideRail, SideRailGroup, SideRailItem } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+import { Button, RatioGlyph, SideRail, SideRailGroup, SideRailItem, Text } from 'ui';
 import { FilterType, OTHER_RATIO, UsageShelf } from '../utils/useFilter';
 
 /**

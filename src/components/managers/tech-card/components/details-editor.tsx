@@ -4,17 +4,21 @@ import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
-import { Toolbar } from 'ui/components/toolbar';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import {
+  AddDoor,
+  Button,
+  Chip,
+  Input,
+  Media,
+  Pill,
+  Section,
+  Text,
+  Textarea,
+  Toolbar,
+  Close,
+} from 'ui';
+import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { InertDoor } from './design/bench-slot';
 import { cardFactsContext } from './design/core/card-facts';
 import { isBoardRow } from './design/core/mood-gate';
@@ -234,7 +238,8 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   // аспект — правило двери у поля-адресата (`references-section.tsx`, `takeAspects`). Здесь только
   // ЧИСЛО, тем же счётом; текст не собирается — второго писателя у правила нет.
   const pasteLines =
-    (fit.trim() ? 1 : 0) + details.filter((d) => (d.key ?? '').trim() && (d.text ?? '').trim()).length;
+    (fit.trim() ? 1 : 0) +
+    details.filter((d) => (d.key ?? '').trim() && (d.text ?? '').trim()).length;
 
   const addAspect = () => {
     const own = newAspect.trim();
@@ -274,96 +279,98 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
       className={GROUP_SEAM}
     >
       <div className='space-y-2.5' data-c19-aspects=''>
-      {/* СПИСОК И ЕГО ПОСЛЕДНИЙ, ПУСТОЙ РЯД — ОДИН СТОЛБИК. Дверь `+ aspect` стоит там, где
+        {/* СПИСОК И ЕГО ПОСЛЕДНИЙ, ПУСТОЙ РЯД — ОДИН СТОЛБИК. Дверь `+ aspect` стоит там, где
           появится аспект, а не в шапке блока (п.6): ряд-плейсхолдер держит тот же левый край и тот
           же ритм, что заполненные ряды над ним, поэтому «добавить» читается как продолжение
           списка, а не как отдельный орган. Пустой список ничего не объясняет словами — там этот
           ряд и есть всё содержимое блока, и он сам говорит, что делать. */}
-      <div data-c19-aspect-list=''>
-        {allKeys.map((key, i) => {
-          const d = detailByKey(key);
-          return (
-            <AspectRow
-              key={key}
-              aspectKey={key}
-              last={i === allKeys.length - 1}
-              text={d?.text ?? ''}
-              ids={d?.mediaIds ?? []}
-              inputIds={inputIds}
-              urlOf={urlOf}
-              onText={(text) => upsert(key, { text })}
-              enhanceContext={enhanceContext}
-              onAddImages={(picked) => addImages(key, picked)}
-              onRemoveImage={(id) => removeImage(key, id)}
-              onRemoveAspect={() => removeAspect(key)}
-              onOpenViewer={(index, ids) => setViewer({ items: viewerItemsFor(ids), index })}
-            />
-          );
-        })}
-        {/* ВОЗДУХ ПОД ПОСЛЕДНИМ РЯДОМ (владелец, 2026-09-26, O-40): «от плейсхолдера + aspect до
+        <div data-c19-aspect-list=''>
+          {allKeys.map((key, i) => {
+            const d = detailByKey(key);
+            return (
+              <AspectRow
+                key={key}
+                aspectKey={key}
+                last={i === allKeys.length - 1}
+                text={d?.text ?? ''}
+                ids={d?.mediaIds ?? []}
+                inputIds={inputIds}
+                urlOf={urlOf}
+                onText={(text) => upsert(key, { text })}
+                enhanceContext={enhanceContext}
+                onAddImages={(picked) => addImages(key, picked)}
+                onRemoveImage={(id) => removeImage(key, id)}
+                onRemoveAspect={() => removeAspect(key)}
+                onOpenViewer={(index, ids) => setViewer({ items: viewerItemsFor(ids), index })}
+              />
+            );
+          })}
+          {/* ВОЗДУХ ПОД ПОСЛЕДНИМ РЯДОМ (владелец, 2026-09-26, O-40): «от плейсхолдера + aspect до
             подчеркивания выше сделай больше гэп»; и O-48: «после последнего чилда в списке не
             делать подчеркивание». Линейка стоит только МЕЖДУ рядами — последний ряд кончается
             воздухом, — а дверь и пикер, встающий на её место, отступают от него на один шаг, и
             только когда над ними есть ряды: в пустом списке дверь остаётся первой строкой под
             шапкой, без лишнего зазора. */}
-        {!picker ? (
-          <button
-            type='button'
-            onClick={() => setPicker(true)}
-            data-c19-aspect-add=''
-            className={`${afterRows}flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`}
-          >
-            + aspect
-          </button>
-        ) : (
-          /* ПИКЕР ВСТАЁТ РОВНО НА МЕСТО РЯДА-ПЛЕЙСХОЛДЕРА — той же последней строкой списка, а не
+          {!picker ? (
+            <AddDoor afterRows={!!afterRows} onClick={() => setPicker(true)} data-c19-aspect-add=''>
+              aspect
+            </AddDoor>
+          ) : (
+            /* ПИКЕР ВСТАЁТ РОВНО НА МЕСТО РЯДА-ПЛЕЙСХОЛДЕРА — той же последней строкой списка, а не
              отдельным органом ниже: двух дверей «добавить» на экране не бывает ни на миг. Полоса
              контролов (`Toolbar` — единственная рамка, которой внутри блока можно): словарь, своё
              имя, `add`, `close`. Якорь проб стоит на обёртке: `Toolbar` чужие пропы не пропускает,
              и `data-*` на нём молча терялся бы. */
-          <div data-c19-aspect-picker='' className={afterRows || undefined}>
-            <Toolbar>
-              {remainingStandard.length > 0 && (
-                <select
-                  aria-label='aspect kind'
-                  value={newStandard}
-                  onChange={(e) => setNewStandard(e.target.value)}
-                  className='min-h-[22px] w-44 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+            <div data-c19-aspect-picker='' className={afterRows || undefined}>
+              <Toolbar>
+                {remainingStandard.length > 0 && (
+                  <select
+                    aria-label='aspect kind'
+                    value={newStandard}
+                    onChange={(e) => setNewStandard(e.target.value)}
+                    className='min-h-[22px] w-44 appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+                  >
+                    <option value=''>— not set —</option>
+                    {remainingStandard.map((a) => (
+                      <option key={a.key} value={a.key}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <Input
+                  name='new-aspect'
+                  aria-label='your own aspect'
+                  value={newAspect}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setNewAspect(e.target.value)
+                  }
+                  placeholder='or your own, e.g. lining'
+                  className='w-48'
+                />
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={addAspect}
+                  data-c19-aspect-confirm=''
                 >
-                  <option value=''>— not set —</option>
-                  {remainingStandard.map((a) => (
-                    <option key={a.key} value={a.key}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <Input
-                name='new-aspect'
-                aria-label='your own aspect'
-                value={newAspect}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAspect(e.target.value)}
-                placeholder='or your own, e.g. lining'
-                className='w-48'
-              />
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                onClick={addAspect}
-                data-c19-aspect-confirm=''
-              >
-                add
-              </Button>
-              <Button type='button' variant='secondary' size='xs' onClick={() => setPicker(false)}>
-                close
-              </Button>
-            </Toolbar>
-          </div>
-        )}
-      </div>
+                  add
+                </Button>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => setPicker(false)}
+                >
+                  close
+                </Button>
+              </Toolbar>
+            </div>
+          )}
+        </div>
 
-      {/* ДВЕРЬ ВСТАВКИ ВО ФЛЭТ — см. шапку файла: живая стоит у поля-адресата на шаге FLAT, здесь —
+        {/* ДВЕРЬ ВСТАВКИ ВО ФЛЭТ — см. шапку файла: живая стоит у поля-адресата на шаге FLAT, здесь —
           инертная с причиной, и число строк тем же правилом. */}
       <div className='flex flex-wrap items-center gap-2' data-c19-paste-lines={pasteLines}>
         <InertDoor
@@ -390,14 +397,14 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
         />
       )}
 
-      {/* click-to-enlarge preview of the aspect's reference images */}
-      <MediaViewer
-        items={viewer?.items ?? []}
-        index={viewer?.index ?? 0}
-        open={!!viewer}
-        onOpenChange={(open) => !open && setViewer(null)}
-        onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
-      />
+        {/* click-to-enlarge preview of the aspect's reference images */}
+        <MediaViewer
+          items={viewer?.items ?? []}
+          index={viewer?.index ?? 0}
+          open={!!viewer}
+          onOpenChange={(open) => !open && setViewer(null)}
+          onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
+        />
       </div>
     </Section>
   );
@@ -501,16 +508,12 @@ function AspectRow({
           data-c19-prov={aspectKey}
           data-provenance='drafted'
         />
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
+        <Close
+          size='sm'
           aria-label={`remove aspect ${label}`}
           onClick={onRemoveAspect}
           data-c19-aspect-drop={aspectKey}
-        >
-          ✕
-        </Button>
+        />
       </div>
 
       {/* РАМКА ОДНА: пока поле подсвечено, его собственный край снят (`border-0`), и синий край
@@ -555,7 +558,7 @@ function AspectRow({
           const url = urlOf(id);
           return (
             <div key={id} className='min-w-[100px]' data-c19-aspect-pic={id}>
-              <div className='relative size-[100px] border border-borderColor bg-bgZebra'>
+              <div className='relative size-[100px] border border-borderColor bg-pageBg'>
                 <button
                   type='button'
                   onClick={() => url && onOpenViewer(imgIndex, ids)}
@@ -571,14 +574,12 @@ function AspectRow({
                     </span>
                   )}
                 </button>
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label='remove image'
                   onClick={() => onRemoveImage(id)}
-                  className='absolute right-0.5 top-0.5 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor'
-                >
-                  ✕
-                </button>
+                  className='absolute right-0.5 top-0.5 bg-bgColor'
+                />
               </div>
               {inputIds.has(id) && (
                 <div className='pt-0.5'>

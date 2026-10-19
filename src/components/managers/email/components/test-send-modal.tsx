@@ -1,10 +1,7 @@
 import { common_EmailCampaignInsert } from 'api/proto-http/admin';
 import { LANGUAGES } from 'constants/constants';
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Input, Select, Text } from 'ui';
 import { useTestSend } from './useCampaign';
 
 interface TestSendModalProps {
@@ -58,7 +55,7 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
           <Text component='label' size='small' variant='label'>
             recipient email(s)
           </Text>
-          <div className='border-b border-textInactiveColor'>
+          <div className='border-b border-borderColor'>
             <Input
               value={emails}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmails(e.target.value)}

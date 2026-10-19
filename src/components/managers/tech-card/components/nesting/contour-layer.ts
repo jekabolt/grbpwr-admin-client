@@ -29,6 +29,7 @@ import {
   type AllowanceIndex,
   type ContourAllowance,
 } from './contour-allowance';
+import { manifestFactsOf } from './manifest-facts';
 
 export type LayerOption = {
   layer: string;
@@ -52,7 +53,43 @@ export type LayerOption = {
   // Замер ДАЛ ВЕРДИКТ (крой или шов). false — либо не мерили вовсе, либо улик не нашлось; обе
   // ветки обязаны звучать как «не измерено», а не как «ноль».
   sampled: boolean;
+  // СЛОЙ КРОЯ, ЗАЯВЛЕННЫЙ МАНИФЕСТОМ КОНВЕРТАЦИИ (F6b): КАЖДАЯ деталь на этом слое пришла из файла
+  // с манифестом, и манифест называет этот слой финальной линией кроя. Ключа нет вовсе — заявления
+  // нет (у файлов без манифеста список слоёв ровно прежний, до последнего поля).
+  trustedCut?: true;
 };
+
+// Припуск, ЗАЯВЛЕННЫЙ конвертером, — в той же форме, что замер, чтобы подпись, отказ «двойной
+// припуск» и предзаполнение читали одно и то же поле, а не две похожие ветки.
+function manifestAllowance(layer: string, cm: number, chosenPieces: number): ContourAllowance {
+  const r = Math.round(cm * 100) / 100;
+  return {
+    layer,
+    verdict: 'cut',
+    allowanceCm: r,
+    gapCm: r,
+    reason: null,
+    samples: [],
+    stats: {
+      chosenPieces,
+      aloneInBlock: 0,
+      pairsTried: 0,
+      rejectedCrossing: 0,
+      rejectedSpread: 0,
+      rejectedTooClose: 0,
+      rejectedTooWide: 0,
+      rejectedNoOrigin: 0,
+      conflicted: 0,
+      accepted: 0,
+      votesChosenOutside: 0,
+      votesChosenInside: 0,
+    },
+    source: 'manifest',
+  };
+}
+
+// Расхождение замера с заявлением, при котором оно печатается: полмиллиметра (K1 §СПИСОК ПРАВОК, 2).
+const MANIFEST_CROSSCHECK_TOL_CM = 0.05;
 
 // Габарит с точностью до 0.5 мм: градация мельче этого не бывает, а дребезг тесселяции бывает.
 const dim = (p: PieceDTO) => `${Math.round(p.bboxW * 20)}x${Math.round(p.bboxH * 20)}`;
@@ -78,9 +115,20 @@ export function layerOptions(
   // слой → идентичность → размер → габарит
   const byLayer = new Map<string, Map<string, Map<string, string>>>();
   const count = new Map<string, number>();
+  // Детали слоя, про которые манифест сказал «этот слой — финальная линия кроя», и заявленный
+  // припуск (см). Наибольший — если файлы пачки заявили разное: подпись про «сколько припуска уже в
+  // контуре» не должна занижать, а решение (крой, прифилл 0) от числа не зависит.
+  const declaredCut = new Map<string, { n: number; cm: number }>();
   for (const p of pieces) {
     const layer = p.layer ?? '';
     count.set(layer, (count.get(layer) ?? 0) + 1);
+    const declared = manifestFactsOf(p);
+    if (declared && declared.cutLayer === layer) {
+      const d = declaredCut.get(layer) ?? { n: 0, cm: 0 };
+      d.n += 1;
+      d.cm = Math.max(d.cm, declared.cutAllowanceCm);
+      declaredCut.set(layer, d);
+    }
     const code = codeById.get(p.id);
     if (!code || !code.identity) continue;
     const ident = byLayer.get(layer) ?? new Map<string, Map<string, string>>();
@@ -105,6 +153,37 @@ export function layerOptions(
     // Замер пристёгивается ЗДЕСЬ, а не в сортировке ниже: он подпись к выбору, а не участник
     // ранжирования. Слой, на котором лежит линия кроя, остаётся ровно там же в списке, где стоял
     // до Ф3, — просто теперь про него сказано, что он линия кроя.
+    //
+    // ЗАЯВЛЕНИЕ МАНИФЕСТА (F6b) — только когда КАЖДАЯ деталь слоя пришла из файла, назвавшего этот
+    // слой линией кроя. Слой, где рядом лежат детали без манифеста, меряется как всегда: заявление
+    // одного файла не говорит ничего про контуры другого. Замер при этом не выбрасывается — он
+    // становится сверкой (crossCheck), если индекс передан.
+    const declared = declaredCut.get(layer);
+    if (declared && declared.n === pieceCount) {
+      const allowance = manifestAllowance(layer, declared.cm, pieceCount);
+      if (index) {
+        const m = measureContourAllowance(pieces, layer, index);
+        allowance.crossCheck = {
+          verdict: m.verdict,
+          allowanceCm: m.allowanceCm,
+          agrees:
+            m.verdict === 'unknown' ||
+            (m.verdict === 'cut' &&
+              Math.abs((m.allowanceCm ?? 0) - allowance.allowanceCm!) <= MANIFEST_CROSSCHECK_TOL_CM),
+        };
+      }
+      out.push({
+        layer,
+        pieces: pieceCount,
+        graded,
+        checked,
+        allowance,
+        allowanceCm: allowance.allowanceCm,
+        sampled: true,
+        trustedCut: true,
+      });
+      continue;
+    }
     const allowance = index ? measureContourAllowance(pieces, layer, index) : null;
     out.push({
       layer,
@@ -143,6 +222,14 @@ export function layerOptions(
 export function layerAllowanceLabel(o: LayerOption): string {
   const m = o.allowance;
   if (!m) return '';
+  if (m.source === 'manifest') {
+    const declared = `cut line (converter), +${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm`;
+    const c = m.crossCheck;
+    if (!c || c.agrees) return declared;
+    return c.verdict === 'cut'
+      ? `${declared} — the file measures +${(engineCmToMm(c.allowanceCm) ?? 0).toFixed(1)} mm`
+      : `${declared} — the file measures a seam line here`;
+  }
   // ЗАМЕР ЖИВЁТ В САНТИМЕТРАХ (это геометрия файла), ПОКАЗЫВАЕТСЯ В МИЛЛИМЕТРАХ (это припуск).
   // Конверсия здесь и в предзаполнении ниже — по одной и той же функции, других в файле нет.
   if (m.verdict === 'cut') return `cut line, +${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm`;
@@ -213,6 +300,15 @@ export function seamAllowancePrefill(args: {
   fallbackMm: number;
 }): SeamAllowancePrefill {
   const m = args.measured;
+  if (m && m.source === 'manifest' && m.verdict === 'cut') {
+    // Заявление конвертера: слой — ФИНАЛЬНАЯ линия кроя при любом числе блоков (замер на одном-двух
+    // блоках молчит законно, а двойной припуск там тот же — K1 f1/f2/f3 дали +8…23 % площади).
+    return {
+      value: 0,
+      source: 'contour_is_cut',
+      why: `layer ${m.layer} carries the FINAL cut line (declared by the converter's manifest) — the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour, no offset needed`,
+    };
+  }
   if (m && m.verdict === 'cut' && (m.allowanceCm ?? 0) > 0) {
     return {
       value: 0,
@@ -252,8 +348,21 @@ export function seamAllowancePrefill(args: {
 
 // Слой по умолчанию. Возвращает '' когда выбирать не из чего — вызывающий тогда ничего не
 // фильтрует, вместо того чтобы показать пустой лист.
+//
+// Слой, заявленный манифестом конвертации как линия кроя, выбирается ПЕРВЫМ (F6b): ранжирование по
+// градации его обычно и так ставит первым (1 и 14 градуируются оба, ничья уходит к «1»), но
+// «обычно» — не обещание, а манифест — обещание. Без манифеста ключа trustedCut нет ни у одного
+// слоя, и ответ прежний.
 export function defaultContourLayer(options: readonly LayerOption[]): string {
-  return options[0]?.layer ?? '';
+  return options.find((o) => o.trustedCut)?.layer ?? options[0]?.layer ?? '';
+}
+
+// ЛЕЖИТ ЛИ НА СЛОЕ ЛИНИЯ КРОЯ — одно выражение на все отказы «двойной припуск» (модалка раскладки,
+// условия замера). Замер говорит «крой» только с положительным припуском; заявление манифеста —
+// всегда, потому что линия кроя финальна и при нулевом припуске (добавить сверху нечего и нельзя).
+export function contourIsCutLine(m: ContourAllowance | null | undefined): boolean {
+  if (!m || m.verdict !== 'cut') return false;
+  return m.source === 'manifest' || (m.allowanceCm ?? 0) > 0;
 }
 
 // Блоки, у которых на выбранном слое контура НЕТ вовсе. Такие детали фильтр выкидывает молча —

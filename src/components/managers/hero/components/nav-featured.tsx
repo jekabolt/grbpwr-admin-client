@@ -2,11 +2,8 @@ import { common_ArchiveList, common_MediaFull } from 'api/proto-http/admin';
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 import { useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import { TranslationField } from 'ui/form/fields/translation-field';
+import { Button, GroupLabel, Text, InputField } from 'ui';
+import { TranslationField } from 'components/shared/translation/translation-field';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { ArchivePicker } from './archive-picker';
 import { HeroSchema } from './schema';
@@ -67,7 +64,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
         </div>
         <div className='w-full flex flex-col gap-4'>
           <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
-          <div className='flex items-center w-full border border-textInactiveColor justify-between px-2 py-1'>
+          <div className='flex items-center w-full border border-borderColor justify-between px-2 py-1'>
             <Text variant='uppercase'>
               {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
             </Text>

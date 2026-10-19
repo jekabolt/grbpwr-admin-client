@@ -3,11 +3,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
+import { Button, Section, HeaderCount, Text, Tooltip, TooltipProvider } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { pictureRepresentation } from './bench-kinds';
@@ -176,7 +172,7 @@ function StepCell({
       data-locked={state === 'blocked' || later ? note : undefined}
       aria-label={`${step.label} · ${state}`}
       onClick={onOpen}
-      className={cn(CELL, 'hover:bg-bgSecondary', className)}
+      className={cn(CELL, 'hover:bg-pageBg', className)}
     >
       {body}
     </button>

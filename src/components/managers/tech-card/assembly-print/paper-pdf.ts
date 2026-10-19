@@ -234,6 +234,21 @@ async function base64Of(url: string): Promise<string> {
 
 type Pdf = InstanceType<typeof import('jspdf').jsPDF>;
 
+/** FeatureMono (Regular + Bold) as base64, fetched from the bundle once per call. */
+export async function paperFontData(): Promise<{ regular: string; bold: string }> {
+  const [regular, bold] = await Promise.all([base64Of(regularTtf), base64Of(boldTtf)]);
+  return { regular, bold };
+}
+
+/** Embed FeatureMono into a jsPDF document under the family «FeatureMono». */
+export function registerPaperFonts(pdf: Pdf, data: { regular: string; bold: string }): string {
+  pdf.addFileToVFS('FeatureMono-Regular.ttf', data.regular);
+  pdf.addFont('FeatureMono-Regular.ttf', FAMILY, 'normal');
+  pdf.addFileToVFS('FeatureMono-Bold.ttf', data.bold);
+  pdf.addFont('FeatureMono-Bold.ttf', FAMILY, 'bold');
+  return FAMILY;
+}
+
 /** Примитивы листа на странице: точка v → v·k + t; кегли, толщины и штрих — × k. */
 function drawPrims(pdf: Pdf, prims: Prim[], k: number, tx: number, ty: number) {
   const X = (v: number) => v * k + tx;
@@ -314,21 +329,14 @@ export async function exportPaperPdf(
 ): Promise<void> {
   const problem = pdfSizeProblem(size);
   if (problem) throw new Error(`${size.w} × ${size.h} mm: ${problem}`);
-  const [{ jsPDF }, regular, bold] = await Promise.all([
-    import('jspdf'),
-    base64Of(regularTtf),
-    base64Of(boldTtf),
-  ]);
+  const [{ jsPDF }, fonts] = await Promise.all([import('jspdf'), paperFontData()]);
   const pdf = new jsPDF({
     orientation: size.w > size.h ? 'landscape' : 'portrait',
     unit: 'mm',
     format: [size.w, size.h],
     compress: true,
   });
-  pdf.addFileToVFS('FeatureMono-Regular.ttf', regular);
-  pdf.addFont('FeatureMono-Regular.ttf', FAMILY, 'normal');
-  pdf.addFileToVFS('FeatureMono-Bold.ttf', bold);
-  pdf.addFont('FeatureMono-Bold.ttf', FAMILY, 'bold');
+  registerPaperFonts(pdf, fonts);
   pdf.setDrawColor('#000000');
   pdf.setFillColor('#000000');
   pdf.setTextColor('#000000');

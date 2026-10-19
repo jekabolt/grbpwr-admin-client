@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Link, useNavigate } from 'react-router-dom';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Media, Text, EmptyCell } from 'ui';
 import { useInfiniteFittings } from './useFittingQuery';
 import { formatFittingDate, statusLabel, verdictLabel } from './utils';
 
@@ -64,7 +63,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
       {/* Desktop table */}
       <div className='hidden w-full overflow-x-auto lg:block'>
         <table className='w-full border-collapse border border-borderColor'>
-          <thead className='bg-textInactiveColor'>
+          <thead className='bg-borderColor'>
             <tr>
               {headers.map((h, i) => (
                 <th key={i} className='border border-borderColor px-2 py-1 text-left'>
@@ -86,7 +85,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                   tabIndex={0}
                   onClick={() => navigate(`/fittings/${id}`)}
                   onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-                  className='cursor-pointer border-b border-borderColor transition-colors hover:bg-bgZebra'
+                  className='cursor-pointer border-b border-borderColor transition-colors hover:bg-pageBg'
                 >
                   <td className='border border-borderColor px-2 py-1'>
                     <Text>{formatFittingDate(insert?.fittingDate)}</Text>
@@ -102,7 +101,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                           <Text>#{insert.productId}</Text>
                         </Link>
                       ) : (
-                        <Text>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}
@@ -117,7 +116,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                           <Text>#{insert.modelId}</Text>
                         </Link>
                       ) : (
-                        <Text>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}

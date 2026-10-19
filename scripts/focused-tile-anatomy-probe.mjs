@@ -85,7 +85,7 @@ const stubNetwork = {
 };
 
 // Мутации в памяти сборщика, по одной на закон.
-const FA = /ui\/components\/focused-annotator\.tsx$/;
+const FA = /tech-card\/annotation\/focused-annotator\.tsx$/;
 const MUTATIONS = {
   group: {
     file: FA,

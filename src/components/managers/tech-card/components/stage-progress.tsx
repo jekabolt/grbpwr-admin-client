@@ -2,17 +2,11 @@ import type {
   common_TechCardStage,
   GetTechCardReadinessResponse,
   TechCardReadinessAdvice,
-  TechCardReadinessRequirement,
 } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { Link, useLocation } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
-import type { ReleaseBlocker } from './release-blockers-modal';
+import { Button, GroupLabel, Pill, GenericPopover, HeaderNext, HeaderNote, Text } from 'ui';
 
 /**
  * ═══ ПРОГРЕСС СТЕЙДЖА — ОДИН РЯД ВМЕСТО СЕЛЕКТОВ, ПОЛОСЫ И ЧЕК-ЛИСТА (волна 25.09 · T17/T18/T20) ════
@@ -24,11 +18,10 @@ import type { ReleaseBlocker } from './release-blockers-modal';
  * и фраза, которая к нему отсылала, ушли вместе.
  *
  * Остался один ряд: шесть сегментов (пройденные — залиты ink, текущий — в ink-рамке и жирный,
- * будущие — пунктир), а справа три органа — каждый одна пилюля с поповером:
- *   · `next: <ступень> · N to go` — строки GetTechCardReadiness.nextStageRequirements с дверями;
- *   · `release · N blockers` / `ready to release` — тот же список блокеров, что у модалки релиза;
- *   · `warnings · N` — замечания сервера (advisories) и ошибки формы, только когда они есть;
- * и одна кнопка `release ▸`.
+ * будущие — пунктир), справа одна строка `next: <ступень> · <глагол + объект> ›` (TABS-LITE R1:
+ * пилюли `NEXT ▾` и `RELEASE · N BLOCKERS ▾` ушли — из их списков действовали только по первой
+ * открытой строке), пилюля `warnings · N`, когда есть что сказать, и кнопка `release ▸`: залитая,
+ * когда выпуск открыт, а закрытый открывает выезжающий список блокеров.
  */
 
 export const SPINE_STAGES: { value: common_TechCardStage; label: string }[] = [
@@ -65,9 +58,127 @@ export const REQ_TAB: Record<string, string> = {
   bom_linked: 'bom',
   colorway_linked: 'colorways',
   patterns: 'patterns',
-  size_range: 'patterns',
+  size_range: 'sizes',
   costing: 'costing',
 };
+
+/**
+ * ═══ NEXT STEP — ЧТО НАЖАТЬ ДАЛЬШЕ (TABS-LITE R1) ═══════════════════════════════════════════════
+ *
+ * Один шаг на всю страницу, три вида: строка в полосе стейджа, `›` у вкладки в рейле, `→ next:` над
+ * активной вкладкой. Источник — первая НЕвыполненная строка `nextStageRequirements` (как у
+ * авто-стейджа: aux без `colorway_linked`; строка `unknown` не шаг — сервер не смог проверить, и
+ * нажать там нечего), иначе первый блокер релиза. Подпись — глагол + объект: строки сервера —
+ * утверждения («the BOM has at least one fabric line»), а кнопка обязана говорить, что сделать.
+ * Ключ без словарной подписи показывает утверждение сервера как есть: не «continue».
+ */
+export type NextStep = {
+  key: string;
+  /** Verb + object: `link shell fabric`. */
+  label: string;
+  /** The tab that clears it (the TabId string). */
+  tab: string;
+  /** Next stage's label (`fit`), or `release` when the step comes from the release list. */
+  goal: string;
+  /** A quick action instead of a tab walk (sample / fitting / run). */
+  action?: ActionKey;
+  /** The form path to pulse after the tab switch, when one is known. */
+  field?: string;
+};
+
+export const NEXT_LABEL: Record<string, string> = {
+  style_number: 'set the style number',
+  size_range: 'pick the size range',
+  bom_fabric: 'add a fabric to the bom',
+  bom_linked: 'link an article to every bom slot',
+  first_sample: 'add a proto sample',
+  fitting_recorded: 'record a fitting',
+  fit_approved: 'approve a fitting',
+  fittings_resolved: 'resolve the fitting changes',
+  sms_sample: 'add an sms sample',
+  pp_sample: 'add a pp sample',
+  colorway_linked: 'add a colourway',
+  lab_dip: 'approve the lab dips',
+  run_planned: 'plan a production run',
+  patterns: 'add patterns for every size',
+  costing: 'fill in the costing',
+  costing_computes: 'set consumption on colorways',
+  signoffs: 'approve the sign-offs',
+  idea: 'advance the stage past idea',
+  bom_slots: 'link an article to every bom slot',
+  construction_graph: 'join the assembly into one garment',
+};
+// Where a stage row is fixed when it has no quick action (REQ_TAB covers the rest).
+const NEXT_TAB: Record<string, string> = {
+  costing_computes: 'colorways',
+  construction_graph: 'construction',
+  lab_dip: 'colorways',
+  signoffs: 'signoff',
+};
+// The one row whose wording depends on WHICH half failed (the server's detail names it).
+const labelOf = (key: string, detail: string | undefined, fallback: string | undefined) =>
+  key === 'costing' && /currency/i.test(detail ?? '')
+    ? 'set the cost currency'
+    : NEXT_LABEL[key] ?? fallback ?? key;
+const NEXT_FIELD: Record<string, string> = {
+  style_number: 'styleNumber',
+  size_range: 'sizeIds',
+};
+// Quick actions land on these tabs, so the rail and the tab header can still point at them.
+const ACTION_TAB: Record<ActionKey, string> = {
+  sample: 'samples',
+  fitting: 'history',
+  'fittings-unresolved': 'history',
+  run: 'production',
+};
+
+export function resolveNextStep(i: {
+  readiness: GetTechCardReadinessResponse | undefined;
+  isAux: boolean;
+  /** Release blockers as the page lists them; `key` names a server row or a client rule. */
+  blockers: { key?: string; label: string; tab: string; detail?: string; field?: string }[];
+  /** Concrete wording the page knows better than the dictionary (the slot's name). */
+  concrete?: Partial<Record<string, { label: string; field?: string }>>;
+  /** A step on a tab the card hides right now (IDEA shows four) yields to the next visible one. */
+  visible?: (tab: string) => boolean;
+}): NextStep | null {
+  const pick = <T,>(xs: T[], tabOf: (x: T) => string) =>
+    xs.find((x) => i.visible?.(tabOf(x)) ?? true) ?? xs[0];
+  const r = i.readiness;
+  const nextStage = r?.nextStage;
+  if (nextStage && nextStage !== 'TECH_CARD_STAGE_UNKNOWN') {
+    const tabOf = (key: string) => {
+      const action = REQ_ACTION[key];
+      return action ? ACTION_TAB[action] : REQ_TAB[key] ?? NEXT_TAB[key] ?? 'studio';
+    };
+    const open = (r?.nextStageRequirements ?? []).filter(
+      (x) => x.met !== true && x.unknown !== true && !(i.isAux && x.key === 'colorway_linked'),
+    );
+    const row = pick(open, (x) => tabOf(x.key ?? ''));
+    if (row) {
+      const key = row.key ?? '';
+      const c = i.concrete?.[key];
+      return {
+        key,
+        label: c?.label ?? labelOf(key, row.detail, row.label),
+        tab: tabOf(key),
+        goal: stageLabel(nextStage),
+        action: REQ_ACTION[key],
+        field: c?.field ?? NEXT_FIELD[key],
+      };
+    }
+  }
+  const b = pick(i.blockers, (x) => x.tab);
+  if (!b) return null;
+  const c = b.key ? i.concrete?.[b.key] : undefined;
+  return {
+    key: b.key ?? b.label,
+    label: c?.label ?? (b.key ? labelOf(b.key, b.detail, b.label) : b.label),
+    tab: b.tab,
+    goal: 'release',
+    field: c?.field ?? b.field ?? (b.key ? NEXT_FIELD[b.key] : undefined),
+  };
+}
 
 /**
  * ═══ АВТО-СТЕЙДЖ: РЕШЕНИЕ «ПОДНЯТЬ ЛИ НА ШАГ» (D-14 / D-14' / Codex B-01, M-01) ═══════════════════
@@ -138,7 +249,7 @@ function Organ({
       className={width}
       triggerProps={{ className: `flex items-center ${FOCUS}`, 'aria-label': `${label}, details` }}
       openElement={
-        <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-bgZebra' data-organ={testId}>
+        <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-pageBg' data-organ={testId}>
           <span>{label}</span>
           <span aria-hidden>▾</span>
         </Pill>
@@ -146,24 +257,6 @@ function Organ({
     >
       {children}
     </GenericPopover>
-  );
-}
-
-// The reference's 14px `.check-box`: a 1px ink square, filled ink with a white tick once met; a
-// dashed one with `?` when the server could not answer. Decorative — each row says it in words too.
-function Mark({ state }: { state: 'met' | 'open' | 'unknown' }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        'flex size-3.5 shrink-0 items-center justify-center border text-nano leading-none',
-        state === 'met' && 'border-textColor bg-textColor text-bgColor',
-        state === 'open' && 'border-textColor text-transparent',
-        state === 'unknown' && 'border-dashed border-labelColor text-labelColor',
-      )}
-    >
-      {state === 'unknown' ? '?' : '✓'}
-    </span>
   );
 }
 
@@ -175,11 +268,11 @@ export function StageProgress({
   readiness,
   readinessPending,
   readinessError,
-  isAux,
   canEdit,
   planRunDisabled,
   planRunDisabledReason,
-  blockers,
+  next,
+  onNext,
   canRelease,
   releasing,
   onRelease,
@@ -187,7 +280,6 @@ export function StageProgress({
   onBackToDraft,
   formErrors,
   onRevealError,
-  onGoTab,
   onAddSample,
   onGoFittings,
 }: {
@@ -197,20 +289,22 @@ export function StageProgress({
   readiness: GetTechCardReadinessResponse | undefined;
   readinessPending: boolean;
   readinessError: boolean;
-  isAux: boolean;
   canEdit: boolean;
   planRunDisabled?: boolean;
   planRunDisabledReason?: string;
-  blockers: ReleaseBlocker[];
+  /** The one step to press next (`resolveNextStep`); null when nothing is left before release. */
+  next: NextStep | null;
+  /** Walk to the step's tab (and its field) — for every step without a quick action. */
+  onNext: () => void;
   canRelease: boolean;
   releasing: boolean;
+  /** Releases when the gate is open; otherwise opens the release blockers drawer. */
   onRelease: () => void;
   /** The SAVED approval state (N-03 reads the server's, not an unsaved form value). */
   approvalState: string | undefined;
   onBackToDraft: () => void;
   formErrors: FormErrorRow[];
   onRevealError: (path: string) => void;
-  onGoTab: (tab: string) => void;
   onAddSample: () => void;
   onGoFittings: (unresolvedOnly: boolean) => void;
 }) {
@@ -219,23 +313,14 @@ export function StageProgress({
   const idx = STAGE_ORDER.indexOf(stage);
   const currentLabel = idx >= 0 ? SPINE_STAGES[idx].label : 'stage unset';
 
-  // ── next ──────────────────────────────────────────────────────────────────────────────────────
-  const nextStage = readiness?.nextStage;
-  const hasNext = !!nextStage && nextStage !== 'TECH_CARD_STAGE_UNKNOWN';
-  const rows: TechCardReadinessRequirement[] = (readiness?.nextStageRequirements ?? []).filter(
-    // The one fact the readiness RPC cannot know: an auxiliary card links no products BY DESIGN,
-    // so its colourway row would sit permanently unmet. Dropped, not failed.
-    (r) => !(isAux && r.key === 'colorway_linked'),
-  );
-  // An `unknown` row counts as TO GO: the auto-stage will not advance past it (B-01), and a chip
-  // saying «ready» over a stage that never moves would be the lie.
-  const toGo = rows.filter((r) => r.met !== true).length;
-
-  const renderAction = (key: ActionKey) => {
+  // A quick action is its own door (a sample opens the wizard, a fitting is another page); the
+  // words stay the step's, so the line reads the same whichever door it carries.
+  const actionDoor = (key: ActionKey, label: string) => {
+    const text = `${label} ›`;
     if (key === 'sample') {
       return (
         <Button type='button' variant='underline' size='xs' onClick={onAddSample}>
-          + sample
+          {text}
         </Button>
       );
     }
@@ -245,7 +330,7 @@ export function StageProgress({
           <Link
             to={`${ROUTES.addFitting}?techCardId=${techCardId}&returnTo=${encodeURIComponent(returnTo)}`}
           >
-            + fitting
+            {text}
           </Link>
         </Button>
       );
@@ -253,20 +338,20 @@ export function StageProgress({
     if (key === 'fittings-unresolved') {
       return (
         <Button type='button' variant='underline' size='xs' onClick={() => onGoFittings(true)}>
-          resolve →
+          {text}
         </Button>
       );
     }
     if (planRunDisabled) {
       return (
-        <Button type='button' variant='underline' size='xs' disabled>
-          plan run
+        <Button type='button' variant='underline' size='xs' disabled title={planRunDisabledReason}>
+          {text}
         </Button>
       );
     }
     return (
       <Button asChild variant='underline' size='xs'>
-        <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>plan run</Link>
+        <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>{text}</Link>
       </Button>
     );
   };
@@ -282,59 +367,6 @@ export function StageProgress({
       : approvalState === 'TECH_CARD_APPROVAL_STATE_APPROVED'
         ? { label: 'approved', tone: 'ok' as const }
         : null;
-
-  const releaseBody = (
-    <div className='flex flex-col gap-2 py-0.5'>
-      {blockers.length === 0 ? (
-        <Text size='micro' variant='label' component='p'>
-          nothing blocks the release
-        </Text>
-      ) : (
-        <ol className='flex flex-col'>
-          {blockers.map((b, i) => (
-            <li key={`${b.tab}-${i}`} className='border-b border-hairline last:border-b-0'>
-              <button
-                type='button'
-                onClick={() => onGoTab(b.tab)}
-                className={`flex w-full items-baseline gap-2 py-1 text-left hover:bg-bgZebra ${FOCUS}`}
-              >
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <Text size='micro' component='span'>
-                    {b.label}
-                  </Text>
-                  {b.detail && (
-                    <Text size='micro' variant='label' component='span'>
-                      {b.detail}
-                    </Text>
-                  )}
-                </span>
-                <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
-                  → {b.tab}
-                </Text>
-              </button>
-            </li>
-          ))}
-        </ol>
-      )}
-      {legacyApproval && canEdit && (
-        <div className='flex items-baseline gap-2 border-t border-borderColor pt-1.5'>
-          <Text size='micro' variant='label' component='p' className='min-w-0 flex-1'>
-            marked {legacyApproval.label} by the old approval select
-          </Text>
-          <Button
-            type='button'
-            variant='underline'
-            size='xs'
-            className='shrink-0'
-            disabled={releasing}
-            onClick={onBackToDraft}
-          >
-            back to draft ›
-          </Button>
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div
@@ -384,98 +416,39 @@ export function StageProgress({
         </Text>
       </div>
 
-      {/* NEXT — hidden at PRODUCTION: there is no next stage to reach. */}
+      {/* NEXT — one sentence, one door. The checklist and the blockers list that used to sit
+          behind two popover pills are the same data; only their first open row was ever acted on. */}
       {readinessError ? (
-        <Pill tone='gap' title='GetTechCardReadiness failed: the checklist is unknown'>
+        <HeaderNote title='GetTechCardReadiness failed: the checklist is unknown'>
           checklist unavailable
-        </Pill>
+        </HeaderNote>
       ) : readinessPending && !readiness ? (
-        <Pill tone='gap'>checking stage…</Pill>
-      ) : hasNext ? (
-        <Organ
-          testId='next'
-          title={`to reach ${stageLabel(nextStage)}`}
-          label={
-            toGo > 0
-              ? `next: ${stageLabel(nextStage)} · ${toGo} to go`
-              : `next: ${stageLabel(nextStage)} · ready`
-          }
-          tone={toGo > 0 ? 'attention' : 'ok'}
-          width='w-[340px]'
-        >
-          <ol className='flex flex-col py-0.5'>
-            {rows.map((r) => {
-              const state = r.met ? 'met' : r.unknown ? 'unknown' : 'open';
-              const action = !r.met && canEdit ? REQ_ACTION[r.key ?? ''] : undefined;
-              const tab = !r.met && !REQ_ACTION[r.key ?? ''] ? REQ_TAB[r.key ?? ''] : undefined;
-              // A blocked plan-run REPLACES the detail: why you can't act beats why it's unmet.
-              const why =
-                action === 'run' && planRunDisabled ? planRunDisabledReason : r.met ? '' : r.detail;
-              return (
-                <li
-                  key={r.key}
-                  className='flex items-start gap-2 border-b border-hairline py-1 last:border-b-0'
-                >
-                  <Mark state={state} />
-                  <span className='sr-only'>
-                    {state === 'met' ? 'done' : state === 'unknown' ? 'cannot be checked' : 'to do'}
-                  </span>
-                  <span className='flex min-w-0 flex-1 flex-col'>
-                    <Text size='micro' component='span'>
-                      {r.label}
-                    </Text>
-                    {why ? (
-                      <Text size='micro' variant='label' component='span'>
-                        {why}
-                      </Text>
-                    ) : null}
-                  </span>
-                  <span className='flex shrink-0 items-center gap-2'>
-                    {action && renderAction(action)}
-                    {tab && (
-                      <Button
-                        type='button'
-                        variant='underline'
-                        size='xs'
-                        onClick={() => onGoTab(tab)}
-                      >
-                        → {tab}
-                      </Button>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-            {rows.length === 0 && (
-              <Text size='micro' variant='label' component='p'>
-                the server lists nothing for this step
-              </Text>
-            )}
-          </ol>
-        </Organ>
+        <HeaderNote>checking stage…</HeaderNote>
+      ) : next ? (
+        <HeaderNext
+          lead={`next: ${next.goal} ·`}
+          label={next.label}
+          onClick={onNext}
+          door={next.action && canEdit ? actionDoor(next.action, next.label) : undefined}
+          data-next-key={next.key}
+        />
       ) : null}
-
-      {/* RELEASE — the SAME blocker list the release modal and the history tab's gate read. */}
-      {canRelease && !legacyApproval ? (
-        <Pill tone='ok' data-organ='release'>
-          ready to release
-        </Pill>
-      ) : (
-        <Organ
-          testId='release'
-          title='release'
-          label={
-            blockers.length > 0
-              ? `release · ${blockers.length} blocker${blockers.length === 1 ? '' : 's'}`
-              : 'ready to release'
-          }
-          tone={blockers.length > 0 ? 'warn' : 'ok'}
-          width='w-[340px]'
-        >
-          {releaseBody}
-        </Organ>
+      {legacyApproval && (
+        <span className='flex items-baseline gap-1.5'>
+          <HeaderNote tone={legacyApproval.tone}>{legacyApproval.label}</HeaderNote>
+          {canEdit && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              disabled={releasing}
+              onClick={onBackToDraft}
+            >
+              back to draft ›
+            </Button>
+          )}
+        </span>
       )}
-      {legacyApproval && <Pill tone={legacyApproval.tone}>{legacyApproval.label}</Pill>}
 
       {/* WARNINGS — only when there is something to say. Advisories never block (they are not in
           either `*_ready`); form errors block the SAVE, not the release, and walk to their field. */}
@@ -497,7 +470,7 @@ export function StageProgress({
                       <button
                         type='button'
                         onClick={() => onRevealError(e.path)}
-                        className={`flex w-full items-baseline gap-2 py-1 text-left hover:bg-bgZebra ${FOCUS}`}
+                        className={`flex w-full items-baseline gap-2 py-1 text-left hover:bg-pageBg ${FOCUS}`}
                       >
                         <span className='flex min-w-0 flex-1 flex-col'>
                           <Text size='micro' component='span' className='truncate'>
@@ -546,7 +519,7 @@ export function StageProgress({
         <Button
           type='button'
           // Filled only when pressing it releases; outlined while blocked — pressing it then
-          // explains why (the blockers modal), which is the one moment the reasons are wanted.
+          // explains why (the blockers drawer), which is the one moment the reasons are wanted.
           variant={canRelease ? 'main' : 'secondary'}
           size='sm'
           className='ml-auto uppercase'

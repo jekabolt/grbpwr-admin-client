@@ -2,10 +2,7 @@
 // или прогон; запас %; итоги строк и столбцов; итог лент A и B (в simplex ×2). Из прогона ячейки
 // только читаются — число в прогоне правят в прогоне, а не здесь, иначе два источника разойдутся.
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Input, Text } from 'ui';
 import type { CareLabelRun, CareLabelSize } from './adapter';
 import { allEqual, toQty, type Quantities, type QtyGrid } from './quantities';
 import type { CareLabelPrefs } from './use-care-label-prefs';

@@ -3,16 +3,16 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { SectionHeader } from 'ui/components/section-header';
 import {
+  CalloutBox,
+  Pill,
+  SectionHeader,
   SideRail,
   SideRailGroup,
   SideRailItem,
   SideRailLayout,
-} from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+  Text,
+} from 'ui';
 import { MonthlyContent } from './components/monthly-tab';
 import { RecurringTab } from './components/recurring-tab';
 import { isPermissionDenied, useOpexLinesRange, useOpexRecurring } from './utils/hooks';

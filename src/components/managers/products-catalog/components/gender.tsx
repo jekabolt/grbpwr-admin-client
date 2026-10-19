@@ -1,6 +1,5 @@
 import { genderOptions } from 'constants/filter';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Selector, Text } from 'ui';
 import useFilter from '../../../../lib/useFilter';
 
 export default function Gender() {

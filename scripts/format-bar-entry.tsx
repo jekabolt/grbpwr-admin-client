@@ -9,7 +9,7 @@ import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-import { SnackBar } from 'ui/components/snackbar';
+import { SnackBar } from 'components/shell/snackbar';
 
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { mediaEdit } from 'components/managers/files/note/format-edits';

@@ -1,4 +1,5 @@
 import { common_Category, common_SizeSkuSystem } from 'api/proto-http/admin';
+import type { SizeGroup } from 'components/managers/model/components/size-categories';
 import { useSizeSystems } from 'components/managers/model/components/use-size-systems';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -6,13 +7,15 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn, getCategoriesByParentId } from 'lib/utility';
 import { useCallback, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
-import SelectField from 'ui/form/fields/select-field';
+import {
+  ConfirmationModal,
+  GroupLabel,
+  GenericPopover,
+  Row,
+  Text,
+  FormLabel,
+  SelectField,
+} from 'ui';
 import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { followCategory } from './design/flat-route';
 import { garmentClassOf, useGarmentClass } from './design/head/card-facts-form';
@@ -41,7 +44,7 @@ function BrowserRow({
       aria-pressed={selected}
       className={cn(
         'flex w-full items-center justify-between gap-1.5 border-b border-hairline px-1.5 py-0.5 text-left last:border-b-0',
-        selected ? 'bg-textColor text-bgColor' : 'text-textColor hover:bg-bgZebra',
+        selected ? 'bg-textColor text-bgColor' : 'text-textColor hover:bg-pageBg',
       )}
     >
       {/* option-label size (11px), not the 10px label size — these are the choices themselves */}
@@ -115,13 +118,31 @@ function BrowserColumn({
 // мёртвая ветка, которая однажды вернёт текст «по умолчанию»; поэтому снят и он. Довод строки
 // был и остаётся верен: колонки браузера подписаны «sub · optional» / «type · optional», и она
 // повторяла их третий раз.
+/**
+ * THE ONE WRITER OF `categoryId` (the browser below and the create quiz both call it).
+ * M10: WORDS were seeded with the old category's «garment: <class>» — the one line a flat sends.
+ * It moves with the category in the same save; a class the designer wrote stays (`followCategory`).
+ */
+export function useCategoryWriter(): (id: number) => void {
+  const { setValue, getValues } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+  const cats = useMemo(() => dictionary?.categories ?? [], [dictionary?.categories]);
+  const { seeded } = useGarmentClass();
+  return (id: number) => {
+    setValue('categoryId', id || 0, { shouldDirty: true });
+    const words = (getValues('garmentDescription') ?? '') as string;
+    const next = followCategory(words, garmentClassOf(cats, id), seeded);
+    if (next !== words) setValue('garmentDescription', next, { shouldDirty: true });
+  };
+}
+
 export function CategoryBrowser() {
-  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const cats = useMemo(() => dictionary?.categories ?? [], [dictionary?.categories]);
-  const { seeded } = useGarmentClass();
+  const applyLeaf = useCategoryWriter();
 
   const [open, setOpen] = useState(false);
   // A category change that would move the size run's goalposts is confirmed first (see below).
@@ -189,15 +210,6 @@ export function CategoryBrowser() {
       const size = sizeById.get(id);
       return !size || !sizeInSystems(size, allow);
     }).length;
-  };
-
-  // M10: WORDS were seeded with the old category's «garment: <class>» — the one line a flat sends.
-  // It moves with the category in the same save; a class the designer wrote stays (`followCategory`).
-  const applyLeaf = (id: number) => {
-    setValue('categoryId', id || 0, { shouldDirty: true });
-    const words = (getValues('garmentDescription') ?? '') as string;
-    const next = followCategory(words, garmentClassOf(cats, id), seeded);
-    if (next !== words) setValue('garmentDescription', next, { shouldDirty: true });
   };
 
   // Category drives the permitted size systems AND the measurement columns of the size chart, so a
@@ -276,9 +288,9 @@ export function CategoryBrowser() {
       <ConfirmationModal
         open={pending != null}
         width='sm'
-        title='change the category?'
-        confirmLabel='change the category'
-        cancelLabel='cancel'
+        title='change category?'
+        confirmLabel='change category'
+        hideCancel
         onOpenChange={(o) => {
           if (!o) setPending(null);
         }}
@@ -287,19 +299,11 @@ export function CategoryBrowser() {
           setPending(null);
         }}
       >
-        <Text size='micro' variant='label' className='mb-2'>
-          the category sets the allowed size systems and the measurement columns of the size chart.
-          changing it to “{pendingLabel}” affects the size range already assembled:
-        </Text>
-        <Row label='sizes in the range' value={sizeIds.length} />
+        <Row label='new category' value={pendingLabel} />
         <Row
-          label="of them outside the new category's systems"
-          value={pending != null ? outsideCount(pending) : 0}
+          label='sizes outside it'
+          value={`${pending != null ? outsideCount(pending) : 0} of ${sizeIds.length}`}
         />
-        <Text size='micro' variant='label' className='mt-2'>
-          sizes are not deleted — but the range will stop matching the category, and the measurement
-          columns in the size chart will be recomputed for the new one.
-        </Text>
       </ConfirmationModal>
     </div>
   );
@@ -330,6 +334,16 @@ export function CategoryBrowser() {
 // по группам; без категории поле закрыто. Выбор на пустом диапазоне засевает `sizeIds` всей группой
 // выбранного размера — сервер требует base ∈ range, и группа разрешённой системы есть ровно то, что
 // он примет. Непустой диапазон — прежнее правило: список = диапазон.
+/**
+ * The size run a base sample size seeds on an empty run: the whole permitted group of that size,
+ * in grade order (`groupSizes` sorts by the dictionary's ordinal). Empty = the size is in no group.
+ * Shared with the create quiz, so the quiz's sample size seeds exactly what this select does.
+ */
+export function sampleRunOf(permitted: SizeGroup[], sizeId: number): number[] {
+  const group = permitted.find((g) => g.sizes.some((sz) => sz.id === sizeId));
+  return group ? group.sizes.map((sz) => sz.id ?? 0).filter((x) => x > 0) : [];
+}
+
 export function BaseModelFields() {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
@@ -390,13 +404,8 @@ export function BaseModelFields() {
   const seedRange = (picked: string | number | undefined) => {
     const id = Number(picked ?? 0);
     if (!seeding || !(id > 0)) return;
-    const group = permitted.find((g) => g.sizes.some((sz) => sz.id === id));
-    if (!group) return;
-    setValue(
-      'sizeIds',
-      group.sizes.map((sz) => sz.id ?? 0).filter((x) => x > 0),
-      { shouldDirty: true },
-    );
+    const run = sampleRunOf(permitted, id);
+    if (run.length) setValue('sizeIds', run, { shouldDirty: true });
   };
 
   return (
@@ -424,7 +433,7 @@ export function BaseModelFields() {
         items={sampleSizeOptions}
         valueAsNumber
         disabled={noCategory}
-        className={noCategory ? 'bg-bgZebra text-labelColor' : undefined}
+        className={noCategory ? 'bg-pageBg text-labelColor' : undefined}
         onAfterChange={seedRange}
       />
     </div>

@@ -6,10 +6,7 @@
 //
 // СОСТАВ РАСКЛАДКИ НЕ УМНОЖЕН НА СЛОИ. Выход настила считает сервер с учётом режима настилания, и
 // вторая арифметика того же числа разошлась бы с первой ровно тогда, когда это дороже всего.
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { CalloutBox, GroupLabel, Row, Text } from 'ui';
 import { layModeWord } from './labels';
 import { RpLay, RpMaterialBlocker } from './manifest';
 
@@ -29,7 +26,7 @@ export function Lays({
   // список читается как приглашение их завести.
   if (applicable === false) {
     return (
-      <Text component='p'>
+      <Text size='reading' component='p'>
         {(notApplicableReason ?? '').trim() ||
           'this run never has lays — the card is auxiliary, it has no cut pieces and no markers.'}
       </Text>
@@ -37,7 +34,7 @@ export function Lays({
   }
   if (lays.length === 0) {
     return (
-      <Text component='p'>
+      <Text size='reading' component='p'>
         {filtered
           ? 'not a single lay fell into the selected subset — clear the filter to see the rest.'
           : 'no lays yet — cutting is not driven by them.'}
@@ -110,11 +107,11 @@ export function MaterialBlockers({ blockers }: { blockers: RpMaterialBlocker[] }
   }
   return (
     <CalloutBox tone='error' className='space-y-1'>
-      <Text component='p' className='uppercase'>
+      <Text size='reading' component='p' className='uppercase'>
         <b>not computed — {blockers.length} slot × colourway</b>
       </Text>
       {blockers.map((b, i) => (
-        <Text key={`${b.slot_name || i}-${b.colorway_id ?? 0}-${i}`} component='p'>
+        <Text size='reading' key={`${b.slot_name || i}-${b.colorway_id ?? 0}-${i}`} component='p'>
           {(b.slot_name ?? '').trim() || 'slot'} ·{' '}
           {(b.colorway_name ?? '').trim() || `colourway #${b.colorway_id}`} — {b.planned_qty ?? 0}{' '}
           garments: {(b.reason ?? '').trim() || 'reason not named'}

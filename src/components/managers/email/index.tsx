@@ -5,8 +5,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { CampaignCard } from './components/campaign-card';
 import { useCampaignsPaged } from './components/useCampaign';
 
@@ -49,7 +48,7 @@ function FilterRow<T extends string | undefined>({
             'border px-2 py-1 leading-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             active === v
               ? 'border-textColor bg-textColor text-bgColor'
-              : 'border-textInactiveColor hover:bg-textColor hover:text-bgColor',
+              : 'border-borderColor hover:bg-textColor hover:text-bgColor',
           )}
         >
           <Text size='small' variant='uppercase' className={active === v ? '!text-bgColor' : ''}>

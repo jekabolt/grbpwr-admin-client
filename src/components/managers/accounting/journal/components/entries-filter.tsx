@@ -1,7 +1,5 @@
 import { AcctAccount } from 'api/proto-http/admin';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import { Input, Selector, Text } from 'ui';
 import { ACCT_SOURCE_TYPES } from '../../utils/constants';
 
 export type JournalFilterState = {

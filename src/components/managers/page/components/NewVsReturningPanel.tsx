@@ -1,7 +1,7 @@
 import type { NewVsReturningSplit } from 'api/proto-http/admin';
 import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import {
   categoryAxis,
   ChartCard,
@@ -134,7 +134,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
       )}
 
       {lowSample && (
-        <div className='border border-warning bg-bgSecondary p-2'>
+        <div className='border border-warning bg-pageBg p-2'>
           <Text className='text-warning text-textBaseSize'>
             Low sample (n={totalOrders}): directional only, not statistically reliable yet.
           </Text>

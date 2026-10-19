@@ -1,6 +1,5 @@
 import { FC, ReactNode } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 
 interface ChartCardProps {
   title?: string;

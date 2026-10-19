@@ -8,7 +8,7 @@ import {
   InlinePlate,
   NOTE_PICTURE_FRAME,
   NOTE_PICTURE_IMAGE,
-} from 'ui/markdown/refs';
+} from 'components/shared/markdown/refs';
 import { filesService } from '../api/filesService';
 import { errorStatus } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';

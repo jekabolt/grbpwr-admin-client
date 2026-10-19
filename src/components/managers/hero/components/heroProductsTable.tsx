@@ -18,9 +18,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import MediaComponent from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Button, Close, Media, Text } from 'ui';
 import { COLORWAY_STATUS_LABEL } from './productPickerModal';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
@@ -121,7 +119,7 @@ export const HeroProductTable: FC<
         <td className='border border-text p-2'>
           <button
             type='button'
-            className='flex w-full cursor-grab items-center justify-center touch-none select-none leading-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className='flex w-full cursor-grab items-center justify-center touch-none select-none leading-none text-borderColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             aria-label='drag to reorder product'
             {...(dragHandleProps || {})}
           >
@@ -132,14 +130,14 @@ export const HeroProductTable: FC<
       <td className='border border-text p-2'>
         <button
           onClick={() => navigate(`/products/${product.id}`)}
-          className='text-blue underline hover:text-blue cursor-pointer'
+          className='text-warning underline hover:text-warning cursor-pointer'
         >
           {product.id}
         </button>
       </td>
       <td className='border border-text lg:w-16'>
         {product.display?.thumbnail?.media?.thumbnail?.mediaUrl && (
-          <MediaComponent
+          <Media
             src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl}
             alt='Thumbnail'
             type='image'
@@ -166,14 +164,7 @@ export const HeroProductTable: FC<
       </td>
       {isFeaturedProducts && (
         <td className='border border-text'>
-          <Button
-            type='button'
-            onClick={() => handleDelete(index)}
-            className='w-full'
-            aria-label='delete'
-          >
-            ×
-          </Button>
+          <Close size='sm' onClick={() => handleDelete(index)} aria-label='delete' />
         </td>
       )}
     </>

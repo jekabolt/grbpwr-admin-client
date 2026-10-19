@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import Text from './text';
 
 /**
  * The reference's `.stats` block: an auto-fitting grid of bordered cells, each a
@@ -21,7 +21,7 @@ export function StatGrid({
     // bg-bgColor: the strip is a white card. Without a fill the bordered cells are transparent and
     // the gray page ground shows through every KPI — data must read on white.
     <div
-      className={`grid border border-borderColor bg-bgColor ${className ?? ''}`}
+      className={`grid overflow-hidden border border-borderColor bg-bgColor ${className ?? ''}`}
       style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))` }}
     >
       {children}
@@ -44,7 +44,9 @@ export function Stat({
 }) {
   const toneClass = tone === 'up' ? 'text-success' : tone === 'down' ? 'text-error' : undefined;
   return (
-    <div className='border-r border-b border-borderColor px-2.5 py-2'>
+    // Each cell rules its right and bottom edge; -1px pushes the last column's and last row's rule
+    // under the grid's own outline (clipped), so the edge is one line, not two.
+    <div className='-mr-px -mb-px border-r border-b border-borderColor px-2.5 py-2'>
       <Text size='micro' variant='label' tracking='label' className='uppercase'>
         {label}
       </Text>

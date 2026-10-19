@@ -1,5 +1,5 @@
 import { useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text, EmptyCell } from 'ui';
 import { ReadOnlyField } from '../read-only-field';
 import { CareSymbol } from './care-card';
 import { careCodes } from './care-codes';
@@ -25,7 +25,7 @@ export function Care() {
     <ReadOnlyField label='care instructions'>
       {codes.length === 0 ? (
         <Text size='micro' variant='label'>
-          —
+          <EmptyCell />
         </Text>
       ) : (
         <div className='flex flex-wrap items-start gap-1.5'>

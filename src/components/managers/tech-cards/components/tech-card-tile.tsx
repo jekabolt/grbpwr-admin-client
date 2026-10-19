@@ -2,10 +2,7 @@ import { common_SkuSeason, common_TechCardListItem } from 'api/proto-http/admin'
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile } from 'ui/components/tiles';
+import { Pill, Placeholder, Text, Tile } from 'ui';
 import { AuxBadge } from './aux-badge';
 import { TechCardHoverInfo } from './tech-card-hover-info';
 import { approvalStateLabel, formatTechCardDate, stageLabel } from './utils';

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { cn } from 'lib/utility';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { FoldCaret } from './fold-caret';
 
 /**
- * The reference's `.acc`: a bordered block whose header is a zebra-tinted strip.
+ * The reference's `.acc`: a bordered block with a plain header strip; a hairline splits it from the body.
  * Controlled (`open` + `onOpenChange`) or uncontrolled (`defaultOpen`).
  *
  * Note for phase 19: a field that can hold a validation error must be reachable, so
@@ -67,7 +67,11 @@ export function Accordion({
           }
         }}
         aria-expanded={isOpen}
-        className='flex w-full cursor-pointer items-center gap-2 border-b border-hairline bg-bgZebra px-2 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        // The hairline separates header from body; closed, there is no body and the outline closes it.
+        className={cn(
+          'flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+          isOpen && 'border-b border-hairline',
+        )}
       >
         <span className='min-w-0 truncate'>{title}</span>
         <span className='ml-auto flex shrink-0 items-center gap-2 text-labelColor'>

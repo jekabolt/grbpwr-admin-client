@@ -1,6 +1,5 @@
 import { common_ModelMeasurement } from 'api/proto-http/admin';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 
 // Read-only, grouped view of a model's captured body measurements (mm). Used in

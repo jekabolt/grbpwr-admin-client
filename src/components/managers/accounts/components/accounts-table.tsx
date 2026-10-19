@@ -1,10 +1,7 @@
 import { AdminAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, Text } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { ACCESS, useDeleteAccount, useSetAccountDisabled } from '../utils/hooks';
 import { SpecialtiesField } from './specialties-field';
@@ -89,7 +86,7 @@ export function AccountsTable({
           <div
             key={i}
             className={cn(
-              'h-24 animate-pulse bg-textInactiveColor/30',
+              'h-24 animate-pulse bg-borderColor/30',
               i > 0 && 'border-t border-hairline',
             )}
           />

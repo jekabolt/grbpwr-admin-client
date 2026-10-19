@@ -10,17 +10,8 @@
 
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import {
-  arityForOperator,
-  effectiveValueKind,
-  FieldDef,
-  Operator,
-  ValueKind,
-} from './catalog';
+import { Button, Close, Input, Select, Text } from 'ui';
+import { arityForOperator, effectiveValueKind, FieldDef, Operator, ValueKind } from './catalog';
 
 const BOOL_ITEMS = [
   { value: 'true', label: 'true' },
@@ -132,20 +123,16 @@ function TokenInput({
           {values.map((v, i) => (
             <span
               key={`${v}-${i}`}
-              className='flex items-center gap-1 border border-textInactiveColor px-1.5 py-0.5'
+              className='flex items-center gap-1 border border-borderColor px-1.5 py-0.5'
             >
               <Text size='small'>{v}</Text>
               {!disabled && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   onClick={() => onChange(values.filter((_, j) => j !== i))}
                   aria-label={`remove ${v}`}
-                  className='leading-none'
-                >
-                  <Text size='small' variant='inactive'>
-                    [x]
-                  </Text>
-                </button>
+                  className='-my-1 -mr-1 leading-none'
+                />
               )}
             </span>
           ))}
@@ -216,7 +203,7 @@ function EnumChips({
               'border px-2 py-1 leading-none transition-colors',
               active
                 ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor hover:bg-textColor hover:text-bgColor',
+                : 'border-borderColor hover:bg-textColor hover:text-bgColor',
               disabled && 'pointer-events-none opacity-60',
             )}
           >

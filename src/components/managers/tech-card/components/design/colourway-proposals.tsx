@@ -11,12 +11,7 @@ import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Input, Pill, Section, Text, EmptyCell } from 'ui';
 
 import { ColourwayPaletteEditor, PaletteSwatches, type PaletteValue } from '../colourway-palette';
 import { nameI18nPatch, paletteRefusal, paletteToWire } from '../colourway-palette-model';
@@ -348,7 +343,7 @@ function SavedColourway({
             component='span'
             className={cn('uppercase', archived && 'text-labelColor')}
           >
-            {colourWords || '—'}
+            {colourWords || <EmptyCell />}
           </Text>
         </span>
         <Button
@@ -463,7 +458,7 @@ function SavedColourway({
                  чей цвет живёт на пришпиленном артикуле, так и говорит — прочерк там был бы
                  неправдой. */
               <Text size='micro' variant='label' component='span' data-slot-pantone=''>
-                {r.article ? 'set by its article' : '—'}
+                {r.article ? 'set by its article' : <EmptyCell />}
               </Text>
             )}
           </div>
@@ -822,7 +817,7 @@ export function ColourwayProposals({
                         <Swatch hex={hex} title={p.pantone || p.colorCode || undefined} />
                       )}
                       <Text size='micro' component='span' className='uppercase'>
-                        {p.pantone || p.colorCode || '—'}
+                        {p.pantone || p.colorCode || <EmptyCell />}
                       </Text>
                     </span>
                     <span className='ml-auto flex items-center gap-1.5'>

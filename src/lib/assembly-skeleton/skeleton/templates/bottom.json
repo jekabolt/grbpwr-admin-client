@@ -1,0 +1,149 @@
+{
+  "id": "bottom",
+  "category": "bottom",
+  "garmentName": "Garment",
+  "_note": "A bottom read from the PIECES (no category on the card): a waistband on left and right fronts and backs, no sleeve, collar or hood, and nothing that only trousers have (fly, crotch, inseam, leg, rise). Trousers or a panelled skirt: the panel method of the trousers template (pockets and waistband built first → the backs into one back → the fronts into one front → back and front in one → waistband → hem) with words both garments share — side seams, no inseam or crotch. A card with its category set, or a fly / crotch piece, reads trousers instead.",
+  "pressOpen": true,
+  "pressFlat": false,
+  "mergeHands": ["waistband", "yoke"],
+  "fuseRoles": ["waistband", "fly", "pocket", "facing"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "features",
+      "op": "features",
+      "label": "Darts"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Pockets, waistband, facings",
+      "roles": ["pocket", "fly", "waistband", "facing", "loop"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "*"]
+    },
+    {
+      "id": "back",
+      "op": "combine",
+      "label": "Join the back panels",
+      "roles": ["back", "yoke"],
+      "requireAll": ["back"],
+      "as": "back",
+      "name": "Back",
+      "zone": "BACK",
+      "press": "open"
+    },
+    {
+      "id": "front",
+      "op": "combine",
+      "label": "Join the front panels",
+      "roles": ["front"],
+      "requireAll": ["front"],
+      "as": "front",
+      "name": "Front",
+      "zone": "FRONT",
+      "press": "open"
+    },
+    {
+      "id": "body",
+      "op": "combine",
+      "label": "Join back and front: side seams",
+      "roles": ["front", "back", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "waistband",
+      "op": "attach",
+      "label": "Attach the waistband",
+      "roles": ["waistband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Garment with waistband",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "loops",
+      "op": "attach",
+      "label": "Attach belt loops",
+      "roles": ["loop"],
+      "to": ["body"],
+      "together": true,
+      "name": "Garment with belt loops",
+      "zone": "WAIST"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM"
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "drawcord",
+      "op": "bom",
+      "label": "Thread the drawcord",
+      "when": "drawcord",
+      "operationType": "HANDWORK",
+      "zone": "WAIST"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

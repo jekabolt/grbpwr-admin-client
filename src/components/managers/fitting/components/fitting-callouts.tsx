@@ -1,12 +1,11 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { kindDef } from 'ui/components/annotation/kinds';
-import type { AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
+import type {
+  AnnotationColorKey,
+  AnnotationKindKey,
+} from 'components/managers/tech-card/annotation/wire';
+import { Button, Close, GroupLabel, Select, Text, TextareaField } from 'ui';
 import { demoteCalloutToPin } from './callout-geometry';
 import { useDisclosure } from './disclosure';
 import { FittingFormData } from './schema';
@@ -75,7 +74,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
   ];
 
   return (
-    <div className='border-t border-textInactiveColor pt-3'>
+    <div className='border-t border-borderColor pt-3'>
       <button
         type='button'
         onClick={toggle}
@@ -113,9 +112,8 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                   <GroupLabel
                     flush={index === 0}
                     action={
-                      <Button
-                        type='button'
-                        variant='secondary'
+                      <Close
+                        size='sm'
                         aria-label='remove fit note'
                         onClick={() =>
                           writeCallouts(
@@ -124,9 +122,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                             ),
                           )
                         }
-                      >
-                        ✕
-                      </Button>
+                      />
                     }
                   >
                     {`fit note #${number} · ${kind.label}${

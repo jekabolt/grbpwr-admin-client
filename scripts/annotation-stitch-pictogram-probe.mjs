@@ -27,7 +27,7 @@ const outfile = resolve(
 await build({
   stdin: {
     contents: `
-      export * from 'ui/components/annotation/stitch-pictogram';
+      export * from 'components/managers/tech-card/annotation/stitch-pictogram';
       export { STITCHES } from 'components/managers/tech-card/components/design/modals/vector-strokes';
       export { createElement } from 'react';
       export { renderToStaticMarkup } from 'react-dom/server';

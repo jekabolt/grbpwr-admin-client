@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ROUTES } from 'constants/routes';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { MembersFilters, useMembers } from '../utils/hooks';
 import { MembersFilter } from './components/members-filter';
 import { MembersTable } from './components/members-table';
@@ -39,7 +38,7 @@ export function Members() {
 
   return (
     <div className='flex flex-col w-full gap-6 pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='large'>
             members

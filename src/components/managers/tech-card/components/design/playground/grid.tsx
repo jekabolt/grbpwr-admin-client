@@ -1,7 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import type { JSX } from 'react';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Text, Tile, Tiles } from 'ui';
 
 import { WORKFLOWS } from './registry';
 import { whyNot } from './registry/common';
@@ -44,8 +43,8 @@ export function WorkflowGrid({
               <span
                 className={
                   live
-                    ? 'flex aspect-[4/3] items-center justify-center bg-bgSecondary text-textColor'
-                    : 'flex aspect-[4/3] items-center justify-center text-textInactiveColor'
+                    ? 'flex aspect-[4/3] items-center justify-center bg-pageBg text-textColor'
+                    : 'flex aspect-[4/3] items-center justify-center text-borderColor'
                 }
                 data-workflow-tile={def.key}
                 data-workflow-live={live ? '' : undefined}

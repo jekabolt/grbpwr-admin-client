@@ -1,0 +1,1926 @@
+// PATTERN-IMPORT · A2 + A0.3 probe — face seeds and the legend roles by faces, through the e2e
+// operator pass (e2e-entry runCase): per case the automatic seeds (text / face), every blob with its
+// junk reason, the legend rows, the click metric; PNGs of the face seeds + legend roles; the
+// checks of auto/00-PLAN §A2 (wm M 4 seeds, the SVG 2 seeds and outlines = size/cut with 0 legend
+// edits, fixture sheets ≤ 1 junk face, negative controls unchanged against the base E2E report),
+// the r4454 M2 trap (two clicks in the back → one seed point) and a mutation check of every filter.
+//   node scripts/pattern-import/faces.mjs [case…]     (yarn patimport:faces)
+//   env PATIMPORT_CORPUS, PATIMPORT_REPORTS, PATIMPORT_E2E_OUT, FACES_BASE (base E2E json)
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import {
+  faceMap,
+  faceRaster,
+  faceSeedsOf,
+  judgeBlobs,
+  type FaceBlob,
+  type FaceJunk,
+  type FaceSwitch,
+} from 'lib/pattern-import/pieces/faces';
+import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
+import {
+  gradeView,
+  rolesByFaces,
+  STRAY_LANES,
+  sourceClash,
+  strayLanes,
+  type FaceRoleOpts,
+  type FaceSizeCtx,
+} from 'lib/pattern-import/chains/face-role';
+import { confirmRows, withClassSigs } from 'lib/pattern-import/chains/legend';
+import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
+import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
+import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
+import {
+  blobShapes,
+  countEvidence,
+  shapeCandidates,
+  sheetFeed,
+} from 'lib/pattern-import/sizes/count-evidence';
+import { readRawDxf } from 'lib/pattern-import/gate';
+import { srcKey } from 'lib/pattern-import/clean';
+import { nestedPieces } from 'lib/pattern-import/gate/checks';
+import type {
+  BoxMm,
+  Chain,
+  ChainRole,
+  ChainSet,
+  IRPath,
+  IRText,
+  PagePose,
+  Style,
+  PieceFamily,
+  PtMm,
+  Seed,
+  Sheet,
+  SizeRun,
+  StageIO,
+  StageName,
+} from 'lib/pattern-import/types';
+import { PATIMPORT } from 'lib/pattern-import/types';
+import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
+import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
+
+import { CASES, runCase } from './e2e-entry';
+import { renderPng, type Label, type Stroke } from './sizes-render';
+
+const REPORTS =
+  process.env.PATIMPORT_REPORTS ??
+  '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/reports/';
+const OUT = resolve(REPORTS, 'A2-faces');
+
+type Inner = {
+  sheet: Sheet;
+  chains: ChainSet;
+  run: SizeRun;
+  faces: { map: ReturnType<typeof faceMap>; seeds: Seed[] } | null;
+};
+const inner = (s: Session) => s as unknown as Inner;
+
+const ROLE_COLOR: Record<string, string> = {
+  size: '#d62728',
+  common: '#1f77b4',
+  seam: '#9467bd',
+  grain: '#2ca02c',
+  notch: '#8c564b',
+  internal: '#ff7f0e',
+  ignore: '#d0d0d0',
+};
+
+type Auto = {
+  seeds: Record<string, number>;
+  faceSeeds: { at: PtMm; areaCm2: number; depth: number }[];
+  blobs: { junk: string | null; areaCm2: number; text: boolean }[];
+  junkBy: Record<string, number>;
+  legend: { role: string; chains: number; lenM: number; conf: number; why: string }[];
+  families: { seed: number; origin: string; outcomes: string; areasCm2: number[] }[];
+  /** A2 r2: what the pieces step lists as set aside, by reason. */
+  setAside: Record<string, number>;
+};
+
+function render(file: string, inn: Inner, pc: StageIO['pieces']['out'], title: string) {
+  const { chains, sheet } = inn;
+  const roleOf = new Map<number, string>();
+  for (const k of chains.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  const strokes: Stroke[] = [];
+  // ignore first (under), then the rest
+  const order = [...chains.chains].sort(
+    (a, b) => (roleOf.get(a.id) === 'ignore' ? 0 : 1) - (roleOf.get(b.id) === 'ignore' ? 0 : 1),
+  );
+  for (const c of order) {
+    const r = roleOf.get(c.id) ?? 'orphan';
+    strokes.push({
+      pts: c.pts,
+      closed: c.closed,
+      color: ROLE_COLOR[r] ?? '#000',
+      width: r === 'ignore' ? 0.5 : 1,
+    });
+  }
+  const labels: Label[] = [];
+  for (const f of pc.families) {
+    const c0 = f.candidates.find((c) => c.outcome === 'closed' && c.outer.length > 2);
+    if (c0)
+      strokes.push({ pts: c0.outer, closed: true, color: '#2ca02c', width: 2.5, dash: '6 4' });
+  }
+  for (const b of inn.faces?.map.blobs ?? []) {
+    if (!b.junk || b.areaMm2 < PATIMPORT.minPieceAreaMm2) continue;
+    const q = b.box;
+    strokes.push({
+      pts: [
+        { x: q.minX, y: q.minY },
+        { x: q.maxX, y: q.minY },
+        { x: q.maxX, y: q.maxY },
+        { x: q.minX, y: q.maxY },
+      ],
+      closed: true,
+      color: '#888',
+      width: 1,
+      dash: '2 3',
+    });
+    labels.push({
+      at: { x: q.minX + 2, y: q.maxY - 6 },
+      text: `junk:${b.junk}`,
+      color: '#555',
+      size: 11,
+    });
+  }
+  for (const sd of pc.seeds) {
+    const col = sd.origin === 'face' ? '#e41a1c' : sd.origin === 'text' ? '#377eb8' : '#984ea3';
+    const r = 6;
+    strokes.push({
+      pts: [
+        { x: sd.at.x - r, y: sd.at.y },
+        { x: sd.at.x + r, y: sd.at.y },
+      ],
+      color: col,
+      width: 3,
+    });
+    strokes.push({
+      pts: [
+        { x: sd.at.x, y: sd.at.y - r },
+        { x: sd.at.x, y: sd.at.y + r },
+      ],
+      color: col,
+      width: 3,
+    });
+    labels.push({
+      at: { x: sd.at.x + 8, y: sd.at.y + 4 },
+      text: `${sd.origin} #${sd.id}`,
+      color: col,
+      size: 14,
+    });
+  }
+  const box = { ...sheet.bbox };
+  box.minX -= 10;
+  box.minY -= 10;
+  box.maxX += 10;
+  box.maxY += 10;
+  const px = Math.min(1.6, 1800 / Math.max(1, box.maxX - box.minX));
+  const legend = [
+    { color: '#000', text: title },
+    ...chains.classes.map((k) => ({
+      color: ROLE_COLOR[k.role] ?? '#000',
+      text: `${k.id}:${k.role}${k.sizeLabel ? ` ${k.sizeLabel}` : ''} ${k.chains.length} conf ${k.confidence.toFixed(2)}`,
+    })),
+    { color: '#e41a1c', text: 'face seed' },
+    { color: '#377eb8', text: 'text seed' },
+    { color: '#2ca02c', text: 'closed outline (first rank)' },
+  ];
+  renderPng(file, box, strokes, labels, px, legend);
+}
+
+function autoOf(inn: Inner, pc: StageIO['pieces']['out']): Auto {
+  const seeds: Record<string, number> = {};
+  for (const s of pc.seeds) seeds[s.origin] = (seeds[s.origin] ?? 0) + 1;
+  const blobs = (inn.faces?.map.blobs ?? []).filter((b) => b.areaMm2 >= PATIMPORT.minPieceAreaMm2);
+  const junkBy: Record<string, number> = {};
+  for (const b of blobs) if (b.junk) junkBy[b.junk] = (junkBy[b.junk] ?? 0) + 1;
+  return {
+    seeds,
+    faceSeeds: pc.seeds
+      .filter((s) => s.origin === 'face')
+      .map((s) => ({
+        at: { x: +s.at.x.toFixed(1), y: +s.at.y.toFixed(1) },
+        areaCm2: Math.round((s.face?.areaMm2 ?? 0) / 100),
+        depth: s.face?.depth ?? -1,
+      })),
+    blobs: blobs.map((b) => ({
+      junk: b.junk,
+      areaCm2: Math.round(b.areaMm2 / 100),
+      text: b.textSeed != null,
+    })),
+    junkBy,
+    legend: inn.chains.classes.map((k) => ({
+      role: k.role,
+      chains: k.chains.length,
+      lenM: +(k.totalLengthMm / 1000).toFixed(2),
+      conf: k.confidence,
+      why: k.evidence.map((e) => e.kind + ('name' in e ? `:${e.name}` : '')).join(','),
+    })),
+    setAside: (pc.setAside ?? []).reduce<Record<string, number>>((m, a) => {
+      const k = a.seed ? `label:${a.reason}` : a.reason;
+      m[k] = (m[k] ?? 0) + 1;
+      return m;
+    }, {}),
+    families: pc.families.map((f: PieceFamily) => ({
+      seed: f.seed,
+      origin: pc.seeds.find((s) => s.id === f.seed)?.origin ?? '?',
+      outcomes: f.candidates.map((c) => c.outcome[0]).join(''),
+      areasCm2: f.candidates.map((c) => Math.round(c.areaMm2 / 100)),
+    })),
+  };
+}
+
+type Check = { section: string; check: string; ok: boolean; got: string };
+const checks: Check[] = [];
+const check = (section: string, name: string, ok: boolean, got: unknown) =>
+  checks.push({
+    section,
+    check: name,
+    ok,
+    got: typeof got === 'string' ? got : JSON.stringify(got),
+  });
+
+/** One case through the e2e operator pass; the automatic pieces run captured. */
+async function oneCase(id: string) {
+  const c = CASES.find((x) => x.id === id);
+  if (!c) throw new Error(`no case ${id}`);
+  let auto: Auto | null = null;
+  let snap: { inn: Inner; pc: StageIO['pieces']['out'] } | null = null;
+  const rec = await runCase(c, {
+    onAutoPieces: (s, pc) => {
+      const i0 = inner(s);
+      // the session is closed when the case ends: keep the references
+      const inn: Inner = { sheet: i0.sheet, chains: i0.chains, run: i0.run, faces: i0.faces };
+      auto = autoOf(inn, pc);
+      snap = { inn, pc };
+      mkdirSync(OUT, { recursive: true });
+      render(resolve(OUT, `${id.replace(/[^\w.-]+/g, '_')}.png`), inn, pc, id);
+    },
+  });
+  return {
+    rec,
+    auto: auto as Auto | null,
+    snap: snap as { inn: Inner; pc: StageIO['pieces']['out'] } | null,
+  };
+}
+
+const FIXTURE: Record<string, number> = { blazer: 8, r4454: 9, redcafe: 4, wm: 4 };
+
+const CORPUS =
+  process.env.PATIMPORT_CORPUS ??
+  '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
+const ctx = (): StageCtx => ({ checkCancel: () => {}, progress: () => {} });
+
+/**
+ * The r4454 M2 trap (FLY-final): the back seeded by a click at (1350, 720) closed all six sizes,
+ * at (1410, 614) it was refused. The back's face seed, and each click alone → the back's outcome.
+ */
+async function m2(): Promise<Record<string, unknown>> {
+  const b = readFileSync(resolve(CORPUS, 'pdf/r4454.pdf'));
+  const file = {
+    name: 'r4454.pdf',
+    bytes: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer,
+  };
+  const s = new Session(1, [file]);
+  const run = <S extends StageName>(st: S, input: StageIO[S]['in']) => s.runStage(st, input, ctx());
+  await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  const cl = await run('clean', { edits: [] });
+  const best = cl.scale[0];
+  await run('scale', {
+    decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
+  });
+  await run('assemble', { sheet: 0 });
+  await run('chains', {
+    opts: {
+      joinGapMm: PATIMPORT.joinGapMm,
+      joinAngleDeg: PATIMPORT.joinAngleDeg,
+      joinLateralMm: PATIMPORT.joinLateralMm,
+    },
+  });
+  const card = CASES.find((x) => x.id === 'r4454')!.card.map((t, i) => ({
+    sizeId: i + 1,
+    token: t,
+  }));
+  await run('sizes', { card } as unknown as StageIO['sizes']['in']);
+  const opts = { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null };
+  const auto = await run('pieces', { edits: [], opts });
+  const back = auto.seeds.find(
+    (x) =>
+      x.origin === 'face' &&
+      !!x.face &&
+      1350 >= x.face.box.minX &&
+      1350 <= x.face.box.maxX &&
+      720 >= x.face.box.minY &&
+      720 <= x.face.box.maxY,
+  );
+  const fam = (out: StageIO['pieces']['out'], sid: number) => {
+    const f = out.families.find((x) => x.seed === sid);
+    return f
+      ? {
+          outcomes: f.candidates.map((c) => c.outcome[0]).join(''),
+          areasCm2: f.candidates.map((c) => Math.round(c.areaMm2 / 100)),
+          at: out.seeds.find((x) => x.id === sid)?.at,
+        }
+      : null;
+  };
+  const res: Record<string, unknown> = { face: back ? fam(auto, back.id) : null };
+  for (const [k, at] of [
+    ['click1350', { x: 1350, y: 720 }],
+    ['click1410', { x: 1410, y: 614 }],
+  ] as const) {
+    const seed: Seed = { id: 900, at, origin: 'click', variant: null };
+    const out = await run('pieces', { seeds: [seed], edits: [], opts });
+    res[k] = fam(out, 900);
+  }
+  s.close();
+  return res;
+}
+
+// ── synthetic: every filter of the face pass and every rule of the legend by faces ──────────────
+
+const rect = (x0: number, y0: number, x1: number, y1: number): PtMm[] => [
+  { x: x0, y: y0 },
+  { x: x1, y: y0 },
+  { x: x1, y: y1 },
+  { x: x0, y: y1 },
+];
+const polyLenOf = (p: PtMm[], closed: boolean) => {
+  let L = 0;
+  const q = closed ? [...p, p[0]] : p;
+  for (let i = 1; i < q.length; i++) L += Math.hypot(q[i].x - q[i - 1].x, q[i].y - q[i - 1].y);
+  return L;
+};
+const chainOf = (id: number, pts: PtMm[], closed: boolean, style = 0): Chain => ({
+  id,
+  pts,
+  closed,
+  ranges: [{ path: id, from: 0, to: pts.length - 1 }],
+  motif: null,
+  style,
+  lengthMm: polyLenOf(pts, closed),
+});
+const textAt = (id: number, x: number, y: number, t: string): IRText => ({
+  id,
+  text: t,
+  anchor: { x, y },
+  bbox: { minX: x, minY: y, maxX: x + 6, maxY: y + 3 },
+  fontSizeMm: 3,
+  rotationDeg: 0,
+  layer: null,
+  src: { file: 'syn', page: 0, op: id, sub: 0 },
+});
+const STYLE = (id: number, layer: string | null): Style => ({
+  id,
+  strokeRgb: [0, 0, 0],
+  widthMm: 0.3,
+  dash: null,
+  layer,
+  fill: false,
+  clip: null,
+});
+const sheetOf = (bbox: BoxMm, poses: PagePose[], texts: IRText[], styles: Style[]): Sheet => ({
+  id: 0,
+  poses,
+  pairs: [],
+  bbox,
+  missing: [],
+  paths: [],
+  texts,
+  rasters: [],
+  styles,
+  warnings: [],
+});
+const pose = (x: number, y: number, w: number, h: number): PagePose => ({
+  file: 'syn',
+  page: 0,
+  toSheet: { a: 1, b: 0, c: 0, d: 1, e: x, f: y },
+  widthMm: w,
+  heightMm: h,
+  residualMm: 0,
+});
+
+/** The face-pass filters on a synthetic sheet: each one's junk, and seeded when it is off. */
+function synthFaces() {
+  const items: { pts: PtMm[]; closed: boolean }[] = [];
+  const add = (pts: PtMm[], closed = true) => items.push({ pts, closed });
+  // page 1 (0..500 × 0..400) framed as a wall, a piece inside it (peel)
+  add(rect(0, 0, 500, 400));
+  add(rect(100, 100, 300, 300));
+  // a piece on page 2 (500..1000)
+  add(rect(600, 100, 800, 350));
+  // a test square
+  add(rect(850, 50, 950, 150));
+  // a small box
+  add(rect(850, 200, 860, 210));
+  // a logo: a box full of tiny strokes
+  add(rect(850, 250, 910, 310));
+  for (let i = 0; i < 50; i++)
+    add(
+      [
+        { x: 853 + (i % 10) * 5, y: 253 + Math.floor(i / 10) * 10 },
+        { x: 856 + (i % 10) * 5, y: 255 + Math.floor(i / 10) * 10 },
+      ],
+      false,
+    );
+  // a table: 2 rows × 4 cells of 25 × 10
+  add(rect(520, 0, 620, 20));
+  for (const x of [545, 570, 595])
+    add(
+      [
+        { x, y: 0 },
+        { x, y: 20 },
+      ],
+      false,
+    );
+  add(
+    [
+      { x: 520, y: 10 },
+      { x: 620, y: 10 },
+    ],
+    false,
+  );
+  // a legend: a box with 4 line samples, a size number after each
+  add(rect(640, 0, 760, 60));
+  const texts: IRText[] = [];
+  for (let i = 0; i < 4; i++) {
+    add(
+      [
+        { x: 650, y: 10 + i * 12 },
+        { x: 690, y: 10 + i * 12 },
+      ],
+      false,
+    );
+    texts.push(textAt(100 + i, 694, 9 + i * 12, String(44 + 2 * i)));
+  }
+  // a box drawn only in lines the furniture classifier set aside (weak walls)
+  const weak = [{ chain: 9999, pts: rect(880, 330, 980, 390), closed: true }];
+  const wallItems = items.map((it, i) => ({ chain: i, pts: it.pts, closed: it.closed }));
+  const chains = items.map((it, i) => chainOf(i, it.pts, it.closed));
+  const sheet = sheetOf(
+    { minX: 0, minY: 0, maxX: 1000, maxY: 400 },
+    [pose(0, 0, 500, 400), pose(500, 0, 500, 400)],
+    texts,
+    [STYLE(0, null)],
+  );
+  const judge = (off?: Set<FaceJunk | 'peel' | 'nested'>) => {
+    const fr = faceRaster(sheet.bbox, wallItems, weak, 0.5);
+    return judgeBlobs(fr, sheet, chains, wallItems, [], { off });
+  };
+  const at = (bs: FaceBlob[], x: number, y: number) =>
+    bs.find(
+      (b) =>
+        b.box.minX <= x && b.box.maxX >= x && b.box.minY <= y && b.box.maxY >= y && b.areaMm2 >= 50,
+    );
+  const on = judge();
+  const want: [FaceJunk | 'peel', number, number][] = [
+    ['tile-frame', 20, 20],
+    ['test-square', 900, 100],
+    ['small', 855, 205],
+    ['logo', 880, 280],
+    ['table', 570, 10],
+    ['legend', 700, 30],
+    ['background', 930, 360],
+  ];
+  for (const [k, x, y] of want) {
+    const b = at(on, x, y);
+    check(
+      'synthetic faces',
+      `${k}: junk`,
+      b?.junk === k,
+      b ? { junk: b.junk, area: Math.round(b.areaMm2) } : 'no blob',
+    );
+    const o = judge(new Set([k]));
+    const b2 = at(o, x, y);
+    check(
+      'synthetic faces',
+      `${k} off: seeded (mutation)`,
+      !!b2 && !b2.junk,
+      b2 ? { junk: b2.junk } : 'no blob',
+    );
+  }
+  // the piece inside the framed page is peeled out and seeded; without peeling it is lost
+  const inner = on.find((b) => b.peeled && b.box.minX >= 99 && b.box.maxX <= 301);
+  check(
+    'synthetic faces',
+    'peel: the piece inside a framed page is seeded',
+    !!inner && !inner.junk,
+    inner ?? 'none',
+  );
+  const np = judge(new Set(['peel']));
+  check(
+    'synthetic faces',
+    'peel off: it is not (mutation)',
+    !np.some((b) => b.peeled),
+    np.filter((b) => b.peeled).length,
+  );
+  const piece2 = at(on, 700, 200);
+  check(
+    'synthetic faces',
+    'a plain piece is seeded',
+    !!piece2 && !piece2.junk,
+    piece2?.junk ?? null,
+  );
+  // a frame larger than 60 % of the sheet
+  const big = sheetOf({ minX: 0, minY: 0, maxX: 520, maxY: 420 }, [], [], [STYLE(0, null)]);
+  const bigItems = [
+    { chain: 0, pts: rect(0, 0, 510, 410), closed: true },
+    { chain: 1, pts: rect(100, 100, 300, 300), closed: true },
+  ];
+  const bigChains = bigItems.map((it) => chainOf(it.chain, it.pts, true));
+  const fb = judgeBlobs(faceRaster(big.bbox, bigItems, [], 0.5), big, bigChains, bigItems, []);
+  check(
+    'synthetic faces',
+    'sheet: a sheet-sized border is junk, the piece inside is seeded',
+    fb.some((b) => b.junk === 'sheet') && fb.some((b) => b.peeled && !b.junk),
+    fb.map((b) => [b.junk, Math.round(b.areaMm2 / 100)]),
+  );
+  const fb2 = judgeBlobs(faceRaster(big.bbox, bigItems, [], 0.5), big, bigChains, bigItems, [], {
+    off: new Set(['sheet']),
+  });
+  check(
+    'synthetic faces',
+    'sheet off: the border is seeded (mutation)',
+    !fb2.some((b) => b.junk === 'sheet'),
+    fb2.map((b) => [b.junk, Math.round(b.areaMm2 / 100)]),
+  );
+}
+
+/**
+ * Outlines inside one blob (A2 r2): a collar drawn inside the back, a graded nest with a pocket
+ * between two size lines, two pieces touching at a corner, a piece split by an inner line, two
+ * pieces drawn sharing an edge, a label box in another pen — each rule, and its mutation.
+ */
+function synthUnits() {
+  type It = { pts: PtMm[]; closed: boolean; cls: number };
+  const run = (
+    its: It[],
+    o: {
+      graded?: boolean;
+      roles?: Record<number, ChainRole>;
+      off?: Set<FaceSwitch>;
+      texts?: IRText[];
+    } = {},
+  ) => {
+    const wallItems = its.map((it, i) => ({ chain: i, pts: it.pts, closed: it.closed }));
+    const chains = its.map((it, i) => chainOf(i, it.pts, it.closed));
+    let b: BoxMm = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const it of its)
+      for (const p of it.pts)
+        b = {
+          minX: Math.min(b.minX, p.x),
+          minY: Math.min(b.minY, p.y),
+          maxX: Math.max(b.maxX, p.x),
+          maxY: Math.max(b.maxY, p.y),
+        };
+    // a sheet much larger than the drawing (no 'sheet' border verdict)
+    const pad = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+    const sheet = sheetOf(
+      { minX: b.minX - pad, minY: b.minY - pad, maxX: b.maxX + pad, maxY: b.maxY + pad },
+      [],
+      o.texts ?? [],
+      [STYLE(0, null)],
+    );
+    const classOf = new Map(its.map((it, i) => [i, it.cls]));
+    const roleOf = new Map<number, ChainRole>(
+      its.map((it, i) => [i, o.roles?.[it.cls] ?? (o.graded ? 'size' : 'common')]),
+    );
+    const fr = faceRaster(sheet.bbox, wallItems, [], 0.5);
+    const bs = judgeBlobs(fr, sheet, chains, wallItems, [], {
+      off: o.off,
+      classOf,
+      roleOf,
+      graded: !!o.graded,
+      sizeLine: new Set(o.graded ? its.map((_, i) => i) : []),
+    });
+    return {
+      seeds: bs.filter((x) => !x.junk && x.areaMm2 >= PATIMPORT.minPieceAreaMm2),
+      asides: bs.filter(
+        (x) => x.junk && x.junk !== 'small' && x.areaMm2 >= PATIMPORT.minPieceAreaMm2,
+      ),
+    };
+  };
+  const R = (x0: number, y0: number, x1: number, y1: number, cls = 0): It => ({
+    pts: rect(x0, y0, x1, y1),
+    closed: true,
+    cls,
+  });
+  const L = (a: PtMm, b: PtMm, cls = 0): It => ({ pts: [a, b], closed: false, cls });
+  const sum = (r: ReturnType<typeof run>) => ({
+    seeds: r.seeds.length,
+    asides: r.asides.map((x) => x.junk).sort(),
+  });
+  const S = 'synthetic outlines';
+  // U1 one size: back (cut + seam 10 mm in), collar inside it (cut + seam 8 mm in)
+  const u1 = [R(0, 0, 300, 700), R(10, 10, 290, 690), R(200, 100, 260, 500), R(208, 108, 252, 492)];
+  const a1 = sum(run(u1));
+  check(
+    S,
+    'collar inside the back: 2 pieces, both seam lines set aside',
+    a1.seeds === 2 && a1.asides.join() === 'seam-line,seam-line',
+    a1,
+  );
+  const a1n = sum(run(u1, { off: new Set(['nested']) }));
+  check(S, 'nested off: the collar is lost in the back (mutation)', a1n.seeds === 1, a1n);
+  const a1c = sum(run(u1, { off: new Set(['seam-line']) }));
+  check(S, 'seam-line off: seam lines seeded as pieces (mutation)', a1c.seeds > 2, a1c);
+  // U2 graded nest of 3 sizes (classes S 0, M 1, L 2; hem graded 40 mm) + a pocket between the L
+  // and M lines and one inside S, each drawn in two sizes (its own nest)
+  const u2 = [
+    R(0, 0, 200, 300, 0),
+    R(-10, -40, 210, 310, 1),
+    R(-20, -80, 220, 320, 2),
+    R(50, -70, 120, -50, 2),
+    R(53, -67, 117, -53, 1),
+    R(60, 100, 130, 160, 2),
+    R(63, 103, 127, 157, 1),
+  ];
+  const a2 = sum(run(u2, { graded: true }));
+  check(
+    S,
+    'graded nest: 1 piece + its size copies; the pocket between two size lines and the one inside are pieces',
+    a2.seeds === 3 && a2.asides.every((x) => x === 'size-copy'),
+    a2,
+  );
+  // a shape of one size's line with no copy of itself in another size: where sizes cross
+  const u2f = [
+    R(0, 0, 200, 300, 0),
+    R(-10, -40, 210, 310, 1),
+    R(-20, -80, 220, 320, 2),
+    R(50, -70, 120, -50, 2),
+  ];
+  const a2f = sum(run(u2f, { graded: true }));
+  check(
+    S,
+    'graded: a lone shape of one size line, no copy in another size → not seeded',
+    a2f.seeds === 1,
+    a2f,
+  );
+  const a2fo = sum(run(u2f, { graded: true, off: new Set(['fragments']) }));
+  check(S, 'fragments off: it is seeded (mutation)', a2fo.seeds === 2, a2fo);
+  const a2c = sum(run(u2, { graded: true, off: new Set(['size-copy']) }));
+  check(
+    S,
+    'size-copy off: the sizes are no longer held as copies of the piece (mutation)',
+    !a2c.asides.includes('size-copy') && a2c.asides.length + a2c.seeds > 3,
+    a2c,
+  );
+  // U3 two pieces touching at a corner
+  const u3 = [R(0, 0, 100, 130), R(100, 130, 190, 250)];
+  const a3 = sum(run(u3));
+  check(S, 'touching at a corner: 2 pieces', a3.seeds === 2 && !a3.asides.length, a3);
+  const a3u = sum(run(u3, { off: new Set(['units']) }));
+  check(S, 'units off: one seed for both (mutation)', a3u.seeds === 1, a3u);
+  // U4 a piece split by an inner line edge to edge
+  const u4 = [R(0, 0, 200, 300), L({ x: 0, y: 150 }, { x: 200, y: 150 }, 1)];
+  const a4 = sum(run(u4, { roles: { 0: 'common', 1: 'internal' } }));
+  check(
+    S,
+    'split by an inner line: 1 piece, the other half set aside',
+    a4.seeds === 1 && a4.asides.join() === 'inner-line',
+    a4,
+  );
+  const a4o = sum(run(u4, { roles: { 0: 'common', 1: 'internal' }, off: new Set(['inner-line']) }));
+  check(S, 'inner-line off: two halves seeded (mutation)', a4o.seeds === 2, a4o);
+  // U5 two outlines drawn sharing an edge (one pen): which is a piece is the operator's word
+  const u5 = [R(0, 0, 100, 150), R(100, 0, 200, 140)];
+  const a5 = sum(run(u5));
+  check(
+    S,
+    'sharing an edge: 1 seeded, the other set aside (joined)',
+    a5.seeds === 1 && a5.asides.join() === 'joined',
+    a5,
+  );
+  const a5o = sum(run(u5, { off: new Set(['joined']) }));
+  check(S, 'joined off: both seeded (mutation)', a5o.seeds === 2, a5o);
+  // U7 a strap whose size ends cross it edge to edge, each with its size printed by it: a piece,
+  // not a legend box (r4454's band)
+  const u7 = [R(0, 0, 140, 45)];
+  const t7: IRText[] = [];
+  for (let i = 0; i < 4; i++) {
+    u7.push(L({ x: 80 + 8 * i, y: 0 }, { x: 80 + 8 * i, y: 45 }, 1));
+    t7.push(textAt(300 + i, 80 + 8 * i, 34, String(44 + 2 * i)));
+  }
+  const a7 = run(u7, { texts: t7 });
+  check(
+    S,
+    'a strap with size ends across it: not a legend',
+    !a7.asides.some((x) => x.junk === 'legend'),
+    sum(a7),
+  );
+  const a7o = run(u7, { texts: t7, off: new Set(['free-ends']) });
+  check(
+    S,
+    'free-ends off: the strap is a legend (mutation)',
+    a7o.asides.some((x) => x.junk === 'legend'),
+    sum(a7o),
+  );
+  // U6 a label box in another pen inside a piece
+  const u6 = [R(0, 0, 300, 400), R(100, 100, 180, 140, 1)];
+  const a6 = sum(run(u6));
+  check(
+    S,
+    'label box in another pen: set aside',
+    a6.seeds === 1 && a6.asides.join() === 'other-pen',
+    a6,
+  );
+  const a6o = sum(run(u6, { off: new Set(['other-pen']) }));
+  check(S, 'other-pen off: seeded (mutation)', a6o.seeds === 2, a6o);
+}
+
+/** The legend by faces on a synthetic one-pen sheet: each rule, and its mutation. */
+function synthRoles() {
+  const lines: { pts: PtMm[]; closed: boolean; style?: number; tag: string }[] = [];
+  const L = (tag: string, pts: PtMm[], closed = false, style = 0) =>
+    lines.push({ tag, pts, closed, style });
+  // two pieces, cut + seam 10 mm inside, in the layer "Cut lines" (style 1, the same pen)
+  L('cut', rect(0, 0, 300, 400), true, 1);
+  L('seam', rect(10, 10, 290, 390), true, 1);
+  L('cut', rect(400, 0, 650, 350), true, 1);
+  L('seam', rect(410, 10, 640, 340), true, 1);
+  // a grain line inside A
+  L('grain', [
+    { x: 200, y: 60 },
+    { x: 200, y: 340 },
+  ]);
+  // a diagonal crossing A's outline
+  L('cross', [
+    { x: -40, y: 40 },
+    { x: 120, y: 260 },
+  ]);
+  // stroke lettering inside A
+  for (let i = 0; i < 6; i++)
+    L('letters', [
+      { x: 60 + i * 5, y: 100 },
+      { x: 62 + i * 5, y: 110 },
+    ]);
+  // a hand-drawn wiggle inside B
+  const zig: PtMm[] = [];
+  for (let i = 0; i <= 24; i++) zig.push({ x: 450 + i * 6, y: 150 + (i % 2) * 8 });
+  L('wiggle', zig);
+  // N3: the wiggle goes on past a gap a letter took: a curved run of two short pieces
+  L('handrun', [
+    { x: 601, y: 152 },
+    { x: 606, y: 162 },
+    { x: 611, y: 154 },
+  ]);
+  L('handrun', [
+    { x: 611, y: 154 },
+    { x: 616, y: 166 },
+    { x: 621, y: 156 },
+  ]);
+  // N3: a straight diagonal inside A from free space into a tile label's strokes (offered)
+  L('intolabel', [
+    { x: 40, y: 330 },
+    { x: 150, y: 200 },
+  ]);
+  for (const [dx, dy, ex, ey] of [
+    [150, 200, 154, 200],
+    [150, 200, 150, 196],
+    [150, 202, 153, 202],
+    [151, 199, 151, 203],
+  ])
+    L('tlabel', [
+      { x: dx, y: dy },
+      { x: ex, y: ey },
+    ]);
+  // a curve mostly outside B
+  L('outside', [
+    { x: 560, y: 300 },
+    { x: 600, y: 380 },
+    { x: 640, y: 420 },
+    { x: 700, y: 430 },
+  ]);
+  // a line the clean step offered (path offered)
+  L('offered', [
+    { x: 450, y: 250 },
+    { x: 600, y: 250 },
+  ]);
+  // a test square
+  L('square', rect(700, 0, 800, 100), true);
+  // a table of 2 × 4 cells
+  L('table', rect(700, 200, 800, 220), true);
+  for (const x of [725, 750, 775])
+    L('table', [
+      { x, y: 200 },
+      { x, y: 220 },
+    ]);
+  L('table', [
+    { x: 700, y: 210 },
+    { x: 800, y: 210 },
+  ]);
+  const chains = lines.map((l, i) => chainOf(i, l.pts, l.closed, l.style));
+  const styles = new Map<number, Style>([
+    [0, STYLE(0, null)],
+    [1, STYLE(1, 'Cut lines')],
+  ]);
+  const sheet = sheetOf(
+    { minX: -50, minY: -10, maxX: 820, maxY: 440 },
+    [],
+    [],
+    [...styles.values()],
+  );
+  const set: ChainSet = {
+    chains,
+    classes: [
+      {
+        id: 0,
+        role: 'internal',
+        sizeLabel: null,
+        chains: chains.map((c) => c.id),
+        totalLengthMm: chains.reduce((a, c) => a + c.lengthMm, 0),
+        evidence: [],
+        confidence: 0.5,
+      },
+    ],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const offered = new Set(
+    lines.flatMap((l, i) => (l.tag === 'offered' || l.tag === 'tlabel' ? [i] : [])),
+  );
+  type Off = NonNullable<FaceRoleOpts['off']>;
+  const roleOf = (off?: Off, sh: Sheet = sheet) => {
+    const out = rolesByFaces(sh, set, styles, offered, { off });
+    const by = new Map<string, Set<string>>();
+    for (const c of out.classes)
+      for (const id of c.chains) {
+        const t = lines[id].tag;
+        if (!by.has(t)) by.set(t, new Set());
+        by.get(t)!.add(c.role);
+      }
+    const row = out.classes.find((c) => c.evidence.some((e) => e.kind === 'faces'));
+    const ev = row?.evidence.find((e) => e.kind === 'faces');
+    return {
+      role: (t: string) => [...(by.get(t) ?? [])].join('+'),
+      auto: !!ev && ev.kind === 'faces' && ev.auto,
+      cues: ev && ev.kind === 'faces' ? ev.cues : [],
+      conf: row?.confidence ?? 0,
+    };
+  };
+  const r = roleOf();
+  const expect: [string, string][] = [
+    ['cut', 'common'],
+    ['seam', 'common'],
+    ['grain', 'internal'],
+    ['cross', 'ignore'],
+    ['letters', 'ignore'],
+    ['wiggle', 'ignore'],
+    ['outside', 'ignore'],
+    ['offered', 'ignore'],
+    ['square', 'ignore'],
+    ['table', 'ignore'],
+    ['handrun', 'ignore'],
+    ['intolabel', 'ignore'],
+  ];
+  for (const [t, want] of expect)
+    check('synthetic legend', `${t} → ${want}`, r.role(t) === want, r.role(t));
+  check(
+    'synthetic legend',
+    'outline row auto (faces + layer + drawn double)',
+    r.auto && r.conf >= 0.6,
+    r.cues,
+  );
+  const mut: [NonNullable<Off> extends ReadonlySet<infer K> ? K : never, string, string][] = [
+    ['inside', 'cross', 'internal'],
+    ['inside', 'letters', 'internal'],
+    ['inside', 'wiggle', 'internal'],
+    ['outside', 'outside', 'internal'],
+    ['offered', 'offered', 'internal'],
+    ['square', 'square', 'common'],
+    ['junk', 'table', 'internal'],
+    ['runs', 'handrun', 'internal'],
+    ['lettering', 'intolabel', 'internal'],
+  ];
+  for (const [k, t, want] of mut) {
+    const m = roleOf(new Set([k]));
+    check('synthetic legend', `${k} off: ${t} → ${want} (mutation)`, m.role(t) === want, m.role(t));
+  }
+  const noLayerRing = roleOf(new Set(['layer', 'ring']));
+  check(
+    'synthetic legend',
+    'layer + ring off: one cue → asked, not auto (mutation)',
+    !noLayerRing.auto && noLayerRing.conf < 0.6,
+    noLayerRing.cues,
+  );
+  const noRing = roleOf(new Set(['ring']));
+  check('synthetic legend', 'ring off: faces + layer still auto', noRing.auto, noRing.cues);
+  const noLayer = roleOf(new Set(['layer']));
+  check(
+    'synthetic legend',
+    'layer off: faces + drawn double are one source (geometry) → asked, not auto',
+    !noLayer.auto && noLayer.conf < 0.6,
+    noLayer.cues,
+  );
+  const keyed = { ...sheet, texts: [textAt(900, -40, 430, 'Cutting line')] };
+  const byKey = roleOf(new Set(['layer']), keyed);
+  check(
+    'synthetic legend',
+    'layer off, a printed “cutting line” key → auto',
+    byKey.auto,
+    byKey.cues,
+  );
+  const noKey = roleOf(new Set(['layer', 'text']), keyed);
+  check(
+    'synthetic legend',
+    'text off: the key does not count → asked (mutation)',
+    !noKey.auto,
+    noKey.cues,
+  );
+  const all = roleOf(new Set(['all']));
+  check(
+    'synthetic legend',
+    'all off: the legend is left as built (mutation)',
+    all.role('cut') === 'internal',
+    all.role('cut'),
+  );
+}
+
+/**
+ * The face pass's strays as the size checks see them (chains/face-role gradeView), on a sheet that
+ * draws 3 sizes in one pen: a fold drawn once, each size's outline bottom → right → top (6 mm wider,
+ * 5 mm taller per size), a positioning line straight across the nest, 100 mm out on both sides, and
+ * a drawn test square. With the gb2 gate off (the guard behind it), the face pass files the largest
+ * size, the positioning line and the square as strays. Per chain: the size line and the positioning line are handed back (a laneless line may as
+ * well be an edge drawn once for every size — the bench needs those as walls), the square stays out
+ * by its reason. The solver makes the positioning line a wall of every size, and its checks still
+ * close the true outlines only.
+ */
+const GV = { n: 3, W: 240, H: 300, d: 6, e: 5, lineY: 100, ext: 100 };
+/** gb2: the face pass's stray gate off — A0.3's stray row, what gradeView guards behind the gate. */
+const GATE_OFF: FaceRoleOpts = { off: new Set(['gate']) };
+function gradeViewSheet(faceOpts?: FaceRoleOpts, countFeed?: FaceSizeCtx, nSizes = GV.n) {
+  const { W, H, d, e, lineY, ext } = GV;
+  const n = nSizes;
+  const draws: { tag: string; pts: PtMm[] }[] = [
+    {
+      tag: 'fold',
+      pts: [
+        { x: 0, y: -n * e - 5 },
+        { x: 0, y: H + n * e + 5 },
+      ],
+    },
+  ];
+  const truth: PtMm[][] = [];
+  for (let r = 0; r < n; r++) {
+    const o = rect(0, -r * e, W + r * d, H + r * e);
+    draws.push({ tag: `size${r}`, pts: o });
+    truth.push(o);
+  }
+  draws.push({ tag: 'square', pts: [...rect(500, 0, 600, 100), { x: 500, y: 0 }] });
+  draws.push({
+    tag: 'position',
+    pts: [
+      { x: -ext, y: lineY },
+      { x: W + n * d + ext, y: lineY },
+    ],
+  });
+  const styles = [STYLE(0, null)];
+  const paths: IRPath[] = draws.map((x, i) => ({
+    id: i,
+    pts: x.pts,
+    closed: false,
+    style: 0,
+    src: { file: 'syn', page: 0, op: i, sub: 0 },
+  }));
+  const sheet: Sheet = {
+    ...sheetOf({ minX: -ext - 20, minY: -40, maxX: 620, maxY: H + 40 }, [], [], styles),
+    paths,
+  };
+  const { set: built } = buildChainsDetailed(
+    sheet,
+    {
+      joinGapMm: PATIMPORT.joinGapMm,
+      joinAngleDeg: PATIMPORT.joinAngleDeg,
+      joinLateralMm: PATIMPORT.joinLateralMm,
+    },
+    { extraTexts: [], faceOpts, countFeed },
+  );
+  const set = withClassSigs(built, styles);
+  const tagOf = (id: number) => draws[set.chains[id].ranges[0].path].tag;
+  const chainOfTag = (t: string) => set.chains.find((c) => tagOf(c.id) === t)?.id ?? -1;
+  return { sheet, set, truth, tagOf, chainOfTag, draws };
+}
+
+function synthGradeView() {
+  const S = 'grade view';
+  // the guard behind the gb2 gate: A0.3's stray row as it was proposed (the gate off)
+  const { sheet, set, truth, tagOf, chainOfTag } = gradeViewSheet(GATE_OFF);
+  const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const strayTags = (stray?.chains ?? []).map(tagOf).sort();
+  check(
+    S,
+    'premise (gate off): the face pass files the largest size, the positioning line and the square as strays',
+    ['position', 'square', `size${GV.n - 1}`].every((t) => strayTags.includes(t)),
+    strayTags,
+  );
+  const roleIn = (v: ChainSet, t: string) =>
+    v.classes
+      .filter((c) => c.chains.includes(chainOfTag(t)))
+      .map((c) => c.role)
+      .join('+');
+  const v = gradeView(set);
+  for (const [t, want] of [
+    [`size${GV.n - 1}`, 'internal'],
+    ['position', 'internal'],
+    ['square', 'ignore'],
+  ] as const)
+    check(S, `per chain: ${t} → ${want}`, roleIn(v, t) === want, roleIn(v, t));
+  const mut = gradeView(set, { off: new Set(['why']) });
+  check(
+    S,
+    'why off: the test square is handed back too (mutation)',
+    roleIn(mut, 'square') === 'internal',
+    roleIn(mut, 'square'),
+  );
+  // through the fill with 3 sizes answered: the solver ranks the restored size line; the positioning
+  // line is a wall of every size, and no closed contour is wrong
+  const read = detectSizeRun(sheet, set, [
+    { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+  ]);
+  const expected = expectedSizes(read, GV.n, set)!;
+  const run = runForExpected(read, expected);
+  const seeds: Seed[] = [
+    { id: 0, at: { x: GV.W / 2, y: GV.H / 2 + 50 }, origin: 'click', variant: null },
+  ];
+  const fill = (ss: ChainSet) => {
+    const { families, diag } = fillPiecesDetailed(sheet, ss, run, seeds, {
+      cellMm: PATIMPORT.fillCellMm,
+      snapMm: PATIMPORT.snapMm,
+      variant: null,
+      expectedSizes: expected,
+    });
+    const portions = diag.grade?.result?.portions ?? [];
+    const ranksOf = (t: string) =>
+      portions.filter((p) => p.chain === chainOfTag(t)).map((p) => p.ranks.join(''));
+    const wrong = families.flatMap((f) =>
+      f.candidates
+        .filter((c) => c.outcome === 'closed' && hausdorffP95(c.outer, truth[c.rank]) > 1)
+        .map((c) => `r${c.rank}`),
+    );
+    const closed = families.flatMap((f) =>
+      f.candidates.filter((c) => c.outcome === 'closed'),
+    ).length;
+    const refusals = [
+      ...new Set(families.flatMap((f) => f.candidates.map((c) => c.gradeRefusal ?? ''))),
+    ].join(',');
+    return {
+      position: ranksOf('position'),
+      largest: ranksOf(`size${GV.n - 1}`),
+      wrong,
+      closed,
+      refusals,
+    };
+  };
+  const all = Array.from({ length: GV.n }, (_, r) => r).join('');
+  const f = fill(set);
+  check(
+    S,
+    'fill, 3 sizes: the restored size line is ranked as its own size',
+    f.largest.includes(String(GV.n - 1)),
+    f,
+  );
+  check(
+    S,
+    'fill, 3 sizes: the positioning line is a wall of every size, every size closes true, none wrong',
+    f.position.includes(all) && f.closed === GV.n && !f.wrong.length,
+    f,
+  );
+  // the strays kept out (the operator confirmed the row as proposed): the largest size is lost —
+  // the solver sees 2 lines for 3 sizes and refuses, never a wrong contour
+  const stayed = fill(confirmRows(set, [stray?.sig ?? `#${stray?.id}`]));
+  check(
+    S,
+    'strays kept out (row confirmed): a size lost → refused, nothing closes (mutation)',
+    stayed.closed === 0 && !stayed.wrong.length && stayed.largest.length === 0,
+    stayed,
+  );
+}
+
+/**
+ * The operator confirming the proposed stray row (the sizes step's "! confirm") is an answer: through
+ * the chains stage contract (`confirmed`) the row comes back at confidence 1 in a new set, and the
+ * size checks leave it alone. Rows nobody touched stay as built (the restore keeps working).
+ */
+function synthConfirm() {
+  const S = 'legend confirm';
+  const { set, chainOfTag } = gradeViewSheet(GATE_OFF);
+  const largest = chainOfTag(`size${GV.n - 1}`);
+  const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'))!;
+  const key = stray.sig ?? `#${stray.id}`;
+  const roleOfLargest = (v: ChainSet) =>
+    v.classes
+      .filter((c) => c.chains.includes(largest))
+      .map((c) => c.role)
+      .join('+');
+  const conf = confirmRows(set, [key]);
+  const row = conf.classes.find((c) => c.id === stray.id)!;
+  check(
+    S,
+    'confirmed as proposed → confidence 1, a new set, the other rows untouched',
+    row.confidence === 1 &&
+      row.role === stray.role &&
+      conf !== set &&
+      conf.classes.every((c, k) => c.id === stray.id || c === set.classes[k]),
+    { conf: row.confidence, newSet: conf !== set },
+  );
+  check(
+    S,
+    'a confirmed stray row stays out of the size checks',
+    roleOfLargest(gradeView(conf)) === 'ignore',
+    roleOfLargest(gradeView(conf)),
+  );
+  check(
+    S,
+    'not confirmed: the row is handed back as before (mutation)',
+    roleOfLargest(gradeView(confirmRows(set, []))) === 'internal',
+    roleOfLargest(gradeView(set)),
+  );
+}
+
+/**
+ * gb2: the face pass does not offer a size's lines as strays. The GV sheet (3 sizes in one pen, a
+ * positioning line across the nest, a drawn test square) proves no size count, and the lines it
+ * would call strays run beside the outlines like graded copies: the largest size and the positioning
+ * line are an 'internal' row of size lines (not asked), only the square is a stray. The operator
+ * confirming every row asked keeps the walls: 3 sizes close true. Mutations: the gate off (A0.3's
+ * row: confirmed → the size refused), the lane check off (offered again); a one-size proof (the file
+ * the solver reads as one size by its name) offers them, a size run in text withholds them.
+ */
+async function synthStrayGate() {
+  const S = 'stray gate';
+  const asked = (v: ChainSet) => v.classes.filter((c) => c.confidence < 0.6);
+  const strayRows = (v: ChainSet) =>
+    v.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const g = gradeViewSheet();
+  const tagsIn = (v: ChainSet, cs: { chains: number[] }[]) =>
+    [...new Set(cs.flatMap((c) => c.chains.map(g.tagOf)))].sort();
+  const sizeTags = [`size${GV.n - 1}`, 'position'];
+  const graded = g.set.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const roleIn = (v: ChainSet, t: string) =>
+    [...new Set(v.classes.filter((c) => c.chains.includes(g.chainOfTag(t))).map((c) => c.role))]
+      .sort()
+      .join('+');
+  check(
+    S,
+    'graded one-pen sheet: the largest size and the positioning line are candidate size lines (ignore, not asked), only the square a stray',
+    tagsIn(g.set, strayRows(g.set)).join() === 'square' &&
+      graded.length === 1 &&
+      graded[0].role === 'ignore' &&
+      graded[0].confidence >= 0.6 &&
+      sizeTags.every((t) => tagsIn(g.set, graded).includes(t)),
+    {
+      stray: tagsIn(g.set, strayRows(g.set)),
+      graded: tagsIn(g.set, graded),
+      why: graded[0]?.evidence,
+    },
+  );
+  check(
+    S,
+    'no question about a size line; no wall in the canonical set, a line of some size only in gradeView',
+    !tagsIn(g.set, asked(g.set)).some((t) => t.startsWith('size') || t === 'position') &&
+      sizeTags.every(
+        (t) => roleIn(g.set, t) === 'ignore' && roleIn(gradeView(g.set), t) === 'internal',
+      ),
+    {
+      asked: tagsIn(g.set, asked(g.set)),
+      canonical: sizeTags.map((t) => roleIn(g.set, t)),
+      view: sizeTags.map((t) => roleIn(gradeView(g.set), t)),
+    },
+  );
+  // the operator confirms every row asked, as proposed: the walls stay, 3 sizes close true
+  const read = detectSizeRun(g.sheet, g.set, [
+    { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+  ]);
+  const fillAll = (ss: ChainSet) => {
+    const expected = expectedSizes(read, GV.n, ss)!;
+    const { families } = fillPiecesDetailed(
+      g.sheet,
+      ss,
+      runForExpected(read, expected),
+      [{ id: 0, at: { x: GV.W / 2, y: GV.H / 2 + 50 }, origin: 'click', variant: null }],
+      {
+        cellMm: PATIMPORT.fillCellMm,
+        snapMm: PATIMPORT.snapMm,
+        variant: null,
+        expectedSizes: expected,
+      },
+    );
+    const cs = families.flatMap((f) => f.candidates);
+    return {
+      closed: cs.filter((c) => c.outcome === 'closed').length,
+      wrong: cs.filter((c) => c.outcome === 'closed' && hausdorffP95(c.outer, g.truth[c.rank]) > 1)
+        .length,
+      refusals: [...new Set(cs.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+    };
+  };
+  const confirmAll = (v: ChainSet) =>
+    confirmRows(
+      v,
+      asked(v).map((c) => c.sig ?? `#${c.id}`),
+    );
+  const ok = fillAll(confirmAll(g.set));
+  check(
+    S,
+    'every asked row confirmed, 3 sizes answered: every size closes true, none refused',
+    ok.closed === GV.n && !ok.wrong && !ok.refusals.length,
+    ok,
+  );
+  // mutation: the gate off — A0.3's stray row is asked; confirmed, the largest size is lost
+  const m = gradeViewSheet(GATE_OFF);
+  const mFill = fillAll(confirmAll(m.set));
+  check(
+    S,
+    'gate off: the size line is asked as a stray; confirmed → refused, nothing closes (mutation)',
+    tagsIn(m.set, asked(m.set)).includes(`size${GV.n - 1}`) && mFill.closed === 0,
+    { asked: tagsIn(m.set, asked(m.set)), fill: mFill },
+  );
+  // mutation: the lane check off (the count unknown) — offered as strays again
+  const nl = gradeViewSheet({ off: new Set(['lanes']) });
+  check(
+    S,
+    'lane check off: the size line is a stray again (mutation)',
+    tagsIn(nl.set, strayRows(nl.set)).includes(`size${GV.n - 1}`),
+    tagsIn(nl.set, strayRows(nl.set)),
+  );
+  // the candidate row confirmed by the operator (confidence 1) is his: not handed back, the size lost
+  const gr = graded[0];
+  const held = fillAll(confirmRows(confirmAll(g.set), gr ? [gr.sig ?? `#${gr.id}`] : []));
+  check(
+    S,
+    'the candidate row confirmed as ignore: gradeView leaves it out → refused (mutation: only gradeView promotes)',
+    held.closed === 0,
+    held,
+  );
+  // the count (A6 over what feeds the sheet, two groups agreeing): a size in a file name and a lone
+  // size run in text prove nothing; a run in text and the files agreeing say 6 → withheld
+  const roles = (o: FaceRoleOpts | undefined, countFeed: FaceSizeCtx) => {
+    const { set } = buildChainsDetailed(
+      g.sheet,
+      {
+        joinGapMm: PATIMPORT.joinGapMm,
+        joinAngleDeg: PATIMPORT.joinAngleDeg,
+        joinLateralMm: PATIMPORT.joinLateralMm,
+      },
+      { extraTexts: [], faceOpts: o, countFeed },
+    );
+    return tagsIn(set, strayRows(set));
+  };
+  const big = `size${GV.n - 1}`;
+  const named = roles(undefined, { texts: [], files: [{ id: 'syn', name: 'robe_44.svg' }] });
+  check(
+    S,
+    'a size in the file name ("robe_44.svg") is a label, not one size: still withheld',
+    !named.includes(big),
+    named,
+  );
+  const lone = roles(
+    { off: new Set(['lanes']) },
+    { texts: [{ text: 'SIZES 36-46', file: 'syn' }], files: [{ id: 'syn', name: 'robe.svg' }] },
+  );
+  check(
+    S,
+    'a lone size run in text (one group, A6 n unknown), the lane check off: offered as before',
+    lone.includes(big),
+    lone,
+  );
+  const sixFiles = ['36', '38', '40', '42', '44', '46'].map((z, k) => ({
+    id: `f${k}`,
+    name: `robe_${z}.pdf`,
+  }));
+  const agree: FaceSizeCtx = {
+    texts: [{ text: 'SIZES 36-46', file: 'f0' }],
+    files: sixFiles,
+  };
+  const many = roles({ off: new Set(['lanes']) }, agree);
+  check(
+    S,
+    'a size run in text and six size files agree (A6 n = 6), the lane check off: withheld by the count',
+    !many.includes(big),
+    many,
+  );
+  const manyOff = roles({ off: new Set(['lanes', 'proof']) }, agree);
+  check(S, 'the count off too: offered (mutation)', manyOff.includes(big), manyOff);
+
+  // per chain: a line partly beside an outline counts its parallel part; lines beside nothing add
+  // nothing and dilute nothing
+  const outl = rect(0, 0, 300, 400);
+  const ch = [
+    chainOf(0, [...outl, outl[0]], false),
+    // 400 mm straight, 100 mm of it 5 mm outside the bottom edge, the rest leaves at 45°
+    chainOf(
+      1,
+      [
+        { x: 100, y: -5 },
+        { x: 200, y: -5 },
+        { x: 412, y: -217 },
+      ],
+      false,
+    ),
+    // a 3 m hatching far away (lines beside each other, beside no outline)
+    ...Array.from({ length: 10 }, (_, k) =>
+      chainOf(
+        2 + k,
+        [
+          { x: 1000, y: k * 6 },
+          { x: 1300, y: k * 6 },
+        ],
+        false,
+      ),
+    ),
+  ];
+  const st = new Map<number, Style>([[0, STYLE(0, null)]]);
+  const one = strayLanes(ch, [0], [], [1], st);
+  const diluted = strayLanes(
+    ch,
+    [0],
+    [],
+    ch.slice(1).map((c) => c.id),
+    st,
+  );
+  check(
+    S,
+    'per chain: a line partly beside the outline counts ~100 mm, not its 400 mm; the hatching joins nothing and changes nothing',
+    Math.abs(one.laneMm - 100) <= 12 &&
+      one.inLane.join() === '1' &&
+      diluted.laneMm === one.laneMm &&
+      diluted.inLane.join() === '1',
+    { one: [one.laneMm, one.inLane], diluted: [diluted.laneMm, diluted.inLane] },
+  );
+
+  // the worker: the same sheet as an SVG in mm (its page = the sheet's box) — chains → the asked
+  // rows confirmed → 3 sizes answered → a click in the piece: the pieces close, no size refusal
+  const bb = g.sheet.bbox;
+  const box = { x: bb.minX, y: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${box.w}mm" height="${box.h}mm" viewBox="${box.x} ${box.y} ${box.w} ${box.h}">${g.draws
+    .map(
+      (x) =>
+        `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x.pts.map((q) => `${q.x},${q.y}`).join(' ')}"/>`,
+    )
+    .join('')}${[
+    [bb.minX, bb.minY],
+    [bb.maxX - 1, bb.maxY],
+  ]
+    .map(
+      // 1 mm ticks at the box's corners: the worker's sheet box is its content's, so the face
+      // raster lies on the same cells as the sheet above
+      ([x, y]) =>
+        `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x},${y} ${x + 1},${y}"/>`,
+    )
+    .join('')}</svg>`;
+  const svgSession = async (name: string) => {
+    const bytes = new TextEncoder().encode(svg);
+    const ses = new Session(1, [{ name, bytes: bytes.buffer.slice(0) as ArrayBuffer }]);
+    const run1 = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
+      ses.runStage(st, input, ctx());
+    await run1('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    const cl = await run1('clean', { edits: [] });
+    const best = cl.scale[0];
+    if (best)
+      await run1('scale', {
+        decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
+      });
+    await run1('assemble', { sheet: 0 });
+    return { ses, run1 };
+  };
+  const { ses, run1 } = await svgSession('fixture.svg');
+  const opts = {
+    joinGapMm: PATIMPORT.joinGapMm,
+    joinAngleDeg: PATIMPORT.joinAngleDeg,
+    joinLateralMm: PATIMPORT.joinLateralMm,
+  };
+  const ch0 = await run1('chains', { opts });
+  const stray0 = ch0.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const strayLen = stray0.reduce((a, c) => a + c.totalLengthMm, 0);
+  check(
+    S,
+    'worker: the stray row holds the test square only (400 mm), the size lines a row not asked',
+    stray0.length <= 1 &&
+      Math.abs(strayLen - 400) < 5 &&
+      ch0.classes.some(
+        (c) => c.evidence.some((x) => x.kind === 'face-graded') && c.confidence >= 0.6,
+      ),
+    { strayLen, rows: ch0.classes.map((c) => `${c.role}@${c.confidence}`) },
+  );
+  const keys = ch0.classes.filter((c) => c.confidence < 0.6).map((c) => c.sig ?? `#${c.id}`);
+  const ch1 = await run1('chains', { opts, confirmed: keys });
+  check(
+    S,
+    'worker: the rows confirmed through the chains stage come back at confidence 1',
+    ch1.classes.filter((c) => c.confidence < 0.6).length === 0 &&
+      ch1.classes
+        .filter((c) => keys.includes(c.sig ?? `#${c.id}`))
+        .every((c) => c.confidence === 1),
+    ch1.classes.map((c) => `${c.role}@${c.confidence}`),
+  );
+  const ign = await run1('chains', { opts, confirmed: [...keys, 'no-such-row'] });
+  check(
+    S,
+    'worker: a key of no row changes nothing',
+    JSON.stringify(ign.classes.map((c) => c.confidence)) ===
+      JSON.stringify(ch1.classes.map((c) => c.confidence)),
+    ign.classes.map((c) => c.confidence),
+  );
+  // the worker's sheet is the SVG moved to its corner and turned y-up: the click goes where the
+  // piece is in it (read off the positioning line, the one horizontal line)
+  const box2 = (v: ChainSet) => {
+    const ps = v.chains.flatMap((c) => c.pts);
+    return {
+      x0: Math.min(...ps.map((q) => q.x)),
+      y0: Math.min(...ps.map((q) => q.y)),
+      y1: Math.max(...ps.map((q) => q.y)),
+    };
+  };
+  const wB = box2(inner(ses).chains);
+  const fB = box2(g.set);
+  const pos = g.chainOfTag('position');
+  const posW = inner(ses).chains.chains[pos]?.pts[0].y ?? NaN;
+  const up = Math.abs(posW - (wB.y0 + fB.y1 - GV.lineY)) < 1;
+  const toW = (q: PtMm) => ({
+    x: q.x + wB.x0 - fB.x0,
+    y: up ? wB.y0 + fB.y1 - q.y : q.y + wB.y0 - fB.y0,
+  });
+  const at = toW({ x: GV.W / 2, y: GV.H / 2 + 50 });
+  const CARD3 = ['S', 'M', 'L'].map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i }));
+  const sz = await run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const pc = await run1('pieces', {
+    seeds: [{ id: 0, at, origin: 'click', variant: null }],
+    edits: [],
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+  });
+  const cs = pc.families.flatMap((f) => f.candidates);
+  const wf = {
+    expected: sz.expected,
+    closed: cs.filter((c) => c.outcome === 'closed').length,
+    refusals: [...new Set(cs.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+    sizeAsk: (pc.grade?.ambiguities ?? []).map((a) => a.kind),
+  };
+  check(
+    S,
+    'worker: 3 sizes answered, a click in the piece → 3 contours closed, no size refusal',
+    sz.expected?.n === GV.n && wf.closed === GV.n && !wf.refusals.length,
+    wf,
+  );
+
+  // the file name says one size (the solver would read 'pattern_38.svg' as one size, source) while
+  // the lines look graded: a contradiction — the held row is asked, still handed to the size checks
+  const clashRow = (v: ChainSet) =>
+    v.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const cf = gradeViewSheet(undefined, { sourceOne: '38' });
+  const cr = clashRow(cf.set);
+  check(
+    S,
+    'file name 38 against a graded look: the held row is asked (< 0.6, names the clash), gradeView still hands it back',
+    !!cr &&
+      cr.confidence < 0.6 &&
+      cr.evidence.some((x) => x.kind === 'face-graded' && x.sourceOne === '38') &&
+      sourceClash(cf.set) === '38' &&
+      sizeTags.every((t) => roleIn(gradeView(cf.set), t) === 'internal'),
+    { conf: cr?.confidence, why: cr?.evidence },
+  );
+  const cm = gradeViewSheet({ off: new Set(['clash']) }, { sourceOne: '38' });
+  check(
+    S,
+    'clash off: held silently (0.6, not asked) (mutation)',
+    (clashRow(cm.set)?.confidence ?? 0) >= 0.6 && !sourceClash(cm.set),
+    clashRow(cm.set)?.confidence,
+  );
+  const w2 = await svgSession('pattern_38.svg');
+  const c0 = await w2.run1('chains', { opts });
+  const cRow = c0.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const s0 = await w2.run1('sizes', { card: CARD3 });
+  check(
+    S,
+    'worker, pattern_38.svg: the held row asked, the source reads one size, and the sizes step asks the count',
+    !!cRow &&
+      cRow.confidence < 0.6 &&
+      s0.expected?.from === 'source' &&
+      s0.expected.n === 1 &&
+      s0.countAsk != null,
+    { row: cRow?.confidence, expected: s0.expected, ask: s0.countAsk != null },
+  );
+  // the autopilot on that sizes step: it stops with the count (never takes the file name's one
+  // size, never confirms the clash row); answered 3, it does not confirm the clash row either
+  const apOn = (
+    sizes: StageIO['sizes']['out'],
+    chains: StageIO['chains']['out'],
+    confirmed: string[],
+  ) =>
+    decide({
+      session: {
+        step: 'sizes',
+        busy: null,
+        error: null,
+        files: [],
+        variant: null,
+        chains,
+        sizes,
+      } as never,
+      inputs: {
+        sheetIndex: 0,
+        gridOverride: null,
+        cleanEdits: [],
+        legend: [],
+        legendConfirmed: confirmed,
+      } as never,
+      card: { sizes: CARD3 } as never,
+      question: 'the sizes step',
+    });
+  const clashKey = cRow ? cRow.sig ?? `#${cRow.id}` : '';
+  const confirmsClash = (d: ReturnType<typeof decide>) =>
+    d.actions.some(
+      (a) =>
+        (a.kind === 'inputs' && (a.patch.legendConfirmed ?? []).includes(clashKey)) ||
+        (a.kind === 'legend' && (a.confirm ?? []).includes(clashKey)),
+    );
+  const ap0 = apOn(s0, c0, []);
+  check(
+    S,
+    'autopilot, pattern_38.svg: stops on the size count (pre-filled from the look, not 1), never confirms the clash row',
+    ap0.stop?.step === 'sizes' &&
+      !confirmsClash(ap0) &&
+      !ap0.actions.some((a) => a.kind === 'drawn-sizes' && a.n === 1),
+    {
+      stop: ap0.stop,
+      actions: ap0.actions.map((a) => a.kind),
+      assume: ap0.assumptions.map((a) => a.answer),
+    },
+  );
+  // mutation: the clash row read as an ordinary low row — the autopilot would confirm it
+  const plain = {
+    ...c0,
+    classes: c0.classes.map((c) => ({
+      ...c,
+      evidence: c.evidence.map((e) =>
+        e.kind === 'face-graded' ? { kind: 'face-graded' as const, why: e.why } : e,
+      ),
+    })),
+  };
+  check(
+    S,
+    'clash mark off: the autopilot confirms the row as ignore (mutation)',
+    confirmsClash(apOn(s0, plain, [])),
+    apOn(s0, plain, []).actions.map((a) => a.kind),
+  );
+  const s1 = await w2.run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const ap1 = apOn(s1, c0, []);
+  check(
+    S,
+    'autopilot, 3 sizes answered: the clash row is still not confirmed',
+    !confirmsClash(ap1) && ap1.stop?.reason?.includes('file name') !== true,
+    { stop: ap1.stop, actions: ap1.actions.map((a) => a.kind) },
+  );
+  const p1 = await w2.run1('pieces', {
+    seeds: [{ id: 0, at, origin: 'click', variant: null }],
+    edits: [],
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+  });
+  const c1 = p1.families.flatMap((f) => f.candidates);
+  const w2f = {
+    expected: s1.expected,
+    closed: c1.filter((c) => c.outcome === 'closed').length,
+    refusals: [...new Set(c1.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+  };
+  check(
+    S,
+    'worker, pattern_38.svg: 3 sizes answered → the held lines are size walls, 3 contours close',
+    s1.expected?.from === 'operator' && w2f.closed === GV.n && !w2f.refusals.length,
+    w2f,
+  );
+
+  // A6's geometry is the size checks' (gradeView): two pieces drawn in 3 sizes, the face pass held
+  // the two outer sizes (the candidate row), one sample label "SIZE: M" — on the canonical set each
+  // outline reads one line deep and A6 would infer one size (its walls lost); on gradeView it does not
+  const sixRects = [0, 600].flatMap((x0) =>
+    [0, 1, 2].map((r) => rect(x0 - 6 * r, -5 * r, x0 + 240 + 6 * r, 300 + 5 * r)),
+  );
+  const a6Chains = sixRects.map((q, k) => chainOf(k, q, true));
+  const a6Set: ChainSet = {
+    chains: a6Chains,
+    classes: [
+      {
+        id: 0,
+        role: 'common',
+        sizeLabel: null,
+        chains: [0, 3],
+        totalLengthMm: a6Chains[0].lengthMm * 2,
+        evidence: [],
+        confidence: 0.5,
+      },
+      {
+        id: 1,
+        role: 'ignore',
+        sizeLabel: null,
+        chains: [1, 2, 4, 5],
+        totalLengthMm: [1, 2, 4, 5].reduce((a, k) => a + a6Chains[k].lengthMm, 0),
+        evidence: [{ kind: 'face-graded', why: 'probe' }],
+        confidence: 0.6,
+      },
+    ],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const a6Sheet = sheetOf({ minX: -40, minY: -40, maxX: 900, maxY: 340 }, [], [], [STYLE(0, null)]);
+  const a6 = (v: ChainSet) => {
+    const read2 = detectSizeRun(a6Sheet, v, [
+      { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+    ]);
+    const map = faceMap(a6Sheet, v, read2, [], { cellMm: PATIMPORT.fillCellMm });
+    const cands = new Set(shapeCandidates(map.blobs).map((b) => b.id));
+    return countEvidence({
+      texts: [{ text: 'SIZE: M', file: null }],
+      blobs: map.blobs,
+      shapes: blobShapes(map, cands),
+      files: [],
+    }).n;
+  };
+  const nView = a6(gradeView(a6Set));
+  const nCanon = a6(a6Set);
+  check(
+    S,
+    'A6 on gradeView: the held sizes are walls, one size is not inferred (on the canonical set it would be: mutation)',
+    nView !== 1 && nCanon === 1,
+    { nView, nCanon },
+  );
+}
+
+/**
+ * gb2: Redcafe 44 alone (one size; its file name is a label, not a proof) — its strays do not run
+ * beside the outlines like graded copies, so the face pass still offers them; with the lane
+ * thresholds at zero (every stray "graded") they would be held as candidate size lines (mutation).
+ */
+async function redcafeGate() {
+  const S = 'stray gate · Redcafe 44';
+  const base = CASES.find((x) => x.id === 'redcafe')!;
+  let got: { set: ChainSet; mut: ChainSet } | null = null;
+  await runCase(
+    { ...base, id: 'redcafe-44-gate', files: ['pdf/44.pdf'], card: ['44'] },
+    {
+      onAutoPieces: (s) => {
+        const w = s as unknown as {
+          sheet: Sheet;
+          docTexts: string[];
+          docTextSrc: { file: string; page: number; text: string }[];
+          fileNames: Map<string, string>;
+          files: { id: string; name: string }[];
+          pages: Parameters<typeof sheetFeed>[3];
+          sheetOffered: Set<number>;
+          offeredSrc: Set<string>;
+        };
+        const sheet = w.sheet;
+        const offeredPaths = new Set(
+          sheet.paths
+            .filter((p) => w.sheetOffered.has(p.id) || w.offeredSrc.has(srcKey(p.src)))
+            .map((p) => p.id),
+        );
+        const opts = {
+          joinGapMm: PATIMPORT.joinGapMm,
+          joinAngleDeg: PATIMPORT.joinAngleDeg,
+          joinLateralMm: PATIMPORT.joinLateralMm,
+        };
+        const feed = sheetFeed(sheet, w.files, w.docTextSrc, w.pages);
+        const ex = {
+          extraTexts: w.docTexts,
+          fileNames: w.fileNames,
+          offeredPaths,
+          countFeed: { texts: feed.texts, files: feed.files },
+        };
+        const saved = { ...STRAY_LANES };
+        const set = buildChainsDetailed(sheet, opts, ex).set;
+        // every stray "graded": the lane thresholds at zero
+        Object.assign(STRAY_LANES, { minMm: 0, share: 0, joinMm: 0 });
+        try {
+          got = { set, mut: buildChainsDetailed(sheet, opts, ex).set };
+        } finally {
+          Object.assign(STRAY_LANES, saved);
+        }
+      },
+    },
+  );
+  const g = got as { set: ChainSet; mut: ChainSet } | null;
+  const strayMm = (v: ChainSet | undefined) =>
+    Math.round(
+      (v?.classes ?? [])
+        .filter((c) => c.role === 'ignore' && c.evidence.some((x) => x.kind === 'face-stray'))
+        .reduce((a, c) => a + c.totalLengthMm, 0),
+    );
+  const gradedMm = (v: ChainSet | undefined) =>
+    Math.round(
+      (v?.classes ?? [])
+        .filter((c) => c.evidence.some((x) => x.kind === 'face-graded'))
+        .reduce((a, c) => a + c.totalLengthMm, 0),
+    );
+  const row = (v: ChainSet | undefined) => ({
+    stray: strayMm(v),
+    graded: gradedMm(v),
+    warn: v?.warnings.find((w) => w.startsWith('A0.3')) ?? null,
+  });
+  check(
+    S,
+    'single size (44.pdf): strays offered, none held as candidate size lines',
+    !!g && strayMm(g.set) > 0 && gradedMm(g.set) === 0,
+    row(g?.set),
+  );
+  check(
+    S,
+    'every stray made "graded" (lane thresholds 0): held as candidate size lines (mutation)',
+    !!g && gradedMm(g.mut) > 0 && strayMm(g.mut) < strayMm(g.set),
+    row(g?.mut),
+  );
+}
+
+export async function main(args: string[]): Promise<number> {
+  const mode = args[0];
+  const id = args[1];
+  if (mode === 'synth') {
+    synthFaces();
+    synthUnits();
+    synthRoles();
+    synthGradeView();
+    synthConfirm();
+    await synthStrayGate();
+    console.log(`@@RESULT ${JSON.stringify({ id: 'synthetic', checks })}`);
+    return 0;
+  }
+  if (mode === 'gate') {
+    await redcafeGate();
+    console.log(`@@RESULT ${JSON.stringify({ id: 'redcafe-44-gate', checks })}`);
+    return 0;
+  }
+  if (mode === 'm2') {
+    console.log(`@@RESULT ${JSON.stringify({ id: 'r4454-M2', m2: await m2() })}`);
+    return 0;
+  }
+  if (mode === 'case') {
+    const { rec, auto, snap } = await oneCase(id);
+    const out: Record<string, unknown> = {
+      id,
+      verdict: rec.verdict,
+      reason: rec.reason,
+      clicks: rec.clicks,
+      faceSeeds: rec.faceSeeds,
+      legendEdited: (rec.legend as Record<string, unknown> | undefined)?.edited ?? null,
+      wrongPassing: rec.wrongPassing ?? 0,
+      auto,
+    };
+    // mutation: each filter off → what it held back is seeded
+    if (snap && args.includes('--mutate')) {
+      const s = snap as { inn: Inner; pc: StageIO['pieces']['out'] };
+      const text = s.pc.seeds.filter((x) => x.origin === 'text');
+      const count = (off?: Set<FaceSwitch>) =>
+        faceSeedsOf(faceMap(s.inn.sheet, s.inn.chains, s.inn.run, text, { off }), 1000).length;
+      const base = count();
+      const mut: Record<string, number> = {};
+      for (const k of [
+        'small',
+        'sheet',
+        'tile-frame',
+        'test-square',
+        'legend',
+        'table',
+        'logo',
+        'background',
+        'unlabelled',
+        'other-size',
+        'peel',
+        'nested',
+        'units',
+        'fragments',
+      ] as const)
+        mut[k] = count(new Set([k])) - base;
+      out.mutation = mut;
+    }
+    console.log(`@@RESULT ${JSON.stringify(out)}`);
+    return 0;
+  }
+  if (mode === 'summary') {
+    const file = resolve(REPORTS, 'A2-faces.json');
+    const rows = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>[];
+    const base = (() => {
+      const f = process.env.FACES_BASE;
+      if (!f || !existsSync(f)) return new Map<string, Record<string, unknown>>();
+      return new Map(
+        (JSON.parse(readFileSync(f, 'utf8')) as Record<string, unknown>[]).map((r) => [
+          r.id as string,
+          r,
+        ]),
+      );
+    })();
+    const by = new Map(rows.map((r) => [r.id as string, r]));
+    for (const id of ['synthetic', 'redcafe-44-gate'])
+      for (const c of (by.get(id)?.checks as Check[] | undefined) ?? []) checks.push(c);
+    const A = (r: Record<string, unknown> | undefined) => r?.auto as Auto | undefined;
+    // wm M: 4 face seeds, 0 seed clicks; outline row apart from the junk
+    const wm = by.get('wm-M');
+    if (wm) {
+      const a = A(wm)!;
+      check(
+        'wm M',
+        '4 pieces seeded with 0 clicks',
+        a.seeds.face === 4 && !(wm.clicks as { byKind: Record<string, number> })?.byKind?.seed,
+        a.seeds,
+      );
+      const pieceRow = a.legend.filter(
+        (k) => (k.role === 'size' || k.role === 'common') && k.chains > 0,
+      );
+      check(
+        'wm M',
+        'one piece-outline row, apart from the leftover junk',
+        pieceRow.length === 1,
+        a.legend,
+      );
+    }
+    const svg = by.get('syn:inkscape-smoke-SML');
+    if (svg) {
+      const a = A(svg)!;
+      check('SVG smoke', '2 face seeds', a.seeds.face === 2 && !a.seeds.text, a.seeds);
+      check(
+        'SVG smoke',
+        '0 legend edits (outlines row = size/cut)',
+        !svg.legendEdited &&
+          !(svg.clicks as { byKind: Record<string, number> })?.byKind?.['legend-row'],
+        { edited: svg.legendEdited, clicks: svg.clicks },
+      );
+    }
+    // D3: every closed outline is a seed or set aside with its reason (nothing silent)
+    if (wm) {
+      const a = A(wm)!;
+      check(
+        'wm M',
+        "the collar is its own piece: no piece-sized outline on any written block's layer 8 (G20)",
+        (() => {
+          const dir = resolve(process.env.PATIMPORT_E2E_OUT ?? resolve(REPORTS, 'E2E-out'), 'wm-M');
+          if (!existsSync(dir)) return false;
+          const f = readdirSync(dir).find((x) => x.endsWith('-main.dxf'));
+          if (!f) return false;
+          const raw = readRawDxf(readFileSync(resolve(dir, f), 'latin1'));
+          return [...raw.blocks.values()].every((e) => !nestedPieces(e).length);
+        })(),
+        a.setAside,
+      );
+    }
+    const r44 = by.get('r4454');
+    if (r44) {
+      const a = A(r44)!;
+      check(
+        'r4454',
+        'the band (piece 10) is not a legend box: no outline set aside as legend',
+        !a.junkBy.legend && !a.setAside.legend,
+        { junk: a.junkBy, setAside: a.setAside },
+      );
+    }
+    for (const [k, n] of Object.entries(FIXTURE)) {
+      const r = by.get(k);
+      if (!r) continue;
+      const fsd = r.faceSeeds as { offered: number; took: number; junk: number } | undefined;
+      check(k, `face seeds: ≤ 1 junk face (fixture ${n} clicks)`, (fsd?.junk ?? 0) <= 1, fsd);
+    }
+    const m2r = by.get('r4454-M2')?.m2 as
+      | Record<string, { outcomes: string; areasCm2: number[] } | null>
+      | undefined;
+    if (m2r) {
+      const a = m2r.click1350;
+      const b = m2r.click1410;
+      const f = m2r.face;
+      check(
+        'r4454 M2',
+        'the back: its face seed gives the outcome of the good click (1350,720), not the refused one',
+        !!a &&
+          !!f &&
+          f.outcomes === a.outcomes &&
+          JSON.stringify(f.areasCm2) === JSON.stringify(a.areasCm2),
+        { face: f, click1350: a, click1410: b },
+      );
+      check('r4454 M2', 'the back closes in every size', !!f && /^c+$/.test(f.outcomes), f);
+    }
+    for (const r of rows) {
+      const b = base.get(r.id as string);
+      if (!b) continue;
+      const now = (r.wrongPassing as number) ?? 0;
+      const was = (b.wrongPassing as number) ?? 0;
+      check('e2e', `${r.id}: wrongPassing not grown`, now <= was, { was, now });
+    }
+    for (const r of rows) {
+      const mut = r.mutation as Record<string, number> | undefined;
+      if (mut) check('mutation', `${r.id}`, true, mut);
+      const wmMut = by.get('wm')?.mutation as Record<string, number> | undefined;
+      if (wmMut)
+        check(
+          'mutation',
+          'wm: fragments off → fragments of the nest seeded (the rule holds them back)',
+          (wmMut.fragments ?? 0) > 0,
+          wmMut,
+        );
+    }
+    const bad = checks.filter((c) => !c.ok);
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.section} · ${c.check}  — ${c.got.slice(0, 400)}`);
+    console.log(`\n${checks.length - bad.length}/${checks.length} PASS`);
+    writeFileSync(resolve(REPORTS, 'A2-faces-checks.json'), JSON.stringify(checks, null, 1));
+    return bad.length ? 1 : 0;
+  }
+  throw new Error('mode? case <id> [--mutate] | summary');
+}

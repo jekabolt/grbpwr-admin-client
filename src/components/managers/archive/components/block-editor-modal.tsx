@@ -1,8 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Close, Text } from 'ui';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { ARCHIVE_ITEM_TYPE_LABEL } from './item-types';
@@ -71,7 +70,7 @@ export function BlockEditorModal({
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
         <DialogPrimitives.Content
-          className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[1040px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'
+          className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col border border-borderColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[1040px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'
           onEscapeKeyDown={(e) => {
             if (isNew && hasContent(item)) e.preventDefault();
           }}
@@ -86,7 +85,7 @@ export function BlockEditorModal({
             edit block fields; changes apply to the live preview
           </DialogPrimitives.Description>
           <div className='flex h-full flex-col gap-3'>
-            <div className='flex shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
+            <div className='flex shrink-0 items-center justify-between border-b border-borderColor pb-2'>
               <div className='flex items-center gap-2'>
                 {index >= 0 && <Text variant='label'>#{index + 1}</Text>}
                 <Text variant='uppercase' size='large'>
@@ -94,9 +93,7 @@ export function BlockEditorModal({
                 </Text>
               </div>
               <DialogPrimitives.Close asChild>
-                <Button type='button' className='cursor-pointer px-2 py-1'>
-                  [x]
-                </Button>
+                <Close />
               </DialogPrimitives.Close>
             </div>
             <div ref={contentRef} className='min-h-0 flex-1 overflow-y-auto'>

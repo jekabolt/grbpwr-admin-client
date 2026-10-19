@@ -1,14 +1,17 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
-import { EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import { Row, RowTotal } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  CalloutBox,
+  EmptyCell,
+  GroupLabel,
+  Media,
+  Pill,
+  Placeholder,
+  Row,
+  RowTotal,
+  Text,
+} from 'ui';
 import {
   CUT_SYMMETRY_PRINT_LEGEND,
   cutSymmetryBadge,
@@ -341,7 +344,7 @@ export function SampleCutPieces({
             <div
               key={p.key}
               className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border p-1.5 ${
-                fabric ? 'border-borderColor' : 'border-dashed border-textInactiveColor'
+                fabric ? 'border-borderColor' : 'border-dashed border-borderColor'
               }`}
             >
               <Text component='span' size='micro' className='w-14 shrink-0 font-bold uppercase'>
@@ -596,7 +599,7 @@ function TicketFact({ label, value }: { label: string; value: string }) {
         {label}
       </Text>
       <Text size='micro' className='truncate'>
-        {value || '—'}
+        {value || <EmptyCell />}
       </Text>
     </div>
   );
@@ -745,7 +748,7 @@ export function SampleFabricMap({
             </span>
             <span className='shrink-0 text-right tabular-nums'>
               <Text size='micro' component='span'>
-                {f.consumption ? `${f.consumption}${f.unit ? ` ${f.unit}` : ''}` : '—'}
+                {f.consumption ? `${f.consumption}${f.unit ? ` ${f.unit}` : ''}` : <EmptyCell />}
               </Text>
               <Text size='nano' variant='label' className='uppercase'>
                 per garment

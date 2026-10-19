@@ -1,5 +1,4 @@
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
+import { Button, Pill } from 'ui';
 
 interface CompositionSummaryProps {
   totalPercentage: number;

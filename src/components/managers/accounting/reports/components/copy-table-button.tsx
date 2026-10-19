@@ -1,5 +1,5 @@
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 type Props = {
   headers: string[];

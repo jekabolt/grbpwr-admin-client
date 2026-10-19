@@ -1,8 +1,8 @@
 import { cn } from 'lib/utility';
 import type { JSX, ReactNode } from 'react';
-import { ANNOTATION_EDITOR_H } from 'ui/components/annotation/editor';
-import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
-import Text from 'ui/components/text';
+import { ANNOTATION_EDITOR_H } from 'components/managers/tech-card/annotation/editor';
+import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
+import { Text } from 'ui';
 
 /**
  * ПОЛОСА УКАЗАНИЙ — `annStripHtml` прототипа (`proto.html:2800`), ровно две половины:

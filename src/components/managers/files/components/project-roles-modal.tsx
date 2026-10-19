@@ -1,14 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { FileRole, FileTopic } from 'api/proto-http/admin';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Chip, ConfirmationModal, DataTable, Input, Select, Text } from 'ui';
 import { useSnackBarStore } from 'lib/stores/store';
 import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
@@ -385,7 +378,7 @@ export function ProjectRolesModal({
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
               what we merge into
             </Text>
-            <SelectComponent
+            <Select
               name='roleMergeTarget'
               value={roleMergeTarget}
               onValueChange={(v: string) => setRoleMergeTarget(v)}

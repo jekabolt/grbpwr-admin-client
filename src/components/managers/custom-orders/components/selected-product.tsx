@@ -2,11 +2,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { formatSizeName, getFilteredSizes } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
-import { Button } from 'ui/components/button';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { Button, Media, Text, InputField, SelectField } from 'ui';
 
 // custFlow v2 — one basket line. Thumbnail + name, then the per-line controls (qty, size, price)
 // the order needs. The container (in custom-order-form) draws the outer border and divides rows, so

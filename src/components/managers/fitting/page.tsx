@@ -1,8 +1,7 @@
 import { useFitting } from 'components/managers/fittings/components/useFittingQuery';
 import { ROUTES } from 'constants/routes';
-import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { useParams } from 'react-router-dom';
+import { BackLink, Text } from 'ui';
 import { FittingForm } from './components';
 
 export function Fitting() {
@@ -27,9 +26,7 @@ export function Fitting() {
         <Text variant='inactive' className='uppercase'>
           fitting not found
         </Text>
-        <Button asChild variant='main' size='lg' className='uppercase'>
-          <Link to={ROUTES.fittings}>← back to fittings</Link>
-        </Button>
+        <BackLink to={ROUTES.fittings}>fittings</BackLink>
       </div>
     );
   }

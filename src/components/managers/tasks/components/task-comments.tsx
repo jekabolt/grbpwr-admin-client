@@ -1,12 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
-import { Avatar } from 'ui/components/avatar';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Avatar, Button, ConfirmationModal, Section, Text, Textarea } from 'ui';
 import type { TaskComment, TaskMedia } from '../api/types';
 import { useAddComment, useDeleteComment, useTaskComments } from '../hooks/useTasks';
 import { TaskText, type MediaRef } from './task-text';
@@ -75,8 +70,10 @@ export function TaskComments({
   taskId,
   media = [],
   onOpenMedia,
+  className,
 }: {
   taskId: number;
+  className?: string;
   /** Вложения карточки — из них берутся номера чипов у ссылок, уже стоящих в тексте. */
   media?: TaskMedia[];
   onOpenMedia?: (ref: MediaRef) => void;
@@ -97,7 +94,8 @@ export function TaskComments({
 
   async function submit() {
     const text = body.trim();
-    if (!text) return;
+    // Enter не гаснет вместе с кнопкой: второе нажатие во время записи отправило бы дубль.
+    if (!text || add.isPending) return;
     try {
       await add.mutateAsync(text);
       setBody('');
@@ -107,7 +105,10 @@ export function TaskComments({
   }
 
   return (
-    <Section title={`comments${comments.length ? ` · ${comments.length}` : ''}`}>
+    <Section
+      title={`comments${comments.length ? ` · ${comments.length}` : ''}`}
+      className={className}
+    >
       <div className='flex flex-col gap-2.5'>
         {isLoading ? (
           <Text size='micro' variant='label' component='span'>
@@ -135,17 +136,19 @@ export function TaskComments({
                       {formatDistanceToNow(new Date(c.createdAt), { addSuffix: true })}
                     </Text>
                     {canDeleteComment(c, account?.username, isSuper) && (
-                      <button
+                      <Button
                         type='button'
+                        variant='underline'
+                        size='xs'
                         /* Имя РАЗЛИЧИМОЕ: в ленте таких кнопок столько же, сколько реплик, и
                            «delete» без адреса не находится ни читалкой с экрана, ни стендом. */
                         aria-label={`delete comment ${c.id}`}
                         disabled={del.isPending}
                         onClick={() => setPendingDelete(c)}
-                        className='text-nano uppercase tracking-label text-labelColor underline hover:text-error disabled:opacity-50'
+                        className='min-h-11 text-nano text-labelColor hover:text-error disabled:opacity-50 sm:min-h-0'
                       >
                         delete
-                      </button>
+                      </Button>
                     )}
                   </span>
                 </div>
@@ -156,25 +159,38 @@ export function TaskComments({
         )}
       </div>
 
-      <div className='flex flex-col gap-2'>
+      {/* ОДНА СТРОКА: поле и «send» рядом (detail v2). Enter отправляет, Shift+Enter — новая
+          строка; поле растёт по содержимому, а не держит три пустые строки заранее. */}
+      <div className='flex items-end gap-2'>
         <Textarea
           name='newComment'
           variant='secondary'
-          placeholder='add a comment…'
-          className='mb-0 min-h-16 border border-borderColor'
+          aria-label='new comment'
+          placeholder='comment…'
+          rows={1}
+          autoGrow={false}
+          className='mb-0 max-h-40 min-h-11 min-w-0 flex-1 resize-none border border-borderColor field-sizing-content sm:min-h-8'
           value={body}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBody(e.target.value)}
+          onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            // Enter сравнивается по `e.key` сознательно: он не буква. Набор через IME
+            // (`isComposing`) Enter'ом подтверждает слово, а не отправляет реплику.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
         />
         <Button
           type='button'
-          variant='secondary'
+          variant='main'
           size='sm'
-          className='self-end'
+          className='min-h-11 shrink-0 sm:min-h-8'
           loading={add.isPending}
           disabled={!body.trim()}
           onClick={submit}
         >
-          comment
+          send
         </Button>
       </div>
 

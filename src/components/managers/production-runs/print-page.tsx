@@ -1,15 +1,10 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
-import {
-  depStatus,
-  usePrintReady,
-  type PrintDep,
-} from 'components/managers/print/use-print-ready';
+import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
 import { parsePrintQuery } from 'components/managers/print/scope';
 import { ROUTES } from 'constants/routes';
 import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { BackLink, Button, Text } from 'ui';
 import { RunPackDocument } from './components/run-pack-document';
 import { runDetailPath } from './components/options';
 import { useProductionRun, useRunCutPlan } from './components/useProductionRuns';
@@ -67,11 +62,9 @@ export function RunPackPrint() {
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='runpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='runpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
-          <Button asChild variant='secondary' size='lg'>
-            <Link to={runId > 0 ? runDetailPath(runId) : ROUTES.productionRuns}>← back</Link>
-          </Button>
+          <BackLink to={runId > 0 ? runDetailPath(runId) : ROUTES.productionRuns} />
           <Text variant='uppercase' size='large'>
             run pack — pdf
           </Text>
@@ -107,12 +100,10 @@ export function RunPackPrint() {
           <Text variant='inactive' className='uppercase'>
             production run not found
           </Text>
-          <Button asChild variant='main' size='lg' className='uppercase'>
-            <Link to={ROUTES.productionRuns}>← back to production runs</Link>
-          </Button>
+          <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
         </div>
       ) : (
-        <div className='runpack-doc border border-textInactiveColor shadow-sm'>
+        <div className='runpack-doc border border-borderColor shadow-sm'>
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .runpack-doc. */}
           <div className='px-8 pt-6'>
             <PrintDegradedNotice items={degraded} />

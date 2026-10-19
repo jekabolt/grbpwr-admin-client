@@ -1,7 +1,6 @@
 import type { FunnelSection } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { formatNumber } from '../utils';
 
 interface FunnelChartProps {
@@ -69,7 +68,7 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
                   {dropOff > 0 && <Text className='text-error'>-{dropOff.toFixed(1)}%</Text>}
                 </div>
               </div>
-              <div className='h-6 bg-bgSecondary relative overflow-hidden'>
+              <div className='h-6 bg-pageBg relative overflow-hidden'>
                 <div
                   className='h-full bg-textColor transition-all'
                   style={{ width: `${percentage}%` }}

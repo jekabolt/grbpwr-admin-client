@@ -2,16 +2,20 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AvatarPicker } from 'ui/components/avatar';
-import { Board, BoardColumn } from 'ui/components/board';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { SectionHeader } from 'ui/components/section-header';
-import { SkeletonBlocks } from 'ui/components/skeleton';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Toolbar } from 'ui/components/toolbar';
+import {
+  AvatarPicker,
+  Board,
+  BoardColumn,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  SectionHeader,
+  SkeletonBlocks,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+} from 'ui';
 import { FulfillmentCard } from './api/types';
 import { FulfillmentBoard } from './components/fulfillment-board';
 import { PickupModal } from './components/pickup-modal';

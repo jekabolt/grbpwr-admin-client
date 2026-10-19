@@ -1,7 +1,5 @@
 import { useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { Text, InputField, SelectField } from 'ui';
 
 const AUDIENCE_OPTIONS = [
   { label: 'everyone', value: 'HERO_AUDIENCE_ALL' },

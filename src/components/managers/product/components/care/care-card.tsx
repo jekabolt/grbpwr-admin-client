@@ -1,8 +1,5 @@
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { GroupLabel, Media, Text, Tile, Tiles } from 'ui';
 import { cn } from 'lib/utility';
 import { CARE_ARTWORK } from './care-artwork';
 import { CareGroup, CareSymbolView } from './care-codes';
@@ -114,7 +111,7 @@ export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) =>
     pressed={isSelected}
     onClick={() => onSelect(symbol)}
     media={
-      <div className='bg-bgZebra p-1'>
+      <div className='bg-pageBg p-1'>
         {symbol.img ? (
           <Media src={symbol.img} alt={symbol.name} aspectRatio='1/1' fit='contain' />
         ) : (
@@ -130,7 +127,7 @@ export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) =>
     }
     name={symbol.name}
     sub={symbol.code}
-    className={isSelected ? 'bg-bgZebra' : undefined}
+    className={isSelected ? 'bg-pageBg' : undefined}
   />
 );
 

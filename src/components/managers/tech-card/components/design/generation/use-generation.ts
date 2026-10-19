@@ -11,13 +11,14 @@ import type {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { cardOnScreen, designKeys, useDesignWrites, type WriteContext } from '../use-design-band';
 import {
-  cardOnScreen,
-  designKeys,
-  newClientRequestId,
-  useDesignWrites,
-  type WriteContext,
-} from '../use-design-band';
+  fingerprintDigest,
+  ledgerSend,
+  ledgerSettle,
+  operatorKey,
+  requestFingerprint,
+} from '../render/run-ledger';
 import { clearBenchChoice, unstickPin } from './bench-store';
 import { isDefinitiveRefusal, refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
@@ -210,39 +211,28 @@ export type StartRunState = {
  * failure, with nothing changed, replays the same id and the server hands back the run that already
  * exists instead of starting a second paid one. Changing anything at all mints a new id, because
  * that is a new intent — replaying the old one there would return the OLD run with OK and the
- * screen would report success for a request nobody made. A success clears the ledger, so the next
- * press is a new run rather than an idempotent echo of the last.
+ * screen would report success for a request nobody made.
  *
- * THE LEDGER IS MODULE-LEVEL, KEYED BY CARD AND FINGERPRINT (review round 2, MAJOR B). It lived in a
- * ref of the hook, and a step switch unmounts the flat row while its request is still on the wire:
- * the row that came back had an EMPTY ledger, so a retry of the very same intent minted a new id and
- * bought a second run. The answer is awaited on the mutation's promise, not through the observer's
- * callbacks — those fire only while the screen is mounted — so the ledger is cleared, the success is
- * said and the caller's promise settles even when nobody is watching any more.
+ * THE LEDGER IS THE ONE EVERY STUDIO KEEPS (`render/run-ledger.ts`, which holds the rules). FLAT had
+ * a module-level map of its own, and it answered «is this press the same intent as the last one»
+ * differently from the ledger the other studios share — precisely the question a duplicated paid
+ * job turns on: a raw `JSON.stringify` fingerprint (the same request built in another key order, or
+ * with a trailing space, minted a second key), a map that died with the tab (a reload while the
+ * answer was out forgot the key), every refusal kept as if the run might exist (a 4xx replayed a key
+ * the server had turned down), and no operator (B signing into A's tab replayed A's key). Here FLAT
+ * is one more scope of that ledger (`FLAT_LEDGER_SCOPE`) and settles its presses by the same three
+ * rules: definitive refusal frees a fresh key, while a 5xx or silence keeps it.
  *
- * THIS IS WHERE THE THREE STUDIOS MEET. FLAT, FABRIC RENDER and 3D differ only in `kind` and in what
- * they put in `params`; the money, the idempotency and the invalidation are one mechanism, and a
- * second copy of it is precisely where two screens start disagreeing about what a retry means.
+ * CURRENT BETA ADDS ONE STRONGER ACCEPTANCE RULE: an accepted key stays until the returned run is
+ * visible in the band (`generation/run-ledger.ts`). A delayed or failed band refetch therefore
+ * cannot unlock a second paid press. The visibility tracker never mints a key; it only releases this
+ * shared ledger entry with the same id/operator compare-and-settle guard once the row is observable.
+ *
+ * THE ANSWER IS AWAITED ON THE MUTATION'S PROMISE, not through the observer's callbacks — those fire
+ * only while the screen is mounted. So the ledger is settled, the success is said and the caller's
+ * promise settles even when nobody is watching any more.
  */
-
-/**
- * A SHORT, STABLE DIGEST of a JSON-able value (cyrb53: two 32-bit lanes, 53 bits out). It keeps the
- * ledger key readable; a collision would need two different prompts of one card, pressed with one
- * VIEWS selection, to land on the same 53 bits.
- */
-export function digestOf(value: unknown): string {
-  const text = JSON.stringify(value ?? null) ?? 'null';
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
-}
+const FLAT_LEDGER_SCOPE = 'flat';
 
 export function useStartRun(techCardId?: number): StartRunState {
   const { showMessage } = useSnackBarStore();
@@ -252,37 +242,56 @@ export function useStartRun(techCardId?: number): StartRunState {
     async (input: StartRunInput, onStarted?: () => void): Promise<RunRefusal | null> => {
       const card = techCardId ?? 0;
       if (card <= 0) return null;
-      // THE RERUN TARGET IS PART OF THE INTENT, so it is part of the fingerprint. Left out, «rerun
-      // run 3» and «rerun run 7» typed with the same delta phrase would replay ONE request id, and
-      // the second press would come back OK holding the first run — a success reported for a
-      // request nobody made.
-      // THE SAVED PROMPT IS PART OF THE INTENT TOO (review round 3, m6) — see `snapshot`.
-      const fingerprint = JSON.stringify([
-        input.kind,
-        input.ask,
-        input.params,
-        input.rerunOfRunId ?? 0,
-        input.snapshot === undefined ? '' : digestOf(input.snapshot),
-      ]);
-      const key = `${card}:${fingerprint}`;
-      let clientRequestId = runLedger.get(key);
-      if (!clientRequestId) {
-        clientRequestId = newClientRequestId();
-        runLedger.set(key, clientRequestId);
-      }
+      // THE FINGERPRINT IS TAKEN OF THE WIRE OBJECT (`render/run-ledger.ts`) — built here field for
+      // field as `startRun` sends it, minus the key, so what is fingerprinted and what departs cannot
+      // drift apart. The saved prompt is part of the intent too (review round 3, m6), but is not on
+      // the wire, so it rides BESIDE that object as a digest of its canonical form.
+      const wire = {
+        techCardId: card,
+        kind: input.kind,
+        ask: input.ask,
+        params: input.params,
+        rerunOfRunId: input.rerunOfRunId ?? 0,
+      };
+      const fingerprint = requestFingerprint({
+        wire,
+        frozen: input.snapshot === undefined ? undefined : fingerprintDigest(input.snapshot),
+      });
+      const operator = operatorKey();
+      const { id: clientRequestId } = ledgerSend(card, FLAT_LEDGER_SCOPE, fingerprint, operator);
+      const key = `${operator}|${card}|${fingerprint}`;
       let started: StartDesignRunResponse | undefined;
       try {
-        started = await startRun.mutateAsync({ ...input, clientRequestId });
+        started = await startRun.mutateAsync({
+          clientRequestId,
+          kind: wire.kind,
+          ask: wire.ask,
+          params: wire.params,
+          rerunOfRunId: wire.rerunOfRunId,
+        });
       } catch (error) {
+        ledgerSettle(
+          card,
+          FLAT_LEDGER_SCOPE,
+          fingerprint,
+          isDefinitiveRefusal(error) ? 'refused' : 'unknown',
+          clientRequestId,
+          operator,
+        );
         // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
         // seconds, the refusal stays on the screen until read (CONTRACT §E) — in the CALLER's
         // store (see `start`). A 409 is not kept: the band moved first, and the hook-level handler
-        // has already re-read it. The ledger entry stays — the retry of the same intent replays the
-        // same id.
+        // has already re-read it.
         return refusalFromError(error, clientRequestId);
       }
-      // Kept until the band shows the run (`run-ledger.ts`): a press before that replays this id.
-      awaitRun(key, card, started?.run?.id ?? 0, clientRequestId);
+      // Kept until the band shows the run (`generation/run-ledger.ts`): a press before that replays
+      // this shared-ledger id. The sender's operator travels with it for a later guarded settlement.
+      runLedger.set(key, clientRequestId);
+      awaitRun(key, card, started?.run?.id ?? 0, clientRequestId, {
+        fingerprint,
+        operator,
+        scope: FLAT_LEDGER_SCOPE,
+      });
       // The run comes back PENDING, not done: the pictures arrive when the provider answers.
       // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
       // while the card is on screen, whether or not the row that pressed is still mounted. WHERE

@@ -2,7 +2,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { enhanceText } from 'ui/components/ai-enhance';
+import { enhanceText } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from './autosave-contract';

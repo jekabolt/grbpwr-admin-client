@@ -1,7 +1,6 @@
 import { LIMIT_OPTIONS, ORDER_FACTOR_OPTIONS, SOURCE_OPTIONS } from 'constants/constants';
 import { useMemo } from 'react';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
+import { InputField, SelectField } from 'ui';
 
 export interface StockHistorySizeOption {
   id?: number;
@@ -22,7 +21,7 @@ interface StockHistoryFiltersProps {
 }
 
 const inputClassName =
-  'border border-textInactiveColor bg-bgColor px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-textColor';
+  'border border-borderColor bg-bgColor px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-textColor';
 
 export function StockHistoryFilters({ sizes = [] }: StockHistoryFiltersProps) {
   const sizeItems = useMemo(() => getSizeItems(sizes), [sizes]);

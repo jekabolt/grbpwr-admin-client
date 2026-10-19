@@ -19,7 +19,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import type { EditHistory } from 'ui/components/annotation/history';
+import type { EditHistory } from 'components/managers/tech-card/annotation/history';
 // ПЛИТА АРТЕФАКТА — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО ЛИСТ ЭСКИЗА И СНИМОК ШАГА СБОРКИ, а не третья
 // отрисовка «для превью». Прежняя своя рисовалка на плитке была третьим словарём видов: дуга или
 // мерка ставились в редакторе и молча пропадали на плитке, а человек читал это как «выноска не
@@ -33,22 +33,31 @@ import {
   type PenStyle,
   type ShapePoint,
   type SurfaceCallout,
-} from 'ui/components/annotation/surface';
-import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
-import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation/purpose';
-import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
-import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Toolbar } from 'ui/components/toolbar';
-import { Pill } from 'ui/components/pill';
-import { Section, SectionStack } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { ViewSwitch } from 'ui/components/view-switch';
+} from 'components/managers/tech-card/annotation/surface';
+import { PALETTE_KINDS } from 'components/managers/tech-card/annotation/kinds';
+import {
+  parseSpec,
+  placePurpose,
+  sectionLetter,
+} from 'components/managers/tech-card/annotation/purpose';
+import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
+import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
+import {
+  Button,
+  Chip,
+  Close,
+  ConfirmationModal,
+  GroupLabel,
+  Toolbar,
+  Pill,
+  Section,
+  SectionStack,
+  HeaderNote,
+  Text,
+  TILE_CORNER,
+  TILE_QUIET,
+  ViewSwitch,
+} from 'ui';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
@@ -3616,16 +3625,12 @@ export function PlateGrid({
                       </PlateCorner>
                     )}
                     {detachReason ? (
-                      <PlateCorner label={`detach ${plate.name}`} reason={detachReason}>
-                        ✕
-                      </PlateCorner>
+                      <PlateClose label={`detach ${plate.name}`} reason={detachReason} />
                     ) : (
-                      <PlateCorner
+                      <PlateClose
                         label={`detach ${plate.name} — take this picture off the sheet; the callouts on it go with it`}
                         onPress={() => onDetach?.(plate)}
-                      >
-                        ✕
-                      </PlateCorner>
+                      />
                     )}
                   </>
                 }
@@ -3875,7 +3880,7 @@ function SlotTile({
         />
       ) : (
         <div
-          className='flex w-auto max-w-[85vw] items-center justify-center border border-dashed border-borderColor bg-bgZebra'
+          className='flex w-auto max-w-[85vw] items-center justify-center border border-dashed border-borderColor bg-pageBg'
           style={{ height: PLATE_FRAME_HEIGHT, aspectRatio: '4/5' }}
           title={`no ${noun} stands in ${label}; this card is read-only for you`}
         >
@@ -3962,7 +3967,7 @@ function ModelPlateTile({
         type='button'
         onClick={() => onView3d(plate)}
         title={`open ${plate.name} in 3D — orbit it and take a snapshot from any angle to get a picture of it`}
-        className='flex w-auto max-w-[85vw] cursor-pointer flex-col items-center justify-center gap-2 border border-borderColor bg-bgZebra text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className='flex w-auto max-w-[85vw] cursor-pointer flex-col items-center justify-center gap-2 border border-borderColor bg-pageBg text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         style={{ height: PLATE_FRAME_HEIGHT, aspectRatio: '4/5' }}
       >
         <ModelGlyph />
@@ -4036,10 +4041,43 @@ function PlateCorner({
         TILE_CORNER,
         TILE_QUIET,
         'py-px leading-none',
-        dead ? 'cursor-not-allowed text-textInactiveColor' : 'cursor-pointer',
+        dead ? 'cursor-not-allowed text-borderColor' : 'cursor-pointer',
       )}
     >
       {children}
     </span>
+  );
+}
+
+function PlateClose({
+  label,
+  onPress,
+  reason,
+}: {
+  label: string;
+  onPress?: () => void;
+  reason?: string;
+}) {
+  const dead = !!reason || !onPress;
+  return (
+    <Close
+      asChild
+      size='sm'
+      tabIndex={dead ? -1 : 0}
+      aria-disabled={dead || undefined}
+      aria-label={label}
+      title={reason ? `${label} — ${reason}` : label}
+      onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!dead) onPress?.();
+      }}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (!dead) onPress?.();
+      }}
+      className={cn(TILE_QUIET, dead ? 'cursor-not-allowed text-borderColor' : 'cursor-pointer')}
+    />
   );
 }

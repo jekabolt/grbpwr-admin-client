@@ -1,0 +1,10 @@
+{
+  "_note": "Hand-written truth for Allsizes_with_notches (CLO yoke shirt, 9 pieces), from probe/truth/allsizes-M.json: collar layers; yoke + yoke facing sandwich the back (burrito); fronts to the back at the shoulders; collar into the neckline; both sleeves set. CF of FP_L/FP_R is a button opening, not a join.",
+  "joins": [
+    { "name": "Collar", "inputs": ["CLR_3", "CLR_4"] },
+    { "name": "Back", "inputs": ["BP", "BP_2", "BP_1"] },
+    { "name": "Body", "inputs": ["FP_L", "FP_R", "Back"] },
+    { "name": "Body with collar", "inputs": ["Collar", "Body"] },
+    { "name": "Shirt", "inputs": ["SL_L", "SL_R", "Body with collar"] }
+  ]
+}

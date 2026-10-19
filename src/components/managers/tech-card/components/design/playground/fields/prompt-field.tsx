@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { EnhanceRefusal, enhanceText, type EnhanceRequest } from 'ui/components/ai-enhance';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import GenericPopover from 'ui/components/popover';
-import Textarea from 'ui/components/text-area';
+import {
+  EnhanceRefusal,
+  enhanceText,
+  type EnhanceRequest,
+} from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { Button, Chip, GenericPopover, Textarea } from 'ui';
 import { extractFieldViolations, transportRefusal } from 'utils/field-errors';
 
 import { recentMenu } from '../card-recent';
@@ -162,7 +163,7 @@ export async function steerText(req: Omit<EnhanceRequest, 'mode'>): Promise<stri
 }
 
 const MENU_ROW =
-  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
+  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
 
 export function PromptField({
   value,
@@ -372,7 +373,7 @@ export function PromptField({
   });
   const doorSkin = (open: boolean) =>
     cn(
-      disabled && 'pointer-events-none border-textInactiveColor text-textInactiveColor',
+      disabled && 'pointer-events-none border-borderColor text-borderColor',
       // `!`: the Button's variant sets `text-textColor` and cva does not merge classes, so a plain
       // `text-bgColor` lost to it and the open door read black on black unless hovered.
       open && 'bg-textColor !text-bgColor',

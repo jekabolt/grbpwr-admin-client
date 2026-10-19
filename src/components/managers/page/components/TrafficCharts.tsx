@@ -1,7 +1,7 @@
 import type { BusinessMetrics, TrafficSourceMetric } from 'api/proto-http/admin';
 import type { EChartsOption, TooltipComponentFormatterCallbackParams } from 'echarts';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import {
   categoryAxis,
   ChartCard,

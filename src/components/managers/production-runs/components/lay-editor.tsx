@@ -9,15 +9,19 @@ import {
 import { useMaterialLots } from 'components/managers/materials/components/useWarehouse';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import SelectComponent from 'ui/components/select';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Stat,
+  StatGrid,
+  Text,
+  Select, EmptyCell,
+} from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { LAY_MODE_LABEL, stampWhen } from './lay-card';
@@ -372,7 +376,7 @@ export function LayEditor({
             colourway
           </Text>
           {isNew ? (
-            <SelectComponent
+            <Select
               name='lay-colorway'
               items={colorwayOptions.map((c) => ({ value: c.colorwayId, label: c.label }))}
               value={colorwayId || ''}
@@ -390,7 +394,7 @@ export function LayEditor({
             lay fabric
           </Text>
           {isNew ? (
-            <SelectComponent
+            <Select
               name='lay-slot'
               items={slotOptions.map((s) => ({ value: s.lineKey, label: s.name }))}
               value={bomLineKey}
@@ -406,7 +410,7 @@ export function LayEditor({
             />
           ) : (
             <Text size='small'>
-              {existing?.bomItemName || bomLineKey || '—'}
+              {existing?.bomItemName || bomLineKey || <EmptyCell />}
               {existing?.materialName ? ` · ${existing.materialName}` : ''}
             </Text>
           )}
@@ -478,15 +482,15 @@ export function LayEditor({
 
         <GroupLabel>how much fabric this will eat</GroupLabel>
         <StatGrid>
-          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : '—'} />
-          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : '—'} />
+          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : <EmptyCell />} />
+          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : <EmptyCell />} />
           <Stat
             label='end losses'
-            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : '—'}
+            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : <EmptyCell />}
           />
           <Stat
             label='lay plan'
-            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} m` : '—'}
+            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} m` : <EmptyCell />}
           />
           {/* Высота стопки НЕ СЧИТАЕТСЯ на клиенте, и это не лень: толщина ткани живёт на артикуле
               и по проводу сюда не едет. Показать «0 см» значило бы сказать «влезает», а это
@@ -503,7 +507,7 @@ export function LayEditor({
             which roll it was spread from
           </Text>
           {materialId > 0 ? (
-            <SelectComponent
+            <Select
               name='lay-lot'
               // «Рулон не назван» стоит ПЕРВЫМ пунктом, а не отсутствует: это законное состояние
               // настила, а не пропуск в форме, и вернуться в него надо уметь так же, как в него
@@ -566,7 +570,7 @@ export function LayEditor({
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
               unit
             </Text>
-            <SelectComponent
+            <Select
               name='lay-actual-uom'
               items={FACT_UNIT_OPTIONS.map((u) => ({ value: u, label: MATERIAL_UNIT_LABEL[u] }))}
               value={actualUom}

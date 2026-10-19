@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Input, Text } from 'ui';
 
 /**
  * ИМЯ НОВОЙ ДЕТАЛИ — спрашивается ДО записи: слот без имени сервер отвергает

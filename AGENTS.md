@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for Codex when working in this repository.
+Guidance for coding agents (Codex and Claude Code) working in this repository. `CLAUDE.md` imports this file — edit only this one.
 
 ## What this is
 
@@ -27,6 +27,24 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
 
 - Required: `VITE_SERVER_URL` — backend base URL (read in `src/api/api.ts`).
 - Optional: `VITE_MEDIA_PROXY_URL`, `VITE_API_BASE_URL` (dev `/api` proxy, default `http://localhost:3999`).
+- Optional but **set it on every deployed environment**: `VITE_PATTERN_VIEWER_ORIGIN` — the origin
+  baked into the tech pack's pattern QR codes (`{origin}/p/{token}`). It defaults to
+  `window.location.origin`, i.e. the address of the tab that pressed "save as pdf" — so printing
+  from a Vercel _preview_ alias produces paper that points at an ephemeral, SSO-protected host and
+  dies when the branch is renamed. Set it to the stable admin host of that contour
+  (`https://admin.beta.grbpwr.com`, `https://admin.grbpwr.com`). Nothing fails visibly when it is
+  wrong; the QR just stops working later, in a workshop.
+- Optional, almost never needed: `VITE_FILE_SHARE_ORIGIN` — the origin of the public file-share
+  landing page (`{origin}/f/{token}`) that the access block and the shared-files screen copy to
+  the clipboard. It falls back to `VITE_PATTERN_VIEWER_ORIGIN` and then to the tab's own origin,
+  so setting the pattern-viewer variable already covers it — all public pages are the same SPA on
+  the same host. Set this one only if `/f/` ever moves to a domain of its own. The failure it
+  guards against is the same silent one: a link copied from a Vercel preview is handed to a
+  contractor and dies with the alias — which is why the tab fallback is refused when the tab
+  itself is provably ephemeral (`localhost`, a bare IP, `*.vercel.app`). On such a host the
+  address and its copy button are not rendered at all; on a stable host the tab origin _is_ the
+  product origin and the button keeps working. See `src/components/file-share-viewer/link.ts`.
+  `.env.example` documents both variables.
 - `.env.example` lists a stale `REACT_APP_SERVER_URL` — the code uses `VITE_SERVER_URL`. Don't propagate the old name.
 
 ## Architecture
@@ -51,10 +69,27 @@ Each domain is a folder under `src/components/managers/`: `page` (analytics), `m
 ## Conventions
 
 - **Path aliases** (defined in both `vite.config.ts` and `tsconfig.json`, `baseUrl: src`): `@`, `api`, `components`, `constants`, `context`, `hooks`, `lib`, `types`, `ui`, `utils`, `styles`. Import with these, e.g. `import { adminService } from 'api/api'` — not relative `../../..` paths.
-- **UI components**: reuse the local design system in `src/ui` (`button`, `input`, `select`, `date-picker`, `confirmation-modal`, `snackbar`, form fields, etc.) before reaching for raw Radix or new dependencies.
+- **UI components**: import existing primitives only from `ui`, for example
+  `import { Button, Input } from 'ui'`. Never import implementation paths such as
+  `ui/components/...` or `ui/form/...`.
 - **Styling**: Tailwind CSS 4 utility classes are the default; SCSS exists for some components. Match the surrounding file.
 - **Formatting**: Prettier (single quotes, JSX single quotes, semicolons, width 100, trailing commas). Run `yarn fix` before finishing. Keep ESLint clean.
 - **TypeScript**: `strict` is on. Avoid `any`; prefer the generated proto types from `api/proto-http/*` for backend shapes.
+
+## Visual design: DESIGN.md + /ui-kit are the law
+
+`DESIGN.md` defines the tokens and rules; `/ui-kit` shows every primitive live. The design linter
+(`yarn lint:design`) enforces them as a ratchet. Import primitives only `from 'ui'`. The primitive
+list is closed: do not add a file under `src/ui` without the owner's OK and a `[primitive-ok]`
+commit marker.
+
+- The page ground is grey (`pageBg`); white (`bgColor`) is the material of a block, not the page
+  background.
+- The 24px gap between blocks is the divider. Do not draw a separator in it.
+- A block never contains another block. Use `GroupLabel` and `Row` for internal structure.
+- `borderColor` is the outer outline; `hairline` is the inner rule between rows.
+- Modals, boards, tiles, `StatGrid`, and storefront/email preview iframes are already surfaces. Do
+  not wrap them in a `Section`.
 
 ## Generated code — do not hand-edit
 
@@ -65,7 +100,7 @@ Each domain is a folder under `src/components/managers/`: `page` (analytics), `m
 - `src/api/api.ts` logs raw backend responses via `console.log('[BE] ...')`. That's intentional debug noise, not a bug to "fix" unless asked.
 - `src/context/index.tsx` is an empty reducer scaffold (no real actions yet). Don't assume it holds app state.
 - Cropping remote images can hit CORS; dev uses the `media-proxy` Vite middleware (`vite.config.ts`) and production uses `api/media-proxy.js` (Vercel function). Keep both in sync if you touch proxy behavior.
-- This is a worktree checkout of the `beta` branch; the primary clone tracks other branches. Confirm the branch before committing.
+- Checkouts of this repo sit on different branches (primary clone, `-beta-deploy`, `-wt-*` worktrees). Confirm the branch before committing.
 
 ## Docs
 

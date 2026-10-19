@@ -1,8 +1,6 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, Stat, StatGrid, Text } from 'ui';
 import { buildClearSignals, clearBuckets } from '../productSignals';
 import { formatCurrency, formatNumber } from '../utils';
 import { ActionList } from './ActionList';

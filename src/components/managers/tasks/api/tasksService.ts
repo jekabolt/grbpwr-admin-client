@@ -9,7 +9,7 @@ import type {
   common_TaskMediaAnnotations,
   common_TechCardAnnotation,
 } from 'api/proto-http/admin';
-import type { AnnotationValue } from 'ui/components/annotation/canvas';
+import type { AnnotationValue } from 'components/managers/tech-card/annotation/canvas';
 import {
   annotationColorFromWire,
   annotationColorToWire,
@@ -19,7 +19,7 @@ import {
   type AnnotationKindKey,
   readAnnotationCaps,
   annotationCapsOut,
-} from 'ui/components/annotation/wire';
+} from 'components/managers/tech-card/annotation/wire';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import {
   ListTasksFilter,

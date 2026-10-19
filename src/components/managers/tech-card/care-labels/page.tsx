@@ -11,14 +11,19 @@ import { usePrintReady } from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { useParams } from 'react-router-dom';
+import {
+  BackLink,
+  Button,
+  CheckboxCommon,
+  Chip,
+  ChipRow,
+  GroupLabel,
+  HeaderWarnings,
+  Pill,
+  Section,
+  Text,
+} from 'ui';
 import { useCareLabelSource, variantSku } from './adapter';
 import { isBlocking } from './holes';
 import { holeAddress, HolesPanel } from './holes-panel';
@@ -317,9 +322,7 @@ export function TechCardCareLabels() {
     <div className='flex min-h-screen flex-col bg-pageBg' data-care-labels-page={key}>
       <div className='sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-borderColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
-          <Button asChild variant='secondary' size='lg'>
-            <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>
-          </Button>
+          <BackLink to={id ? `/tech-cards/${id}` : ROUTES.techCards} />
           <Text variant='uppercase' size='large'>
             care labels — print
           </Text>
@@ -330,11 +333,12 @@ export function TechCardCareLabels() {
           )}
         </div>
         <div className='ml-auto flex items-center gap-3'>
-          {blocking.length > 0 && (
-            <Text variant='errorLabel' size='small'>
-              {blocking.length} blocking {blocking.length === 1 ? 'hole' : 'holes'}
-            </Text>
-          )}
+          <HeaderWarnings
+            items={blocking.map((h) => ({
+              text: [holeAddress(h, colorways), h.message].filter(Boolean).join(' — '),
+              error: true,
+            }))}
+          />
           <Button
             variant='main'
             size='lg'
@@ -371,9 +375,7 @@ export function TechCardCareLabels() {
           <Text variant='inactive' className='uppercase'>
             tech card not found
           </Text>
-          <Button asChild variant='main' size='lg' className='uppercase'>
-            <Link to={ROUTES.techCards}>← back to tech cards</Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
         <div className='flex flex-col gap-gutter p-gutter'>

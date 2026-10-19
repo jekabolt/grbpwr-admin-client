@@ -5,10 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useEffect, useLayoutEffect, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Section, Text, FoldCaret } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { runRepresentation } from '../bench-kinds';
@@ -59,7 +56,6 @@ import {
   runStatus,
 } from './run-state';
 import { useElapsed, useRunById, useStartRun } from './use-generation';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN UNDER THE GENERATE BLOCK (O-53; 28.09, O-67) ═══

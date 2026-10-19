@@ -1,0 +1,1571 @@
+{
+  "src/components/login/login.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/accounting/accounts/components/accounts-table.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/accounting/bank/components/bank-rules.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/accounting/bank/components/import-csv-modal.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/accounting/bank/components/post-bank-txn-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounting/bank/page.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/accounting/components/balanced-badge.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/accounting/components/caveat-badge.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/components/entry-detail-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounting/components/info-hint.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/components/kit.tsx": {
+    "design/no-arbitrary-px": 20,
+    "design/no-hex-color": 5,
+    "design/no-local-primitive": 1,
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/accounting/events/page.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounting/journal/components/entries-filter.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/accounting/journal/components/entries-table.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/journal/components/manual-entry-modal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/accounting/journal/components/wizard/wizard-modal.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/accounting/journal/page.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/periods/components/close-period-confirm.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounting/periods/components/periods-table.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounting/reports/components/balance-sheet.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/reports/components/cash-flow.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/accounting/reports/components/copy-table-button.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/accounting/reports/components/fixed-assets.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/accounting/reports/components/ledger.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/reports/components/range-controls.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/accounting/reports/components/reconciliation.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/reports/components/report-utils.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/accounting/reports/components/vat.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/accounting/reports/components/xml-export-button.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/accounting/reports/page.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounting/subledgers/page.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/accounts/components/account-form-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/accounts/components/accounts-table.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/accounts/components/permission-picker.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/accounts/components/specialties-field.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/ai-providers/views/providers.tsx": {
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/ai-providers/views/routes.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/ai-providers/views/spend.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/archive/components/archive-preview-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/archive/components/archive-preview.tsx": {
+    "design/no-style-design": 1
+  },
+  "src/components/managers/archive/components/block-editor-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/archive/components/block-rail.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/archive/components/index.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/archive/components/select-item-type.tsx": {
+    "design/no-arbitrary-px": 8,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/archives/components/archvie-item.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/customer-support/components/ticket-detail.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/dictionaries/page.tsx": {
+    "design/no-hex-color": 7,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 16
+  },
+  "src/components/managers/email/components/ab-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/email/components/block-editor-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/email/components/block-editor.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/email/components/block-list-field.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/email/components/block-rail.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/email/components/campaign-card.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/components/campaign-metrics.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/email/components/campaign-preview-panel.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/email/components/dispatch-panel.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/components/index.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/email/components/segment-builder/index.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/email/components/segment-builder/predicate-builder.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/email/components/segment-builder/segment-editor.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/email/components/segment-builder/value-inputs.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/components/selectEmailType.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/email-manager.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/index.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/email/segments.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/employees/index.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/files/components/add-files-modal.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/files/components/add-files-tile.tsx": {
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/files/components/file-access-section.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/files/components/file-card-modal.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/files/components/file-comments.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/files/components/file-owners-section.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/file-reader.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/files/components/file-tasks-section.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/file-tile.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/files/components/files-toolbar.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/files/components/gallery-states.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/files/components/paste-intake-modal.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/files/components/project-description.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/project-edit-modal.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/project-roles-modal.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/files/components/project-sections.tsx": {
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/files/components/reader-page.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/files/components/reader-rail.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-hex-color": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/selection-bar.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/components/topic-chips.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/files/components/upload-bar.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/files/note/ai-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/files/note/file-refs.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/note/note-editor.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/note/note-pictures.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/projects/new-project-modal.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/files/projects/projects-index.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/files/topics/topics-page.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/fitting/components/change-requests-fields.tsx": {
+    "design/no-raw-control": 5
+  },
+  "src/components/managers/fitting/components/fitting-callouts.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/fitting/components/patterns-fields.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/fitting/components/tech-card-field.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/fulfillment/card-detail/page.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/fulfillment/components/card-assignee.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/fulfillment/components/fulfillment-card.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/fulfillment/components/ship-label-modal.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/hero/components/archive-picker.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/hero/components/block-editor-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/hero/components/block-rail.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/hero/components/hero-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/hero/components/hero-preview-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/hero/components/hero-preview.tsx": {
+    "design/no-style-design": 1
+  },
+  "src/components/managers/hero/components/hero-product-picker.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/hero/components/hero-section-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/hero/components/heroProductsTable.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-non-token-class": 14,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/hero/components/index.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/hero/components/link-field.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/hero/components/nav-featured.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/hero/components/productPickerModal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-non-token-class": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/hero/components/selectHeroType.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/hero/components/slide-list-field.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/hero/components/tag-picker.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/materials/components/catalog-tab.tsx": {
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/materials/components/composition-wizard.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/materials/components/material-modal.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 33
+  },
+  "src/components/managers/materials/components/material-picker.tsx": {
+    "design/no-arbitrary-px": 6,
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/materials/components/material-prices-modal.tsx": {
+    "design/no-raw-control": 7
+  },
+  "src/components/managers/materials/components/movement-modals.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 24
+  },
+  "src/components/managers/materials/components/movements-tab.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/materials/components/packaging-bom-tab.tsx": {
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/materials/components/stock-tab.tsx": {
+    "design/no-raw-control": 5
+  },
+  "src/components/managers/materials/index.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/media/components/cropper.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/media/components/dragdrop-area.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/media/components/expander.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/media/components/media-gallery-selector.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/media/components/media-intake-dialog.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/media/components/media-item.tsx": {
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/media/components/media-list.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/media/components/media-slot.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/media/components/pending-media-plate.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/media/index.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/membership/audit/page.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/membership/hacker/components/invites.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/membership/member-details/components/member-actions.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/membership/member-details/components/send-email-modal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/membership/members/components/members-filter.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/membership/members/components/members-table.tsx": {
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/membership/tier-config/page.tsx": {
+    "design/no-non-token-class": 3
+  },
+  "src/components/managers/model/components/measurements-fields.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/model/components/size-picker-modal.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/opex/components/fields.tsx": {
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/opex/components/line-form.tsx": {
+    "design/no-raw-control": 8
+  },
+  "src/components/managers/opex/components/opex-wizard.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/opex/components/recurring-tab.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/order/components/invoice-document.tsx": {
+    "design/no-arbitrary-px": 21,
+    "design/no-non-token-class": 11
+  },
+  "src/components/managers/order/components/order-items.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/order/components/order-table.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/order/components/refund-confirmation.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/order/components/shipment-cost-modal.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/order/components/stripe-details.tsx": {
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/order/invoice-page.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 1,
+    "design/no-non-token-class": 1,
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/order/page.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/orders-catalog/page.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/charts/ChartCard.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/page/components/alert-settings-modal.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/components/CampaignAttributionTable.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/page/components/ChannelSpendForm.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/page/components/CountryMatrix.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/components/DateRangePicker.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-radius-shadow": 2,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/page/components/DeliveryPanel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/page/components/ForecastStrip.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/page/components/GeographyCharts.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/page/components/InventoryHealthTable.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/page/components/InventoryTargetForm.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/page/components/MarginByStyleTable.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/components/NewVsReturningPanel.tsx": {
+    "design/no-hex-color": 2,
+    "design/no-local-primitive": 1,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/page/components/ProductCharts.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/page/components/ProfitabilityPanel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/page/components/RevenueWaterfall.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/page/components/ShareBars.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/page/components/SizeAnalyticsTable.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-hex-color": 1,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/page/components/SlowMoversTable.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/components/Sparkline.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/page/components/vat-rates-modal.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/page/components/VerdictList.tsx": {
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/page/index.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/page/tabs/GrowthTab.tsx": {
+    "design/no-arbitrary-px": 6
+  },
+  "src/components/managers/page/tabs/RevenueTab.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/page/tabs/ThisWeekTab.tsx": {
+    "design/no-arbitrary-px": 7
+  },
+  "src/components/managers/product/components/care/care-card.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/product/components/composition/composition-picker.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/product/components/cost-section.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/customs/customs-section.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/product/components/lifecycle-controls.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/margin-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/read-only-field.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/seconds-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/size-measurements.tsx": {
+    "design/no-non-token-class": 2
+  },
+  "src/components/managers/product/components/stock/stock-history.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/product/components/stock/stock-table.tsx": {
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/product/components/stock/update-stock.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/product/components/style-picker.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/product/components/style-section.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/product/components/tags.tsx": {
+    "design/no-non-token-class": 2
+  },
+  "src/components/managers/product/components/variants-panel.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/product/components/waitlist-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/production-runs/components/aux-run-plan.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/production-runs/components/create-run-modal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 10
+  },
+  "src/components/managers/production-runs/components/cut-receipts.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/production-runs/components/lay-card.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/production-runs/components/lay-editor.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/production-runs/components/lines-grid.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/production-runs/components/marker-picker.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/production-runs/components/production-run-modal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 8
+  },
+  "src/components/managers/production-runs/components/receive-modal.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/production-runs/components/run-conveyor.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/production-runs/components/run-costs.tsx": {
+    "design/no-raw-control": 7
+  },
+  "src/components/managers/production-runs/components/run-rows.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/production-runs/detail-page.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/production-runs/index.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/products-catalog/components/active-filters.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/products-catalog/components/batch-action-bar.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/products-catalog/components/category-btn.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/products-catalog/components/filter.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/products-catalog/components/product-item.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/products-catalog/components/selection-toolbar.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/products-catalog/components/state-treatment.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/products-catalog/components/status-filter.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/settings/components/payment-fees-editor.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tasks/components/avatar-stack.tsx": {
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/tasks/components/description-editor.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tasks/components/entity-picker.tsx": {
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/tasks/components/link-chip.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tasks/components/link-editor.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tasks/components/related-tasks.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tasks/components/task-media-viewer.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tasks/components/task-text.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/ai-enhance/ai-enhance.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/annotation/editor.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/annotation/focused-annotator.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/tech-card/annotation/insets.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/tech-card/annotation/shapes.tsx": {
+    "design/no-hex-color": 6
+  },
+  "src/components/managers/tech-card/annotation/spot-rings.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/annotation/style-row.tsx": {
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/annotation/surface.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 1,
+    "design/no-style-design": 3
+  },
+  "src/components/managers/tech-card/annotation/zoom-dialog.tsx": {
+    "design/no-non-token-class": 2
+  },
+  "src/components/managers/tech-card/assembly-print/page.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 2
+  },
+  "src/components/managers/tech-card/assembly-print/paper-svg.tsx": {
+    "design/no-hex-color": 15,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/care-labels/holes-panel.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/care-labels/page.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/care-labels/qr-settings.tsx": {
+    "design/no-hex-color": 2,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/assembly-canvas.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1,
+    "design/no-style-design": 2
+  },
+  "src/components/managers/tech-card/components/assembly-create-dialog.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/assembly-doll/doll-column.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/assembly-doll/doll-overlay.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/assembly-field.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/assembly-fullscreen.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/assembly-map/pair-shape.tsx": {
+    "design/no-hex-color": 7,
+    "design/no-style-design": 2
+  },
+  "src/components/managers/tech-card/components/assembly-map/piece-map-shape.tsx": {
+    "design/no-hex-color": 9,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/assembly-map/sewn-strip.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/tech-card/components/assembly-schematic.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/assembly-seams/seams-review.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/assembly-seams/seams-sheet.tsx": {
+    "design/no-hex-color": 6,
+    "design/no-style-design": 3
+  },
+  "src/components/managers/tech-card/components/assembly-shelf.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/assembly-skeleton-panel.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/assembly-unit-editor.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/batch-composition.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/batch-marker-queue.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/bom-field.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/bom-line-picker.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/cloth-hatch.tsx": {
+    "design/no-hex-color": 5
+  },
+  "src/components/managers/tech-card/components/collection-field.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/colourway-palette.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/colourways-matrix.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 5
+  },
+  "src/components/managers/tech-card/components/composition-label/composition-label-block.tsx": {
+    "design/no-arbitrary-px": 7,
+    "design/no-hex-color": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/composition-label/doors.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/composition-label/editable.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/composition-label/editor-strip.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/composition-label/fibre-editor.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/composition-label/made-in-value.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/composition-label/ribbon.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/construction-audit.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/construction-general-info.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/construction-tab.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/cost-estimate-field.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/costing-field.tsx": {
+    "design/no-arbitrary-px": 8,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/costing-vocab.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/artifacts-panel.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/assets/colour-picker.tsx": {
+    "design/no-arbitrary-px": 7,
+    "design/no-hex-color": 12,
+    "design/no-raw-control": 2,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/design/bench-slot.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 11
+  },
+  "src/components/managers/tech-card/components/design/callout-purpose-fields.tsx": {
+    "design/no-arbitrary-px": 3
+  },
+  "src/components/managers/tech-card/components/design/callouts-panel.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/card-details.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/design/chain-rail.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/colorway-picker.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/colourway-strip.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-hex-color": 1,
+    "design/no-raw-control": 2,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/design/core/drafted-field.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/core/two-half-slot.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/core/wmg.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/create-quiz.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/design/flat-input-pictures.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/flat-run-row.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/flat-words-field.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-style-design": 2
+  },
+  "src/components/managers/tech-card/components/design/garment-pictograms.tsx": {
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/design/generation/composite.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/generation/crop-deck.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/generation/generation-history.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/design/generation/inline-split.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/generation/live-tiles.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/generation/run-panel.tsx": {
+    "design/no-local-primitive": 3
+  },
+  "src/components/managers/tech-card/components/design/generation/run-tile.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/head/construction-draft.tsx": {
+    "design/no-arbitrary-px": 9,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/head/mood-organs.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/material-slots.tsx": {
+    "design/no-arbitrary-px": 18,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/modals/transform-frame-overlay.tsx": {
+    "design/no-hex-color": 6
+  },
+  "src/components/managers/tech-card/components/design/modals/vector-brush-rail.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 5,
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/tech-card/components/design/modals/vector-modal.tsx": {
+    "design/no-hex-color": 20,
+    "design/no-style-design": 3
+  },
+  "src/components/managers/tech-card/components/design/modals/what-model-gets-modal.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/mood-board.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/tech-card/components/design/mood-cutout.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/mood-quiz.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/design/paint/parts-canvas.tsx": {
+    "design/no-hex-color": 10,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/design/paint/pieces-row.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/pattern/fabrics-hardware.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 5
+  },
+  "src/components/managers/tech-card/components/design/pattern/organs.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-style-design": 3
+  },
+  "src/components/managers/tech-card/components/design/pattern/trim-pictograms.tsx": {
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/design/picture-tile.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/colourway-render-picker.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/fold-section.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/glyphs.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/model-photo-picker.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/option-row.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/prompt-field.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/reuse.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/fields/slider.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/mask/mask-editor.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 1,
+    "design/no-non-token-class": 2,
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/workflow-card.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/playground/workflow-panel.tsx": {
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/tech-card/components/design/references-section.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/render/cloth-is.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/render/field-row.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/render/generate-row.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/render/materials-pack.tsx": {
+    "design/no-arbitrary-px": 7,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/design/render/model-picker.tsx": {
+    "design/no-arbitrary-px": 4
+  },
+  "src/components/managers/tech-card/components/design/render/outputs.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/design/render/palette.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/design/render/side-row.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/design/render/threed-studio.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/design/seam-icons.tsx": {
+    "design/no-hex-color": 15
+  },
+  "src/components/managers/tech-card/components/design/split-modal.tsx": {
+    "design/no-raw-control": 3,
+    "design/no-style-design": 1
+  },
+  "src/components/managers/tech-card/components/design/studio-tab.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/suggested-callouts.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/threed/model-upload-cell.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/design/threed/model-viewer.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/tech-card/components/design/words-field.tsx": {
+    "design/no-style-design": 2
+  },
+  "src/components/managers/tech-card/components/details-editor.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/dev-expenses-field.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/equipment-park.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/components/header-meta-fields.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/index.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/kind-picker.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/lab-dip-tab.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/label-card.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/labels-blocks.tsx": {
+    "design/no-local-primitive": 2
+  },
+  "src/components/managers/tech-card/components/nesting/body-silhouette.tsx": {
+    "design/no-hex-color": 2
+  },
+  "src/components/managers/tech-card/components/nesting/dxf-geometry.tsx": {
+    "design/no-hex-color": 7
+  },
+  "src/components/managers/tech-card/components/nesting/dxf-measure-conditions.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/nesting/dxf-piece-breakdown.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/nesting/layout-editor.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 11,
+    "design/no-non-token-class": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/nesting/marker-length-breakdown.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/nesting/markers-section.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/nesting/nesting-modal.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 4
+  },
+  "src/components/managers/tech-card/components/nesting/piece-match-modal.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/tech-card/components/nesting/piece-sheet.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 14,
+    "design/no-non-token-class": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/nesting/unit-shape.tsx": {
+    "design/no-hex-color": 8,
+    "design/no-style-design": 2
+  },
+  "src/components/managers/tech-card/components/operation-media-strip.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/operations-field.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 4,
+    "design/no-raw-control": 5
+  },
+  "src/components/managers/tech-card/components/operations-ratify-panel.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/tech-card/components/output-variants-field.tsx": {
+    "design/no-local-primitive": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/pantone-picker.tsx": {
+    "design/no-arbitrary-px": 5,
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/tech-card/components/pattern-export/export-menu.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/autopilot/view.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-local-primitive": 2,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/pattern-import/import-wizard.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/pattern-import/line-swatch.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/sheet-viewport.tsx": {
+    "design/no-hex-color": 8
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/apply.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/check.tsx": {
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/details-confirm.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/details-grade.tsx": {
+    "design/no-hex-color": 2
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/details.tsx": {
+    "design/no-arbitrary-px": 6,
+    "design/no-hex-color": 3,
+    "design/no-non-token-class": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/fabrics.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 2
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/files-clean.tsx": {
+    "design/no-arbitrary-px": 6,
+    "design/no-hex-color": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 6
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/not-in-file.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/pieces-guide.tsx": {
+    "design/no-hex-color": 4,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/pieces.tsx": {
+    "design/no-hex-color": 6,
+    "design/no-raw-control": 10
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/scale.tsx": {
+    "design/no-hex-color": 3,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/sheet.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 4,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/pattern-import/steps/sizes.tsx": {
+    "design/no-arbitrary-px": 16,
+    "design/no-hex-color": 3,
+    "design/no-raw-control": 10
+  },
+  "src/components/managers/tech-card/components/pattern-import/ui-bits.tsx": {
+    "design/no-arbitrary-px": 3,
+    "design/no-hex-color": 2,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/patterns-field.tsx": {
+    "design/no-arbitrary-px": 7,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/piece-picker.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 3
+  },
+  "src/components/managers/tech-card/components/piece-silhouette.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/tech-card/components/production-tab.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/release-blockers-modal.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/releases-field.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-card/components/residue-strip.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/roles-field.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-card/components/sample-assembly-map.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-radius-shadow": 1
+  },
+  "src/components/managers/tech-card/components/sample-cut-views.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 23,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/sample-picker.tsx": {
+    "design/no-arbitrary-px": 4,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/sample-quiz.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/tech-card/components/sample-screen.tsx": {
+    "design/no-arbitrary-px": 11,
+    "design/no-local-primitive": 3,
+    "design/no-raw-control": 14
+  },
+  "src/components/managers/tech-card/components/samples-tab.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/save-failure-line.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/save-status-chip.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/sequence-rail.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/components/managers/tech-card/components/signoffs-field.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/sketch-tab.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/stage-progress.tsx": {
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/style-projects.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/tech-card-fittings.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/tech-card-tasks-panel.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1,
+    "design/no-radius-shadow": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-card/components/tech-pack-labels.tsx": {
+    "design/no-non-token-class": 3
+  },
+  "src/components/managers/tech-card/page.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-card/patterns/dxf-quick-view-modal.tsx": {
+    "design/no-hex-color": 1
+  },
+  "src/components/managers/tech-card/patterns/pattern-qr.tsx": {
+    "design/no-hex-color": 2
+  },
+  "src/components/managers/tech-card/patterns/pattern-upload-button.tsx": {
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/managers/tech-cards/components/attention-badge.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-cards/components/aux-badge.tsx": {
+    "design/no-local-primitive": 1
+  },
+  "src/components/managers/tech-cards/components/fabric-direction-report.tsx": {
+    "design/no-arbitrary-px": 2
+  },
+  "src/components/managers/tech-cards/components/pipeline-board.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/managers/tech-cards/components/plt-to-pdf-dialog.tsx": {
+    "design/no-hex-color": 3,
+    "design/no-non-token-class": 1
+  },
+  "src/components/managers/tech-cards/components/tech-card-list.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 2,
+    "design/no-raw-control": 2
+  },
+  "src/components/pattern-viewer/components/sheet-list.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/shared/markdown/doc.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/shared/media-viewer/media-viewer-zoom.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-hex-color": 8,
+    "design/no-local-primitive": 2,
+    "design/no-non-token-class": 5,
+    "design/no-radius-shadow": 2,
+    "design/no-raw-control": 6,
+    "design/no-style-design": 1
+  },
+  "src/components/shared/media-viewer/media-viewer.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-local-primitive": 2,
+    "design/no-non-token-class": 3,
+    "design/no-raw-control": 3
+  },
+  "src/components/shared/translation/language-buttons.tsx": {
+    "design/no-raw-control": 1
+  },
+  "src/components/shared/translation/unified-translation-fields.tsx": {
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 1
+  },
+  "src/components/shell/nav-dropdown-menu.tsx": {
+    "design/no-arbitrary-px": 1
+  },
+  "src/components/shell/snackbar.tsx": {
+    "design/no-raw-control": 2
+  },
+  "src/index.tsx": {
+    "design/no-raw-control": 1,
+    "design/no-style-design": 7
+  }
+}

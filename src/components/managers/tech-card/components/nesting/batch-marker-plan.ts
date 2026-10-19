@@ -46,6 +46,7 @@
 import type { common_TechCardMarkerSummary, googletype_Decimal } from 'api/proto-http/admin';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { gcdOfTotals } from 'lib/nesting/spread';
 import {
   crossSpanCm,
   estimateJob,
@@ -211,6 +212,11 @@ export type MarkerJob = {
   grainLayer: string;
   seamAllowanceMm: number;
   seamAllowanceWhy: string;
+  /**
+   * Откуда взялся припуск. Ноль из `contour_is_cut` — это линия кроя (припуск уже в контуре), а
+   * ноль из карточки/цеха на линии шва — заниженный расход; по одному числу их не различить.
+   */
+  seamAllowanceSource: SeamAllowancePrefill['source'];
   /** Припуск, УЖЕ лежащий в контуре файла, мм. null = не измерено (это не ноль). */
   contourAllowanceMm: number | null;
   /** Уникальных контуров в задании и сколько всего экземпляров лягут на полотно. */
@@ -370,8 +376,7 @@ function uniqueMarkerName(runId: number, sizeId: number, base: string, taken: Se
 
 /** НОД списка количеств — то, на что и только на что ужимается соотношение партии (см. шапку). */
 function gcdOf(values: readonly number[]): number {
-  const gcd2 = (a: number, b: number): number => (b === 0 ? a : gcd2(b, a % b));
-  return values.reduce((g, v) => gcd2(g, Math.max(0, Math.round(v))), 0) || 1;
+  return gcdOfTotals(values) || 1;
 }
 
 export function planBatchMarkers(args: {
@@ -646,8 +651,7 @@ export function planBatchMarkers(args: {
       const pinnedArticle = !!pin;
       const widthCm = pinnedArticle ? pin.cutCm : scope.slotCutCm;
       const selvedgeCm = pinnedArticle ? pin.selvedgeCm : scope.slotSelvedgeCm;
-      const articleName =
-        (pinnedArticle ? pin.articleName : scope.slotArticleName) || 'unnamed';
+      const articleName = (pinnedArticle ? pin.articleName : scope.slotArticleName) || 'unnamed';
       if (!Number.isFinite(widthCm) || widthCm <= 0) {
         refuse(
           pinnedArticle
@@ -839,6 +843,13 @@ export function planBatchMarkers(args: {
           }. expensive — untick the box: the ratio squeezes no further, otherwise it would be a different run`,
         );
       }
+      // НОЛЬ НА ЛИНИИ ШВА называется вслух ещё на экране генерации — тем же текстом, что у модалки:
+      // иначе сохранённая раскладка впервые признаётся в заниженном расходе, когда её откроют.
+      if (prep.seam.value === 0 && prep.seam.source !== 'contour_is_cut') {
+        notes.push(
+          `nested without seam allowance · consumption too low — ${prep.seam.why} is 0 mm while layer ${prep.contourLayer || '—'} is the seam line; set an allowance above 0 on the card or in the workshop settings`,
+        );
+      }
       if (built.estimate?.outlook === 'starved') {
         notes.push(
           `the budget won't even cover the geometry prepass: there will be no search at all. a budget from ${Math.ceil(built.estimate.budgetToFitMs / 1000)} s is needed.`,
@@ -914,6 +925,7 @@ export function planBatchMarkers(args: {
         grainLayer: prep.grainLayer,
         seamAllowanceMm: prep.seam.value,
         seamAllowanceWhy: prep.seam.why,
+        seamAllowanceSource: prep.seam.source,
         contourAllowanceMm:
           prep.contourMeasure && prep.contourMeasure.allowanceCm != null
             ? engineCmToMm(prep.contourMeasure.allowanceCm)

@@ -1,7 +1,6 @@
 import { currencySymbols, SELLING_CURRENCIES } from 'constants/constants';
 import useFilter from 'lib/useFilter';
-import Input from 'ui/components/input';
-import SelectComponent from 'ui/components/select';
+import { Input, Select } from 'ui';
 
 // Catalog price filter runs against colourway SELLING prices, so it offers only selling currencies
 // (no USDT — products are never priced in it).
@@ -18,7 +17,7 @@ export default function FromTo() {
 
   return (
     <div className='flex'>
-      <SelectComponent
+      <Select
         name='currency'
         placeholder='currency'
         items={CURRENCY_ITEMS}

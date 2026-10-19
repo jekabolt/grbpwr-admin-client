@@ -1,11 +1,6 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import type { JSX, ReactNode } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell } from 'ui';
 
 import { isRunLive } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
@@ -202,7 +197,7 @@ export function InventoryLine({
           }
         >
           <Text size='nano' component='span'>
-            {number ?? '—'}
+            {number ?? <EmptyCell />}
           </Text>
         </span>
       ) : null}
@@ -314,7 +309,7 @@ export function WordsAsSent({
           {/* A PANEL FILL, NOT A SECOND BOX: a tint inside the block, never a bordered rectangle
               (a box in a box). Paragraphs long, so it scrolls INSIDE its own frame — wrapped and
               broken, never widening the page. */}
-          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
             {text}
           </pre>
           {caveat ? (
@@ -373,7 +368,7 @@ export function CopyWords({
       >
         words
       </GroupLabel>
-      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
         {words}
       </pre>
       {doors && doors.length > 0 ? (

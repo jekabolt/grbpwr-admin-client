@@ -1,8 +1,7 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import { Arrow, Button, Input, Text } from 'ui';
 import { AvatarStack } from './avatar-stack';
 
 /**
@@ -158,8 +157,9 @@ export function AssigneesPicker({
 
   return (
     <div ref={rootRef} className='relative' data-assignees-picker>
-      <button
+      <Button
         type='button'
+        variant='default'
         aria-haspopup='listbox'
         aria-expanded={open}
         aria-label={label}
@@ -178,42 +178,42 @@ export function AssigneesPicker({
         className={cn(
           // Та же коробка, что у Input, Select и Combobox: пикер не имеет права выглядеть иначе,
           // чем соседние контролы той же рейки.
-          'flex min-h-[22px] w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize transition-colors focus:border-textColor focus:outline-none',
+          'flex min-h-11 w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-2 py-1 text-left text-textBaseSize transition-colors focus:border-textColor focus:outline-none sm:min-h-6',
           disabled && 'opacity-60',
         )}
       >
         <span className='flex min-w-0 flex-1 items-center gap-1.5'>
           <AvatarStack names={draft} size={16} />
-          <span className={cn('min-w-0 flex-1 truncate', !summary && 'text-textInactiveColor')}>
+          <span className={cn('min-w-0 flex-1 truncate', !summary && 'text-borderColor')}>
             {summary || 'unassigned'}
           </span>
         </span>
         <span className={cn('shrink-0 text-textColor', open ? 'rotate-0' : 'rotate-180')}>
           <Arrow />
         </span>
-      </button>
+      </Button>
 
       {open && (
-        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-textInactiveColor bg-bgColor'>
-          <input
+        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-borderColor bg-bgColor'>
+          <Input
             ref={inputRef}
             type='text'
             value={query}
             aria-label='search people'
             data-assignees-search
             placeholder={isError ? 'people list failed to load' : 'type to search'}
-            onChange={(e) => {
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               setQuery(e.target.value);
               setActive(e.target.value.trim() ? 0 : -1);
             }}
             onKeyDown={onKeyDown}
-            className='block min-h-[22px] w-full appearance-none rounded-none border-0 border-b border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:outline-none'
+            className='min-h-11 border-0 border-b px-2 py-1 focus:outline-none sm:min-h-6'
           />
-          <div className='max-h-[240px] overflow-auto' role='listbox' aria-multiselectable>
+          <div className='max-h-60 overflow-auto' role='listbox' aria-multiselectable>
             {shown.length === 0 && (
               // ПРОМАХ НАЗЫВАЕТ ЗАПРОС. Пустота читается как «список не загрузился», и человек
               // закрывает пикер вместо того, чтобы стереть одну букву.
-              <div className='px-[7px] py-1'>
+              <div className='px-2 py-1'>
                 <Text size='micro' variant='label' component='span'>
                   {query ? `nothing matches “${query}”` : 'nobody to pick'}
                 </Text>
@@ -222,17 +222,18 @@ export function AssigneesPicker({
             {shown.map((name, i) => {
               const on = draft.includes(name);
               return (
-                <button
+                <Button
                   key={name}
                   type='button'
+                  variant='default'
                   role='option'
                   aria-selected={on}
                   data-assignee-option={name}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => toggle(name)}
                   className={cn(
-                    'flex w-full items-center gap-2 px-2.5 py-px text-left leading-tight',
-                    i === active && 'bg-[rgba(0,0,0,0.08)]',
+                    'flex min-h-11 w-full items-center gap-2 px-2.5 py-px text-left leading-tight sm:min-h-6',
+                    i === active && 'bg-pageBg',
                   )}
                 >
                   {/* Квадрат-отметка, а не галочка текстом: она обязана занимать место и когда
@@ -240,29 +241,31 @@ export function AssigneesPicker({
                   <span
                     aria-hidden
                     className={cn(
-                      'flex size-3 shrink-0 items-center justify-center border border-textInactiveColor',
+                      'flex size-3 shrink-0 items-center justify-center border border-borderColor',
                       on && 'bg-textColor',
                     )}
                   />
                   <Text component='span' className='min-w-0 truncate'>
                     {name}
                   </Text>
-                </button>
+                </Button>
               );
             })}
           </div>
-          <div className='flex items-center justify-between gap-2 border-t border-borderColor px-[7px] py-px'>
+          <div className='flex items-center justify-between gap-2 border-t border-borderColor px-2 py-px'>
             <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
               {draft.length ? `${draft.length} selected` : 'nobody selected'}
             </Text>
-            <button
+            <Button
               type='button'
+              variant='underline'
+              size='xs'
               data-assignees-done
               onClick={close}
-              className='text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+              className='min-h-11 text-labelColor hover:text-textColor sm:min-h-0'
             >
               done
-            </button>
+            </Button>
           </div>
         </div>
       )}

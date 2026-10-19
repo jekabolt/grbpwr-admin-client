@@ -1,7 +1,6 @@
 import { AcctAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
-import Tooltip from 'ui/components/tooltip';
+import { Text, Tooltip, EmptyCell } from 'ui';
 import { Pill } from '../../components/kit';
 
 type Props = {
@@ -23,9 +22,9 @@ const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide te
 export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchiveToggle }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>code</th>
             <th className={TH}>name</th>
             <th className={TH}>section</th>
@@ -47,7 +46,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
               <tr
                 key={a.code}
                 className={cn(
-                  'h-10 border-b border-textInactiveColor last:border-b-0',
+                  'h-10 border-b border-borderColor last:border-b-0',
                   a.archived && 'opacity-50',
                 )}
               >
@@ -58,16 +57,16 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                 </td>
                 <td className='px-2 uppercase'>{a.statement}</td>
                 <td className='px-2'>
-                  <Text variant='inactive'>{a.isSystem ? 'system' : '—'}</Text>
+                  <Text variant='inactive'>{a.isSystem ? 'system' : <EmptyCell />}</Text>
                 </td>
                 <td className='px-2'>
-                  <Text variant='inactive'>{a.archived ? 'archived' : '—'}</Text>
+                  <Text variant='inactive'>{a.archived ? 'archived' : <EmptyCell />}</Text>
                 </td>
                 <td className='px-2 text-right'>
                   {a.isSystem ? (
                     <Tooltip
                       trigger={
-                        <button type='button' className='cursor-help text-textInactiveColor'>
+                        <button type='button' className='cursor-help text-borderColor'>
                           <Text variant='inactive'>managed</Text>
                         </button>
                       }
@@ -94,7 +93,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                       </button>
                     </div>
                   ) : (
-                    <Text variant='inactive'>—</Text>
+                    <EmptyCell />
                   )}
                 </td>
               </tr>

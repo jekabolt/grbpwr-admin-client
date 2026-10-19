@@ -1,9 +1,6 @@
 import { common_TechCardRevision } from 'api/proto-http/admin';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import { SectionHeader } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Pill, Row, SectionHeader, Text } from 'ui';
 
 // Auto-journal (Q1/§2.1): who / what / when across the card's significant transitions. This is a
 // READ-ONLY server-stamped log now — the old free-text "add revision" editor is gone. Entries are

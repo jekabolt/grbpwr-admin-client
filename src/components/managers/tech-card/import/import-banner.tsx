@@ -1,5 +1,5 @@
 /**
- * БАННЕР «карточка приехала из архива» + модалка её отчёта.
+ * БАННЕР «карточка приехала из архива» + боковая панель (Drawer) её отчёта.
  *
  * Карточка после импорта НЕОТЛИЧИМА от заведённой руками — это решение формата, а не недосмотр.
  * Единственное, что помнит о её происхождении и о потерях, — отчёт импорта, и единственное, что
@@ -17,10 +17,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Drawer, Text } from 'ui';
 import {
   ApplyColorwaysAction,
   ImportReportCounters,
@@ -110,9 +107,10 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
 
   return (
     <>
-      {acknowledged ? (
+      {acknowledged || needsAttention === 0 ? (
         // Закрытый отчёт — приглушённая строка, а не полоса внимания: человек уже сказал, что
-        // взял дыры на себя, и звать его второй раз незачем. Но дорога обратно остаётся.
+        // взял дыры на себя, и звать его второй раз незачем. Но дорога обратно остаётся. Отчёт
+        // без дыр — та же строка: звать некуда.
         <div className='flex flex-wrap items-center gap-2.5'>
           <Text size='micro' variant='label'>
             imported from archive
@@ -130,11 +128,7 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
       ) : (
         <CalloutBox tone='warning'>
           <div className='flex flex-wrap items-center gap-2.5'>
-            <Text size='control'>
-              {needsAttention > 0
-                ? `Imported from archive — ${needsAttention} item(s) need attention`
-                : 'Imported from archive — nothing needs attention'}
-            </Text>
+            <Text size='control'>imported from archive · {needsAttention} need attention</Text>
             <Button
               type='button'
               variant='secondary'
@@ -148,27 +142,28 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
         </CalloutBox>
       )}
 
-      <ConfirmationModal
+      {/* Список, который держат рядом с карточкой, пока чинят дыры, — Drawer, а не модалка.
+          Подвал только у пишущего: «dismiss» есть лишь у того, кому сервер его разрешит
+          (rd ≠ wr), и лишь пока отчёт не закрыт. Остальным — ✕ в шапке. */}
+      <Drawer
         open={open}
         onOpenChange={setOpen}
-        width='lg'
+        width={720}
         title='import report'
-        cancelLabel='close'
-        // Подвал целиком, а не одна кнопка: пустой `confirmLabel` шелл НЕ понимает — он рисует
-        // «главную» кнопку всегда и выдал бы чёрный прямоугольник без подписи. Тот же приём, что
-        // у `sample-delete.tsx` и `colorway-delete.tsx`: нет пишущего действия — нет подвала.
-        // Читателю остаются ✕ в шапке, Esc и клик по подложке.
-        // ...а также когда отчёт УЖЕ закрыт: закрыть его второй раз нечем, и кнопка предлагала бы
-        // действие без последствий.
-        hideActions={!mayDismiss || acknowledged}
-        confirmLabel='dismiss'
-        // Закрывает модалку onSuccess мутации: авто-закрытие спрятало бы отказ сервера,
-        // и баннер остался бы висеть без объяснения, почему «dismiss» ничего не сделал.
-        closeOnConfirm={false}
-        onConfirm={() => {
-          if (!mayDismiss) return;
-          acknowledge.mutate();
-        }}
+        footer={
+          mayDismiss && !acknowledged ? (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              disabled={acknowledge.isPending}
+              // Закрывает панель onSuccess мутации: закрытие сразу спрятало бы отказ сервера.
+              onClick={() => acknowledge.mutate()}
+            >
+              dismiss report
+            </Button>
+          ) : undefined
+        }
       >
         <div className='flex flex-col gap-2.5'>
           <Text size='micro' variant='label'>
@@ -211,14 +206,8 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
             }}
           />
           <ImportReportTable lines={lines} />
-          {mayDismiss && !acknowledged ? (
-            <Text size='micro' variant='label'>
-              «dismiss» takes these holes on yourself — the notice goes quiet, but this report stays
-              reachable from the card.
-            </Text>
-          ) : null}
         </div>
-      </ConfirmationModal>
+      </Drawer>
     </>
   );
 }

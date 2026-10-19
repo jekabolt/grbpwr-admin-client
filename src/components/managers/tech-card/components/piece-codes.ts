@@ -2,36 +2,28 @@ import {
   common_TechCardPieceCutSymmetry,
   common_TechCardPieceFusingMode,
 } from 'api/proto-http/admin';
+import { PIECE_CODES } from 'lib/pattern-import/dictionary/codes';
 
 // Standardised pattern-piece nomenclature, used as free text where pieces are named
 // (sketch callout «part», operation description). Base codes name the piece; the universal
-// modifiers below combine onto them (FP_R_1, PCK_f, BP_L<M>). The modifier set is fixed;
+// modifiers below combine onto them (FP_R_1, PCK_F, BP_L_M). The modifier set is fixed;
 // the base codes are suggestions, not a closed list.
-export const pieceBaseCodes: Array<{ code: string; name: string }> = [
-  { code: 'FP', name: 'front piece' },
-  { code: 'BP', name: 'back piece' },
-  { code: 'SP', name: 'side panel' },
-  { code: 'YK', name: 'yoke' },
-  { code: 'SLV', name: 'sleeve' },
-  { code: 'CLR', name: 'collar' },
-  { code: 'CUF', name: 'cuff' },
-  { code: 'PLK', name: 'placket' },
-  { code: 'WB', name: 'waistband' },
-  { code: 'WS', name: 'waist strap' },
-  { code: 'BLT', name: 'belt' },
-  { code: 'FL', name: 'fly piece' },
-  { code: 'PCK', name: 'pocket' },
-  { code: 'FAC', name: 'facing' },
-  { code: 'LIN', name: 'lining' },
-  { code: 'GST', name: 'gusset' },
-];
+//
+// ONE dictionary (owner decision 10, D2): the base codes live in `lib/pattern-import/dictionary/
+// codes.ts` and are spelt the pattern maker's way — SL for sleeve, upper-case modifiers — exactly as
+// `nesting/block-code.ts` reads real DXF block names and as the pattern importer writes them. A
+// second list here would let the card suggest `SLV` while the converter writes `SL`: two pieces
+// instead of one.
+export const pieceBaseCodes: Array<{ code: string; name: string }> = PIECE_CODES.map((c) => ({
+  ...c,
+}));
 
 export const pieceModifiers: Array<{ mod: string; name: string }> = [
   { mod: '_R / _L', name: 'right / left' },
-  { mod: '_f / _b', name: 'front / back' },
-  { mod: '_#', name: 'main piece' },
+  { mod: '_F / _B', name: 'front / back' },
   { mod: '_1 / _2 / _3…', name: 'part number' },
-  { mod: '<size>', name: 'size' },
+  { mod: '_#', name: 'main piece' },
+  { mod: '_<size>', name: 'size (always last)' },
 ];
 
 // Datalist suggestions for piece-code fields (modifiers are typed onto the base code).
@@ -182,6 +174,27 @@ export function cutSymmetryCountInvalid(
   if ((value ?? '').trim() !== MIRRORED) return false;
   const n = piecesPerGarment ?? 0;
   return !Number.isInteger(n) || n < 2 || n % 2 !== 0;
+}
+
+/**
+ * What an import (the piece-match modal's recount AND the pattern-import apply) writes into a
+ * piece's cut symmetry — ONE rule for both writers, `undefined` = leave the piece as it is.
+ *
+ *   · `force` (from the conversion manifest only: both hands drawn / the fold unfolded) → IDENTICAL;
+ *   · not marked (empty / `_UNKNOWN`) → IDENTICAL: the drawing carries every contour;
+ *   · a MIRRORED pair the new count makes impossible (odd / < 2) → IDENTICAL (the DB CHECK);
+ *   · any other explicit mark (MIRRORED, FOLD) stays: a person stated it and nothing contradicts it.
+ */
+export function importedCutSymmetry(
+  current: string | undefined,
+  piecesPerGarment: number,
+  force?: 'pair' | 'unfolded',
+): string | undefined {
+  const v = (current ?? '').trim();
+  if (v === IDENTICAL_CUT_SYMMETRY) return undefined;
+  if (force || !isCutSymmetryMarked(v) || cutSymmetryCountInvalid(v, piecesPerGarment))
+    return IDENTICAL_CUT_SYMMETRY;
+  return undefined;
 }
 
 // Текста ошибки про чётность здесь больше нет: он объяснял ОПЕРАТОРУ, что исправить в селекте,
@@ -350,6 +363,7 @@ export function fusingHint(mode?: string): string {
   const v = (mode ?? '').trim();
   if (v === FUSING_MODE_STRIP)
     return "strip width in millimetres (up to 100); leave it empty and the strip is as wide as the card's seam allowance (otherwise the workshop settings)";
-  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the fusing is cut whole, from the same pattern piece';
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL')
+    return 'the fusing is cut whole, from the same pattern piece';
   return 'not marked: the workshop will see “fused” with no indication of where exactly the fusing sits';
 }

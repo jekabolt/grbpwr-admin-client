@@ -1,9 +1,6 @@
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, Pill, GenericPopover, Text } from 'ui';
 import { ListTasksFilter, TaskStatus } from '../api/types';
 import { useTasks } from '../hooks/useTasks';
 import { STATUS_LABEL } from '../utils/meta';
@@ -82,7 +79,10 @@ export function RelatedTasks({
     <GenericPopover
       title='linked tasks'
       className={cn('w-[260px]', className)}
-      triggerProps={{ 'aria-label': 'linked tasks' }}
+      triggerProps={{
+        'aria-label': 'linked tasks',
+        className: 'flex min-h-11 items-center sm:min-h-0',
+      }}
       openElement={
         <Pill tone={tasks.length ? 'ink' : 'mut'} className='hover:bg-textColor hover:text-bgColor'>
           tasks · {isLoading ? '…' : tasks.length}
@@ -104,7 +104,7 @@ export function RelatedTasks({
               <li key={t.id}>
                 <Link
                   to={`/tasks/${t.id}`}
-                  className='flex items-center justify-between gap-2 py-1.5 hover:text-textColor'
+                  className='flex min-h-11 items-center justify-between gap-2 py-1.5 hover:text-textColor sm:min-h-0'
                 >
                   <Text size='micro' component='span' className='min-w-0 truncate'>
                     {t.task.title || 'untitled task'}
@@ -115,7 +115,7 @@ export function RelatedTasks({
             ))}
           </ul>
         )}
-        <Button asChild variant='underline' size='xs' className='self-start'>
+        <Button asChild variant='underline' size='xs' className='min-h-11 self-start sm:min-h-0'>
           <Link to='/tasks'>open board</Link>
         </Button>
       </div>

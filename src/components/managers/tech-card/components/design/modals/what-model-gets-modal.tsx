@@ -375,7 +375,7 @@ function HeldLine({
             </>
           )}
           {caption && (
-            <span className='block text-textInactiveColor' data-wmg-model-read=''>
+            <span className='block text-borderColor' data-wmg-model-read=''>
               model read · not sent — {caption}
             </span>
           )}

@@ -4,14 +4,19 @@ import { ROUTES } from 'constants/routes';
 import { useQuery } from '@tanstack/react-query';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Placeholder } from 'ui/components/placeholder';
-import { Section, SectionStack } from 'ui/components/section';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { useParams } from 'react-router-dom';
+import {
+  BackLink,
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  Placeholder,
+  Section,
+  SectionStack,
+  Select,
+  Text,
+} from 'ui';
 import { InvoiceDocument } from './components/invoice-document';
 
 /**
@@ -94,9 +99,7 @@ export function OrderInvoicePrint() {
             <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
               order not found
             </Text>
-            <Button asChild variant='main' size='sm'>
-              <Link to={ROUTES.orders}>← back to orders</Link>
-            </Button>
+            <BackLink to={ROUTES.orders}>orders</BackLink>
           </CalloutBox>
         ) : (
           <div className='invoice-doc mx-auto w-full max-w-[210mm] border border-borderColor bg-white shadow-[var(--shadow-modal)]'>
@@ -128,9 +131,7 @@ export function OrderInvoicePrint() {
             <Text size='micro' variant='label' component='span'>
               choose “save as PDF” as the destination
             </Text>
-            <Button asChild variant='underline' size='xs'>
-              <Link to={backTo}>← back to order</Link>
-            </Button>
+            <BackLink to={backTo}>order</BackLink>
           </Section>
 
           <Section title='document options' question='a filled chip prints on the sheet'>
@@ -166,7 +167,7 @@ export function OrderInvoicePrint() {
                 >
                   product language
                 </Text>
-                <SelectComponent
+                <Select
                   name='invoice-language'
                   placeholder='default'
                   fullWidth

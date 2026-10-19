@@ -1,12 +1,17 @@
 import { common_TechCardOperationType } from 'api/proto-http/admin';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import {
+  Chip,
+  ChipRow,
+  Combobox,
+  type ComboboxGroup,
+  ConfirmationModal,
+  FoldCaret,
+  GroupLabel,
+  Input,
+  Select,
+  Text,
+} from 'ui';
 
 import { suggestUnitCode } from './assembly-suggest';
 import { machineTypeOptionsFor, pressEquipmentOptions } from './equipment-options';
@@ -183,6 +188,8 @@ export function AssemblyCreateDialog({
   const [unitKey, setUnitKey] = useState('');
   const [unitKeyTouched, setUnitKeyTouched] = useState(false);
   const [unitName, setUnitName] = useState('');
+  // POSITION & RESULT are folded (R2.5): the gesture already chose both. Reset on every open.
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const open = prefill !== null;
 
@@ -210,6 +217,7 @@ export function AssemblyCreateDialog({
     setUnitKey('');
     setUnitKeyTouched(false);
     setUnitName('');
+    setMoreOpen(false);
   }, [prefill]);
 
   /**
@@ -260,9 +268,12 @@ export function AssemblyCreateDialog({
     if (produces !== 'unit') return '';
     const code = unitKey.trim();
     if (!code) return 'a unit needs a code — that is what every other step calls it by';
-    if (piecesOnWire.has(code)) return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
-    if (unitsOnWire.has(code)) return `unit “${code}” already exists — a second producer of the same unit is impossible`;
-    if (new TextEncoder().encode(code).length > 64) return "the code is longer than 64 bytes — that won't fit the column";
+    if (piecesOnWire.has(code))
+      return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
+    if (unitsOnWire.has(code))
+      return `unit “${code}” already exists — a second producer of the same unit is impossible`;
+    if (new TextEncoder().encode(code).length > 64)
+      return "the code is longer than 64 bytes — that won't fit the column";
     return '';
   })();
 
@@ -322,7 +333,7 @@ export function AssemblyCreateDialog({
     setMachineType(w.machineType ?? UNKNOWN_MACHINE);
     setPressEquipment(w.pressEquipment ?? UNKNOWN_PRESS);
     const d = STEP_DISCRIMINATORS[verb as common_TechCardOperationType];
-    setDiscriminator(d ? (w[d.field] ?? stepDiscriminatorUnset(d.labels)) : '');
+    setDiscriminator(d ? w[d.field] ?? stepDiscriminatorUnset(d.labels) : '');
     // Всё, о чём диалог не спрашивает отдельным контролом, едет в результат как есть — вместе с
     // самой работой.
     const rest: Record<string, string> = { ...w, work: token };
@@ -355,7 +366,8 @@ export function AssemblyCreateDialog({
     if (!work) return 'pick what kind of step this is';
     if (!zone || zone === UNKNOWN_ZONE) return 'pick a zone — “other” is a legitimate answer';
     if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'pick a machine';
-    if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS)) return 'pick the pressing equipment';
+    if (needsPress && (!pressEquipment || pressEquipment === UNKNOWN_PRESS))
+      return 'pick the pressing equipment';
     if (
       stepDiscriminator &&
       (!discriminator || discriminator === stepDiscriminatorUnset(stepDiscriminator.labels))
@@ -468,8 +480,9 @@ export function AssemblyCreateDialog({
       onCancel={onClose}
       title='new operation'
       confirmLabel='create'
-      cancelLabel='cancel'
+      hideCancel
       confirmDisabled={problem !== ''}
+      footerHint={problem || undefined}
       closeOnConfirm={false}
       // ФОКУС ВОЗВРАЩАЕТСЯ ЭКРАНУ ПРЯМО ЗДЕСЬ, а не эффектом вызывателя по следующему кадру.
       // Radix на закрытии делает `preventDefault()` и метит фокус на триггер — а триггера нет,
@@ -482,116 +495,8 @@ export function AssemblyCreateDialog({
       onCloseAutoFocus={onCloseAutoFocus}
     >
       <div className='flex flex-col gap-2.5'>
-        {/* ГДЕ ШАГ ОКАЖЕТСЯ — ПЕРВОЙ СТРОКОЙ, потому что это рамка для всего остального. Без неё
-            диалог вставки неотличим от диалога дописывания в конец: те же поля, то же «create», а
-            результат в другом месте листа. Номер экранный, `(at + 1) * 10`, как везде; про переезд
-            номеров следующих шагов говорит баннер `StepNumberDrift`, и второго здесь не будет. */}
-        {prefill?.at !== undefined && (
-          <div>
-            <GroupLabel>position</GroupLabel>
-            {/* «ВНУТРИ ▣ COLLAR» ГОВОРИТСЯ, ПОКА ЭТО ПРАВДА. Оставь его стоять рядом с
-                предупреждением — и диалог сообщал бы обе новости сразу, а верна из них одна. */}
-            <Text size='micro' variant='label'>
-              {prefill.intoUnit && holds
-                ? `step ${(prefill.at + 1) * 10}, inside ▣ ${prefill.intoUnit}`
-                : `step ${(prefill.at + 1) * 10}`}
-            </Text>
-            {/* ЧЕРНИЛАМИ, А НЕ СЕРЫМ, И БЕЗ КРАСНОГО: красный занят ошибкой, а это не ошибка —
-                это расхождение жеста с набранным составом, и различается оно глифом «◌» (тем же,
-                каким рельс подписывает «вне узлов») и словами. */}
-            {belongProblem && <Text size='micro'>{belongProblem}</Text>}
-          </div>
-        )}
-        <div>
-          <GroupLabel>inputs</GroupLabel>
-          <ChipRow>
-            {distinct.length === 0 && (
-              <Text size='micro' variant='label' component='span'>
-                no inputs — take at least one
-              </Text>
-            )}
-            {distinct.map((k) => (
-              <Chip key={k} onClick={() => setInputs((cur) => cur.filter((x) => x !== k))} title='remove the input'>
-                {labelOf(k)} ✕
-              </Chip>
-            ))}
-          </ChipRow>
-          {addable.length > 0 && (
-            <ChipRow className='mt-1'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                add:
-              </Text>
-              {addable.map((k) => (
-                <Chip key={k} dashed onClick={() => setInputs((cur) => [...cur, k])} title='take as an input'>
-                  {labelOf(k)}
-                </Chip>
-              ))}
-            </ChipRow>
-          )}
-          {/* ПОД САМИМ СОСТАВОМ, А НЕ В «POSITION»: жест по детали позиции не несёт вовсе, и
-              предупреждение обязано стоять там, где сделано действие, его вызвавшее. Чернилами и
-              тем же глифом «◌», что у предупреждения про узел, — это одна новость двух родов, и
-              читаться она обязана одинаково. Не запрет: убрать деталь из состава — законное
-              намерение, ошибкой это не является. */}
-          {pieceProblem && (
-            <Text size='micro' className='mt-1'>
-              {pieceProblem}
-            </Text>
-          )}
-        </div>
-
-        <div>
-          <GroupLabel>result</GroupLabel>
-          <ChipRow>
-            <Chip
-              dashed={produces !== 'process'}
-              onClick={() => setProduces('process')}
-              title='the step assembles nothing — the inputs stay available to the next steps'
-            >
-              processing
-            </Chip>
-            <Chip
-              dashed={produces !== 'unit'}
-              onClick={() => setProduces('unit')}
-              title={canBeUnit ? 'assemble a new unit' : 'a unit needs at least two inputs'}
-            >
-              ▣ new unit
-            </Chip>
-            {absorbInto && (
-              <Chip
-                dashed={produces !== 'absorb'}
-                onClick={() => setProduces('absorb')}
-                title='add to an existing unit — it keeps its own code'
-              >
-                add to ▣ {absorbInto}
-              </Chip>
-            )}
-          </ChipRow>
-          {produces === 'unit' && (
-            <div className='mt-1 flex flex-col gap-1'>
-              <Input
-                name='assemblyUnitKey'
-                value={unitKey}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  setUnitKeyTouched(true);
-                  setUnitKey(e.target.value);
-                }}
-                placeholder='unit code'
-                maxLength={64}
-              />
-              <Input
-                name='assemblyUnitName'
-                value={unitName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUnitName(e.target.value)}
-                placeholder='unit name — optional, but it is what people read in print'
-                maxLength={255}
-              />
-            </div>
-          )}
-        </div>
-
         <div className='flex flex-col gap-1'>
-          <GroupLabel>what and where</GroupLabel>
+          <GroupLabel>work and zone</GroupLabel>
           {/* ВИД ВМЕСТО ГЛАГОЛА. Раньше здесь стоял селект `operation_type`, и он спрашивал ось, а
               не работу: «machine» не инструкция, а «topstitch» в списке не было вовсе. Теперь
               спрашивается ОДНО слово, а обе оси проставляются из него; доспрашивается только то,
@@ -607,7 +512,7 @@ export function AssemblyCreateDialog({
             footer={
               catalogLive ? undefined : (
                 <Text size='micro' variant='label' component='span' data-work-fallback='1'>
-                  offline list — the catalogue did not load, so search is English-only
+                  offline list · english names only
                 </Text>
               )
             }
@@ -670,12 +575,140 @@ export function AssemblyCreateDialog({
           )}
         </div>
 
-        {/* Причина названа словом, а не задизейбленной кнопкой без объяснения: «создать» гаснет и
-            тут же сообщает, чего именно не хватает. */}
-        {problem && (
-          <Text size='micro' variant='label'>
-            {problem}
-          </Text>
+        <div>
+          <GroupLabel>pieces</GroupLabel>
+          <ChipRow>
+            {distinct.map((k) => (
+              <Chip
+                key={k}
+                onClick={() => setInputs((cur) => cur.filter((x) => x !== k))}
+                onRemove={() => setInputs((cur) => cur.filter((x) => x !== k))}
+                title='remove the input'
+              >
+                {labelOf(k)}
+              </Chip>
+            ))}
+          </ChipRow>
+          {addable.length > 0 && (
+            <ChipRow className='mt-1'>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                add:
+              </Text>
+              {addable.map((k) => (
+                <Chip
+                  key={k}
+                  dashed
+                  onClick={() => setInputs((cur) => [...cur, k])}
+                  title='take as an input'
+                >
+                  {labelOf(k)}
+                </Chip>
+              ))}
+            </ChipRow>
+          )}
+          {/* ПОД САМИМ СОСТАВОМ, А НЕ В «POSITION»: жест по детали позиции не несёт вовсе, и
+              предупреждение обязано стоять там, где сделано действие, его вызвавшее. Чернилами и
+              тем же глифом «◌», что у предупреждения про узел, — это одна новость двух родов, и
+              читаться она обязана одинаково. Не запрет: убрать деталь из состава — законное
+              намерение, ошибкой это не является. */}
+          {pieceProblem && (
+            <Text size='micro' className='mt-1'>
+              {pieceProblem}
+            </Text>
+          )}
+        </div>
+
+        {/* POSITION & RESULT — folded; the toggle names what the gesture chose, so a closed fold
+            still says where the step lands and what it makes. A broken promise of the gesture (the
+            step no longer lands in the unit it was dropped into) stays visible outside the fold. */}
+        <div>
+          <button
+            type='button'
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+            className='inline-flex items-center text-micro uppercase tracking-label text-labelColor hover:text-textColor'
+          >
+            {[
+              prefill?.at !== undefined ? `step ${(prefill.at + 1) * 10}` : 'at the end',
+              produces === 'unit'
+                ? `▣ ${unitKey.trim() || 'new unit'}`
+                : produces === 'absorb'
+                  ? `add to ▣ ${absorbInto}`
+                  : 'processing',
+            ].join(' · ')}
+            <FoldCaret open={moreOpen} />
+          </button>
+          {belongProblem && <Text size='micro'>{belongProblem}</Text>}
+        </div>
+        {moreOpen && (
+          <>
+            {prefill?.at !== undefined && (
+              <div>
+                <GroupLabel>position</GroupLabel>
+                {/* «ВНУТРИ ▣ COLLAR» ГОВОРИТСЯ, ПОКА ЭТО ПРАВДА. Оставь его стоять рядом с
+                предупреждением — и диалог сообщал бы обе новости сразу, а верна из них одна. */}
+                <Text size='micro' variant='label'>
+                  {prefill.intoUnit && holds
+                    ? `step ${(prefill.at + 1) * 10}, inside ▣ ${prefill.intoUnit}`
+                    : `step ${(prefill.at + 1) * 10}`}
+                </Text>
+                {/* ЧЕРНИЛАМИ, А НЕ СЕРЫМ, И БЕЗ КРАСНОГО: красный занят ошибкой, а это не ошибка —
+                это расхождение жеста с набранным составом, и различается оно глифом «◌» (тем же,
+                каким рельс подписывает «вне узлов») и словами. */}
+              </div>
+            )}
+            <div>
+              <GroupLabel>result</GroupLabel>
+              <ChipRow>
+                <Chip
+                  dashed={produces !== 'process'}
+                  onClick={() => setProduces('process')}
+                  title='the step assembles nothing — the inputs stay available to the next steps'
+                >
+                  processing
+                </Chip>
+                <Chip
+                  dashed={produces !== 'unit'}
+                  onClick={() => setProduces('unit')}
+                  title={canBeUnit ? 'assemble a new unit' : 'a unit needs at least two inputs'}
+                >
+                  ▣ new unit
+                </Chip>
+                {absorbInto && (
+                  <Chip
+                    dashed={produces !== 'absorb'}
+                    onClick={() => setProduces('absorb')}
+                    title='add to an existing unit — it keeps its own code'
+                  >
+                    add to ▣ {absorbInto}
+                  </Chip>
+                )}
+              </ChipRow>
+              {produces === 'unit' && (
+                <div className='mt-1 flex flex-col gap-1'>
+                  <Input
+                    name='assemblyUnitKey'
+                    value={unitKey}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setUnitKeyTouched(true);
+                      setUnitKey(e.target.value);
+                    }}
+                    placeholder='unit code'
+                    maxLength={64}
+                  />
+                  <Input
+                    name='assemblyUnitName'
+                    value={unitName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setUnitName(e.target.value)
+                    }
+                    placeholder='unit name'
+                    maxLength={255}
+                  />
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </ConfirmationModal>

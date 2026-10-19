@@ -1,6 +1,7 @@
 import DxfParser, { type IDxf } from 'dxf-parser';
 import type { Unit } from '../types';
 import { detectUnit, unitFactorCm } from '../units';
+import { attachPointNotches } from './notch';
 
 const BINARY_SENTINEL = 'AutoCAD Binary DXF';
 
@@ -40,9 +41,12 @@ export function parseDxf(buf: ArrayBuffer, unitOverride: Unit): ParsedDxf {
     throw new Error(`couldn't parse DXF: ${e instanceof Error ? e.message : String(e)}`);
   }
   if (!dxf) throw new Error("couldn't parse DXF (the parser returned nothing)");
+  // dxf-parser drops a POINT's code 50 — the AAMA notch angle. Recovered from the same text.
+  attachPointNotches(dxf, text);
 
   const header = (dxf.header ?? {}) as Record<string, unknown>;
-  const insunits = typeof header['$INSUNITS'] === 'number' ? (header['$INSUNITS'] as number) : undefined;
+  const insunits =
+    typeof header['$INSUNITS'] === 'number' ? (header['$INSUNITS'] as number) : undefined;
 
   if (unitOverride !== 'auto') {
     return { dxf, unit: unitOverride, cmPerUnit: unitFactorCm(unitOverride), unitGuessed: false };

@@ -11,12 +11,13 @@ import {
   spiOf,
   writeSpec,
   type Spec,
-} from 'ui/components/annotation/purpose';
-import { frameAspectOf } from 'ui/components/annotation/frame-aspect';
-import { StitchPictogram, stitchBrushOf } from 'ui/components/annotation/stitch-pictogram';
-import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
+} from 'components/managers/tech-card/annotation/purpose';
+import { frameAspectOf } from 'components/managers/tech-card/annotation/frame-aspect';
+import {
+  StitchPictogram,
+  stitchBrushOf,
+} from 'components/managers/tech-card/annotation/stitch-pictogram';
+import { Chip, ChipRow, Input, Select } from 'ui';
 
 import { BomLineSelect } from '../bom-line-picker';
 import { PRINT_METHOD_LABELS, seamClassOptions } from '../operation-options';
@@ -363,15 +364,15 @@ function OwnPicture({
 }) {
   if (url)
     return (
-      // Миниатюра и «×» — одним куском: при переносе строки чипов они не расходятся.
+      // Миниатюра и Close — одним куском: при переносе строки чипов они не расходятся.
       <span className='inline-flex items-center gap-1'>
         <img
           src={url}
           alt=''
           className='h-[18px] w-[18px] border border-borderColor object-contain'
         />
-        <Chip disabled={disabled} onClick={onClear} title={clearTitle}>
-          × {label}
+        <Chip disabled={disabled} onClick={onClear} onRemove={onClear} title={clearTitle}>
+          {label}
         </Chip>
       </span>
     );

@@ -38,20 +38,29 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  GroupLabel,
+  HeaderWarnings,
+  type HeaderWarning,
+  Input,
+  Text,
+} from 'ui';
 import { ulid } from 'utils/ulid';
-import { clampUtf8Bytes } from 'utils/pattern';
+import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
+import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
 import {
   IDENTICAL_CUT_SYMMETRY,
-  cutSymmetryCountInvalid,
+  UNSET_FUSING_MODE,
+  fusingModeOptionsFor,
+  fusingTakesWidth,
+  grainlineArrow,
+  grainlineOptionsFor,
+  importedCutSymmetry,
   isCutSymmetryMarked,
 } from '../piece-codes';
 import type { TechCardFormData } from '../schema';
@@ -65,9 +74,10 @@ import {
 import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { PieceSheet, type PieceMark } from './piece-sheet';
+import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import {
   aliasIdentity,
+  foreignManifestSizes,
   missingSizesIn,
   splitPiecesBySize,
   useDictionarySizeTokens,
@@ -78,6 +88,14 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
+import { manifestFactsOf } from './manifest-facts';
+import { isFetchFailure } from './dxf-warnings';
+import {
+  hasOldPieceLoss,
+  OldPiecesDecision,
+  type OldPieceDecision,
+  type OldPieceItem,
+} from './old-pieces-panel';
 
 // Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
 // «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.
@@ -129,10 +147,17 @@ type BlockRow = {
   // What the dialog proposes and why. 'exact' | 'loose' need no badge — they ARE the name;
   // 'similar' and 'other-fabric' are guesses and say so.
   suggested: string; // piece lineKey, '' = none
-  basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'none';
+  // 'same-name-elsewhere' — ТОЛЬКО у строк файла с манифестом (F6b): имя совпало с деталью, которая
+  // привязана к ДРУГОЙ ткани и не к этой. Подкладочная FP_L и FP_L верха — разные детали кроя, и
+  // совпадение имени здесь — подсказка, а не ответ: предлагается, но не выбирается само (K1, C5).
+  basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'same-name-elsewhere' | 'none';
   // Слот, с которого пришла подсказка 'other-fabric'. '' для остальных оснований.
   fromSlot?: string;
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
+  // ИМЯ ДЕТАЛИ КАРТОЧКИ ИЗ МАНИФЕСТА КОНВЕРТАЦИИ (F6b). У пары — без руки: FP_L и FP_R предлагают
+  // одно имя «FP», и вторая строка по общему правилу привязывается к детали, которую заводит первая —
+  // одна деталь, ×2 по perGarmentFromBlocks. Нет ключа — манифеста нет, имя по умолчанию прежнее.
+  manifestName?: string;
 };
 
 // Деталь кроя, которой в перезалитом чертеже больше нет. Собирается ниже (deleteCandidates),
@@ -156,8 +181,11 @@ type DeleteCandidate = {
 // хранит сервер, так что связь деталь↔чертёж сохраняется у обеих копий.
 //
 // Имя — предложение, а не приговор: оно стоит в поле «название новой детали» и правится там же.
-const defaultPieceName = (row: { block: string; uniBase: string }): string =>
-  row.uniBase || row.block;
+//
+// F6b: у строки файла с манифестом конвертации имя по умолчанию — заявленное конвертером (у пары — без
+// руки, см. BlockRow.manifestName). Оно стоит ПЕРВЫМ: манифест знает про деталь больше, чем имя блока.
+const defaultPieceName = (row: { block: string; uniBase: string; manifestName?: string }): string =>
+  row.manifestName || row.uniBase || row.block;
 
 // Sentinel for «создать новую деталь», deliberately unable to collide with a piece lineKey: a
 // ULID is 26 chars of upper-case Crockford base32, so a '+' and lower case can never be one.
@@ -169,10 +197,258 @@ const CREATE = '+create';
 // 255-character Cyrillic name is twice over the limit and would fail the whole card save.
 const MAX_PIECE_NAME = 255;
 
+// Выпущенная карточка заморожена целиком — тот же ответ, что у pieces-tab и index.tsx. Модалка
+// рисуется порталом, то есть ВНЕ `<fieldset disabled={frozen}>` страницы, поэтому гасит себя сама.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
+
+// Поля детали, которые правит редактор справа. Буферизуются в модалке и пишутся в форму только
+// по SAVE (cancel = ничего не было). Пути и семантика — ровно pieces-tab.tsx (fused/fusingMode/
+// fusingWidthMm/ungraded/grainline/note); имя существующей детали — тоже здесь.
+type PieceFields = {
+  name?: string;
+  fused?: boolean;
+  fusingMode?: string;
+  fusingWidthMm?: string;
+  ungraded?: boolean;
+  grainline?: string;
+  note?: string;
+};
+const FIELD_KEYS = [
+  'fused',
+  'fusingMode',
+  'fusingWidthMm',
+  'ungraded',
+  'grainline',
+  'note',
+] as const;
+
+// No width of its own: a `w-full` here beat the caller's `w-24`/`w-56` in the stylesheet and
+// squeezed the row's name to nothing (the gone-pieces rows read just «delete»).
+const selectCls =
+  'block min-h-[22px] appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
+
+// The piece panel beside the sheet: one type size (micro) and one box height (22px) for every
+// field, toggle and select in it.
+const BOX =
+  'block h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] text-micro transition-colors focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
+const INPUT_BOX = 'h-[22px] py-0 text-micro';
+const TOGGLE_BOX = 'h-[22px] w-full justify-center';
+
+// Label row (micro uppercase label, an optional door on the right) over one box.
+function PanelField({
+  label,
+  door,
+  children,
+}: {
+  label: string;
+  door?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className='space-y-0.5'>
+      <div className='flex items-baseline justify-between gap-2'>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          {label}
+        </Text>
+        {door}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 type PieceValue = NonNullable<TechCardFormData['pieces']>[number];
 // Что известно про идентичность из разбора: сколько раз она в чертеже (максимум по файлам и
 // размерам) и общий корень uni-копий, если он есть.
-type BlockCount = { instances: number; uniBase: string };
+//
+// `force` — ТОЛЬКО у идентичностей из файла с манифестом (F6b): конвертер нарисовал КАЖДЫЙ контур
+// детали сам — обе руки пары отдельными блоками ('pair') или деталь со сгиба развёрнутой целиком
+// ('unfolded'). Такая деталь режется как нарисована, и хранимая «зеркальная пара» / «со сгиба» ей
+// прямо противоречит (см. planPieceUpdates и forcedSymmetryReason).
+type BlockCount = { instances: number; uniBase: string; force?: 'pair' | 'unfolded' };
+
+// Строка подсчёта блоков разбора: то, что знает о идентичности диалог (см. countBlocks).
+type CountedBlock = {
+  block: string;
+  instances: number;
+  sizes: string[];
+  uniBase: string;
+  manifestName?: string;
+  force?: 'pair' | 'unfolded';
+};
+
+// ПОЧЕМУ ХРАНИМАЯ РАЗМЕТКА ПЕРЕПИСЫВАЕТСЯ НА «ОДИНАКОВЫЕ КОПИИ» (F6b) — словами для сводки.
+//
+// Решение и его цена записаны в tmp/plans/pdf-to-dxf/reports/F6b.md (D1). Коротко: раскладка
+// карточки кладёт каждый контур как нарисован и НИКОГДА не отражает (flippedQuantity не ставится нигде),
+// поэтому в настиле ЛИЦОМ ВВЕРХ (его и предлагает очередь партии) обе руки пары дают только два
+// нарисованных блока — «зеркальная пара» там BLOCKER `lay_mirror_expansion`, а «одинаковые копии»
+// считаются верно. В настиле ЛИЦОМ К ЛИЦУ сервер сочтёт отражения «одинаковой» детали перекроем и
+// покажет ложную нехватку ×½ — это известная цена, она названа в сводке, а не скрыта.
+const FORCED_REASON: Record<'pair' | 'unfolded', string> = {
+  pair: 'the drawing carries both hands as separate pieces — cut as drawn',
+  unfolded: 'the drawing carries the unfolded piece — cut flat, not on the fold',
+};
+
+// Подсчёт блоков разбора — тело эффекта диалога, вынесенное ЧИСТОЙ функцией, чтобы зонд проверял
+// именно его, а не копию (K1 держал REPLICA этого цикла).
+function countBlocks(
+  contourPieces: readonly PieceDTO[],
+  split: ReturnType<typeof splitPiecesBySize>,
+): Map<string, CountedBlock> {
+  // Blocks are counted under the SERVER's identity — normalized then case-folded — because
+  // that is what its UNIQUE index collapses. Counting case-sensitively made «ПОЛОЧКА» in one
+  // sheet and «Полочка» in another two rows, both auto-preselected, and the resulting pair of
+  // aliases was rejected as a duplicate: the card then could not be saved at all, with the bad
+  // aliases sitting in form state where nothing could delete them.
+  // Per FILE, then max across files: two pattern rows of one fabric+size are usually two
+  // REVISIONS of the same sheet, so summing their instances doubled pieces_per_garment and
+  // every consumption derived from it.
+  const perFile = new Map<string, Map<string, number>>();
+  const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
+  const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
+  const uniBaseByCi = new Map<string, string>(); // ci key → uniBase у помеченных блоков
+  // F6b: факты манифеста по идентичности (первое написание выигрывает, как у spelling).
+  const declaredByCi = new Map<string, { name: string; force?: 'pair' | 'unfolded' }>();
+  for (const p of contourPieces) {
+    // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
+    // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
+    // here is what keeps the piece count a property of the STYLE.
+    const b = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
+    if (!b) continue; // a file with no per-piece blocks has nothing to map
+    const ci = b.toLowerCase();
+    if (!spelling.has(ci)) spelling.set(ci, b);
+    const uniBase = split.codeById.get(p.id)?.uniBase ?? '';
+    if (uniBase && !uniBaseByCi.has(ci)) uniBaseByCi.set(ci, normBlock(uniBase));
+    const declared = manifestFactsOf(p);
+    if (declared && !declaredByCi.has(ci)) {
+      const force = declared.pairOf ? 'pair' : declared.unfolded ? 'unfolded' : undefined;
+      declaredByCi.set(ci, { name: normBlock(declared.cardName), ...(force ? { force } : {}) });
+    }
+    const sz = split.codeById.get(p.id)?.size ?? '';
+    if (sz) {
+      const set = sizesByCi.get(ci) ?? new Set<string>();
+      set.add(sz);
+      sizesByCi.set(ci, set);
+    }
+    // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
+    // legitimately share a display name (two revisions re-exported by the factory under one
+    // filename), so the name cannot separate them — and now that one file holds every size,
+    // counting per file would report «BP_1 ×5» for a piece cut once per garment, multiplying
+    // pieces_per_garment and every consumption derived from it by the size run.
+    const bucket = `${p.fileIndex ?? p.source}|${split.codeById.get(p.id)?.size ?? ''}`;
+    const file = perFile.get(bucket) ?? new Map<string, number>();
+    file.set(ci, (file.get(ci) ?? 0) + 1);
+    perFile.set(bucket, file);
+  }
+  const counts = new Map<string, number>();
+  for (const file of perFile.values()) {
+    for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
+  }
+  const all = new Map<string, CountedBlock>();
+  for (const [ci, instances] of counts) {
+    const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
+      (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
+    );
+    const declared = declaredByCi.get(ci);
+    all.set(ci, {
+      block: spelling.get(ci)!,
+      instances,
+      sizes,
+      uniBase: uniBaseByCi.get(ci) ?? '',
+      ...(declared ? { manifestName: declared.name } : {}),
+      ...(declared?.force ? { force: declared.force } : {}),
+    });
+  }
+  return all;
+}
+
+// Предложение по строкам — второе тело того же эффекта, тоже чистой функцией. `elsewhereOnly` —
+// детали (lineKey, ci), привязанные к ДРУГИМ тканям и ни разу к этой: по ним строка файла с
+// манифестом получает 'same-name-elsewhere' вместо автоматического выбора (F6b). Блоки без
+// манифеста этот набор не читают вовсе.
+function proposeRows(
+  counted: ReadonlyMap<string, CountedBlock>,
+  args: {
+    storedFirst: ReadonlyMap<string, string>;
+    pieceOptions: readonly { lineKey: string; name: string }[];
+    otherFabricByBlock: ReadonlyMap<string, { pieceKey: string; fromSlot: string }>;
+    elsewhereOnly: ReadonlyMap<string, string>;
+  },
+): BlockRow[] {
+  const { storedFirst, pieceOptions, otherFabricByBlock, elsewhereOnly } = args;
+  const next: BlockRow[] = [];
+  for (const [ci, c] of counted) {
+    const block = c.block;
+    const instances = c.instances;
+    // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
+    // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
+    // from the dialog with no way to ever map it.
+    if (storedFirst.has(ci)) continue;
+    let suggested = '';
+    let basis: BlockRow['basis'] = 'none';
+    let fromSlot = '';
+    // F6b: строка с манифестом сверяется ещё и по имени детали карточки, заявленному конвертером
+    // (у пары — «FP» для FP_L и FP_R): деталь, заведённую мастером конвертации, она узнаёт сама.
+    const names =
+      c.manifestName && c.manifestName.toLowerCase() !== block.toLowerCase()
+        ? [block, c.manifestName]
+        : [block];
+    const exact = pieceOptions.find((p) =>
+      names.some((n) => p.name.toLowerCase() === n.toLowerCase()),
+    );
+    const byLoose = pieceOptions.find((p) => names.some((n) => loose(p.name) === loose(n)));
+    const hint = otherFabricByBlock.get(loose(block));
+    if (exact) {
+      suggested = exact.lineKey;
+      basis = 'exact';
+    } else if (byLoose) {
+      suggested = byLoose.lineKey;
+      basis = 'loose';
+    } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
+      suggested = hint.pieceKey;
+      basis = 'other-fabric';
+      fromSlot = hint.fromSlot;
+    } else {
+      let best = SUGGEST_MIN;
+      for (const p of pieceOptions) {
+        const s = similarity(p.name, block);
+        if (s >= best) {
+          best = s;
+          suggested = p.lineKey;
+          basis = 'similar';
+        }
+      }
+    }
+    // F6b: точное имя у ДРУГОЙ ткани — не ответ. Деталь подкладки FP_L и деталь верха FP_L — разные
+    // детали кроя; автоматический выбор здесь молча посадил бы подкладку на деталь верха.
+    if (c.manifestName && (basis === 'exact' || basis === 'loose')) {
+      const from = elsewhereOnly.get(suggested.toLowerCase());
+      if (from !== undefined) {
+        basis = 'same-name-elsewhere';
+        fromSlot = from;
+      }
+    }
+    // Only the two exact tiers bind to an existing piece by default. A similarity guess or another
+    // fabric's mapping is never applied — being wrong there costs cloth. Everything else defaults
+    // to a NEW piece named after the block (patterns-lite: the target action is one SAVE; the old
+    // «create all» button is now the default). The editor still offers «not a piece».
+    const preselect = basis === 'exact' || basis === 'loose' ? suggested : CREATE;
+    next.push({
+      block,
+      instances,
+      sizes: c.sizes,
+      uniBase: c.uniBase,
+      suggested,
+      basis,
+      fromSlot,
+      choice: preselect,
+      ...(c.manifestName ? { manifestName: c.manifestName } : {}),
+    });
+  }
+  next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
+  return next;
+}
 
 // СКОЛЬКО ЭТОЙ ДЕТАЛИ В ИЗДЕЛИИ — ОДНА ФУНКЦИЯ НА ОБА ПУТИ (заведение и пересчёт).
 //
@@ -224,7 +500,15 @@ function sizelessStem(block: string, isSizeToken: (token: string) => boolean): s
 // Что применение изменит у ОДНОЙ уже существующей детали. Незаполненное поле значит «не трогать»:
 // запись того, что и так стоит, — это лишний dirty на форме и лишний сдвиг дайджеста CONSTRUCTION,
 // то есть подпись, протухшая без единого изменения физического состава кроя.
-type PieceUpdate = { index: number; piecesPerGarment?: number; cutSymmetry?: string };
+//
+// `reason` — только когда переписывается ЯВНАЯ разметка по манифесту конвертации (F6b): сводка обязана
+// назвать, почему «зеркальная пара» или «со сгиба» стала «одинаковыми копиями».
+type PieceUpdate = {
+  index: number;
+  piecesPerGarment?: number;
+  cutSymmetry?: string;
+  reason?: string;
+};
 
 // ЧТО ЭТОТ СКОУП БУДЕТ СВЯЗЫВАТЬ ПОСЛЕ ПРИМЕНЕНИЯ — блок (идентичность, ci) → деталь кроя.
 //
@@ -354,13 +638,30 @@ function planPieceUpdates(
     const update: PieceUpdate = { index };
     if ((p.piecesPerGarment ?? 0) !== total) update.piecesPerGarment = total;
     const current = (p.cutSymmetry ?? '').trim();
-    if (!isCutSymmetryMarked(current)) {
+    // F6b: блоки детали пришли из файла с манифестом, и конвертер нарисовал КАЖДЫЙ её контур сам —
+    // обе руки пары или развёрнутый сгиб. Пара побеждает сгиб в подписи: она называет больше.
+    const forced = cis
+      .map((ci) => blockCounts.get(ci)?.force)
+      .reduce<
+        'pair' | 'unfolded' | undefined
+      >((acc, f) => (acc === 'pair' || f === 'pair' ? 'pair' : acc ?? f), undefined);
+    // ОДНО правило с apply импорта (piece-codes `importedCutSymmetry`); ниже — почему каждая ветка.
+    const symmetry = importedCutSymmetry(current, total, forced);
+    if (symmetry && forced) {
+      // Чертёж конвертера несёт каждый контур, раскладка карточки кладёт их как нарисованы и не
+      // отражает ничего — значит деталь режется как нарисована, и хранимая «зеркальная пара» или
+      // «со сгиба» ему прямо противоречит (первая — BLOCKER настила лицом вверх, второй печатает
+      // «on fold» на полной детали). Расчёт и цена (лицом к лицу) — FORCED_REASON выше.
+      update.cutSymmetry = symmetry;
+      if (isCutSymmetryMarked(current)) update.reason = FORCED_REASON[forced];
+    } else if (symmetry && !isCutSymmetryMarked(current)) {
       // Не размечено — значит никто не отвечал, а чертёж отвечает: он несёт КАЖДЫЙ контур, и
       // деталь режется как нарисована. Молчание здесь не нейтрально — оно гасит выводы бэка
       // (клетка покрытия настила становится UNKNOWN, проверки зеркального разворота и перекроя
       // перестают судить), поэтому ответ ставится, а не оставляется на потом.
-      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
-    } else if (cutSymmetryCountInvalid(current, total)) {
+      update.cutSymmetry = symmetry;
+    } else if (symmetry) {
+      // = cutSymmetryCountInvalid(current, total):
       // Единственное исключение к «явную разметку не трогаем»: новое количество делает хранимую
       // зеркальную пару невозможной (нечётное или < 2), и сохранение ВСЕЙ карточки упёрлось бы в
       // серверную проверку и двухколоночный CHECK `chk_tcp_mirrored_needs_even_count`.
@@ -372,7 +673,7 @@ function planPieceUpdates(
       // следующим проходом как «не размечено», ветка выше ставила ему IDENTICAL — и повторное
       // применение БЕЗ единой правки в чертеже меняло данные и роняло подписи. Теперь второй
       // проход не меняет ничего: cutSymmetryCountInvalid у IDENTICAL всегда false.
-      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+      update.cutSymmetry = symmetry;
     }
     // Явные «зеркальные пары» и «со сгибом», которым новое количество не противоречит, остаются
     // как есть: человек утверждал факт, и чертёж ему не возражает.
@@ -393,6 +694,8 @@ export function PieceMatchModal({
   sizeLabel,
   colorways,
   pieceAreaScopes,
+  techCardId,
+  readOnly: readOnlyProp,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
@@ -411,9 +714,16 @@ export function PieceMatchModal({
   // обе таблицы в транзакции сохранения карточки). Показать состав потерь можно только отсюда.
   colorways?: readonly common_AdminColorwayRef[];
   pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
+  // Карточка этой формы: размеры из манифеста ДРУГОЙ карточки сами в ряд не пишутся (F14f).
+  techCardId?: number;
+  // Optional override: the caller may already know the card cannot be edited (no write right).
+  // A RELEASED card is detected here on its own either way.
+  readOnly?: boolean;
   onClose: () => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  const { data: cardRead } = useTechCard(techCardId);
+  const readOnly = !!readOnlyProp || cardRead?.techCard?.approvalState === RELEASED_STATE;
   // Pieces are written by setValue on the ARRAY ROOT, not through a second useFieldArray.
   //
   // This looks like the thing pieces-tab.tsx warns against, and it is the opposite. Measured
@@ -434,7 +744,7 @@ export function PieceMatchModal({
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as TechCardFormData['pieces'];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
-  const { parse } = useNesting(files);
+  const { parse, reparse } = useNesting(files);
   // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
   // внутри них не пропущен) решает судьбу ДВУХ исходов сразу: предложений об удалении (находка 1
   // первого ревью) и пересчёта «× на изделие» с разметкой кроя (находка 2 второго). Собирать это
@@ -444,22 +754,15 @@ export function PieceMatchModal({
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
   const dictTokens = useDictionarySizeTokens();
-  const allPieces = useMemo(
-    () => (parse.phase === 'ready' ? parse.pieces : []),
-    [parse],
-  );
+  const allPieces = useMemo(() => (parse.phase === 'ready' ? parse.pieces : []), [parse]);
   const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
   // A block carries the piece on more than one layer (sewing line and cutting line). Only ONE of
   // them is the piece; the other must not reach the counting, or every block would be counted
   // twice and pieces_per_garment would double.
-  const layerOpts = useMemo(
-    () => layerOptions(allPieces, split.codeById),
-    [allPieces, split],
-  );
-  const [activeLayer, setActiveLayer] = useState<string | null>(null);
-  const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
-    ? (activeLayer as string)
-    : defaultContourLayer(layerOpts);
+  const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
+  // Always the heuristic's answer (patterns-lite #6): the override was never persisted, and
+  // nobody should have to know what a contour layer is.
+  const contourLayer = defaultContourLayer(layerOpts);
   const contourPieces = useMemo(
     () => allPieces.filter((p) => (p.layer ?? '') === contourLayer),
     [allPieces, contourLayer],
@@ -470,11 +773,7 @@ export function PieceMatchModal({
     [allPieces, contourLayer],
   );
   // Долевая на листе — та же линия, по которой раскладка разворачивает деталь.
-  const grainLayer = useMemo(
-    () => defaultGrainLayer(grainLayerOptions(allPieces)),
-    [allPieces],
-  );
-  const [showGrain, setShowGrain] = useState(true);
+  const grainLayer = useMemo(() => defaultGrainLayer(grainLayerOptions(allPieces)), [allPieces]);
   // Слои внутренней геометрии, найденные в файле: линия шва, надсечки, свёрла, вытачки. По
   // умолчанию показываются ВСЕ — деталь без них это голый силуэт, а режут именно по ним.
   const innerLayerNames = useMemo(() => {
@@ -487,11 +786,7 @@ export function PieceMatchModal({
     }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [contourPieces, grainLayer]);
-  const [hiddenInner, setHiddenInner] = useState<string[]>([]);
-  const innerLayers = useMemo(
-    () => new Set(innerLayerNames.map(([l]) => l).filter((l) => !hiddenInner.includes(l))),
-    [innerLayerNames, hiddenInner],
-  );
+  const innerLayers = useMemo(() => new Set(innerLayerNames.map(([l]) => l)), [innerLayerNames]);
   // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
   // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
   const sizeById = useSizeNames();
@@ -513,9 +808,66 @@ export function PieceMatchModal({
   }, [operations]);
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
-  const missingSizes = useMemo(
-    () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById),
-    [allPieces, dictTokens, cardSizeIds, sizeById],
+  const fileSizes = useMemo(
+    () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById, techCardId),
+    [allPieces, dictTokens, cardSizeIds, sizeById, techCardId],
+  );
+  // OS (one size) and graded sizes exclude each other (size-ids-field). A graded file on a one-size
+  // card appends NOTHING: it surfaces as a warning whose action swaps OS for the file's sizes. An
+  // OS file on a graded card adds nothing either.
+  const isOsId = (id: number) => {
+    const raw = sizeById.get(id);
+    return raw != null && isOsSizeName(raw);
+  };
+  const cardIsOs = cardSizeIds.some(isOsId);
+  const cardIsGraded = cardSizeIds.some((id) => sizeById.has(id) && !isOsId(id));
+  // Graded sizes of the file that the OS line keeps out of the card.
+  const gradedOnOs = useMemo(
+    () => (cardIsOs ? fileSizes.filter((m) => !isOsId(m.sizeId)) : []),
+    // isOsId reads sizeById.
+    [cardIsOs, fileSizes, sizeById],
+  );
+  const missingSizes = useMemo(() => {
+    if (cardIsOs) return [];
+    const fileGraded = fileSizes.some((m) => !isOsId(m.sizeId));
+    return cardIsGraded || fileGraded ? fileSizes.filter((m) => !isOsId(m.sizeId)) : fileSizes;
+    // isOsId reads sizeById.
+  }, [cardIsOs, cardIsGraded, fileSizes, sizeById]);
+  // F14f: что пишется само, а что только предлагается (манифест другой карточки, карточка без
+  // размеров) — второе добавляет человек из предупреждения.
+  const autoSizes = useMemo(() => missingSizes.filter((m) => !m.confirm), [missingSizes]);
+  const proposedSizes = useMemo(() => missingSizes.filter((m) => m.confirm), [missingSizes]);
+  // Swap OS for the file's graded sizes, pruning like removing OS in size-ids-field: DXF rows on OS
+  // are re-filed onto the smallest new size. A PDF on OS would be lost, so the swap waits for it.
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{
+    sizeId?: number;
+    url?: string;
+  }>;
+  const osPdfs = patterns.filter((p) => p.sizeId != null && isOsId(p.sizeId) && !isDxfUrl(p.url));
+  const switchToFileSizes = () => {
+    if (gradedOnOs.length === 0 || osPdfs.length > 0) return;
+    const next = orderSizes([
+      ...cardSizeIds.filter((id) => !isOsId(id)),
+      ...gradedOnOs.map((m) => m.sizeId),
+    ]);
+    setValue('sizeIds', next, { shouldDirty: true });
+    const target = next[0] ?? 0;
+    const current = (getValues('patterns') ?? []) as typeof patterns;
+    if (current.some((p) => p.sizeId != null && isOsId(p.sizeId))) {
+      setValue(
+        'patterns',
+        current.map((p) =>
+          p.sizeId != null && isOsId(p.sizeId) ? { ...p, sizeId: target } : p,
+        ) as TechCardFormData['patterns'],
+        { shouldDirty: true },
+      );
+    }
+    setAddedSizes((prev) => [...prev, ...gradedOnOs.map((m) => formatSizeName(m.name))]);
+  };
+  // F14: размеры манифеста другой карточки или вне системы карточки не берутся из него — сказать.
+  const foreignSizes = useMemo(
+    () => foreignManifestSizes(allPieces, cardSizeIds, sizeById, techCardId),
+    [allPieces, cardSizeIds, sizeById, techCardId],
   );
   // Размеры из файла заводятся в карточку САМИ, как только разбор закончился: файл — источник
   // истины о том, какие размеры у стиля есть, а ручная кнопка означала бы, что деталь может
@@ -527,13 +879,21 @@ export function PieceMatchModal({
   const [addedSizes, setAddedSizes] = useState<string[]>([]);
   const addedRef = useRef(false);
   useEffect(() => {
-    if (parse.phase !== 'ready' || addedRef.current || missingSizes.length === 0) return;
+    if (parse.phase !== 'ready' || addedRef.current || autoSizes.length === 0 || readOnly) return;
     addedRef.current = true;
-    setAddedSizes(missingSizes.map((m) => formatSizeName(m.name)));
-    setValue('sizeIds', orderSizes([...cardSizeIds, ...missingSizes.map((m) => m.sizeId)]), {
+    setAddedSizes(autoSizes.map((m) => formatSizeName(m.name)));
+    setValue('sizeIds', orderSizes([...cardSizeIds, ...autoSizes.map((m) => m.sizeId)]), {
       shouldDirty: true,
     });
-  }, [parse.phase, missingSizes, cardSizeIds, orderSizes, setValue]);
+  }, [parse.phase, autoSizes, cardSizeIds, orderSizes, setValue, readOnly]);
+  // Предложенные размеры (F14f) — только по явному нажатию; тем же путём записи, что и выше.
+  const addProposedSizes = () => {
+    if (proposedSizes.length === 0) return;
+    setAddedSizes((prev) => [...prev, ...proposedSizes.map((m) => formatSizeName(m.name))]);
+    setValue('sizeIds', orderSizes([...cardSizeIds, ...proposedSizes.map((m) => m.sizeId)]), {
+      shouldDirty: true,
+    });
+  };
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form. The rule asks the FILE, not the
@@ -545,11 +905,7 @@ export function PieceMatchModal({
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
-  const [blockCounts, setBlockCounts] = useState<
-    Map<string, { block: string; instances: number; sizes: string[]; uniBase: string }>
-  >(
-    new Map(),
-  );
+  const [blockCounts, setBlockCounts] = useState<Map<string, CountedBlock>>(new Map());
   // Blocks the operator asked to unmap in this dialog session (ci keys).
   const [unmapped, setUnmapped] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -560,6 +916,14 @@ export function PieceMatchModal({
   // only a default: «PERED_S» is what the exporter called it, «полочка правая» is what the
   // garment calls it, and the second one is the one that has to reach the factory.
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
+  // Buffered editor fields. Existing pieces by lineKey (lower-cased) — a piece is one thing however
+  // many blocks point at it; new pieces by their RESOLVED name (lower-cased, see newTargetOf), so
+  // every block that will coalesce into one new piece shares one buffer — keyed by the creating
+  // block, FP_R's edits were dropped whenever FP_L (same default name) was processed first.
+  const [pieceEdits, setPieceEdits] = useState<Record<string, PieceFields>>({});
+  const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
+  // Block whose «this is» select was opened by the `relink` door (a linked block shows only its name).
+  const [relinkOf, setRelinkOf] = useState<string | null>(null);
   // Which sheet is on screen. Several files reach one fabric slot when the same size was
   // re-uploaded (revisions) — they are separate drawings and must not be drawn on top of
   // each other.
@@ -656,141 +1020,46 @@ export function PieceMatchModal({
     return m;
   }, [aliases, scope, split]);
 
+  // F6b: детали, привязанные к ДРУГИМ тканям и ни разу к этой, — lineKey (ci) → ключ первой такой
+  // ткани. Читается только строками файла с манифестом (см. proposeRows, 'same-name-elsewhere').
+  const elsewhereOnly = useMemo(() => {
+    const here = new Set<string>();
+    const there = new Map<string, string>();
+    for (const a of aliases ?? []) {
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (!pk || !livePieceKeys.has(pk)) continue;
+      if (aliasInScope(a, scope)) here.add(pk);
+      else if (!there.has(pk)) there.set(pk, aliasScopeKey(a));
+    }
+    for (const pk of here) there.delete(pk);
+    return there;
+  }, [aliases, scope, livePieceKeys]);
+
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
   useEffect(() => {
     if (parse.phase !== 'ready') return;
-    // Blocks are counted under the SERVER's identity — normalized then case-folded — because
-    // that is what its UNIQUE index collapses. Counting case-sensitively made «ПОЛОЧКА» in one
-    // sheet and «Полочка» in another two rows, both auto-preselected, and the resulting pair of
-    // aliases was rejected as a duplicate: the card then could not be saved at all, with the bad
-    // aliases sitting in form state where nothing could delete them.
-    // Per FILE, then max across files: two pattern rows of one fabric+size are usually two
-    // REVISIONS of the same sheet, so summing their instances doubled pieces_per_garment and
-    // every consumption derived from it.
-    const perFile = new Map<string, Map<string, number>>();
-    const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
-    const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
-    const uniBaseByCi = new Map<string, string>(); // ci key → uniBase у помеченных блоков
-    for (const p of contourPieces) {
-      // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
-      // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
-      // here is what keeps the piece count a property of the STYLE.
-      const b = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
-      if (!b) continue; // a file with no per-piece blocks has nothing to map
-      const ci = b.toLowerCase();
-      if (!spelling.has(ci)) spelling.set(ci, b);
-      const uniBase = split.codeById.get(p.id)?.uniBase ?? '';
-      if (uniBase && !uniBaseByCi.has(ci)) uniBaseByCi.set(ci, normBlock(uniBase));
-      const sz = split.codeById.get(p.id)?.size ?? '';
-      if (sz) {
-        const set = sizesByCi.get(ci) ?? new Set<string>();
-        set.add(sz);
-        sizesByCi.set(ci, set);
-      }
-      // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
-      // legitimately share a display name (two revisions re-exported by the factory under one
-      // filename), so the name cannot separate them — and now that one file holds every size,
-      // counting per file would report «BP_1 ×5» for a piece cut once per garment, multiplying
-      // pieces_per_garment and every consumption derived from it by the size run.
-      const bucket = `${p.fileIndex ?? p.source}|${split.codeById.get(p.id)?.size ?? ''}`;
-      const file = perFile.get(bucket) ?? new Map<string, number>();
-      file.set(ci, (file.get(ci) ?? 0) + 1);
-      perFile.set(bucket, file);
-    }
-    const counts = new Map<string, number>();
-    for (const file of perFile.values()) {
-      for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
-    }
-    const all = new Map<
-      string,
-      { block: string; instances: number; sizes: string[]; uniBase: string }
-    >();
-    for (const [ci, instances] of counts) {
-      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
-      );
-      all.set(ci, {
-        block: spelling.get(ci)!,
-        instances,
-        sizes,
-        uniBase: uniBaseByCi.get(ci) ?? '',
-      });
-    }
+    const all = countBlocks(contourPieces, split);
     setBlockCounts(all);
-    const next: BlockRow[] = [];
-    for (const [ci, instances] of counts) {
-      const block = spelling.get(ci)!;
-      // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
-      // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
-      // from the dialog with no way to ever map it.
-      if (stored.first.has(ci)) continue;
-      let suggested = '';
-      let basis: BlockRow['basis'] = 'none';
-      let fromSlot = '';
-      const exact = pieceOptions.find((p) => p.name.toLowerCase() === block.toLowerCase());
-      const byLoose = pieceOptions.find((p) => loose(p.name) === loose(block));
-      const hint = otherFabricByBlock.get(loose(block));
-      if (exact) {
-        suggested = exact.lineKey;
-        basis = 'exact';
-      } else if (byLoose) {
-        suggested = byLoose.lineKey;
-        basis = 'loose';
-      } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
-        suggested = hint.pieceKey;
-        basis = 'other-fabric';
-        fromSlot = hint.fromSlot;
-      } else {
-        let best = SUGGEST_MIN;
-        for (const p of pieceOptions) {
-          const s = similarity(p.name, block);
-          if (s >= best) {
-            best = s;
-            suggested = p.lineKey;
-            basis = 'similar';
-          }
-        }
-      }
-      // Only the two exact tiers are pre-selected. A similarity guess or another fabric's
-      // mapping is offered, never applied by default — being wrong there costs cloth.
-      const preselect = basis === 'exact' || basis === 'loose' ? suggested : '';
-      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
-      );
-      next.push({
-        block,
-        instances,
-        sizes,
-        uniBase: uniBaseByCi.get(ci) ?? '',
-        suggested,
-        basis,
-        fromSlot,
-        choice: preselect,
-      });
-    }
-    next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-    setRows(next);
-  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock]);
+    setRows(
+      proposeRows(all, {
+        storedFirst: stored.first,
+        pieceOptions,
+        otherFabricByBlock,
+        elsewhereOnly,
+      }),
+    );
+  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock, elsewhereOnly]);
 
   const decided = rows.filter((r) => r.choice).length;
-  const alreadyMapped = mineByBlock.size;
-  // What this fabric already maps, shown so a wrong mapping is visible and removable rather
-  // than permanent. Rendered from the same source the "skip already mapped" test uses, so the
-  // two can never disagree.
-  const mappedRows = useMemo(() => {
-    const nameByKey = new Map(pieceOptions.map((p) => [p.lineKey.toLowerCase(), p.name]));
-    return [...mineByBlock.entries()]
-      .map(([ci, pieceKey]) => ({
-        ci,
-        // The spelling is remembered on the IDENTITY as the aliases are read: a stored alias may
-        // still spell the size out, and comparing raw names would miss it and fall back to the key.
-        block: mineSpelling.get(ci) ?? ci,
-        pieceName: nameByKey.get(pieceKey.toLowerCase()) ?? '—',
-      }))
-      .sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-  }, [mineByBlock, mineSpelling, pieceOptions]);
   const toUnmap = unmapped.length;
+  // A live piece list with the buffered renames applied — what «a typed name that already exists
+  // binds to that piece» has to compare against, in the plan and in apply() alike.
+  const withEditedNames = (list: readonly PieceValue[]): PieceValue[] =>
+    list.map((p) => {
+      const e = pieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
+      return e?.name !== undefined ? { ...p, name: clampUtf8Bytes(e.name, MAX_PIECE_NAME) } : p;
+    });
 
   // ── исчезнувшие детали ────────────────────────────────────────────────────────────────
   // ЧТО РАЗБОР ЗНАЕТ ПРИСУТСТВУЮЩИМ: по всем файлам скоупа и по ВСЕМ слоям, а не по контурному.
@@ -920,49 +1189,6 @@ export function PieceMatchModal({
     return out;
   }, [parse, parseComplete, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
 
-  // Ответ по каждому кандидату. Дефолт — «удалить», и он НЕ материализуется в карту: пустая
-  // карта уже значит «удалить всех», поэтому новый кандидат (оператор переключил список файлов)
-  // не требует ни эффекта-засева, ни синхронизации, которая молча теряла бы выбор. Переключатель
-  // секции пишет сюда `setDeleteChoice((prev) => new Map(prev).set(lineKey, v))`.
-  const [deleteChoice, setDeleteChoice] = useState<Map<string, 'delete' | 'keep'>>(new Map());
-  const deleteDecision = (lineKey: string): 'delete' | 'keep' =>
-    deleteChoice.get(lineKey) ?? 'delete';
-  // То, что реально применит apply(), — и то, по чему считается сводка исходов.
-  const toDelete = useMemo(
-    () => deleteCandidates.filter((c) => deleteDecision(c.lineKey) === 'delete'),
-    [deleteCandidates, deleteChoice],
-  );
-
-  // ── четыре исхода одного нажатия ──────────────────────────────────────────────────────
-  // Диалог давно перестал быть только сопоставлением: он заводит детали, удаляет исчезнувшие,
-  // пересчитывает число на изделие и размечает крой — и всё это уходит ОДНОЙ кнопкой. Значит
-  // кнопка обязана называть свои исходы до нажатия, а не после сохранения карточки.
-  //
-  // «Без изменений» — тоже исход, и он здесь не для симметрии: это единственное видимое
-  // доказательство, что повторное применение по тем же файлам ничего не переписывает. Молчание на
-  // его месте читалось бы как «диалог ничего не заметил».
-  const outcome = useMemo(() => {
-    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
-    const live = ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
-      (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
-    );
-    const { bound, created, reused } = plannedScopeBinding(
-      live,
-      mineByBlock,
-      unmapped,
-      rows,
-      draftNames,
-    );
-    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts, parseComplete);
-    return {
-      created,
-      reused,
-      removed: toDelete.length,
-      updated: updates.length,
-      unchanged,
-    };
-  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts, parseComplete]);
-
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
   // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
   // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
@@ -984,6 +1210,103 @@ export function PieceMatchModal({
     }
     return m;
   }, [pieceAreaScopes]);
+
+  // Ответ по каждому кандидату. Пустая карта теперь значит безопасный пресет: удалить только
+  // действительно пустые детали, а всё, что держит рецепты, нормы, площади или операции, оставить.
+  // Явный выбор материализуется только после действия оператора, поэтому новый кандидат получает
+  // тот же безопасный ответ без эффекта-засева, который мог бы затереть уже сделанный выбор.
+  const oldPieceItems = useMemo<OldPieceItem[]>(
+    () =>
+      deleteCandidates.map((candidate) => {
+        const key = candidate.lineKey.trim().toLowerCase();
+        const hold = recipeHold.get(key);
+        return {
+          lineKey: candidate.lineKey,
+          name: candidate.name?.trim() || candidate.lineKey,
+          losses: {
+            recipeRows: hold?.rows ?? 0,
+            norms: hold?.withNorm ?? 0,
+            areas: areaRowsByPiece.get(key) ?? 0,
+            operations: opsByPiece.get(key) ?? 0,
+          },
+        };
+      }),
+    [deleteCandidates, recipeHold, areaRowsByPiece, opsByPiece],
+  );
+  const oldPieceByKey = useMemo(
+    () => new Map(oldPieceItems.map((item) => [item.lineKey, item])),
+    [oldPieceItems],
+  );
+  const [deleteChoice, setDeleteChoice] = useState<Map<string, OldPieceDecision>>(new Map());
+  const [pickingOldPieces, setPickingOldPieces] = useState(false);
+  const deleteDecision = (lineKey: string): OldPieceDecision => {
+    const explicit = deleteChoice.get(lineKey);
+    if (explicit) return explicit;
+    const item = oldPieceByKey.get(lineKey);
+    return item && hasOldPieceLoss(item.losses) ? 'keep' : 'delete';
+  };
+  const setGoneDecisions = (entries: readonly (readonly [string, OldPieceDecision])[]) =>
+    setDeleteChoice((previous) => {
+      const next = new Map(previous);
+      entries.forEach(([lineKey, decision]) => next.set(lineKey, decision));
+      return next;
+    });
+  const setAllGone = (decision: OldPieceDecision) =>
+    setGoneDecisions(deleteCandidates.map((candidate) => [candidate.lineKey, decision] as const));
+  // То, что реально применит apply(), — и то, по чему считается сводка исходов.
+  const toDelete = useMemo(
+    () => deleteCandidates.filter((candidate) => deleteDecision(candidate.lineKey) === 'delete'),
+    // oldPieceItems carries the default decision even while deleteChoice stays intentionally sparse.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deleteCandidates, deleteChoice, oldPieceItems],
+  );
+
+  // ── четыре исхода одного нажатия ──────────────────────────────────────────────────────
+  // Диалог давно перестал быть только сопоставлением: он заводит детали, удаляет исчезнувшие,
+  // пересчитывает число на изделие и размечает крой — и всё это уходит ОДНОЙ кнопкой. Значит
+  // кнопка обязана называть свои исходы до нажатия, а не после сохранения карточки.
+  //
+  // «Без изменений» — тоже исход, и он здесь не для симметрии: это единственное видимое
+  // доказательство, что повторное применение по тем же файлам ничего не переписывает. Молчание на
+  // его месте читалось бы как «диалог ничего не заметил».
+  const outcome = useMemo(() => {
+    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+    const live = withEditedNames(
+      ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
+        (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
+      ),
+    );
+    const { bound, created, reused } = plannedScopeBinding(
+      live,
+      mineByBlock,
+      unmapped,
+      rows,
+      draftNames,
+    );
+    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts, parseComplete);
+    return {
+      created,
+      reused,
+      removed: toDelete.length,
+      updated: updates.length,
+      unchanged,
+      // F6b: явная разметка, которую применение перепишет по манифесту, — с причиной для сводки.
+      rewritten: updates
+        .filter((u) => u.reason)
+        .map((u) => ({ name: live[u.index]?.name ?? '', reason: u.reason! })),
+    };
+    // pieceEdits: withEditedNames reads it.
+  }, [
+    pieces,
+    toDelete,
+    mineByBlock,
+    unmapped,
+    rows,
+    draftNames,
+    blockCounts,
+    parseComplete,
+    pieceEdits,
+  ]);
 
   // Сколько деталей вообще привязано к этой ткани — знаменатель предупреждения о массовом
   // исчезновении. Считается по тем же СЫРЫМ алиасам, что и кандидаты, и только по живым деталям:
@@ -1019,9 +1342,7 @@ export function PieceMatchModal({
       entry.pieces.push(p);
       byFile.set(idx, entry);
     });
-    return [...byFile.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([index, v]) => ({ index, ...v }));
+    return [...byFile.entries()].sort((a, b) => a[0] - b[0]).map(([index, v]) => ({ index, ...v }));
   }, [parse, contourPieces]);
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
 
@@ -1050,15 +1371,13 @@ export function PieceMatchModal({
   // would open showing those two and hide everything else behind a toggle nobody would press.
   const shownSize = sizeOptions.some((o) => o.size === activeSize)
     ? (activeSize as string)
-    : (sizeOptions.reduce<{ size: string; count: number } | null>(
+    : sizeOptions.reduce<{ size: string; count: number } | null>(
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
-      )?.size ?? '');
+      )?.size ?? '';
   const sheetPieces = useMemo(
     () =>
-      sheet
-        ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize)
-        : [],
+      sheet ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize) : [],
     [sheet, split, shownSize],
   );
 
@@ -1066,43 +1385,81 @@ export function PieceMatchModal({
     () => new Map(pieceOptions.map((p) => [p.lineKey.toLowerCase(), p.name])),
     [pieceOptions],
   );
-  const rowByCi = useMemo(
-    () => new Map(rows.map((r) => [r.block.toLowerCase(), r])),
-    [rows],
-  );
+  const rowByCi = useMemo(() => new Map(rows.map((r) => [r.block.toLowerCase(), r])), [rows]);
   // A contour with no block carries no identity the alias table can hold, so it is drawn but
   // not clickable — '' is the sheet's own signal for that. Keyed on the IDENTITY, so the same
   // piece in another size is the same thing to click.
   const ciOf = (p: PieceDTO) =>
     normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
 
+  // The display name of an existing piece, with a buffered rename applied.
+  const pieceName = (lineKey: string): string => {
+    const k = lineKey.toLowerCase();
+    const e = pieceEdits[k]?.name;
+    return e !== undefined ? e : nameByPieceKey.get(k) ?? '';
+  };
+
+  // What a block IS right now, in one place: the sheet, the editor and the plan all read this.
+  //   existing — bound to a piece of the card (stored link, or chosen in this pass)
+  //   new      — becomes a new piece on save
+  //   none     — «not a piece» (a skipped block, or a stored link being dropped)
+  type BlockState =
+    | { kind: 'existing'; key: string; stored: boolean }
+    | { kind: 'new'; row: BlockRow }
+    | { kind: 'none'; stored: boolean };
+  const stateOf = (ci: string): BlockState => {
+    const stored = mineByBlock.get(ci);
+    const off = unmapped.includes(ci);
+    if (stored && !off) return { kind: 'existing', key: stored, stored: true };
+    const row = rowByCi.get(ci);
+    if (row?.choice === CREATE) return { kind: 'new', row };
+    if (row?.choice) return { kind: 'existing', key: row.choice, stored: false };
+    return { kind: 'none', stored: !!stored };
+  };
+  const newNameOf = (row: BlockRow): string =>
+    (draftNames[row.block.toLowerCase()] ?? '').trim() || defaultPieceName(row);
+  // The piece a NEW block will actually land on — resolved exactly as apply() resolves it: a name
+  // that a live piece (buffered renames applied, leaving pieces excluded) already carries binds to
+  // that piece; otherwise every block under this name coalesces into ONE new piece. The editor
+  // buffers by this target, so blocks resolving to the same piece read and write the same values.
+  const liveKeyByName = (() => {
+    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+    const m = new Map<string, string>();
+    const live = ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
+      (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
+    );
+    for (const p of withEditedNames(live)) {
+      const n = p.name?.trim().toLowerCase();
+      if (n && p.lineKey?.trim()) m.set(n, p.lineKey.trim().toLowerCase());
+    }
+    return m;
+  })();
+  const newEditKey = (name: string) => name.toLowerCase();
+  const newTargetOf = (row: BlockRow): { kind: 'piece' | 'new'; key: string } => {
+    const n = newEditKey(newNameOf(row));
+    const k = liveKeyByName.get(n);
+    return k ? { kind: 'piece', key: k } : { kind: 'new', key: n };
+  };
+
   const markOf = (p: PieceDTO): PieceMark => {
     const ci = ciOf(p);
     if (!ci) return 'unnamed';
-    if (unmapped.includes(ci)) return 'dropped';
-    if (mineByBlock.has(ci)) return 'mapped';
-    return rowByCi.get(ci)?.choice ? 'staged' : 'open';
+    const st = stateOf(ci);
+    if (st.kind === 'existing') return st.stored ? 'mapped' : 'staged';
+    if (st.kind === 'new') return 'staged';
+    // «not a piece»: a dropped stored link keeps its red dash (the link goes on save); a block
+    // that was never a piece is simply dimmed.
+    return st.stored ? 'dropped' : 'unnamed';
   };
-  // What the piece IS, in one word on the shape. A mapped block shows the cut piece it means
-  // (that is the answer); an open one shows the raw block name (that is the question).
+  // The label on the shape is the PIECE NAME it will be saved as — the block name only when the
+  // block is not a piece. Uni copies share their default name, so they read as one piece.
   const labelOf = (p: PieceDTO): string => {
     const ci = ciOf(p);
     if (!ci) return '';
-    if (!unmapped.includes(ci)) {
-      const mapped = mineByBlock.get(ci);
-      if (mapped) return nameByPieceKey.get(mapped.toLowerCase()) ?? p.blockName ?? '';
-    }
-    const row = rowByCi.get(ci);
-    // Подпись на листе называет ТО ИМЯ, под которым деталь будет заведена: у uni-копий оно общее
-    // (см. defaultPieceName), и «+ PCK_L_UNI_M» на одном контуре рядом с «+ PCK_L_UNI_S» на
-    // другом обещал бы две детали там, где создаётся одна.
-    if (row?.choice === CREATE)
-      return `+ ${(draftNames[ci] ?? '').trim() || defaultPieceName(row)}`;
-    if (row?.choice) return nameByPieceKey.get(row.choice.toLowerCase()) ?? row.block;
-    // Идентичность, а не сырое имя: иначе на листе — главной поверхности диалога — блок
-    // подписан «BP_1_XS», а строка таблицы, заголовок инспектора и «+ создать» рядом говорят
-    // «BP_1». Расходиться должен файл с нами, а не мы сами с собой.
-    return normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
+    const st = stateOf(ci);
+    if (st.kind === 'existing') return pieceName(st.key) || p.blockName || '';
+    if (st.kind === 'new') return newNameOf(st.row);
+    return '';
   };
 
   const setChoice = (ci: string, value: string) =>
@@ -1110,16 +1467,32 @@ export function PieceMatchModal({
       prev.map((r) => (r.block.toLowerCase() === ci ? { ...r, choice: value } : r)),
     );
 
-  // Toggling a stored mapping off, and back on. Extracted so the sheet's inspector and the
-  // list below it drive exactly the same transition instead of two lookalike copies.
-  const toggleUnmap = (ci: string) => {
+  // «this is: …» — the one transition for every block. A STORED link changed to anything else is
+  // the old unlink (the block goes to `unmapped`) plus a row carrying the new answer; changed back
+  // to its stored piece it is the old restore. Rows are appended, never rebuilt by the effect,
+  // which would throw away every choice already made.
+  const choose = (ci: string, value: string) => {
+    const stored = mineByBlock.get(ci);
+    if (!stored) {
+      setChoice(ci, value);
+      return;
+    }
     const off = unmapped.includes(ci);
-    setUnmapped((prev) => (off ? prev.filter((x) => x !== ci) : [...prev, ci]));
-    // Unmapping OFFERS the block again in the same pass. Done by appending rather than by
-    // re-running the rebuild effect, which would throw away every choice already made above.
+    if (value.toLowerCase() === stored.toLowerCase()) {
+      if (!off) return;
+      setUnmapped((prev) => prev.filter((x) => x !== ci));
+      setRows((prev) => prev.filter((r) => r.block.toLowerCase() !== ci));
+      return;
+    }
+    if (off) {
+      setChoice(ci, value);
+      return;
+    }
+    setUnmapped((prev) => (prev.includes(ci) ? prev : [...prev, ci]));
     setRows((prev) => {
-      if (off) return prev.filter((r) => r.block.toLowerCase() !== ci);
-      if (prev.some((r) => r.block.toLowerCase() === ci)) return prev;
+      if (prev.some((r) => r.block.toLowerCase() === ci)) {
+        return prev.map((r) => (r.block.toLowerCase() === ci ? { ...r, choice: value } : r));
+      }
       const found = blockCounts.get(ci);
       if (!found) return prev;
       return [
@@ -1131,50 +1504,26 @@ export function PieceMatchModal({
           uniBase: found.uniBase,
           suggested: '',
           basis: 'none',
-          choice: '',
+          choice: value,
+          ...(found.manifestName ? { manifestName: found.manifestName } : {}),
         },
       ];
     });
   };
 
-  // The inspector's subject: everything the dialog knows about the clicked block.
+  // The editor's subject: everything the dialog knows about the clicked block.
   const focus = useMemo(() => {
     if (!selected) return null;
     const counted = blockCounts.get(selected);
     const row = rowByCi.get(selected);
-    const mappedTo = mineByBlock.get(selected);
     return {
       ci: selected,
       block: counted?.block ?? row?.block ?? selected,
       instances: counted?.instances ?? row?.instances ?? 0,
       sizes: counted?.sizes ?? row?.sizes ?? [],
-      row,
-      mappedTo,
-      mappedName: mappedTo ? (nameByPieceKey.get(mappedTo.toLowerCase()) ?? '—') : null,
-      dropped: unmapped.includes(selected),
+      known: !!counted || !!row || mineByBlock.has(selected),
     };
-  }, [selected, blockCounts, rowByCi, mineByBlock, nameByPieceKey, unmapped]);
-
-  // The choice control, shared by the inspector and the table row — one place decides what
-  // «пропустить / создать / существующая деталь» means.
-  const choiceSelect = (ci: string, block: string, instances: number, value: string) => (
-    <select
-      className='h-7 min-w-0 flex-1 border border-borderColor bg-bgColor px-1 text-micro'
-      aria-label={`piece for block ${block}`}
-      value={value}
-      onChange={(e) => setChoice(ci, e.target.value)}
-    >
-      <option value=''>skip</option>
-      <option value={CREATE}>
-        + create “{block}” (×{instances})
-      </option>
-      {pieceOptions.map((p) => (
-        <option key={p.lineKey} value={p.lineKey}>
-          {p.name}
-        </option>
-      ))}
-    </select>
-  );
+  }, [selected, blockCounts, rowByCi, mineByBlock]);
 
   function apply() {
     setSaving(true);
@@ -1215,7 +1564,9 @@ export function PieceMatchModal({
       // place a cut piece is created, that rule now has exactly one keeper. So a typed name that
       // already exists REUSES that piece instead of minting a second one.
       const keyByName = new Map<string, string>();
-      for (const p of live) {
+      // Buffered renames count: a new piece typed as «полочка» right after an existing piece was
+      // renamed to «полочка» binds to it rather than minting a duplicate name.
+      for (const p of withEditedNames(live)) {
         const n = p.name?.trim().toLowerCase();
         if (n && p.lineKey?.trim()) keyByName.set(n, p.lineKey.trim());
       }
@@ -1312,6 +1663,10 @@ export function PieceMatchModal({
           } else {
             pieceLineKey = ulid();
             keyByName.set(name.toLowerCase(), pieceLineKey);
+            // Fields typed in the editor for this new piece — one buffer per resolved name, shared
+            // by every block that coalesces into it (newTargetOf). A name that binds to an existing
+            // piece takes the branch above; its edits sit in pieceEdits and land in the loop below.
+            const ed = newEdits[newEditKey(name)] ?? {};
             created.push({
               lineKey: pieceLineKey,
               name,
@@ -1327,10 +1682,15 @@ export function PieceMatchModal({
               // на бумаге голая «2» и так читается как «две одинаковые» — то есть молчание всё
               // равно утверждает этот же ответ, просто не давая его проверить.
               cutSymmetry: IDENTICAL_CUT_SYMMETRY,
-              grainline: '',
-              fused: false,
+              grainline: ed.grainline ?? '',
+              fused: ed.fused ?? false,
+              ...(ed.fused && ed.fusingMode !== undefined ? { fusingMode: ed.fusingMode } : {}),
+              ...(ed.fused && ed.fusingWidthMm !== undefined
+                ? { fusingWidthMm: ed.fusingWidthMm }
+                : {}),
+              ...(ed.ungraded !== undefined ? { ungraded: ed.ungraded } : {}),
               calloutNumber: 0,
-              note: '',
+              note: ed.note ?? '',
               materials: [],
             });
           }
@@ -1391,6 +1751,31 @@ export function PieceMatchModal({
           setValue(`pieces.${u.index}.cutSymmetry`, u.cutSymmetry, { shouldDirty: true });
         }
       }
+      // BUFFERED EDITOR FIELDS of existing pieces — nested-path writes, indices by `live` (same
+      // reasoning as the recount above). A piece leaving in this same apply gets nothing.
+      live.forEach((p, i) => {
+        const ed = pieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
+        if (!ed) return;
+        for (const f of FIELD_KEYS) {
+          if (ed[f] === undefined || ed[f] === p[f]) continue;
+          setValue(`pieces.${i}.${f}`, ed[f] as never, { shouldDirty: true });
+        }
+        if (ed.name !== undefined && ed.name !== (p.name ?? '')) {
+          const value = clampUtf8Bytes(ed.name, MAX_PIECE_NAME);
+          setValue(`pieces.${i}.name`, value, { shouldDirty: true });
+          // S8: a piece pinned to a sketch callout has its name rewritten from `callout.part` by
+          // the server on every save — the rename has to reach the callout too (pieces-tab
+          // renamePiece), or the save silently reverts it.
+          const n = (p.calloutNumber as number) || 0;
+          if (n) {
+            const cs = (getValues('callouts') ?? []) as Array<{ number?: number }>;
+            cs.forEach((c, ci) => {
+              if ((c.number ?? 0) === n)
+                setValue(`callouts.${ci}.part`, value.trim(), { shouldDirty: true });
+            });
+          }
+        }
+      });
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
       onClose();
     } finally {
@@ -1398,56 +1783,436 @@ export function PieceMatchModal({
     }
   }
 
-  // Renaming the cut piece from here renames it EVERYWHERE — operations, norms, the cut list —
-  // because the alias points at the piece's line_key, never at a name. That is the whole point of
-  // the scoping: the name in the DXF is the exporter's, the name of the piece is ours, and there
-  // is exactly one of the latter. Written on the nested path, not through useFieldArray.update,
-  // which would replace the row from a stale snapshot (patterns-field.tsx makes the same call).
-  const renamePiece = (lineKey: string, name: string) => {
-    const live = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
-    const i = live.findIndex((p) => p.lineKey === lineKey);
-    if (i < 0) return;
-    setValue(`pieces.${i}.name`, clampUtf8Bytes(name, MAX_PIECE_NAME), { shouldDirty: true });
+  // ── header warnings ───────────────────────────────────────────────────────────────────
+  // A warning's «show»: bring the contour's file and size on screen and select it.
+  const showContour = (p: PieceDTO | undefined) => {
+    if (!p) return;
+    const fi = sheets.findIndex((sh) => sh.pieces.includes(p));
+    if (fi >= 0) setActiveFile(fi);
+    setActiveSize(split.codeById.get(p.id)?.size ?? '');
+    const ci = ciOf(p);
+    if (ci) setSelected(ci);
   };
-
-  const nameField = (label: string, value: string, onChange: (v: string) => void) => (
-    <label className='block'>
-      <Text size='nano' variant='label' component='span'>
-        {label}
-      </Text>
-      <input
-        className='mt-0.5 block min-h-[22px] w-full border border-borderColor bg-bgColor px-[7px] py-[3px] text-micro focus:border-textColor focus:outline-none'
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder='piece name'
-      />
-    </label>
-  );
-
-  // Кнопка называет ВСЕ исходы, а не только сопоставления. «сопоставить (0)» на кнопке, которая
-  // сейчас удалит три детали и перепишет число на изделие у пяти, врало бы ровно в тот момент,
-  // когда цена ошибки самая высокая — и никакого другого места, где эти исходы названы вместе, у
-  // оператора нет.
-  const confirmParts = [
-    outcome.reused > 0 ? `${outcome.reused} ↔` : '',
-    outcome.created > 0 ? `${outcome.created} +` : '',
-    outcome.removed > 0 ? `${outcome.removed} −` : '',
-    outcome.updated > 0 ? `${outcome.updated} ×` : '',
-    toUnmap > 0 ? `${toUnmap} unlink` : '',
-  ].filter(Boolean);
-  // Четыре нуля подряд не значат ничего: на карточке, где ещё ничего не связано и ничего не
-  // выбрано, сводка была бы строкой ради строки.
-  const hasOutcome = outcome.created + outcome.removed + outcome.updated + outcome.unchanged > 0;
-
-  const basisLabel = (r: BlockRow) => {
-    if (!r.suggested) return null;
-    if (r.basis === 'similar') return <Pill tone='warn'>suggested by similarity</Pill>;
-    if (r.basis === 'other-fabric') {
-      const from = r.fromSlot ? scopeLabelByKey?.get(r.fromSlot) : '';
-      return <Pill tone='warn'>{from ? `from “${from}”` : 'from another fabric'}</Pill>;
+  const showBlock = (ci: string) => showContour(contourPieces.find((p) => ciOf(p) === ci));
+  // First contour of the active sheet whose size was not recognised (UNI is declared, not missed).
+  const showUnsized = () =>
+    showContour(
+      sheet?.pieces.find((p) => {
+        const code = split.codeById.get(p.id);
+        return !code?.size && !code?.uni;
+      }),
+    );
+  // Everything the parse or the plan wants to say, as one `! N warnings` door in the top bar
+  // (patterns-lite #11). Nothing of it sits in the body.
+  const unrecognisedSizes = (() => {
+    if (missingSizes.length > 0 || sizeOptions.length <= 1) return 0;
+    const rest = sizeOptions.find((o) => o.size === '');
+    // UNI contours carry no size by declaration, not by a parse failure.
+    return rest ? Math.max(0, rest.count - rest.uniCount) : 0;
+  })();
+  const warnings: HeaderWarning[] = [];
+  if (parse.phase === 'error') warnings.push({ text: parse.message, error: true });
+  if (parse.phase === 'ready') {
+    // Units are asked at upload — the parse's «units are not set» note is not repeated here.
+    warnings.push(
+      ...parse.warnings
+        .filter((w) => !/units are not set in the file/.test(w))
+        .map(
+          (w): HeaderWarning =>
+            isFetchFailure(w)
+              ? { text: w, error: true, action: { label: 'retry', onClick: reparse } }
+              : w,
+        ),
+    );
+    if (!parse.complete) {
+      warnings.push(
+        `files read: ${parse.filesParsed} of ${parse.filesTotal}${
+          parse.blocksSkipped > 0 ? ` · blocks skipped: ${parse.blocksSkipped}` : ''
+        }`,
+      );
     }
-    return null;
-  };
+    if (blockCounts.size === 0 && mineByBlock.size === 0) warnings.push('no named pieces');
+  }
+  if (foreignSizes.length > 0) {
+    warnings.push(
+      `sizes not taken from the file: ${foreignSizes.map((n) => formatSizeName(n)).join(', ')}`,
+    );
+  }
+  if (gradedOnOs.length > 0) {
+    const names = orderSizes(gradedOnOs.map((m) => m.sizeId)).map((id) =>
+      formatSizeName(sizeById.get(id) ?? `#${id}`),
+    );
+    const range = names.length > 1 ? `${names[0]}–${names[names.length - 1]}` : names[0];
+    warnings.push({
+      text: `the file is graded (${range}), the card is one size`,
+      action: readOnly
+        ? undefined
+        : osPdfs.length > 0
+          ? { label: 'remove one-size PDFs first', onClick: () => {}, disabled: true }
+          : { label: 'switch to these sizes', onClick: switchToFileSizes },
+    });
+  }
+  if (proposedSizes.length > 0) {
+    warnings.push({
+      text: `new sizes in the file: ${proposedSizes.map((m) => formatSizeName(m.name)).join(', ')}`,
+      action: readOnly ? undefined : { label: 'add sizes', onClick: addProposedSizes },
+    });
+  }
+  if (addedSizes.length > 0) warnings.push(`sizes added: ${addedSizes.join(', ')}`);
+  if (unrecognisedSizes > 0) {
+    warnings.push({
+      text: `size not recognised on ${unrecognisedSizes} contours`,
+      action: { label: 'show', onClick: showUnsized },
+    });
+  }
+  if (missingOnLayer.length > 0) {
+    warnings.push(
+      `no contour for ${missingOnLayer.length} pieces: ${missingOnLayer.slice(0, 6).join(', ')}${
+        missingOnLayer.length > 6 ? '…' : ''
+      }`,
+    );
+  }
+  for (const r of outcome.rewritten) warnings.push(`${r.name}: cut as drawn, identical copies`);
+  // Once the operator has answered the old-pieces question, the alarm has done its job.
+  if (massVanish && deleteChoice.size === 0) {
+    warnings.push({
+      text: `${deleteCandidates.length} of ${scopeBoundPieces} pieces gone from the file`,
+      error: true,
+      action:
+        readOnly || toDelete.length === 0
+          ? undefined
+          : {
+              label: 'keep all',
+              onClick: () => setAllGone('keep'),
+            },
+    });
+  }
+  if (unresolvedCollapses.length > 0) {
+    warnings.push({
+      text: `one block, two pieces: ${unresolvedCollapses.length} to pick`,
+      error: true,
+      action: { label: 'show', onClick: () => showBlock(unresolvedCollapses[0]) },
+    });
+  }
+
+  // ── save / done ───────────────────────────────────────────────────────────────────────
+  // Anything apply() would write. Nothing → the primary just closes.
+  const hasEdits = Object.keys(pieceEdits).length > 0;
+  const changed =
+    decided > 0 ||
+    toUnmap > 0 ||
+    collapses.size > 0 ||
+    outcome.removed > 0 ||
+    outcome.updated > 0 ||
+    hasEdits;
+  const canSave = changed && !readOnly;
+  // Until every dispute is settled there is nothing valid to save: the server would reject the
+  // whole card.
+  const blocked = unresolvedCollapses.length > 0;
+
+  // ── the editor ────────────────────────────────────────────────────────────────────────
+  const optionKeyOf = (key: string) =>
+    pieceOptions.find((p) => p.lineKey.toLowerCase() === key.toLowerCase())?.lineKey ?? key;
+
+  // ── pieces gone from the file ─────────────────────────────────────────────────────────
+  // ONE question, asked where the eye already is (the panel beside the sheet) when no piece is
+  // picked. The card stores no outline, and a candidate is absent from the new file by definition,
+  // so the pick tiles honestly carry words only: there is no old geometry to preview on hover.
+  const goneQuestion =
+    deleteCandidates.length > 0 ? (
+      <OldPiecesDecision
+        items={oldPieceItems}
+        decisionOf={deleteDecision}
+        onDecide={setGoneDecisions}
+        picking={pickingOldPieces}
+        onPickingChange={(picking) => {
+          setPickingOldPieces(picking);
+          if (picking) setSelected(null);
+        }}
+        readOnly={readOnly}
+      />
+    ) : null;
+
+  const editor = (() => {
+    if (pickingOldPieces && goneQuestion) return goneQuestion;
+    if (!focus) {
+      return (
+        goneQuestion ?? (
+          <Text size='micro' variant='label' component='p'>
+            click a piece to edit it
+          </Text>
+        )
+      );
+    }
+    const ci = focus.ci;
+    const st = stateOf(ci);
+    const value = st.kind === 'existing' ? optionKeyOf(st.key) : st.kind === 'new' ? CREATE : '';
+
+    // Values shown and the setter, per kind. Existing pieces read the form and overlay the buffer;
+    // new pieces read only the buffer (they do not exist yet).
+    let index = -1;
+    let vals: PieceFields = {};
+    let patch: (p: PieceFields) => void = () => {};
+    let title = focus.block;
+    if (st.kind === 'existing') {
+      const k = st.key.toLowerCase();
+      index = (pieces ?? []).findIndex((p) => (p.lineKey ?? '').trim().toLowerCase() === k);
+      const p = index >= 0 ? (pieces ?? [])[index] : undefined;
+      vals = {
+        name: pieceName(st.key),
+        fused: p?.fused,
+        fusingMode: p?.fusingMode,
+        fusingWidthMm: p?.fusingWidthMm,
+        ungraded: p?.ungraded,
+        grainline: p?.grainline,
+        note: p?.note,
+        ...pieceEdits[k],
+      };
+      vals.name = pieceName(st.key);
+      patch = (d) =>
+        setPieceEdits((prev) => {
+          const next = { ...(prev[k] ?? {}), ...d };
+          if (d.name !== undefined && d.name === (nameByPieceKey.get(k) ?? '')) delete next.name;
+          const rest = { ...prev };
+          if (Object.keys(next).length === 0) delete rest[k];
+          else rest[k] = next;
+          return rest;
+        });
+      title = vals.name || focus.block;
+    } else if (st.kind === 'new') {
+      const row = st.row;
+      const shownName = draftNames[ci] ?? defaultPieceName(row);
+      const tgt = newTargetOf(row);
+      if (tgt.kind === 'piece') {
+        // The typed name is an existing piece's: the block binds to it on save, so its fields are
+        // that piece's — read the form, overlay the shared piece buffer, write the shared buffer.
+        const p = (pieces ?? []).find((x) => (x.lineKey ?? '').trim().toLowerCase() === tgt.key);
+        vals = {
+          fused: p?.fused,
+          fusingMode: p?.fusingMode,
+          fusingWidthMm: p?.fusingWidthMm,
+          ungraded: p?.ungraded,
+          grainline: p?.grainline,
+          note: p?.note,
+          ...pieceEdits[tgt.key],
+          name: shownName,
+        };
+      } else {
+        vals = { ...newEdits[tgt.key], name: shownName };
+      }
+      patch = (d) => {
+        const { name, ...rest } = d;
+        let target = tgt;
+        if (name !== undefined) {
+          setDraftNames((prev) => ({ ...prev, [ci]: name }));
+          const nk = newEditKey(name.trim() || defaultPieceName(row));
+          const pk = liveKeyByName.get(nk);
+          target = pk ? { kind: 'piece', key: pk } : { kind: 'new', key: nk };
+          // Renaming carries this piece's buffered fields to the new name unless that name already
+          // has its own (another block's piece). The old buffer stays: other blocks may still
+          // resolve to it.
+          if (tgt.kind === 'new' && target.kind === 'new' && target.key !== tgt.key) {
+            const from = tgt.key;
+            const to = target.key;
+            setNewEdits((prev) =>
+              prev[from] && !prev[to] ? { ...prev, [to]: { ...prev[from] } } : prev,
+            );
+          }
+        }
+        if (Object.keys(rest).length === 0) return;
+        const t = target;
+        if (t.kind === 'piece')
+          setPieceEdits((prev) => ({ ...prev, [t.key]: { ...(prev[t.key] ?? {}), ...rest } }));
+        else setNewEdits((prev) => ({ ...prev, [t.key]: { ...(prev[t.key] ?? {}), ...rest } }));
+      };
+      title = newNameOf(row);
+    }
+    // Form anchors only for a piece that exists in the form (error deep links land here).
+    const anchor = (f: string) => (index >= 0 ? { 'data-field': `pieces.${index}.${f}` } : {});
+    const isPiece = st.kind !== 'none';
+    const linked = st.kind === 'existing';
+
+    return (
+      <div className='space-y-2'>
+        <div>
+          <Text
+            size='micro'
+            component='p'
+            className='truncate border-b border-borderColor pb-0.5 uppercase'
+            title={title}
+          >
+            {title}
+          </Text>
+          <Text size='micro' variant='label' component='p' className='pt-0.5'>
+            ×{focus.instances} per garment
+            {focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
+          </Text>
+        </div>
+        {linked && relinkOf !== ci ? null : (
+          <PanelField label='this is'>
+            <select
+              className={BOX}
+              aria-label={`what block ${focus.block} is`}
+              value={value}
+              disabled={readOnly || !focus.known}
+              onChange={(e) => choose(ci, e.target.value)}
+            >
+              <option value={CREATE}>+ new piece</option>
+              <option value=''>not a piece</option>
+              {pieceOptions.map((p) => (
+                <option key={p.lineKey} value={p.lineKey}>
+                  {pieceName(p.lineKey) || p.name}
+                </option>
+              ))}
+            </select>
+          </PanelField>
+        )}
+        {isPiece && (
+          <>
+            <PanelField
+              label='name'
+              door={
+                linked &&
+                relinkOf !== ci &&
+                !readOnly &&
+                focus.known && (
+                  <button
+                    type='button'
+                    className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
+                    onClick={() => setRelinkOf(ci)}
+                  >
+                    relink
+                  </button>
+                )
+              }
+            >
+              <Input
+                {...anchor('name')}
+                className={INPUT_BOX}
+                aria-label='piece name'
+                placeholder='piece name'
+                disabled={readOnly}
+                value={vals.name ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  patch({ name: e.target.value })
+                }
+              />
+            </PanelField>
+            <div className='grid grid-cols-2 gap-1'>
+              <Chip
+                className={TOGGLE_BOX}
+                selected={!!vals.fused}
+                pressed={!!vals.fused}
+                disabled={readOnly}
+                aria-label='fused'
+                onClick={() =>
+                  // Unchecking clears the fusing markup at once (pieces-tab, 0304).
+                  patch(
+                    vals.fused
+                      ? { fused: false, fusingMode: UNSET_FUSING_MODE, fusingWidthMm: '' }
+                      : { fused: true },
+                  )
+                }
+              >
+                fused
+              </Chip>
+              <Chip
+                className={TOGGLE_BOX}
+                selected={!!vals.ungraded}
+                pressed={!!vals.ungraded}
+                disabled={readOnly}
+                aria-label='ungraded'
+                onClick={() => patch({ ungraded: !vals.ungraded })}
+              >
+                ungraded
+              </Chip>
+            </div>
+            {!!vals.fused && (
+              <PanelField label="how it's fused">
+                <div className='flex gap-1'>
+                  <select
+                    className={`${BOX} min-w-0 flex-1`}
+                    aria-label="how it's fused"
+                    {...anchor('fusingMode')}
+                    disabled={readOnly}
+                    value={vals.fusingMode ?? UNSET_FUSING_MODE}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      patch(
+                        fusingTakesWidth(mode)
+                          ? { fusingMode: mode }
+                          : { fusingMode: mode, fusingWidthMm: '' },
+                      );
+                    }}
+                  >
+                    {fusingModeOptionsFor(vals.fusingMode).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {fusingTakesWidth(vals.fusingMode) && (
+                    <Input
+                      type='number'
+                      min='0.5'
+                      max='100'
+                      step='0.5'
+                      placeholder='mm'
+                      aria-label='fusing strip width, mm'
+                      className={`${INPUT_BOX} w-16 shrink-0`}
+                      {...anchor('fusingWidthMm')}
+                      disabled={readOnly}
+                      value={vals.fusingWidthMm ?? ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        patch({ fusingWidthMm: e.target.value })
+                      }
+                    />
+                  )}
+                </div>
+              </PanelField>
+            )}
+            <PanelField label='grain'>
+              {/* The arrow is the select's own glyph: it sits inside the box, where a chevron would. */}
+              <div className='relative'>
+                <select
+                  className={`${BOX} pr-6`}
+                  aria-label='grainline'
+                  {...anchor('grainline')}
+                  disabled={readOnly}
+                  value={vals.grainline ?? ''}
+                  onChange={(e) => patch({ grainline: e.target.value })}
+                >
+                  {grainlineOptionsFor(vals.grainline).map((o) => (
+                    <option key={o.value || '(unset)'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span
+                  aria-hidden
+                  className='pointer-events-none absolute inset-y-0 right-[7px] flex items-center text-micro'
+                >
+                  {grainlineArrow(vals.grainline)}
+                </span>
+              </div>
+            </PanelField>
+            <PanelField label='note'>
+              <Input
+                {...anchor('note')}
+                className={INPUT_BOX}
+                aria-label='note'
+                disabled={readOnly}
+                value={vals.note ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  patch({ note: e.target.value })
+                }
+              />
+            </PanelField>
+          </>
+        )}
+      </div>
+    );
+  })();
 
   return (
     <ConfirmationModal
@@ -1455,733 +2220,126 @@ export function PieceMatchModal({
       onOpenChange={(o: boolean) => {
         if (!o && !saving) onClose();
       }}
-      onConfirm={apply}
+      onConfirm={canSave ? apply : onClose}
       onCancel={onClose}
-      title={`cut pieces from DXF · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
-      confirmLabel={
-        confirmParts.length > 0 ? `apply (${confirmParts.join(', ')})` : 'apply'
-      }
-      // Пока хоть один спор не разрешён, применять НЕЧЕГО: набор, который ушёл бы на сервер, для
-      // него невалиден, и он отклонит сохранение ВСЕЙ карты. Кнопка гаснет вместе с объяснением
-      // выше — это и есть «предупредить до сохранения, а не после».
-      //
-      // Удаления и пересчёт × — самостоятельные исходы, а не довесок к сопоставлению: чертёж, из
-      // которого блок исчез или в котором сменилось число копий, не приносит НИ ОДНОГО нового
-      // сопоставления, и требование «сначала сопоставь хоть что-нибудь» запирало бы карточку с
-      // призраком детали и с неверным числом на изделие навсегда.
-      confirmDisabled={
-        saving ||
-        unresolvedCollapses.length > 0 ||
-        (decided === 0 &&
-          toUnmap === 0 &&
-          collapses.size === 0 &&
-          outcome.removed === 0 &&
-          outcome.updated === 0)
-      }
+      title={`pieces · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
+      confirmLabel={canSave ? 'save' : 'done'}
+      confirmDisabled={canSave && (saving || blocked)}
       width='lg'
       closeOnConfirm={false}
     >
       <div className='space-y-2'>
-        {parse.phase === 'loading' && (
-          <Text size='micro' variant='label' component='p'>
-            parsing DXF…
-          </Text>
-        )}
-        {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
-
-        {/* СХЛОПЫВАНИЕ АЛИАСОВ (0267). Две строки BOM, разложенные в ОДНО назначение, сливают свои
-            наборы связей — и если в обеих лежал блок с одним именем, на один блок оказывается два
-            ответа. Сервер такую пару не примет и отклонит сохранение ВСЕЙ карты, поэтому спор
-            показывается здесь, до записи, и решает его человек: имя блока ничего не говорит о том,
-            какая из двух деталей верна, а угадать за оператора — это ровно та ошибка, из-за которой
-            назначения вообще не бэкфилились. */}
-        {collapses.size > 0 && (
-          <CalloutBox tone='error'>
-            <div className='space-y-1'>
-              <Text size='micro' component='p'>
-                <b>one block — two cut pieces.</b> several BOM lines are sorted into this purpose,
-                and their links merged. choose which piece stays with the block: the second link will
-                be dropped. until the dispute is settled there is nothing to save — the server will
-                reject the whole card.
+        {(sheets.length > 1 || parse.phase === 'loading' || warnings.length > 0) && (
+          <div className='flex min-h-[22px] flex-wrap items-center gap-2'>
+            {sheets.length > 1 && (
+              <ChipRow>
+                {sheets.map((s, i) => (
+                  <Chip key={s.index} selected={i === activeFile} onClick={() => setActiveFile(i)}>
+                    {s.name}
+                  </Chip>
+                ))}
+              </ChipRow>
+            )}
+            {parse.phase === 'loading' && (
+              <Text size='micro' variant='label' component='span'>
+                reading…
               </Text>
-              {[...collapses.entries()].map(([ci, c]) => (
-                <div key={ci} className='flex flex-wrap items-center gap-1.5'>
-                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                    {c.block}
-                  </Text>
-                  <select
-                    className='h-7 min-w-0 flex-1 border border-borderColor bg-bgColor px-1 text-micro'
-                    aria-label={`cut piece for the disputed block ${c.block}`}
-                    value={collapseChoice[ci] ?? ''}
-                    onChange={(e) =>
-                      setCollapseChoice((prev) => ({ ...prev, [ci]: e.target.value }))
-                    }
-                  >
-                    <option value=''>choose a piece…</option>
-                    {c.pieceKeys.map((k) => (
-                      <option key={k} value={k}>
-                        {nameByPieceKey.get(k.toLowerCase()) ?? k}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+            )}
+            <div className='ml-auto'>
+              <HeaderWarnings items={warnings} />
             </div>
-          </CalloutBox>
+          </div>
         )}
 
-        {/* Parse warnings were never rendered here (the nesting modal has always shown them).
-            That was survivable while the surface was a table of names; it is not now that the
-            sheet is presented AS the file. `useNesting` only errors when EVERY file fails, so a
-            fabric whose second sheet 404'd on the CDN would draw one drawing, show no tab bar
-            (one sheet parsed), and say nothing — and the operator would map what loaded and
-            close, believing the fabric is done. */}
-        {parse.phase === 'ready' && parse.warnings.length > 0 && (
-          <CalloutBox tone='note'>
-            <div className='space-y-0.5'>
-              {parse.warnings.map((w, i) => (
-                <Text key={i} size='micro' component='p'>
-                  {w}
-                </Text>
-              ))}
-            </div>
-          </CalloutBox>
-        )}
-
-        {parse.phase === 'ready' && rows.length === 0 && alreadyMapped === 0 && (
-          <CalloutBox tone='note'>
-            the files carry no named blocks — there is nothing to link; such DXFs do nest, but no
-            pieces are created from them
-          </CalloutBox>
-        )}
-
-        {/* Sheet + inspector. The drawing is the question, the panel beside it is the answer —
-            they sit side by side so choosing never means losing sight of the shape. */}
         {parse.phase === 'ready' && sheet && (
-          <div className='flex flex-col gap-2 lg:flex-row'>
-            <div className='min-w-0 flex-1'>
-              {sheets.length > 1 && (
-                <div className='mb-1 flex flex-wrap items-center gap-1'>
-                  {sheets.map((s, i) => (
-                    <Button
-                      key={s.index}
-                      type='button'
-                      variant={i === activeFile ? 'main' : 'secondary'}
-                      size='xs'
-                      onClick={() => setActiveFile(i)}
-                    >
-                      {s.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {/* Which layer holds the piece. Offered only when the file actually draws it on
-                  more than one (sewing line + cutting line), and the default is the layer that
-                  GRADES: a contour identical in every size is a reference, not the piece. Left
-                  switchable because the guess is a guess, and reading the wrong contour means
-                  cutting to the wrong size. */}
-              {layerOpts.length > 1 && (
-                <div className='mb-1 flex flex-wrap items-center gap-1'>
-                  <Text size='nano' variant='label' component='span'>
-                    contour:
-                  </Text>
-                  {layerOpts.map((o) => (
-                    <Button
-                      key={o.layer || '(none)'}
-                      type='button'
-                      variant={o.layer === contourLayer ? 'main' : 'secondary'}
-                      size='xs'
-                      title={
-                        o.checked === 0
-                          ? `layer ${o.layer}: ${o.pieces} contours, nothing to compare sizes against`
-                          : `layer ${o.layer}: ${o.pieces} contours, graded on ${o.graded} of ${o.checked} pieces`
-                      }
-                      onClick={() => setActiveLayer(o.layer)}
-                    >
-                      layer {o.layer || '—'}
-                      {o.checked > 0 && o.graded === 0 ? ' (not graded)' : ''}
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {/* Слои чертежа. Линия шва (зазор до линии кроя — это и есть припуск), надсечки,
-                  свёрла, вытачки: по ним режут, и деталь без них — голый силуэт. Показываются
-                  все, выключить можно любой: на плотном листе лишние слои превращаются в кашу. */}
-              {innerLayerNames.length > 0 && (
-                <div className='mb-1 flex flex-wrap items-center gap-2'>
-                  <Text size='nano' variant='label' component='span'>
-                    drawing layers:
-                  </Text>
-                  {innerLayerNames.map(([layer, n]) => (
-                    <label key={layer} className='flex cursor-pointer items-center gap-1'>
-                      <input
-                        type='checkbox'
-                        checked={!hiddenInner.includes(layer)}
-                        onChange={(e) =>
-                          setHiddenInner((prev) =>
-                            e.target.checked ? prev.filter((l) => l !== layer) : [...prev, layer],
-                          )
-                        }
-                      />
-                      <Text size='nano' variant='label' component='span'>
-                        {layer} ({n})
-                      </Text>
-                    </label>
-                  ))}
-                </div>
-              )}
-              {/* Долевая на листе. Раскладка разворачивает деталь именно по этой линии, так что
-                  увидеть её здесь — единственный способ проверить прочитанное до того, как
-                  ткань разрезана. */}
-              {grainLayer !== '' && (
-                <div className='mb-1'>
-                  <label className='flex cursor-pointer items-center gap-1.5'>
-                    <input
-                      type='checkbox'
-                      checked={showGrain}
-                      onChange={(e) => setShowGrain(e.target.checked)}
-                    />
-                    <Text size='nano' variant='label' component='span'>
-                      show the grainline (layer {grainLayer}) — the marker turns the piece by it
-                    </Text>
-                  </label>
-                </div>
-              )}
-              {/* В файле есть размеры, которых нет в карточке. Пока их там нет, хвост у таких
-                  блоков не отрезается, и одна деталь кроя двоится — по строке на каждый
-                  непризнанный размер. Добавляет их ЧЕЛОВЕК: резать имена по всему словарю
-                  нельзя («FP_L» — левая полочка, а «L» в словаре есть как размер), поэтому
-                  машина только показывает находку. */}
-              {addedSizes.length > 0 && (
-                <CalloutBox tone='note'>
-                  <Text size='micro' component='p'>
-                    the card's size range was topped up from the file: {addedSizes.join(', ')} —
-                    already in the form, will be saved together with the card
-                  </Text>
-                </CalloutBox>
-              )}
-              {/* Осталась группа «без размера», хотя все словарные размеры уже заведены — значит
-                  хвост этих блоков размером не является вовсе.
-                  UNI-контуры в это число НЕ входят: у них размера нет ПО ЗАЯВЛЕНИЮ автора, и
-                  «не опознан» звучало бы про них как поломка разбора. Когда кроме них в группе
-                  никого нет, предупреждения не остаётся вовсе. */}
-              {missingSizes.length === 0 &&
-                sizeOptions.length > 1 &&
-                (() => {
-                  const rest = sizeOptions.find((o) => o.size === '');
-                  const unnamed = rest ? rest.count - rest.uniCount : 0;
-                  if (unnamed <= 0) return null;
-                  return (
-                    <CalloutBox tone='warning'>
-                      <Text size='micro' component='p'>
-                        the size in the name was not recognised on {unnamed} contours — such blocks
-                        will create cut pieces of their own, not shared with the other sizes
-                      </Text>
-                    </CalloutBox>
-                  );
-                })()}
-              {missingOnLayer.length > 0 && (
-                <CalloutBox tone='warning'>
-                  <Text size='micro' component='p'>
-                    layer {contourLayer || '—'} has no contour for {missingOnLayer.length} blocks —
-                    they show neither on the sheet nor in the list: {missingOnLayer.slice(0, 6).join(', ')}
-                    {missingOnLayer.length > 6 ? '…' : ''}
-                  </Text>
-                </CalloutBox>
-              )}
-              {/* One graded DXF draws the whole size run on one sheet. Overlaid they are
-                  unreadable, so only one size is ever on screen — and since a cut piece is ONE
-                  piece across the grade, switching size changes what you look at, never what
-                  gets created. */}
-              {sizeOptions.length > 1 && (
-                <div className='mb-1 flex flex-wrap items-center gap-1'>
-                  <Text size='nano' variant='label' component='span'>
-                    size:
-                  </Text>
-                  {sizeOptions.map((o) => (
-                    <Button
-                      key={o.size || '(none)'}
-                      type='button'
-                      variant={o.size === shownSize ? 'main' : 'secondary'}
-                      size='xs'
-                      title={`${o.count} contours`}
-                      onClick={() => setActiveSize(o.size)}
-                    >
-                      {/* Группа целиком из помеченных контуров — это «UNI», а не «без размера»:
-                          размер у них не потерян, его и не должно быть. Смешанная группа
-                          подписывается прежним словом — там размер и правда не опознан. */}
-                      {o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'no size')}
-                    </Button>
-                  ))}
-                </div>
-              )}
+          <div className='flex flex-wrap gap-4'>
+            <div className='min-w-0' style={{ flex: '999 1 560px' }}>
               <PieceSheet
                 // Keyed by the FILE and the SIZE: zoom/pan live inside the sheet, so without a
-                // remount switching either kept the previous drawing's viewBox — and two sizes
-                // sit at different places on the sheet, so the view would land on nothing.
+                // remount switching either kept the previous drawing's viewBox.
                 key={`${sheet.index}|${shownSize}`}
                 pieces={sheetPieces}
-                grainLayer={showGrain ? grainLayer : ''}
+                grainLayer={grainLayer}
                 innerLayers={innerLayers}
                 keyOf={ciOf}
                 markOf={markOf}
                 labelOf={labelOf}
                 selectedKey={selected}
-                onPick={setSelected}
+                onPick={(key) => {
+                  if (!pickingOldPieces) setSelected(key);
+                }}
+                tall
+                bare
+                topLeft={
+                  // One size on screen at a time: a piece is ONE piece across the grade, so
+                  // switching changes what you look at, never what gets created.
+                  sizeOptions.length > 1 && (
+                    <CanvasSegments
+                      label='size on screen'
+                      value={shownSize}
+                      onChange={setActiveSize}
+                      options={sizeOptions.map((o) => ({
+                        key: o.size,
+                        label:
+                          o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'no size'),
+                      }))}
+                    />
+                  )
+                }
               />
             </div>
-
-            <div className='w-full shrink-0 space-y-1.5 lg:w-72'>
-              {!focus && (
-                <Text size='micro' variant='label' component='p'>
-                  pick a piece on the sheet — its shape and its neighbours show what it is, which
-                  the block name from the file will not tell you.
-                </Text>
+            <div
+              className='min-w-0 max-w-[420px] space-y-4 lg:max-h-[60vh] lg:overflow-y-auto'
+              style={{ flex: '1 1 380px' }}
+            >
+              {editor}
+              {/* A piece is open: the open question stays one click away instead of vanishing. */}
+              {focus && deleteCandidates.length > 0 && (
+                <button
+                  type='button'
+                  className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
+                  onClick={() => setSelected(null)}
+                >
+                  {deleteCandidates.length === 1
+                    ? '1 card piece not in this file'
+                    : `${deleteCandidates.length} card pieces not in this file`}
+                </button>
               )}
-              {focus && (
-                <div className='space-y-1.5 border border-borderColor p-2'>
-                  <Text size='micro' component='p' className='break-words'>
-                    piece <span className='uppercase'>{focus.block}</span> · ×{focus.instances} per
-                    garment
-                  </Text>
-                  {focus.sizes.length > 0 && (
-                    <Text size='nano' variant='label' component='p'>
-                      one across sizes: {focus.sizes.join(' ')}
-                    </Text>
-                  )}
-                  {focus.mappedTo && !focus.dropped ? (
-                    <>
-                      {/* Renaming right here is the point of the sheet: the shape tells you what
-                          the piece IS, so that is the moment the right name is known. It renames
-                          the cut piece everywhere, because the alias points at its line_key. */}
-                      {nameField('cut piece', focus.mappedName ?? '', (v) =>
-                        renamePiece(focus.mappedTo!, v),
-                      )}
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        size='xs'
-                        onClick={() => toggleUnmap(focus.ci)}
-                      >
-                        unlink
-                      </Button>
-                    </>
-                  ) : focus.dropped ? (
-                    <>
-                      <Text size='micro' variant='label' component='p'>
-                        the link to “{focus.mappedName}” will be dropped
-                      </Text>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        size='xs'
-                        onClick={() => toggleUnmap(focus.ci)}
-                      >
-                        restore
-                      </Button>
-                    </>
-                  ) : focus.row ? (
-                    <>
-                      <div className='flex flex-wrap items-center gap-1'>
-                        {choiceSelect(
-                          focus.ci,
-                          focus.row.block,
-                          focus.row.instances,
-                          focus.row.choice,
-                        )}
-                        {basisLabel(focus.row)}
-                      </div>
-                      {/* Creating: the block name is only the default. «PERED_S» is what the
-                          exporter called it; the factory sheet needs «полочка правая». */}
-                      {focus.row.choice === CREATE &&
-                        nameField(
-                          'name of the new piece',
-                          draftNames[focus.ci] ?? defaultPieceName(focus.row),
-                          (v) => setDraftNames((prev) => ({ ...prev, [focus.ci]: v })),
-                        )}
-                      {/* Bound to an existing piece in this same pass — renaming it here is the
-                          same one-place edit as above. */}
-                      {focus.row.choice && focus.row.choice !== CREATE &&
-                        nameField(
-                          'cut piece',
-                          nameByPieceKey.get(focus.row.choice.toLowerCase()) ?? '',
-                          (v) => renamePiece(focus.row!.choice, v),
-                        )}
-                    </>
-                  ) : (
-                    <Text size='micro' variant='label' component='p'>
-                      this block is not from the current parse — reopen the dialog
-                    </Text>
-                  )}
-                </div>
-              )}
-              <Text size='nano' variant='label' component='p'>
-                the link is stored by {scope.byPurpose ? 'PURPOSE' : 'FABRIC'} and points at the cut
-                piece, not at a name: block names wander from file to file. that is why the next size
-                of the same fabric arrives already matched, and adds no cut pieces of its own.
-                {scope.byPurpose && scope.lines.length > 1
-                  ? ' several articles are sorted into this purpose — the link is shared by all of them: the pattern piece is one, only the cloth differs.'
-                  : ''}
-              </Text>
-              <Text size='nano' variant='label' component='p'>
-                links and new pieces are written when the card is saved.
-              </Text>
             </div>
           </div>
         )}
 
-        {/* НЕПОЛНЫЙ РАЗБОР — ОБЪЯСНЕНИЕ НА МЕСТЕ СЕКЦИИ УДАЛЕНИЯ (находка 1). Секция ниже просто
-            не появится, а пустое место читается как «всё на месте» — то есть ровно как ответ,
-            которого разбор дать не может. Поэтому вместо предложений здесь стоит причина.
-            Здесь же названы ОБА выключенных исхода (находка 2 второго ревью): ноль в «обновить ×»
-            обязан быть объяснён там же, где ноль в удалениях, иначе он читается как «в чертеже всё
-            совпало» — то есть ровно наоборот. */}
-        {parse.phase === 'ready' && !parse.complete && (
-          <div className='space-y-1'>
-            <GroupLabel flush>no longer in the drawing (—)</GroupLabel>
-            <CalloutBox tone='warning'>
-              <div className='space-y-0.5'>
-                <Text size='micro' component='p'>
-                  <b>
-                    files parsed: {parse.filesParsed} of {parse.filesTotal}
-                    {parse.blocksSkipped > 0
-                      ? `, blocks skipped inside the files: ${parse.blocksSkipped}`
-                      : ''}
-                  </b>{' '}
-                  — there will be no suggestions to delete pieces. an incomplete parse cannot claim
-                  that a piece is gone from the drawing: its block could have been in a sheet that
-                  didn't download or didn't read
-                  {parse.blocksSkipped > 0
-                    ? ', or could have stayed unexpanded inside the file itself (a reference to a missing block definition, nesting too deep, the insert limit exhausted)'
-                    : ''}
-                  . check the parse warnings above and reopen the dialog.
+        {/* Blocking: two BOM lines sorted into one purpose merged two answers for one block. The
+            server refuses that pair by failing the whole card save, so a human picks here. */}
+        {collapses.size > 0 && (
+          <div>
+            <GroupLabel>one block, two pieces</GroupLabel>
+            {[...collapses.entries()].map(([ci, c]) => (
+              <div key={ci} className='flex items-center gap-2 py-0.5'>
+                <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                  {c.block}
                 </Text>
-                <Text size='micro' component='p'>
-                  <b>“per garment” and “how it's cut” are not recomputed either</b> — on pieces that
-                  already exist they stay as they are. “there are so many of this piece per garment”
-                  is a claim about the FULL set of blocks: one sheet fails to arrive and the number
-                  quietly drops, and the cutting markup changes after it. that is why “update ×”
-                  shows zero here, and every linked piece goes to “unchanged”.
-                </Text>
-                <Text size='nano' variant='label' component='p'>
-                  matching and creating new pieces work as usual: they claim things about what IS in
-                  the files, not about what is missing from them and how much of it there is in all.
-                </Text>
+                <select
+                  className={`${selectCls} w-56`}
+                  aria-label={`piece for ${c.block}`}
+                  disabled={readOnly}
+                  value={collapseChoice[ci] ?? ''}
+                  onChange={(e) => setCollapseChoice((prev) => ({ ...prev, [ci]: e.target.value }))}
+                >
+                  <option value=''>choose a piece…</option>
+                  {c.pieceKeys.map((k) => (
+                    <option key={k} value={k}>
+                      {pieceName(k) || k}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </CalloutBox>
+            ))}
           </div>
         )}
 
-        {/* В ЧЕРТЕЖЕ БОЛЬШЕ НЕТ — второй исход этого диалога, рядом с первым. Показывается ТОЛЬКО
-            составом потерь: «деталь удалится» само по себе звучит как уборка мусора, а уносит оно
-            строки рецепта колорвеев и замеренные площади — работу, которую делали руками и
-            восстановить которую будет неоткуда. Решение по каждой детали отдельное: чертёж
-            утверждает про крой, а деталь могла жить в карточке и по другой причине. */}
-        {parse.phase === 'ready' && deleteCandidates.length > 0 && (
-          <div className='space-y-1'>
-            {massVanish && (
-              <CalloutBox tone='error'>
-                <Text size='micro' component='p'>
-                  <b>
-                    pieces vanished: {deleteCandidates.length} of {scopeBoundPieces} bound to this
-                    fabric.
-                  </b>{' '}
-                  it looks like the wrong file was uploaded or the wrong layer picked — check the
-                  file list and the chosen contour above. the parse itself is COMPLETE — every file
-                  was read and not one block inside them was skipped: an incomplete parse never
-                  yields deletion suggestions at all. you can apply anyway — replacing the pattern
-                  pieces wholesale is sometimes legitimate too.
-                </Text>
-              </CalloutBox>
-            )}
-            <GroupLabel flush>no longer in the drawing ({deleteCandidates.length})</GroupLabel>
-            {/* Формулировка называет ИМЕННО тот критерий, по которому деталь сюда попала: блок не
-                встретился разбору ни разу. «Не нашлось контура» — это другое утверждение, и по нему
-                деталь не удаляют (находка 1 третьего ревью). */}
-            <Text size='nano' variant='label' component='p'>
-              the blocks of these pieces were not met once in the parsed files of this fabric — not
-              on any layer, not in any size — and they are not bound to any other fabric either. by
-              default such a piece is deleted — together with everything that rests on it.
-            </Text>
-            {deleteCandidates.map((c) => {
-              const decision = deleteDecision(c.lineKey);
-              const key = c.lineKey.trim().toLowerCase();
-              const hold = recipeHold.get(key);
-              const areas = areaRowsByPiece.get(key) ?? 0;
-              const ops = opsByPiece.get(key) ?? 0;
-              return (
-                <div key={c.lineKey} className='space-y-0.5 pt-1'>
-                  <div className='flex flex-wrap items-center gap-1.5'>
-                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                      {c.name?.trim() || '—'}
-                    </Text>
-                    {/* Состояние читается СЛОВОМ. Красный здесь по делу — «сейчас будет
-                        разрушено», — но он второй, а не единственный носитель смысла. */}
-                    <Pill tone={decision === 'delete' ? 'warn' : 'mut'}>
-                      {decision === 'delete' ? 'will be deleted' : 'stays'}
-                    </Pill>
-                    <select
-                      className='h-7 border border-borderColor bg-bgColor px-1 text-micro'
-                      aria-label={`what to do with piece ${c.name?.trim() || c.lineKey}`}
-                      value={decision}
-                      onChange={(e) =>
-                        setDeleteChoice((prev) =>
-                          new Map(prev).set(
-                            c.lineKey,
-                            e.target.value === 'keep' ? 'keep' : 'delete',
-                          ),
-                        )
-                      }
-                    >
-                      <option value='delete'>delete</option>
-                      <option value='keep'>keep</option>
-                    </select>
-                  </div>
-                  <Text size='nano' variant='label' component='p' className='break-words'>
-                    blocks gone: {c.blocks.join(', ')}
-                  </Text>
-                  {decision === 'delete' ? (
-                    <>
-                      <Row
-                        label={
-                          <Text size='micro' component='span'>
-                            recipe lines
-                            {hold ? ` (${hold.colorways.join(', ')})` : ' in the card colourways'}
-                          </Text>
-                        }
-                        value={
-                          <Text size='micro' component='span'>
-                            {hold?.rows ?? 0}
-                          </Text>
-                        }
-                      />
-                      {/* Вписанная норма — единственное здесь, что считал человек. Назначение ткани
-                          без детали ни во что не входит, а число — входит в себестоимость. */}
-                      {(hold?.withNorm ?? 0) > 0 && (
-                        <Row
-                          tone='error'
-                          label={
-                            <Text size='micro' component='span'>
-                              of them with a NORM typed in — there will be nowhere to restore it from
-                            </Text>
-                          }
-                          value={
-                            <Text size='micro' component='span'>
-                              {hold?.withNorm ?? 0}
-                            </Text>
-                          }
-                        />
-                      )}
-                      <Row
-                        label={
-                          <Text size='micro' component='span'>
-                            measured areas, rows by size
-                          </Text>
-                        }
-                        value={
-                          <Text size='micro' component='span'>
-                            {areas > 0 ? areas : '—'}
-                          </Text>
-                        }
-                      />
-                      <Row
-                        label={
-                          <Text size='micro' component='span'>
-                            assembly operations will lose this piece
-                          </Text>
-                        }
-                        value={
-                          <Text size='micro' component='span'>
-                            {ops > 0 ? ops : '—'}
-                          </Text>
-                        }
-                      />
-                      {/* Выноска эскиза переживает деталь намеренно: номер на чертеже принадлежит
-                          рисунку, а не строке таблицы, и стирать его из-за смены лекал значило бы
-                          переписывать эскиз чужими руками. */}
-                      <Text size='nano' variant='label' component='p'>
-                        the sketch callout stays — its number belongs to the drawing, not to the piece
-                      </Text>
-                    </>
-                  ) : (
-                    <Text size='nano' variant='label' component='p'>
-                      the piece stays on the card together with its link to a block that is no longer
-                      in the drawing
-                    </Text>
-                  )}
-                </div>
-              );
-            })}
-            <Text size='nano' variant='label' component='p'>
-              recipe lines are counted across the colourways the card shows: it does not read archived
-              ones, and their lines hold the piece just the same and will go with it.
-            </Text>
-            <Text size='nano' variant='label' component='p'>
-              the deletion is applied when the card is SAVED — nothing is lost before that, and it
-              can be undone by re-reading the card.
-            </Text>
-          </div>
-        )}
-
-        {/* Заведение пачкой. Имена уже нормализованы — BP_1_S и BP_1_XL это один BP_1 — так что
-            «завести всё» создаёт ровно по одной детали кроя на деталь чертежа, а не по одной на
-            размер. Девять выпадающих списков подряд никто не выберет правильно. */}
-        {rows.length > 0 && (
-          <div className='flex flex-wrap items-center gap-2'>
-            <Text size='nano' variant='label' component='span'>
-              not matched: {rows.length}
-            </Text>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={rows.every((r) => r.choice)}
-              onClick={() =>
-                setRows((prev) => prev.map((r) => (r.choice ? r : { ...r, choice: CREATE })))
-              }
-            >
-              create all as cut pieces ({rows.filter((r) => !r.choice).length})
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={rows.every((r) => !r.choice)}
-              onClick={() => setRows((prev) => prev.map((r) => ({ ...r, choice: '' })))}
-            >
-              clear the choice
-            </Button>
-          </div>
-        )}
-
-        {/* The same state as a list: a sheet answers «which piece is this», a list answers
-            «what is still unanswered» and stays reachable from the keyboard. */}
-        {rows.length > 0 && (
-          <DataTable variant='grid' className='[&_td]:text-micro'>
-            <thead>
-              <tr>
-                <th>piece in the DXF</th>
-                <th>sizes</th>
-                <th>per garment</th>
-                <th>cut piece</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const ci = r.block.toLowerCase();
-                return (
-                  <tr
-                    key={r.block}
-                    className={selected === ci ? 'bg-bgZebra' : undefined}
-                    onFocus={() => setSelected(ci)}
-                  >
-                    <td className='min-w-0 truncate'>
-                      <button
-                        type='button'
-                        className='text-left underline-offset-2 hover:underline'
-                        onClick={() => setSelected(ci)}
-                        title='show on the sheet'
-                      >
-                        {r.block}
-                      </button>
-                    </td>
-                    {/* Размеры, в которых деталь нашлась. Это и есть видимое доказательство,
-                        что строка одна на всю градацию: BP_1_XS…BP_1_XL — одна деталь BP_1. */}
-                    <td className='whitespace-nowrap'>
-                      {r.sizes.length > 0 ? r.sizes.join(' ') : '—'}
-                    </td>
-                    <td>×{r.instances}</td>
-                    <td>
-                      <div className='flex flex-wrap items-center gap-1'>
-                        {choiceSelect(ci, r.block, r.instances, r.choice)}
-                        {basisLabel(r)}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
-        )}
-
-        {rows.length > 0 && (
-          <Text size='nano' variant='label' component='p'>
-            names are normalised: BP_1_S and BP_1_XL are one piece BP_1, and it is created once for
-            all sizes. “skip” leaves the block unmatched — the dialog will offer it again.
-          </Text>
-        )}
-
-        {/* Already mapped, with a way OUT. A wrong mapping puts the wrong cloth on a piece at the
-            cutting table; leaving it unreachable would make the dialog's own caution about that
-            empty words. */}
-        {mappedRows.length > 0 && (
-          <div className='space-y-1'>
-            <Text size='nano' variant='label' component='p'>
-              already matched for “{fabricName}” ({mappedRows.length})
-            </Text>
-            {mappedRows.map((m) => {
-              const off = unmapped.includes(m.ci);
-              return (
-                <div key={m.ci} className='flex flex-wrap items-center gap-1.5'>
-                  <button
-                    type='button'
-                    className={`min-w-0 flex-1 truncate text-left text-micro underline-offset-2 hover:underline ${off ? 'line-through opacity-60' : ''}`}
-                    onClick={() => setSelected(m.ci)}
-                    title='show on the sheet'
-                  >
-                    {m.block} → {m.pieceName}
-                  </button>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    onClick={() => toggleUnmap(m.ci)}
-                  >
-                    {off ? 'restore' : 'unlink'}
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ЧТО СДЕЛАЕТ ОДНО НАЖАТИЕ — все четыре исхода, названные рядом с кнопкой, которая их
-            исполнит. Раньше диалог только сопоставлял, и подпись на кнопке была полным ответом;
-            теперь он заводит, удаляет, пересчитывает и размечает, а увидеть это можно было бы
-            только по сохранённой карточке — то есть после. «Без изменений» стоит здесь наравне с
-            остальными: это и есть видимое доказательство, что повторный проход по тем же файлам
-            ничего не переписывает. */}
-        {parse.phase === 'ready' && hasOutcome && (
-          <div className='space-y-0.5 border border-borderColor p-2'>
-            <Text size='micro' component='p'>
-              applying: create {outcome.created} · delete {outcome.removed} · update ×{' '}
-              {outcome.updated} · unchanged {outcome.unchanged}
-            </Text>
-            {/* Ноль в «обновить ×» имеет ДВА разных смысла — «чертёж сошёлся» и «считать не по
-                чему», — и по одной цифре они неразличимы. Второй называется прямо здесь, у самой
-                цифры: причина подробно разобрана выше, в блоке про неполный разбор. */}
-            {!parseComplete && (
-              <Text size='nano' variant='label' component='p'>
-                the parse is incomplete, so “update ×” is always zero here: “per garment” and “how
-                it's cut” on pieces that already exist are not touched at all — see the block about
-                the incomplete parse above.
-              </Text>
-            )}
-            <Text size='nano' variant='label' component='p'>
-              “update ×” — the per-garment count is recomputed from the drawing (a sum over the
-              different drawing pieces; copies of one piece split across per-size exports are not
-              added up), and “how it's cut: identical copies” is set where there was no answer: the
-              drawing carries every contour, so the piece is cut as it is drawn.
-            </Text>
-            <Text size='nano' variant='label' component='p'>
-              explicit “mirrored pairs” and “on fold” are not touched by the modal — except when the
-              new count makes a mirrored pair impossible (odd, or fewer than two): then “identical
-              copies” is set, otherwise the card will not save at all. the drawing here directly
-              contradicts the mark and carries every contour separately — so the piece is cut as it
-              is drawn.
-            </Text>
-          </div>
-        )}
+        {/* No sheet to sit beside (nothing drew): the gone-pieces question stands on its own. */}
+        {parse.phase === 'ready' && !sheet && goneQuestion}
       </div>
     </ConfirmationModal>
   );

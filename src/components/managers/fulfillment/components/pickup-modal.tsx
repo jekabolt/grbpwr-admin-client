@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { ConfirmationModal, Input, Text } from 'ui';
 import { useSchedulePickup } from '../hooks/useFulfillment';
 
 // Today as YYYY-MM-DD from local wall-clock parts (matches the SchedulePickup date field).

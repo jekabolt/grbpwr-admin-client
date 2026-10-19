@@ -1,0 +1,117 @@
+{
+  "_note": "Synthetic cards for placement without a seam (07-ENGINE-QUALITY §4.1–4.3). Compact form, expanded by skeleton.mjs into the SeamGraph contract: a piece is [name, areaMm2] or [name, areaMm2, twinName, 'identical' | 'mirror']; a seam is [nameA, nameB, score], each on a fresh edge; `rivals` [[i, j]] says seam j is within the ambiguity of seam i (ambiguousWith). Names are made up, not a card's.",
+  "cards": {
+    "strips": {
+      "_why": "Two strips of one front (upper larger than main) and a BOTTOM pocket with no seam to either: the pocket goes onto the main strip by its position word, before the strips meet.",
+      "category": "generic",
+      "pieces": [
+        ["FP_U_L", 52000],
+        ["FP_L", 48000],
+        ["BP", 90000],
+        ["PCK_BTTM_L", 4000]
+      ],
+      "seams": [
+        ["FP_U_L", "FP_L", 0.9],
+        ["FP_L", "BP", 0.9]
+      ]
+    },
+    "bag": {
+      "_why": "A bag of two identical panels (inner, outer; no body), a belt of two layers whose seam fits both alike (each the other's rival) and a border strip with no seam at all: the belt goes onto ONE panel now (the first on the card) as a decision; the border onto the panel with no parts; both before the panels meet.",
+      "category": "generic",
+      "pieces": [
+        ["INNER", 60000, "OUTER", "identical"],
+        ["OUTER", 60000],
+        ["BLT_1", 3000, "BLT_2", "identical"],
+        ["BLT_2", 3000],
+        ["BRDR", 8000]
+      ],
+      "seams": [
+        ["INNER", "OUTER", 0.9],
+        ["BLT_1", "BLT_2", 0.95],
+        ["BLT_1", "INNER", 0.78],
+        ["BLT_1", "OUTER", 0.78]
+      ],
+      "rivals": [
+        [2, 3],
+        [3, 2]
+      ]
+    },
+    "halves": {
+      "_why": "Two identical halves of a side pocket bag sewn to each other, one named for the back (PCK_B_L): not layers — one goes onto the front, the other onto the back.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["BP_L", 50000],
+        ["PCK_L", 5000, "PCK_B_L", "identical"],
+        ["PCK_B_L", 5000]
+      ],
+      "seams": [
+        ["FP_L", "BP_L", 0.9],
+        ["PCK_L", "PCK_B_L", 0.97]
+      ]
+    },
+    "orphans": {
+      "_why": "A left sleeve placket with no role in its name and no seam: onto the left panel with the fewest parts (the sleeve; the larger front already carries a pocket), as a guess.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["BP", 90000],
+        ["SLV_L", 30000],
+        ["PCK_L", 4000],
+        ["FLP_L", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85],
+        ["PCK_L", "FP_L", 0.8]
+      ]
+    },
+    "twinStrips": {
+      "_why": "E2 tie (07 review): a pocket with no seam and two strips of the left front alike in name, position and size: onto the first strip by name, said as a tie, never by where the pieces stand on the card.",
+      "category": "generic",
+      "pieces": [
+        ["FP_1_L", 50000],
+        ["FP_2_L", 50000],
+        ["BP", 90000],
+        ["PCK_L", 4000]
+      ],
+      "seams": [
+        ["FP_1_L", "FP_2_L", 0.9],
+        ["FP_2_L", "BP", 0.9]
+      ]
+    },
+    "twoTies": {
+      "_why": "Two INDEPENDENT E3 ties (07 re-review): a left and a right roleless, seamless tab, each with two panels of its hand alike. Settling the left one must not settle the right one.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["SLV_L", 50000],
+        ["FP_R", 50000],
+        ["SLV_R", 50000],
+        ["BP", 90000],
+        ["TAB_L", 2000],
+        ["TAB_R", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85],
+        ["FP_R", "BP", 0.9],
+        ["SLV_R", "BP", 0.85]
+      ]
+    },
+    "twinOrphan": {
+      "_why": "E3 tie (07 review): a left piece with no role and no seam, and two left panels with no parts and one size: onto the first by name, said as a tie.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["SLV_L", 50000],
+        ["BP", 90000],
+        ["TAB_L", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85]
+      ]
+    }
+  }
+}

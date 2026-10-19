@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 
-import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { ToggleSwitch } from 'ui';
 
 import { FieldRow } from '../../render/field-row';
 

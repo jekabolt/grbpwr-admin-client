@@ -2,7 +2,7 @@ import { AcctJournalEntry } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { AmountCell } from '../../components/amount-cell';
 import { CaveatBadge } from '../../components/caveat-badge';
 import { Pill } from '../../components/kit';
@@ -36,9 +36,9 @@ const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide te
 export function EntriesTable({ entries, isLoading, onSelect, renderRowAction }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>date</th>
             <th className={TH}>description</th>
             <th className={TH}>source</th>
@@ -64,7 +64,7 @@ export function EntriesTable({ entries, isLoading, onSelect, renderRowAction }: 
                 <tr
                   key={entry.id}
                   onClick={() => onSelect(entry)}
-                  className='cursor-pointer border-b border-textInactiveColor last:border-b-0 hover:bg-bgSecondary'
+                  className='cursor-pointer border-b border-borderColor last:border-b-0 hover:bg-pageBg'
                 >
                   <td className='whitespace-nowrap px-2 py-1.5 align-top'>
                     <div>{formatAcctDate(entry.occurredAt)}</div>

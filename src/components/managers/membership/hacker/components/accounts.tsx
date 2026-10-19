@@ -1,9 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import { useHackerAccounts, useRevokeHackerStatus } from '../../utils/hooks';
 import { formatEur } from '../../utils/tier-utils';
@@ -19,11 +17,11 @@ export function HackerAccounts() {
   return (
     <Section title={`hacker accounts${members.length > 0 ? ` (${members.length})` : ''}`}>
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
+        <table className='w-full border-collapse border border-borderColor min-w-max'>
+          <thead className='bg-borderColor h-9'>
             <tr>
               {['ID', 'Email', 'Name', 'Spend (12mo)', 'Status', ''].map((h) => (
-                <th key={h} className='border border-textInactiveColor px-2 h-9'>
+                <th key={h} className='border border-borderColor px-2 h-9'>
                   <Text variant='uppercase' size='small'>
                     {h}
                   </Text>
@@ -42,24 +40,24 @@ export function HackerAccounts() {
               members.map((m) => (
                 <tr
                   key={m.userId}
-                  className='border-b border-textInactiveColor last:border-b-0 h-9'
+                  className='border-b border-borderColor last:border-b-0 h-9'
                 >
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{m.userId}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.email || '-'}</Text>
+                  <td className='border border-borderColor text-center px-2'>
+                    <Text size='small'>{m.email || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.name || '-'}</Text>
+                  <td className='border border-borderColor text-center px-2'>
+                    <Text size='small'>{m.name || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{formatEur(m.qualifyingSpendEur12mo)}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.status || '-'}</Text>
+                  <td className='border border-borderColor text-center px-2'>
+                    <Text size='small'>{m.status || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2 whitespace-nowrap'>
+                  <td className='border border-borderColor text-center px-2 whitespace-nowrap'>
                     <Button variant='underline' onClick={() => navigate(`/members/${m.userId}`)}>
                       view
                     </Button>

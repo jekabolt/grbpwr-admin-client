@@ -1,12 +1,7 @@
 import { cn } from 'lib/utility';
 import type React from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, Close, GroupLabel, Input, Select, Text } from 'ui';
 
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import type { common_MediaFull } from 'api/proto-http/admin';
@@ -176,8 +171,7 @@ export const previewScale = (naturalH: number): { k: number; label: string | nul
   return { k: last[0], label: last[1] };
 };
 /** Одна высота на ВСЕ строки списка: разные высоты читались бы как разный вес видов. */
-const rowSampleH = (gauge: number) =>
-  Math.max(...STITCHES.map((st) => sampleBox(st.key, gauge).h));
+const rowSampleH = (gauge: number) => Math.max(...STITCHES.map((st) => sampleBox(st.key, gauge).h));
 
 /**
  * ОБРАЗЕЦ ГОВОРИТ О ФОРМЕ И РАЗМЕРЕ, НО НЕ О ЦВЕТЕ, и это решение, а не упущение. Цвет нити виден
@@ -656,7 +650,7 @@ function InkPicker({
         'relative flex h-5 w-5 shrink-0 items-center justify-center border',
         'focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-textColor',
         disabled
-          ? 'cursor-default border-borderColor text-textInactiveColor'
+          ? 'cursor-default border-borderColor text-borderColor'
           : 'cursor-pointer border-borderColor text-textColor hover:border-textColor',
       )}
     >
@@ -984,7 +978,9 @@ function Ramp({
       aria-label={label}
       aria-valuetext={`${Math.round(here * 100) / 100}${unit === '%' ? ' per cent' : ' plate pixels'}`}
       {...{ [`data-${probe}-ramp`]: '' }}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(valueAt(Number(e.target.value)))}
+      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+        onChange(valueAt(Number(e.target.value)))
+      }
       className='h-[14px] min-w-0 flex-1 cursor-pointer accent-textColor disabled:cursor-default'
     />
   );
@@ -1659,7 +1655,7 @@ export function VectorBrushRail(p: RailProps) {
               // Запертый список обязан ВЫГЛЯДЕТЬ запертым: Radix метит кнопку `disabled`, но у
               // примитива на этот случай цвета нет, и в режиме только-чтения выбор видов читался
               // как живой (замерено на пресете `unreadable`).
-              className='disabled:text-textInactiveColor'
+              className='disabled:text-borderColor'
               // ВЫБРАННАЯ СТРОКА ИНВЕРТИРОВАНА — ступень `chip-selected` из DESIGN.md. Образец
               // рисуется `currentColor` и потому выворачивается сам, без второго правила о цвете.
               // Подсветка клавиатурой (`data-[highlighted]`) слабее заливки нарочно: она говорит
@@ -1815,7 +1811,7 @@ export function VectorBrushRail(p: RailProps) {
             className={cn(
               'flex h-5 w-5 shrink-0 items-center justify-center border',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-              'disabled:cursor-default disabled:text-textInactiveColor',
+              'disabled:cursor-default disabled:text-borderColor',
               p.picking
                 ? 'border-textColor bg-textColor text-bgColor'
                 : 'cursor-pointer border-borderColor bg-bgColor text-textColor hover:border-textColor',
@@ -2187,9 +2183,7 @@ export function VectorBrushRail(p: RailProps) {
                 curve='linear'
                 unit='%'
                 disabled={p.frozen}
-                onChange={(v) =>
-                  p.onBackdropOp(setBackdropOpacity(p.backdrop!, p.plate, v / 100))
-                }
+                onChange={(v) => p.onBackdropOp(setBackdropOpacity(p.backdrop!, p.plate, v / 100))}
                 hint='how strongly the template shows through'
                 sample={null}
                 probe='backdrop-opacity'
@@ -2444,17 +2438,13 @@ export function VectorBrushRail(p: RailProps) {
             <Text size='nano' variant='label' component='span' className='shrink-0'>
               px
             </Text>
-            <button
-              type='button'
+            <Close
+              size='sm'
               onClick={p.onDropSel}
               title='drop this area (⌘d) — the strokes stay, and ⇧⌘d brings it back'
               aria-label='drop the area'
-              className='ml-auto shrink-0 cursor-pointer px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-            >
-              <Text size='micro' component='span'>
-                ✕
-              </Text>
-            </button>
+              className='ml-auto focus-visible:outline-offset-1'
+            />
           </div>
           <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
             <Button

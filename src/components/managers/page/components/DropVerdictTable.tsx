@@ -1,7 +1,6 @@
 import type { SellThroughByDropRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface DropVerdictTableProps {
@@ -57,7 +56,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
                   {action}
                 </Text>
               </div>
-              <div className='my-2 h-2 bg-bgSecondary'>
+              <div className='my-2 h-2 bg-pageBg'>
                 <div className={`h-2 ${barCls}`} style={{ width: `${Math.min(100, pct)}%` }} />
               </div>
               <Text className='text-labelColor text-textBaseSize block'>

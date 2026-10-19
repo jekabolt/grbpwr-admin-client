@@ -9,11 +9,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell } from 'ui';
 import {
   archiveCollection,
   archiveColor,
@@ -49,7 +45,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'countries', label: 'countries' },
 ];
 
-const th = 'border border-borderColor bg-bgSecondary px-2 py-1 text-left uppercase';
+const th = 'border border-borderColor bg-pageBg px-2 py-1 text-left uppercase';
 const td = 'border border-borderColor px-2 py-1';
 const inputCls =
   'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
@@ -422,7 +418,7 @@ export const Dictionaries: FC = () => {
               key: c.code ?? c.name ?? '',
               archived: !!c.archived,
               cells: [
-                <Text variant='uppercase'>{c.code || '—'}</Text>,
+                <Text variant='uppercase'>{c.code || <EmptyCell />}</Text>,
                 <Text>{c.name}</Text>,
                 <Text variant='inactive'>{c.countMen ?? 0}</Text>,
                 <Text variant='inactive'>{c.countWomen ?? 0}</Text>,

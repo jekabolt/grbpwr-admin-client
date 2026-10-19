@@ -1,9 +1,7 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import { Section, Text, Arrow } from 'ui';
 import { FIELD_REVEAL_EVENT } from 'utils/field-errors';
 
 import { onDoorKey } from './callout-rail';

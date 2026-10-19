@@ -1,7 +1,6 @@
 import type { SlowMoverRow } from 'api/proto-http/admin';
 import { FC, useMemo, useState } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -100,7 +99,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                   ? lastSaleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   : 'Never';
                 return (
-                  <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                  <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                     <td className='p-2'>
                       <ProductNameLink
                         productId={row.productId}
@@ -122,7 +121,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                       {row.hasCost && row.grossMarginPct != null ? (
                         <Text>{row.grossMarginPct.toFixed(0)}%</Text>
                       ) : (
-                        <Text variant='label'>N/A</Text>
+                        <EmptyCell />
                       )}
                     </td>
                     <td className='p-2 text-right'>

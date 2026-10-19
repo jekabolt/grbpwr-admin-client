@@ -1,7 +1,6 @@
 import { DEFAULT_PRODUCT_LIMIT, PRODUCT_LIMIT_OPTIONS } from 'constants/filter';
 import useFilter from 'lib/useFilter';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Select, Text } from 'ui';
 
 const LIMIT_ITEMS = PRODUCT_LIMIT_OPTIONS.map((o) => ({
   value: String(o.value),
@@ -17,7 +16,7 @@ export default function ShowLatestLimit() {
       <Text variant='uppercase' className='w-auto whitespace-nowrap'>
         show latest
       </Text>
-      <SelectComponent
+      <Select
         name='limit'
         placeholder='quantity'
         items={LIMIT_ITEMS}

@@ -1,0 +1,127 @@
+{
+  "_note": "FROZEN truth for SS26-005 size M (tmp/plans/assembly-from-pattern/probe/data/ss26-005-shirt.dxf). Every point is a DXF vertex of the piece's SEWING line (layer 14, block <piece>_M) picked BY HAND on 10.10 from vertex-numbered renders of the raw polylines (the 09.10 probe reader's vertex order, mm, y up) — not computed by lib/pom or by any corner finder. `xy` is the vertex as read, so a re-export that moves it fails loudly. Measures are plain arithmetic between these points. The ONE convention in it: chest needs the panels laid side by side, and here their hem corners meet (the technologist's reading of this shirt: hems are level, panels are sewn from the hem); it is written down, not derived. `expect` is the exactness the engine must claim for each value, decided by hand from the pattern.",
+  "file": "assembly-from-pattern/probe/data/ss26-005-shirt.dxf",
+  "size": "M",
+  "points": {
+    "FRONT_R.hps": {
+      "piece": "FRONT_R",
+      "v": 39,
+      "xy": [-2513.5, 597.2],
+      "what": "shoulder 38→39 meets neckline 39→56"
+    },
+    "FRONT_R.cfNeck": {
+      "piece": "FRONT_R",
+      "v": 56,
+      "xy": [-2458.2, 533.0],
+      "what": "neckline meets the CF edge"
+    },
+    "FRONT_R.sp": {
+      "piece": "FRONT_R",
+      "v": 38,
+      "xy": [-2630.1, 548.8],
+      "what": "shoulder meets armhole"
+    },
+    "FRONT_R.hemA": { "piece": "FRONT_R", "v": 0, "xy": [-2455.7, -59.9] },
+    "FRONT_R.hemB": { "piece": "FRONT_R", "v": 1, "xy": [-2532.3, -59.9] },
+    "FRONT_L.hps": { "piece": "FRONT_L", "v": 39, "xy": [-2157.2, 597.1] },
+    "FRONT_L.hemA": { "piece": "FRONT_L", "v": 0, "xy": [-2214.9, -60.0] },
+    "FRONT_L.hemB": { "piece": "FRONT_L", "v": 1, "xy": [-2138.3, -60.0] },
+    "BP.spR": {
+      "piece": "BP",
+      "v": 149,
+      "xy": [-2607.6, -280.5],
+      "what": "back shoulder point (drawing left)"
+    },
+    "BP.spL": {
+      "piece": "BP",
+      "v": 23,
+      "xy": [-2130.5, -280.5],
+      "what": "back shoulder point (drawing right)"
+    },
+    "BP.hpsR": {
+      "piece": "BP",
+      "v": 150,
+      "xy": [-2488.4, -239.2],
+      "what": "back HPS: shoulder 149→150 meets neckline"
+    },
+    "BP.hpsL": { "piece": "BP", "v": 22, "xy": [-2249.7, -239.2] },
+    "BP.cbNeck": {
+      "piece": "BP",
+      "v": 0,
+      "xy": [-2369.0, -301.3],
+      "what": "CB neck point (axis of the symmetric back)"
+    },
+    "BP.cbHem": { "piece": "BP", "v": 86, "xy": [-2369.0, -933.1] },
+    "SLV_M_R.apexA": {
+      "piece": "SLV_M_R",
+      "v": 29,
+      "xy": [-2856.4, -261.0],
+      "what": "cap apex = midpoint of the flat top 29–30"
+    },
+    "SLV_M_R.apexB": { "piece": "SLV_M_R", "v": 30, "xy": [-2859.7, -261.0] },
+    "SLV_M_R.wristA": { "piece": "SLV_M_R", "v": 0, "xy": [-2926.7, -925.8] },
+    "SLV_M_R.wristB": { "piece": "SLV_M_R", "v": 1, "xy": [-2752.1, -927.9] },
+    "SLV_M_L.apexA": { "piece": "SLV_M_L", "v": 29, "xy": [-1874.5, -261.0] },
+    "SLV_M_L.apexB": { "piece": "SLV_M_L", "v": 30, "xy": [-1871.3, -261.0] },
+    "SLV_M_L.wristA": { "piece": "SLV_M_L", "v": 0, "xy": [-1804.2, -925.7] },
+    "SLV_M_L.wristB": { "piece": "SLV_M_L", "v": 1, "xy": [-1978.8, -927.9] },
+    "PLCK_R.seam": {
+      "piece": "PLCK_R",
+      "v": 4,
+      "xy": [-2428.3, 532.9],
+      "what": "edge sewn to FRONT_R"
+    },
+    "PLCK_L.seam": {
+      "piece": "PLCK_L",
+      "v": 6,
+      "xy": [-2253.8, 532.8],
+      "what": "edge sewn to FRONT_L"
+    },
+    "FP_2_L.sideTop": {
+      "piece": "FP_2_L",
+      "v": 24,
+      "xy": [-1857.9, 347.1],
+      "what": "top of the side seam FP_2_L | BP_1_L"
+    },
+    "BP_1_L.sideTop": { "piece": "BP_1_L", "v": 11, "xy": [-1722.7, 344.4] },
+    "BP_2_R.sideTop": {
+      "piece": "BP_2_R",
+      "v": 28,
+      "xy": [-2908.2, 342.5],
+      "what": "top of the side seam BP_2_R | FP_1_R"
+    },
+    "FP_1_R.sideTop": { "piece": "FP_1_R", "v": 11, "xy": [-2783.4, 341.2] }
+  },
+  "buttonLines": {
+    "_note": "x of the drill column taken as CF. PLCK_R has one column. PLCK_L has TWO (-2291.8 and -2342.8); the one nearest its seam is taken — a choice, so CF on the left is NOT exact.",
+    "PLCK_R": -2415.7,
+    "PLCK_L": -2291.8
+  },
+  "hemRuns": {
+    "_note": "per body panel: the hem as the vertex run from..to (ascending indices, the bottom corners), left→right chain order around the body from the left CF to the right CF.",
+    "chain": [
+      { "piece": "FRONT_L", "from": 0, "to": 1 },
+      { "piece": "FP_L", "from": 46, "to": 47 },
+      { "piece": "FP_1_L", "from": 7, "to": 8 },
+      { "piece": "FP_2_L", "from": 1, "to": 2 },
+      { "piece": "BP_1_L", "from": 29, "to": 35 },
+      { "piece": "BP_L", "from": 0, "to": 6 },
+      { "piece": "BP", "from": 76, "to": 96 },
+      { "piece": "BP_R", "from": 52, "to": 56 },
+      { "piece": "BP_1_R", "from": 9, "to": 13 },
+      { "piece": "BP_2_R", "from": 6, "to": 10 },
+      { "piece": "FP_1_R", "from": 33, "to": 37 },
+      { "piece": "FP_R", "from": 1, "to": 6 },
+      { "piece": "FRONT_R", "from": 0, "to": 1 }
+    ]
+  },
+  "expect": {
+    "chest": "approx",
+    "length-hps": "exact",
+    "across-shoulder": "exact",
+    "sleeve-length": "exact",
+    "hem": "approx",
+    "neck-width": "exact",
+    "length-cb": "exact"
+  }
+}

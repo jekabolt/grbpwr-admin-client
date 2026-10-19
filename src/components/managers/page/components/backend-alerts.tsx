@@ -3,8 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 
 // Deep-links by DashboardAlert.code (06-implementation-order.md §Шаг 6b). An unknown/new code
 // still renders — just without a link — so this stays forward-compatible with alert codes added

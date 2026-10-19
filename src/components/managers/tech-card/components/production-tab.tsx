@@ -10,11 +10,7 @@ import { useProductionRuns } from 'components/managers/production-runs/component
 import { ROUTES, SECTION } from 'constants/routes';
 import { Controller, useFormContext } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Row } from 'ui/components/row';
-import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, Row, Section, SectionStack, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import { TechCardFormData } from './schema';
 
 // The style's production side, in the tech card rather than only in the separate /production-runs
@@ -129,13 +125,15 @@ export function ProductionTab({
               // batches).
               tone={dropPassedWithOpenRuns ? 'error' : undefined}
               value={
-                !dropDate || dropIn == null
-                  ? '—'
-                  : dropIn > 0
-                    ? `passed ${dropIn} d ago${dropPassedWithOpenRuns ? ' · runs are still open' : ''}`
-                    : dropIn === 0
-                      ? 'today'
-                      : `in ${-dropIn} d`
+                !dropDate || dropIn == null ? (
+                  <EmptyCell />
+                ) : dropIn > 0 ? (
+                  `passed ${dropIn} d ago${dropPassedWithOpenRuns ? ' · runs are still open' : ''}`
+                ) : dropIn === 0 ? (
+                  'today'
+                ) : (
+                  `in ${-dropIn} d`
+                )
               }
             />
             <Row
@@ -187,12 +185,12 @@ export function ProductionTab({
       <StatGrid>
         <Stat
           label='plan, pcs'
-          value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'}
+          value={summary.plannedQty > 0 ? String(summary.plannedQty) : <EmptyCell />}
           sub={summary.cancelled > 0 ? `without ${summary.cancelled} cancelled` : undefined}
         />
         <Stat
           label='received good'
-          value={summary.anyReceived ? String(summary.receivedQty) : '—'}
+          value={summary.anyReceived ? String(summary.receivedQty) : <EmptyCell />}
           sub={
             summary.anyReceived && summary.plannedQty > 0
               ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% of the plan`
@@ -203,11 +201,13 @@ export function ProductionTab({
           <Stat
             label='unit plan → actual'
             value={
-              summary.planUnit != null
-                ? `${summary.planUnit.toFixed(2)}${
-                    summary.factUnit != null ? ` → ${summary.factUnit.toFixed(2)}` : ''
-                  }`
-                : '—'
+              summary.planUnit != null ? (
+                `${summary.planUnit.toFixed(2)}${
+                  summary.factUnit != null ? ` → ${summary.factUnit.toFixed(2)}` : ''
+                }`
+              ) : (
+                <EmptyCell />
+              )
             }
             sub={
               summary.planUnit != null && summary.factUnit != null

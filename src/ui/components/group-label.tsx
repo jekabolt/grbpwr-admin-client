@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import Text from './text';
 
 /**
  * A lightweight sub-group divider inside a section — one step below `SectionHeader`.

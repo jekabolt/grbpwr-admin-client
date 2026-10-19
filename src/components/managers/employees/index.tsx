@@ -12,18 +12,22 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { EmptyCell } from 'ui/components/data-table';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import SelectComponent from 'ui/components/select';
-import { SkeletonLine } from 'ui/components/skeleton';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { SectionHeader } from 'ui/components/section-header';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  EmptyCell,
+  Input,
+  Pill,
+  Select,
+  SkeletonLine,
+  Stat,
+  StatGrid,
+  Text,
+  SectionHeader,
+} from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   useArchiveEmployee,
@@ -540,11 +544,26 @@ function EmployeeCard({
   const tenure = tenureLabel(e?.employmentStart, e?.employmentEnd);
 
   const chips: React.ReactNode[] = [];
-  if (left && booked) chips.push(<Chip key='sb' tone='error'>still booking</Chip>);
-  if (booked && (salary?.uncosted ?? 0) > 0) chips.push(<Chip key='uc' tone='error'>uncosted</Chip>);
+  if (left && booked)
+    chips.push(
+      <Chip key='sb' tone='error'>
+        still booking
+      </Chip>,
+    );
+  if (booked && (salary?.uncosted ?? 0) > 0)
+    chips.push(
+      <Chip key='uc' tone='error'>
+        uncosted
+      </Chip>,
+    );
   if (!left && !booked) {
     if (linkedInactive) chips.push(<Chip key='si'>salary inactive</Chip>);
-    else chips.push(<Chip key='ns' tone='error'>no salary</Chip>);
+    else
+      chips.push(
+        <Chip key='ns' tone='error'>
+          no salary
+        </Chip>,
+      );
   }
 
   return (
@@ -561,14 +580,14 @@ function EmployeeCard({
       }}
       className={cn(
         'flex flex-col gap-2 border border-borderColor bg-bgColor p-3 text-left',
-        'cursor-pointer transition-colors hover:bg-bgZebra',
+        'cursor-pointer transition-colors hover:bg-pageBg',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
         left && 'opacity-60',
       )}
     >
       <div className='flex items-start justify-between gap-2'>
         <Text component='span' className='font-bold'>
-          {e?.fullName || '—'}
+          {e?.fullName || <EmptyCell />}
         </Text>
         {left ? <Pill tone='mut'>left</Pill> : <Pill tone='ink'>active</Pill>}
       </div>
@@ -591,8 +610,8 @@ function EmployeeCard({
               <EmptyCell />
             ) : (
               <>
-                {e?.employmentStart ? fmtDate(e.employmentStart) : '—'} →{' '}
-                {e?.employmentEnd ? fmtDate(e.employmentEnd) : '—'}
+                {e?.employmentStart ? fmtDate(e.employmentStart) : <EmptyCell />} →{' '}
+                {e?.employmentEnd ? fmtDate(e.employmentEnd) : <EmptyCell />}
               </>
             )}
           </Text>
@@ -870,7 +889,7 @@ function EmployeeFormModal({
             />
           </Field>
           <Field label='currency'>
-            <SelectComponent
+            <Select
               name='defaultCurrency'
               placeholder='currency'
               fullWidth

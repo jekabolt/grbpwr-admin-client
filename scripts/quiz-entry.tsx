@@ -34,8 +34,8 @@ import {
 import { seamOf, swatchOf } from 'components/managers/tech-card/components/design/seam-icons';
 import { requestBrief } from 'components/managers/tech-card/components/design/words-brief';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
-import { enhanceText } from 'ui/components/ai-enhance';
-import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { enhanceText } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { Section } from 'ui/components/section';
 
 const q = (

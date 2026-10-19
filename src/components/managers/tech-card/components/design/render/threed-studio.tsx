@@ -3,12 +3,7 @@ import { useAllModels } from 'components/managers/models/components/useModelQuer
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import { HeaderNote } from 'ui/components/section-header';
-import SelectComponent from 'ui/components/select';
-import { ViewSwitch } from 'ui/components/view-switch';
+import { Button, GroupLabel, Section, HeaderNote, Select, ViewSwitch } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { InertDoor } from '../bench-slot';
@@ -427,7 +422,7 @@ export function ThreedStudio({
                   невыполнимым требованием, а прогон — недостижимым. */}
               <FieldRow label='garment size *' data-garment-size=''>
                 <div className='w-[200px] shrink-0'>
-                  <SelectComponent
+                  <Select
                     name='design-threed-size'
                     value={draft.garmentSizeId ? String(draft.garmentSizeId) : NO_SIZE}
                     placeholder='not set'
@@ -447,7 +442,7 @@ export function ThreedStudio({
               cut. The override is a STATED DEVIATION for this run only; the card stays the truth. */}
           <FieldRow label='fit' data-fit=''>
             <div className='w-[210px] shrink-0'>
-              <SelectComponent
+              <Select
                 name='design-threed-fit'
                 value={draft.fitOverride || CARD_FIT}
                 placeholder='not set'

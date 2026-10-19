@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
-import { CalloutBox } from 'ui/components/callout-box';
+import { CalloutBox } from 'ui';
 
 import { usePickMode } from './pick-mode';
 import { isComposite } from './split-modal';

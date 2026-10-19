@@ -7,7 +7,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { BatchActionBar } from './batch-action-bar';
 import { ProductGrid } from './product-grid';
 import { SelectionToolbar } from './selection-toolbar';

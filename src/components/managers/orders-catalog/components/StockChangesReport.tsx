@@ -6,9 +6,7 @@ import {
   downloadCsv,
   stockChangeRowsToCsv,
 } from 'components/managers/product/components/stock/stock-csv';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { useSnackBarStore } from 'lib/stores/store';
 
 function toRfc3339DateOnly(dateStr: string, endOfDay: boolean): string {
@@ -81,7 +79,7 @@ export function StockChangesReport() {
       </Text>
       <div className='flex flex-wrap items-center gap-2'>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             From
           </Text>
           <Input
@@ -93,7 +91,7 @@ export function StockChangesReport() {
           />
         </label>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             To
           </Text>
           <Input

@@ -1,0 +1,263 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "12",
+ "size": "M",
+ "summary": "SS26-012 Octagon M: 16 identical triangles (400 base, 403 sides, 91 top) — eight sewn side to side into the top ring, eight into the bottom ring, the rings joined base to base, each ring closed with an octagon (8 × 91); four 1470 × 35 strap strips, a two-ply flap, a pocket on triangle 9 (surface). The triangles are interchangeable: the rows are patterns with counts.",
+ "rows": [
+  {
+   "derivation": "technologist's order «triangle_1 … triangle_8 → triangles top» · eight triangles sewn side to side (403 = 403, notches 40 / 75 ↔ 328 / 363) into a ring — any triangle to any other, either side (the triangle is symmetric)",
+   "confidence": "sure",
+   "cls": "bag panel ↔ panel (ring)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "pattern": {
+    "a": "^triangle_[1-8]_M#[02]$",
+    "b": "^triangle_[1-8]_M#[02]$",
+    "count": 8
+   }
+  },
+  {
+   "derivation": "technologist's order «… triangle_9 … triangle_16 → triangles Bottom» · the bottom ring of eight",
+   "confidence": "sure",
+   "cls": "bag panel ↔ panel (ring)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "pattern": {
+    "a": "^triangle_(9|1[0-6])_M#[02]$",
+    "b": "^triangle_(9|1[0-6])_M#[02]$",
+    "count": 8
+   }
+  },
+  {
+   "derivation": "technologist's order «triangles top + triangles Bottom → Base» · the two rings joined base to base: 400 = 400 (centre notch 200), eight seams",
+   "confidence": "sure",
+   "cls": "bag ring ↔ ring (bases)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "pattern": {
+    "a": "^triangle_[1-8]_M#3$",
+    "b": "^triangle_(9|1[0-6])_M#3$",
+    "count": 8
+   }
+  },
+  {
+   "derivation": "technologist's order «Base + Octagon_bottom_M + Octagon_Top_M → Base with closed octagon hole» · each octagon edge 91 (centre notch 46) onto a triangle top 91 (notches 46 / 66): eight per octagon, either octagon on either ring",
+   "confidence": "sure",
+   "cls": "bag octagon ↔ panel tops",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "pattern": {
+    "a": "^Octagon_(Top|bottom)_M#[0-7]$",
+    "b": "^triangle_([1-9]|1[0-6])_M#1$",
+    "count": 16
+   }
+  },
+  {
+   "derivation": "technologist's order «BLT_2_M + BLT_1_M → belt upper», «BLT_4_M + BLT_3_M → belt bottom» · two straps of two 1470 strips each, sewn along both long edges",
+   "confidence": "likely",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "pattern": {
+    "a": "^BLT_[1-4]_M#[02]$",
+    "b": "^BLT_[1-4]_M#[02]$",
+    "count": 4
+   }
+  },
+  {
+   "derivation": "technologist's order «Flap_os_M_M + flap_bottom_os_M_M → flap» · the pocket flap’s two 80 × 30 plies along 80",
+   "confidence": "unsure",
+   "cls": "ply bagging (flap)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "KM2W2C6N6KG0WGYQ88AFS48RTS",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1M2KABHRYAPAKSDNJC5SXA5",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3636,
+      "lenMm": 80,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1M2KABHRYAPAKSDNJC5SXA5#1",
+      "contourSig": "59061b2b12ce4369"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1M2KABH9V42WAGEQ0V9XBMB",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3636,
+      "lenMm": 80,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1M2KABH9V42WAGEQ0V9XBMB#1",
+      "contourSig": "59061b2b12ce4369"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Flap_os_M_M + flap_bottom_os_M_M → flap» · the pocket flap’s two 80 × 30 plies along 80",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the flap plies’ other 80 edge",
+   "confidence": "unsure",
+   "cls": "ply bagging (flap)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "6EN0K2TFS4S771JEWK26QKVDKT",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1M2KABHRYAPAKSDNJC5SXA5",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.3636,
+      "lenMm": 80,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1M2KABHRYAPAKSDNJC5SXA5#3",
+      "contourSig": "59061b2b12ce4369"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1M2KABH9V42WAGEQ0V9XBMB",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.3636,
+      "lenMm": 80,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1M2KABH9V42WAGEQ0V9XBMB#3",
+      "contourSig": "59061b2b12ce4369"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the flap plies’ other 80 edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}

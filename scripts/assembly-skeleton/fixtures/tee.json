@@ -1,0 +1,560 @@
+{
+  "source": "hand-written tee (4 pieces: front and back on the fold, sleeve \u00d72 mirrored, neck rib); seams as lane A should find them, the sleeve cap and the rib as composite edges",
+  "graph": {
+    "pieces": [
+      {
+        "pieceKey": "FRONT",
+        "name": "FRONT",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "FRONT#0",
+            "pieceKey": "FRONT",
+            "k": 0,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 520,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#1",
+            "pieceKey": "FRONT",
+            "k": 1,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 450,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#2",
+            "pieceKey": "FRONT",
+            "k": 2,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 240,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#3",
+            "pieceKey": "FRONT",
+            "k": 3,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 130,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#4",
+            "pieceKey": "FRONT",
+            "k": 4,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 260,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#5",
+            "pieceKey": "FRONT",
+            "k": 5,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 130,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#6",
+            "pieceKey": "FRONT",
+            "k": 6,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 240,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FRONT#7",
+            "pieceKey": "FRONT",
+            "k": 7,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 450,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 364000,
+        "perimMm": 2420,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "BACK",
+        "name": "BACK",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "BACK#0",
+            "pieceKey": "BACK",
+            "k": 0,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 520,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#1",
+            "pieceKey": "BACK",
+            "k": 1,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 450,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#2",
+            "pieceKey": "BACK",
+            "k": 2,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 230,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#3",
+            "pieceKey": "BACK",
+            "k": 3,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 130,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#4",
+            "pieceKey": "BACK",
+            "k": 4,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 180,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#5",
+            "pieceKey": "BACK",
+            "k": 5,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 130,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#6",
+            "pieceKey": "BACK",
+            "k": 6,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 230,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BACK#7",
+            "pieceKey": "BACK",
+            "k": 7,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 450,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 374400,
+        "perimMm": 2320,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "SLEEVE",
+        "name": "SLEEVE",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "SLEEVE#0",
+            "pieceKey": "SLEEVE",
+            "k": 0,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 480,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SLEEVE#1",
+            "pieceKey": "SLEEVE",
+            "k": 1,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SLEEVE#2",
+            "pieceKey": "SLEEVE",
+            "k": 2,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 380,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SLEEVE#3",
+            "pieceKey": "SLEEVE",
+            "k": 3,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 158400,
+        "perimMm": 1260,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "NECK_RIB",
+        "name": "NECK_RIB",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "NECK_RIB#0",
+            "pieceKey": "NECK_RIB",
+            "k": 0,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 440,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "NECK_RIB#1",
+            "pieceKey": "NECK_RIB",
+            "k": 1,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 30,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "NECK_RIB#2",
+            "pieceKey": "NECK_RIB",
+            "k": 2,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 440,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "NECK_RIB#3",
+            "pieceKey": "NECK_RIB",
+            "k": 3,
+            "s": 0,
+            "e": 0,
+            "pts": [],
+            "lenMm": 30,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": true,
+        "areaMm2": 13200,
+        "perimMm": 940,
+        "twinOf": []
+      }
+    ],
+    "chosen": [
+      {
+        "a": "FRONT#3",
+        "b": "BACK#3",
+        "score": 0.98,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "FRONT#5",
+        "b": "BACK#5",
+        "score": 0.98,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "FRONT#1",
+        "b": "BACK#1",
+        "score": 0.9,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "FRONT#7",
+        "b": "BACK#7",
+        "score": 0.9,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "SLEEVE#0",
+        "b": "FRONT#2",
+        "score": 0.66,
+        "evidence": {
+          "dLenMm": 10,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "composite"
+      },
+      {
+        "a": "NECK_RIB#0",
+        "b": "FRONT#4",
+        "score": 0.62,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "composite"
+      },
+      {
+        "a": "NECK_RIB#1",
+        "b": "NECK_RIB#3",
+        "score": 0.8,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": true
+        },
+        "kind": "edge"
+      }
+    ],
+    "rejected": [],
+    "components": [["FRONT", "BACK", "SLEEVE", "NECK_RIB"]],
+    "warnings": []
+  },
+  "facts": {
+    "pieces": [
+      {
+        "pieceKey": "FRONT",
+        "name": "FRONT",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "FOLD",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "BACK",
+        "name": "BACK",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "FOLD",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "SLEEVE",
+        "name": "SLEEVE",
+        "piecesPerGarment": 2,
+        "cutSymmetry": "MIRRORED",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "NECK_RIB",
+        "name": "NECK_RIB",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      }
+    ],
+    "category": "tee",
+    "bom": {
+      "zipper": 0,
+      "buttons": 0,
+      "snaps": 0,
+      "tape": 0,
+      "elastic": 0,
+      "drawcord": 0,
+      "interlining": 0
+    },
+    "defaultMachineType": "overlock"
+  },
+  "truth": [
+    {
+      "name": "Body",
+      "inputs": ["FRONT", "BACK"]
+    },
+    {
+      "name": "Body with neck rib",
+      "inputs": ["NECK_RIB", "Body"]
+    },
+    {
+      "name": "Tee",
+      "inputs": ["SLEEVE", "Body with neck rib"]
+    }
+  ],
+  "truthSteps": [
+    "Join shoulders",
+    "Close the neck rib into a ring",
+    "Set the neck rib",
+    "Set sleeves",
+    "Close side and underarm seams",
+    "Hem sleeves",
+    "Hem",
+    "Final press"
+  ]
+}

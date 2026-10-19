@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 
 interface Props {
   selectedCount: number;

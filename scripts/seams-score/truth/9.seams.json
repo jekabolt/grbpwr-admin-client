@@ -1,0 +1,2002 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "9",
+ "size": "m",
+ "summary": "SS26-009 summer shirt (F): a wide one-piece back BP (828 hem, 210 sides, back neck 351 with four pleat notches), fronts LP_1 / RP_1 with a 214 mm hem opening (dart or pleat) and 402 plackets (plank / plank_1, buttons 22 mm in), two identical sleeves (block names unreadable: «unnamed piece 8 / 9»), a collar CLR 514 onto a 719 neckline. The sleeves are interchangeable, so each cap row is an anyOf of the two.",
+ "rows": [
+  {
+   "derivation": "technologist's order «plank+LP_1 + plank_1+RP_1 + BP → Back panel with sides» · left shoulder 149 ≈ 150: the back’s drawing-left shoulder onto the LEFT front (LP_1’s CF is its drawing-left edge: face up)",
+   "confidence": "sure",
+   "cls": "shoulder",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "V53FHDEHQXRHS0CFDJ2JHZF8VF",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.227,
+        1
+       ],
+       [
+        0.183,
+        0.978
+       ],
+       [
+        0.139,
+        0.956
+       ],
+       [
+        0.095,
+        0.934
+       ],
+       [
+        0.051,
+        0.912
+       ]
+      ],
+      "perimShare": 0.0582,
+      "lenMm": 149.2,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#5",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.803,
+        0.91
+       ],
+       [
+        0.665,
+        0.932
+       ],
+       [
+        0.528,
+        0.955
+       ],
+       [
+        0.39,
+        0.977
+       ],
+       [
+        0.253,
+        1
+       ]
+      ],
+      "perimShare": 0.0869,
+      "lenMm": 150.2,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#5",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «plank+LP_1 + plank_1+RP_1 + BP → Back panel with sides» · left shoulder 149 ≈ 150: the back’s drawing-left shoulder onto the LEFT front (LP_1’s CF is its drawing-left edge: face up)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back panel with sides» · right shoulder 149 ≈ 150",
+   "confidence": "sure",
+   "cls": "shoulder",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "6J1MZY5B25YSVX78R392GB5EAW",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.949,
+        0.912
+       ],
+       [
+        0.905,
+        0.934
+       ],
+       [
+        0.861,
+        0.956
+       ],
+       [
+        0.817,
+        0.978
+       ],
+       [
+        0.774,
+        1
+       ]
+      ],
+      "perimShare": 0.0582,
+      "lenMm": 149.2,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#1",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.747,
+        1
+       ],
+       [
+        0.61,
+        0.977
+       ],
+       [
+        0.472,
+        0.955
+       ],
+       [
+        0.335,
+        0.932
+       ],
+       [
+        0.197,
+        0.91
+       ]
+      ],
+      "perimShare": 0.0869,
+      "lenMm": 150.2,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#1",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Back panel with sides» · right shoulder 149 ≈ 150",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back panel with sides» · left side 210 ≈ 207 — the engine sewed the back’s sides to the sleeves’ underarm edges (211) instead",
+   "confidence": "sure",
+   "cls": "side seam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "5FD47GGPPWDF2KV0YYC00X38BH",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.004,
+        0.445
+       ],
+       [
+        0.003,
+        0.334
+       ],
+       [
+        0.003,
+        0.222
+       ],
+       [
+        0.002,
+        0.111
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.0818,
+      "lenMm": 209.6,
+      "notches": 0,
+      "turnDeg": -3.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#7",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.994,
+        0.134
+       ],
+       [
+        0.987,
+        0.24
+       ],
+       [
+        0.99,
+        0.346
+       ],
+       [
+        0.994,
+        0.453
+       ],
+       [
+        1,
+        0.559
+       ]
+      ],
+      "perimShare": 0.1194,
+      "lenMm": 206.6,
+      "notches": 0,
+      "turnDeg": -14.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#3",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Back panel with sides» · left side 210 ≈ 207 — the engine sewed the back’s sides to the sleeves’ underarm edges (211) instead",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back panel with sides» · right side 210 ≈ 207",
+   "confidence": "sure",
+   "cls": "side seam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "SACDEBX7NCN3NBW994KABC9SBB",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        0.998,
+        0.111
+       ],
+       [
+        0.997,
+        0.222
+       ],
+       [
+        0.997,
+        0.334
+       ],
+       [
+        0.997,
+        0.445
+       ]
+      ],
+      "perimShare": 0.0818,
+      "lenMm": 209.7,
+      "notches": 0,
+      "turnDeg": -3.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#9",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0,
+        0.559
+       ],
+       [
+        0.006,
+        0.453
+       ],
+       [
+        0.01,
+        0.346
+       ],
+       [
+        0.013,
+        0.24
+       ],
+       [
+        0.006,
+        0.134
+       ]
+      ],
+      "perimShare": 0.1194,
+      "lenMm": 206.6,
+      "notches": 0,
+      "turnDeg": -14.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#3",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Back panel with sides» · right side 210 ≈ 207",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «plank + LP_1 → left panel with plank» · the placket 402 on the left CF 399 (both long edges of the placket carry five drills 22 mm in: a folded placket)",
+   "confidence": "sure",
+   "cls": "placket",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "9M1DE8T7MKH6TNEJS3AFCB648P",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQX0E1J1XWE002RQDH",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4258,
+      "lenMm": 401.5,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQX0E1J1XWE002RQDH#3",
+      "contourSig": "4f0f3cc1ce5f3bcf"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.051,
+        0.817
+       ],
+       [
+        0.001,
+        0.615
+       ],
+       [
+        0.006,
+        0.41
+       ],
+       [
+        0.012,
+        0.205
+       ],
+       [
+        0.017,
+        0
+       ]
+      ],
+      "perimShare": 0.2307,
+      "lenMm": 399,
+      "notches": 1,
+      "turnDeg": 56.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#7",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «plank + LP_1 → left panel with plank» · the placket 402 on the left CF 399 (both long edges of the placket carry five drills 22 mm in: a folded placket)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «plank_1 + RP_1 → Right panel with plank» · 402 on 399",
+   "confidence": "sure",
+   "cls": "placket",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "EJHWGHW8NV3TYR8Y2DMGYD80N7",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQGGZ6PW1R0AJASHEZ",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4258,
+      "lenMm": 401.5,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQGGZ6PW1R0AJASHEZ#2",
+      "contourSig": "0364e9ef2d6d092d"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.983,
+        0
+       ],
+       [
+        0.988,
+        0.205
+       ],
+       [
+        0.994,
+        0.41
+       ],
+       [
+        0.999,
+        0.615
+       ],
+       [
+        0.949,
+        0.817
+       ]
+      ],
+      "perimShare": 0.2307,
+      "lenMm": 399,
+      "notches": 1,
+      "turnDeg": 56.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#8",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «plank_1 + RP_1 → Right panel with plank» · 402 on 399",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the plackets’ free edges 402 = 402, buttoned — a closure",
+   "confidence": "sure",
+   "cls": "CF closure",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "closure",
+   "row": {
+    "seamKey": "R7XXS16MDHD35V7R403X11VNG9",
+    "status": "confirmed",
+    "kind": "closure",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQX0E1J1XWE002RQDH",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4258,
+      "lenMm": 401.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQX0E1J1XWE002RQDH#1",
+      "contourSig": "4f0f3cc1ce5f3bcf"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQGGZ6PW1R0AJASHEZ",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4258,
+      "lenMm": 401.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQGGZ6PW1R0AJASHEZ#0",
+      "contourSig": "0364e9ef2d6d092d"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the plackets’ free edges 402 = 402, buttoned — a closure",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the plackets’ 70 mm ends sewn to each other — the doll proposes it from the order; two plackets never meet end to end",
+   "confidence": "sure",
+   "cls": "two plackets end to end",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "1C2Z2DFE04JBS2CQPDCQ171JH7",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQX0E1J1XWE002RQDH",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.0742,
+      "lenMm": 70,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQX0E1J1XWE002RQDH#2",
+      "contourSig": "4f0f3cc1ce5f3bcf"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQGGZ6PW1R0AJASHEZ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.0742,
+      "lenMm": 70,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQGGZ6PW1R0AJASHEZ#3",
+      "contourSig": "0364e9ef2d6d092d"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the plackets’ 70 mm ends sewn to each other — the doll proposes it from the order; two plackets never meet end to end",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the plackets’ other 70 mm ends",
+   "confidence": "sure",
+   "cls": "two plackets end to end",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "JFQ4CCF042H0S51WTZF612990V",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQX0E1J1XWE002RQDH",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.0742,
+      "lenMm": 70,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQX0E1J1XWE002RQDH#0",
+      "contourSig": "4f0f3cc1ce5f3bcf"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQGGZ6PW1R0AJASHEZ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.0742,
+      "lenMm": 70,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQGGZ6PW1R0AJASHEZ#1",
+      "contourSig": "0364e9ef2d6d092d"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the plackets’ other 70 mm ends",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «unnamed piece 8 + unnamed piece 9 + body → Base with sleeves» · a cap 506 (four notches) onto the left armhole: front 229 + back 256 = 485 (4 % ease); either identical sleeve may be the left one",
+   "confidence": "likely",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "anyOf": "cap-L",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "DDY128P2H2B68FZYRWWBKZRMMH",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ45TDQRJ3RG08BA3M",
+      "samples": [
+       [
+        1,
+        0.6
+       ],
+       [
+        0.747,
+        0.807
+       ],
+       [
+        0.498,
+        1
+       ],
+       [
+        0.229,
+        0.833
+       ],
+       [
+        0,
+        0.606
+       ]
+      ],
+      "perimShare": 0.4102,
+      "lenMm": 506.4,
+      "notches": 4,
+      "turnDeg": 72.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ45TDQRJ3RG08BA3M#1",
+      "contourSig": "6f964d000cbc0c72"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        1,
+        0.559
+       ],
+       [
+        0.79,
+        0.566
+       ],
+       [
+        0.737,
+        0.678
+       ],
+       [
+        0.753,
+        0.795
+       ],
+       [
+        0.803,
+        0.91
+       ]
+      ],
+      "perimShare": 0.1324,
+      "lenMm": 229,
+      "notches": 1,
+      "turnDeg": -344.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#4",
+      "contourSig": "3abd5c13939eb275"
+     },
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.051,
+        0.912
+       ],
+       [
+        0.064,
+        0.778
+       ],
+       [
+        0.068,
+        0.642
+       ],
+       [
+        0.067,
+        0.507
+       ],
+       [
+        0.004,
+        0.445
+       ]
+      ],
+      "perimShare": 0.1001,
+      "lenMm": 256.4,
+      "notches": 1,
+      "turnDeg": -285.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#6",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «unnamed piece 8 + unnamed piece 9 + body → Base with sleeves» · a cap 506 (four notches) onto the left armhole: front 229 + back 256 = 485 (4 % ease); either identical sleeve may be the left one",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other sleeve on the left armhole",
+   "confidence": "likely",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "anyOf": "cap-L",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "QD6TJ6FNYFTCWZQHEYNFZ5HJ6Q",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQWRVY037M6TPF60EJ",
+      "samples": [
+       [
+        1,
+        0.606
+       ],
+       [
+        0.771,
+        0.833
+       ],
+       [
+        0.502,
+        1
+       ],
+       [
+        0.253,
+        0.807
+       ],
+       [
+        0,
+        0.6
+       ]
+      ],
+      "perimShare": 0.4102,
+      "lenMm": 506.4,
+      "notches": 4,
+      "turnDeg": 72.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQWRVY037M6TPF60EJ#0",
+      "contourSig": "6e5d28260ccfc7d8"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        1,
+        0.559
+       ],
+       [
+        0.79,
+        0.566
+       ],
+       [
+        0.737,
+        0.678
+       ],
+       [
+        0.753,
+        0.795
+       ],
+       [
+        0.803,
+        0.91
+       ]
+      ],
+      "perimShare": 0.1324,
+      "lenMm": 229,
+      "notches": 1,
+      "turnDeg": -344.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#4",
+      "contourSig": "3abd5c13939eb275"
+     },
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.051,
+        0.912
+       ],
+       [
+        0.064,
+        0.778
+       ],
+       [
+        0.068,
+        0.642
+       ],
+       [
+        0.067,
+        0.507
+       ],
+       [
+        0.004,
+        0.445
+       ]
+      ],
+      "perimShare": 0.1001,
+      "lenMm": 256.4,
+      "notches": 1,
+      "turnDeg": -285.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#6",
+      "contourSig": "6f34ca400e2ac14e"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the other sleeve on the left armhole",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · a cap 506 onto the right armhole 256 + 229 = 485",
+   "confidence": "likely",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "anyOf": "cap-R",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "GRTY15YQTRDR26Y5Z2TSPQRJ4T",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQWRVY037M6TPF60EJ",
+      "samples": [
+       [
+        1,
+        0.606
+       ],
+       [
+        0.771,
+        0.833
+       ],
+       [
+        0.502,
+        1
+       ],
+       [
+        0.253,
+        0.807
+       ],
+       [
+        0,
+        0.6
+       ]
+      ],
+      "perimShare": 0.4102,
+      "lenMm": 506.4,
+      "notches": 4,
+      "turnDeg": 72.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQWRVY037M6TPF60EJ#0",
+      "contourSig": "6e5d28260ccfc7d8"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.997,
+        0.445
+       ],
+       [
+        0.934,
+        0.507
+       ],
+       [
+        0.932,
+        0.642
+       ],
+       [
+        0.937,
+        0.778
+       ],
+       [
+        0.949,
+        0.912
+       ]
+      ],
+      "perimShare": 0.1001,
+      "lenMm": 256.5,
+      "notches": 1,
+      "turnDeg": -286.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#0",
+      "contourSig": "6f34ca400e2ac14e"
+     },
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.197,
+        0.91
+       ],
+       [
+        0.247,
+        0.795
+       ],
+       [
+        0.263,
+        0.678
+       ],
+       [
+        0.21,
+        0.566
+       ],
+       [
+        0,
+        0.559
+       ]
+      ],
+      "perimShare": 0.1324,
+      "lenMm": 229,
+      "notches": 1,
+      "turnDeg": -344.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#2",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Base with sleeves» · a cap 506 onto the right armhole 256 + 229 = 485",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other sleeve on the right armhole",
+   "confidence": "likely",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "anyOf": "cap-R",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "QKYFG6VF8YA56EA283XWQW1M9G",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ45TDQRJ3RG08BA3M",
+      "samples": [
+       [
+        1,
+        0.6
+       ],
+       [
+        0.747,
+        0.807
+       ],
+       [
+        0.498,
+        1
+       ],
+       [
+        0.229,
+        0.833
+       ],
+       [
+        0,
+        0.606
+       ]
+      ],
+      "perimShare": 0.4102,
+      "lenMm": 506.4,
+      "notches": 4,
+      "turnDeg": 72.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ45TDQRJ3RG08BA3M#1",
+      "contourSig": "6f964d000cbc0c72"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.997,
+        0.445
+       ],
+       [
+        0.934,
+        0.507
+       ],
+       [
+        0.932,
+        0.642
+       ],
+       [
+        0.937,
+        0.778
+       ],
+       [
+        0.949,
+        0.912
+       ]
+      ],
+      "perimShare": 0.1001,
+      "lenMm": 256.5,
+      "notches": 1,
+      "turnDeg": -286.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#0",
+      "contourSig": "6f34ca400e2ac14e"
+     },
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.197,
+        0.91
+       ],
+       [
+        0.247,
+        0.795
+       ],
+       [
+        0.263,
+        0.678
+       ],
+       [
+        0.21,
+        0.566
+       ],
+       [
+        0,
+        0.559
+       ]
+      ],
+      "perimShare": 0.1324,
+      "lenMm": 229,
+      "notches": 1,
+      "turnDeg": -344.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#2",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the other sleeve on the right armhole",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · the sleeve’s underarm 208 ≈ 211",
+   "confidence": "sure",
+   "cls": "underarm",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "RD1973FEWWFKM7HX230TH0ZRWZ",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ45TDQRJ3RG08BA3M",
+      "samples": [
+       [
+        0.891,
+        0.001
+       ],
+       [
+        0.918,
+        0.151
+       ],
+       [
+        0.945,
+        0.3
+       ],
+       [
+        0.973,
+        0.45
+       ],
+       [
+        1,
+        0.6
+       ]
+      ],
+      "perimShare": 0.1685,
+      "lenMm": 208.1,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ45TDQRJ3RG08BA3M#0",
+      "contourSig": "6f964d000cbc0c72"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ45TDQRJ3RG08BA3M",
+      "samples": [
+       [
+        0,
+        0.606
+       ],
+       [
+        0.028,
+        0.454
+       ],
+       [
+        0.057,
+        0.303
+       ],
+       [
+        0.085,
+        0.151
+       ],
+       [
+        0.113,
+        0
+       ]
+      ],
+      "perimShare": 0.1705,
+      "lenMm": 210.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ45TDQRJ3RG08BA3M#2",
+      "contourSig": "6f964d000cbc0c72"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Base with sleeves» · the sleeve’s underarm 208 ≈ 211",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · underarm 208 ≈ 211",
+   "confidence": "sure",
+   "cls": "underarm",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "2XNZWGVMAMXCZ2SPGS6TTS5FZ5",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQWRVY037M6TPF60EJ",
+      "samples": [
+       [
+        0,
+        0.6
+       ],
+       [
+        0.027,
+        0.45
+       ],
+       [
+        0.055,
+        0.3
+       ],
+       [
+        0.082,
+        0.151
+       ],
+       [
+        0.109,
+        0.001
+       ]
+      ],
+      "perimShare": 0.1685,
+      "lenMm": 208.1,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQWRVY037M6TPF60EJ#1",
+      "contourSig": "6e5d28260ccfc7d8"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQWRVY037M6TPF60EJ",
+      "samples": [
+       [
+        0.887,
+        0
+       ],
+       [
+        0.915,
+        0.151
+       ],
+       [
+        0.943,
+        0.303
+       ],
+       [
+        0.972,
+        0.454
+       ],
+       [
+        1,
+        0.606
+       ]
+      ],
+      "perimShare": 0.1705,
+      "lenMm": 210.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQWRVY037M6TPF60EJ#3",
+      "contourSig": "6e5d28260ccfc7d8"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «Base with sleeves» · underarm 208 ≈ 211",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «body + CLR → Summer shirt woman» · the collar’s neck edge 514 (notches 43 / 152 / 205 / 309 / 362 / 472) onto the neckline 107 + 77 + 351 + 77 + 107 = 719 — the four back-neck notches (two pleats of 47) do not close the gap: the neckline must gather or the collar is short; sewn, but how far along the fronts is unsure",
+   "confidence": "unsure",
+   "cls": "collar ↔ neckline",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "9NDW75R9XCQZ31HAW477XGCZEJ",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQEBM7T09RHFTRDADP",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0.155,
+        0.23
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.845,
+        0.23
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.5423,
+      "lenMm": 514.5,
+      "notches": 6,
+      "turnDeg": 466,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQEBM7T09RHFTRDADP#3",
+      "contourSig": "3955112caf2132a6"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.949,
+        0.817
+       ],
+       [
+        0.869,
+        0.85
+       ],
+       [
+        0.816,
+        0.897
+       ],
+       [
+        0.779,
+        0.948
+       ],
+       [
+        0.747,
+        1
+       ]
+      ],
+      "perimShare": 0.0617,
+      "lenMm": 106.8,
+      "notches": 0,
+      "turnDeg": -127,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#0",
+      "contourSig": "35f0531c4ccd4282"
+     },
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.774,
+        1
+       ],
+       [
+        0.765,
+        0.962
+       ],
+       [
+        0.751,
+        0.929
+       ],
+       [
+        0.73,
+        0.916
+       ],
+       [
+        0.707,
+        0.925
+       ]
+      ],
+      "perimShare": 0.0299,
+      "lenMm": 76.7,
+      "notches": 0,
+      "turnDeg": -253,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#2",
+      "contourSig": "6f34ca400e2ac14e"
+     },
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.707,
+        0.925
+       ],
+       [
+        0.607,
+        0.866
+       ],
+       [
+        0.5,
+        0.864
+       ],
+       [
+        0.393,
+        0.866
+       ],
+       [
+        0.293,
+        0.925
+       ]
+      ],
+      "perimShare": 0.1369,
+      "lenMm": 350.8,
+      "notches": 4,
+      "turnDeg": -250.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#3",
+      "contourSig": "6f34ca400e2ac14e"
+     },
+     {
+      "piece": "01M0FGJ0TQ4RCQ04WZGZDP7SV2",
+      "samples": [
+       [
+        0.293,
+        0.925
+       ],
+       [
+        0.27,
+        0.917
+       ],
+       [
+        0.249,
+        0.929
+       ],
+       [
+        0.235,
+        0.962
+       ],
+       [
+        0.227,
+        1
+       ]
+      ],
+      "perimShare": 0.0299,
+      "lenMm": 76.6,
+      "notches": 0,
+      "turnDeg": -252.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ4RCQ04WZGZDP7SV2#4",
+      "contourSig": "6f34ca400e2ac14e"
+     },
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.253,
+        1
+       ],
+       [
+        0.221,
+        0.948
+       ],
+       [
+        0.184,
+        0.897
+       ],
+       [
+        0.131,
+        0.85
+       ],
+       [
+        0.051,
+        0.817
+       ]
+      ],
+      "perimShare": 0.0617,
+      "lenMm": 106.8,
+      "notches": 0,
+      "turnDeg": -127,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#6",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "technologist's order «body + CLR → Summer shirt woman» · the collar’s neck edge 514 (notches 43 / 152 / 205 / 309 / 362 / 472) onto the neckline 107 + 77 + 351 + 77 + 107 = 719 — the four back-neck notches (two pleats of 47) do not close the gap: the neckline must gather or the collar is short; sewn, but how far along the fronts is unsure",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the 214 + 214 opening at the left hem (55 mm wide at the hem, point at mid-height): sewn as a dart or left as a pleat — the order does not say",
+   "confidence": "unsure",
+   "cls": "dart legs (self)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "VGWVEFR77ZFDTM2Q1HH01BP3JK",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.404,
+        0.021
+       ],
+       [
+        0.385,
+        0.131
+       ],
+       [
+        0.366,
+        0.24
+       ],
+       [
+        0.347,
+        0.35
+       ],
+       [
+        0.328,
+        0.459
+       ]
+      ],
+      "perimShare": 0.1236,
+      "lenMm": 213.7,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#0",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQ8NWFN76MGC8RA3BF",
+      "samples": [
+       [
+        0.328,
+        0.459
+       ],
+       [
+        0.399,
+        0.356
+       ],
+       [
+        0.47,
+        0.253
+       ],
+       [
+        0.541,
+        0.149
+       ],
+       [
+        0.611,
+        0.046
+       ]
+      ],
+      "perimShare": 0.1237,
+      "lenMm": 213.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQ8NWFN76MGC8RA3BF#1",
+      "contourSig": "3abd5c13939eb275"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the 214 + 214 opening at the left hem (55 mm wide at the hem, point at mid-height): sewn as a dart or left as a pleat — the order does not say",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the right hem opening 214 + 214",
+   "confidence": "unsure",
+   "cls": "dart legs (self)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "3VEAZ80V7AAF5TEBCPWF8TXWEE",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.389,
+        0.046
+       ],
+       [
+        0.459,
+        0.149
+       ],
+       [
+        0.53,
+        0.253
+       ],
+       [
+        0.601,
+        0.356
+       ],
+       [
+        0.672,
+        0.459
+       ]
+      ],
+      "perimShare": 0.1237,
+      "lenMm": 213.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#5",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0FGJ0TQTFK08Y928BDBHN0S",
+      "samples": [
+       [
+        0.672,
+        0.459
+       ],
+       [
+        0.653,
+        0.35
+       ],
+       [
+        0.634,
+        0.24
+       ],
+       [
+        0.615,
+        0.131
+       ],
+       [
+        0.596,
+        0.021
+       ]
+      ],
+      "perimShare": 0.1236,
+      "lenMm": 213.7,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0FGJ0TQTFK08Y928BDBHN0S#6",
+      "contourSig": "35f0531c4ccd4282"
+     }
+    ],
+    "anchoredSize": "m",
+    "note": "the right hem opening 214 + 214",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}

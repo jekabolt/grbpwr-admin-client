@@ -15,11 +15,8 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { useNavigate } from 'react-router-dom';
+import { BackLink, Button, Section, SectionStack, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { ImportReportCounters, ImportReportTable } from './import-report-table';
 
 const UPLOAD_PATH = '/api/techcard-archive/upload';
@@ -192,9 +189,7 @@ export function TechCardImport() {
     return (
       <div className='flex flex-col items-center gap-4 py-20'>
         <Text variant='uppercase'>importing a tech card needs write access</Text>
-        <Button asChild variant='main' size='lg' className='uppercase'>
-          <Link to={ROUTES.techCards}>← back to tech cards</Link>
-        </Button>
+        <BackLink to={ROUTES.techCards}>tech cards</BackLink>
       </div>
     );
   }
@@ -205,9 +200,7 @@ export function TechCardImport() {
   return (
     <div className='flex flex-col gap-2.5 pb-16'>
       <Toolbar>
-        <Button asChild variant='secondary' size='sm'>
-          <Link to={ROUTES.techCards}>←</Link>
-        </Button>
+        <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         <Text component='h1' variant='uppercase' tracking='section' className='font-bold'>
           import tech card
         </Text>
@@ -240,7 +233,7 @@ export function TechCardImport() {
                 accept(e.dataTransfer.files);
               }}
               className={`flex flex-col items-center justify-center gap-2.5 border border-dashed p-10 ${
-                dragging ? 'border-textColor bg-bgZebra' : 'border-borderColor'
+                dragging ? 'border-textColor bg-pageBg' : 'border-borderColor'
               }`}
             >
               <Text variant='uppercase'>

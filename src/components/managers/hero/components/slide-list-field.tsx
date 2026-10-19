@@ -2,9 +2,8 @@ import { LANGUAGES } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { AddDoor, Text, Close } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { LinkField } from './link-field';
 import { MediaPairField } from './media-pair-field';
 
@@ -104,7 +103,7 @@ export function SlideListField({
         const summary = summaryOf(slide);
 
         return (
-          <div key={field.id} className='border border-textInactiveColor'>
+          <div key={field.id} className='border border-borderColor'>
             <div className='flex items-center gap-1 p-2'>
               <button
                 type='button'
@@ -116,10 +115,10 @@ export function SlideListField({
                   <img
                     src={thumb}
                     alt=''
-                    className='h-9 w-9 shrink-0 border border-textInactiveColor object-cover'
+                    className='h-9 w-9 shrink-0 border border-borderColor object-cover'
                   />
                 ) : (
-                  <div className='h-9 w-9 shrink-0 border border-dashed border-textInactiveColor' />
+                  <div className='h-9 w-9 shrink-0 border border-dashed border-borderColor' />
                 )}
                 <span className='flex min-w-0 flex-1 flex-col'>
                   <Text variant='label' size='small'>
@@ -140,7 +139,7 @@ export function SlideListField({
                   disabled={i === 0}
                   onClick={() => move(i, i - 1)}
                   aria-label={`move ${itemLabel} up`}
-                  className='px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  className='px-1.5 py-1 leading-none cursor-pointer text-borderColor hover:text-textColor disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
                   ↑
                 </button>
@@ -149,23 +148,16 @@ export function SlideListField({
                   disabled={i === fields.length - 1}
                   onClick={() => move(i, i + 1)}
                   aria-label={`move ${itemLabel} down`}
-                  className='px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  className='px-1.5 py-1 leading-none cursor-pointer text-borderColor hover:text-textColor disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
                   ↓
                 </button>
-                <button
-                  type='button'
-                  onClick={() => remove(i)}
-                  aria-label={`remove ${itemLabel}`}
-                  className='px-1.5 py-1 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  ×
-                </button>
+                <Close size='sm' onClick={() => remove(i)} aria-label={`remove ${itemLabel}`} />
               </div>
             </div>
 
             {isOpen && (
-              <div className='space-y-3 border-t border-textInactiveColor p-3'>
+              <div className='space-y-3 border-t border-borderColor p-3'>
                 <MediaPairField
                   prefix={`${name}.${i}`}
                   landscapeUrl={slide.mediaLandscapeUrl || ''}
@@ -187,9 +179,7 @@ export function SlideListField({
         );
       })}
 
-      <Button type='button' variant='secondary' size='lg' onClick={() => append(blankSlide())}>
-        + add {itemLabel}
-      </Button>
+      <AddDoor onClick={() => append(blankSlide())}>{itemLabel}</AddDoor>
     </div>
   );
 }

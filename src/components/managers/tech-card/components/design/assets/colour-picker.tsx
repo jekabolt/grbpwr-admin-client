@@ -1,9 +1,6 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, Input, GenericPopover, Text } from 'ui';
 
 import { normaliseTypedHex } from '../render/model';
 import { hexIsPaintable, normaliseHex } from './model';

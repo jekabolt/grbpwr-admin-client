@@ -3,13 +3,18 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  BackLink,
+  Button,
+  Chip,
+  ConfirmationModal,
+  CopyToClipboard,
+  Pill,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+  EmptyCell,
+} from 'ui';
 
 // Refunding is only meaningful once money has been taken and before the order is fully
 // unwound — same list the old bottom bar used. PARTIALLY REFUNDED stays refundable: the backend
@@ -77,14 +82,10 @@ export function OrderHeader({
   return (
     <div className='print:hidden'>
       <Toolbar>
-        <Button asChild variant='secondary' size='sm'>
-          <Link to={ROUTES.orders} aria-label='back to orders'>
-            ←
-          </Link>
-        </Button>
+        <BackLink to={ROUTES.orders}>orders</BackLink>
         <div className='min-w-0'>
           <Text variant='uppercase' tracking='label' className='font-bold'>
-            order #{order?.id ?? '—'}
+            order #{order?.id ?? <EmptyCell />}
           </Text>
           {identity && (
             <Text size='micro' variant='label' className='truncate'>

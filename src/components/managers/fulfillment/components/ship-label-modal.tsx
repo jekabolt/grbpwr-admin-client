@@ -1,12 +1,6 @@
 import { riskTone } from 'components/managers/order/components/stripe-details';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { BackLink, Button, CalloutBox, ConfirmationModal, CopyToClipboard, Input, Pill, Text } from 'ui';
 import { emptyParcel, GeneratedLabel, ShippingOptionVM, ShippingParcel } from '../api/types';
 import {
   useFulfillmentCard,
@@ -276,9 +270,7 @@ export function ShipLabelModal({
         <div className='flex flex-col gap-2.5'>
           <StepHeader step={2} label='carrier' carrierName={carrierName} />
           <div className='flex items-center justify-between gap-2'>
-            <Button variant='underline' size='xs' onClick={() => setStep('parcel')}>
-              ← back to parcel
-            </Button>
+            <BackLink onClick={() => setStep('parcel')}>parcel</BackLink>
             <Button
               variant='secondary'
               size='sm'

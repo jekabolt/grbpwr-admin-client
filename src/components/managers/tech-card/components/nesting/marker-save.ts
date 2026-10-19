@@ -52,9 +52,13 @@ export function markerInsertFromJob({
       ...result,
       warnings: [
         ...result.warnings,
+        // Ноль на ЛИНИИ КРОЯ — не недобор: припуск уже в контуре. Прежде сюда писалось «SEAM
+        // LINE was nested» на любом нуле, и раскладка по слою кроя открывалась с ложной тревогой.
         job.seamAllowanceMm > 0
           ? `seam allowance: ${job.seamAllowanceMm.toFixed(1)} mm (${job.seamAllowanceWhy}) — the CUT contour was saved`
-          : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
+          : job.seamAllowanceSource === 'contour_is_cut'
+            ? `seam allowance: 0 — the contour is the CUT line (${job.seamAllowanceWhy})`
+            : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
         provenanceNote,
       ],
     },

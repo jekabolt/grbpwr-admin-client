@@ -8,11 +8,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
+import { Button, ConfirmationModal, SectionStack, Text, Form } from 'ui';
 import { BlockEditorModal } from './block-editor-modal';
 import { BlockRail } from './block-rail';
 import { HeroPreviewPanel } from './hero-preview-panel';
@@ -387,7 +383,7 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero

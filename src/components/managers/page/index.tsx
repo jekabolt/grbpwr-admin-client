@@ -4,9 +4,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, SectionStack, Text } from 'ui';
 import { BackendAlerts, DateRangePicker, PersistentKpiBar } from './components';
 import { AlertSettingsModal } from './components/alert-settings-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
@@ -228,7 +226,7 @@ export function Analitic() {
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className='h-20 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+                className='h-20 animate-pulse border border-borderColor bg-borderColor/10'
               />
             ))}
           </div>
@@ -236,7 +234,7 @@ export function Analitic() {
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
-                className='h-56 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+                className='h-56 animate-pulse border border-borderColor bg-borderColor/10'
               />
             ))}
           </div>

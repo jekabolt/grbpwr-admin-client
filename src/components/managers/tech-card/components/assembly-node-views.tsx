@@ -7,8 +7,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from 'react';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+import { Chip, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { CreatePrefill } from './assembly-create-dialog';
@@ -27,6 +26,7 @@ import {
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
+import { UnitGlyph, useUnitPicture } from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // ПРЕЗЕНТАЦИОННЫЙ РЕНДЕР НОД СХЕМЫ СБОРКИ — боксы узлов, хвост, провода, глифы.
@@ -93,8 +93,6 @@ const STEP_ROW_FOCUS =
  * дословно: «когда у нас в фокусе в нижнем баре какая-то операция, то нужно на ui её тоже
  * отображать как 20 операция».
  *
- * ИНВЕРСИЯ, А НЕ ЗЕБРА. `bg-bgZebra` в этой коробке уже занята дважды — наведением строки и
- * выделенной шапкой, — и третий смысл на том же оттенке читался бы как «мышь стоит здесь».
  * Инверсия — язык активного пункта этого приложения (`segmented-field`, мобильное меню), она
  * различима на полотне издалека и не отнимает у коробки ни пикселя разметки.
  *
@@ -106,7 +104,7 @@ const STEP_ROW_FOCUS =
  * чтения: строка чёрная (rgb(0,0,0)), обе подписи белые (rgb(255,255,255)), включая ту, что
  * вариантом `label` красится в #666.
  *
- * НАВЕДЕНИЕ У ОТКРЫТОЙ СТРОКИ СНЯТО СОВСЕМ: `hover:bg-bgZebra` — псевдокласс, он перебил бы
+ * НАВЕДЕНИЕ У ОТКРЫТОЙ СТРОКИ СНЯТО СОВСЕМ: `hover:bg-pageBg` — псевдокласс, он перебил бы
  * инверсию, и открытая строка белела бы ровно под мышью, то есть в тот момент, когда на неё и
  * смотрят.
  *
@@ -127,7 +125,7 @@ const STEP_ROW_FOCUS =
 export const stepRowSkin = (open: boolean): string =>
   open
     ? `bg-textColor [&_*]:text-bgColor ${STEP_ROW_FOCUS} focus-visible:outline-bgColor`
-    : `hover:bg-bgZebra ${STEP_ROW_FOCUS} focus-visible:outline-textColor`;
+    : `hover:bg-pageBg ${STEP_ROW_FOCUS} focus-visible:outline-textColor`;
 
 /**
  * ПОДПИСЬ СТРОКИ ШАГА. Открытая строка не зовёт открыть себя ещё раз — она говорит, где её поля.
@@ -353,7 +351,7 @@ export function makeRowY(
     // намеренно осталась прежней. Считай провод по блоку — и он целился бы в строку, сдвинутую
     // на все уехавшие, то есть мимо всех оставшихся.
     const rows =
-      blockKey === '' ? layout.tailSteps : (blocks.find((x) => x.key === blockKey)?.steps ?? []);
+      blockKey === '' ? layout.tailSteps : blocks.find((x) => x.key === blockKey)?.steps ?? [];
     const pos = rows.indexOf(stepIndex);
     if (pos < 0) return box.y + HEAD_H / 2;
     return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
@@ -1061,6 +1059,8 @@ export function UnitBoxView({
   onDissolveUnit: () => void;
 }) {
   const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
+  // Пиктограмма узла (полоса C) — только когда каркас её поставил; иначе шапка как была.
+  const picture = useUnitPicture(box.key);
   return (
     <div>
       <div
@@ -1089,13 +1089,13 @@ export function UnitBoxView({
             // раскладкой, и третья строка текста, откуда бы она ни взялась, легла бы
             // поверх первой строки шага.
             'flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1 text-left',
+            // Место под глиф узла слева: шапка держит свою высоту, текст сдвигается.
+            picture && 'pl-9',
             // Подсветка под курсором БЕЗ ОГОВОРОК — потому что и действие без оговорок:
             // шапка открывает операции узла на любой карточке и в любом его состоянии.
-            'hover:bg-bgZebra',
-            // ТА ЖЕ ЗЕБРА У ВЫДЕЛЕННОГО. Выделение набирают три дороги — маркиза, режим узла
-            // (он переводит выбор на открытый) и ⌘/Ctrl/⇧-клик по этой самой шапке, — а
-            // показывать выделенное обязан кто-то один, и это бокс.
-            isPicked && 'bg-bgZebra',
+            'hover:bg-pageBg',
+            // Выделенная шапка держит заливку: выделение набирают маркиза, режим узла и ⌘/Ctrl/⇧-клик.
+            isPicked && 'bg-pageBg',
           )}
           style={{ height: HEAD_H }}
           // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
@@ -1115,13 +1115,24 @@ export function UnitBoxView({
           // если я сюда нажму». В фулскрине то же самое повторяет справка по клавишам; у инлайна
           // справки нет вовсе, и здесь эта строка — единственная.
           title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
-            terminal ? ' · finished garment' : b.absorbedInto ? ` · goes into ▣ ${b.absorbedInto}` : ' · break'
+            terminal
+              ? ' · finished garment'
+              : b.absorbedInto
+                ? ` · goes into ▣ ${b.absorbedInto}`
+                : ' · break'
           }\n${
             b.steps.length === 1
               ? 'click to open its only step'
               : `click to open the ${b.steps.length} steps of this unit`
           }\n⌘/⇧-click to add it to the selection`}
         >
+          {/* ГЛИФ УЗЛА — детали, состыкованные по швам. Абсолютом поверх отступа шапки, чтобы её
+              две строки и высота не менялись; клики уходят в шапку (подсказка — её). */}
+          {picture && (
+            <span className='pointer-events-none absolute top-0.5 left-1'>
+              <UnitGlyph picture={picture} name={b.name || box.key} boxClassName='mr-0 h-7 w-7' />
+            </span>
+          )}
           {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
               шагах, и делить строку с чем-либо ему нельзя: раньше имя теснило ключ,
               ключ теснил состояние, и двухсловный «ДВА РУКАВА» уезжал поверх шага. */}
@@ -1140,7 +1151,12 @@ export function UnitBoxView({
               а не оттенок. */}
           <span className='flex w-full items-baseline gap-1 overflow-hidden'>
             {b.name && (
-              <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
+              <Text
+                size='nano'
+                variant='label'
+                component='span'
+                className='min-w-0 shrink truncate'
+              >
                 {b.name}
               </Text>
             )}
@@ -1254,7 +1270,12 @@ export function UnitBoxView({
             />
           </Text>
           {smvOfBlock.get(box.key) && (
-            <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              className='ml-auto shrink-0 tabular-nums'
+            >
               Σ {smvOfBlock.get(box.key)}
             </Text>
           )}
@@ -1368,7 +1389,13 @@ export function TailBoxView({
         className='flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1'
         style={{ height: HEAD_H }}
       >
-        <Text size='micro' variant='uppercase' tracking='label' component='span' className='block truncate font-bold'>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='block truncate font-bold'
+        >
           ◌ waiting for a unit
         </Text>
         <Text size='nano' variant='label' component='span' className='block truncate'>
@@ -1397,7 +1424,12 @@ export function TailBoxView({
           {tailSteps.length} {tailSteps.length === 1 ? 'step' : 'steps'}
         </Text>
         {tailSmv && (
-          <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            className='ml-auto shrink-0 tabular-nums'
+          >
             Σ {tailSmv}
           </Text>
         )}

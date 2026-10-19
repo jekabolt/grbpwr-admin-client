@@ -1,0 +1,18 @@
+{
+  "_doc": "A9 (Codex #6): INDEPENDENT page truth — the real role of each page (pattern = a page holding 1:1 pattern line work: a tile of a sheet or a whole sheet). Kept apart from the AI answers (page-roles.json): the probe scores the reader + AI against THIS. Read by eye from the rendered pages (11.10) and cross-checked with corpus/TRUTH.md where it names pages (reef p3 list, robe p11 overview, zhaket overview p1, polupalto overviews p5/p56 + two sheets A/B, r4454 lists p2 + interfacing tiles p35–39, Redcafe p1 'Толстовка NN'). Only pages that were looked at are listed.",
+  "files": {
+    "robe.pdf": { "pattern": ["12-32"], "not": { "1-2": "cover", "3-10": "instructions", "11": "overview" } },
+    "palto.pdf": { "pattern": ["3-37"], "not": { "1": "instructions", "2": "overview" } },
+    "reef.pdf": { "pattern": ["4-35"], "not": { "1": "cover", "2": "table", "3": "overview" } },
+    "zhaket.pdf": { "pattern": ["2-29"], "not": { "1": "overview" } },
+    "blazer.pdf": { "pattern": ["2-25"], "not": { "1": "overview" } },
+    "r4454.pdf": { "pattern": ["4-39"], "not": { "1": "instructions", "2": "cutting_layout", "3": "cover" } },
+    "44.pdf": { "pattern": ["2-21"], "not": { "1": "instructions" } },
+    "46.pdf": { "pattern": ["2-22"], "not": { "1": "instructions" } },
+    "48.pdf": { "pattern": ["2-22"], "not": { "1": "instructions" } },
+    "50.pdf": { "pattern": ["2-22"], "not": { "1": "instructions" } },
+    "52.pdf": { "pattern": ["2-23"], "not": { "1": "instructions" } },
+    "54.pdf": { "pattern": ["2-25"], "not": { "1": "instructions" } },
+    "polupalto.pdf": { "pattern": ["6-40"], "not": { "1-4": "instructions", "5": "overview", "56": "overview" } }
+  }
+}

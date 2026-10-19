@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, RenderTask, TextLayer } from 'pdfjs-dist';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { loadPdfjs, textRuns } from '../hooks/usePdfDocument';
 import { buildPageText, sliceMatch, type PageText, type Span } from '../utils/reader-find';
 

@@ -8,20 +8,26 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { isDxfUrl } from 'utils/pattern';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo, useState } from 'react';
+import { Fragment, ReactNode, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Button, Chip, ChipRow, ConfirmationModal, GroupLabel, Row, Text } from 'ui';
 import { permittedSizeSystems } from 'utils/size-systems';
 import { TechCardFormData } from './schema';
 
-// Size range / grade for the tech card (FK size ids). The permitted systems are rendered INLINE —
-// every size the category allows is on the page as a chip, selected or not, so the run reads at a
-// glance and the common case needs no overlay at all. The popover behind "more systems" only
-// carries what the category filtered out.
+// OS (one size) by its dictionary name. Shared with the pieces dialog, which must not append a
+// graded file's sizes onto a one-size card.
+export function isOsSizeName(raw: string): boolean {
+  const n = formatSizeName(raw)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ' ')
+    .trim();
+  return n === 'os' || n === 'one size' || n === 'onesize';
+}
+
+// Size range / grade for the tech card (FK size ids). The primary system (the one holding the run,
+// else the first permitted) is inline; every other system with a selected size is inline too, and
+// the empty ones fold behind "more systems (N)". Inside the fold, the out-of-category picker
+// carries what the category filtered out. OS and graded sizes exclude each other.
 //
 // Per-size patterns and the colourways' per-size consumption reference ids from this set. Removing
 // a size prunes what this form owns (patterns) and is confirmed first, with the real counts,
@@ -49,7 +55,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
 
   // Same filter the picker popover uses — one hook, so the inline grid and the overlay can never
   // offer different sets.
-  const { permitted, narrowed } = useSizeSystems({
+  const { permitted, other, narrowed } = useSizeSystems({
     gender,
     allowedSizeSystems,
     selectedIds: sizeIds,
@@ -58,6 +64,22 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   const orderSizes = useSizeOrdering();
 
   const selected = new Set(sizeIds);
+  const [expanded, setExpanded] = useState(false);
+
+  // OS (one size) excludes every graded size and vice versa. Detected by the dictionary name;
+  // an id the dictionary does not know is neither, so it blocks nothing.
+  const isOs = (id: number) => {
+    const raw = sizeById.get(id);
+    return raw != null && isOsSizeName(raw);
+  };
+  const osSelected = sizeIds.some(isOs);
+  const gradedSelected = sizeIds.some((id) => sizeById.has(id) && !isOs(id));
+  // Toggle ON is blocked across the OS line; toggle OFF never is (legacy rows may carry both).
+  const blockedReason = (id: number): string | null => {
+    if (selected.has(id)) return null;
+    if (isOs(id)) return gradedSelected ? "one size can't be combined with other sizes" : null;
+    return osSelected ? 'clear one size first' : null;
+  };
 
   // Выкройки, которые снятие размера ДЕЙСТВИТЕЛЬНО потеряет.
   //
@@ -124,6 +146,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
 
   const toggle = (id: number) => {
     if (!selected.has(id)) {
+      if (blockedReason(id)) return;
       setValue('sizeIds', [...sizeIds, id], { shouldDirty: true });
       return;
     }
@@ -143,44 +166,114 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   const rendered = new Set(permitted.flatMap((g) => g.sizes.map((s) => s.id ?? 0)));
   const unknown = sizeIds.filter((id) => !rendered.has(id));
 
+  // Primary system: the one holding the most selected sizes, else the first permitted. Every
+  // system with a selected size stays inline; only empty ones fold behind the door.
+  const selectedIn = (g: (typeof permitted)[number]) =>
+    g.sizes.filter((sz) => selected.has(sz.id ?? 0)).length;
+  const primary = permitted.reduce<(typeof permitted)[number] | undefined>(
+    (best, g) => (!best || selectedIn(g) > selectedIn(best) ? g : best),
+    undefined,
+  );
+  const pinned = permitted.filter((g) => g !== primary && selectedIn(g) > 0);
+  const folded = permitted.filter((g) => g !== primary && selectedIn(g) === 0);
+  // N = folded permitted systems + the out-of-category systems behind the picker.
+  const moreCount = folded.length + (narrowed ? other.length : 0);
+
+  const renderChip = (sz: (typeof permitted)[number]['sizes'][number]) => {
+    const id = sz.id ?? 0;
+    const on = selected.has(id);
+    const attached = on ? attachedCount(id) : 0;
+    const blocked = blockedReason(id);
+    return (
+      <Chip
+        key={id}
+        selected={on}
+        pressed={on}
+        disabled={!!blocked}
+        onClick={() => toggle(id)}
+        className='disabled:border-dashed disabled:text-borderColor disabled:hover:text-borderColor'
+        title={
+          blocked ??
+          (attached
+            ? `${formatSizeName(sz.name)} — carries ${attached} linked ${
+                attached === 1 ? 'entry' : 'entries'
+              }; removing it prunes them`
+            : formatSizeName(sz.name))
+        }
+      >
+        {formatSizeName(sz.name)}
+        {/* a size carrying patterns / consumption is not a free deselect */}
+        {attached > 0 && <span aria-hidden>•</span>}
+      </Chip>
+    );
+  };
+
+  const renderGroup = (group: (typeof permitted)[number], first: boolean, door?: ReactNode) => {
+    const os = group.sizes.filter((sz) => isOs(sz.id ?? 0));
+    const graded = group.sizes.filter((sz) => !isOs(sz.id ?? 0));
+    return (
+      <div key={group.key}>
+        <GroupLabel className={first ? 'mt-0' : undefined}>{group.label}</GroupLabel>
+        <div className='flex items-start gap-2'>
+          <ChipRow className='flex-1'>
+            {os.map(renderChip)}
+            {os.length > 0 && graded.length > 0 && (
+              <Text size='micro' variant='label' component='span' className='px-1'>
+                or
+              </Text>
+            )}
+            {graded.map(renderChip)}
+          </ChipRow>
+          {door}
+        </div>
+      </div>
+    );
+  };
+
+  const door =
+    moreCount > 0 ? (
+      <Button
+        variant='underline'
+        size='xs'
+        className='ml-auto shrink-0 text-labelColor hover:text-textColor'
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        more systems ({moreCount}) {expanded ? '▴' : '▾'}
+      </Button>
+    ) : undefined;
+
   return (
-    <div className='space-y-2'>
-      {permitted.length === 0 ? (
+    // `data-field='sizeIds'`: the anchor revealField walks to — a failed save on the range and the
+    // PATTERNS «open size range» door both land here on the SIZES tab.
+    <div className='space-y-2' data-field='sizeIds'>
+      {!primary ? (
         <Text size='micro' variant='label'>
           no sizes available for this category and target gender
         </Text>
       ) : (
-        permitted.map((group, gi) => (
-          <div key={group.key}>
-            <GroupLabel className={gi === 0 ? 'mt-0' : undefined}>{group.label}</GroupLabel>
-            <ChipRow>
-              {group.sizes.map((s) => {
-                const id = s.id ?? 0;
-                const on = selected.has(id);
-                const attached = on ? attachedCount(id) : 0;
-                return (
-                  <Chip
-                    key={id}
-                    selected={on}
-                    pressed={on}
-                    onClick={() => toggle(id)}
-                    title={
-                      attached
-                        ? `${formatSizeName(s.name)} — carries ${attached} linked ${
-                            attached === 1 ? 'entry' : 'entries'
-                          }; removing it prunes them`
-                        : formatSizeName(s.name)
-                    }
-                  >
-                    {formatSizeName(s.name)}
-                    {/* a size carrying patterns / consumption is not a free deselect */}
-                    {attached > 0 && <span aria-hidden>•</span>}
-                  </Chip>
-                );
-              })}
-            </ChipRow>
-          </div>
-        ))
+        <Fragment>
+          {renderGroup(primary, true, door)}
+          {pinned.map((g) => renderGroup(g, false))}
+          {expanded && (
+            <Fragment>
+              {folded.map((g) => renderGroup(g, false))}
+              {narrowed && (
+                <div className='pt-1'>
+                  <SizePickerModal
+                    selectedIds={sizeIds}
+                    onToggle={toggle}
+                    gender={gender}
+                    allowedSizeSystems={allowedSizeSystems}
+                    scope='other'
+                    triggerLabel='out of category'
+                    title='other size systems'
+                  />
+                </div>
+              )}
+            </Fragment>
+          )}
+        </Fragment>
       )}
 
       {unknown.length > 0 && (
@@ -196,23 +289,6 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         </div>
       )}
 
-      <div className='flex flex-wrap items-center gap-2 pt-1'>
-        <Text size='micro' variant='label'>
-          {sizeIds.length} in the run{sizeIds.length === 0 ? ' — pick the sizes above' : ''}
-        </Text>
-        {narrowed && (
-          <SizePickerModal
-            selectedIds={sizeIds}
-            onToggle={toggle}
-            gender={gender}
-            allowedSizeSystems={allowedSizeSystems}
-            scope='other'
-            triggerLabel='more systems'
-            title='other size systems'
-          />
-        )}
-      </div>
-
       <ConfirmationModal
         open={pendingRemove != null}
         width='sm'
@@ -223,13 +299,10 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           if (pendingRemove != null) pruneAndRemove(pendingRemove);
           setPendingRemove(null);
         }}
-        title='delete the size?'
-        confirmLabel='delete the size'
-        cancelLabel='cancel'
+        title={`delete size ${pendingName}?`}
+        confirmLabel='delete size'
+        hideCancel
       >
-        <Text size='micro' variant='label' className='mb-2'>
-          size {pendingName} is in use. what will happen:
-        </Text>
         {pendingRemove != null && patternCount(pendingRemove) > 0 && (
           <Row label='pattern PDFs' value={patternCount(pendingRemove)} />
         )}
@@ -237,14 +310,14 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           <Row
             label={
               refileTarget(pendingRemove) > 0
-                ? `DXF — won't be deleted, they'll be re-filed onto ${nameOf(refileTarget(pendingRemove))}`
-                : "DXF — won't be deleted, they'll stay WITHOUT a size: no sizes will be left in the range, and the sizes are written in the files themselves anyway"
+                ? `DXF · moved to ${nameOf(refileTarget(pendingRemove))}`
+                : 'DXF · kept without a size'
             }
             value={dxfCount(pendingRemove)}
           />
         )}
         <Row
-          label='per-size consumption lines (colourways)'
+          label='per-size consumption lines'
           value={pendingRemove != null ? usageLineCount(pendingRemove) : 0}
         />
       </ConfirmationModal>

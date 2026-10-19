@@ -3,15 +3,19 @@ import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import CheckboxCommon from 'ui/components/checkbox';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  ConfirmationModal,
+  Pill,
+  Section,
+  Stat,
+  StatGrid,
+  Text,
+  Toolbar,
+  ToolbarSpacer, EmptyCell,
+} from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,
@@ -136,7 +140,7 @@ export function RecurringTab({
             // With the FX read denied we cannot fold non-base templates, so the total would be
             // silently short — say "—" rather than print a plausible-looking lie.
             value={
-              fxUnavailable && runRate.uncosted > 0 ? '—' : money(runRate.total, base, canRead)
+              fxUnavailable && runRate.uncosted > 0 ? <EmptyCell /> : money(runRate.total, base, canRead)
             }
             sub={
               fxUnavailable && runRate.uncosted > 0
@@ -273,7 +277,7 @@ function RecurringRow({
       <div className='flex items-start justify-between gap-2'>
         <div className='flex min-w-0 flex-col gap-1'>
           <Text component='span' className='truncate font-medium'>
-            {ins?.label || '—'}
+            {ins?.label || <EmptyCell />}
           </Text>
           <div className='flex flex-wrap items-center gap-1'>
             <Pill tone='mut'>{opexCategoryLabel(ins?.category)}</Pill>
@@ -305,7 +309,7 @@ function RecurringRow({
       </div>
 
       <Text size='micro' variant='label' component='span'>
-        {monthLabelShort(toMonth(ins?.activeFrom)) || '—'} →{' '}
+        {monthLabelShort(toMonth(ins?.activeFrom)) || <EmptyCell />} →{' '}
         {ins?.activeTo ? monthLabelShort(toMonth(ins.activeTo)) : 'open'}
       </Text>
 

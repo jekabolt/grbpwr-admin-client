@@ -3,9 +3,7 @@ import { adminService } from 'api/api';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Chip } from 'ui/components/chip';
-import GenericPopover from 'ui/components/popover';
-import { Row } from 'ui/components/row';
+import { Chip, GenericPopover, Row } from 'ui';
 
 const DAY = 86_400_000;
 const ageDays = (ts?: string) => (ts ? (Date.now() - new Date(ts).getTime()) / DAY : 0);

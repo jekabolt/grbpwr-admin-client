@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, GroupLabel, Section, Text } from 'ui';
 import {
   formatNoteMarkdown,
   NoteFormatError,

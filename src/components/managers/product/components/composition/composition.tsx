@@ -1,8 +1,7 @@
 import { composition, CompositionStructure } from 'constants/garment-composition';
 import { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import InputField from 'ui/form/fields/input-field';
+import { Button, InputField } from 'ui';
 import { ReadOnlyField } from '../read-only-field';
 import { CompositionModal } from './composition-modal/composition-modal';
 import { compositionToValue } from './composition-modal/utils';
@@ -124,7 +123,7 @@ export function Composition({ editMode }: CompositionProps) {
 
   return (
     <div className='w-full h-full'>
-      <div className='border-b border-textInactiveColor flex items-center w-full'>
+      <div className='border-b border-borderColor flex items-center w-full'>
         <div className='flex-1'>
           <InputField
             name='product.productBodyInsert.composition'

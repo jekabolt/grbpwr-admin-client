@@ -1,6 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_Colorway, common_EmailCampaignInsert, common_EmailCampaignStatus } from 'api/proto-http/admin';
+import {
+  common_Colorway,
+  common_EmailCampaignInsert,
+  common_EmailCampaignStatus,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   EDITABLE_STATUSES,
@@ -14,13 +18,8 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { BackLink, Button, Section, SectionStack, Text, Form, InputField, SelectField } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
 import { useProductSelection } from '../../hero/components/useProductSelection';
 import { ABPanel } from './ab-panel';
@@ -166,9 +165,7 @@ export function CampaignBuilder() {
 
   const buildInsert = useCallback((): common_EmailCampaignInsert => {
     const values = form.getValues();
-    const liveBody = (values.body || []).filter(
-      (b: any) => !deletedIndicesRef.current.has(b._uid),
-    );
+    const liveBody = (values.body || []).filter((b: any) => !deletedIndicesRef.current.has(b._uid));
     // status is server-owned (the upsert accepts drafts only), so the mapper always
     // declares DRAFT — never echo currentStatus back or every save of a
     // paused/scheduled campaign is rejected with "campaign status is server-owned".
@@ -249,20 +246,13 @@ export function CampaignBuilder() {
   return (
     <Form {...form}>
       <form onSubmit={(e) => e.preventDefault()} className='flex flex-col'>
-        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              className='px-2 py-1'
-              onClick={() => navigate(ROUTES.emailCampaigns)}
-            >
-              ← campaigns
-            </Button>
+            <BackLink onClick={() => navigate(ROUTES.emailCampaigns)}>campaigns</BackLink>
             <Text variant='uppercase' size='large'>
               {routeId > 0 ? 'edit campaign' : 'new campaign'}
             </Text>
-            <span className='border border-textInactiveColor px-1.5 py-0.5 leading-none'>
+            <span className='border border-borderColor px-1.5 py-0.5 leading-none'>
               <Text size='small' variant='uppercase'>
                 {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS] ?? currentStatus}
               </Text>
@@ -325,8 +315,9 @@ export function CampaignBuilder() {
         {readOnly && (
           <div className='mb-4 border border-warning p-2'>
             <Text size='small' variant='uppercase' className='text-warning'>
-              read-only — this campaign is {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS]}. only
-              DRAFT campaigns can be edited; the content of a scheduled or sent campaign is frozen.
+              read-only — this campaign is{' '}
+              {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS]}. only DRAFT campaigns can
+              be edited; the content of a scheduled or sent campaign is frozen.
             </Text>
           </div>
         )}
@@ -445,7 +436,7 @@ export function CampaignBuilder() {
         <DialogPrimitives.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
           <DialogPrimitives.Portal>
             <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
-            <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col overflow-y-auto border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[900px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
+            <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col overflow-y-auto border border-borderColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[900px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
               <DialogPrimitives.Title className='mb-3 shrink-0'>
                 <Text variant='uppercase' size='large'>
                   add a block

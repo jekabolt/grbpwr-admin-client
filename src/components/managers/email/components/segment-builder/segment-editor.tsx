@@ -10,12 +10,16 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import { Section, SectionStack } from 'ui/components/section';
-import Textarea from 'ui/components/text-area';
-import Text from 'ui/components/text';
+import {
+  BackLink,
+  Button,
+  ConfirmationModal,
+  Input,
+  Section,
+  SectionStack,
+  Textarea,
+  Text,
+} from 'ui';
 import { useDeleteSegment, useSegment, useUpsertSegment } from '../useCampaign';
 import { PredicateBuilder } from './predicate-builder';
 import {
@@ -146,16 +150,9 @@ export function SegmentEditor() {
   return (
     <div className='flex flex-col'>
       {/* header bar */}
-      <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            className='px-2 py-1'
-            onClick={() => navigate(ROUTES.emailSegments)}
-          >
-            ← segments
-          </Button>
+          <BackLink onClick={() => navigate(ROUTES.emailSegments)}>segments</BackLink>
           <Text variant='uppercase' size='large'>
             {routeId > 0 ? 'edit segment' : 'new segment'}
           </Text>

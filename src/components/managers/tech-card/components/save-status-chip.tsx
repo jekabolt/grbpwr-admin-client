@@ -1,10 +1,6 @@
 import { useRef, useState } from 'react';
 import type { AutosaveStatus } from './design/autosave-contract';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { GroupLabel, Pill, GenericPopover, Button, Text } from 'ui';
 import { sameText, TEXT_SECTION_LABEL, type HistoryEntry, type TextSnapshot } from './save-history';
 import type { FormErrorRow } from './stage-progress';
 import type { MachineState } from './useTechCardAutosave';
@@ -220,7 +216,7 @@ export function SaveStatusChip({
           title={decision.title}
           className={`flex items-stretch ${FOCUS}`}
         >
-          <Pill tone={tone} className='cursor-pointer hover:bg-bgZebra'>
+          <Pill tone={tone} className='cursor-pointer hover:bg-pageBg'>
             {label}
           </Pill>
         </button>
@@ -245,7 +241,7 @@ export function SaveStatusChip({
           'aria-label': decision ? 'saving details and history' : `${label}, details and history`,
         }}
         openElement={
-          <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-bgZebra'>
+          <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-pageBg'>
             {!decision && <span>{label}</span>}
             <span aria-hidden>▾</span>
           </Pill>
@@ -261,7 +257,7 @@ export function SaveStatusChip({
                 setOpen(false);
                 onRevealError(walk.path);
               }}
-              className={`flex w-full items-baseline gap-2 border-b border-hairline pb-1 text-left hover:bg-bgZebra ${FOCUS}`}
+              className={`flex w-full items-baseline gap-2 border-b border-hairline pb-1 text-left hover:bg-pageBg ${FOCUS}`}
             >
               <span className='flex min-w-0 flex-1 flex-col'>
                 <Text size='micro' component='span' className='truncate'>

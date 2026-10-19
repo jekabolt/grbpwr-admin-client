@@ -1,6 +1,6 @@
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 
 type Props = {
   label: string;

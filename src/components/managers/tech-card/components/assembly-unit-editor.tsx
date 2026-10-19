@@ -2,7 +2,7 @@ import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { Text, EmptyCell } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 
 import type { AssemblyBlock } from './assembly-blocks';
@@ -395,7 +395,7 @@ function UnitStepRow({
       title={`${label} — open this step in the editor`}
       className={cn(
         'flex min-w-0 cursor-pointer items-center gap-1.5 border px-1 py-1 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-        selected ? 'border-textColor bg-bgZebra' : 'border-transparent hover:border-borderColor',
+        selected ? 'border-textColor bg-pageBg' : 'border-transparent hover:border-borderColor',
       )}
     >
       <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
@@ -422,7 +422,7 @@ function UnitStepRow({
         className='w-8 shrink-0 text-right tabular-nums'
         title='SMV, min'
       >
-        {smvMin > 0 ? smvMin.toFixed(1) : '—'}
+        {smvMin > 0 ? smvMin.toFixed(1) : <EmptyCell />}
       </Text>
     </span>
   );

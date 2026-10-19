@@ -1,6 +1,6 @@
 import type { TimeSeriesPoint } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { parseDecimal } from '../utils';
 
 /**
@@ -30,7 +30,7 @@ export const Sparkline: FC<{
     )
     .join(' ');
   return (
-    <div className='border border-textInactiveColor p-2'>
+    <div className='border border-borderColor p-2'>
       <Text variant='uppercase' className='block text-[10px] text-labelColor'>
         {label}
         {sub ? ` · ${sub}` : ''}

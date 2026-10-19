@@ -1,0 +1,9 @@
+{
+  "_note": "A10 metric: per-case truth points (sheet mm) — one labelled point INSIDE each truth piece, for a case whose sheet differs from its click fixture (pieces-clicks.json). wm-M is the M file alone: the 7-size fixture's sleeve click (390,450) falls 5 mm outside the M sleeve (cap edge of the larger sizes); its point here is inside the M sleeve. The other three are the fixture's own points.",
+  "wm-M": [
+    { "label": "ID: 1", "at": [180, 450] },
+    { "label": "ID: 2", "at": [760, 400] },
+    { "label": "ID: 3", "at": [493, 577] },
+    { "label": "ID: 4", "at": [890, 250] }
+  ]
+}

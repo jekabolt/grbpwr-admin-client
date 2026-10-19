@@ -21,8 +21,7 @@
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { fabricScopes, isRollGoodsSection } from './bom-purpose';
 import type { MarkerColorway } from './nesting/colorway-widths';
 import { dxfSheetsByScope } from './nesting/dxf-by-scope';
@@ -127,13 +126,15 @@ export function KitMarkerHint({
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
-      <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        title="lay out this fabric's pieces at the article width: measured length, waste included"
+        onClick={() => setOpen(true)}
+      >
         kit marker…
       </Button>
-      <Text size='nano' variant='label' component='span'>
-        lay out the pieces of THIS fabric at this article's width — a measured length, waste already
-        inside it
-      </Text>
       {open && (
         <Suspense fallback={null}>
           <KitMarkerDialog

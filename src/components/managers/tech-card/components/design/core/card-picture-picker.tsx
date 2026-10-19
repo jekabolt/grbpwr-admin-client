@@ -1,11 +1,7 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, GroupLabel, HeaderCount, Text } from 'ui';
 
 import type { Representation } from '../bench-kinds';
 import { colorwayLabel } from '../colorway-picker';

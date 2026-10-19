@@ -1,6 +1,5 @@
 import { common_OrderFull } from 'api/proto-http/frontend';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { NewTrackCode } from './new-track-code';
 
 interface Props {

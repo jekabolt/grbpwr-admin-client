@@ -17,12 +17,7 @@ import {
   useWatch,
   type FieldValues,
 } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
-import SelectField from 'ui/form/fields/select-field';
+import { Button, GroupLabel, Pill, Text, FormLabel, SelectField } from 'ui';
 import { FIT_KEYS, fitChoicesFor, fitLabel } from './design/fit-vocabulary';
 import { TechCardFormData, toPurposeEnum } from './schema';
 import { parseSeasonToSku } from './season-util';

@@ -4,7 +4,7 @@
 // тоже — правка не теряется молча.
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 /** Появление полосы правки: 150 мс прозрачности; при reduced-motion — сразу (global.css). */
 export const SWAP = 'composition-line-in';

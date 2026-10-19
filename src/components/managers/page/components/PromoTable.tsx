@@ -1,6 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { FC } from 'react';
-import Text from 'ui/components/text';
+import { Text, EmptyCell } from 'ui';
 import { formatCurrency, parseDecimal } from '../utils';
 
 interface PromoTableProps {
@@ -16,10 +16,10 @@ export const PromoTable: FC<PromoTableProps> = ({ metrics }) => {
       <Text variant='uppercase' className='font-bold'>
         Revenue by promo
       </Text>
-      <div className='border border-textInactiveColor overflow-x-auto'>
+      <div className='border border-borderColor overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-borderColor'>
               <th className='text-left p-2 uppercase'>Code</th>
               <th className='text-right p-2 uppercase'>Orders</th>
               <th className='text-right p-2 uppercase'>Revenue</th>
@@ -28,8 +28,8 @@ export const PromoTable: FC<PromoTableProps> = ({ metrics }) => {
           </thead>
           <tbody>
             {promos.map((p, i) => (
-              <tr key={i} className='border-b border-textInactiveColor last:border-0'>
-                <td className='p-2 font-mono'>{p.promoCode ?? '-'}</td>
+              <tr key={i} className='border-b border-borderColor last:border-0'>
+                <td className='p-2 font-mono'>{p.promoCode ?? <EmptyCell />}</td>
                 <td className='p-2 text-right'>{p.ordersCount ?? 0}</td>
                 <td className='p-2 text-right'>{formatCurrency(parseDecimal(p.revenue))}</td>
                 <td className='p-2 text-right'>{formatCurrency(parseDecimal(p.avgDiscount))}</td>

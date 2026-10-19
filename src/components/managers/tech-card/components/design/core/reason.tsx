@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 /**
  * THE VISIBLE REASON UNDER A DEAD DOOR.

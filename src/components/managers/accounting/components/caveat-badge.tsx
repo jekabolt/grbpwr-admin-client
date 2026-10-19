@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import Tooltip from 'ui/components/tooltip';
+import { Tooltip } from 'ui';
 
 type Props = {
   text?: string;

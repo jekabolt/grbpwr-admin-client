@@ -57,7 +57,7 @@ const root = resolve(HERE, '..');
 
 const PICTURES = /design\/flat-input-pictures\.tsx$/;
 const WORDS = /design\/flat-words-field\.tsx$/;
-const ANNOTATOR = /ui\/components\/focused-annotator\.tsx$/;
+const ANNOTATOR = /tech-card\/annotation\/focused-annotator\.tsx$/;
 const RUNROW = /design\/flat-run-row\.tsx$/;
 const LABELS = /design\/board-labels\.ts$/;
 const MUTATIONS = {

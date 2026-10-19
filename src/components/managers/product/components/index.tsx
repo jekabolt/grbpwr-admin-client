@@ -8,13 +8,9 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
-import { generatePath, Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Section, SectionStack } from 'ui/components/section';
+import { generatePath, useNavigate } from 'react-router-dom';
+import { BackLink, Button, CalloutBox, Section, SectionStack, Text, Form } from 'ui';
 import { SkuToken } from 'components/managers/tech-card/components/colourway-palette';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
 import { ProductCostSection } from './cost-section';
@@ -236,11 +232,9 @@ export function ProductForm({
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
         {/* Header — identity + status */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.product}>← products</Link>
-            </Button>
+            <BackLink to={ROUTES.product}>products</BackLink>
             <Text variant='uppercase' size='large'>
               {headerTitle || 'product'}
             </Text>
@@ -391,7 +385,7 @@ export function ProductForm({
       </form>
 
       {/* Sticky action bar */}
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2 print:hidden'>
         <Text variant='inactive' size='small'>
           {editMode && isFormChanged ? 'unsaved changes' : ' '}
         </Text>
@@ -445,7 +439,7 @@ function SectionNav({ items }: { items: { id: string; label: string }[] }) {
   const jump = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
-    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-textInactiveColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
+    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-borderColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
       {items.map((it) => (
         <Button
           key={it.id}

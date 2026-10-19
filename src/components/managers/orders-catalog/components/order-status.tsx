@@ -1,5 +1,4 @@
-import { Pill } from 'ui/components/pill';
-import { Step, Stepper } from 'ui/components/stepper';
+import { Pill, Step, Stepper } from 'ui';
 
 /**
  * ordStatus v3 — "lifecycle micro-stepper".

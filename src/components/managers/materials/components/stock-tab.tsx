@@ -4,9 +4,7 @@ import { SECTION } from 'constants/routes';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Button, GenericPopover, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialModal } from './material-modal';
 import { MaterialThumb } from './material-thumb';
@@ -19,8 +17,8 @@ import {
 import { materialPurposeLabel } from './purpose-options';
 import { useMaterialStock } from './useWarehouse';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
-const chip = 'border border-textInactiveColor px-1.5 py-0.5 text-small uppercase';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
+const chip = 'border border-borderColor px-1.5 py-0.5 text-small uppercase';
 const sectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? '—';
 
@@ -57,7 +55,7 @@ function SortTh({
         }`}
       >
         {label}
-        <span className='text-textInactiveColor'>
+        <span className='text-borderColor'>
           {active ? (dir === 'asc' ? '▲' : '▼') : '↕'}
         </span>
       </button>
@@ -246,7 +244,7 @@ export function StockTab() {
       ) : isError ? (
         <Text size='small'>Stock is unavailable — the warehouse backend may not be deployed.</Text>
       ) : rows.length === 0 ? (
-        <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+        <div className='flex flex-col gap-1 border border-borderColor p-3'>
           <Text size='small'>No stock yet.</Text>
           <Text variant='inactive' size='small'>
             Existing shelf stock? Use adjust → set count per material — it sets on hand without
@@ -330,7 +328,7 @@ export function StockTab() {
                     <td className={cell}>
                       <MaterialThumb material={m} size='sm' />
                     </td>
-                    <td className={cell}>{m?.code || '—'}</td>
+                    <td className={cell}>{m?.code || <EmptyCell />}</td>
                     <td className={cell}>
                       <div className='flex flex-wrap items-center gap-2'>
                         <span>{m?.name}</span>
@@ -343,17 +341,23 @@ export function StockTab() {
                     </td>
                     <td className={`${cell} text-right`}>
                       {below ? '! ' : ''}
-                      {decimalToInput(r.minStock) || '—'}
+                      {decimalToInput(r.minStock) || <EmptyCell />}
                     </td>
                     {canReadCosting ? (
                       <>
                         <td className={`${cell} text-right`}>
-                          {r.avgUnitCostBase?.value
-                            ? `${decimalToInput(r.avgUnitCostBase)} ${r.baseCurrency || ''}`
-                            : '—'}
+                          {r.avgUnitCostBase?.value ? (
+                            `${decimalToInput(r.avgUnitCostBase)} ${r.baseCurrency || ''}`
+                          ) : (
+                            <EmptyCell />
+                          )}
                         </td>
                         <td className={`${cell} text-right`}>
-                          {r.stockValueBase?.value ? decimalToInput(r.stockValueBase) : '—'}
+                          {r.stockValueBase?.value ? (
+                            decimalToInput(r.stockValueBase)
+                          ) : (
+                            <EmptyCell />
+                          )}
                         </td>
                       </>
                     ) : null}

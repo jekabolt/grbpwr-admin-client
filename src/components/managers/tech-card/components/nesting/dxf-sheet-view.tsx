@@ -1,4 +1,4 @@
-// Тело просмотра DXF НАШИМ листом: выбор размера, контурного слоя и слоёв чертежа.
+// Тело просмотра DXF НАШИМ листом: выбор размера; контур, слои чертежа и долевая — по умолчанию.
 //
 // Вынесено из dxf-sheet-viewer.tsx БЕЗ модалки и БЕЗ словаря: публичный вьюер выкроек
 // (/p/:token) показывает те же градуированные листы швее без логина, и токены размеров там
@@ -11,15 +11,15 @@
 // значит увиденное и посчитанное не могут разойтись.
 import type { PieceDTO } from 'lib/nesting/types';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Text, HeaderWarnings } from 'ui';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet } from './piece-sheet';
 import { dedupeUniPieces } from './piece-selection';
 import { splitPiecesBySize } from './split-pieces';
 import { useNesting, type NestingFile } from './use-nesting';
+
+const UNITS_NOT_SET = /units are not set in the file/;
 
 export function DxfSheetView({
   files,
@@ -39,10 +39,9 @@ export function DxfSheetView({
   const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
 
   const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
-  const [activeLayer, setActiveLayer] = useState<string | null>(null);
-  const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
-    ? (activeLayer as string)
-    : defaultContourLayer(layerOpts);
+  // Контурный слой, слои чертежа и долевая не выбираются (владелец, patterns-lite r2): всегда
+  // слой по умолчанию, весь внутренний чертёж и долевая.
+  const contourLayer = defaultContourLayer(layerOpts);
   const onLayer = useMemo(
     () => allPieces.filter((p) => (p.layer ?? '') === contourLayer),
     [allPieces, contourLayer],
@@ -105,10 +104,10 @@ export function DxfSheetView({
   // Крупнейшая группа по умолчанию: группа «без размера» это остаток, а не размер.
   const shownSize = sizeOpts.some((o) => o.size === activeSize)
     ? (activeSize as string)
-    : (sizeOpts.reduce<{ size: string; count: number } | null>(
+    : sizeOpts.reduce<{ size: string; count: number } | null>(
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
-      )?.size ?? '');
+      )?.size ?? '';
   const shown = useMemo(() => view.piecesOfSize(shownSize), [view, shownSize]);
 
   const grainLayer = useMemo(() => defaultGrainLayer(grainLayerOptions(allPieces)), [allPieces]);
@@ -119,12 +118,13 @@ export function DxfSheetView({
         if (c.layer === grainLayer) continue;
         seen.set(c.layer, (seen.get(c.layer) ?? 0) + 1);
       }
-    return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return [...seen.keys()];
   }, [shown, grainLayer]);
-  const [hiddenInner, setHiddenInner] = useState<string[]>([]);
-  const innerLayers = useMemo(
-    () => new Set(innerNames.map(([l]) => l).filter((l) => !hiddenInner.includes(l))),
-    [innerNames, hiddenInner],
+  const innerLayers = useMemo(() => new Set(innerNames), [innerNames]);
+  // Единицы спросит диалог при загрузке — здесь их предупреждение лишнее.
+  const warnings = useMemo(
+    () => (parse.phase === 'ready' ? parse.warnings.filter((w) => !UNITS_NOT_SET.test(w)) : []),
+    [parse],
   );
 
   const pillSize = touchTargets ? 'lg' : 'xs';
@@ -138,15 +138,6 @@ export function DxfSheetView({
         </Text>
       )}
       {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
-      {parse.phase === 'ready' && parse.warnings.length > 0 && (
-        <CalloutBox tone='note'>
-          {parse.warnings.map((w, i) => (
-            <Text key={i} size='micro' component='p'>
-              {w}
-            </Text>
-          ))}
-        </CalloutBox>
-      )}
 
       {parse.phase === 'ready' && (
         <>
@@ -171,63 +162,10 @@ export function DxfSheetView({
                 ))}
               </div>
             )}
-            {layerOpts.length > 1 && (
-              <div className='flex flex-wrap items-center gap-1'>
-                <Text size='nano' variant='label' component='span'>
-                  contour:
-                </Text>
-                {layerOpts.map((o) => (
-                  <Button
-                    key={o.layer || '(none)'}
-                    type='button'
-                    variant={o.layer === contourLayer ? 'main' : 'secondary'}
-                    size={pillSize}
-                    className={pillClass}
-                    title={
-                      o.checked === 0
-                        ? `layer ${o.layer}: ${o.pieces} contours`
-                        : `layer ${o.layer}: graded on ${o.graded} of ${o.checked} pieces`
-                    }
-                    onClick={() => setActiveLayer(o.layer)}
-                  >
-                    layer {o.layer || '—'}
-                  </Button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {innerNames.length > 0 && (
-            <div className='flex flex-wrap items-center gap-2'>
-              <Text size='nano' variant='label' component='span'>
-                drawing layers:
-              </Text>
-              {innerNames.map(([layer, n]) => (
-                <label
-                  key={layer}
-                  className={
-                    touchTargets
-                      ? 'flex min-h-11 cursor-pointer items-center gap-1.5'
-                      : 'flex cursor-pointer items-center gap-1'
-                  }
-                >
-                  <input
-                    type='checkbox'
-                    className={touchTargets ? 'size-5' : undefined}
-                    checked={!hiddenInner.includes(layer)}
-                    onChange={(e) =>
-                      setHiddenInner((prev) =>
-                        e.target.checked ? prev.filter((l) => l !== layer) : [...prev, layer],
-                      )
-                    }
-                  />
-                  <Text size='nano' variant='label' component='span'>
-                    {layer} ({n})
-                  </Text>
-                </label>
-              ))}
+            <div className='ml-auto'>
+              <HeaderWarnings items={warnings} />
             </div>
-          )}
+          </div>
 
           <PieceSheet
             // Пересобираем при смене размера или слоя: зум и панорама живут внутри листа, и
@@ -241,12 +179,8 @@ export function DxfSheetView({
             labelOf={(p) => split.codeById.get(p.id)?.identity ?? p.blockName ?? ''}
             selectedKey={null}
             onPick={() => {}}
+            bare
           />
-
-          <Text size='nano' variant='label' component='p'>
-            pieces in this size: {shown.length}
-            {sizeOpts.length > 1 ? ` · sizes in the file: ${sizeOpts.filter((o) => o.size).length}` : ''}
-          </Text>
         </>
       )}
     </div>

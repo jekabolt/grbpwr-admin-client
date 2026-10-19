@@ -8,8 +8,7 @@
 // «скачать» живёт на строке листа в sheet-list и работает при сломанном рендере (тот же
 // договор деградации, что у dxf-quick-view-modal).
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import Text from 'ui/components/text';
+import { CalloutBox, Text } from 'ui';
 import type { NestingFile } from 'components/managers/tech-card/components/nesting/use-nesting';
 // Из `sheet-name`, а не из `dxf-by-scope`: реэкспорт там тянет за собой proto-типы и пикер строк
 // BOM, а это публичная страница на телефоне. Сам модуль намеренно без зависимостей (см. его шапку).

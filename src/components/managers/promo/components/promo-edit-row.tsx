@@ -1,9 +1,5 @@
 import { UseFormReturn } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
-import { Form } from 'ui/form';
-import CheckboxField from 'ui/form/fields/checkbox-field';
-import InputField from 'ui/form/fields/input-field';
+import { Button, Text, Form, CheckboxField, InputField } from 'ui';
 import { type PromoDraftSchema } from './schema';
 
 type Props = {

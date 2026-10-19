@@ -1,5 +1,5 @@
 import { useFormContext } from 'react-hook-form';
-import Input, { InputProps } from 'ui/components/input';
+import Input, { InputProps } from '../../components/input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = Omit<InputProps, 'name'> & {

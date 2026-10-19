@@ -1,4 +1,4 @@
-import type { AnnotationValue } from 'ui/components/annotation/canvas';
+import type { AnnotationValue } from 'components/managers/tech-card/annotation/canvas';
 
 // UI-facing view model for the kanban. Mirrors the generated client
 // (api/proto-http/admin: common_Task / common_TaskInsert @ proto 26a19e8) but

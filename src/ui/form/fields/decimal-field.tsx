@@ -1,5 +1,5 @@
 import { useFormContext } from 'react-hook-form';
-import Input, { InputProps } from 'ui/components/input';
+import Input, { InputProps } from '../../components/input';
 import { sanitizeDecimal } from 'utils/decimal';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '..';
 

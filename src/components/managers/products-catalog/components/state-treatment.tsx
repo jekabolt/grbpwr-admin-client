@@ -1,6 +1,6 @@
 import { ArchiveIcon, EyeNoneIcon, Pencil1Icon } from '@radix-ui/react-icons';
 import { common_Colorway, common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // Catalog-scoped lifecycle presentation.
 //
@@ -105,7 +105,7 @@ export function CatalogCommerceTags({ product }: { product: common_Colorway }) {
       {tags.map((tag) => (
         <span
           key={tag}
-          className='border border-textInactiveColor bg-bgColor px-1 py-0.5 leading-none'
+          className='border border-borderColor bg-bgColor px-1 py-0.5 leading-none'
         >
           <Text size='small' variant='label' component='span'>
             {tag}

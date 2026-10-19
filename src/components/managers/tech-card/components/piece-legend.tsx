@@ -1,7 +1,4 @@
-import { Accordion } from 'ui/components/accordion';
-import { GroupLabel } from 'ui/components/group-label';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import { Accordion, GroupLabel, Row, Text } from 'ui';
 import { pieceBaseCodes, pieceModifiers } from './piece-codes';
 
 // Collapsible glossary of the pattern-piece abbreviation system, so codes written on the
@@ -58,7 +55,7 @@ export function PieceLegend() {
       ))}
 
       <Text size='micro' variant='label' className='mt-1.5'>
-        {'codes combine: FP_R_1 · PCK_f · BP_L<M>'}
+        {'codes combine: FP_R_1 · PCK_F · SL_R_B_1_# · BP_L_M (size last)'}
       </Text>
     </Accordion>
   );

@@ -12,11 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { AddDoor, Button, Chip, Pill, Text, FoldCaret, Close } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import {
@@ -33,6 +29,7 @@ import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
 import { AssemblyUnitEditor, unitDockTitle } from './assembly-unit-editor';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
+import { ResetLayoutModal } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import {
@@ -46,7 +43,6 @@ import {
 } from './use-panel-prefs';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 // ФУЛСКРИН СХЕМЫ СБОРКИ — ТРЕТИЙ ВИД, а не отдельный экран.
 //
@@ -117,7 +113,11 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   // ВТОРОЙ СПОСОБ НАБОРА, И ОН НЕ ДУБЛЁР. Рамка берёт всё, что накрыла; на собранной карточке
   // ноды стоят вперемешку, и «две через одну» она взять не умеет — клик с модификатором умеет.
   ['⌘/⇧-click a head', 'add the node to the selection (or drop it)', 'schematic'],
-  ['drag from the shelf', 'drop on a node to join, on empty ground to place the piece', 'schematic'],
+  [
+    'drag from the shelf',
+    'drop on a node to join, on empty ground to place the piece',
+    'schematic',
+  ],
   ['drag ⠿ on a step', 'reorder the sequence', 'list'],
   ['arrows', 'nudge the picked by 8px (shift: 1px)', 'schematic'],
   ['u', 'join the picked into a unit', 'schematic'],
@@ -749,7 +749,7 @@ export function AssemblyFullscreen({
    * первой же вставкой: в шапке «3 steps», на схеме четыре.
    */
   const dockUnit =
-    dock?.role === 'unit' ? (blocks.find((b) => b.key === dock.unitKey) ?? null) : null;
+    dock?.role === 'unit' ? blocks.find((b) => b.key === dock.unitKey) ?? null : null;
 
   /**
    * ШАГ, ОТКРЫТЫЙ В НИЖНЕМ БАРЕ, — ДЛЯ ПОЛОТНА. Его строка на схеме инвертируется, и «шаг 20» в
@@ -1691,7 +1691,13 @@ export function AssemblyFullscreen({
             {/* ── хром ─────────────────────────────────────────────────────────────────────── */}
             <header className='flex flex-col gap-1 border border-borderColor bg-bgColor px-2 py-1.5'>
               <div className='flex flex-wrap items-center gap-2'>
-                <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                <Text
+                  size='micro'
+                  variant='uppercase'
+                  tracking='label'
+                  component='span'
+                  className='font-bold'
+                >
                   assembly
                 </Text>
                 <CardIdentity />
@@ -1774,19 +1780,22 @@ export function AssemblyFullscreen({
                       чипов он единственный такой. Слово снимает класс целиком — чип становится
                       таким же, как соседи (замер: dx −0.10, dy как у всего ряда). Клавишу называет
                       подпись: она и была единственным местом, где про неё сказано. */}
-                  <Chip nonForm dashed onClick={() => setHelpOpen(true)} title='keyboard shortcuts (?)'>
-                    help
-                  </Chip>
                   <Chip
                     nonForm
                     dashed
-                    onClick={() => setResetOpen(true)}
-                    title='restore the automatic layout'
+                    onClick={() => setHelpOpen(true)}
+                    title='keyboard shortcuts (?)'
                   >
+                    help
+                  </Chip>
+                  <Chip nonForm dashed onClick={() => setResetOpen(true)}>
                     reset layout
                   </Chip>
                   {frozen ? (
-                    <Pill tone='mut' title='the card is released — it can be read and laid out, not edited'>
+                    <Pill
+                      tone='mut'
+                      title='the card is released — it can be read and laid out, not edited'
+                    >
                       released · read-only
                     </Pill>
                   ) : onSave ? (
@@ -1945,19 +1954,14 @@ export function AssemblyFullscreen({
                         первая строка колонки, без зазора. Порядок и зазоры — те же, что у
                         инлайна. */}
                     {!frozen && (
-                      <button
-                        type='button'
+                      <AddDoor
+                        afterRows={railFields.length > 0}
+                        className='shrink-0'
                         onClick={openCreateDialog}
                         title='a new step from scratch — pick what it joins in the dialog'
-                        className={cn(
-                          'w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-                          railFields.length > 0 && 'mt-4',
-                        )}
                       >
-                        <Text size='control' variant='uppercase' tracking='label' component='span'>
-                          + new operation
-                        </Text>
-                      </button>
+                        new operation
+                      </AddDoor>
                     )}
                   </div>
                   {/* СВОЙ `<fieldset disabled>` — РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО У ДОКА: внешний,
@@ -2068,7 +2072,13 @@ export function AssemblyFullscreen({
                 >
                   <FoldCaret open className='ml-0' />
                 </button>
-                <Text size='micro' variant='uppercase' tracking='label' component='span' className='min-w-0 truncate font-bold'>
+                <Text
+                  size='micro'
+                  variant='uppercase'
+                  tracking='label'
+                  component='span'
+                  className='min-w-0 truncate font-bold'
+                >
                   {/* ПОДПИСЬ НАЗЫВАЕТ РОЛЬ, а не всегда шаг. ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА:
                       `selected` родителя всегда ≥ 0 (useState(0)), и на карточке без операций `]`
                       подписывал бы док «step 10» по строке, которой нет. */}
@@ -2294,7 +2304,8 @@ export function AssemblyFullscreen({
                   {/* Только клавиши ЭТОГО вида: строка про мёртвую в списке `v` — та же ложь, что
                       подпись про несуществующую клавишу. */}
                   {HELP_KEYS.filter(
-                    ([, , where]) => where === 'both' || where === (listMode ? 'list' : 'schematic'),
+                    ([, , where]) =>
+                      where === 'both' || where === (listMode ? 'list' : 'schematic'),
                   ).map(([keys, what]) => (
                     <Fragment key={keys}>
                       <dt className='whitespace-nowrap'>
@@ -2320,28 +2331,16 @@ export function AssemblyFullscreen({
             </div>
           )}
 
-          {/* R8: ЕДИНСТВЕННОЕ подтверждение на всём экране, и текст его — слово в слово тот же, что
-              у инлайна. Два экрана, по-разному объясняющих одно и то же, читаются как два разных
-              правила. */}
-          <ConfirmationModal
+          {/* R8: the screen's only confirm, shared with the inline schematic (ResetLayoutModal). */}
+          <ResetLayoutModal
             open={resetOpen}
             onOpenChange={setResetOpen}
-            onConfirm={() => {
+            onReset={() => {
               prefs.reset();
               setResetOpen(false);
             }}
-            title='restore the automatic layout'
-            confirmLabel='reset'
-            cancelLabel='keep'
-            width='sm'
             onCloseAutoFocus={restoreScreenFocus}
-          >
-            <Text size='micro' variant='label'>
-              every manual position on this card will be forgotten, and the schematic will place the
-              units by itself again. the card's data doesn't change: positions are only a way of
-              looking.
-            </Text>
-          </ConfirmationModal>
+          />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -2811,17 +2810,13 @@ function SketchSticker({
         >
           sketch
         </Text>
-        <button
-          type='button'
+        <Close
+          size='sm'
           onClick={close}
           aria-label='hide the sketch'
           title='hide the sketch (s)'
-          className='ml-auto text-labelColor transition-colors hover:text-textColor'
-        >
-          <Text size='micro' component='span'>
-            ✕
-          </Text>
-        </button>
+          className='ml-auto'
+        />
       </div>
       {/* СВЁРНУТЫЙ СТИКЕР — РОВНО ЕГО ШАПКА: тело снимается, а не прячется `visibility`, иначе
           свёрнутая справка продолжала бы отнимать место у полотна, ничего не показывая. */}

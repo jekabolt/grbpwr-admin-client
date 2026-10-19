@@ -22,7 +22,7 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import Input from 'ui/components/input';
-import { SnackBar } from 'ui/components/snackbar';
+import { SnackBar } from 'components/shell/snackbar';
 
 type TrayProbe = {
   mount: () => void;

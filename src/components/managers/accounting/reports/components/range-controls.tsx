@@ -1,7 +1,5 @@
 import { cn } from 'lib/utility';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Input, Select, Text } from 'ui';
 import { useAcctAccounts, useAcctPeriods } from '../../utils/hooks';
 import {
   monthsForAsOf,
@@ -46,10 +44,10 @@ export function RangeControls({ mode, from, to, asOf, code, onChange }: Props) {
   const status = rangePeriodStatus(months, periods);
 
   const presetBtn =
-    'border border-textInactiveColor px-2 py-1 text-textBaseSize uppercase hover:bg-textColor hover:text-bgColor transition-colors';
+    'border border-borderColor px-2 py-1 text-textBaseSize uppercase hover:bg-textColor hover:text-bgColor transition-colors';
 
   return (
-    <div className='flex flex-wrap items-end justify-between gap-4 border-b border-textInactiveColor pb-3'>
+    <div className='flex flex-wrap items-end justify-between gap-4 border-b border-borderColor pb-3'>
       <div className='flex flex-wrap items-end gap-4'>
         {mode === 'asOf' ? (
           <label className='flex flex-col gap-1'>
@@ -144,7 +142,7 @@ export function RangeControls({ mode, from, to, asOf, code, onChange }: Props) {
         <span
           className={cn(
             'whitespace-nowrap text-textBaseSize uppercase',
-            status === 'closed' ? 'text-textInactiveColor' : 'text-textColor',
+            status === 'closed' ? 'text-borderColor' : 'text-textColor',
           )}
         >
           {status === 'closed' ? 'closed' : 'open'}

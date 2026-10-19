@@ -1,8 +1,7 @@
 import { useProductWaitlist } from 'components/managers/waitlist/components/useWaitlist';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
+import { DataTable, EmptyCell, GroupLabel } from 'ui';
 import { formatSizeName } from '../utility/sizes';
 
 // Compact read of the back-in-stock waitlist for this colourway — sits inside the same "sizes &

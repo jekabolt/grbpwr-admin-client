@@ -11,15 +11,11 @@ import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
 import { AskModal, PlaceOrDrawCell, Reason } from './core';
-import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { TILE_CORNER, TILE_QUIET, Button, Close, Input, Pill, Text } from 'ui';
 import { useDrafted } from './drafted-contract';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
-import type { MediaViewerItem } from 'ui/components/media-viewer';
+import type { MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { PictureTile } from './picture-tile';
 import { successorStands } from './generation/edit-chain';
 import { useEditChainDoors } from './generation/edit-chain-doors';
@@ -1115,27 +1111,32 @@ export function BenchSlot(props: BenchSlotProps) {
   };
   const deleteCorner =
     detail && onDelete && !disabled && !proposed ? (
-      <button
-        type='button'
-        data-detail-delete={label}
-        aria-label={`delete detail ${label}`}
-        title={`delete detail «${label}»`}
-        aria-busy={deleting || undefined}
-        disabled={deleting || saving}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (history) setAskDelete(true);
-          else runDelete();
-        }}
-        className={cn(
-          'z-20 py-0.5 leading-none',
-          TILE_CORNER,
-          TILE_QUIET,
-          deleting && 'opacity-100',
-        )}
-      >
-        {deleting ? '…' : '✕'}
-      </button>
+      deleting ? (
+        <Button
+          type='button'
+          data-detail-delete={label}
+          aria-label={`deleting detail ${label}`}
+          aria-busy
+          disabled
+          className={cn('z-20 py-0.5 leading-none', TILE_CORNER, 'opacity-100')}
+        >
+          …
+        </Button>
+      ) : (
+        <Close
+          size='sm'
+          data-detail-delete={label}
+          aria-label={`delete detail ${label}`}
+          title={`delete detail «${label}»`}
+          disabled={saving}
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (history) setAskDelete(true);
+            else runDelete();
+          }}
+          className={cn('z-20', TILE_QUIET)}
+        />
+      )
     ) : undefined;
 
   /* THE EDIT PROPAGATES, AND WALKS BACK (04.10, owner item 28, T28): the editor over a filled slot

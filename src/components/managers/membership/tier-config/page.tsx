@@ -2,11 +2,7 @@ import { TierConfigEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { BackLink, Button, Input, Section, SectionStack, Text } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
 
@@ -30,13 +26,11 @@ export function TierConfig() {
 
   return (
     <div className='flex flex-col w-full gap-6 pb-24'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
           tier configuration
         </Text>
-        <Button variant='secondary' size='lg' className='uppercase' asChild>
-          <Link to={ROUTES.members}>← members</Link>
-        </Button>
+        <BackLink to={ROUTES.members}>members</BackLink>
       </div>
 
       <Text variant='inactive' size='small'>
@@ -146,7 +140,7 @@ export function TierConfig() {
       </SectionStack>
 
       {canWrite(SECTION.members) && entries.length > 0 && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
+        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
           <Text variant='inactive' size='small'>
             {dirty ? 'unsaved changes' : ' '}
           </Text>

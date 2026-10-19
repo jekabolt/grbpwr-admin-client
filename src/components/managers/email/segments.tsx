@@ -8,9 +8,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 import { useDeleteSegment, useSegments } from './components/useCampaign';
 
 function formatCount(n: number | undefined): string | undefined {

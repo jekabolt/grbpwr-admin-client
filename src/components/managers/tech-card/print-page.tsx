@@ -10,9 +10,8 @@ import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { BackLink, Button, Text } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
 
@@ -180,23 +179,21 @@ export function TechCardPrint() {
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
-          <Button asChild variant='secondary' size='lg'>
-            <Link
+          <>
+            <BackLink
               to={id ? `/tech-cards/${id}` : ROUTES.techCards}
               title='back to the tech card · esc'
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent) => {
                 // Ссылка остаётся ссылкой: щелчок с модификатором или средней кнопкой открывает
                 // карточку по href, как прежде. Простой щелчок — тот же шаг назад, что и Esc.
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 e.preventDefault();
                 goBack();
               }}
-            >
-              ← back
-            </Link>
-          </Button>
+            />
+          </>
           <Text variant='uppercase' size='large'>
             tech pack — pdf
           </Text>
@@ -231,12 +228,10 @@ export function TechCardPrint() {
           <Text variant='inactive' className='uppercase'>
             tech card not found
           </Text>
-          <Button asChild variant='main' size='lg' className='uppercase'>
-            <Link to={ROUTES.techCards}>← back to tech cards</Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
-        <div className='techpack-doc border border-textInactiveColor shadow-sm'>
+        <div className='techpack-doc border border-borderColor shadow-sm'>
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
               плашка без неё напечаталась бы текстом впритык к рамке. */}
           <div className='px-8 pt-6'>

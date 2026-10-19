@@ -1,11 +1,7 @@
 import { PackagingRecipeItem, PackagingRecipeLine } from 'api/proto-http/admin';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Input, Placeholder, Pill, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -121,17 +117,7 @@ function PackagingRow({
             </Text>
           )}
         </div>
-        {canEdit && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            aria-label='remove material'
-            onClick={onRemove}
-          >
-            ✕
-          </Button>
-        )}
+        {canEdit && <Close size='sm' aria-label='remove material' onClick={onRemove} />}
       </div>
 
       <div className='grid grid-cols-2 gap-2'>
@@ -147,7 +133,7 @@ function PackagingRow({
               }
             />
           ) : (
-            <Text size='control'>{row.qtyPerOrder || '—'}</Text>
+            <Text size='control'>{row.qtyPerOrder || <EmptyCell />}</Text>
           )}
         </Field>
         <Field label={`/ item${unit}`}>
@@ -162,7 +148,7 @@ function PackagingRow({
               }
             />
           ) : (
-            <Text size='control'>{row.qtyPerItem || '—'}</Text>
+            <Text size='control'>{row.qtyPerItem || <EmptyCell />}</Text>
           )}
         </Field>
       </div>
@@ -274,10 +260,6 @@ export function PackagingRecipeField({
   return (
     <div className='flex flex-col gap-2'>
       <div className='flex flex-wrap items-center gap-2'>
-        <Text size='micro' variant='label' component='span'>
-          per shipment (/order) + per item (/item) · empty → global fallback (materials → packaging
-          BOM)
-        </Text>
         {canEdit && (
           <Button
             type='button'
@@ -310,9 +292,7 @@ export function PackagingRecipeField({
           </div>
         </CalloutBox>
       ) : rows.length === 0 ? (
-        <Text size='micro' variant='label'>
-          no style packaging yet{canEdit ? ' — add a material to override the global fallback' : ''}
-        </Text>
+        <Placeholder className='h-12' label='global packaging applies' />
       ) : (
         <div className='grid grid-cols-1 gap-1.5 lg:grid-cols-2'>
           {rows.map((r, i) => (
@@ -335,9 +315,6 @@ export function PackagingRecipeField({
               {problem}
             </Text>
           )}
-          <Text size='micro' variant='label' component='span' className='ml-auto'>
-            saves with the card
-          </Text>
         </div>
       )}
     </div>

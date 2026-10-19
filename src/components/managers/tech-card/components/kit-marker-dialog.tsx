@@ -42,20 +42,25 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  ConfirmationModal,
+  FoldCaret,
+  HeaderWarnings,
+  type HeaderWarning,
+  Progress as ProgressBar,
+  Row,
+  Text,
+} from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { aliasInScope, fabricScopes, isRollGoodsSection } from './bom-purpose';
 import type { MarkerJob, PlanRefusal } from './nesting/batch-marker-plan';
 import { sizeTokensOf } from './nesting/block-code';
 import type { MarkerColorway } from './nesting/colorway-widths';
 import { dxfSheetsByScope } from './nesting/dxf-by-scope';
-import { weightRefusalText, type WeightBasisResolution } from './nesting/fabric-weight';
+import { weightMissingShort, type WeightBasisResolution } from './nesting/fabric-weight';
 import {
   kitBoundNote,
   kitInputDrift,
@@ -87,6 +92,8 @@ type Progress = {
   nfp: { done: number; total: number } | null;
   generation: number;
   bestPct: number | null;
+  /** Доля бюджета поиска, прошедшая с запуска, % — то, чем заполняется полоса. */
+  elapsedPct: number;
 };
 
 export type KitMarkerApplyPatch = {
@@ -243,7 +250,12 @@ export default function KitMarkerDialog({
     typeof kitScopeSkeleton
   > | null>(null);
   const [parseId, setParseId] = useState(0);
-  const [progress, setProgress] = useState<Progress>({ nfp: null, generation: 0, bestPct: null });
+  const [progress, setProgress] = useState<Progress>({
+    nfp: null,
+    generation: 0,
+    bestPct: null,
+    elapsedPct: 0,
+  });
   const [stopping, setStopping] = useState(false);
   const [result, setResult] = useState<NestResult | null>(null);
   const [saveError, setSaveError] = useState('');
@@ -408,15 +420,9 @@ export default function KitMarkerDialog({
   // БАЗОВЫЙ РАЗМЕР НАЗЫВАЕТСЯ ПЕРВЫМ. Себестоимость считается по нему (base_sample_size_id, без
   // фолбэка), и раскладка «какого-нибудь» размера была бы нормой не того изделия. Подставить
   // средний размер ряда — ровно та молчаливая догадка, которой здесь быть не должно.
-  const noBaseSize =
-    baseSizeId <= 0
-      ? 'the card has no BASE size picked (card header, “base sample size”). Cost is computed from it, with no fallback, so the kit is cut in exactly that size — substituting the middle size of the range would mean measuring the norm of a different garment'
-      : '';
+  const noBaseSize = baseSizeId <= 0 ? 'no base sample size on the card' : '';
   const baseSizeName = baseSizeId > 0 ? sizeLabelOf(baseSizeId) : '';
-  const noScope =
-    !scopeDef && !noBaseSize
-      ? "the BOM line of this fabric is not among the card's roll-goods sections — nothing to make a marker on"
-      : '';
+  const noScope = !scopeDef && !noBaseSize ? 'this line is not a roll-goods fabric' : '';
   const widthDisagreement = job
     ? kitWidthDisagreement(job.widthCm, Number((articleWidth || '').replace(',', '.')))
     : '';
@@ -427,11 +433,11 @@ export default function KitMarkerDialog({
   // отказ верный, но минуты уже потрачены, а починка лежит на вкладке BOM.
   const unitKind = bomUnitKind(unit);
   const unitRefusal = !unit
-    ? "the BOM line has no unit — the norm is written in the slot's unit, and there's nothing to apply the measured length in. Fill in the unit on the BOM tab"
+    ? 'slot has no unit'
     : unitKind == null
-      ? `the BOM line's unit (“${unit}”) accepts neither length nor weight — the norm can be written in meters, centimeters or kilograms`
+      ? `unit “${unit}” takes neither length nor weight`
       : unitKind === 'kg' && !weightBasis.ok
-        ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
+        ? weightMissingShort(weightBasis.missing)
         : '';
   const blocked = noBaseSize || noScope || parseError || widthDisagreement || unitRefusal;
 
@@ -477,25 +483,30 @@ export default function KitMarkerDialog({
     // Показ им не управляет — экран смотрит на фазу.
     setAppliedText('');
     setStopping(false);
-    setProgress({ nfp: null, generation: 0, bestPct: null });
+    setProgress({ nfp: null, generation: 0, bestPct: null, elapsedPct: 0 });
     setPhase('running');
     let last = 0;
+    const startedAt = Date.now();
+    const budgetMs = Math.max(1, budgetS) * 1000;
     const { id, done } = client().nest(parseId, job.config, (p) => {
       const now = Date.now();
       if (p.phase === 'ga' && now - last < PROGRESS_MIN_MS) return;
       last = now;
       if (!aliveRef.current) return;
+      const elapsedPct = Math.min(100, ((now - startedAt) / budgetMs) * 100);
       if (p.phase === 'nfp') {
         setProgress({
           nfp: { done: p.nfpDone ?? 0, total: p.nfpTotal ?? 0 },
           generation: 0,
           bestPct: null,
+          elapsedPct,
         });
       } else {
         setProgress({
           nfp: null,
           generation: p.generation ?? 0,
           bestPct: p.best ? Math.min(100, p.best.efficiency * 100) : null,
+          elapsedPct,
         });
       }
     });
@@ -667,112 +678,70 @@ export default function KitMarkerDialog({
 
   // ── экран ─────────────────────────────────────────────────────────────────────────────────
   const forecast = job?.estimate;
-  const forecastText = !forecast
-    ? 'nothing to estimate'
-    : forecast.outlook === 'starved'
-      ? `the budget won't even cover the geometry prepass: there will be no search at all, and the run would return an empty lay. A budget from ${Math.ceil(forecast.budgetToFitMs / 1000)} s is needed — raise it higher; if even 180 s is not enough, the job is too big for the browser, and the marker has to be captured from the “patterns” tab with the pieces picked by hand`
-      : forecast.outlook === 'squeezed'
-        ? `prepass ~${Math.round(forecast.predictedPrepassMs / 1000)} s, ~${Math.round(forecast.searchMsLeft / 1000)} s left for the search`
-        : `up to ${Math.ceil((forecast.predictedElapsedMs ?? forecast.timeBudgetMs) / 1000)} s (prepass ~${Math.round(forecast.predictedPrepassMs / 1000)} s)`;
   // «Поиска не будет вовсе» — не предупреждение, а бесполезно потраченные минуты: предпросчёт не
   // успевает построить ни одной пары NFP, и укладывать нечем. Кнопка гаснет, причина стоит рядом.
   const starved = forecast?.outlook === 'starved';
   const busy = phase === 'running' || phase === 'saving';
+
+  const forecastShort = !forecast
+    ? undefined
+    : starved
+      ? `budget too small: needs ${Math.ceil(forecast.budgetToFitMs / 1000)} s`
+      : `up to ${Math.ceil((forecast.predictedElapsedMs ?? forecast.timeBudgetMs) / 1000)} s`;
+  const canRun = phase === 'ready' && !!job && !!parseId && !blocked && !starved;
+
+  // Всё, что мешает или что стоит знать о числе, — строкой в шапке тела, не колаутами.
+  const warnings: (HeaderWarning | null | undefined | false)[] = [
+    noBaseSize && { text: noBaseSize, error: true },
+    noScope && { text: noScope, error: true },
+    parseError && { text: parseError, error: true },
+    widthDisagreement && { text: widthDisagreement, error: true },
+    unitRefusal && { text: unitRefusal, error: true },
+    ...refusals.map((r) => ({
+      text: `${[r.scopeLabel, r.sizeLabel].filter(Boolean).join(' · ')}: ${r.reason}`,
+      error: true,
+    })),
+    saveError && { text: saveError, error: true },
+    ...(job?.notes ?? []),
+    job?.replaces &&
+      `replaces marker “${job.replaces.name}”${job.replaces.isNorm ? ' (the norm)' : ''}`,
+    drift && `inputs changed since the line's norm: ${drift}`,
+    ...(result?.warnings ?? []),
+  ];
 
   return (
     <ConfirmationModal
       open
       onOpenChange={(o: boolean) => {
         // ЗАПИСЬ ИДЁТ — ЗАКРЫТЬ НЕЛЬЗЯ. `SaveTechCardMarker` — обычный fetch, отменить его нечем;
-        // закрытое посреди записи окно оставило бы раскладку на сервере, а норму — неприменённой,
-        // и оператор не увидел бы ни успеха, ни отказа. Окно самих секунд стоит одну-две.
+        // закрытое посреди записи окно оставило бы раскладку на сервере, а норму — неприменённой.
         if (!o && phase !== 'saving') onClose();
       }}
-      onConfirm={onClose}
-      title={`kit marker${baseSizeName ? ` · size ${baseSizeName}` : ''}`}
-      hideActions
+      onConfirm={() => void run()}
+      onCancel={onClose}
+      hideCancel
+      headerActions={<HeaderWarnings items={warnings} />}
+      title={`compute kit marker${job ? ` · ${job.scopeLabel}` : ''}${baseSizeName ? ` · ${baseSizeName}` : ''}`}
+      confirmLabel='compute marker'
+      confirmDisabled={!canRun}
+      closeOnConfirm={false}
+      // Подвал — только пока есть что запускать; во время прогона и после — один ✕ в шапке.
+      hideActions={phase !== 'ready' || !job || !!blocked}
+      footerHint={phase === 'ready' && job && !blocked ? forecastShort : undefined}
     >
       <div className='space-y-2.5'>
-        {/* ЧТО МЕШАЕТ — ПЕРВЫМ И БЕЗ ИСКЛЮЧЕНИЙ: отказ, лежащий под числами, читается после того,
-            как оператор уже поверил числу. */}
-        {noBaseSize && <CalloutBox tone='error'>{noBaseSize}</CalloutBox>}
-        {noScope && <CalloutBox tone='error'>{noScope}</CalloutBox>}
-        {parseError && <CalloutBox tone='error'>{parseError}</CalloutBox>}
-        {widthDisagreement && <CalloutBox tone='error'>{widthDisagreement}</CalloutBox>}
-        {unitRefusal && <CalloutBox tone='error'>{unitRefusal}</CalloutBox>}
-        {refusals.map((r) => (
-          <CalloutBox key={r.key} tone='error'>
-            {[r.scopeLabel, r.sizeLabel].filter(Boolean).join(' · ')}: {r.reason}
-          </CalloutBox>
-        ))}
-
         {phase === 'parsing' && (
-          <Text size='nano' variant='label' component='p'>
-            downloading and parsing this fabric's patterns…
+          <Text size='micro' variant='label' component='p'>
+            reading patterns…
           </Text>
         )}
 
-        {/* ЧТО ИМЕННО БУДЕТ ПОСЧИТАНО — до нажатия, числами. Раскладка стоит минуты, и «что мы
-            вообще кроим» обязано быть видно ДО того, как их потратят. */}
-        {job && (
-          <>
-            <GroupLabel>job</GroupLabel>
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <Pill tone='mut'>{job.scopeLabel}</Pill>
-              <Pill tone='mut'>{job.pinned ? `pin: ${job.articleName}` : job.articleName}</Pill>
-              <Pill tone='mut'>cloth {job.widthCm} cm</Pill>
-              <Pill tone='mut'>
-                {job.pieceCount} contours · {job.instanceCount} instances
-              </Pill>
-            </div>
-            <Text size='nano' variant='label' component='p'>
-              {`contour layer ${job.contourLayer || '—'}, grainline ${job.grainLayer || 'no rotation'}, seam allowance ${job.seamAllowanceMm} mm (${job.seamAllowanceWhy}), selvedge ${job.selvedgeCm} cm per side`}
-            </Text>
-            {/* ЧТО ИМЕННО КРОИМ — СПИСКОМ, А НЕ ОДНИМ СЧЁТЧИКОМ.
-                Ради этого списка всё и затевалось: одна и та же ткань в роли основной и в роли
-                карманки даёт РАЗНЫЕ числа, и разницу обязано объяснять не «настройка», а вот эти
-                строки — у двух слотов они разные. Без списка два числа на одном артикуле выглядели
-                бы расхождением расчёта. Свёрнуто: на большой ткани это сорок строк, а вопрос
-                «сколько это будет стоить» задают чаще, чем «из чего именно». */}
-            <details>
-              <summary className='cursor-pointer'>
-                <Text size='nano' variant='label' component='span' className='uppercase'>
-                  kit pieces ({job.pieceCount})
-                </Text>
-              </summary>
-              <div className='flex flex-col gap-0.5 pt-1'>
-                {kitPieceLines.map((l) => (
-                  <Text key={l.key} size='nano' variant='label' component='span'>
-                    {l.text}
-                  </Text>
-                ))}
-              </div>
-            </details>
-            {job.notes.map((n, i) => (
-              <CalloutBox key={i} tone='warning'>
-                {n}
-              </CalloutBox>
-            ))}
-            {job.replaces && (
-              <CalloutBox tone='note'>
-                {`a recompute will REPLACE the marker “${job.replaces.name}”${job.replaces.isNorm ? ' (it is set as the norm of this fabric)' : ''}${job.replaces.isDraft ? " — right now it's a draft, some pieces were not placed" : ''}: it has the same slot, the same colorway and the same size, and a second one just like it would pile up beside it`}
-              </CalloutBox>
-            )}
-            {/* ПРОТУХАНИЕ — ТОЧНАЯ ПОЛОВИНА. Сравнивается отпечаток входа: экземпляры и ширина. */}
-            {drift && (
-              <CalloutBox tone='warning'>
-                {`the line's norm was captured from the marker “${stampedMarker?.name ?? ''}”, and the input has changed since: ${drift}. The number on the line stays true for those conditions — recompute it if you need today's`}
-              </CalloutBox>
-            )}
-          </>
-        )}
-
-        {/* ГРАНИЦА НАЗЫВАЕТСЯ ГРАНИЦЕЙ — и до прогона, и после. Без этой строки число неотличимо
-            от измеренного настила партии: у них одинаковы все поля раскладки. */}
-        {job && <CalloutBox tone='note'>{kitBoundNote(job.sizeLabel)}</CalloutBox>}
-
         {phase === 'ready' && job && !blocked && (
           <>
+            <Row
+              label={job.pinned ? `pin: ${job.articleName}` : job.articleName}
+              value={`${job.widthCm} cm · ${job.instanceCount} pieces`}
+            />
             <ChipRow>
               {[20, 60, 180].map((s) => (
                 <Chip
@@ -781,89 +750,86 @@ export default function KitMarkerDialog({
                   pressed={budgetS === s}
                   onClick={() => setBudgetS(s)}
                 >
-                  budget {s} s
+                  {s} s
                 </Chip>
               ))}
             </ChipRow>
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                disabled={starved}
-                title={starved ? forecastText : undefined}
-                onClick={run}
-              >
-                compute the marker
-              </Button>
-              <Text size='nano' variant='label' component='span'>
-                {forecastText}
-              </Text>
-            </div>
+            {/* Условия съёмки и список деталей — за складкой: вопрос «из чего именно» задают
+                реже, чем «сколько». `<details>`: так он живёт и внутри выключенного fieldset. */}
+            <details className='group'>
+              <summary className='cursor-pointer list-none text-micro uppercase tracking-label text-labelColor'>
+                details
+                <FoldCaret open='details' />
+              </summary>
+              <div className='flex flex-col gap-0.5 pt-1'>
+                <Text size='nano' variant='label' component='p'>
+                  {`contour layer ${job.contourLayer || '—'}, grainline ${job.grainLayer || 'no rotation'}, seam allowance ${job.seamAllowanceMm} mm (${job.seamAllowanceWhy}), selvedge ${job.selvedgeCm} cm per side`}
+                </Text>
+                {kitPieceLines.map((l) => (
+                  <Text key={l.key} size='nano' variant='label' component='span'>
+                    {l.text}
+                  </Text>
+                ))}
+              </div>
+            </details>
           </>
         )}
 
         {phase === 'running' && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <Button type='button' variant='secondary' size='xs' disabled={stopping} onClick={stop}>
-              {stopping ? 'stopping…' : 'stop'}
-            </Button>
-            <Text size='nano' variant='label' component='span'>
-              {progress.nfp
-                ? `geometry prepass ${progress.nfp.done}/${progress.nfp.total}`
-                : `generation ${progress.generation}${progress.bestPct != null ? ` · efficiency ${progress.bestPct.toFixed(1)}%` : ''}`}
-            </Text>
-            <Text size='nano' variant='label' component='span'>
-              “stop” gives back the best found so far — it doesn't throw the computation away
-            </Text>
+          <div className='flex flex-col gap-1.5'>
+            <ProgressBar
+              value={
+                progress.nfp && progress.nfp.total > 0
+                  ? (progress.nfp.done / progress.nfp.total) * 100
+                  : progress.elapsedPct
+              }
+            />
+            <div className='flex items-center gap-1.5'>
+              <Text size='micro' variant='label' component='span' className='mr-auto'>
+                {progress.nfp
+                  ? `preparing geometry ${progress.nfp.done}/${progress.nfp.total}`
+                  : progress.bestPct != null
+                    ? `best so far ${progress.bestPct.toFixed(1)}%`
+                    : 'searching…'}
+              </Text>
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={stopping}
+                title='keeps the best marker found so far'
+                onClick={stop}
+              >
+                {stopping ? 'stopping…' : 'stop'}
+              </Button>
+            </div>
           </div>
         )}
 
         {phase === 'saving' && (
-          <Text size='nano' variant='label' component='p'>
-            saving the marker and re-reading the consumption from the server…
+          <Text size='micro' variant='label' component='p'>
+            saving…
           </Text>
         )}
 
-        {result && (
-          <Text size='nano' variant='label' component='p'>
-            {`placed ${result.placedCount} of ${result.totalCount} · lay length ${result.usedLengthCm.toFixed(0)} cm · efficiency ${(result.efficiency * 100).toFixed(1)}%${result.cancelled ? ' · the search was stopped, this is the best found' : ''}`}
-          </Text>
-        )}
-        {result?.warnings.map((w, i) => (
-          <CalloutBox key={i} tone='warning'>
-            {w}
-          </CalloutBox>
-        ))}
-
-        {saveError && <CalloutBox tone='error'>{saveError}</CalloutBox>}
-
-        {phase === 'applied' && savedSummary && (
-          <>
-            <CalloutBox tone='note'>
-              {`the norm ${appliedText} is applied into the recipe line from the marker “${savedSummary.name}” with the source “from a marker”: costing does NOT add the slot's wastage percent on top of it — the waste is already measured. The write goes out when the card is saved.`}
-            </CalloutBox>
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <Button type='button' variant='secondary' size='xs' onClick={onClose}>
-                done
-              </Button>
-            </div>
-          </>
-        )}
-
-        {phase === 'stuck' && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <Button type='button' variant='secondary' size='xs' onClick={onClose}>
-              close
-            </Button>
+        {/* Граница называется границей: без подписи число неотличимо от настила партии. */}
+        {result && job && (
+          <div title={kitBoundNote(job.sizeLabel)}>
+            <Row label='width' value={`${job.widthCm} cm`} />
+            <Row label='length' value={`${result.usedLengthCm.toFixed(0)} cm`} />
+            <Row
+              label='efficiency'
+              value={`${(result.efficiency * 100).toFixed(1)}%${result.cancelled ? ' · stopped' : ''}`}
+            />
+            {result.placedCount < result.totalCount && (
+              <Row
+                label='placed'
+                value={`${result.placedCount} of ${result.totalCount}`}
+                tone='error'
+              />
+            )}
+            {phase === 'applied' && appliedText && <Row label='norm applied' value={appliedText} />}
           </div>
-        )}
-
-        {!busy && phase !== 'applied' && phase !== 'stuck' && (
-          <Text size='nano' variant='label' component='p'>
-            the marker is computed IN THIS BROWSER: there is no other executor — nothing on the
-            server can parse DXF. Closing the window or leaving the page stops the computation
-          </Text>
         )}
       </div>
     </ConfirmationModal>

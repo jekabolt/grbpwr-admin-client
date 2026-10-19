@@ -12,19 +12,31 @@ import { stampWhen } from 'components/managers/production-runs/components/useLay
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { BarRow } from 'ui/components/bar-row';
-import { CalloutBox } from 'ui/components/callout-box';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import {
+  BarRow,
+  DataTable,
+  EmptyCell,
+  TotalRow,
+  GroupLabel,
+  Pill,
+  Stat,
+  StatGrid,
+  Text,
+  FoldCaret,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { laysProvenancePhrase } from './bom-wastage-suggestion';
-import { LineProblems, noFx, NO_PRICE, PriceOrigin, TIER_ESTIMATE } from './costing-vocab';
+import {
+  ESTIMATE_WHY,
+  HelpMark,
+  LineProblems,
+  noFx,
+  NO_PRICE,
+  PriceOrigin,
+  TIER_ESTIMATE,
+} from './costing-vocab';
 import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 const num = (s?: string) => {
   const n = parseDecimalNumber(s);
@@ -255,7 +267,14 @@ function Breakdown({
         <thead>
           <tr>
             <th>line</th>
-            <th>consumption</th>
+            <th>
+              <span className='inline-flex items-center gap-1'>
+                consumption
+                <HelpMark title='consumption'>
+                  A per-size norm enters as the mean across the size range, not a run forecast.
+                </HelpMark>
+              </span>
+            </th>
             <th>price</th>
             <th>price from</th>
             <th>problem</th>
@@ -265,7 +284,7 @@ function Breakdown({
           </tr>
         </thead>
         <tbody>
-          <tr className='bg-bgZebra'>
+          <tr>
             <td colSpan={BREAKDOWN_LEAD}>
               <Text
                 size='micro'
@@ -329,7 +348,7 @@ function Breakdown({
                     )}
                   </td>
                   <td>
-                    {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
+                    {decimalToInput(m.unitPrice) || <EmptyCell />} {m.currency || ''}
                   </td>
                   <td>
                     <RightCell>
@@ -374,7 +393,7 @@ function Breakdown({
             })
           )}
 
-          <tr className='bg-bgZebra'>
+          <tr>
             <td colSpan={BREAKDOWN_LEAD}>
               <Text
                 size='micro'
@@ -400,12 +419,12 @@ function Breakdown({
           ) : (
             articles.map((a, i) => (
               <tr key={`a${i}`}>
-                <td>{a.kind || '—'}</td>
+                <td>{a.kind || <EmptyCell />}</td>
                 <td>
                   <EmptyCell />
                 </td>
                 <td>
-                  {decimalToInput(a.amount) || '—'} {a.currency || ''}
+                  {decimalToInput(a.amount) || <EmptyCell />} {a.currency || ''}
                 </td>
                 {/* У статьи нет лестницы цен — её вписал человек, «откуда» здесь нечему быть. */}
                 <td>
@@ -437,7 +456,7 @@ function Breakdown({
               остаётся (иначе столбец «amount» перестанет складываться в unit cost), но называет
               себя тем, что она есть: неразнесённой разницей. */}
           {defectAmount >= 0.005 && (
-            <tr className='bg-bgZebra'>
+            <tr>
               <td colSpan={BREAKDOWN_LEAD}>
                 <Text
                   size='micro'
@@ -459,43 +478,31 @@ function Breakdown({
             </tr>
           )}
           <TotalRow>
-            <td colSpan={BREAKDOWN_LEAD}>unit cost{cur ? ` · ${cur}` : ''}</td>
-            <td>{unitCost > 0 ? unitCost.toFixed(2) : '—'}</td>
-            <td>{unitCost > 0 ? '100%' : '—'}</td>
+            <td colSpan={BREAKDOWN_LEAD}>
+              <span className='inline-flex items-center gap-1'>
+                {`unit cost${cur ? ` · ${cur}` : ''}${planIsLowerBound ? ` · ${TIER_ESTIMATE}` : ''}`}
+                {planIsLowerBound && <HelpMark title={TIER_ESTIMATE}>{ESTIMATE_WHY}</HelpMark>}
+              </span>
+            </td>
+            <td>{unitCost > 0 ? unitCost.toFixed(2) : <EmptyCell />}</td>
+            <td>{unitCost > 0 ? '100%' : <EmptyCell />}</td>
           </TotalRow>
         </tbody>
       </DataTable>
       {excluded > 0 && (
         <Text size='micro' variant='label'>
-          {`Lines marked “${NO_PRICE}” or “${noFx()}” (${excluded}) are not in the sum — unit cost is understated by exactly them.`}
+          {`${excluded} ${excluded === 1 ? 'line' : 'lines'} not in the sum (${NO_PRICE} / ${noFx()})`}
         </Text>
       )}
-      <Text size='micro' variant='label'>
-        For a line with per-size norms, “consumption” is the mean across the size range (a simple
-        mean of the norms over all sizes of the range). This is not a run forecast: a run's plan is
-        computed from its own lines.
-      </Text>
-
       {estimate.caveat && (
-        <CalloutBox tone='note'>
-          <Text size='micro'>{estimate.caveat}</Text>
-        </CalloutBox>
+        <Text size='micro' variant='label'>
+          {estimate.caveat}
+        </Text>
       )}
       {comparison?.caveat && (
-        <CalloutBox tone='note'>
-          <Text size='micro'>{comparison.caveat}</Text>
-        </CalloutBox>
-      )}
-
-      {/* Ступень итога — у самого итога, а не только на строках, из которых он сложен: unit cost в
-          закрывающей строке таблицы выше — это ровно то число, которое ниже сравнивают с фактом и с
-          проведённым snapshot'ом. */}
-      {planIsLowerBound && (
-        <CalloutBox tone='note'>
-          <Text size='micro'>
-            {`The bottom line of this estimate is a “${TIER_ESTIMATE}”: the consumption of some fabrics is derived from piece area ÷ cutting width, and there is no waste between pieces in it. The real unit cost is HIGHER, so every Δ below (to the actual, to the snapshot) is exaggerated towards overspend, and its sign may be the opposite.`}
-          </Text>
-        </CalloutBox>
+        <Text size='micro' variant='label'>
+          {comparison.caveat}
+        </Text>
       )}
 
       <VarianceByKind comparison={comparison} cur={cur} planIsLowerBound={planIsLowerBound} />
@@ -548,7 +555,7 @@ function SnapshotReconciliation({
       <StatGrid min={130}>
         <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
-          value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : '—'}
+          value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : <EmptyCell />}
           sub={
             snapshotVsPlan != null
               ? // «≤» — тем же знаком, что у маржи на вкладке костинга, и в том же смысле:
@@ -562,7 +569,7 @@ function SnapshotReconciliation({
         {comparison.hasActual && (
           <Stat
             label='Δ actual to snapshot'
-            value={actualVsSnapshot != null ? money(actualVsSnapshot) : '—'}
+            value={actualVsSnapshot != null ? money(actualVsSnapshot) : <EmptyCell />}
             tone={statTone(actualVsSnapshot)}
           />
         )}
@@ -820,13 +827,8 @@ export function CostEstimateField({
     );
   }
 
-  if (colorways.length === 0) {
-    return (
-      <Text size='micro' variant='label'>
-        no colourways yet — add a colourway and its cost will be computed too
-      </Text>
-    );
-  }
+  // Нечего показывать — колорвеев нет: блок молчит, следующий шаг называет шапка вкладки.
+  if (colorways.length === 0) return null;
 
   const forbiddenAt = (i: number) =>
     (results[i]?.error as { status?: number } | null)?.status === 403;
@@ -908,6 +910,11 @@ export function CostEstimateField({
 
   const withPlan = rows.filter((r) => r.plan != null);
   const both = rows.filter((r) => r.plan != null && r.actual != null);
+  // Ни у одного колорвея ещё нет плана (и ничего не сломалось) — таблица из «…» и «—» ничего не
+  // говорит; блок появляется вместе с первой цифрой.
+  if (withPlan.length === 0 && !rows.some((r) => r.state === 'error' || r.state === 'forbidden')) {
+    return null;
+  }
   // ВЗВЕШИВАТЬ НЕЧЕМ. Средневзвешенная себестоимость требует выпуска на колорвей, а его в
   // StyleCostEstimate нет (order_qty — снятый «типовой тираж», не факт). Поэтому итог — простое
   // среднее арифметическое, и подпись под таблицей говорит об этом прямым текстом.
@@ -1049,49 +1056,52 @@ export function CostEstimateField({
         })}
         <tbody>
           <TotalRow>
-            <td>{totalLabel}</td>
             <td>
-              {meanPlan != null ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}` : '—'}
+              <span className='inline-flex items-center gap-1'>
+                {totalLabel}
+                <HelpMark title='mean'>
+                  {`A simple mean: there is no output per colourway to weight by. Amounts in ${
+                    cur || "the style's base currency"
+                  } at the costing rates.${
+                    totalIsLowerBound
+                      ? ` ${lowerBoundInTotal} of ${totalBase.length} plans are a ${TIER_ESTIMATE}, so Δ goes without colour.`
+                      : ''
+                  }`}
+                </HelpMark>
+              </span>
             </td>
-            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
+            <td>
+              {meanPlan != null ? (
+                `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}`
+              ) : (
+                <EmptyCell />
+              )}
+            </td>
+            <td>{meanActual != null ? meanActual.toFixed(2) : <EmptyCell />}</td>
             {/* Цвет — утверждение о знаке, а знак средней Δ от смешанных ступеней недоказуем ровно
                 так же, как у строки: план занижен на неизвестную величину. */}
             <td
               className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
-              {meanDelta != null ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}` : '—'}
+              {meanDelta != null ? (
+                `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}`
+              ) : (
+                <EmptyCell />
+              )}
             </td>
             <td
               className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
-              {meanDeltaPct != null
-                ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
-                : '—'}
+              {meanDeltaPct != null ? (
+                `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
+              ) : (
+                <EmptyCell />
+              )}
             </td>
             <td colSpan={2} />
           </TotalRow>
         </tbody>
       </DataTable>
-
-      <Text size='micro' variant='label'>
-        {`The bottom line is a simple mean: the style has no output per colourway, so there is nothing to weight by.${
-          both.length > 0 && both.length < withPlan.length
-            ? ` ${both.length} of ${withPlan.length} colourways have both a plan and an actual — those are the ones it is computed from.`
-            : ''
-        }`}
-      </Text>
-      {/* ИТОГ СМЕШИВАЕТ СТУПЕНИ, И МОЛЧАТЬ ОБ ЭТОМ НЕЛЬЗЯ. Среднее по колорвеям складывает
-          полноценные планы с нижними границами; разделять их на два средних — значит показать два
-          числа, ни одно из которых не отвечает на вопрос «сколько стоит стиль». Поэтому среднее
-          остаётся одно, а рядом сказано, из чего оно сложено. */}
-      {totalIsLowerBound && (
-        <Text size='micro' variant='label'>
-          {`For ${lowerBoundInTotal} of the ${totalBase.length} colourways that made it into the bottom line, the plan is a “${TIER_ESTIMATE}”: the consumption of some fabrics is derived from piece area, without waste between pieces. Such a plan is understated, so Δ to the actual on these rows and on the bottom line goes without colour — the sign of the difference may be the opposite.`}
-        </Text>
-      )}
-      <Text size='micro' variant='label'>
-        {`All amounts in ${cur || "the style's base currency"}, converted at the costing rates. Plan ≠ actual ≠ booked COGS snapshot — three different figures, and they deliberately do not merge.`}
-      </Text>
     </div>
   );
 }

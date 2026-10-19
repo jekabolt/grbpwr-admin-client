@@ -18,9 +18,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, Text } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';

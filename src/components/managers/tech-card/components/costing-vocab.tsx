@@ -1,7 +1,5 @@
 import { StyleCostPriceSource } from 'api/proto-http/admin';
-import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Pill, GenericPopover, Text, EmptyCell } from 'ui';
 
 /**
  * ONE vocabulary for the whole costing tab.
@@ -86,7 +84,7 @@ export const ESTIMATE_WHY =
  */
 export function PriceOrigin({ source, date }: { source?: StyleCostPriceSource; date?: string }) {
   const label = source ? ORIGIN_LABEL[source] : undefined;
-  if (!label) return <span className='text-labelColor'>—</span>;
+  if (!label) return <EmptyCell />;
   return (
     <span className='flex flex-col items-start gap-0.5'>
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>

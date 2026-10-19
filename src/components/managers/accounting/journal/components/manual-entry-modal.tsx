@@ -12,18 +12,22 @@ import {
   useFormContext,
   useWatch,
 } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Selector from 'ui/components/selector';
-import Text from 'ui/components/text';
+import {
+  AddDoor,
+  Button,
+  Close,
+  ConfirmationModal,
+  Input,
+  Selector,
+  Text,
+  Form,
+  ComboField,
+  DecimalField,
+  SegmentedField,
+} from 'ui';
 import { inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors } from 'utils/field-errors';
-import { Form } from 'ui/form';
-import ComboField from 'ui/form/fields/combo-field';
-import CurrencySelect from 'ui/form/fields/currency-select';
-import DecimalField from 'ui/form/fields/decimal-field';
-import SegmentedField from 'ui/form/fields/segmented-field';
+import CurrencySelect from 'components/shared/currency-select';
 import { Callout, CheckStrip, Verdict } from '../../components/kit';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
 import {
@@ -294,15 +298,13 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[760px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[760px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               new journal entry
             </DialogPrimitives.Title>
-            <Button type='button' className='shrink-0 cursor-pointer' onClick={requestClose}>
-              [x]
-            </Button>
+            <Close onClick={requestClose} />
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Create a manual journal entry
@@ -392,7 +394,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
                   </Text>
                 </div>
               ) : monthInfo?.isPast ? (
-                <div className='border border-textInactiveColor p-3'>
+                <div className='border border-borderColor p-3'>
                   <Text size='small' variant='inactive'>
                     dated {monthInfo.month} (an open past month) — the list shows the current month
                     by default, so this entry won&apos;t appear there after posting. use the
@@ -402,7 +404,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
               ) : null}
 
               {hasAPLine && (
-                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                <div className='flex flex-col gap-2 border border-borderColor p-3'>
                   <Text variant='inactive' size='small'>
                     supplier — required: a line posts to 2010 accounts payable
                   </Text>
@@ -453,13 +455,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
                     onEnterLast={() => append(emptyLine('debit'))}
                   />
                 ))}
-                <button
-                  type='button'
-                  onClick={() => append(emptyLine('debit'))}
-                  className='w-fit underline underline-offset-2 hover:opacity-70'
-                >
-                  <Text>+ add line</Text>
-                </button>
+                <AddDoor onClick={() => append(emptyLine('debit'))}>line</AddDoor>
               </div>
 
               {/* Live balance footer (UX 8.4) — same computed sums, now asserted as a CheckStrip
@@ -556,7 +552,7 @@ function LineRow({
   const mode = useWatch({ control, name: `lines.${index}.amountMode` }) as 'base' | 'src';
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+    <div className='flex flex-col gap-2 border border-borderColor p-3'>
       <div className='flex items-center justify-between'>
         <Text size='small' variant='inactive'>
           line {index + 1}
@@ -569,14 +565,12 @@ function LineRow({
           >
             <Text size='small'>duplicate</Text>
           </button>
-          <button
-            type='button'
+          <Close
+            size='sm'
+            aria-label='remove journal line'
             onClick={onRemove}
             disabled={count <= 2}
-            className='underline underline-offset-2 hover:opacity-70 disabled:opacity-40'
-          >
-            <Text size='small'>[x]</Text>
-          </button>
+          />
         </div>
       </div>
 

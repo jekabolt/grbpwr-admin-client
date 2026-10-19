@@ -1,5 +1,5 @@
 import { composition } from 'constants/garment-composition';
-import Select from 'ui/components/select';
+import { Select } from 'ui';
 
 interface MaterialCategorySelectorProps {
   selectedCategory: string;

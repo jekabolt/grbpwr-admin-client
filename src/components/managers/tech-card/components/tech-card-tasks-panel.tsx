@@ -12,8 +12,7 @@ import { useCreateTask, useTasks } from 'components/managers/tasks/hooks/useTask
 import { dueMeta, PRIORITY_LABEL, STATUS_LABEL } from 'components/managers/tasks/utils/meta';
 import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 // TASKS hub panel (#75) — this tech card as a working hub: the work items linked to it, at a
 // glance, without leaving the card. Mounted in the tech-card FORM (near the lifecycle strip) so
@@ -28,8 +27,8 @@ import Text from 'ui/components/text';
 // to this tech card already exists for free on that page (TaskDetail renders `taskLinks(t)` via
 // LinkChip, which resolves techCardId into a "техкарта: <name>" chip — no tasks/ edits needed).
 const STATUS_STYLE: Record<TaskStatus, string> = {
-  TASK_STATUS_UNKNOWN: 'border-textInactiveColor text-labelColor',
-  TASK_STATUS_BACKLOG: 'border-textInactiveColor text-labelColor',
+  TASK_STATUS_UNKNOWN: 'border-borderColor text-labelColor',
+  TASK_STATUS_BACKLOG: 'border-borderColor text-labelColor',
   TASK_STATUS_TODO: 'border-textColor text-textColor',
   TASK_STATUS_IN_PROGRESS: 'border-textColor bg-textColor text-bgColor',
   TASK_STATUS_REVIEW: 'border-textColor text-textColor',
@@ -46,7 +45,7 @@ function TaskTile({ task }: { task: Task }) {
   return (
     <Link
       to={`${ROUTES.tasks}/${task.id}`}
-      className='flex flex-col gap-1.5 border border-textInactiveColor bg-bgColor p-2.5 outline-none transition-[border-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[2px_2px_0_0_var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor motion-reduce:hover:translate-y-0'
+      className='flex flex-col gap-1.5 border border-borderColor bg-bgColor p-2.5 outline-none transition-[border-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[2px_2px_0_0_var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor motion-reduce:hover:translate-y-0'
     >
       <div className='flex items-center justify-between gap-2'>
         <span
@@ -146,7 +145,7 @@ export function TechCardTasksPanel({ techCardId }: { techCardId: number }) {
   if (!canView) return null;
 
   return (
-    <div className='-mx-2.5 flex flex-col gap-2 border-b border-textInactiveColor px-2.5 py-3'>
+    <div className='-mx-2.5 flex flex-col gap-2 border-b border-borderColor px-2.5 py-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='small'>

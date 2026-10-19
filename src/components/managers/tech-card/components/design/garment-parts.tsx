@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
+import { StitchPictogram } from 'components/managers/tech-card/annotation/stitch-pictogram';
 
 import {
   GARMENT_MANIFEST,

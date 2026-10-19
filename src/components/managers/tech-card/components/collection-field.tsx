@@ -5,11 +5,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
-import { FormLabel } from 'ui/form';
+import { ConfirmationModal, Input, Select, Text, FormLabel } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { TechCardFormData } from './schema';
 
@@ -54,7 +50,7 @@ export function CollectionField({
   readOnly?: boolean;
   /**
    * The account cannot write the style's collection (UpdateStyle is `products:write`, Codex R3):
-   * a dead control like FIT's — disabled, zebra ground — and no «+ new collection…» door.
+   * a dead control like FIT's — disabled, pageBg ground — and no «+ new collection…» door.
    */
   locked?: boolean;
 }) {
@@ -95,7 +91,7 @@ export function CollectionField({
         value={collection ? nameItem(collection) : NONE}
         readOnly={readOnly}
         disabled={locked}
-        className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+        className={locked ? 'bg-pageBg text-labelColor' : undefined}
         onValueChange={(v?: string) => {
           if (v === NEW) {
             // Opened on the next frame: the list is still closing and hands focus back to its
@@ -120,8 +116,7 @@ export function CollectionField({
 /**
  * The create dialog: ONE field. The server derives the collection's code from the name
  * (`NormalizeDictSlug`), so there is nothing else to ask. The dictionary write is immediate and
- * shared — it does not wait for the card's save and is not undone by leaving the card — and the
- * dialog says so in one line. A refusal (a duplicate name, a name with no letters) keeps the dialog
+ * shared — it does not wait for the card's save and is not undone by leaving the card. A refusal (a duplicate name, a name with no letters) keeps the dialog
  * open with what was typed and names the reason in the snackbar.
  */
 function NewCollectionDialog({
@@ -171,8 +166,9 @@ function NewCollectionDialog({
         if (!busy) onOpenChange(next);
       }}
       onConfirm={create}
-      title='new collection'
-      confirmLabel={busy ? 'creating…' : 'create'}
+      title='create collection'
+      confirmLabel={busy ? 'creating…' : 'create collection'}
+      hideCancel
       confirmDisabled={!trimmed || busy}
       closeOnConfirm={false}
       width='sm'
@@ -203,9 +199,6 @@ function NewCollectionDialog({
             }}
           />
         </div>
-        <Text size='micro' variant='label'>
-          added to the shared collections dictionary right away, not with the card’s save
-        </Text>
       </div>
     </ConfirmationModal>
   );

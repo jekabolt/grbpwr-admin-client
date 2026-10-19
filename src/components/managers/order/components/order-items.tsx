@@ -1,11 +1,6 @@
 import type { common_OrderFull, common_OrderItem } from 'api/proto-http/frontend';
 import { useMemo } from 'react';
-import Checkbox from 'ui/components/checkbox';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { CheckboxCommon, Media, Pill, Placeholder, Text, Tile, Tiles, EmptyCell } from 'ui';
 import { money, toNum } from '../money';
 
 export type OrderLine = {
@@ -111,7 +106,7 @@ function UnitSelector({
       )}
       {line.unitKeys.map((key, i) => (
         <label key={key} className='flex cursor-pointer items-center gap-1'>
-          <Checkbox
+          <CheckboxCommon
             name={`refund-${key}`}
             checked={selectedUnitKeys.includes(key)}
             onChange={() => onToggleOrderItems([key])}
@@ -173,10 +168,10 @@ export function OrderItems({
             </span>
             <div className='flex min-w-0 flex-1 flex-col gap-1'>
               <Text size='micro' className='truncate font-bold uppercase'>
-                {line.item.translations?.[0]?.name || '—'}
+                {line.item.translations?.[0]?.name || <EmptyCell />}
               </Text>
               <Text size='micro' variant='label' className='truncate'>
-                {line.item.variantSkuSnapshot || '—'}
+                {line.item.variantSkuSnapshot || <EmptyCell />}
               </Text>
               <Text size='micro' variant='label'>
                 {size ? `size ${size}` : 'size —'} · ×{line.qty}

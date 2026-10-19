@@ -1,10 +1,7 @@
 import { common_SizeSkuSystem } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { cn } from 'lib/utility';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, GroupLabel, GenericPopover, Text } from 'ui';
 import { useSizeSystems } from './use-size-systems';
 
 /**
@@ -62,7 +59,7 @@ export function SizePickerModal({
           className={cn(
             'inline-flex items-center gap-1 border border-borderColor bg-bgColor px-2.5 py-1',
             'text-micro uppercase tracking-label',
-            disabled ? 'text-textInactiveColor' : 'text-textColor hover:border-textColor',
+            disabled ? 'text-borderColor' : 'text-textColor hover:border-textColor',
             triggerClassName,
           )}
         >

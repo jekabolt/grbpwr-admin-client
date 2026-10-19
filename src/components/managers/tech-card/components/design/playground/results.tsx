@@ -5,13 +5,11 @@ import type {
 } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
-import { CalloutBox } from 'ui/components/callout-box';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import { CalloutBox, Pill, Section, HeaderCount, Text, Tiles, EmptyCell } from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import {
   cardOutputRows,
@@ -367,10 +365,10 @@ export function PlaygroundResults({
                     }
                   />
                   <Text size='micro' className='truncate font-bold uppercase'>
-                    {runHandle(run.id) || 'run —'} · picture {picture.ordinal ?? '—'}
+                    {runHandle(run.id) || 'run —'} · picture {picture.ordinal ?? <EmptyCell />}
                   </Text>
                   <Text size='micro' variant='label' className='truncate'>
-                    {words.join(' · ') || '—'}
+                    {words.join(' · ') || <EmptyCell />}
                   </Text>
                   {/* ONE WORD, NOT A PARAGRAPH (the old playground's pill, restored — G-01 M-2): the
                       tile's height stays the grid's, and the fact reads as fully. */}

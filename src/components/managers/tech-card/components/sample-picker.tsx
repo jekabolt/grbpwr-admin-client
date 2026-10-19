@@ -2,11 +2,7 @@ import { common_Sample } from 'api/proto-http/admin';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import GenericPopover from 'ui/components/popover';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Media, Placeholder, GenericPopover, Text, Tile, Tiles } from 'ui';
 import { samplePurposeLabel, sampleRoundLabel, sampleThumbUrl } from './sample-options';
 import { useSamples } from './useSamples';
 
@@ -85,7 +81,7 @@ export function SamplePicker({
       openElement={
         <span
           className={`flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
-            isDisabled ? 'bg-bgZebra text-labelColor' : 'hover:border-textColor'
+            isDisabled ? 'bg-pageBg text-labelColor' : 'hover:border-textColor'
           }`}
         >
           <SampleThumb url={picked ? sampleThumbUrl(picked) : undefined} className='size-5' />

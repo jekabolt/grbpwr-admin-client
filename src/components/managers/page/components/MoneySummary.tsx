@@ -2,9 +2,7 @@ import type { GetMetricsResponse, MarginByStyleRow } from 'api/proto-http/admin'
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { generatePath, Link } from 'react-router-dom';
-import { Section } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import { marginExtremes, valuationSummary } from '../productSignals';
 import { formatCurrency, formatCurrencyCompact, parseDecimal } from '../utils';
 import { ActPill, ColHead, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';
@@ -64,7 +62,7 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
             />
             <Stat
               label='Concentration'
-              value={val.top3Share > 0 ? `${val.top3Share.toFixed(0)}%` : '—'}
+              value={val.top3Share > 0 ? `${val.top3Share.toFixed(0)}%` : <EmptyCell />}
               sub='top 3 products'
             />
           </StatGrid>

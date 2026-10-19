@@ -3,8 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text, EmptyCell } from 'ui';
 import { AmountCell } from '../components/amount-cell';
 import { InfoHint } from '../components/info-hint';
 import { Note, Pill } from '../components/kit';
@@ -56,7 +55,7 @@ export function AcctSubledgersPage() {
                   'border px-3 py-1.5 text-textBaseSize uppercase transition-colors',
                   active
                     ? 'border-textColor text-textColor'
-                    : 'border-textInactiveColor text-textInactiveColor hover:text-textColor',
+                    : 'border-borderColor text-borderColor hover:text-textColor',
                 )}
               >
                 {t.label}
@@ -129,7 +128,7 @@ function OwedOwingSection() {
                 </thead>
                 <tbody>
                   {payRows.map((r: AcctPayableRow, i) => (
-                    <tr key={r.supplierId ?? i} className='border-b border-textInactiveColor'>
+                    <tr key={r.supplierId ?? i} className='border-b border-borderColor'>
                       <td className='px-2 py-1.5'>
                         <span className='inline-flex items-center gap-1.5'>
                           <Text size='small' className={r.supplierId ? undefined : 'italic'}>
@@ -209,7 +208,7 @@ function OwedOwingSection() {
                     const ref = r.ref ?? '';
                     const linkable = ref.startsWith('ORD-');
                     return (
-                      <tr key={ref || i} className='border-b border-textInactiveColor'>
+                      <tr key={ref || i} className='border-b border-borderColor'>
                         <td className='px-2 py-1.5'>
                           {linkable ? (
                             <Link
@@ -219,7 +218,7 @@ function OwedOwingSection() {
                               {ref}
                             </Link>
                           ) : (
-                            <Text size='small'>{ref || '—'}</Text>
+                            <Text size='small'>{ref || <EmptyCell />}</Text>
                           )}
                         </td>
                         <AmountCell value={r.invoiced} className='px-2 py-1.5' />
@@ -339,7 +338,7 @@ function SuppliersSection() {
                     added {formatAcctDate(s.createdAt)}
                   </Text>
                 ) : null}
-                <div className='mt-auto flex items-baseline justify-between gap-2 border-t border-textInactiveColor pt-1.5'>
+                <div className='mt-auto flex items-baseline justify-between gap-2 border-t border-borderColor pt-1.5'>
                   <span className='text-[10px] uppercase tracking-wide text-labelColor'>
                     open balance
                   </span>

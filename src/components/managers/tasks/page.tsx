@@ -5,17 +5,21 @@ import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips'
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { SectionHeader } from 'ui/components/section-header';
 import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  Section,
+  SectionHeader,
+  Select,
   SideRail,
   SideRailGroup,
   SideRailItem,
   SideRailLayout,
-} from 'ui/components/side-rail';
-import Text from 'ui/components/text';
-import { Toolbar } from 'ui/components/toolbar';
+  Text,
+  Toolbar,
+} from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
 import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
@@ -26,9 +30,12 @@ import {
   emptyFilters,
   filtersActive,
   FiltersBar,
+  PhoneFilterGroups,
   setFilter,
+  taskFilterCount,
   TaskFilters,
 } from './components/filters-bar';
+import { TAP } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
 import { useCreateTask, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
@@ -121,6 +128,10 @@ export function Tasks() {
     }
     return m;
   }, [countsData]);
+  const boardOptions = BOARDS.map((board) => ({
+    value: board,
+    label: `${BOARD_LABEL[board]} · ${counts.get(board) ?? 0}`,
+  }));
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   //
@@ -141,8 +152,10 @@ export function Tasks() {
     }
   });
   useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const active = filtersActive(filters);
+  const phoneFilterCount = taskFilterCount(filters, showArchived, projectId > 0);
   // The include_archived flag already scopes the read; the chip cards dim themselves.
   const visible = useMemo(
     () => applyFilters(tasks, filters, account?.username),
@@ -163,7 +176,10 @@ export function Tasks() {
   // Заводя карточку на суженной проектом доске, человек заводит её ПО ЭТОМУ ПРОЕКТУ:
   // преселект ссылки — то же самое, что преселект колонки, из которой нажали «+».
   const initial: TaskFormValues = useMemo(
-    () => ({ ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'), projectTopicId: projectId }),
+    () => ({
+      ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'),
+      projectTopicId: projectId,
+    }),
     [activeBoard, creating, projectId],
   );
 
@@ -199,8 +215,9 @@ export function Tasks() {
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-10'>
+    <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
       <SectionHeader
+        className='max-sm:hidden'
         title='tasks'
         question='what is each department working on — and what needs a hand?'
         action={
@@ -214,7 +231,7 @@ export function Tasks() {
 
       <SideRailLayout
         rail={
-          <SideRail>
+          <SideRail className='hidden lg:block'>
             <SideRailGroup flush>boards</SideRailGroup>
             {BOARDS.map((board) => (
               <SideRailItem
@@ -228,8 +245,80 @@ export function Tasks() {
           </SideRail>
         }
       >
-        <div className='flex min-w-0 flex-col gap-3'>
-          <Toolbar>
+        <div className='flex min-w-0 flex-col gap-2 sm:gap-3'>
+          <Section
+            title='tasks'
+            className='sm:hidden'
+            action={
+              <>
+                {!!account?.username && (
+                  <Chip
+                    selected={filters.mine}
+                    pressed={filters.mine}
+                    onClick={() =>
+                      setFilters((current) => setFilter(current, { mine: !current.mine }))
+                    }
+                    className='min-h-9'
+                  >
+                    mine
+                  </Chip>
+                )}
+                <Chip
+                  selected={phoneFilterCount > 0}
+                  pressed={filtersOpen}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls='task-phone-filters'
+                  className='min-h-9'
+                >
+                  {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
+                </Chip>
+              </>
+            }
+          >
+            <Select
+              name='task-board-phone'
+              value={activeBoard}
+              items={boardOptions}
+              fullWidth
+              itemClassName='min-h-11'
+              className='min-h-11 uppercase tracking-label'
+              placeholder='board'
+              onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
+            />
+            {filtersOpen && (
+              <div id='task-phone-filters'>
+                <PhoneFilterGroups
+                  filters={filters}
+                  onChange={setFilters}
+                  people={people}
+                  showArchived={showArchived}
+                  onToggleArchived={() => setShowArchived((value) => !value)}
+                  onClear={clearFilters}
+                  projectLabel={projectLabel}
+                  onClearProject={dropProject}
+                />
+              </div>
+            )}
+          </Section>
+
+          {/* Между sm и lg рельса нет: доски остаются строкой чипов из v1. */}
+          <div className='hidden sm:block lg:hidden'>
+            <ChipRow className='gap-1.5 overflow-x-auto flex-nowrap'>
+              {BOARDS.map((board) => (
+                <Chip
+                  key={board}
+                  selected={board === activeBoard}
+                  pressed={board === activeBoard}
+                  onClick={() => setActiveBoard(board)}
+                  className={TAP}
+                >
+                  {BOARD_LABEL[board]} {counts.get(board) ?? 0}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
+          <Toolbar className='hidden sm:flex'>
             <FiltersBar
               filters={filters}
               onChange={setFilters}
@@ -258,7 +347,11 @@ export function Tasks() {
             <>
               {(boardTruncated || countsTruncated) && (
                 <CalloutBox tone='warning' className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     not all tasks loaded
                   </Text>
                   <Text size='micro' component='span'>
@@ -272,7 +365,11 @@ export function Tasks() {
               )}
               {active && visible.length === 0 && (
                 <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     no tasks match
                   </Text>
                   <Button variant='underline' size='xs' onClick={clearFilters} className='ml-auto'>
@@ -294,6 +391,19 @@ export function Tasks() {
         </div>
       </SideRailLayout>
 
+      {writable && (
+        <div className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'>
+          <Button
+            variant='main'
+            size='lg'
+            className='min-h-12 w-full uppercase tracking-label'
+            onClick={() => setCreating('TASK_STATUS_TODO')}
+          >
+            + new task
+          </Button>
+        </div>
+      )}
+
       <TaskFormModal
         open={creating !== null}
         onOpenChange={(o) => !o && setCreating(null)}
@@ -301,6 +411,7 @@ export function Tasks() {
         initial={initial}
         saving={createTask.isPending}
         onSubmit={handleCreate}
+        draftKey={projectId ? `${activeBoard}.project-${projectId}` : activeBoard}
       />
     </div>
   );

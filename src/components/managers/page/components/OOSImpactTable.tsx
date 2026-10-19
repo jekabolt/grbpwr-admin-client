@@ -1,7 +1,6 @@
 import type { OOSImpactMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -80,7 +79,7 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
           </thead>
           <tbody>
             {topOOS.map((row, idx) => (
-              <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+              <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}

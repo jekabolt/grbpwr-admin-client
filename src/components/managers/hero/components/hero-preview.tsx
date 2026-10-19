@@ -1,8 +1,6 @@
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Button, Section, Text } from 'ui';
 import { useHeroPreview } from './useHeroPreview';
 
 interface HeroPreviewProps {

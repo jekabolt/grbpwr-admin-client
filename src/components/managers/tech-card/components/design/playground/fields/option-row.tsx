@@ -1,7 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 
-import SelectComponent from 'ui/components/select';
-import { ViewSwitch } from 'ui/components/view-switch';
+import { Select, ViewSwitch } from 'ui';
 
 import { FieldRow } from '../../render/field-row';
 
@@ -70,7 +69,7 @@ export function OptionRow<T extends string>({
             }}
           />
         ) : (
-          <SelectComponent
+          <Select
             name={`option-${anchor ?? label}`}
             placeholder={label}
             value={value}

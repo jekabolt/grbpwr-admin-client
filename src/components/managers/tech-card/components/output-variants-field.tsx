@@ -8,13 +8,18 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import Text from 'ui/components/text';
+import {
+  AddDoor,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
@@ -33,7 +38,7 @@ import { decimalToInput } from 'utils/decimal';
 // The field-level metrics used by the locally-managed controls in this panel — identical to <Input>,
 // so a control here is indistinguishable from an RHF-bound one elsewhere (see colorway-recipe).
 const cell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 // A pale dye vanishes into the page without the outline, so the swatch keeps its 1px ink box.
 function Swatch({ hex, title }: { hex?: string; title?: string }) {
@@ -232,7 +237,7 @@ function AddColourDialog({
         title={title}
         width='sm'
         confirmLabel={confirmLabel}
-        cancelLabel='cancel'
+        hideCancel
         confirmDisabled={!ready || upsert.isPending}
         // The handler closes it on success only — a refusal has to keep the answers on screen or the
         // operator retypes them blind.
@@ -243,7 +248,7 @@ function AddColourDialog({
         {availableColors.length === 0 ? (
           <CalloutBox tone='note'>
             <Text size='micro' component='span'>
-              no colours in the dictionary yet — add them under <b>settings › colors</b>
+              no colours yet · add them in <b>settings › colors</b>
             </Text>
           </CalloutBox>
         ) : (
@@ -305,11 +310,6 @@ function AddColourDialog({
                 </div>
               )}
             </div>
-            <Text size='micro' variant='label'>
-              A variant is not restricted to packaging — any material can be the bucket. The server
-              checks it is unitless-free, un-archived, and claimed by no other card, and that its
-              unit agrees with the colours already registered here.
-            </Text>
           </div>
         )}
       </ConfirmationModal>
@@ -406,12 +406,6 @@ export function OutputVariantsPanel({
 
   return (
     <div className='flex flex-col gap-2'>
-      <Text variant='inactive' size='small'>
-        this card produces one warehouse bucket per colour — each colour has its own on-hand and its
-        own moving average. The single output material no longer applies while any colour is
-        registered.
-      </Text>
-
       <GroupLabel>
         colour variants · {variants.length} ({liveCount} active)
       </GroupLabel>
@@ -425,7 +419,7 @@ export function OutputVariantsPanel({
             label={
               <span className='flex min-w-0 items-center gap-2'>
                 <Swatch hex={hexByCode.get(v.colorCode ?? '')} title={v.colorName ?? undefined} />
-                <span className='uppercase'>{v.colorCode || '—'}</span>
+                <span className='uppercase'>{v.colorCode || <EmptyCell />}</span>
                 <Text size='micro' variant='label' component='span' className='truncate'>
                   {v.colorName || ''}
                   {v.materialName ? ` · ${v.materialName}` : ''}
@@ -436,7 +430,7 @@ export function OutputVariantsPanel({
             value={
               <span className='flex items-center gap-2'>
                 <span>
-                  {onHand || '—'}
+                  {onHand || <EmptyCell />}
                   {v.unit ? ` ${v.unit}` : ''}
                 </span>
                 {canEdit && (
@@ -450,16 +444,12 @@ export function OutputVariantsPanel({
                     >
                       {v.active ? 'retire' : 'reactivate'}
                     </Button>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
+                    <Close
+                      size='sm'
                       aria-label={`delete colour ${v.colorCode ?? ''}`}
                       disabled={busy}
                       onClick={() => setPendingDelete(v)}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </>
                 )}
               </span>
@@ -471,18 +461,9 @@ export function OutputVariantsPanel({
       {/* The door stands a step below the last colour (O-48): the column's 8px gap plus 8px — the
           last row ends in air, and a door right under it would read as one more row. */}
       {canEdit && (
-        <div className={variants.length > 0 ? 'mt-2' : undefined}>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            disabled={busy}
-            onClick={() => setAddOpen(true)}
-          >
-            + add colour
-          </Button>
-        </div>
+        <AddDoor afterRows={variants.length > 0} disabled={busy} onClick={() => setAddOpen(true)}>
+          colour
+        </AddDoor>
       )}
 
       <AddColourDialog
@@ -490,7 +471,7 @@ export function OutputVariantsPanel({
         onOpenChange={setAddOpen}
         techCardId={techCardId}
         usedCodes={usedCodes}
-        title='register a colour'
+        title='register colour'
         confirmLabel='register'
       />
 
@@ -500,26 +481,18 @@ export function OutputVariantsPanel({
           width='sm'
           // Closable mid-flight for the same reason as the add dialog — see there.
           onOpenChange={(next) => !next && setPendingDelete(null)}
-          title={`delete ${pendingDelete.colorCode || 'colour'}?`}
-          confirmLabel='delete'
-          cancelLabel='cancel'
+          title={`delete colour ${pendingDelete.colorCode || ''}?`}
+          confirmLabel='delete colour'
+          hideCancel
           confirmDisabled={del.isPending}
           closeOnConfirm={false}
           onConfirm={confirmDelete}
         >
-          <Row label='colour' value={pendingDelete.colorCode || '—'} />
-          <Row label='bucket' value={pendingDelete.materialName || '—'} />
-          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || '—'} />
-          <Text size='micro' variant='label' className='mt-2'>
-            Deleting unhooks the colour from this card. The material keeps its stock and its history
-            — nothing is written off and no movement is recorded. To stop planning a colour without
-            unhooking it, retire it instead.
-          </Text>
+          <Row label='colour' value={pendingDelete.colorCode || <EmptyCell />} />
+          <Row label='bucket' value={pendingDelete.materialName || <EmptyCell />} />
+          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || <EmptyCell />} />
           {variants.length === 1 && (
-            <Text size='micro' variant='label' className='mt-2'>
-              This is the last colour: deleting it returns the card to single-output mode and
-              un-pins the auxiliary purpose — a registered colour is what pins it.
-            </Text>
+            <Row label='last colour' value='card goes back to one output' />
           )}
         </ConfirmationModal>
       )}
@@ -561,15 +534,8 @@ export function AdoptLegacyOutputButton({
         techCardId={techCardId}
         usedCodes={new Set<string>()}
         seedMaterialId={materialId}
-        title='adopt the output material as a colour'
+        title='adopt output as colour'
         confirmLabel='adopt'
-        note={
-          <Text size='micro' variant='label' className='mb-2'>
-            Name the colour this card has been producing all along. The material below keeps every
-            unit of stock and its whole history — this only files it under a colour, after which the
-            card switches to per-colour buckets and new colours get their own.
-          </Text>
-        }
       />
     </div>
   );

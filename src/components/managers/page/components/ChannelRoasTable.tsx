@@ -1,7 +1,6 @@
 import type { GetChannelRoasSettledResponse } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
 interface ChannelRoasTableProps {
@@ -56,7 +55,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
           </thead>
           <tbody>
             {sorted.map((r, i) => (
-              <tr key={i} className='border-b border-hairline hover:bg-bgSecondary'>
+              <tr key={i} className='border-b border-hairline hover:bg-pageBg'>
                 <td className='p-2'>{channelLabel(r.utmSource, r.utmMedium, r.utmCampaign)}</td>
                 <td className='p-2 text-right'>
                   {formatCurrency(parseDecimal(r.settledRevenue), currency)}
@@ -64,13 +63,13 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
                 <td className='p-2 text-right'>{formatNumber(r.orders ?? 0)}</td>
                 <td className='p-2 text-right'>{formatNumber(r.newCustomers ?? 0)}</td>
                 <td className='p-2 text-right'>
-                  {r.hasSpend ? formatCurrency(parseDecimal(r.spend), currency) : 'N/A'}
+                  {r.hasSpend ? formatCurrency(parseDecimal(r.spend), currency) : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasSpend ? `${(r.roas ?? 0).toFixed(2)}×` : 'N/A'}
+                  {r.hasSpend ? `${(r.roas ?? 0).toFixed(2)}×` : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasSpend ? formatCurrency(r.cac ?? 0, currency) : 'N/A'}
+                  {r.hasSpend ? formatCurrency(r.cac ?? 0, currency) : <EmptyCell />}
                 </td>
               </tr>
             ))}

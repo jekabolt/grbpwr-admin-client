@@ -1,8 +1,7 @@
 import type { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSyncExternalStore, type JSX } from 'react';
-import { HATCH } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import { HATCH, Text } from 'ui';
 
 import { findPantone, pantoneVersion, subscribePantone } from '../pantone-swatches';
 import { archivedRef, colorwayLabel } from './colorway-picker';
@@ -111,7 +110,7 @@ export function ColourwayStrip({
             className={cn(
               TILE,
               'flex items-center justify-center border border-dashed border-borderColor bg-bgColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
-              (disabled || !onCreate) && 'text-textInactiveColor',
+              (disabled || !onCreate) && 'text-borderColor',
             )}
           >
             <Text component='span' size='control' className='font-bold'>

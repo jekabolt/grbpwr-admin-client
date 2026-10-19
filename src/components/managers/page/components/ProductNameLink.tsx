@@ -1,7 +1,7 @@
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { Link } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 interface ProductNameLinkProps {
   productId?: number | string | null;

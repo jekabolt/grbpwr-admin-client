@@ -3,12 +3,9 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { DxfQuickViewModal } from 'ui/components/dxf-quick-view-modal';
-import Input from 'ui/components/input';
-import { PatternUploadButton } from 'ui/components/pattern-upload-button';
-import Text from 'ui/components/text';
-import SelectField from 'ui/form/fields/select-field';
+import { Button, Close, Input, Text, SelectField } from 'ui';
+import { DxfQuickViewModal } from 'components/managers/tech-card/patterns/dxf-quick-view-modal';
+import { PatternUploadButton } from 'components/managers/tech-card/patterns/pattern-upload-button';
 import { MAX_PATTERN_NAME, clampPatternName, formatBytes, isDxfUrl } from 'utils/pattern';
 import { FittingFormData } from './schema';
 
@@ -191,15 +188,7 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                 >
                   ✎
                 </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  aria-label='remove pattern'
-                  className='shrink-0'
-                  onClick={() => remove(index)}
-                >
-                  ✕
-                </Button>
+                <Close size='sm' aria-label='remove pattern' onClick={() => remove(index)} />
               </li>
             );
           })}

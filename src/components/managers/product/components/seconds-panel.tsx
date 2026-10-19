@@ -4,9 +4,7 @@ import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
+import { Button, Input, Text } from 'ui';
 import { formatSizeName } from '../utility/sizes';
 
 // B-grade seconds surface (0251). B variants are factory seconds of this SAME colourway
@@ -105,7 +103,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
   if (rows.length === 0) return null;
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-2 border-t border-borderColor pt-3'>
       <Text variant='uppercase' size='small'>
         seconds (b-grade)
       </Text>
@@ -123,7 +121,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
           const busy = busyId === variantId;
 
           return (
-            <div key={variantId} className='space-y-2 border border-textInactiveColor p-2'>
+            <div key={variantId} className='space-y-2 border border-borderColor p-2'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex flex-wrap items-center gap-2'>
                   <Text size='small' variant='uppercase'>

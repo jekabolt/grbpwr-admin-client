@@ -1,8 +1,7 @@
 import { AcctEvent } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text, EmptyCell } from 'ui';
 import { Callout, Note } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
 import { ReportState } from '../reports/components/report-utils';
@@ -49,7 +48,7 @@ export function AcctEventsPage() {
   // A row is busy while either of its two actions is in flight; both mutations are shared across
   // rows, so scope "pending" to the id currently being mutated rather than a global isPending.
   const pendingId = (m: { isPending: boolean; variables?: { id: number } }): number | null =>
-    m.isPending ? (m.variables?.id ?? null) : null;
+    m.isPending ? m.variables?.id ?? null : null;
   const reprocessingId = pendingId(reprocess);
   const resolvingId = pendingId(resolve);
 
@@ -89,7 +88,7 @@ export function AcctEventsPage() {
               return (
                 <div
                   key={id}
-                  className='flex flex-wrap items-start justify-between gap-3 border-b border-textInactiveColor p-2.5 last:border-b-0'
+                  className='flex flex-wrap items-start justify-between gap-3 border-b border-borderColor p-2.5 last:border-b-0'
                 >
                   <div className='flex min-w-0 flex-1 basis-64 flex-col gap-1'>
                     <div className='flex flex-wrap items-baseline gap-2'>
@@ -109,8 +108,9 @@ export function AcctEventsPage() {
                       </Text>
                     ) : null}
                     <span className='text-[10px] uppercase tracking-wide text-labelColor'>
-                      id {id ?? '—'} · occurred {e.occurredAt ? formatAcctDate(e.occurredAt) : '—'}{' '}
-                      · {e.attempts ?? 0} attempt{(e.attempts ?? 0) === 1 ? '' : 's'}
+                      id {id ?? <EmptyCell />} · occurred{' '}
+                      {e.occurredAt ? formatAcctDate(e.occurredAt) : <EmptyCell />} ·{' '}
+                      {e.attempts ?? 0} attempt{(e.attempts ?? 0) === 1 ? '' : 's'}
                     </span>
                   </div>
                   <div className='flex items-center gap-2'>

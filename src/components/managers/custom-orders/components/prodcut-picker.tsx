@@ -2,14 +2,17 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import {
+  Button,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Media,
+  Placeholder,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
 
 /**
  * custPicker v2 — thumbnail grid + basket.
@@ -169,7 +172,7 @@ export function ProductPicker({
             </div>
 
             {/* basket pane — what is staged for the order */}
-            <aside className='flex max-h-[58vh] flex-col gap-2 border border-borderColor bg-bgSecondary p-2'>
+            <aside className='flex max-h-[58vh] flex-col gap-2 border border-borderColor bg-pageBg p-2'>
               <GroupLabel flush>basket · {pendingSelection.length}</GroupLabel>
               {pendingSelection.length === 0 ? (
                 <Text size='micro' variant='label' component='span'>

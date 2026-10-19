@@ -7,8 +7,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import debounce from 'lodash/debounce';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 import { ActiveFilters } from './components/active-filters';
 import { Categories } from './components/categories';
 import Filter from './components/filter';
@@ -85,7 +84,7 @@ export default function ProductsCatalog() {
 
   return (
     <div className='flex flex-col gap-6 pb-20'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
           <Text variant='uppercase' size='large'>
             products

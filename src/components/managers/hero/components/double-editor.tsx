@@ -1,8 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
-import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
+import { GroupLabel, Text } from 'ui';
+import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
 import { LinkField } from './link-field';
 import { MediaModifierToggles } from './media-modifier-toggles';

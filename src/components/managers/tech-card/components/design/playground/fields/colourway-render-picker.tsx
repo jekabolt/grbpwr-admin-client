@@ -6,8 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMemo, useState, type JSX } from 'react';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Select, Text } from 'ui';
 
 import { colorwayOf } from '../../bench-kinds';
 import { colorwayLabel } from '../../colorway-picker';
@@ -160,7 +159,7 @@ export function ColourwayRenderPicker({
     <div className='flex flex-col gap-4' data-colourway-render-picker={shown ?? ''}>
       <FieldRow label='Colourway' className='py-2'>
         <div className='ml-auto w-[280px] max-w-full'>
-          <SelectComponent
+          <Select
             name='playground-product-colourway'
             value={shown === null ? undefined : String(shown)}
             placeholder={isLoading ? 'reading the colourways…' : 'pick a colourway'}

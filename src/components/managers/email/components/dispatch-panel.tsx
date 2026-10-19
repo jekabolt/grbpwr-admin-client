@@ -12,12 +12,7 @@ import {
   STATUS_LABELS,
 } from 'constants/email-campaign';
 import { useMemo, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, ConfirmationModal, GroupLabel, Section, Select, Text, EmptyCell } from 'ui';
 import { fmtInt, StatTile, StatTone } from './stat-tile';
 import {
   useCancelCampaign,
@@ -215,7 +210,7 @@ export function DispatchPanel({
                   name='schedule-at'
                   value={scheduleLocal}
                   onChange={(e) => setScheduleLocal(e.target.value)}
-                  className='appearance-none rounded-none border-b border-textInactiveColor bg-bgColor text-textBaseSize transition-colors focus:border-textInactiveColor focus:outline-none'
+                  className='appearance-none rounded-none border-b border-borderColor bg-bgColor text-textBaseSize transition-colors focus:outline-none'
                 />
                 <Button
                   type='button'
@@ -397,38 +392,45 @@ function RecipientsTable({ id }: { id: number }) {
         <div className='overflow-x-auto'>
           <table className='w-full min-w-[720px] border-collapse text-left'>
             <thead>
-              <tr className='border-b border-textInactiveColor'>
-                {['email', 'status', 'variant', 'cohort', 'attempts', 'resend id', 'sent', 'error'].map(
-                  (h) => (
-                    <th key={h} className='py-2 pr-3'>
-                      <Text variant='label' size='small' className='uppercase'>
-                        {h}
-                      </Text>
-                    </th>
-                  ),
-                )}
+              <tr className='border-b border-borderColor'>
+                {[
+                  'email',
+                  'status',
+                  'variant',
+                  'cohort',
+                  'attempts',
+                  'resend id',
+                  'sent',
+                  'error',
+                ].map((h) => (
+                  <th key={h} className='py-2 pr-3'>
+                    <Text variant='label' size='small' className='uppercase'>
+                      {h}
+                    </Text>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const failed = r.status === 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED';
                 return (
-                  <tr key={r.id} className='border-b border-textInactiveColor/40 align-top'>
+                  <tr key={r.id} className='border-b border-borderColor/40 align-top'>
                     <td className='py-2 pr-3'>
                       <Text size='small' className='break-all'>
-                        {r.email || '—'}
+                        {r.email || <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant={failed ? 'error' : 'default'} className='uppercase'>
-                        {RECIPIENT_STATUS_LABELS[r.status || ''] ?? r.status ?? '—'}
+                        {RECIPIENT_STATUS_LABELS[r.status || ''] ?? r.status ?? <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
-                      <Text size='small'>{r.variantId ? `#${r.variantId}` : '—'}</Text>
+                      <Text size='small'>{r.variantId ? `#${r.variantId}` : <EmptyCell />}</Text>
                     </td>
                     <td className='py-2 pr-3'>
-                      <Text size='small'>{COHORT_LABELS[r.cohort || ''] ?? '—'}</Text>
+                      <Text size='small'>{COHORT_LABELS[r.cohort || ''] ?? <EmptyCell />}</Text>
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' className='tabular-nums'>
@@ -437,7 +439,7 @@ function RecipientsTable({ id }: { id: number }) {
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant='inactive' className='break-all'>
-                        {r.resendEmailId || '—'}
+                        {r.resendEmailId || <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
@@ -447,7 +449,7 @@ function RecipientsTable({ id }: { id: number }) {
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant={r.lastError ? 'error' : 'inactive'}>
-                        {r.lastError || r.errorCode || '—'}
+                        {r.lastError || r.errorCode || <EmptyCell />}
                       </Text>
                     </td>
                   </tr>

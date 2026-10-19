@@ -2,8 +2,8 @@ import * as Select from '@radix-ui/react-select';
 import React, { useState } from 'react';
 
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import Text from './text';
+import { Arrow } from '../icons/arrow';
 
 export default function SelectComponent({
   name,
@@ -279,7 +279,7 @@ export function SelectContent({
   return (
     <Select.Portal>
       <Select.Content
-        className='z-[var(--z-popover)] w-full overflow-auto border border-textInactiveColor bg-bgColor'
+        className='z-[var(--z-popover)] w-full overflow-auto border border-borderColor bg-bgColor'
         position='popper'
         style={{
           width: getWidth(),

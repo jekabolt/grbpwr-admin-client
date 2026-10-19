@@ -7,14 +7,20 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
-import { Pill } from 'ui/components/pill';
-import { Section } from 'ui/components/section';
-import { SideRail, SideRailGroup, SideRailItem, SideRailLayout } from 'ui/components/side-rail';
-import Text from 'ui/components/text';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  DataTable,
+  EmptyCell,
+  Pill,
+  Section,
+  SideRail,
+  SideRailGroup,
+  SideRailItem,
+  SideRailLayout,
+  Text,
+} from 'ui';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { failureText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { FilesDropOverlay } from '../components/drop-overlay';
@@ -475,7 +481,7 @@ function SharedRow({
   return (
     <tr>
       <td>
-        <div className='flex h-9 w-9 items-center justify-center overflow-hidden border border-hairline bg-bgZebra'>
+        <div className='flex h-9 w-9 items-center justify-center overflow-hidden border border-hairline bg-pageBg'>
           {file?.previewUrl ? (
             <img src={file.previewUrl} alt='' className='h-full w-full object-cover' />
           ) : (

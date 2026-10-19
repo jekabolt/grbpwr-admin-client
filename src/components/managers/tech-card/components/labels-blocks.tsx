@@ -2,11 +2,8 @@ import { common_MediaFull, type common_TechCardMediaFull } from 'api/proto-http/
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { GroupLabel } from 'ui/components/group-label';
-import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
-import { Section } from 'ui/components/section';
-import ComboField from 'ui/form/fields/combo-field';
-import InputField from 'ui/form/fields/input-field';
+import { GroupLabel, Section, ComboField, InputField } from 'ui';
+import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { labelMediaOf } from '../care-labels/label-media';
 import {
   removeGarmentLabel,
@@ -214,7 +211,7 @@ export function LabelsBlock({
   resolvedMedia?: readonly common_TechCardMediaFull[];
 }): JSX.Element {
   return (
-    <Section title='labels' question='· every other label on the garment, each with its mockup'>
+    <Section title='labels'>
       <KeyedCards
         field='garmentLabels'
         kinds={garmentLabelKinds}
@@ -240,7 +237,7 @@ export function PackagingBlock({
   resolvedMedia?: readonly common_TechCardMediaFull[];
 }): JSX.Element {
   return (
-    <Section title='packaging' question='· the carton, and every item the garment ships with'>
+    <Section title='packaging'>
       <div id='packaging-spec'>
         <GroupLabel flush>carton</GroupLabel>
         <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>

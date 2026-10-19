@@ -5,14 +5,21 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
-import { Placeholder } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
-import { HeaderCount } from 'ui/components/section-header';
-import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import {
+  Button,
+  CalloutBox,
+  Placeholder,
+  Section,
+  HeaderCount,
+  Text,
+  Tiles,
+  FoldCaret,
+  EmptyCell,
+} from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import { serverSpeaksDesign } from '../capability';
 import { ReplacingEditor } from '../generation/propagating-editor';
@@ -39,7 +46,6 @@ import {
 } from './model';
 import { DOOR, DOOR_ROW } from './render-tile';
 import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
-import { FoldCaret } from 'ui/components/fold-caret';
 
 /* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
    Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и
@@ -72,10 +78,8 @@ import { FoldCaret } from 'ui/components/fold-caret';
  * несущая в этой системе, а 4px на неё не стоят ничего: по горизонтали грунт и так виден в
  * междурядьях, а под подписями и дверьми — во всю ширину группы.
  *
- * ⚠ ТОН — `bgSecondary` (#ededed), И ЭТО ЕДИНСТВЕННАЯ СВОБОДНАЯ КЛЕТКА СЛОВАРЯ. DESIGN.md: panel
- * «a fill, not a container… where a tint is wanted but a new box is not» — дословно этот случай.
- * Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка внутри — это box-in-box, прямой
- * запрет системы. `bgZebra` (#fafafa) на белом не читается вовсе: 5 единиц яркости против 18.
+ * ⚠ ТОН — `pageBg` (#f2f2f2). Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка
+ * внутри — это box-in-box, прямой запрет системы.
  */
 function Bay({
   groupOf,
@@ -94,7 +98,7 @@ function Bay({
   return (
     <div
       data-deck-group={groupOf || undefined}
-      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
+      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-pageBg' : '')}
       style={spanTwo ? { gridColumn: 'span 2' } : undefined}
     >
       {children}
@@ -136,7 +140,7 @@ export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
           в полосе выше или ниже своих соседей и подписи перестают лежать на одной линии. */}
       <Placeholder dashed className='w-full' style={{ aspectRatio: STRIP_FRAME_ASPECT }} />
       <Text size='nano' component='span' className='min-w-0 break-words text-warning'>
-        <b>run {run.id ?? '—'}</b> · {elapsed || '0:00'}
+        <b>run {run.id ?? <EmptyCell />}</b> · {elapsed || '0:00'}
       </Text>
       {/* СЛОВО СОСТОЯНИЯ — С ПРОВОДА (`pending` = в очереди, `running` = у провайдера), а не
           выдуманное. Оно же различает две вещи, которые дыра сама по себе не различает, и ничего

@@ -1,4 +1,4 @@
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { resolveFailure } from '../api/rpc-error';
 
 /**

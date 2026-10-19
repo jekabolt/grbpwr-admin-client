@@ -2,8 +2,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { cn } from 'lib/utility';
 import { useId, type JSX } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+import { Text, Textarea } from 'ui';
 
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from './autosave-contract';

@@ -14,11 +14,7 @@ import {
 import { cn } from 'lib/utility';
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import Select from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, Input, Media, Select, Text } from 'ui';
 import { useInfiniteArchives } from '../../archives/components/useArchiveQuery';
 import { ProductPickerModal } from './productPickerModal';
 import { TagPicker } from './tag-picker';
@@ -117,7 +113,7 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
                 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                 active
                   ? 'border-textColor bg-textColor text-bgColor'
-                  : 'border-textInactiveColor text-textColor hover:border-textInactiveColor',
+                  : 'border-borderColor text-textColor',
               )}
             >
               {t.label}
@@ -253,9 +249,7 @@ function ArchiveBody({
                 className={cn(
                   'flex flex-col gap-1 border-2 p-1 text-left cursor-pointer',
                   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                  selected
-                    ? 'border-textInactiveColor'
-                    : 'border-textInactiveColor hover:border-textInactiveColor',
+                  'border-borderColor',
                 )}
               >
                 <div className='aspect-[4/5] w-full overflow-hidden'>
@@ -422,13 +416,13 @@ function CatalogBody({
         className={cn(
           'flex items-center gap-2 self-end border px-2 py-1.5 cursor-pointer',
           'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-          link.onSale ? 'border-textInactiveColor' : 'border-textInactiveColor',
+          'border-borderColor',
         )}
       >
         <span
           className={cn(
             'inline-block h-3 w-3 border',
-            link.onSale ? 'border-textColor bg-textColor' : 'border-textInactiveColor',
+            link.onSale ? 'border-textColor bg-textColor' : 'border-borderColor',
           )}
         />
         <Text size='small' variant='uppercase'>

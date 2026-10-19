@@ -1,6 +1,6 @@
 import { common_ProductionRunStatus } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 
 // The run conveyor: a production run is six phases long, and the detail page shows the one the
 // run is IN — the rest collapse to a line each. This module owns two things: WHERE the run is

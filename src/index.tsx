@@ -14,8 +14,8 @@ import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
-import { TooltipProvider } from 'ui/components/tooltip';
-import { Layout } from 'ui/layout';
+import { TooltipProvider } from 'ui';
+import { Layout } from 'components/shell/layout';
 import './global.css';
 
 // A deploy replaces every hashed chunk, so a tab that was already open asks for a file that is no
@@ -175,9 +175,6 @@ const OrderInvoicePrint = lazyRoute(() =>
 const Materials = lazyRoute(() =>
   import('components/managers/materials').then((m) => ({ default: m.Materials })),
 );
-const WorkshopSettingsPage = lazyRoute(() =>
-  import('components/managers/workshop/page').then((m) => ({ default: m.WorkshopSettingsPage })),
-);
 const ProductionRuns = lazyRoute(() =>
   import('components/managers/production-runs').then((m) => ({ default: m.ProductionRuns })),
 );
@@ -267,6 +264,9 @@ const FulfillmentCardDetail = lazyRoute(() =>
 const PatternViewerPage = lazyRoute(() =>
   import('components/pattern-viewer/page').then((m) => ({ default: m.PatternViewerPage })),
 );
+const UiKitPage = lazyRoute(() =>
+  import('components/ui-kit/page').then((m) => ({ default: m.UiKitPage })),
+);
 const RunPackViewerPage = lazyRoute(() =>
   import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
 );
@@ -306,7 +306,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
       <h2 style={{ fontSize: '18px' }}>
         {stale ? 'This tab is running an old version' : 'Something went wrong'}
       </h2>
-      <pre style={{ color: 'red', marginTop: '1rem' }}>
+      <pre style={{ color: 'var(--color-error)', marginTop: '1rem' }}>
         {stale
           ? 'The app was updated while this tab was open. Reload to get the current version.'
           : error instanceof Error
@@ -436,7 +436,6 @@ root.render(
                   <Route path={ROUTES.techCardImport} element={<TechCardImport />} />
                   <Route path={ROUTES.singleTechCard} element={<TechCard />} />
                   <Route path={ROUTES.materials} element={<Materials />} />
-                  <Route path={ROUTES.workshop} element={<WorkshopSettingsPage />} />
                   <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
@@ -516,6 +515,9 @@ root.render(
                     DictionaryProvider). Всё, что странице нужно, приезжает с публичного
                     `/api/f/{token}?mode=json`. */}
                 <Route path={ROUTES.publicFile} element={<FileShareViewerPage />} />
+                {/* PUBLIC ui-kit: every primitive from 'ui' on one static page, no fetch, no JWT.
+                    Public so the screenshot test (yarn test:ui-kit) opens it without a backend. */}
+                <Route path={ROUTES.uiKit} element={<UiKitPage />} />
                 {/* Стенд печати. DictionaryProvider свой: без токена он ничего не запрашивает и
                     отдаёт пустой словарь — ровно то состояние, в котором документ обязан
                     печататься, называя недостающее, а не падать. */}

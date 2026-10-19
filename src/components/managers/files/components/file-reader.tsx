@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { Button, Input, Text, Toolbar, ToolbarSpacer, EmptyCell, Close } from 'ui';
 import { useLibraryFile } from '../hooks/useFiles';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { extensionOf } from '../utils/format';
@@ -303,7 +300,7 @@ function PdfStage({
       <Toolbar sticky>
         <b className='max-w-[34ch] truncate'>{name}</b>
         <Text size='micro' variant='label' className='tabular-nums'>
-          p. {page} of {numPages || '—'}
+          p. {page} of {numPages || <EmptyCell />}
         </Text>
         <Button
           size='xs'
@@ -434,14 +431,11 @@ function PdfStage({
             <ToolbarSpacer />
             {/* У крестика нет текста, а значит для скринридера у кнопки нет имени вовсе:
                 читается «кнопка». Имя даёт `aria-label`, и оно называет действие. */}
-            <Button
-              size='xs'
-              variant='secondary'
+            <Close
+              size='sm'
               aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
-            >
-              ✕
-            </Button>
+            />
           </Toolbar>
         ) : (
           <Toolbar className='border-error'>
@@ -456,14 +450,11 @@ function PdfStage({
               {indexing ? ' checking the remaining pages…' : ''}
             </Text>
             <ToolbarSpacer />
-            <Button
-              size='xs'
-              variant='secondary'
+            <Close
+              size='sm'
               aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
-            >
-              ✕
-            </Button>
+            />
           </Toolbar>
         ))}
 
@@ -520,7 +511,7 @@ function PdfStage({
           />
           {/* СЦЕНА — ЗЕМЛЯ, А НЕ БЛОК: рамки у неё нет, потому что рамка есть у страницы, а
               блок в блоке против DESIGN.md. Серая заливка и держит белый лист видимым. */}
-          <div className='min-h-0 flex-1 overflow-auto bg-bgSecondary p-3.5'>
+          <div className='min-h-0 flex-1 overflow-auto bg-pageBg p-3.5'>
             {/* w-max + mx-auto, а не justify-center: центрирование флексом обрезает ЛЕВЫЙ край
                 страницы, когда она шире окна, и на 200% до него уже не доскроллить. */}
             <div className='mx-auto flex w-max gap-3'>

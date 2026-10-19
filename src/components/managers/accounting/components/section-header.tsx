@@ -2,7 +2,7 @@ import { isActiveRoute, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { AcctTabAlerts, useAcctTabAlerts } from '../utils/hooks';
 
 const TABS: { label: string; route: string; alert?: keyof AcctTabAlerts }[] = [
@@ -47,7 +47,7 @@ export function AcctSectionHeader({ children }: Props) {
     // from md up. Without this the 7-tab <nav> was a non-wrapping ~545px flex row that ran wider than
     // a phone viewport and scrolled the WHOLE page sideways (this header is shared by every
     // accounting screen, so it broke all of them).
-    <div className='-mx-2.5 flex flex-col gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between'>
+    <div className='-mx-2.5 flex flex-col gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between'>
       <div className='flex min-w-0 items-center gap-4 md:gap-6'>
         <Text variant='uppercase' size='large' className='shrink-0'>
           accounting
@@ -66,7 +66,7 @@ export function AcctSectionHeader({ children }: Props) {
                 title={alert?.on ? alert.reason : undefined}
                 className={cn(
                   'shrink-0 whitespace-nowrap text-textBaseSize uppercase underline-offset-4 transition-opacity hover:opacity-70',
-                  active ? 'text-textColor underline' : 'text-textInactiveColor',
+                  active ? 'text-textColor underline' : 'text-borderColor',
                 )}
               >
                 {tab.label}

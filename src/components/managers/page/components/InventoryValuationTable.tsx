@@ -1,8 +1,6 @@
 import type { InventoryValuation, InventoryValuationRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { GroupLabel, Stat, StatGrid, Text } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -26,7 +24,7 @@ const RowTable: FC<{ title: string; rows: InventoryValuationRow[] }> = ({ title,
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.productId} className='border-b border-hairline hover:bg-bgSecondary'>
+            <tr key={r.productId} className='border-b border-hairline hover:bg-pageBg'>
               <td className='p-2'>
                 <ProductNameLink
                   productId={r.productId}

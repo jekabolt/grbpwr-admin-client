@@ -1,5 +1,4 @@
-import CheckboxField from 'ui/form/fields/checkbox-field';
-import InputField from 'ui/form/fields/input-field';
+import { CheckboxField, InputField } from 'ui';
 
 // custFlow v2 — the buyer's identity, as a plain field stack under the section rule (no accordion
 // stage). Name + phone moved here off the old shipping step so "who" and "where" are separate.

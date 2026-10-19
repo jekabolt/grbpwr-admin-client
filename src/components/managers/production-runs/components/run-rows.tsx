@@ -1,7 +1,6 @@
 import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
 import { Link } from 'react-router-dom';
-import { DataTable } from 'ui/components/data-table';
-import Text from 'ui/components/text';
+import { DataTable, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { overdueDays, runDate, runDetailPath, runStatusLabel, runStatusTone } from './options';
 
@@ -62,7 +61,7 @@ export function QtyBar({
   const planMark = planned > 0 && received + defect > planned ? (planned / scale) * 100 : null;
   return (
     <span className='flex items-center gap-2'>
-      <span className='relative block h-3 w-[86px] shrink-0 bg-trackBg' aria-hidden>
+      <span className='relative block h-3 w-[86px] shrink-0 bg-pageBg' aria-hidden>
         <span className='absolute top-0 left-0 h-3 bg-textColor' style={{ width: `${good}%` }} />
         {bad > 0 && (
           <span
@@ -78,7 +77,7 @@ export function QtyBar({
         )}
       </span>
       <span className='shrink-0 tabular-nums'>
-        {hasReceived ? received : '—'} / {planned}
+        {hasReceived ? received : <EmptyCell />} / {planned}
         {defect > 0 ? ` · defect ${defect}` : ''}
       </span>
     </span>
@@ -188,7 +187,7 @@ export function RunTable({
               <td data-align='left'>
                 <QtyBar {...q} />
               </td>
-              <td className='tabular-nums'>{runDate(ins?.promisedAt) || '—'}</td>
+              <td className='tabular-nums'>{runDate(ins?.promisedAt) || <EmptyCell />}</td>
               {canReadCosting && (
                 <td>
                   {/* Each figure carries its OWN currency: a run's frozen plan may be quoted in the
@@ -196,10 +195,10 @@ export function RunTable({
                       no units is a lie whenever those differ. */}
                   <span className='flex flex-col items-end'>
                     <span>
-                      plan {decimalToInput(r.plannedUnitCost) || '—'} {planCur}
+                      plan {decimalToInput(r.plannedUnitCost) || <EmptyCell />} {planCur}
                     </span>
                     <span>
-                      actual {decimalToInput(r.actuals?.actualUnitCost) || '—'}{' '}
+                      actual {decimalToInput(r.actuals?.actualUnitCost) || <EmptyCell />}{' '}
                       {r.actuals?.actualUnitCost?.value ? factCur : ''}
                     </span>
                     {hasVariance && (

@@ -129,8 +129,9 @@ export enum ROUTES {
   // файл сразу; отличие в том, что сюда можно прийти по мёртвой ссылке и прочитать об этом
   // фразу вместо голого 404 браузера.
   publicFile = '/f/:token',
+  // PUBLIC kit of every ui primitive: static, no data, no login (screenshot-tested).
+  uiKit = '/ui-kit',
   materials = '/materials',
-  workshop = '/workshop',
   productionRuns = '/production-runs',
   productionRun = '/production-runs/:id',
   // НАРЯД НА ПАРТИЮ — печатный документ ПРОГОНА, а не стиля. Тех-пак карты отвечает «как это
@@ -239,10 +240,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
       { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
       { label: 'production', route: ROUTES.productionRuns, section: SECTION.production },
-      // Shop-floor constants (cutting table, default seam allowance). Gated on `production`, which
-      // is what UpdateWorkshopSettings actually requires — not on `settings`, whose screen holds
-      // storefront configuration and is a different role's business.
-      { label: 'workshop', route: ROUTES.workshop, section: SECTION.production },
     ],
   },
   {

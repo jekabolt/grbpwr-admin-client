@@ -6,9 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 import { FC, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Stat, StatGrid, Text } from 'ui';
 import { ExecutiveHealthStrip, ForecastStrip } from '../components';
 import { ProductNameLink } from '../components/ProductNameLink';
 import type { MetricsPeriod } from '../useMetricsQuery';
@@ -106,7 +104,7 @@ const NewReturningSplit: FC<{ split: NewVsReturningSplit | undefined; repeatRate
           {newShare >= 22 ? `New · ${formatCurrency(newRev)} · ${newShare.toFixed(0)}%` : ''}
         </div>
         <div
-          className='flex items-center justify-center overflow-hidden bg-textInactiveColor px-1 text-[10px] whitespace-nowrap'
+          className='flex items-center justify-center overflow-hidden bg-borderColor px-1 text-[10px] whitespace-nowrap'
           style={{ width: `${retShare}%` }}
         >
           {retShare >= 14 ? `Repeat · ${retShare.toFixed(0)}%` : ''}
@@ -260,7 +258,7 @@ export function ThisWeekTab({
       />
 
       {paymentFailures.count > 0 && (
-        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-bgSecondary p-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-pageBg p-3'>
           <Text variant='uppercase' className='text-error text-textBaseSize font-semibold'>
             Payment failures this period
           </Text>

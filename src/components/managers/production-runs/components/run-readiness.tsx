@@ -7,10 +7,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Link } from 'react-router-dom';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { CalloutBox, GroupLabel, Pill, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
   SEV_BLOCKER,
@@ -272,7 +269,7 @@ export function CoverageTable({
                 <tr key={`${c.colorwayId}-${c.bomItemId}-${i}`}>
                   <td className={cell}>{colorwayName(c.colorwayId ?? 0)}</td>
                   <td className={cell}>
-                    {[c.slotName, c.materialName].filter(Boolean).join(' · ') || '—'}
+                    {[c.slotName, c.materialName].filter(Boolean).join(' · ') || <EmptyCell />}
                   </td>
                   <td className={`${cell} text-right tabular-nums`}>
                     {short(c.required)} {c.unit ?? ''}
@@ -281,7 +278,7 @@ export function CoverageTable({
                   <td
                     className={`${cell} text-right tabular-nums ${lacking ? 'text-error' : ''}`}
                   >
-                    {lacking ? `short by ${short_}` : '—'}
+                    {lacking ? `short by ${short_}` : <EmptyCell />}
                   </td>
                 </tr>
               );

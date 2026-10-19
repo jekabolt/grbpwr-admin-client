@@ -3,7 +3,7 @@ import {
   mediaFullToViewerItem,
   mediaFullViewerSrc,
   type MediaViewerItem,
-} from 'ui/components/media-viewer';
+} from 'components/shared/media-viewer/media-viewer';
 
 import { cropFamilies, isCutOut } from './composite';
 import { isUndoneEdit } from './edit-chain';

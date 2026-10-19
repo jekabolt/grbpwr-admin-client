@@ -1,7 +1,6 @@
 import { adminService } from 'api/api';
 import { googletype_Decimal } from 'api/proto-http/admin';
-import { Section, SectionStack } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, SectionStack, Text } from 'ui';
 import { AmountCell } from '../../components/amount-cell';
 import { CheckStrip, GroupHeader, RowLine } from '../../components/kit';
 import { formatBase } from '../../utils/format';
@@ -143,7 +142,12 @@ export function VatTab({ from }: Props) {
           plain: 'VAT paid at customs, reclaimable',
           value: ret.inputImport,
         },
-        { label: 'Net VAT to pay', plain: 'output minus input', value: ret.netPayable, total: true },
+        {
+          label: 'Net VAT to pay',
+          plain: 'output minus input',
+          value: ret.netPayable,
+          total: true,
+        },
       ]
     : [];
   // Lines JPK declares for completeness but that are settled on another return (OSS, UK) or carry
@@ -304,7 +308,7 @@ export function VatTab({ from }: Props) {
                 </thead>
                 <tbody>
                   {ossRows.map((r, i) => (
-                    <tr key={r.country ?? i} className='border-b border-textInactiveColor'>
+                    <tr key={r.country ?? i} className='border-b border-borderColor'>
                       <td className='whitespace-nowrap px-2 py-1'>{r.country}</td>
                       <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
                         {formatPercent(r.ratePct)}

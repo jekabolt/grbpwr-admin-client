@@ -1,7 +1,6 @@
 import type { CogsStructureRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { formatCurrency, parseDecimal } from '../utils';
 
 interface CogsStructureTableProps {
@@ -39,7 +38,7 @@ export const CogsStructureTable: FC<CogsStructureTableProps> = ({ cogsStructure 
                   <span className='text-labelColor'> · {pct.toFixed(0)}%</span>
                 </Text>
               </div>
-              <div className='h-2 w-full bg-bgSecondary/40'>
+              <div className='h-2 w-full bg-pageBg/40'>
                 <div className='h-2 bg-textColor/70' style={{ width: `${pct}%` }} />
               </div>
             </div>

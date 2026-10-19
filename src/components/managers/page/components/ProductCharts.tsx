@@ -8,8 +8,7 @@ import type {
 } from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import {
   categoryAxis,
   ChartCard,
@@ -238,7 +237,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
               </thead>
               <tbody>
                 {revenueMarginRows.map((row, idx) => (
-                  <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                  <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                     <td className='p-2'>
                       <ProductNameLink
                         productId={row.productId}
@@ -256,7 +255,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
                       {row.hasCost && row.marginPct != null ? (
                         <Text>{row.marginPct.toFixed(0)}%</Text>
                       ) : (
-                        <Text variant='label'>N/A</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   </tr>

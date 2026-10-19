@@ -1,7 +1,7 @@
 import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { Fragment } from 'react';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { GroupLabel, Text } from 'ui';
 import { VideoSize } from '..';
 import { usePendingFiles } from '../utils/usePendingFiles';
 import { DragDropArea } from './dragdrop-area';
@@ -40,6 +40,12 @@ interface MediaListProps {
   usageOf?: (media: common_MediaFull) => MediaUsageRef[] | undefined;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void | Promise<void>;
+  /** Phone layout of the library page: two columns, no hover actions (see `MediaItem.touch`). */
+  touch?: boolean;
+  /** Phone select mode: a tap toggles instead of opening. */
+  selecting?: boolean;
+  /** Phone: a long press on a card enters select mode with it picked. */
+  onLongPress?: (media: common_MediaFull) => void;
 }
 
 export function MediaList({
@@ -58,6 +64,9 @@ export function MediaList({
   usageOf,
   onVideoLoad,
   onView,
+  touch = false,
+  selecting = false,
+  onLongPress,
 }: MediaListProps) {
   const renderItem = (m: common_MediaFull) => (
     <MediaItem
@@ -72,6 +81,9 @@ export function MediaList({
       selectionMode={selectionMode}
       fit={fitOf?.(m)}
       usage={usageOf?.(m)}
+      touch={touch}
+      selecting={selecting}
+      onLongPress={onLongPress ? () => onLongPress(m) : undefined}
     />
   );
 
@@ -80,7 +92,10 @@ export function MediaList({
       mediaLength={media.length}
       // Дорожки по содержимому, а не четыре колонки на любой ширине: на 1600 пикселях
       // четырёхколоночная сетка растягивала плитку до полуметра, на 1000 — сжимала подпись.
-      className='grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2'
+      className={cn(
+        'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2',
+        touch && 'grid-cols-2',
+      )}
       pendingFilesHook={pendingFilesHook}
       onFilesPicked={onFilesPicked}
       showAddButton={showAddButton}
@@ -106,8 +121,7 @@ export function MediaList({
                     ) : undefined
                   }
                 >
-                  {band.title}{' '}
-                  <span className='font-normal tabular-nums'>{band.items.length}</span>
+                  {band.title} <span className='font-normal tabular-nums'>{band.items.length}</span>
                 </GroupLabel>
                 {band.items.map(renderItem)}
               </Fragment>

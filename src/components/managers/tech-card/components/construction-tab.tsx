@@ -4,30 +4,36 @@ import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSet
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Canvas, Pin } from 'ui/components/canvas';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Section } from 'ui/components/section';
-import { SectionHeader } from 'ui/components/section-header';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import DecimalField from 'ui/form/fields/decimal-field';
+import {
+  Canvas,
+  Pin,
+  Chip,
+  ChipRow,
+  Section,
+  HeaderWarnings,
+  HeaderNote,
+  Stat,
+  StatGrid,
+  Text,
+  DecimalField,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
-import {
-  ColorwayArticles,
-  ColorwayCloth,
-  OPERATION_EXPECTED_SECTIONS,
-  OperationsField,
-} from './operations-field';
+import { ColorwayArticles, ColorwayCloth, OperationsField } from './operations-field';
 import { pieceClothMap, type ClothSlot, type PieceCloth } from './piece-cloth';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
+import { useSkeletonDoor } from './assembly-skeleton-panel';
+import { CardUnitPicturesProvider, renderProposalUnit } from './card-unit-pictures';
+import { useCardCategoryNames } from './skeleton-card-inputs';
+import { ActiveStepProvider } from './assembly-map/active-step';
+import { AssemblyMap } from './assembly-map/assembly-map';
+import { SeamsDoor } from './assembly-seams/seams-door';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -54,7 +60,6 @@ export type SummaryOp = {
   zone?: string;
   bomLineKeys?: string[];
 };
-type SummaryBom = { lineKey?: string; name?: string; section?: string };
 
 // The minutes ONE operation contributes to total SAM, exactly as the server computes it
 // (dto.operationMinutes: SMV when the operation carries one, else the time norm). This summary
@@ -77,68 +82,48 @@ export function operationMinutes(o: SummaryOp): number {
 // ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2) — the standard a раскладка's recorded allowance is judged against, and
 // the one number on this tab a machine reads rather than a human.
 //
-// It sits next to `construction.seamAllowances` deliberately: that field is a free-text note («5
-// мм») written for the factory, this one is a decimal the readiness gate compares against, and the
-// two are exactly the pair an operator would otherwise conflate. On the wire it is a CARD field, not
-// part of `construction` — anything added to a section's digest projection instantly marks every
-// signed-off CONSTRUCTION approval as «edited since signing», on every card at once.
+// On the wire it is a CARD field, not part of `construction` — anything added to a section's digest
+// projection instantly marks every signed-off CONSTRUCTION approval as «edited since signing».
 //
-// THREE VALUES, NOT TWO. Empty means «эта карточка не требует конкретного припуска» and the workshop
-// default applies; a number OVERRIDES the workshop default; and 0 is a number like any other, saying
-// «кроим по линии как нарисована». The readout below spells out which of the three is in force,
-// because a blank field next to a configured workshop default otherwise reads as «ничего не задано»
-// when in fact a standard IS in force — just not this card's.
+// THREE VALUES, NOT TWO. Empty = the workshop default applies (the placeholder names it); a number
+// overrides it; 0 is a number like any other («кроим по линии как нарисована»). The distinction
+// lives in the field's `title`, not in a paragraph under it.
 function RequiredSeamAllowanceField() {
-  const { control } = useFormContext<TechCardFormData>();
-  const cardValue = (
-    (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string
-  ).trim();
   // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
   // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
   const { data } = useWorkshopSettings();
   const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
-
-  const verdict = cardValue
-    ? `this card's requirement: ${cardValue} mm${shopDefault ? ` (the workshop's ${shopDefault} mm is overridden)` : ''}`
-    : shopDefault
-      ? `the card has no requirement of its own — the workshop's applies: ${shopDefault} mm`
-      : 'neither the card nor the workshop sets one — there is nothing to compare against';
-
   return (
-    <div className='flex flex-col gap-1'>
+    <div title='empty inherits the workshop value; 0 means cut along the line as drawn'>
       <DecimalField
         name='requiredSeamAllowanceMm'
         label='required seam allowance, mm'
         maxDecimals={1}
-        placeholder={shopDefault ? `workshop: ${shopDefault}` : 'not set'}
+        placeholder={shopDefault ? `inherited · ${shopDefault} mm` : 'not set'}
       />
-      <Text size='micro' variant='label'>
-        {verdict}
-      </Text>
-      {/* THE ONE THING THAT CANNOT BE SHOWN ANY OTHER WAY: пусто ≠ 0. Пусто = наследуем; 0 = «кроим
-          по линии как нарисована». Всё остальное, что здесь стояло абзацем, теперь видно само —
-          каскад показан плейсхолдером и вердиктом, а текстового двойника, от которого поле надо
-          было отличать, больше нет. */}
-      <Text size='micro' variant='label'>
-        empty = inherited. 0 is a different thing: “we cut along the line as drawn”. to drop the
-        requirement, clear the field rather than typing a zero.
-      </Text>
     </div>
   );
 }
 
-// СТАНДАРТЫ КАРТОЧКИ — одна полоса вместо блока на каждое число. Требуемый припуск перестал быть
-// отдельным Section: он больше не защищается от текстового двойника (тот удалён вместе с разрывом)
-// и не объясняет каскад словами (каскад теперь виден плейсхолдером в самом шаге). Осталось одно,
-// что показать иначе нельзя, — разница между пустым полем и нулём.
+// СТАНДАРТЫ КАРТОЧКИ — the required allowance and the card defaults (workmanship + equipment park)
+// in ONE block, folded by default: they are what every step inherits, set once and rarely looked
+// at again. The block opens itself on any error under it, so the error router's revealField finds
+// the control; it is keyed on the submit count while an error stands, so a fold the user closed by
+// hand is reopened by the next failed save rather than hiding the failing field.
 function CardStandards() {
+  const {
+    formState: { errors, submitCount },
+  } = useFormContext<TechCardFormData>();
+  const hasError = !!errors.construction || !!errors.requiredSeamAllowanceMm;
   return (
-    <Section title='standards' question='— what every step inherits unless it says otherwise'>
-      {/* The narrow column belongs to the ONE number above, not to the block: a single decimal in a
-          640px-wide box reads as an unfinished layout. The defaults accordion below it now carries
-          the card's equipment park — two lists of tiles and a grid of settings — and capped at
-          `max-w-sm` every one of those grids collapsed to a single column with the tiles stacked
-          under each other, on a screen with room for four. */}
+    <Section
+      key={hasError ? `err-${submitCount}` : 'ok'}
+      title='standards'
+      collapsible
+      defaultOpen={hasError}
+    >
+      {/* The narrow column belongs to the ONE number, not to the block: the equipment park below
+          needs the full width for its tile grids. */}
       <div className='flex flex-col gap-2.5'>
         <div className='sm:max-w-sm'>
           <RequiredSeamAllowanceField />
@@ -149,14 +134,9 @@ function CardStandards() {
   );
 }
 
-// Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
-// operations, total SAM (feeds costing), how many assembly zones are tagged, and how many steps
-// still have no place on the sketch. Sits above the assembly workspace.
-//
-// The SAM → money line underneath connects the minutes to the only rate the card actually holds:
-// costing.cmt_cost is a per-GARMENT CMT figure, so the derived number is the implied €/min rather
-// than a stored rate. Read-only, and rendered only when that cost exists (it is nulled on read for
-// an account without costing:read, so this line simply does not appear for them).
+// Summary lead: how many operations, total SMV (feeds costing) and how many assembly zones are
+// tagged. Defects (steps without a pin, materials on no step, labels no step sews) are not counted
+// here any more: they are the operations block's header warnings.
 //
 // It subscribes to the whole `operations` array ITSELF rather than taking it as a prop: that array
 // changes on every keystroke in the assembly editor, and holding the subscription in the tab
@@ -170,97 +150,13 @@ function ConstructionSummary() {
   const zonesCovered = new Set(
     operations.map((o) => o.zone).filter((z) => z && z !== 'TECH_CARD_GARMENT_ZONE_UNKNOWN'),
   ).size;
-  const unpinned = operations.filter((o) => !(o.calloutNumber && o.calloutNumber > 0)).length;
 
-  // Completeness in the other direction: which materials the card BUYS but no step CONSUMES. The
-  // per-step checks catch a step missing its material; this catches a material missing its step —
-  // фурнитура that gets costed, ordered and issued to the floor with nothing telling anyone where
-  // it goes. Labels are excluded (they ride tech_card_label / the assembly bill), which is what
-  // OPERATION_EXPECTED_SECTIONS encodes.
-  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as SummaryBom[];
-  const attachedKeys = new Set(operations.flatMap((o) => o.bomLineKeys ?? []));
-  const unattached = bomItems.filter((b) => {
-    if (!OPERATION_EXPECTED_SECTIONS.has(b.section ?? '')) return false;
-    const key = b.lineKey?.trim();
-    // A line with no key yet (just added, not saved) is by definition on no step.
-    return !key || !attachedKeys.has(key);
-  });
-
-  // ПРИШИВ ЭТИКЕТОК — РАБОТА, КОТОРОЙ НЕТ В МАРШРУТЕ.
-  //
-  // Строки секции «этикетки» намеренно исключены из проверки выше: этикетка попадает на изделие
-  // через `tech_card_label` и сборочную ведомость, поэтому строка без операции — норма, а не
-  // пропуск. Верно для СТРОКИ, но не для КАРТОЧКИ: кто-то этикетку пришивает, это занимает время,
-  // и если такого шага нет ни одного, его минуты не попадают ни в маршрут для цеха, ни в SAM —
-  // себестоимость занижена ровно на этот труд.
-  //
-  // Проверка КАРТОЧНАЯ, а не построчная, именно поэтому: одна фраза о пропущенной работе читается,
-  // а список «эта этикетка не на шаге, и эта, и эта» — то самое обучение игнорировать проверки,
-  // от которого исключение и защищало.
-  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
-    content?: string;
-    placement?: string;
-    attachment?: string;
-    size?: string;
-    note?: string;
-  }>;
-  // Заполненная этикетка, а не пустая строка на дефолтном типе — тот же предикат, что у чек-листа.
-  const usedLabels = labels.filter((l) =>
-    [l.content, l.placement, l.attachment, l.size, l.note].some((v) => !!v?.trim()),
-  ).length;
-  const labelsOnSomeStep = bomItems.some(
-    (b) =>
-      (b.section ?? '') === 'TECH_CARD_BOM_SECTION_LABEL' &&
-      !!b.lineKey?.trim() &&
-      attachedKeys.has(b.lineKey.trim()),
-  );
-  const labelsOffRoute = opCount > 0 && usedLabels > 0 && !labelsOnSomeStep;
-
-  // The SAM → money readout (implied ₽/min from cmt_cost) moved to the costing tab's labour band
-  // (Phase 3, plan 11): money reads next to the CMT input it derives from, minutes stay here.
   return (
-    <div>
-      <StatGrid min={130}>
-        <Stat label='operations' value={opCount} />
-        {/* One number, and the rail below sums the same column. The sub used to explain which of
-            two time fields won, because there were two; there is one. */}
-        <Stat label='total SMV' value={`${totalSam.toFixed(1)} min`} sub='feeds costing' />
-        <Stat label='zones covered' value={`${zonesCovered} / ${TOTAL_CONSTRUCTION_ZONES}`} />
-        <Stat
-          label='unpinned ops'
-          value={unpinned}
-          sub='no sketch pin'
-          tone={unpinned > 0 ? 'down' : 'default'}
-        />
-        <Stat
-          label='off-step materials'
-          value={unattached.length}
-          sub='not consumed by any step'
-          tone={unattached.length > 0 ? 'down' : 'default'}
-        />
-      </StatGrid>
-      {/* Named, not merely counted: «3 материала вне шагов» sends the operator hunting through the
-          BOM, and the point of the check is that they already know which zip they forgot.
-          Suppressed while the card has NO operations at all — there every material is trivially
-          off-step, so the callout would greet every new card with a list of its own BOM. */}
-      {opCount > 0 && unattached.length > 0 && (
-        <CalloutBox tone='note' className='mt-2.5'>
-          <Text size='micro'>
-            bound to no operation:{' '}
-            {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
-          </Text>
-        </CalloutBox>
-      )}
-      {labelsOffRoute && (
-        <CalloutBox tone='note' className='mt-2.5'>
-          <Text size='micro'>
-            {usedLabels} labels are declared, but no step sews them on — that work is in neither
-            the workshop route nor the SAM. add a step that attaches them, and link the label's BOM
-            line to it.
-          </Text>
-        </CalloutBox>
-      )}
-    </div>
+    <StatGrid min={130}>
+      <Stat label='operations' value={opCount} />
+      <Stat label='total SMV' value={`${totalSam.toFixed(1)} min`} />
+      <Stat label='zones covered' value={`${zonesCovered} / ${TOTAL_CONSTRUCTION_ZONES}`} />
+    </StatGrid>
   );
 }
 
@@ -280,21 +176,10 @@ function ConstructionSketch({
   mediaById,
   activePin,
   onActivePinChange,
-  note,
 }: {
   mediaById: Map<number, common_MediaFull>;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
-  /**
-   * Подвал под эскизом, и он ПРИЕЗЖАЕТ ПРОПОМ.
-   *
-   * Один и тот же эскиз живёт на двух экранах — колонкой рядом с операциями и плавающим стикером
-   * над полотном фулскрина, — а подсвечивает он на них разное: рядом со списком работают обе
-   * половины кросс-подсветки, над полотном — только одна, и полотно активный пин не потребляет
-   * вовсе. Подпись, честная на одном экране, на другом обещала бы поведение, которого там нет, —
-   * ровно та ложь, ради которой подвал и вынесен в проп.
-   */
-  note: string;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   // Which pins an operation actually claims — computed here, for the same reason the summary
@@ -341,11 +226,8 @@ function ConstructionSketch({
             no technical sketch
           </Text>
         </Canvas>
-        {/* Без «рядом с операциями»: этот же эскиз показывается и стикером над полотном
-            фулскрина, где рядом с ним никаких операций нет. */}
         <Text size='micro' variant='label'>
-          put a flat into a bench slot on STUDIO, then draw pins on it from ARTIFACTS — they show up
-          here
+          add a flat on STUDIO, pin it in ARTIFACTS
         </Text>
       </div>
     );
@@ -398,58 +280,42 @@ function ConstructionSketch({
           );
         })}
       </div>
-
-      <Text size='micro' variant='label'>
-        {note}
-      </Text>
     </div>
   );
 }
 
-// ПРИГЛАШЕНИЕ РАЗОБРАТЬ ВЫКРОЙКИ — единственная реакция вкладки на наличие DXF, одна микро-строка
-// в шапке блока операций.
+// THE PATTERN'S STATE IN THE OPERATIONS HEADER — the tab's only reaction to a DXF on the card.
 //
-// Возвращает `undefined`, а не пустой узел, там, где сказать нечего, и это обязательно: карточка
-// БЕЗ выкроек не должна узнать, что силуэты вообще бывают (ни ссылки, ни плейсхолдера, ни пустого
-// бокса — выглядит ровно как вчера), а карточка, у которой контуры уже нарисованы, не нуждается в
-// приглашении нажать то, что и так видно. Молчание — только в этих двух случаях: разобранная
-// пачка, не давшая ни одного контура, и упавший разбор говорят о себе сами.
+// Silent (`undefined`) where there is nothing to say: a card WITHOUT patterns must not learn that
+// silhouettes exist, and a card whose outlines are drawn needs no word about them. While the batch
+// is being read: one quiet note (the skeleton door stays silent meanwhile, so the state is named
+// once). A parse that gave no outline, or failed, is a defect of the block: a header warning, with
+// the door to PATTERNS where pieces are matched to blocks.
 //
-// Ошибка говорится ОДИН раз и не превращается в повтор: useDxfGeometry заведён с `retry: false`,
-// потому что недоступный CDN — это ответ, а не повод скачать всё второй раз.
-function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
+// The error is said ONCE: useDxfGeometry runs with `retry: false`, an unreachable CDN is an answer.
+function shapesAffordance(
+  shapes: PieceShapes,
+  onGoTab?: (tab: string) => void,
+): React.ReactNode | undefined {
   if (!shapes.hasDxf) return undefined;
-  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе экран выглядит
-  // поломкой: мегабайты скачались, а детали остались теми же именами. Причина всегда одна и
-  // чинится не здесь — деталь кроя не связана с блоком чертежа, — поэтому строка называет
-  // вкладку, на которой это делают.
+  const toPatterns = onGoTab
+    ? { label: 'open patterns', onClick: () => onGoTab('patterns') }
+    : undefined;
   if (shapes.shapeByKey) {
     return shapes.foundCount === 0 ? (
-      <Text size='micro' variant='label' component='span'>
-        pieces aren't matched to pattern blocks — the PATTERNS tab
-      </Text>
+      <HeaderWarnings
+        items={[{ text: 'pieces not matched to pattern blocks', action: toPatterns }]}
+      />
     ) : undefined;
   }
   if (shapes.error) {
     return (
-      <Text size='micro' variant='error' component='span' title={shapes.error.message}>
-        the patterns didn't parse
-      </Text>
+      <HeaderWarnings
+        items={[{ text: `the patterns didn't parse: ${shapes.error.message}`, error: true }]}
+      />
     );
   }
-  if (shapes.isLoading) {
-    return (
-      <Text size='micro' variant='label' component='span'>
-        parsing the patterns…
-      </Text>
-    );
-  }
-  // Кнопки «показать силуэты» здесь больше НЕТ. Силуэт — не украшение и не опция: сборку
-  // размечают по формам деталей, и экран, спрашивающий разрешения показать то, ради чего на него
-  // пришли, перекладывает на человека решение, которого у него нет данных принять. Цена честная и
-  // остаётся: пачка DXF скачивается и разбирается при открытии вкладки. Запрос один на карточку
-  // (React Query кэширует пачку между вкладками), `retry: false` не даёт недоступному CDN
-  // превратиться в повтор, а состояния разбора остаются здесь же строкой.
+  if (shapes.isLoading) return <HeaderNote>reading the pattern…</HeaderNote>;
   return undefined;
 }
 
@@ -740,6 +606,20 @@ export function ConstructionTab({
     return m;
   }, [techCard?.resolvedTechnicalMedia]);
 
+  // КАРКАС СБОРКИ ПО ВЫКРОЙКЕ: две двери (шапка блока операций и пустое состояние), панель
+  // предложения и запрос записи, который уезжает в `OperationsField`. Хук сам ни на что в форме не
+  // подписан: панель читает форму, только пока открыта.
+  const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  const categoryNames = useCardCategoryNames();
+  const skeleton = useSkeletonDoor({
+    frozen,
+    shapes: pieceShapes,
+    cloth: pieceClothByColorway[0]?.map ?? null,
+    categoryNames,
+    renderUnit: renderProposalUnit,
+    techCardId: techCard?.id,
+  });
+
   return (
     <div className='flex flex-col gap-3.5'>
       {/* ═══ ЗДЕСЬ СТОЯЛИ ТРИ БЛОКА КРУГА 20 — И ОНИ УЕХАЛИ В СТУДИЮ ═══════════════════════════
@@ -763,106 +643,118 @@ export function ConstructionTab({
       {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
           assembly sequence the rest of the screen. At 2/5 the drawing was 640px wide on a 1600px
           display with ~3000px of empty ground under it, while the operations were squeezed. */}
-      <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-        <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
-          <section className='border border-borderColor bg-bgColor p-4'>
-            <SectionHeader
-              title='sketch — assembly map'
-              question='— hovering an operation lights its pin, and the other way round'
-            />
-            <ConstructionSketch
-              mediaById={mediaById}
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-              note='hover an operation — its pin lights up (and the other way round)'
-            />
-          </section>
-          <PieceLegend />
-        </div>
+      {/* КАРТА СБОРКИ И РЕЛЬС ЧИТАЮТ ОДИН ГРАФ И ОДИН АКТИВНЫЙ ШАГ: провайдер пиктограмм (он же — граф
+          швов карты) и стор активного шага стоят над ОБЕИМИ колонками. Без DXF граф null, и
+          колонка — сегодняшний эскиз байт в байт. */}
+      <ActiveStepProvider>
+        <CardUnitPicturesProvider
+          shapes={pieceShapes.shapeByKey}
+          cloth={pieceClothByColorway[0]?.map ?? null}
+          categoryNames={categoryNames}
+        >
+          <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
+            <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
+              <AssemblyMap
+                sketch={
+                  <ConstructionSketch
+                    mediaById={mediaById}
+                    activePin={pin.active}
+                    onActivePinChange={pin.setActive}
+                  />
+                }
+              />
+              <SeamsDoor techCard={techCard} frozen={frozen} shapes={pieceShapes.shapeByKey} />
+              <PieceLegend />
+            </div>
 
-        <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
-          {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
+            <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
+              {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
               рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
               его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
-          <ConstructionAudit
-            techCardId={techCard?.id}
-            active={active}
-            onGoTab={onGoTab}
-            // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
-            // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
-            // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
-            // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
-            // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
-            // и исчезали бы молча.
-            frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-            // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
-            // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
-            // несохранённых правок.
-            operationCount={(techCard?.techCard?.operations ?? []).length}
-          />
-          <CardStandards />
-          <section className='border border-borderColor bg-bgColor p-4'>
-            <SectionHeader
-              title='operations — assembly order'
-              question='— what each step does, where, on which pieces, and how long it takes'
-              action={shapesAffordance(pieceShapes)}
-            />
-            <OperationsField
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-              activeBom={bom.active}
-              onActiveBomChange={bom.setActive}
-              colorwayArticles={colorwayArticles}
-              pieceClothByColorway={pieceClothByColorway}
-              pieceShapes={pieceShapes.shapeByKey}
-              // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
-              // принимает намерение «снять разметку» только против карточки, которая её несёт,
-              // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
-              // распакована (восстановленный черновик).
-              storedHasUnits={(techCard?.techCard?.operations ?? []).some(
-                (o) => (o?.outputUnitKey ?? '').trim() !== '',
-              )}
-              // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
-              // замораживает тело. Схема получает его ЯВНО, а не через внешний
-              // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
-              frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-              // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
-              operationMediaUrls={operationMediaUrls}
-              // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
-              // от него зависит, показывать ли путь отступления «снять фотографии шагов».
-              storedHasMedia={(techCard?.techCard?.operations ?? []).some(
-                (o) => (o?.media ?? []).length > 0,
-              )}
-              onSave={onSave}
-              saving={saving}
-              // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
-              // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
-              // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
-              // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
-              //
-              // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
-              // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
-              // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
-              // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
-              // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
-              sketchNote={
-                <ConstructionSketch
-                  mediaById={mediaById}
+              <ConstructionAudit
+                techCardId={techCard?.id}
+                active={active}
+                onGoTab={onGoTab}
+                // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
+                // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
+                // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
+                // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
+                // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
+                // и исчезали бы молча.
+                frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+                // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
+                // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
+                // несохранённых правок.
+                operationCount={(techCard?.techCard?.operations ?? []).length}
+              />
+              <CardStandards />
+              <section className='border border-borderColor bg-bgColor p-4'>
+                {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
+                    by OperationsField: its warnings read the rail's own subscriptions. */}
+                <OperationsField
                   activePin={pin.active}
                   onActivePinChange={pin.setActive}
-                  // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
-                  // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
-                  // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
-                  // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
-                  // было бы новое визуальное состояние, которого у инлайна нет.
-                  note='hover a pin — in the list view it lights that step; the canvas never reacts'
+                  activeBom={bom.active}
+                  onActiveBomChange={bom.setActive}
+                  colorwayArticles={colorwayArticles}
+                  pieceClothByColorway={pieceClothByColorway}
+                  pieceShapes={pieceShapes.shapeByKey}
+                  // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+                  // принимает намерение «снять разметку» только против карточки, которая её несёт,
+                  // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+                  // распакована (восстановленный черновик).
+                  storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                    (o) => (o?.outputUnitKey ?? '').trim() !== '',
+                  )}
+                  // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+                  // замораживает тело. Схема получает его ЯВНО, а не через внешний
+                  // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                  frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+                  // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+                  operationMediaUrls={operationMediaUrls}
+                  // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+                  // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+                  storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                    (o) => (o?.media ?? []).length > 0,
+                  )}
+                  onSave={onSave}
+                  saving={saving}
+                  applyRequest={skeleton.applyRequest}
+                  onSkeletonApplied={skeleton.onSkeletonApplied}
+                  skeletonUndoRequest={skeleton.skeletonUndoRequest}
+                  onSkeletonUndone={skeleton.onSkeletonUndone}
+                  onSkeletonUndoable={skeleton.onSkeletonUndoable}
+                  emptyAction={skeleton.emptyAction}
+                  headerAction={
+                    <>
+                      {shapesAffordance(pieceShapes, onGoTab)}
+                      {skeleton.headerAction}
+                    </>
+                  }
+                  // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+                  // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+                  // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+                  // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+                  //
+                  // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+                  // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+                  // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+                  // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+                  // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+                  sketchNote={
+                    <ConstructionSketch
+                      mediaById={mediaById}
+                      activePin={pin.active}
+                      onActivePinChange={pin.setActive}
+                    />
+                  }
                 />
-              }
-            />
-          </section>
-        </div>
-      </div>
-
+                {skeleton.panel}
+              </section>
+            </div>
+          </div>
+        </CardUnitPicturesProvider>
+      </ActiveStepProvider>
     </div>
   );
 }

@@ -1,11 +1,7 @@
 import type { common_DesignPicture } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import SelectComponent from 'ui/components/select';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Pill, Select, Text } from 'ui';
 
 import { InertDoor } from '../bench-slot';
 import { AskModal } from '../core';
@@ -450,7 +446,7 @@ export function ApplySplitDoor({
           title='apply this split into the sides of one colourway'
           className='flex w-full'
         >
-          <SelectComponent
+          <Select
             name={`apply-split-${techCardId}-${pieces.length}`}
             value={APPLY_PROMPT}
             placeholder={quiet ? label : 'apply ▸'}

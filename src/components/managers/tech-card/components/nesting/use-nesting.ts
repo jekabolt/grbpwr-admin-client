@@ -152,6 +152,7 @@ export function useNesting(files: NestingFile[] | null) {
   useEffect(() => {
     return () => {
       if (hardStopTimer.current != null) window.clearTimeout(hardStopTimer.current);
+      if (probeStopTimer.current != null) window.clearTimeout(probeStopTimer.current);
       clientRef.current?.terminate();
       clientRef.current = null;
     };
@@ -222,5 +223,53 @@ export function useNesting(files: NestingFile[] | null) {
     setRun((prev) => (prev.phase === 'done' ? { phase: 'idle' } : prev));
   }, []);
 
-  return { parse, run, start, stop, resetRun, unitOverride, setUnitOverride };
+  // Read the files again (a warning's «retry» after a failed download).
+  const reparse = useCallback(() => setParseNonce((n) => n + 1), []);
+
+  // ПРОБНЫЙ ПРОГОН («fit to the table»): тот же воркер, но без run-состояния — ни холст, ни
+  // кнопки не видят пробу. Один пробный за раз; cancelProbe просит воркер вернуть лучшее.
+  const probeRef = useRef<number | null>(null);
+  const probeStopTimer = useRef<number | null>(null);
+  const probe = useCallback(
+    async (parseId: number, config: NestConfig): Promise<NestResult> => {
+      const { id, done } = client().nest(parseId, config, () => {});
+      probeRef.current = id;
+      try {
+        return await done;
+      } finally {
+        if (probeRef.current === id) probeRef.current = null;
+      }
+    },
+    [client],
+  );
+  // Отмена пробы — как stop(): сперва мягкая (воркер возвращает лучшее), а если воркер застрял в
+  // непрерываемой геометрии и молчит HARD_STOP_MS — terminate(). Он отклоняет обещание пробы
+  // («nesting worker terminated»), так что fitToTable выходит через catch и снимает «fitting…»;
+  // разобранные детали умерли вместе с воркером — разбор перезапускается через nonce.
+  const cancelProbe = useCallback(() => {
+    const id = probeRef.current;
+    if (id == null) return;
+    client().cancel(id);
+    if (probeStopTimer.current != null) window.clearTimeout(probeStopTimer.current);
+    probeStopTimer.current = window.setTimeout(() => {
+      probeStopTimer.current = null;
+      if (probeRef.current !== id) return; // мягкая отмена дошла вовремя
+      probeRef.current = null;
+      client().terminate();
+      setParseNonce((n) => n + 1);
+    }, HARD_STOP_MS);
+  }, [client]);
+
+  return {
+    parse,
+    run,
+    start,
+    stop,
+    resetRun,
+    reparse,
+    unitOverride,
+    setUnitOverride,
+    probe,
+    cancelProbe,
+  };
 }

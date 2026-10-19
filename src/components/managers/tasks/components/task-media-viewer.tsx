@@ -4,10 +4,9 @@ import {
   indexOfPin,
   useAnnotationSurface,
   type AnnotationValue,
-} from 'ui/components/annotation/canvas';
-import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
-import { Chip } from 'ui/components/chip';
-import Text from 'ui/components/text';
+} from 'components/managers/tech-card/annotation/canvas';
+import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
+import { Chip, Text } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { mediaRefToken, type MediaRef } from './task-text';
 
@@ -212,6 +211,7 @@ function ReferenceChip({ token }: { token: string }) {
     <Chip
       dashed={!done}
       title={`copy ${token} — paste it into the description or a comment`}
+      className='min-h-11 sm:min-h-0'
       onClick={() => {
         navigator.clipboard?.writeText(token);
         setDone(true);

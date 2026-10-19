@@ -1,9 +1,6 @@
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, PLACEHOLDER_SURFACE, placeholderClass, Text } from 'ui';
 import { usePendingFiles } from '../utils/usePendingFiles';
 
 export function DragDropArea({
@@ -187,7 +184,7 @@ export function DragDropArea({
 
       {isDragging && (
         // z-10 — локальный стек самой зоны (плёнка поверх её плиток), не слой страницы.
-        <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textInactiveColor bg-bgColor/90'>
+        <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-borderColor bg-bgColor/90'>
           <span className='uppercase text-textColor'>drop files to upload</span>
         </div>
       )}

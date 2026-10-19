@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import Text from 'ui/components/text';
+import { Button, Media, Text } from 'ui';
 import type { TaskMedia } from '../api/types';
 import { mediaRefToken } from './task-text';
 
@@ -65,16 +65,17 @@ export function MediaRefRow({
         // КЛЮЧ С ПОЗИЦИЕЙ, как у плиток формы и карточки: один media_id может прийти с провода
         // дважды, и на одинаковых ключах React перепутал бы кнопки местами — а каждая из них
         // вставляет в текст СВОЙ номер.
-        <button
+        <Button
           key={`${m.id}:${i}`}
           type='button'
+          variant='default'
           title={`insert a link to attachment ${i + 1}`}
           aria-label={`insert a link to attachment ${i + 1}`}
           onClick={() => insert(m.id)}
-          className='relative size-8 shrink-0 border border-borderColor bg-bgColor hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          className='relative size-11 shrink-0 border border-borderColor bg-bgColor hover:border-textColor sm:size-8'
         >
           {m.thumbnail ? (
-            <img src={m.thumbnail} alt='' className='size-full object-cover' />
+            <Media src={m.thumbnail} alt='' aspectRatio='auto' />
           ) : (
             <span className='flex size-full items-center justify-center text-nano leading-none text-labelColor'>
               #{m.id}
@@ -85,7 +86,7 @@ export function MediaRefRow({
           <span className='absolute bottom-0 right-0 bg-textColor px-0.5 text-nano leading-none text-bgColor'>
             {i + 1}
           </span>
-        </button>
+        </Button>
       ))}
     </div>
   );

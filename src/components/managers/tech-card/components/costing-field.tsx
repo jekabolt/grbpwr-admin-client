@@ -16,20 +16,29 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
-import GenericPopover from 'ui/components/popover';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
-import CurrencySelect from 'ui/form/fields/currency-select';
-import DecimalField from 'ui/form/fields/decimal-field';
-import TextareaField from 'ui/form/fields/textarea-field';
-import { FoldCaret } from 'ui/components/fold-caret';
+import { createPortal } from 'react-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  HeaderWarnings,
+  type HeaderWarning,
+  GroupLabel,
+  Pill,
+  Row,
+  GenericPopover,
+  Stat,
+  StatGrid,
+  Text,
+  Tile,
+  Tiles,
+  DecimalField,
+  FoldCaret,
+  EmptyCell,
+} from 'ui';
+import CurrencySelect from 'components/shared/currency-select';
+import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
 import { bomPurposeLabel } from './bom-purpose';
@@ -40,6 +49,11 @@ import { unmeasuredDxfScopeKeys } from './piece-areas-state';
 import { useDevExpenses } from './dev-expenses-field';
 import { MarkerConsumptionBand } from './marker-apply';
 import { TechCardFormData } from './schema';
+import {
+  defaultsPatch,
+  describeDefaults,
+  useWorkshopCostingDefaults,
+} from './use-workshop-costing-defaults';
 
 // Весь граф раскладки (dxf-parser + clipper2 + воркер) живёт в ленивом чанке — см. место рендера.
 const BatchMarkerQueue = lazy(() =>
@@ -75,11 +89,7 @@ export const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as
 // тот же следующий шаг, и разъехаться словами им незачем: кнопки здесь нет намеренно (вердикт
 // живёт внутри `fieldset disabled` выпущенной карточки, где кнопка была бы мёртвой, а блок базы
 // расчёта с этими действиями стоит ВЫШЕ и заморозке не подлежит).
-const ESTIMATE_CTA =
-  'the consumption of some fabrics is derived from geometry (piece area ÷ cutting width): there is ' +
-  'no waste between pieces in this number, so the cost is understated and the margin overstated. ' +
-  'The norm comes from a marker — pick a run as the calculation basis at the top of the tab and ' +
-  'build it, or enter the consumption by hand in the colourway recipe.';
+const ESTIMATE_CTA = 'build a marker for a run, or enter consumption in the recipe.';
 
 const BREAK_EVEN_NO_FX =
   'R&D is accounted for in the base currency, and the margin above is in the costing currency. ' +
@@ -205,8 +215,11 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
 export function CostingField({
   techCard,
   frozen = false,
+  headerEl,
 }: {
   techCard?: common_TechCard;
+  /** The Section header slot: calculation problems portal there as `! N`. Absent → drawn inline. */
+  headerEl?: HTMLElement | null;
   /**
    * Карточка ВЫПУЩЕНА (approval_state = RELEASED), и её содержимое правке больше не подлежит.
    *
@@ -225,6 +238,12 @@ export function CostingField({
   const { canWriteCosting, canWrite } = usePermissions();
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
+  const [params, setParams] = useSearchParams();
+  const goToTab = (tab: string) => {
+    const next = new URLSearchParams(params);
+    next.set('tab', tab);
+    setParams(next, { replace: true });
+  };
 
   // WHICH MARKET this margin is for. GetTechCardRequest.vat_country_code was never sent, so the tab
   // always showed the domestic rate while presenting it as "the" margin — the one thing the netting
@@ -424,6 +443,39 @@ export function CostingField({
   const totalSam = operations.reduce((sum, o) => sum + operationMinutes(o), 0);
   const impliedPerMinute = cmt > 0 && totalSam > 0 ? cmt / totalSam : undefined;
 
+  // ── WORKSHOP DEFAULTS (0414): ghost values in the empty fields, applied only by a click (the
+  // card autosaves, so nothing may reach form state by viewing); the shown figures written back.
+  const canWriteWorkshop = canWrite(SECTION.production);
+  const workshop = useWorkshopCostingDefaults({
+    enabled: canWriteCosting && !frozen,
+    canWrite: canWriteWorkshop,
+    saved: rollup,
+    totalSam,
+  });
+  const ghost = (key: 'cmtCost' | 'overheadCost' | 'defectPercent' | 'targetMarginPct') =>
+    workshop.suggestions[key];
+  const workshopPatch = defaultsPatch({
+    defaults: workshop.defaults,
+    currency: costing.currency ?? '',
+    cmt,
+    totalSam,
+    overhead,
+    materials,
+    materialsComparable: !currencyDirty && !rollup?.hasUnconvertedCurrencies,
+    defectPercent: costing.defectPercent ?? '',
+    targetMarginPct: costing.targetMarginPct ?? '',
+  });
+  const workshopPatchEmpty = Object.keys(workshopPatch).length === 0;
+  const saveWorkshopDefaults = () => {
+    if (workshopPatchEmpty || !canWriteWorkshop || !workshop.loaded || workshop.update.isPending)
+      return;
+    workshop.update.mutate(workshopPatch, {
+      onSuccess: () => showMessage('saved as workshop default', 'success'),
+      onError: () => showMessage("couldn't save the workshop default", 'error'),
+    });
+  };
+  const wsTag = (on: boolean) => (on ? 'workshop' : '');
+
   // Read-only cutting-wastage context for the reject rate: the per-line wastage% already grosses
   // the material lines, so reject% must not re-price the same losses. Read from the SAVED card
   // (the rollup's own inputs), not the form.
@@ -437,6 +489,17 @@ export function CostingField({
   const rejectNoWastage = defectPct > 10 && bomLines.length > 0 && bomWastages.length === 0;
 
   const catalogLinkedLines = bomLines.filter((b) => (b.materialId ?? 0) > 0).length;
+  const [repriceOpen, setRepriceOpen] = useState(false);
+  // Подписанный MATERIALS — единственный случай, когда репрайс что-то портит сверх цен.
+  const signoffs = (useWatch({ control, name: 'signoffs' }) ?? []) as {
+    section?: string;
+    state?: string;
+  }[];
+  const materialsSigned = signoffs.some(
+    (x) =>
+      x.section === 'TECH_CARD_SIGNOFF_SECTION_MATERIALS' &&
+      x.state === 'TECH_CARD_SIGNOFF_STATE_APPROVED',
+  );
   const onReprice = () => {
     if (!techCardId) return;
     reprice.mutate(techCardId, {
@@ -598,13 +661,26 @@ export function CostingField({
       key: 'cmt',
       name: 'CMT (labour)',
       amount: cmt,
-      aside: impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/min` : undefined,
+      aside:
+        [
+          wsTag(workshop.fromWorkshop('cmtCost')),
+          impliedPerMinute != null ? `≈ ${impliedPerMinute.toFixed(2)} ${cur}/min` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
       help: `The factory's quote per garment — the only money figure a person brings in from outside. ${
         impliedPerMinute != null
           ? `At the construction's total SAM of ${totalSam.toFixed(1)} min that is ≈ ${impliedPerMinute.toFixed(2)} ${cur}/min — a derived rate, stored nowhere; check it against the factory's usual rate.`
           : 'The per-minute rate will appear beside it once the construction has operations with a SAM.'
       }`,
-      lever: <Lever canWrite={canWriteCosting} name='costing.cmtCost' label='CMT per garment' />,
+      lever: (
+        <Lever
+          canWrite={canWriteCosting}
+          name='costing.cmtCost'
+          label='CMT per garment'
+          ghost={ghost('cmtCost')}
+        />
+      ),
     },
     {
       key: 'logistics',
@@ -623,12 +699,14 @@ export function CostingField({
       key: 'overhead',
       name: 'overhead',
       amount: overhead,
+      aside: wsTag(workshop.fromWorkshop('overheadCost')) || undefined,
       help: 'Per 1 garment, in the costing currency. Pricing (markup, wholesale, retail) lives on the published product, not here.',
       lever: (
         <Lever
           canWrite={canWriteCosting}
           name='costing.overheadCost'
           label='overhead per garment'
+          ghost={ghost('overheadCost')}
         />
       ),
     },
@@ -639,12 +717,18 @@ export function CostingField({
       // and materials_per_unit to 2dp independently, so it lands within ±0.005). Printing «0.01»
       // beside «defects 0%» states a cost nobody entered.
       amount: defectPct > 0 ? defectAmount : 0,
+      aside: wsTag(workshop.fromWorkshop('defectPercent')) || undefined,
       help:
         avgWastage != null
           ? `Only defects in FINISHED garments. Cutting losses are already in the materials: the average cutting wastage across BOM lines is ${avgWastage.toFixed(1)}% (${bomWastages.length} lines with wastage).`
           : 'Only defects in FINISHED garments. Cutting losses are set per line in the BOM (wastage %) and are already built into the materials.',
       lever: (
-        <Lever canWrite={canWriteCosting} name='costing.defectPercent' label='defect percent' />
+        <Lever
+          canWrite={canWriteCosting}
+          name='costing.defectPercent'
+          label='defect percent'
+          ghost={ghost('defectPercent')}
+        />
       ),
     },
   ];
@@ -681,14 +765,6 @@ export function CostingField({
 
   // ── PROBLEMS. One counted row instead of up to five stacked full-width callouts; each entry
   // carries the link to the screen where it is actually fixed.
-  type Problem = {
-    key: string;
-    blocking: boolean;
-    text: React.ReactNode;
-    action?: React.ReactNode;
-    detail?: React.ReactNode;
-  };
-  const problems: Problem[] = [];
   // РЕЦЕПТ НЕ ДАЛ РАСХОДА — и раньше об этом не говорила НИ ОДНА строка экрана.
   //
   // Сервер считает материалы, обходя строки рецепта колорвея (dto colorwayCost). Строка, привязанная
@@ -769,161 +845,57 @@ export function CostingField({
   const areasWouldPrice =
     recipeGaveNothing && !noColorways && !rollup?.hasEstimate && unmeasuredCloth.length > 0;
 
+  // ПРОБЛЕМЫ РАСЧЁТА живут в шапке блока (`HeaderWarnings`), не в теле: одна строка на поломку,
+  // текст строки и есть дверь к месту, где она чинится.
+  const problems: HeaderWarning[] = [];
   if (recipeGaveNothing) {
     problems.push({
-      key: 'norecipe',
-      blocking: true,
-      text: noColorways ? (
-        <>
-          <b>the card has no colourways — there is nothing to set the consumption on.</b> The recipe
-          (which fabric and how much of it goes into the garment) lives on a colourway, so the
-          materials count as zero no matter how complete the BOM is.
-        </>
-      ) : (
-        <>
-          <b>the colourway recipe gives no consumption — there is not a single “per unit” line.</b>{' '}
-          A piece line answers only the question “which fabric is the piece cut from” and carries no
-          norm: consumption is a property of the garment. Until a per-unit consumption is named for
-          the fabric, the materials count as zero, and the cost below is not understated — it is
-          uncomputed.
-        </>
-      ),
-      action: (
-        <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=colorways'>to colorways</Link>
-        </Button>
-      ),
+      text: noColorways
+        ? 'no colourways to set consumption on'
+        : 'no per-unit consumption in the recipes',
+      error: true,
+      action: { label: 'open colorways', onClick: () => goToTab('colorways') },
     });
   }
   if (areasWouldPrice) {
+    // НЕ ошибка: расчёт уже заблокирован строкой выше; это второй выход из той же дыры.
     problems.push({
-      key: 'noareas',
-      // НЕ «блок»: расчёт уже заблокирован строкой выше, и вторая красная строка про ту же дыру
-      // считала бы одну поломку дважды. Это второй ВЫХОД из неё, а не вторая причина.
-      blocking: false,
-      text: (
-        <>
-          <b>
-            the piece areas are not measured — there will be no consumption estimate from the
-            patterns.
-          </b>{' '}
-          A slot can get a price even WITHOUT a “per unit” line: if cut pieces are assigned to it,
-          the server computes a lower-bound estimate — piece area ÷ cutting width (netto, without
-          the waste between pieces). But the areas have to be measured from the DXF once, and only
-          the browser does that. Without a usable measurement (never measured at all, or the
-          measurement went stale — files or links changed after it): {unmeasuredCloth.join(', ')}.
-        </>
-      ),
-      action: (
-        <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=patterns'>to patterns</Link>
-        </Button>
-      ),
+      text: `piece areas not measured: ${unmeasuredCloth.join(', ')}`,
+      action: { label: 'open patterns', onClick: () => goToTab('patterns') },
     });
   }
   if (rollup?.hasUnpriced) {
     problems.push({
-      key: 'unpriced',
-      blocking: true,
-      text: (
-        <>
-          <b>
-            a line without a price — unit cost is understated and is NOT seeded into cost_price.
-          </b>{' '}
-          There is no price in the BOM or in the catalog, a pin onto an article with a mismatched
-          unit of measure, no consumption norm set, or the norm is set per size but not on every
-          size of the range — the mean across the range requires a norm on each. Such a line enters
-          no currency total, so the figures above look plausible but are understated by a whole
-          material.
-          {colorwayCosts.some((cc) => cc.hasUnpriced)
-            ? ' The offending colourway is marked in the tiles below.'
-            : ''}
-        </>
-      ),
-      action: (
-        <Button asChild size='xs' variant='secondary'>
-          <Link to='?tab=bom'>to the BOM</Link>
-        </Button>
-      ),
+      text: 'a BOM line has no price or norm',
+      error: true,
+      action: { label: 'open the BOM', onClick: () => goToTab('bom') },
     });
   }
   if (rollup?.hasUnconvertedCurrencies) {
     problems.push({
-      key: 'nofx',
-      blocking: true,
-      text: (
-        <>
-          <b>some BOM lines are in another currency</b> and did not make it into the
-          costing-currency total — the unit cost above is understated. The headline stays in the
-          costing currency and still will not include those lines while there is no rate.
-        </>
-      ),
-      action: (
-        <Button asChild size='xs' variant='secondary'>
-          <Link to={ROUTES.settings}>rates</Link>
-        </Button>
-      ),
-    });
-  }
-  if (draftPreview) {
-    problems.push({
-      key: 'draft',
-      blocking: false,
-      text: (
-        <>
-          <b>draft — save to recompute.</b> unit cost, the margin, break-even and the breakdown are
-          computed in the browser from unsaved edits to the cost items. The final figure is computed
-          by the server (from the BOM + FX rates), and it is the one that goes into the product's
-          cost_price.
-        </>
-      ),
+      text: 'a BOM currency has no rate',
+      error: true,
+      action: { label: 'open rates', href: ROUTES.settings },
     });
   }
   if (rejectNoWastage) {
     problems.push({
-      key: 'reject',
-      blocking: false,
-      text: (
-        <>
-          <b>{`defects ${defectPct.toFixed(0)}% with zero wastage on all ${bomLines.length} BOM lines`}</b>
-          {
-            ' — it looks like the cutting losses were dumped into the defect rate too. Keeping them apart is more honest: wastage on the material lines, defects only on finished garments.'
-          }
-        </>
-      ),
+      text: `defects ${defectPct.toFixed(0)}% with zero wastage on every BOM line`,
+      action: { label: 'open the BOM', onClick: () => goToTab('bom') },
     });
   }
-  if (migrationExceptions.length > 0) {
+  for (const e of migrationExceptions) {
     problems.push({
-      key: 'migration',
-      blocking: false,
-      text: (
-        <>
-          <b>money is waiting to be carried into the BOM by hand.</b> The “hardware/packaging → BOM”
-          migration could not carry these amounts over automatically. To carry them: a BOM line with
-          this amount + a usage on every colourway. The report is historical and does not clean
-          itself up.
-        </>
-      ),
-      detail: (
-        <div className='mt-1 flex flex-col'>
-          {migrationExceptions.map((e, i) => (
-            <Text size='micro' variant='label' key={i}>
-              {`· ${e.article}: ${e.amount?.value ?? '—'} ${e.currency || ''} — ${
-                e.kind === 'not_draft'
-                  ? 'the card was released (carry it over at the next re-release)'
-                  : e.kind === 'zero_colorways'
-                    ? 'no colourways, nowhere to hang a usage'
-                    : 'the section already had a priced line (double-count; the BOM won)'
-              }`}
-            </Text>
-          ))}
-        </div>
-      ),
+      text: `carry ${e.article} ${e.amount?.value ?? '—'} ${e.currency || ''} into the BOM (${
+        e.kind === 'not_draft'
+          ? 'at the next re-release'
+          : e.kind === 'zero_colorways'
+            ? 'no colourways'
+            : 'BOM already priced'
+      })`,
+      action: { label: 'open the BOM', onClick: () => goToTab('bom') },
     });
   }
-  const blockingCount = problems.filter((p) => p.blocking).length;
-  const warningCount = problems.length - blockingCount;
 
   // ── THE VERDICT. One figure, one sentence, one control.
   const verdict: {
@@ -944,9 +916,9 @@ export function CostingField({
         // «fill in the BOM» на заполненном BOM — не подсказка, а отправка туда, где всё уже
         // сделано: человек проверяет спецификацию, находит её полной и остаётся без следующего шага.
         cause: !bomHasLines
-          ? 'fill in the BOM or enter a cost item in the breakdown below — the figures will appear after saving'
+          ? 'fill in the BOM or a cost item below'
           : recipeGaveNothing && noColorways
-            ? 'the BOM is filled in, but the card has no colourways — consumption is set in the colourway recipe'
+            ? 'no colourways to set consumption on'
             : recipeGaveNothing
               ? // ВТОРАЯ ПОЛОВИНА ФАКТА — ТУТ ЖЕ. «no per-unit consumption lines» было правдой ровно
                 // наполовину с тех пор, как сервер научился считать слот с деталями по ПЛОЩАДИ:
@@ -955,13 +927,13 @@ export function CostingField({
                 // есть что (выкройки в DXF на месте, площадей нет) — иначе она звала бы на вкладку,
                 // где делать нечего.
                 areasWouldPrice
-                ? 'the BOM is filled in, but the colourway recipes have no per-unit consumption lines, and there is no usable measurement of the piece areas — from areas the server computes a lower-bound estimate even without such a line, if pieces are assigned to the slot (the patterns tab)'
-                : 'the BOM is filled in, but the colourway recipes have no per-unit consumption lines — consumption is set on the fabric, not on the pieces'
-              : 'the BOM lines have no price, or the recipe is not assigned to any colourway — the figures will appear after saving',
+                ? 'no per-unit consumption in the recipes, and piece areas are not measured'
+                : 'no per-unit consumption in the colourway recipes'
+              : 'the BOM lines have no price, or no colourway has a recipe',
         action:
           bomHasLines && recipeGaveNothing ? (
             <Button asChild size='xs' variant='secondary'>
-              <Link to='?tab=colorways'>to colorways</Link>
+              <Link to='?tab=colorways'>set consumption</Link>
             </Button>
           ) : (
             <Button asChild size='xs' variant='secondary'>
@@ -974,9 +946,7 @@ export function CostingField({
           figure: '—',
           figureLabel: `currency → ${cur || '—'}`,
           tone: 'error',
-          sentence: 'the costing currency was changed — there is nothing to compute with yet',
-          cause:
-            'the materials and the per-colourway costs are still in the previous currency: only the server can convert them, at the costing rates — the figure comes back once the card has saved.',
+          sentence: 'costing currency changed · save to recompute',
         }
       : costIncomplete
         ? {
@@ -985,8 +955,7 @@ export function CostingField({
             tone: 'error',
             figureTone: 'text-error',
             sentence: "the margin can't be computed from this cost",
-            cause:
-              'the calculation contains lines without a price or without a rate — they entered no total',
+            cause: 'some lines have no price or no rate',
             action: (
               <Button asChild size='xs' variant='secondary'>
                 <Link to='?tab=bom'>find the line</Link>
@@ -1030,8 +999,12 @@ export function CostingField({
                   tone: 'warning',
                   sentence:
                     `the margin is no higher than ${marginPct.toFixed(1)}%` +
-                    (hasTarget ? ` — the ${targetPct.toFixed(0)}% target passes only on it` : ''),
-                  cause: ESTIMATE_CTA,
+                    (hasTarget ? ` · the ${targetPct.toFixed(0)}% target passes only on it` : ''),
+                  cause: (
+                    <>
+                      {ESTIMATE_CTA} <HelpMark title={TIER_ESTIMATE}>{ESTIMATE_WHY}</HelpMark>
+                    </>
+                  ),
                 }
               : {
                   figure: `−${(gap ?? 0).toFixed(2)}`,
@@ -1039,7 +1012,12 @@ export function CostingField({
                   tone: 'error',
                   figureTone: 'text-error',
                   sentence: `the margin is no higher than ${marginPct.toFixed(1)}% against a ${targetPct.toFixed(0)}% target`,
-                  cause: `the gap is computed from an UNDERSTATED cost, the real one is bigger. ${ESTIMATE_CTA}`,
+                  cause: (
+                    <>
+                      {`computed from an understated cost; the real gap is bigger. ${ESTIMATE_CTA}`}{' '}
+                      <HelpMark title={TIER_ESTIMATE}>{ESTIMATE_WHY}</HelpMark>
+                    </>
+                  ),
                 }
             : !hasTarget
               ? {
@@ -1047,8 +1025,7 @@ export function CostingField({
                   figureLabel: 'net margin',
                   tone: 'note',
                   sentence: `${money(grossMargin ?? 0)} per garment`,
-                  cause:
-                    "no margin target is set — neither the style's own nor the company default",
+                  cause: 'no margin target set',
                 }
               : // Тот же порог полкопейки, что и в ветке оценки выше: недобор, который печатается
                 // как «−0.00», это остаток округления, а не дыра в марже, и красная плашка о нём
@@ -1093,114 +1070,107 @@ export function CostingField({
 
   return (
     <div className='flex flex-col gap-3'>
+      {headerEl && createPortal(<HeaderWarnings items={problems} />, headerEl)}
       {/* ═══ БАЗА РАСЧЁТА (Ф2). Стиль и партия — РАЗНЫЕ вопросы об одной карточке, и экран обязан
           говорить, на какой сейчас отвечает: партия из одних XL, показанная как средняя по ряду,
           выглядит нормально и врёт на всю разницу градации. */}
       {(runs.length > 0 || canPlanRuns) && (
-        <CalloutBox tone='note'>
-          <div className='flex flex-col gap-2'>
-            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
-              <Text size='micro' variant='label' component='span'>
-                calculation basis
-              </Text>
-              {runs.length > 0 && (
-                <Button
-                  type='button'
-                  size='xs'
-                  variant={batchRunId === 0 ? 'default' : 'secondary'}
-                  onClick={() => {
-                    setBatchRunId(0);
-                    setComposing(false);
-                  }}
-                >
-                  style · mean across the range
-                </Button>
-              )}
-              {basisRuns.map((r) => (
-                <Button
-                  key={r.id}
-                  type='button'
-                  size='xs'
-                  variant={batchRunId === r.id ? 'default' : 'secondary'}
-                  onClick={() => {
-                    setBatchRunId(r.id ?? 0);
-                    setComposing(false);
-                  }}
-                >
-                  {`run #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
-                </Button>
-              ))}
-              {/* СОСТАВИТЬ ПАРТИЮ, НЕ УХОДЯ СО СТРАНИЦЫ. Черновик не занимает ткань и не проходит
+        <div className='flex flex-col gap-2 border-b border-hairline pb-2'>
+          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+            <Text size='micro' variant='label' component='span'>
+              calculation basis
+            </Text>
+            {runs.length > 0 && (
+              <Button
+                type='button'
+                size='xs'
+                variant={batchRunId === 0 ? 'default' : 'secondary'}
+                onClick={() => {
+                  setBatchRunId(0);
+                  setComposing(false);
+                }}
+              >
+                style · range mean
+              </Button>
+            )}
+            {basisRuns.map((r) => (
+              <Button
+                key={r.id}
+                type='button'
+                size='xs'
+                variant={batchRunId === r.id ? 'default' : 'secondary'}
+                onClick={() => {
+                  setBatchRunId(r.id ?? 0);
+                  setComposing(false);
+                }}
+              >
+                {`run #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
+              </Button>
+            ))}
+            {/* СОСТАВИТЬ ПАРТИЮ, НЕ УХОДЯ СО СТРАНИЦЫ. Черновик не занимает ткань и не проходит
                   гейт — это прикидка денег, и заводится она там, где деньги и считают. Аффорданса
                   нет, когда составлять не из чего: у карточки без живых колорвеев с продуктом
                   клетку сетки нечем ключевать (product_id), и об этом сказано строкой ниже —
                   один раз, а не кнопкой, которая молча ничего не делает. */}
-              {canPlanRuns && runColorways.length > 0 && (
-                // Эта кнопка — ДЕЙСТВИЕ, а не база, и нажатой она поэтому не выглядит никогда:
-                // пока черновик не создан, расчёт по-прежнему ведётся по стилю, и «выбранной»
-                // обязана читаться именно кнопка стиля. Открытость редактора видна по самому
-                // редактору ниже, а закрывает его «отмена» в его заголовке.
-                <Button
-                  type='button'
-                  size='xs'
-                  variant='secondary'
-                  onClick={() => {
-                    setBatchRunId(0);
-                    setComposing(true);
-                  }}
-                >
-                  + new run
-                </Button>
-              )}
-              {canPlanRuns && runColorways.length === 0 && (
-                <Text size='micro' variant='label' component='span'>
-                  the card has no live colourways with a product — there is nothing to compose a run
-                  from
-                </Text>
-              )}
-              {batchRunId > 0 && (
-                <Text size='micro' component='span'>
-                  {batchCost?.value
-                    ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} per garment — weighted by THIS run's mix (colourways × sizes), with its pins`
-                    : batchReason || "the run's cost is not computed"}
-                </Text>
-              )}
-            </div>
+            {canPlanRuns && runColorways.length > 0 && (
+              // Эта кнопка — ДЕЙСТВИЕ, а не база, и нажатой она поэтому не выглядит никогда:
+              // пока черновик не создан, расчёт по-прежнему ведётся по стилю, и «выбранной»
+              // обязана читаться именно кнопка стиля. Открытость редактора видна по самому
+              // редактору ниже, а закрывает его «отмена» в его заголовке.
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                onClick={() => {
+                  setBatchRunId(0);
+                  setComposing(true);
+                }}
+              >
+                + new run
+              </Button>
+            )}
+            {batchRunId > 0 && (
+              <Text size='micro' component='span'>
+                {batchCost?.value
+                  ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} per garment · this run's mix`
+                  : batchReason || "the run's cost is not computed"}
+              </Text>
+            )}
+          </div>
 
-            {/* СОСТАВ. `key` — это и есть сброс состояния редактора: смена базы есть смена
+          {/* СОСТАВ. `key` — это и есть сброс состояния редактора: смена базы есть смена
                 предмета, а не обновление того же, и набранное для одной партии не должно
                 перетечь в другую. Сохранение внутри инвалидирует префикс productionRunKeys.all,
                 под которым лежат И список, И detail(id) выбранной партии, — поэтому цифра
                 «за изделие» выше пересчитывается сама, без второго вызова отсюда. */}
-            {batchRunId > 0 ? (
-              batchRun ? (
-                <BatchComposition
-                  key={batchRunId}
-                  techCard={techCard}
-                  run={batchRun}
-                  canPlan={canPlanRuns}
-                />
-              ) : (
-                <Text size='micro' variant='label'>
-                  loading the run's composition…
-                </Text>
-              )
-            ) : composing ? (
+          {batchRunId > 0 ? (
+            batchRun ? (
               <BatchComposition
-                key='new'
+                key={batchRunId}
                 techCard={techCard}
+                run={batchRun}
                 canPlan={canPlanRuns}
-                // Созданный черновик СРАЗУ становится базой: иначе оператор набрал бы партию и
-                // остался смотреть на среднюю по ряду — то есть на ответ к другому вопросу.
-                onCreated={(id) => {
-                  setBatchRunId(id);
-                  setComposing(false);
-                }}
-                onCancel={() => setComposing(false)}
               />
-            ) : null}
-          </div>
-        </CalloutBox>
+            ) : (
+              <Text size='micro' variant='label'>
+                loading the run's composition…
+              </Text>
+            )
+          ) : composing ? (
+            <BatchComposition
+              key='new'
+              techCard={techCard}
+              canPlan={canPlanRuns}
+              // Созданный черновик СРАЗУ становится базой: иначе оператор набрал бы партию и
+              // остался смотреть на среднюю по ряду — то есть на ответ к другому вопросу.
+              onCreated={(id) => {
+                setBatchRunId(id);
+                setComposing(false);
+              }}
+              onCancel={() => setComposing(false)}
+            />
+          ) : null}
+        </div>
       )}
 
       {/* ═══ РАСКРОЙ ПАРТИИ — состав выше превращается в НАБОР РАСКЛАДОК и в измеренный расход.
@@ -1242,6 +1212,13 @@ export function CostingField({
 
           Классы повторяют внешний контейнер (flex-col gap-3): fieldset встаёт между ним и его
           бывшими детьми, и без этого все промежутки между блоками вкладки схлопнулись бы в один. */}
+      {/* Без слота шапки — своей строкой, и ВНЕ fieldset: на выпущенной карточке он погасил бы
+          кнопку-триггер списка, а читать проблемы там нужно так же. */}
+      {!headerEl && problems.length > 0 && (
+        <div className='flex justify-end'>
+          <HeaderWarnings items={problems} />
+        </div>
+      )}
       <fieldset disabled={frozen} className='m-0 flex min-w-0 flex-col gap-3 border-0 p-0'>
         {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
         <CalloutBox tone={verdict.tone}>
@@ -1275,73 +1252,23 @@ export function CostingField({
             носит эту пилюлю с Ф6.1, вкладка — нет, и человек, видевший обе, читал два разных
             ответа об одной цифре. */}
           {lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
-          {draftPreview && <Pill tone='attention'>draft</Pill>}
+          {draftPreview && (
+            <span title='computed in the browser from unsaved edits; save to recompute'>
+              <Pill tone='attention'>draft · save to recompute</Pill>
+            </span>
+          )}
           {/* ОДНА БАЗА НА ЭКРАНЕ. Переключатель вверху меняет базу расчёта, но перерисовать по
             партии сервер сегодня умеет ровно одну цифру — её цену за изделие (planned_unit_cost);
             ни разбивки, ни маржи, ни колорвейного разреза по партии он не отдаёт. Пока это так,
             экран обязан хотя бы СКАЗАТЬ, что всё ниже — про стиль: молчащая подпись при нажатой
             кнопке «run #12» читается как «вот её деньги», а это средняя по размерному ряду,
             которая на партии из одних XL врёт на всю разницу градации. */}
-          <Text size='micro' variant='label'>
-            {batchRunId > 0
-              ? `the calculation basis is run #${batchRunId}, but everything below describes the STYLE: ` +
-                "the server returns the run's cost as the single figure above; there is no breakdown or margin by its mix yet. "
-              : ''}
-            planned cost · per-size norms enter as the MEAN ACROSS THE SIZE RANGE (this is not a run
-            forecast — a run plan is computed from its own lines) · recomputed when the card is
-            saved
-          </Text>
+          {batchRunId > 0 && (
+            <Text size='micro' variant='label' component='span'>
+              {`below: the style, not run #${batchRunId}`}
+            </Text>
+          )}
         </div>
-
-        {/* ═══ ПРОБЛЕМЫ — counted, collapsed, each with the link to where it is fixed.
-          `<details>`, not a button: a RELEASED card wraps this whole tab in `<fieldset disabled>`,
-          which would make a button-driven disclosure unreadable on exactly the cards people read
-          most. */}
-        {problems.length > 0 && (
-          <details className='group'>
-            <summary
-              className={`flex cursor-pointer list-none items-center gap-2 border px-2.5 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden ${
-                blockingCount > 0 ? 'border-error' : 'border-warning bg-warning/5'
-              }`}
-            >
-              <Text
-                size='micro'
-                tracking='label'
-                component='span'
-                className={`font-bold uppercase ${blockingCount > 0 ? 'text-error' : 'text-warning'}`}
-              >
-                {blockingCount > 0
-                  ? `${blockingCount} ${plural(blockingCount, 'problem')} ${plural(blockingCount, 'blocks', 'block')} the calculation`
-                  : `${warningCount} ${plural(warningCount, 'warning')}`}
-              </Text>
-              {blockingCount > 0 && warningCount > 0 && (
-                <Text size='micro' variant='label' component='span'>
-                  {`+ ${warningCount} ${plural(warningCount, 'warning')}`}
-                </Text>
-              )}
-              <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-                <FoldCaret open='details' />
-              </Text>
-            </summary>
-            <div className='flex flex-col border border-t-0 border-borderColor'>
-              {problems.map((p) => (
-                <div
-                  key={p.key}
-                  className='flex flex-wrap items-start gap-2 border-b border-hairline px-2.5 py-1.5 last:border-b-0'
-                >
-                  <Pill tone={p.blocking ? 'warn' : 'attention'}>
-                    {p.blocking ? 'blocking' : 'warning'}
-                  </Pill>
-                  <div className='min-w-[200px] flex-1'>
-                    <Text size='micro'>{p.text}</Text>
-                    {p.detail}
-                  </div>
-                  {p.action}
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
 
         {/* ═══ ОСЬ ЦЕНЫ — one arithmetic chain, left to right. VAT stops being a footnote and
           becomes the step it actually is. */}
@@ -1364,12 +1291,8 @@ export function CostingField({
             />
             <Stat
               label={netted ? `− VAT ${vatRate.toFixed(0)}% ${vatCountry}` : '− VAT'}
-              value={netted ? (netRetail ?? 0).toFixed(2) : '—'}
-              sub={
-                netted
-                  ? 'net — the margin comes off it'
-                  : `no rate for ${vatCountry || 'the country'}`
-              }
+              value={netted ? (netRetail ?? 0).toFixed(2) : <EmptyCell />}
+              sub={netted ? 'net, the margin base' : `no rate for ${vatCountry || 'the country'}`}
             />
             <Stat
               label={
@@ -1389,7 +1312,7 @@ export function CostingField({
               // одну строку `sub` помещается только одно из двух.
               sub={
                 lowerBound
-                  ? `${TIER_ESTIMATE} — the real one is higher`
+                  ? `${TIER_ESTIMATE} · the real one is higher`
                   : usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
                     ? `plan · base ${baseCur} ${serverUnitCostBase.toFixed(2)}`
                     : 'plan, per garment'
@@ -1401,7 +1324,11 @@ export function CostingField({
               // читают не всегда, а число — всегда. Без знака ячейка утверждала точные «42.00» ровно
               // там, где вердикт двумя блоками выше говорит «не выше».
               value={
-                grossMargin != null ? `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}` : '—'
+                grossMargin != null ? (
+                  `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}`
+                ) : (
+                  <EmptyCell />
+                )
               }
               // `certifiable`, not just `hasTarget`: a green «up» on a margin the verdict has already
               // called uncomputable is the contradiction this gate exists to prevent.
@@ -1432,7 +1359,7 @@ export function CostingField({
             <Stat
               label='cost'
               big
-              value={hasCosting && showMoney ? money(unitCost) : '—'}
+              value={hasCosting && showMoney ? money(unitCost) : <EmptyCell />}
               sub={
                 !showMoney
                   ? `will be recomputed in ${cur} on save`
@@ -1502,21 +1429,50 @@ export function CostingField({
             emphasis
           />
         )}
-        {!hasCosting && (
-          <Text size='micro' variant='label'>
-            nothing to break down yet — add materials to the BOM or enter a cost item in the row
-            above, and the bars will appear as soon as the first number does.
-          </Text>
+        {/* The defaults are edited where they are used: one quiet action under the waterfall
+          (after it, so the step rows stay adjacent for their rules), the stored values on hover.
+          Only what the rows above state, and what differs, is written. */}
+        {((canWriteWorkshop && canWriteCosting) || workshop.suggestionCount > 0) && (
+          <div className='flex flex-wrap justify-end gap-x-4 gap-y-1'>
+            {workshop.suggestionCount > 0 && (
+              <button
+                type='button'
+                data-use-workshop-defaults=''
+                onClick={workshop.apply}
+                title={`fills the empty ${(Object.keys(workshop.suggestions) as string[])
+                  .map((k) => SUGGESTION_NAME[k] ?? k)
+                  .join(', ')} · saves with the card`}
+                className='cursor-pointer whitespace-nowrap text-micro uppercase tracking-label text-textColor underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              >
+                {`use workshop defaults (${workshop.suggestionCount})`}
+              </button>
+            )}
+            {canWriteWorkshop && canWriteCosting && (
+              <button
+                type='button'
+                data-save-workshop-defaults=''
+                onClick={saveWorkshopDefaults}
+                // aria-disabled, not disabled: the hover line with the stored defaults is the
+                // point of this control, and a disabled button swallows the pointer.
+                aria-disabled={workshopPatchEmpty || workshop.update.isPending || !workshop.loaded}
+                title={
+                  workshopPatchEmpty
+                    ? `${describeDefaults(workshop.defaults)} · nothing different to save`
+                    : describeDefaults(workshop.defaults)
+                }
+                className='cursor-pointer whitespace-nowrap text-micro uppercase tracking-label text-textColor underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor aria-disabled:cursor-default aria-disabled:text-labelColor aria-disabled:no-underline'
+              >
+                {workshop.update.isPending ? 'saving…' : 'save as workshop default'}
+              </button>
+            )}
+          </div>
         )}
         {/* Not on an understated cost: a confident unit count derived from a margin the verdict has
           just refused to certify is the same contradiction as a green bar. */}
         {breakEven.value && certifiable && (
           <Text size='micro' variant='label'>
-            {`R&D ${baseCur || cur} ${devTotal.toFixed(2)} pays back at ${breakEven.value} on the PLANNED margin (catalogue retail)`}
-            {breakEven.why ? ` — ${breakEven.why}` : ''}
-            {
-              '. The payback from actual sales is in the R&D section below; these are different questions. '
-            }
+            {`R&D ${baseCur || cur} ${devTotal.toFixed(2)} pays back at ${breakEven.value} · planned margin`}
+            {breakEven.why ? ` · ${breakEven.why}` : ''}{' '}
             {fxIncomplete && (
               <HelpMark title='why it is not computed' label='why'>
                 {BREAK_EVEN_NO_FX}
@@ -1557,13 +1513,24 @@ export function CostingField({
               disabled={!canWriteCosting}
               className='m-0 grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
             >
-              <CurrencySelect name='costing.currency' label='costing currency' />
+              <CurrencySelect
+                name='costing.currency'
+                label={`costing currency${workshop.fromWorkshop('currency') ? ' · workshop' : ''}`}
+                placeholder={
+                  workshop.suggestions.currency
+                    ? `${workshop.suggestions.currency} · workshop`
+                    : undefined
+                }
+              />
               {/* This style's own target. Left empty it falls back to the house default, which the
                 server resolves onto the read — so an empty field is not "no target", it is "the
                 usual one". */}
               <DecimalField
                 name='costing.targetMarginPct'
-                label={`margin target, %${hasTarget && !num(costing.targetMarginPct) ? ` (default ${targetPct.toFixed(0)})` : ''}`}
+                label={`margin target, %${hasTarget && !num(costing.targetMarginPct) ? ` (default ${targetPct.toFixed(0)})` : ''}${workshop.fromWorkshop('targetMarginPct') ? ' · workshop' : ''}`}
+                placeholder={ghost('targetMarginPct')}
+                title={ghost('targetMarginPct') ? 'workshop default' : undefined}
+                className={ghost('targetMarginPct') ? 'placeholder:text-labelColor' : undefined}
               />
             </fieldset>
             {/* WHICH MARKET the margin is for. Catalogue prices are VAT-inclusive, so the net retail —
@@ -1581,19 +1548,15 @@ export function CostingField({
                     onPick={setVatScenarioCountry}
                   />
                 </div>
-                <Text size='micro' variant='label' className='min-w-0 flex-1 pb-0.5'>
-                  {vatScenarioLoading
-                    ? "re-reading the card at this country's rate…"
-                    : vatCountry
-                      ? vatRate > 0
-                        ? `the net retail and the margin are computed at the ${vatRate.toFixed(0)}% ${vatCountry} rate${vatScenarioCountry ? '' : " — the company's domestic rate"}.`
-                        : `there is no VAT rate for ${vatCountry} — nothing is deducted, and the margin comes out “against the list price”.`
-                      : "the company's domestic rate. Pick a destination to see the margin that market leaves."}
-                </Text>
+                {(vatScenarioLoading || (vatCountry && !(vatRate > 0))) && (
+                  <Text size='micro' variant='label' className='min-w-0 flex-1 pb-0.5'>
+                    {vatScenarioLoading ? 'reading…' : `no VAT rate for ${vatCountry}`}
+                  </Text>
+                )}
               </div>
             )}
             <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
-              <TextareaField
+              <AiTextareaField
                 name='costing.notes'
                 label='notes'
                 rows={2}
@@ -1680,7 +1643,7 @@ export function CostingField({
                       size='stat'
                       className={broken || !showMoney ? 'text-labelColor' : undefined}
                     >
-                      {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : '—'}
+                      {showMoney && ccUnit > 0 ? ccUnit.toFixed(2) : <EmptyCell />}
                     </Text>
                     <Text size='micro' variant='label'>
                       {!showMoney
@@ -1722,21 +1685,32 @@ export function CostingField({
         {/* Reprice: the one write this band owns. Server-side, frozen only for RELEASED cards,
           catalog-linked lines only. */}
         {canWriteCosting && !isReleased && catalogLinkedLines > 0 && (
-          <div className='flex flex-wrap items-center gap-3'>
+          <div>
             <Button
               type='button'
               size='sm'
               variant='secondary'
               disabled={reprice.isPending}
-              onClick={onReprice}
+              onClick={() => setRepriceOpen(true)}
             >
-              {reprice.isPending ? 'refreshing prices…' : 'refresh prices from the catalog'}
+              {reprice.isPending ? 'refreshing prices…' : 'refresh catalog prices'}
             </Button>
-            <Text size='micro' variant='label' className='min-w-0 flex-1'>
-              {`will overwrite the unit price on ${catalogLinkedLines} catalog-linked BOM lines and mark their source as “catalog”; a signed MATERIALS sign-off will become stale.`}
-            </Text>
           </div>
         )}
+        {/* Последствия — только по клику и строками, без абзаца. */}
+        <ConfirmationModal
+          open={repriceOpen}
+          onOpenChange={setRepriceOpen}
+          onConfirm={onReprice}
+          title='refresh catalog prices'
+          confirmLabel={`refresh ${catalogLinkedLines} ${plural(catalogLinkedLines, 'price')}`}
+          width='sm'
+          hideCancel
+        >
+          <Row label='BOM lines overwritten' value={catalogLinkedLines} />
+          <Row label='price source' value='catalog' />
+          {materialsSigned && <Row label='materials sign-off' value='goes stale' tone='error' />}
+        </ConfirmationModal>
 
         {/* ═══ ДОКАЗАТЕЛЬСТВА — one click away, never in the way. */}
         <details className='group'>
@@ -1751,7 +1725,7 @@ export function CostingField({
               materials line by line
             </Text>
             <Text size='micro' variant='label' component='span'>
-              markers · totals by currency · rates
+              markers · totals by currency
             </Text>
             <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
               <FoldCaret open='details' />
@@ -1767,29 +1741,11 @@ export function CostingField({
                   <Row
                     key={i}
                     label={`materials · ${line.currency || 'no currency'}`}
-                    value={decimalToInput(line.amount) || '—'}
+                    value={decimalToInput(line.amount) || <EmptyCell />}
                   />
                 ))}
               </div>
             )}
-            {colorwayCosts.length === 0 && materialsTotal.length === 0 && (
-              <Text size='micro' variant='label'>
-                no materials yet — fill in the BOM and the colourway recipes, and the amounts will
-                be computed on save. The source and date of every price are visible in the estimate
-                below.
-              </Text>
-            )}
-            <Text size='micro' variant='label'>
-              BOM lines in other currencies are folded into the base one
-              {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} at the shared costing rates
-              — the same ones that seed the product's cost_price.{' '}
-              <Link to={ROUTES.settings} className='underline hover:text-textColor'>
-                Rates in settings
-              </Link>
-              . This is the style plan (its base colourway), not the saved cost_price of each
-              product; line-by-line precision is in the estimate below. R&D is in the base currency
-              and is not part of the unit cost.
-            </Text>
           </div>
         </details>
       </fieldset>
@@ -1868,7 +1824,7 @@ function MarketPicker({
               tabIndex={0}
               onClick={pick}
               onKeyDown={key(pick)}
-              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-bgSecondary ${selected ? 'font-bold' : ''} ${focus}`}
+              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-pageBg ${selected ? 'font-bold' : ''} ${focus}`}
             >
               {i.label}
             </span>
@@ -1937,7 +1893,7 @@ function StepRow({
           </Text>
         )}
       </span>
-      <span className='relative block h-[13px] bg-trackBg'>
+      <span className='relative block h-[13px] bg-pageBg'>
         <span
           className={`absolute top-0 h-[13px] ${fill}`}
           style={{ left: `${left}%`, width: `${Math.max(0, Math.min(100, width))}%` }}
@@ -1958,10 +1914,37 @@ function StepRow({
  * `<fieldset disabled>` wrapping the whole band would also disable the materials row's link into
  * the BOM, which is a read action a costing:read account is entitled to.
  */
-function Lever({ canWrite, name, label }: { canWrite: boolean; name: string; label: string }) {
+function Lever({
+  canWrite,
+  name,
+  label,
+  ghost,
+}: {
+  canWrite: boolean;
+  name: string;
+  label: string;
+  /** The workshop default this EMPTY field would take — shown, never written (no write on view). */
+  ghost?: string;
+}) {
   return (
     <fieldset disabled={!canWrite} className='m-0 border-0 p-0'>
-      <DecimalField name={name} label={label} srLabel />
+      <DecimalField
+        name={name}
+        label={label}
+        srLabel
+        placeholder={ghost}
+        title={ghost ? 'workshop default' : undefined}
+        className={ghost ? 'placeholder:text-labelColor' : undefined}
+      />
     </fieldset>
   );
 }
+
+// Field names for the `use workshop defaults` hover line.
+const SUGGESTION_NAME: Record<string, string> = {
+  currency: 'currency',
+  cmtCost: 'CMT',
+  overheadCost: 'overhead',
+  defectPercent: 'defect %',
+  targetMarginPct: 'margin target',
+};

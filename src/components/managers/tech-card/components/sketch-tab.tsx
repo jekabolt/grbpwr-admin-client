@@ -2,25 +2,28 @@ import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api
 import { techCardMeasurementUnitOptions, techCardMediaKindOptions } from 'constants/filter';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotationEditor } from 'ui/components/annotation/editor';
-import { type EditHistory } from 'ui/components/annotation/history';
-import { type AnnotationCapsKey } from 'ui/components/annotation/kinds';
-import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
-import { Button } from 'ui/components/button';
+import { AnnotationEditor } from 'components/managers/tech-card/annotation/editor';
+import { type EditHistory } from 'components/managers/tech-card/annotation/history';
+import { type AnnotationCapsKey } from 'components/managers/tech-card/annotation/kinds';
+import { rememberPen, type PenStyle, type SurfaceCallout } from 'components/managers/tech-card/annotation/surface';
+import {
+  Button,
+  GroupLabel,
+  ViewSwitch,
+  SectionHeader,
+  Text,
+  Textarea,
+  InputField,
+  TextareaField,
+  GenericPopover,
+  Chip,
+  ChipRow, EmptyCell,
+} from 'ui';
 import { moveItem } from 'components/managers/media/components/gallery-order';
-import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
-import { GroupLabel } from 'ui/components/group-label';
-import { ViewSwitch } from 'ui/components/view-switch';
-import { SectionHeader } from 'ui/components/section-header';
+import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
 import { CornerMenu } from './design/picture-tile';
-import Text from 'ui/components/text';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import Textarea from 'ui/components/text-area';
-import InputField from 'ui/form/fields/input-field';
-import TextareaField from 'ui/form/fields/textarea-field';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { cn } from 'lib/utility';
-import GenericPopover from 'ui/components/popover';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { PieceAddChip, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -736,7 +739,7 @@ export function TechCardGallery({
               {c.number || i + 1}
             </Text>
             <Text size='nano' component='span' className='min-w-0 flex-1'>
-              {(c.description ?? '').trim() || calloutParts(c).join(', ') || '—'}
+              {(c.description ?? '').trim() || calloutParts(c).join(', ') || <EmptyCell />}
             </Text>
             {!frozen && (
               <ChipRow>

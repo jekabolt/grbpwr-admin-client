@@ -6,13 +6,12 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text, EmptyCell, Close } from 'ui';
 import { ulid } from 'utils/ulid';
 import { runDate } from './options';
 import { updateRunErrorMessage, useProductionRuns, useUpdateRunSection } from './useProductionRuns';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 const key = (productId: number, sizeId: number) => `${productId}:${sizeId}`;
 
 type Row = { productId: number; label: string };
@@ -429,27 +428,24 @@ export function LinesGrid({
                     <td key={s} className={`${cell} text-right`}>
                       {editable ? (
                         <input
-                          className='w-14 border border-textInactiveColor bg-bgColor px-1 text-right text-textBaseSize'
+                          className='w-14 border border-borderColor bg-bgColor px-1 text-right text-textBaseSize'
                           inputMode='numeric'
                           value={qty[key(r.productId, s)] ?? ''}
                           onChange={(e) => setCell(r.productId, s, e.target.value)}
                         />
                       ) : (
-                        qty[key(r.productId, s)] || '—'
+                        qty[key(r.productId, s)] || <EmptyCell />
                       )}
                     </td>
                   ))}
                   <td className={`${cell} text-right`}>{rowTotal(r.productId)}</td>
                   {editable ? (
                     <td className={cell}>
-                      <Button
-                        type='button'
-                        variant='secondary'
+                      <Close
+                        size='sm'
                         aria-label='remove colour-model'
                         onClick={() => removeRow(r.productId)}
-                      >
-                        ✕
-                      </Button>
+                      />
                     </td>
                   ) : null}
                 </tr>

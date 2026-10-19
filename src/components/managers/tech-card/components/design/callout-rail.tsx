@@ -1,21 +1,17 @@
 import { cn } from 'lib/utility';
 import { useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { kindDef } from 'ui/components/annotation/kinds';
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
 import {
   parseSpec,
   purposeTool,
   specSummary,
   type Purpose,
-} from 'ui/components/annotation/purpose';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
-import { rememberPen, type NoteArrows } from 'ui/components/annotation/surface';
-import { Button } from 'ui/components/button';
-import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
+} from 'components/managers/tech-card/annotation/purpose';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
+import { AnnotationStyleRow } from 'components/managers/tech-card/annotation/style-row';
+import { rememberPen, type NoteArrows } from 'components/managers/tech-card/annotation/surface';
+import { Button, Input, Pill, Text, Textarea, EmptyCell, Close } from 'ui';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
 import { CalloutPurposeFields } from './callout-purpose-fields';
@@ -290,11 +286,11 @@ export function CalloutRail({
             key={index}
             data-callout-row={index}
             data-callout-hot={hot ? 'true' : undefined}
-            /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`bgSecondary` — «a fill, not a container»),
+            /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`pageBg` — «a fill, not a container»),
                а картинка в тот же миг подсвечивает указание: два конца одного жеста. */
             className={cn(
               'group border-b border-hairline py-1 px-1 -mx-1 last:border-b-0',
-              hot && 'bg-bgSecondary',
+              hot && 'bg-pageBg',
             )}
             onPointerEnter={() => onHover(index)}
             onPointerLeave={() => onHover(null)}
@@ -306,7 +302,7 @@ export function CalloutRail({
             <div className='flex items-center gap-2'>
               {numbered && (
                 <Text size='nano' variant='uppercase' component='span' className='w-5 shrink-0'>
-                  {c.number || '—'}
+                  {c.number || <EmptyCell />}
                 </Text>
               )}
               <KindGlyph kind={c.kind ?? 'pin'} spec={c.spec} />
@@ -332,16 +328,14 @@ export function CalloutRail({
               {/* УДАЛИТЬ С НАВЕДЕНИЯ — без разворота строки. Настоящая кнопка: она ПИШЕТ, и fieldset
                   выпущенной карты обязан её гасить; без `onRemove` двери нет вовсе. */}
               {onRemove && !disabled && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`delete callout ${c.number || ''}`.trim()}
                   title='delete'
                   data-callout-remove={index}
                   onClick={() => onRemove(index)}
-                  className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor opacity-0 transition-opacity hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100 motion-reduce:transition-none'
-                >
-                  <span aria-hidden>✕</span>
-                </button>
+                  className='opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
+                />
               )}
             </div>
 

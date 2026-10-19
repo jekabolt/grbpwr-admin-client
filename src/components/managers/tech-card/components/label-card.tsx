@@ -3,15 +3,19 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
 import { useEffect, useId, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
-import Input from 'ui/components/input';
-import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
-import { AiEnhance } from 'ui/components/ai-enhance';
-import Textarea from 'ui/components/text-area';
+import {
+  Button,
+  Chip,
+  Close,
+  Input,
+  Media,
+  Pill,
+  PLACEHOLDER_SURFACE,
+  placeholderClass,
+  Text,
+  Textarea,
+} from 'ui';
+import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { LABEL_MEDIA_MAX } from './labels-schema';
 
@@ -134,17 +138,13 @@ export function LabelCard({
             ! no mockup
           </Pill>
         )}
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
+        <Close
+          size='sm'
           className='ml-auto shrink-0'
           aria-label={`remove ${noun} ${title}`}
           onClick={onRemove}
           data-label-card-remove={cardKey}
-        >
-          ✕
-        </Button>
+        />
       </div>
 
       <div className='mt-4 grid grid-cols-1 gap-6 sm:grid-cols-[160px_minmax(0,1fr)]'>
@@ -233,7 +233,7 @@ function Thumb({
   return (
     <div
       className={cn(
-        'relative border border-borderColor bg-bgZebra',
+        'relative border border-borderColor bg-pageBg',
         size === 'lg' ? 'size-40' : 'size-12',
       )}
       data-mockup-pic={id}
@@ -251,15 +251,13 @@ function Thumb({
           <span className='flex size-full items-center justify-center text-micro'>#{id}</span>
         )}
       </button>
-      <button
-        type='button'
+      <Close
+        size='sm'
         aria-label='remove this mockup'
         onClick={onRemove}
         data-mockup-drop={id}
-        className='absolute right-0.5 top-0.5 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor'
-      >
-        ✕
-      </button>
+        className='absolute right-0.5 top-0.5 bg-bgColor'
+      />
     </div>
   );
 }

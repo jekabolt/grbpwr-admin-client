@@ -1,0 +1,2885 @@
+{
+ "sha": "17038f74",
+ "at": "2026-10-11T22:15:21.911Z",
+ "reqTag": "metrics-dca44de6",
+ "cover": 0.7,
+ "total": {
+  "graph": {
+   "rows": 231,
+   "found": 102,
+   "tpPreds": 102,
+   "fp": 92,
+   "fn": 129,
+   "precision": 0.5257731958762887,
+   "recall": 0.44155844155844154,
+   "sure": {
+    "rows": 187,
+    "found": 87,
+    "recall": 0.46524064171123
+   },
+   "ply": {
+    "rows": 79,
+    "found": 38
+   },
+   "lining": {
+    "rows": 15,
+    "found": 8
+   },
+   "classes": {
+    "FP spurious: pocket / flap / fly piece": 18,
+    "FN armhole (composite)": 14,
+    "FN shoulder": 10,
+    "FN underarm": 10,
+    "FP identical panels paired outside the truth": 8,
+    "FP wrong partner: armhole (composite)": 5,
+    "FP wrong partner: bag bottom strip ↔ panel (composite)": 5,
+    "FP twin swap: shoulder": 4,
+    "FP wrong partner: side seam": 4,
+    "FN collar ↔ neckline": 4,
+    "FP wrong partner: back yoke ↔ back (composite)": 4,
+    "FN bag side (below / above the gusset)": 4,
+    "FN bag panel ↔ panel (ring)": 4,
+    "FN bag bottom strip ↔ panel (composite)": 4,
+    "FN collar fall ↔ stand": 3,
+    "FN fly facing / shield": 3,
+    "FN waistband ↔ waist (composite)": 3,
+    "FP mirror pairing L↔R": 3,
+    "FP wrong partner: outseam (composite)": 3,
+    "FP not sewn: vent (open)": 2,
+    "FN collar stand ↔ neckline": 2,
+    "FP wrong partner: shoulder": 2,
+    "FN placket (composite)": 2,
+    "FP wrong partner: inseam": 2,
+    "FP wrong partner: outseam": 2,
+    "FP wrong partner: fly facing / shield": 2,
+    "FN inseam": 2,
+    "FN outseam": 2,
+    "FN front rise (below the fly)": 2,
+    "FP spurious: other": 2,
+    "FP wrong partner: centre back": 2,
+    "FP wrong edge: lining side-front seam": 2,
+    "FN side-back seam (partial, armhole top)": 2,
+    "FN side seam": 2,
+    "FN dart legs (self)": 2,
+    "FN back yoke ↔ back (composite)": 2,
+    "FN outseam (composite)": 2,
+    "FN yoke ↔ back": 2,
+    "FP not sewn: two cuffs L↔R": 2,
+    "FP twin swap: ply bagging (cuff end)": 2,
+    "FP wrong partner: bag gusset ↔ panel": 2,
+    "FN bag gusset ↔ panel": 2,
+    "FN bag top (round the hanger slot)": 2,
+    "FN bag ring ↔ ring (bases)": 2,
+    "FN bag octagon ↔ panel tops": 2,
+    "FP wrong partner: bag binding / channel ↔ panel": 2,
+    "FP wrong edge: shoulder": 1,
+    "FP wrong partner: collar stand ↔ neckline": 1,
+    "FP overreach: placket (composite)": 1,
+    "FP wrong edge: pocket bag in a seam (sandwich)": 1,
+    "FP overreach: fly facing / shield": 1,
+    "FP not sewn: two pockets L↔R": 1,
+    "FP overreach: pocket bag": 1,
+    "FN back rise": 1,
+    "FP wrong partner: collar ↔ neckline (gorge)": 1,
+    "FP overreach: lining sleeve seam": 1,
+    "FP not sewn: two side-back seams L↔R": 1,
+    "FP wrong partner: lining side-front seam": 1,
+    "FP wrong partner: side-back seam (partial, armhole top)": 1,
+    "FP wrong partner: lining side-back seam": 1,
+    "FN centre back": 1,
+    "FN collar ↔ neckline (gorge)": 1,
+    "FP not sewn: strip ↔ flap": 1,
+    "FN back rise (composite)": 1,
+    "FN waistband halves (CB)": 1,
+    "FN bag bottom": 1,
+    "FN bag binding / channel ↔ panel": 1
+   }
+  },
+  "doll": {
+   "rows": 231,
+   "found": 92,
+   "tpPreds": 83,
+   "fp": 20,
+   "fn": 139,
+   "precision": 0.8058252427184466,
+   "recall": 0.39826839826839827,
+   "sure": {
+    "rows": 187,
+    "found": 87,
+    "recall": 0.46524064171123
+   },
+   "ply": {
+    "rows": 79,
+    "found": 20
+   },
+   "lining": {
+    "rows": 15,
+    "found": 0
+   },
+   "classes": {
+    "FN pocket bag": 6,
+    "FN armhole (composite)": 5,
+    "FN fly facing / shield": 4,
+    "FP wrong partner: side seam": 4,
+    "FN bag gusset ↔ panel": 4,
+    "FN bag side (below / above the gusset)": 4,
+    "FN bag panel ↔ panel (ring)": 4,
+    "FN bag bottom strip ↔ panel (composite)": 4,
+    "FN waistband ↔ waist (composite)": 3,
+    "FP wrong partner: collar stand ↔ neckline": 2,
+    "FP not sewn: vent (open)": 2,
+    "FN collar stand ↔ neckline": 2,
+    "FN shoulder": 2,
+    "FN placket (composite)": 2,
+    "FN side-back seam (partial, armhole top)": 2,
+    "FP not sewn: two plackets end to end": 2,
+    "FN side seam": 2,
+    "FN underarm": 2,
+    "FN dart legs (self)": 2,
+    "FP wrong partner: back yoke ↔ back (composite)": 2,
+    "FP wrong partner: outseam (composite)": 2,
+    "FN back yoke ↔ back (composite)": 2,
+    "FN bag top (round the hanger slot)": 2,
+    "FN bag ring ↔ ring (bases)": 2,
+    "FN bag octagon ↔ panel tops": 2,
+    "FN bag binding / channel ↔ panel": 2,
+    "FP wrong partner: shoulder": 1,
+    "FP wrong partner: collar fall ↔ stand": 1,
+    "FN stacked collar": 1,
+    "FN front rise (below the fly)": 1,
+    "FP not sewn: two side-back seams L↔R": 1,
+    "FP twin swap: ply bagging (chest piece)": 1,
+    "FP wrong partner: centre back": 1,
+    "FP wrong partner: armhole (composite)": 1,
+    "FN centre back": 1,
+    "FN side-front seam": 1,
+    "FN collar fall ↔ stand": 1,
+    "FN collar ↔ neckline (gorge)": 1,
+    "FN collar ↔ neckline": 1,
+    "FN waistband halves (CB)": 1,
+    "FN bag bottom": 1
+   }
+  }
+ },
+ "cards": [
+  {
+   "id": "5",
+   "label": "SS26-005 load balance (shirt, F)",
+   "size": "M",
+   "pieces": 25,
+   "truth": {
+    "rows": 41,
+    "main": 25,
+    "sure": 24,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 9,
+    "lining": 0,
+    "notSewn": 3,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 25,
+    "found": 19,
+    "tpPreds": 19,
+    "fp": 5,
+    "fn": 6,
+    "precision": 0.7916666666666666,
+    "recall": 0.76,
+    "sure": {
+     "rows": 24,
+     "found": 18,
+     "recall": 0.75
+    },
+    "ply": {
+     "rows": 9,
+     "found": 3,
+     "preds": 4
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "SLV_R#0 ↔ SLV_M_R#3",
+      "cls": "not sewn: vent (open)",
+      "detail": "the right cuff vent, 120 = 120 — open"
+     },
+     {
+      "words": "SLV_L#4 ↔ SLV_M_L#0",
+      "cls": "not sewn: vent (open)",
+      "detail": "the cuff vent below the back sleeve seam: the two 120 mm vent edges stay open (a notched 25 / 38 mm step marks the vent top) — not a seam"
+     },
+     {
+      "words": "FRONT_R#2 ↔ BP#13",
+      "cls": "twin swap: shoulder",
+      "detail": "one side is the true shoulder edge; its partner sits on the MIRROR / twin piece of the true one — truth BP#13 ↔ FRONT_L#1"
+     },
+     {
+      "words": "FRONT_L#1 ↔ BP#3",
+      "cls": "wrong edge: shoulder",
+      "detail": "right pieces, wrong edge on BP — truth BP#13 ↔ FRONT_L#1"
+     },
+     {
+      "words": "FRONT_L#2 ↔ BP#8",
+      "cls": "wrong partner: collar stand ↔ neckline",
+      "detail": "one side is the true collar stand ↔ neckline edge, sewn to FRONT_L instead — truth NCK#3 ↔ FRONT_R#1+BP#4+BP#5+BP#6+BP#7+BP#8+BP#9+BP#10+BP#11+BP#12+FRONT_L#2"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP#13 ↔ FRONT_L#1",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · left shoulder 126 = 126 — the back's drawing-left shoulder onto the LEFT front (face-up; the engine crosses it) · instead: FRONT_L#1 ↔ BP#3; FRONT_R#2 ↔ BP#13"
+     },
+     {
+      "words": "BP#3 ↔ FRONT_R#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · right shoulder 126 = 126 (face-up; the engine crosses it) · instead: FRONT_R#2 ↔ BP#13; FRONT_L#1 ↔ BP#3"
+     },
+     {
+      "words": "SLV_M_L#3+SLV_L#1 ↔ BP#14+BP#15+FRONT_L#0+FP_L#0+FP_1_L#1+FP_2_L#1+BP_1_L#1+BP_L#1",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «right sleeve + left sleeve + base with collar → Shirt» · cap 331 + 160 = 491 onto the left armhole walked round its panels 121 + 116 + 27  · instead: BP_1_L#0 ↔ BP_L#1; FP_L#0 ↔ FP_1_L#2"
+     },
+     {
+      "words": "SLV_R#3+SLV_M_R#0 ↔ BP_R#2+BP_1_R#1+BP_2_R#1+FP_1_R#0+FP_R#1+FRONT_R#3+BP#1+BP#2",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Shirt» · cap 160 + 331 = 491 onto the right armhole 49 + 80 + 31 + 54 + 54 + 116 + 121 = 505; phase as on the left: the back (510, vented) · instead: FP_1_R#3 ↔ FP_R#1; BP_R#2 ↔ BP_1_R#2"
+     },
+     {
+      "words": "NCK#3 ↔ FRONT_R#1+BP#4+BP#5+BP#6+BP#7+BP#8+BP#9+BP#10+BP#11+BP#12+FRONT_L#2",
+      "cls": "collar stand ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Collar with neck details + Base → base with collar» · stand neck edge 412 (CF notches 13 / 400, SNP 114 / 298) onto the neckline CF-right  · instead: NCK_1#3 ↔ NCK#3; FRONT_L#2 ↔ BP#8"
+     },
+     {
+      "words": "NCK#1 ↔ CLR#2",
+      "cls": "collar fall ↔ stand",
+      "confidence": "sure",
+      "detail": "technologist's order «NCK + NCK_1 + Collar → Collar with neck details» · the fall's neck edge 350 into the stand top 375 between its end notches 13 / 362 (= 349 · instead: 2CLR#2 ↔ CLR#2"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 25,
+    "found": 24,
+    "tpPreds": 23,
+    "fp": 4,
+    "fn": 1,
+    "precision": 0.8518518518518519,
+    "recall": 0.96,
+    "sure": {
+     "rows": 24,
+     "found": 23,
+     "recall": 0.9583333333333334
+    },
+    "ply": {
+     "rows": 9,
+     "found": 3,
+     "preds": 4
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "FRONT_L#2 ↔ BP#8",
+      "cls": "wrong partner: collar stand ↔ neckline",
+      "detail": "one side is the true collar stand ↔ neckline edge, sewn to FRONT_L instead — truth NCK#3 ↔ FRONT_R#1+BP#4+BP#5+BP#6+BP#7+BP#8+BP#9+BP#10+BP#11+BP#12+FRONT_L#2"
+     },
+     {
+      "words": "SLV_L#4 ↔ SLV_M_L#0",
+      "cls": "not sewn: vent (open)",
+      "detail": "the cuff vent below the back sleeve seam: the two 120 mm vent edges stay open (a notched 25 / 38 mm step marks the vent top) — not a seam"
+     },
+     {
+      "words": "SLV_R#0 ↔ SLV_M_R#3",
+      "cls": "not sewn: vent (open)",
+      "detail": "the right cuff vent, 120 = 120 — open"
+     },
+     {
+      "words": "NCK#3 ↔ PLCK_L#0+BP#6+BP#4+FRONT_R#1+PLCK_R#1",
+      "cls": "wrong partner: collar stand ↔ neckline",
+      "detail": "one side is the true collar stand ↔ neckline edge, sewn to PLCK_L+BP+FRONT_R+PLCK_R instead — truth NCK#3 ↔ FRONT_R#1+BP#4+BP#5+BP#6+BP#7+BP#8+BP#9+BP#10+BP#11+BP#12+FRONT_L#2"
+     }
+    ],
+    "fns": [
+     {
+      "words": "NCK#3 ↔ FRONT_R#1+BP#4+BP#5+BP#6+BP#7+BP#8+BP#9+BP#10+BP#11+BP#12+FRONT_L#2",
+      "cls": "collar stand ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Collar with neck details + Base → base with collar» · stand neck edge 412 (CF notches 13 / 400, SNP 114 / 298) onto the neckline CF-right  · instead: NCK#3 ↔ PLCK_L#0+BP#6+BP#4+FRONT_R#1+PLCK_R#1; FRONT_L#2 ↔ BP#8"
+     }
+    ]
+   },
+   "dollStates": {
+    "closed": 19,
+    "open": 1,
+    "eased": 2,
+    "stretched": 1,
+    "proposed": 4
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 184,
+    "doll": 1649
+   }
+  },
+  {
+   "id": "6",
+   "label": "SS26-006 starvation (shirt with pockets, M)",
+   "size": "M",
+   "pieces": 25,
+   "truth": {
+    "rows": 50,
+    "main": 18,
+    "sure": 15,
+    "likely": 2,
+    "unsure": 0,
+    "ply": 18,
+    "lining": 0,
+    "notSewn": 2,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 18,
+    "found": 8,
+    "tpPreds": 8,
+    "fp": 4,
+    "fn": 10,
+    "precision": 0.6666666666666666,
+    "recall": 0.4444444444444444,
+    "sure": {
+     "rows": 15,
+     "found": 5,
+     "recall": 0.3333333333333333
+    },
+    "ply": {
+     "rows": 18,
+     "found": 12,
+     "preds": 13
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BP_MAIN#0 ↔ P_R_U#2",
+      "cls": "wrong partner: shoulder",
+      "detail": "one side is the true shoulder edge, sewn to BP_MAIN instead — truth BP_U#1 ↔ P_R_U#2"
+     },
+     {
+      "words": "P_L_U#0 ↔ BP_U_1#1",
+      "cls": "twin swap: shoulder",
+      "detail": "one side is the true shoulder edge; its partner sits on the MIRROR / twin piece of the true one — truth BP_U#3 ↔ P_L_U#0"
+     },
+     {
+      "words": "P_L_MAIN#3 ↔ PCK_L_BTTM#2",
+      "cls": "overreach: placket (composite)",
+      "detail": "touches truth PLCK_L#0 ↔ P_L_U#2+P_L_MAIN#2 but runs past it (inside 0 % / 0 %)"
+     },
+     {
+      "words": "PCK_R_BTTM#0 ↔ P_R_MAIN#4",
+      "cls": "wrong edge: pocket bag in a seam (sandwich)",
+      "detail": "right pieces, wrong edge on P_R_MAIN — truth PCK_R_BTTM#0 ↔ P_R_MAIN#1"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP_U#3 ↔ P_L_U#0",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «right piece with placket + left piece with placket + back → base» · left shoulder 164 = 164 (the engine sewed the back ARMHOLE BP_MAIN#0 h · instead: P_L_U#0 ↔ BP_U_1#1; BP_U#3 ↔ PCK_L_MAIN#1"
+     },
+     {
+      "words": "BP_U#1 ↔ P_R_U#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «base» · right shoulder 164 = 164 · instead: BP_MAIN#0 ↔ P_R_U#2; BP_U#1 ↔ PCK_R_MAIN#2"
+     },
+     {
+      "words": "PLCK_L#0 ↔ P_L_U#2+P_L_MAIN#2",
+      "cls": "placket (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «PLCK_L + left panel with pocket → left piece with placket» · placket 668 onto the left front's CF 124 + 544 = 668 (one placket ↔ two piece · instead: P_L_MAIN#3 ↔ PCK_L_BTTM#2"
+     },
+     {
+      "words": "PLCK_R#1 ↔ P_R_MAIN#0+P_R_U#0",
+      "cls": "placket (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «PLCK_R + right panel with pocket → right piece with placket» · placket 668 onto 544 + 124 · instead: P_R_MAIN#1 ↔ P_R_U#4"
+     },
+     {
+      "words": "SLV_L#1 ↔ P_L_MAIN#0+P_L_U#4+BP_U#4+BP_MAIN#2",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «right sleeve + left sleeve + base → base with sleeves» · cap 524 onto the left armhole 116 + 142 + 101 + 166 = 525 (four pieces)"
+     },
+     {
+      "words": "SLV_R#0 ↔ BP_MAIN#0+BP_U#0+P_R_U#3+P_R_MAIN#2",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «base with sleeves» · cap 524 onto the right armhole 166 + 101 + 142 + 116 = 525 · instead: BP_MAIN#0 ↔ P_R_U#2"
+     },
+     {
+      "words": "SLV_L#0 ↔ SLV_L#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «left sleeve» · underarm 577 ≈ 576"
+     },
+     {
+      "words": "SLV_R#1 ↔ SLV_R#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «right sleeve» · underarm 577 ≈ 576"
+     },
+     {
+      "words": "nck#3 ↔ P_R_U#1+BP_U#2+P_L_U#1",
+      "cls": "collar stand ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Collar base + base with sleeves → shirt man» · stand 475 (CF notches 25 / 450, SNP 130 / 345, CB 238) onto the neckline 105 + 215 + 105 =  · instead: nck_1#3 ↔ nck#3; P_R_U#1 ↔ PCK_R_MAIN#1"
+     },
+     {
+      "words": "nck#1 ↔ clr_main#2",
+      "cls": "collar fall ↔ stand",
+      "confidence": "sure",
+      "detail": "technologist's order «nck + nck_1 + collars → Collar base» · the collar's neck edge 413 into the stand top 438 between its end notches 13 / 426 · instead: clr_main#2 ↔ CLR_SECOND#1"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 18,
+    "found": 10,
+    "tpPreds": 7,
+    "fp": 2,
+    "fn": 8,
+    "precision": 0.7777777777777778,
+    "recall": 0.5555555555555556,
+    "sure": {
+     "rows": 15,
+     "found": 10,
+     "recall": 0.6666666666666666
+    },
+    "ply": {
+     "rows": 18,
+     "found": 4,
+     "preds": 7
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BP_MAIN#0 ↔ P_R_U#2",
+      "cls": "wrong partner: shoulder",
+      "detail": "one side is the true shoulder edge, sewn to BP_MAIN instead — truth BP_U#1 ↔ P_R_U#2"
+     },
+     {
+      "words": "clr_main#2 ↔ CLR_SECOND_1#1",
+      "cls": "wrong partner: collar fall ↔ stand",
+      "detail": "one side is the true collar fall ↔ stand edge, sewn to CLR_SECOND_1 instead — truth nck#1 ↔ clr_main#2"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP_U#1 ↔ P_R_U#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «base» · right shoulder 164 = 164 · instead: BP_MAIN#0 ↔ P_R_U#2"
+     },
+     {
+      "words": "PLCK_L#0 ↔ P_L_U#2+P_L_MAIN#2",
+      "cls": "placket (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «PLCK_L + left panel with pocket → left piece with placket» · placket 668 onto the left front's CF 124 + 544 = 668 (one placket ↔ two piece"
+     },
+     {
+      "words": "PLCK_R#1 ↔ P_R_MAIN#0+P_R_U#0",
+      "cls": "placket (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «PLCK_R + right panel with pocket → right piece with placket» · placket 668 onto 544 + 124 · instead: P_R_MAIN#1 ↔ P_R_U#4"
+     },
+     {
+      "words": "SLV_R#0 ↔ BP_MAIN#0+BP_U#0+P_R_U#3+P_R_MAIN#2",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «base with sleeves» · cap 524 onto the right armhole 166 + 101 + 142 + 116 = 525 · instead: BP_MAIN#0 ↔ P_R_U#2"
+     },
+     {
+      "words": "nck#3 ↔ P_R_U#1+BP_U#2+P_L_U#1",
+      "cls": "collar stand ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Collar base + base with sleeves → shirt man» · stand 475 (CF notches 25 / 450, SNP 130 / 345, CB 238) onto the neckline 105 + 215 + 105 = "
+     },
+     {
+      "words": "clr_main#2 ↔ CLR_SECOND#1",
+      "cls": "stacked collar",
+      "confidence": "unsure",
+      "detail": "technologist's order «collar + second collar → collars» · the second collar band stacked on the collar's neck edge 413 = 413 (which long edge of the band: the e · instead: clr_main#2 ↔ nck_1#1; clr_main#2 ↔ CLR_SECOND_1#1"
+     },
+     {
+      "words": "PCK_L_MAIN#4 ↔ PCK_L_BTTM#3",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "technologist's order «left panel with pocket» · the in-seam chest pocket’s two bag pieces sewn round the bag 314 = 314 (both curved 270°)"
+     },
+     {
+      "words": "PCK_R_MAIN#4 ↔ PCK_R_BTTM#2",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "technologist's order «right panel with pocket» · pocket bag 314 = 314"
+     }
+    ]
+   },
+   "dollStates": {
+    "closed": 8,
+    "proposed": 4
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 145,
+    "doll": 1129
+   }
+  },
+  {
+   "id": "7",
+   "label": "SS26-007 fan out (pants, F)",
+   "size": "M",
+   "pieces": 15,
+   "truth": {
+    "rows": 20,
+    "main": 11,
+    "sure": 6,
+    "likely": 3,
+    "unsure": 2,
+    "ply": 1,
+    "lining": 1,
+    "notSewn": 5,
+    "closures": 2,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 11,
+    "found": 3,
+    "tpPreds": 3,
+    "fp": 11,
+    "fn": 8,
+    "precision": 0.21428571428571427,
+    "recall": 0.2727272727272727,
+    "sure": {
+     "rows": 6,
+     "found": 0,
+     "recall": 0
+    },
+    "ply": {
+     "rows": 1,
+     "found": 1,
+     "preds": 1
+    },
+    "lining": {
+     "rows": 1,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "FL_2#3 ↔ FL#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "FL_2#1 ↔ FL#3",
+      "cls": "overreach: fly facing / shield",
+      "detail": "touches truth FL#0 ↔ FP_R#0 but runs past it (inside 0 % / 0 %)"
+     },
+     {
+      "words": "FL_1#3 ↔ FL#2",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "BP_L#7 ↔ BP_R#6",
+      "cls": "wrong partner: inseam",
+      "detail": "one side is the true inseam edge, sewn to BP_R instead — truth FP_L#3 ↔ BP_L#7"
+     },
+     {
+      "words": "FP_R#4 ↔ FP_L#3",
+      "cls": "wrong partner: inseam",
+      "detail": "one side is the true inseam edge, sewn to FP_R instead — truth FP_L#3 ↔ BP_L#7"
+     },
+     {
+      "words": "FP_R#2 ↔ FP_L#0",
+      "cls": "wrong partner: outseam",
+      "detail": "one side is the true outseam edge, sewn to FP_R instead — truth FP_L#0 ↔ BP_L#5"
+     },
+     {
+      "words": "PCK_L_#_2#2 ↔ PCK_R_#_1#1",
+      "cls": "not sewn: two pockets L↔R",
+      "detail": "the left pocket piece onto the right one — two pockets"
+     },
+     {
+      "words": "BP_L#5 ↔ BP_R#0",
+      "cls": "wrong partner: outseam",
+      "detail": "one side is the true outseam edge, sewn to BP_R instead — truth FP_L#0 ↔ BP_L#5"
+     },
+     {
+      "words": "FL_2#0 ↔ PCK_L_XS#0",
+      "cls": "wrong partner: fly facing / shield",
+      "detail": "one side is the true fly facing / shield edge, sewn to PCK_L_XS instead — truth FL_2#0 ↔ FP_L#2"
+     },
+     {
+      "words": "PCK_R_XS#2 ↔ PCK_R_#_2_XS#1",
+      "cls": "overreach: pocket bag",
+      "detail": "touches truth PCK_R_#_1#2 ↔ PCK_R_#_2_XS#0 but runs past it (inside 0 % / 0 %)"
+     },
+     {
+      "words": "PCK_L_XS#2 ↔ PCK_L_#_1_XS#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     }
+    ],
+    "fns": [
+     {
+      "words": "FP_L#3 ↔ BP_L#7",
+      "cls": "inseam",
+      "confidence": "sure",
+      "detail": "technologist's order «back + front → pants base» · left inseam 862 onto 891 (back eased 3 %) — the engine sewed the two FRONT inseams together · instead: BP_L#7 ↔ BP_R#6; FP_R#4 ↔ FP_L#3"
+     },
+     {
+      "words": "FP_R#4 ↔ BP_R#6",
+      "cls": "inseam",
+      "confidence": "sure",
+      "detail": "technologist's order «pants base» · right inseam 862 onto 891 · instead: BP_L#7 ↔ BP_R#6; FP_R#4 ↔ FP_L#3"
+     },
+     {
+      "words": "FP_L#0 ↔ BP_L#5",
+      "cls": "outseam",
+      "confidence": "sure",
+      "detail": "technologist's order «pants base» · left outseam 1066 onto 1099 — the engine sewed the two front outseams together · instead: BP_L#5 ↔ BP_R#0; FP_R#2 ↔ FP_L#0"
+     },
+     {
+      "words": "FP_R#2 ↔ BP_R#0",
+      "cls": "outseam",
+      "confidence": "sure",
+      "detail": "technologist's order «pants base» · right outseam 1066 onto 1099 · instead: BP_L#5 ↔ BP_R#0; FP_R#2 ↔ FP_L#0"
+     },
+     {
+      "words": "FP_L#2 ↔ FP_R#0",
+      "cls": "front rise (below the fly)",
+      "confidence": "sure",
+      "detail": "technologist's order «right front panel with flap piece + left front panel with flap piece → front» · the rise 208 is sewn below the fly only: fly 142 mm (vee), · instead: FL#0 ↔ FP_R#0"
+     },
+     {
+      "words": "FL_2#0 ↔ FP_L#2",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FL_1+FL_2 + PCK_L_XS+FP_L → left front panel with flap piece» · the two-ply shield on the left fly edge 135 = 135 (which shield edge: unkn · instead: FL_2#0 ↔ PCK_L_XS#0"
+     },
+     {
+      "words": "BP_L#0 ↔ BP_R#5",
+      "cls": "back rise",
+      "confidence": "sure",
+      "detail": "technologist's order «left back + right back → back» · back rise 303 = 303 · instead: BP_L#7 ↔ BP_R#6"
+     },
+     {
+      "words": "WS#3 ↔ FP_R#1+BP_R#1+BP_R#2+BP_R#3+BP_R#4+BP_L#1+BP_L#2+BP_L#3+BP_L#4+FP_L#1",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "unsure",
+      "detail": "technologist's order «waistband + pants base → Pants» · band 877 onto the top CF → CF 286 + 139 + 122 + 122 + 139 + 286 = 1094 — the front waist pleats (notches"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 11,
+    "found": 5,
+    "tpPreds": 5,
+    "fp": 0,
+    "fn": 6,
+    "precision": 1,
+    "recall": 0.45454545454545453,
+    "sure": {
+     "rows": 6,
+     "found": 5,
+     "recall": 0.8333333333333334
+    },
+    "ply": {
+     "rows": 1,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 1,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "FP_L#2 ↔ FP_R#0",
+      "cls": "front rise (below the fly)",
+      "confidence": "sure",
+      "detail": "technologist's order «right front panel with flap piece + left front panel with flap piece → front» · the rise 208 is sewn below the fly only: fly 142 mm (vee),"
+     },
+     {
+      "words": "FL#0 ↔ FP_R#0",
+      "cls": "fly facing / shield",
+      "confidence": "likely",
+      "detail": "technologist's order «FL + PCK_R_XS+FP_R → right front panel with flap piece» · the fly facing (82 × 139, buttons 20 mm in on its free edge #2) on the right fly"
+     },
+     {
+      "words": "FL_2#0 ↔ FP_L#2",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FL_1+FL_2 + PCK_L_XS+FP_L → left front panel with flap piece» · the two-ply shield on the left fly edge 135 = 135 (which shield edge: unkn"
+     },
+     {
+      "words": "WS#3 ↔ FP_R#1+BP_R#1+BP_R#2+BP_R#3+BP_R#4+BP_L#1+BP_L#2+BP_L#3+BP_L#4+FP_L#1",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "unsure",
+      "detail": "technologist's order «waistband + pants base → Pants» · band 877 onto the top CF → CF 286 + 139 + 122 + 122 + 139 + 286 = 1094 — the front waist pleats (notches"
+     },
+     {
+      "words": "PCK_L_#_2#1 ↔ PCK_L_#_1_XS#0",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "technologist's order «PCK_L_#_1_XS + PCK_L_#_2 → left pocket piece» · the back welt pocket’s bag onto its facing 189 = 189"
+     },
+     {
+      "words": "PCK_R_#_1#2 ↔ PCK_R_#_2_XS#0",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "technologist's order «PCK_R_#_1 + PCK_R_#_2_XS → right pocket piece» · 189 = 189"
+     }
+    ]
+   },
+   "dollStates": {
+    "proposed": 5
+   },
+   "notSewnByDoll": [
+    "BP_L#7 ↔ BP_R#6",
+    "FP_R#4 ↔ FP_L#3",
+    "FP_R#2 ↔ FP_L#0",
+    "BP_L#5 ↔ BP_R#0"
+   ],
+   "ms": {
+    "graph": 93,
+    "doll": 1395
+   }
+  },
+  {
+   "id": "8",
+   "label": "SS26-008 critical path (blazer, M)",
+   "size": "M",
+   "pieces": 46,
+   "truth": {
+    "rows": 42,
+    "main": 18,
+    "sure": 11,
+    "likely": 7,
+    "unsure": 0,
+    "ply": 8,
+    "lining": 12,
+    "notSewn": 3,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 18,
+    "found": 9,
+    "tpPreds": 9,
+    "fp": 30,
+    "fn": 9,
+    "precision": 0.23076923076923078,
+    "recall": 0.5,
+    "sure": {
+     "rows": 11,
+     "found": 7,
+     "recall": 0.6363636363636364
+    },
+    "ply": {
+     "rows": 8,
+     "found": 3,
+     "preds": 3
+    },
+    "lining": {
+     "rows": 12,
+     "found": 8,
+     "preds": 8
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "CLR_INS_1#1 ↔ CLR_INS#1",
+      "cls": "wrong partner: collar ↔ neckline (gorge)",
+      "detail": "one side is the true collar ↔ neckline (gorge) edge, sewn to CLR_INS_1 instead — truth CLR_INS#1 ↔ P_R#1+BPU_R#1+BPU_L#0+P_L#3"
+     },
+     {
+      "words": "INS_U_PCK#0 ↔ INS_D_PCK#0",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "INS_U_PCK#2 ↔ INS_D_PCK#2",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "PCK_INS_S#0 ↔ PCK_MAIN_INS_S#0",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "PCK_INS_S#2 ↔ PCK_MAIN_INS_S#2",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "BP_R#4 ↔ BP_LIN_R_1#3",
+      "cls": "spurious: other",
+      "detail": "neither side is on a sewn truth stretch"
+     },
+     {
+      "words": "BPU_L#4 ↔ PCK_UP_INS_S#0",
+      "cls": "wrong partner: centre back",
+      "detail": "one side is the true centre back edge, sewn to PCK_UP_INS_S instead — truth BPU_L#4 ↔ BPU_R#2"
+     },
+     {
+      "words": "BPU_R#2 ↔ PCK_UP_INS_S#2",
+      "cls": "wrong partner: centre back",
+      "detail": "one side is the true centre back edge, sewn to PCK_UP_INS_S instead — truth BPU_L#4 ↔ BPU_R#2"
+     },
+     {
+      "words": "P_LIN_L_2#6 ↔ SL_OUT_L#3",
+      "cls": "spurious: other",
+      "detail": "neither side is on a sewn truth stretch"
+     },
+     {
+      "words": "MP_R#3 ↔ PCK_MAIN_INS_S#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "MP_L#2 ↔ PCK_MAIN_INS_S#3",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "MP_LIN_L_1#2 ↔ PU_LIN_L#3",
+      "cls": "wrong edge: lining side-front seam",
+      "detail": "right pieces, wrong edge on MP_LIN_L_1 — truth MP_LIN_L_1#1 ↔ PU_LIN_L#3+PD_LIN_L_2#0"
+     },
+     {
+      "words": "PU_LIN_R#2 ↔ MP_LIN_R_1#3",
+      "cls": "wrong edge: lining side-front seam",
+      "detail": "right pieces, wrong edge on MP_LIN_R_1 — truth MP_LIN_R_1#0 ↔ PD_LIN_R_2#0+PU_LIN_R#2"
+     },
+     {
+      "words": "MP_R#1 ↔ MP_LIN_R_1#1",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to MP_LIN_R_1 instead — truth SL_OUT_R#0+SL_INS_R#1 ↔ P_R#3+MP_R#1+BP_R#5+BPU_R#4"
+     },
+     {
+      "words": "BP_L#0 ↔ SL_INS_LIN_L#4",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "MP_L#0 ↔ MP_LIN_L_1#0",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to MP_LIN_L_1 instead — truth SL_INS_L#0+SL_OUT_L#1 ↔ BPU_L#2+BP_L#4+MP_L#0+P_L#1"
+     },
+     {
+      "words": "BP_R#3 ↔ SL_INS_LIN_R#4",
+      "cls": "overreach: lining sleeve seam",
+      "detail": "touches truth SL_OUT_LIN_R#3 ↔ SL_INS_LIN_R#0 but runs past it (inside 0 % / 0 %)"
+     },
+     {
+      "words": "BP_LIN_R_1#1 ↔ PCK_OUT_R_S#0",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "BP_L#4 ↔ BP_R#5",
+      "cls": "not sewn: two side-back seams L↔R",
+      "detail": "the two 599 edges are the side-back seams (each takes a side panel from the hem up to the armhole), not the CB — the engine and the doll sew"
+     },
+     {
+      "words": "PD_LIN_R_2#0 ↔ PD_LIN_L_2#0",
+      "cls": "wrong partner: lining side-front seam",
+      "detail": "one side is the true lining side-front seam edge, sewn to PD_LIN_R_2 instead — truth MP_LIN_L_1#1 ↔ PU_LIN_L#3+PD_LIN_L_2#0"
+     },
+     {
+      "words": "MP_R#2 ↔ MP_L#3",
+      "cls": "wrong partner: side-back seam (partial, armhole top)",
+      "detail": "one side is the true side-back seam (partial, armhole top) edge, sewn to MP_R instead — truth MP_L#3 ↔ BP_L#4"
+     },
+     {
+      "words": "MP_LIN_L_1#3 ↔ MP_LIN_R_1#2",
+      "cls": "wrong partner: lining side-back seam",
+      "detail": "one side is the true lining side-back seam edge, sewn to MP_LIN_L_1 instead — truth MP_LIN_R_1#2 ↔ BP_LIN_R_1#4"
+     },
+     {
+      "words": "PCK_MAIN_L_1#2 ↔ PCK_MAIN_R_1#1",
+      "cls": "mirror pairing L↔R",
+      "detail": "a piece sewn to its mirror twin, no truth row on either edge"
+     },
+     {
+      "words": "SL_INS_R#1 ↔ PD_LIN_R_2#2",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to PD_LIN_R_2 instead — truth SL_OUT_R#0+SL_INS_R#1 ↔ P_R#3+MP_R#1+BP_R#5+BPU_R#4"
+     },
+     {
+      "words": "SL_INS_L#0 ↔ PD_LIN_L_2#1",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to PD_LIN_L_2 instead — truth SL_INS_L#0+SL_OUT_L#1 ↔ BPU_L#2+BP_L#4+MP_L#0+P_L#1"
+     },
+     {
+      "words": "PCK_MAIN_L_1#1 ↔ BP_L#5",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "PCK_INS_S#3 ↔ P_R#2",
+      "cls": "wrong partner: shoulder",
+      "detail": "one side is the true shoulder edge, sewn to PCK_INS_S instead — truth BPU_R#0 ↔ P_R#2"
+     },
+     {
+      "words": "PCK_MAIN_R_S#0 ↔ PCK_MAIN_R_1#2",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "P_L#5 ↔ PCK_OUT_L_S#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "BPU_L#2 ↔ PCK_MAIN_L_S#0",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to PCK_MAIN_L_S instead — truth SL_INS_L#0+SL_OUT_L#1 ↔ BPU_L#2+BP_L#4+MP_L#0+P_L#1"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BPU_L#4 ↔ BPU_R#2",
+      "cls": "centre back",
+      "confidence": "sure",
+      "detail": "technologist's order «BPU_L + BPU_R → Back Panels Upper» · the upper CB 138 = 138 — straight edges (turn 6); the neck (96, concave) and shoulder (155, two notch · instead: BPU_L#4 ↔ PCK_UP_INS_S#0; BPU_R#2 ↔ PCK_UP_INS_S#2"
+     },
+     {
+      "words": "MP_L#3 ↔ BP_L#4",
+      "cls": "side-back seam (partial, armhole top)",
+      "confidence": "likely",
+      "detail": "technologist's order «… + MP_L → LEft front panel with pockets» then «Base» · the side panel’s back edge 520 onto the back panel’s 599 from the hem up; the top  · instead: MP_R#2 ↔ MP_L#3; BP_L#4 ↔ BP_R#5"
+     },
+     {
+      "words": "MP_R#2 ↔ BP_R#5",
+      "cls": "side-back seam (partial, armhole top)",
+      "confidence": "likely",
+      "detail": "technologist's order «Base» · 520 onto 599 from the hem up (BP_R#5 walks hem → top; its notch 563 = 36 from the top, as on the left) · instead: BP_L#4 ↔ BP_R#5; MP_R#2 ↔ MP_L#3"
+     },
+     {
+      "words": "BPU_L#1 ↔ P_L#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · left shoulder 155 = 155 (the front’s shoulder P_L#2 runs from the armhole to the neck; the yoke’s drawing-left shoulder is the wea"
+     },
+     {
+      "words": "BPU_R#0 ↔ P_R#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · right shoulder 155 = 155 · instead: PCK_INS_S#3 ↔ P_R#2"
+     },
+     {
+      "words": "SL_INS_L#0+SL_OUT_L#1 ↔ BPU_L#2+BP_L#4+MP_L#0+P_L#1",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «SL_INS_L+SL_OUT_L + … → base» · cap 354 + 222 = 576 onto the left armhole: yoke armhole 117 + the free top 79 of the back panel + side pan · instead: SL_INS_L#0 ↔ PD_LIN_L_2#1; MP_L#0 ↔ MP_LIN_L_1#0"
+     },
+     {
+      "words": "SL_OUT_R#0+SL_INS_R#1 ↔ P_R#3+MP_R#1+BP_R#5+BPU_R#4",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «base» · cap 222 + 354 = 576 onto the right armhole 219 + 142 + 79 + 117 = 557 · instead: SL_INS_R#1 ↔ PD_LIN_R_2#2; MP_R#1 ↔ MP_LIN_R_1#1"
+     },
+     {
+      "words": "CLR_INS#0 ↔ CLR_MAIN#4",
+      "cls": "collar fall ↔ stand",
+      "confidence": "sure",
+      "detail": "technologist's order «CLR_MAIN + CLR_INS → collar outer» · the insert’s 325 (notches 30 / 133 / 193 / 295) on the collar’s neck edge 325 (notches 7 / 30 / 133 / · instead: CLR_INS_1#1 ↔ CLR_INS#1"
+     },
+     {
+      "words": "CLR_INS#1 ↔ P_R#1+BPU_R#1+BPU_L#0+P_L#3",
+      "cls": "collar ↔ neckline (gorge)",
+      "confidence": "likely",
+      "detail": "technologist's order «CLR_MAIN+CLR_INS + Base → base with collar» · the insert’s neck edge 360 with notches 84 from each end: 192 between them = the back neck 9 · instead: CLR_INS_1#1 ↔ CLR_INS#1"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 18,
+    "found": 9,
+    "tpPreds": 9,
+    "fp": 4,
+    "fn": 9,
+    "precision": 0.6923076923076923,
+    "recall": 0.5,
+    "sure": {
+     "rows": 11,
+     "found": 7,
+     "recall": 0.6363636363636364
+    },
+    "ply": {
+     "rows": 8,
+     "found": 3,
+     "preds": 3
+    },
+    "lining": {
+     "rows": 12,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BP_L#4 ↔ BP_R#5",
+      "cls": "not sewn: two side-back seams L↔R",
+      "detail": "the two 599 edges are the side-back seams (each takes a side panel from the hem up to the armhole), not the CB — the engine and the doll sew"
+     },
+     {
+      "words": "SHLD_L#0 ↔ SHLD_1_R#1",
+      "cls": "twin swap: ply bagging (chest piece)",
+      "detail": "one side is the true ply bagging (chest piece) edge; its partner sits on the MIRROR / twin piece of the true one — truth SHLD_L#0 ↔ SHLD_1_L#0"
+     },
+     {
+      "words": "BP_L#2 ↔ SHLD_L#1",
+      "cls": "wrong partner: centre back",
+      "detail": "one side is the true centre back edge, sewn to SHLD_L instead — truth BP_L#2 ↔ BP_R#1"
+     },
+     {
+      "words": "SL_OUT_R#0+SL_INS_R#1 ↔ SHLD_L#1+SHLD_1_R#0",
+      "cls": "wrong partner: armhole (composite)",
+      "detail": "one side is the true armhole (composite) edge, sewn to SHLD_L+SHLD_1_R instead — truth SL_OUT_R#0+SL_INS_R#1 ↔ P_R#3+MP_R#1+BP_R#5+BPU_R#4"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BPU_L#4 ↔ BPU_R#2",
+      "cls": "centre back",
+      "confidence": "sure",
+      "detail": "technologist's order «BPU_L + BPU_R → Back Panels Upper» · the upper CB 138 = 138 — straight edges (turn 6); the neck (96, concave) and shoulder (155, two notch"
+     },
+     {
+      "words": "MP_L#3 ↔ BP_L#4",
+      "cls": "side-back seam (partial, armhole top)",
+      "confidence": "likely",
+      "detail": "technologist's order «… + MP_L → LEft front panel with pockets» then «Base» · the side panel’s back edge 520 onto the back panel’s 599 from the hem up; the top  · instead: BP_L#4 ↔ BP_R#5"
+     },
+     {
+      "words": "MP_R#2 ↔ BP_R#5",
+      "cls": "side-back seam (partial, armhole top)",
+      "confidence": "likely",
+      "detail": "technologist's order «Base» · 520 onto 599 from the hem up (BP_R#5 walks hem → top; its notch 563 = 36 from the top, as on the left) · instead: BP_L#4 ↔ BP_R#5"
+     },
+     {
+      "words": "P_R#4 ↔ MP_R#0",
+      "cls": "side-front seam",
+      "confidence": "sure",
+      "detail": "technologist's order «Right front panel with pockets» · 470 = 470, notches match"
+     },
+     {
+      "words": "BPU_R#0 ↔ P_R#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · right shoulder 155 = 155"
+     },
+     {
+      "words": "SL_INS_L#0+SL_OUT_L#1 ↔ BPU_L#2+BP_L#4+MP_L#0+P_L#1",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «SL_INS_L+SL_OUT_L + … → base» · cap 354 + 222 = 576 onto the left armhole: yoke armhole 117 + the free top 79 of the back panel + side pan · instead: BP_L#4 ↔ BP_R#5"
+     },
+     {
+      "words": "SL_OUT_R#0+SL_INS_R#1 ↔ P_R#3+MP_R#1+BP_R#5+BPU_R#4",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «base» · cap 222 + 354 = 576 onto the right armhole 219 + 142 + 79 + 117 = 557 · instead: SL_OUT_R#0+SL_INS_R#1 ↔ SHLD_L#1+SHLD_1_R#0; BP_L#4 ↔ BP_R#5"
+     },
+     {
+      "words": "CLR_INS#0 ↔ CLR_MAIN#4",
+      "cls": "collar fall ↔ stand",
+      "confidence": "sure",
+      "detail": "technologist's order «CLR_MAIN + CLR_INS → collar outer» · the insert’s 325 (notches 30 / 133 / 193 / 295) on the collar’s neck edge 325 (notches 7 / 30 / 133 /"
+     },
+     {
+      "words": "CLR_INS#1 ↔ P_R#1+BPU_R#1+BPU_L#0+P_L#3",
+      "cls": "collar ↔ neckline (gorge)",
+      "confidence": "likely",
+      "detail": "technologist's order «CLR_MAIN+CLR_INS + Base → base with collar» · the insert’s neck edge 360 with notches 84 from each end: 192 between them = the back neck 9"
+     }
+    ]
+   },
+   "dollStates": {
+    "closed": 8,
+    "open": 2,
+    "proposed": 3
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 217,
+    "doll": 989
+   }
+  },
+  {
+   "id": "9",
+   "label": "SS26-009 Summer Shirt (F)",
+   "size": "m",
+   "pieces": 8,
+   "truth": {
+    "rows": 18,
+    "main": 13,
+    "sure": 8,
+    "likely": 0,
+    "unsure": 3,
+    "ply": 0,
+    "lining": 0,
+    "notSewn": 2,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 13,
+    "found": 4,
+    "tpPreds": 4,
+    "fp": 4,
+    "fn": 9,
+    "precision": 0.5,
+    "recall": 0.3076923076923077,
+    "sure": {
+     "rows": 8,
+     "found": 4,
+     "recall": 0.5
+    },
+    "ply": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BP#7 ↔ unnamed piece 9 (name unreadable)#3",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 9 (name unreadable) instead — truth BP#7 ↔ LP_1#3"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#2 ↔ BP#9",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 8 (name unreadable) instead — truth BP#9 ↔ RP_1#3"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#0 ↔ LP_1#3",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 8 (name unreadable) instead — truth BP#7 ↔ LP_1#3"
+     },
+     {
+      "words": "RP_1#3 ↔ unnamed piece 9 (name unreadable)#1",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 9 (name unreadable) instead — truth BP#9 ↔ RP_1#3"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP#7 ↔ LP_1#3",
+      "cls": "side seam",
+      "confidence": "sure",
+      "detail": "technologist's order «Back panel with sides» · left side 210 ≈ 207 — the engine sewed the back’s sides to the sleeves’ underarm edges (211) instead · instead: BP#7 ↔ unnamed piece 9 (name unreadable)#3; unnamed piece 8 (name unreadable)#0 ↔ LP_1#3"
+     },
+     {
+      "words": "BP#9 ↔ RP_1#3",
+      "cls": "side seam",
+      "confidence": "sure",
+      "detail": "technologist's order «Back panel with sides» · right side 210 ≈ 207 · instead: unnamed piece 8 (name unreadable)#2 ↔ BP#9; RP_1#3 ↔ unnamed piece 9 (name unreadable)#1"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#1 ↔ LP_1#4+BP#6",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «unnamed piece 8 + unnamed piece 9 + body → Base with sleeves» · a cap 506 (four notches) onto the left armhole: front 229 + back 256 = 485"
+     },
+     {
+      "words": "unnamed piece 9 (name unreadable)#0 ↔ BP#0+RP_1#2",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «Base with sleeves» · a cap 506 onto the right armhole 256 + 229 = 485"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#0 ↔ unnamed piece 8 (name unreadable)#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · the sleeve’s underarm 208 ≈ 211 · instead: unnamed piece 8 (name unreadable)#2 ↔ BP#9; unnamed piece 8 (name unreadable)#0 ↔ LP_1#3"
+     },
+     {
+      "words": "unnamed piece 9 (name unreadable)#1 ↔ unnamed piece 9 (name unreadable)#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · underarm 208 ≈ 211 · instead: BP#7 ↔ unnamed piece 9 (name unreadable)#3; RP_1#3 ↔ unnamed piece 9 (name unreadable)#1"
+     },
+     {
+      "words": "CLR#3 ↔ RP_1#0+BP#2+BP#3+BP#4+LP_1#6",
+      "cls": "collar ↔ neckline",
+      "confidence": "unsure",
+      "detail": "technologist's order «body + CLR → Summer shirt woman» · the collar’s neck edge 514 (notches 43 / 152 / 205 / 309 / 362 / 472) onto the neckline 107 + 77 + 351  · instead: plank_1#2 ↔ RP_1#8"
+     },
+     {
+      "words": "LP_1#0 ↔ LP_1#1",
+      "cls": "dart legs (self)",
+      "confidence": "unsure",
+      "detail": "the 214 + 214 opening at the left hem (55 mm wide at the hem, point at mid-height): sewn as a dart or left as a pleat — the order does not say"
+     },
+     {
+      "words": "RP_1#5 ↔ RP_1#6",
+      "cls": "dart legs (self)",
+      "confidence": "unsure",
+      "detail": "the right hem opening 214 + 214"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 13,
+    "found": 4,
+    "tpPreds": 4,
+    "fp": 6,
+    "fn": 9,
+    "precision": 0.4,
+    "recall": 0.3076923076923077,
+    "sure": {
+     "rows": 8,
+     "found": 4,
+     "recall": 0.5
+    },
+    "ply": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BP#7 ↔ unnamed piece 9 (name unreadable)#3",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 9 (name unreadable) instead — truth BP#7 ↔ LP_1#3"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#2 ↔ BP#9",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 8 (name unreadable) instead — truth BP#9 ↔ RP_1#3"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#0 ↔ LP_1#3",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 8 (name unreadable) instead — truth BP#7 ↔ LP_1#3"
+     },
+     {
+      "words": "RP_1#3 ↔ unnamed piece 9 (name unreadable)#1",
+      "cls": "wrong partner: side seam",
+      "detail": "one side is the true side seam edge, sewn to unnamed piece 9 (name unreadable) instead — truth BP#9 ↔ RP_1#3"
+     },
+     {
+      "words": "plank#2 ↔ plank_1#3",
+      "cls": "not sewn: two plackets end to end",
+      "detail": "the plackets’ 70 mm ends sewn to each other — the doll proposes it from the order; two plackets never meet end to end"
+     },
+     {
+      "words": "plank#0 ↔ plank_1#1",
+      "cls": "not sewn: two plackets end to end",
+      "detail": "the plackets’ other 70 mm ends"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP#7 ↔ LP_1#3",
+      "cls": "side seam",
+      "confidence": "sure",
+      "detail": "technologist's order «Back panel with sides» · left side 210 ≈ 207 — the engine sewed the back’s sides to the sleeves’ underarm edges (211) instead · instead: BP#7 ↔ unnamed piece 9 (name unreadable)#3; unnamed piece 8 (name unreadable)#0 ↔ LP_1#3"
+     },
+     {
+      "words": "BP#9 ↔ RP_1#3",
+      "cls": "side seam",
+      "confidence": "sure",
+      "detail": "technologist's order «Back panel with sides» · right side 210 ≈ 207 · instead: unnamed piece 8 (name unreadable)#2 ↔ BP#9; RP_1#3 ↔ unnamed piece 9 (name unreadable)#1"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#1 ↔ LP_1#4+BP#6",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «unnamed piece 8 + unnamed piece 9 + body → Base with sleeves» · a cap 506 (four notches) onto the left armhole: front 229 + back 256 = 485"
+     },
+     {
+      "words": "unnamed piece 9 (name unreadable)#0 ↔ BP#0+RP_1#2",
+      "cls": "armhole (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «Base with sleeves» · a cap 506 onto the right armhole 256 + 229 = 485"
+     },
+     {
+      "words": "unnamed piece 8 (name unreadable)#0 ↔ unnamed piece 8 (name unreadable)#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · the sleeve’s underarm 208 ≈ 211 · instead: unnamed piece 8 (name unreadable)#2 ↔ BP#9; unnamed piece 8 (name unreadable)#0 ↔ LP_1#3"
+     },
+     {
+      "words": "unnamed piece 9 (name unreadable)#1 ↔ unnamed piece 9 (name unreadable)#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · underarm 208 ≈ 211 · instead: BP#7 ↔ unnamed piece 9 (name unreadable)#3; RP_1#3 ↔ unnamed piece 9 (name unreadable)#1"
+     },
+     {
+      "words": "CLR#3 ↔ RP_1#0+BP#2+BP#3+BP#4+LP_1#6",
+      "cls": "collar ↔ neckline",
+      "confidence": "unsure",
+      "detail": "technologist's order «body + CLR → Summer shirt woman» · the collar’s neck edge 514 (notches 43 / 152 / 205 / 309 / 362 / 472) onto the neckline 107 + 77 + 351  · instead: plank_1#2 ↔ RP_1#8"
+     },
+     {
+      "words": "LP_1#0 ↔ LP_1#1",
+      "cls": "dart legs (self)",
+      "confidence": "unsure",
+      "detail": "the 214 + 214 opening at the left hem (55 mm wide at the hem, point at mid-height): sewn as a dart or left as a pleat — the order does not say"
+     },
+     {
+      "words": "RP_1#5 ↔ RP_1#6",
+      "cls": "dart legs (self)",
+      "confidence": "unsure",
+      "detail": "the right hem opening 214 + 214"
+     }
+    ]
+   },
+   "dollStates": {
+    "stretched": 1,
+    "closed": 3,
+    "open": 4,
+    "proposed": 2
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 87,
+    "doll": 1510
+   }
+  },
+  {
+   "id": "11",
+   "label": "SS26-011 Pants (M)",
+   "size": "M",
+   "pieces": 25,
+   "truth": {
+    "rows": 30,
+    "main": 17,
+    "sure": 10,
+    "likely": 5,
+    "unsure": 2,
+    "ply": 3,
+    "lining": 2,
+    "notSewn": 6,
+    "closures": 2,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 17,
+    "found": 6,
+    "tpPreds": 6,
+    "fp": 15,
+    "fn": 11,
+    "precision": 0.2857142857142857,
+    "recall": 0.35294117647058826,
+    "sure": {
+     "rows": 10,
+     "found": 4,
+     "recall": 0.4
+    },
+    "ply": {
+     "rows": 3,
+     "found": 1,
+     "preds": 1
+    },
+    "lining": {
+     "rows": 2,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "BLT#1 ↔ FLAP_L#0",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "BLT#3 ↔ FLAP_L#2",
+      "cls": "not sewn: strip ↔ flap",
+      "detail": "a belt-loop / elastic strip onto a pocket flap — different units"
+     },
+     {
+      "words": "FLAP_R#2 ↔ BLT_1#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "Back_Top_L_R#3 ↔ Back_Top_R_R#3",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to Back_Top_R_R instead — truth Back_L#2 ↔ Back_Top_R_R#3+Back_Top_L_R#3"
+     },
+     {
+      "words": "Back_Top_RL#2 ↔ Back_Top_RR#2",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to Back_Top_RR instead — truth Back_R#0 ↔ Back_Top_RL#2+Back_Top_RR#2"
+     },
+     {
+      "words": "Back_Top_R_R#2 ↔ BLT_1#3",
+      "cls": "wrong partner: outseam (composite)",
+      "detail": "one side is the true outseam (composite) edge, sewn to BLT_1 instead — truth FRONT_L#4 ↔ Back_Top_R_R#2+Back_L#3"
+     },
+     {
+      "words": "Back_Top_RL#1 ↔ Back_Top_RR#3",
+      "cls": "wrong partner: outseam (composite)",
+      "detail": "one side is the true outseam (composite) edge, sewn to Back_Top_RL instead — truth FRONT_R#3 ↔ Back_R#4+Back_Top_RR#3"
+     },
+     {
+      "words": "FRONT_R#3 ↔ FRONT_L#4",
+      "cls": "wrong partner: outseam (composite)",
+      "detail": "one side is the true outseam (composite) edge, sewn to FRONT_R instead — truth FRONT_L#4 ↔ Back_Top_R_R#2+Back_L#3"
+     },
+     {
+      "words": "FLAP_L#3 ↔ FLAP_1_L#3",
+      "cls": "wrong partner: fly facing / shield",
+      "detail": "one side is the true fly facing / shield edge, sewn to FLAP_L instead — truth FLAP_1_L#3 ↔ FRONT_L#1"
+     },
+     {
+      "words": "Back_L#2 ↔ PCK_BACK_1R#0",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to PCK_BACK_1R instead — truth Back_L#2 ↔ Back_Top_R_R#3+Back_Top_L_R#3"
+     },
+     {
+      "words": "PCK_BACK_1L#0 ↔ Back_R#0",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to PCK_BACK_1L instead — truth Back_R#0 ↔ Back_Top_RL#2+Back_Top_RR#2"
+     },
+     {
+      "words": "PCK_B_R#0 ↔ PCK_BACK_R#0",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "PCK_BACK_L#0 ↔ PCK_B_L#1",
+      "cls": "spurious: pocket / flap / fly piece",
+      "detail": "a pocket, flap or fly part paired edge to edge, no truth row"
+     },
+     {
+      "words": "PCK_B_R#1 ↔ PCK_L#0",
+      "cls": "mirror pairing L↔R",
+      "detail": "a piece sewn to its mirror twin, no truth row on either edge"
+     },
+     {
+      "words": "PCK_R#1 ↔ PCK_B_L#0",
+      "cls": "mirror pairing L↔R",
+      "detail": "a piece sewn to its mirror twin, no truth row on either edge"
+     }
+    ],
+    "fns": [
+     {
+      "words": "Back_L#2 ↔ Back_Top_R_R#3+Back_Top_L_R#3",
+      "cls": "back yoke ↔ back (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «BACK TOP LEFT WITH POCKET DETAIL + Left back with pocket detail → Left back with pocket» · back top 231 onto the yoke bottoms 115 + 115 (o · instead: Back_L#2 ↔ PCK_BACK_1R#0; Back_Top_L_R#3 ↔ Back_Top_R_R#3"
+     },
+     {
+      "words": "Back_R#0 ↔ Back_Top_RL#2+Back_Top_RR#2",
+      "cls": "back yoke ↔ back (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Right back with pocket» · 231 onto 115 + 115 · instead: PCK_BACK_1L#0 ↔ Back_R#0; Back_Top_RL#2 ↔ Back_Top_RR#2"
+     },
+     {
+      "words": "FRONT_L#4 ↔ Back_Top_R_R#2+Back_L#3",
+      "cls": "outseam (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · left outseam 1083 onto yoke 81 + back 1002 = 1083 (the front notch at 1003 marks the yoke line) · instead: FRONT_R#3 ↔ FRONT_L#4; Back_Top_R_R#2 ↔ BLT_1#3"
+     },
+     {
+      "words": "FRONT_R#3 ↔ Back_R#4+Back_Top_RR#3",
+      "cls": "outseam (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · right outseam 1083 onto 1002 + 81 · instead: FRONT_R#3 ↔ FRONT_L#4; Back_Top_RL#1 ↔ Back_Top_RR#3"
+     },
+     {
+      "words": "FRONT_L#1 ↔ FRONT_R#1",
+      "cls": "front rise (below the fly)",
+      "confidence": "sure",
+      "detail": "technologist's order «Right front + left front → front» · the front rise 302 is sewn only below the fly: the fly is 203 mm (vee mark) from the waist, the notche"
+     },
+     {
+      "words": "FLAP_1_L#3 ↔ FRONT_L#1",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FLAP_1_L + FRONT_L → Left panel with flap detail» · the 40 × 200 tape on the left fly edge 200 (which of its two 200 edges: unknown) · instead: FLAP_L#3 ↔ FLAP_1_L#3"
+     },
+     {
+      "words": "FLAP_R#1 ↔ FRONT_R#1",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FLAP_R + FRONT_R → right panel with flap» · the curved shield’s straight 200 edge on the right fly edge 200 (buttons 20 mm in)"
+     },
+     {
+      "words": "Back_L#1+Back_Top_L_R#0 ↔ Back_Top_RL#1+Back_R#1",
+      "cls": "back rise (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Back with right … + Back with left … → Back» · back rise 347 + 82 = 429 each side (CB through the yoke) · instead: Back_Top_RL#1 ↔ Back_Top_RR#3"
+     },
+     {
+      "words": "WST_L#2 ↔ Back_Top_L_R#1+Back_Top_R_R#1+FRONT_L#0",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «WST_L + WST_R + Base → base with waist details» · left waistband half 443 onto the left waist CB → side → CF 90 + 107 + 245 = 442; WST_L#2 · instead: FRONT_R#3 ↔ FRONT_L#4"
+     },
+     {
+      "words": "WST_R#3 ↔ FRONT_R#2+Back_Top_RR#0+Back_Top_RL#0",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «base with waist details» · right half 523 onto CF → side → CB 245 + 107 + 90 = 442, gathered 18 % («rubber» = elastic); its notch 90 from "
+     },
+     {
+      "words": "WST_L#3 ↔ WST_R#2",
+      "cls": "waistband halves (CB)",
+      "confidence": "likely",
+      "detail": "technologist's order «base with waist details» · the halves meet at the CB: ends 42 = 42 (the 90 mm notches sit at these ends)"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 17,
+    "found": 8,
+    "tpPreds": 8,
+    "fp": 4,
+    "fn": 9,
+    "precision": 0.6666666666666666,
+    "recall": 0.47058823529411764,
+    "sure": {
+     "rows": 10,
+     "found": 8,
+     "recall": 0.8
+    },
+    "ply": {
+     "rows": 3,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 2,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "Back_Top_L_R#3 ↔ Back_Top_R_R#3",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to Back_Top_R_R instead — truth Back_L#2 ↔ Back_Top_R_R#3+Back_Top_L_R#3"
+     },
+     {
+      "words": "Back_Top_RL#2 ↔ Back_Top_RR#2",
+      "cls": "wrong partner: back yoke ↔ back (composite)",
+      "detail": "one side is the true back yoke ↔ back (composite) edge, sewn to Back_Top_RR instead — truth Back_R#0 ↔ Back_Top_RL#2+Back_Top_RR#2"
+     },
+     {
+      "words": "Back_Top_RL#1 ↔ Back_Top_RR#3",
+      "cls": "wrong partner: outseam (composite)",
+      "detail": "one side is the true outseam (composite) edge, sewn to Back_Top_RL instead — truth FRONT_R#3 ↔ Back_R#4+Back_Top_RR#3"
+     },
+     {
+      "words": "Back_Top_R_R#2 ↔ BLT#3",
+      "cls": "wrong partner: outseam (composite)",
+      "detail": "one side is the true outseam (composite) edge, sewn to BLT instead — truth FRONT_L#4 ↔ Back_Top_R_R#2+Back_L#3"
+     }
+    ],
+    "fns": [
+     {
+      "words": "Back_L#2 ↔ Back_Top_R_R#3+Back_Top_L_R#3",
+      "cls": "back yoke ↔ back (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «BACK TOP LEFT WITH POCKET DETAIL + Left back with pocket detail → Left back with pocket» · back top 231 onto the yoke bottoms 115 + 115 (o · instead: Back_Top_L_R#3 ↔ Back_Top_R_R#3"
+     },
+     {
+      "words": "Back_R#0 ↔ Back_Top_RL#2+Back_Top_RR#2",
+      "cls": "back yoke ↔ back (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Right back with pocket» · 231 onto 115 + 115 · instead: Back_Top_RL#2 ↔ Back_Top_RR#2; FRONT_R#3 ↔ Back_R#4"
+     },
+     {
+      "words": "FLAP_1_L#3 ↔ FRONT_L#1",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FLAP_1_L + FRONT_L → Left panel with flap detail» · the 40 × 200 tape on the left fly edge 200 (which of its two 200 edges: unknown) · instead: FRONT_R#1 ↔ FRONT_L#1"
+     },
+     {
+      "words": "FLAP_R#1 ↔ FRONT_R#1",
+      "cls": "fly facing / shield",
+      "confidence": "unsure",
+      "detail": "technologist's order «FLAP_R + FRONT_R → right panel with flap» · the curved shield’s straight 200 edge on the right fly edge 200 (buttons 20 mm in) · instead: FRONT_R#1 ↔ FRONT_L#1"
+     },
+     {
+      "words": "WST_L#2 ↔ Back_Top_L_R#1+Back_Top_R_R#1+FRONT_L#0",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «WST_L + WST_R + Base → base with waist details» · left waistband half 443 onto the left waist CB → side → CF 90 + 107 + 245 = 442; WST_L#2 · instead: Back_L#3 ↔ FRONT_L#4"
+     },
+     {
+      "words": "WST_R#3 ↔ FRONT_R#2+Back_Top_RR#0+Back_Top_RL#0",
+      "cls": "waistband ↔ waist (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «base with waist details» · right half 523 onto CF → side → CB 245 + 107 + 90 = 442, gathered 18 % («rubber» = elastic); its notch 90 from "
+     },
+     {
+      "words": "WST_L#3 ↔ WST_R#2",
+      "cls": "waistband halves (CB)",
+      "confidence": "likely",
+      "detail": "technologist's order «base with waist details» · the halves meet at the CB: ends 42 = 42 (the 90 mm notches sit at these ends)"
+     },
+     {
+      "words": "PCK_L#2 ↔ PCK_B_L#2",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "technologist's order «PCK_L + … → left front with side pocket detail» · the slant pocket’s two bag halves (identical outline) sewn round the curve 585 = 585"
+     },
+     {
+      "words": "PCK_R#2 ↔ PCK_B_R#2",
+      "cls": "pocket bag",
+      "confidence": "likely",
+      "detail": "the right pocket bag halves, 585 = 585"
+     }
+    ]
+   },
+   "dollStates": {
+    "closed": 4,
+    "open": 3,
+    "stretched": 2,
+    "proposed": 3
+   },
+   "notSewnByDoll": [
+    "FRONT_R#3 ↔ FRONT_L#4"
+   ],
+   "ms": {
+    "graph": 68,
+    "doll": 1140
+   }
+  },
+  {
+   "id": "4",
+   "label": "SS26-004 Shirt Summer (short-sleeve, M)",
+   "size": "M",
+   "pieces": 9,
+   "truth": {
+    "rows": 21,
+    "main": 10,
+    "sure": 10,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 5,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 10,
+    "found": 2,
+    "tpPreds": 2,
+    "fp": 2,
+    "fn": 8,
+    "precision": 0.5,
+    "recall": 0.2,
+    "sure": {
+     "rows": 10,
+     "found": 2,
+     "recall": 0.2
+    },
+    "ply": {
+     "rows": 5,
+     "found": 2,
+     "preds": 2
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "FP_L#1 ↔ BP_2#1",
+      "cls": "twin swap: shoulder",
+      "detail": "one side is the true shoulder edge; its partner sits on the MIRROR / twin piece of the true one — truth BP#3 ↔ FP_L#1"
+     },
+     {
+      "words": "FP_R#2 ↔ BP_2#3",
+      "cls": "twin swap: shoulder",
+      "detail": "one side is the true shoulder edge; its partner sits on the MIRROR / twin piece of the true one — truth BP_2#3 ↔ FP_L#1"
+     }
+    ],
+    "fns": [
+     {
+      "words": "BP#5 ↔ BP_1#2",
+      "cls": "yoke ↔ back",
+      "confidence": "sure",
+      "detail": "technologist's order «BP + BP_1 → Upper back detail» · yoke 475 onto the back top 525 — the CB box pleat between the notches 237 / 288 (51 mm) takes the differe · instead: BP#5 ↔ BP_2#5"
+     },
+     {
+      "words": "BP#3 ↔ FP_L#1",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «FP_R + FP_L + Upper back detail → Back with side panels» · left shoulder 170 = 170 (face-up yoke; the engine crosses it) · instead: FP_L#1 ↔ BP_2#1"
+     },
+     {
+      "words": "BP#1 ↔ FP_R#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «Back with side panels» · right shoulder 170 = 170 · instead: FP_R#2 ↔ BP_2#3"
+     },
+     {
+      "words": "SL_L#0 ↔ FP_L#0+BP#4+BP_1#3",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «SL_R + SL_L + Back with side panels → Base with sleeves» · cap 524 onto the left armhole front 258 + yoke 101 + back 166 = 525"
+     },
+     {
+      "words": "SL_R#1 ↔ BP_1#1+BP#0+FP_R#3",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · cap 524 onto the right armhole 166 + 101 + 258 = 525"
+     },
+     {
+      "words": "SL_L#1 ↔ SL_L#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · left underarm 200 = 200"
+     },
+     {
+      "words": "SL_R#0 ↔ SL_R#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves» · right underarm 200 = 200"
+     },
+     {
+      "words": "CLR#2 ↔ FP_R#1+BP#2+FP_L#2",
+      "cls": "collar ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Base with sleeves + Collar → base with collar» · collar neck edge 483 (CF notches 36 / 447, SNP 140 / 343, CB 241) onto the neckline 128 +"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 10,
+    "found": 10,
+    "tpPreds": 10,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1,
+    "recall": 1,
+    "sure": {
+     "rows": 10,
+     "found": 10,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 5,
+     "found": 2,
+     "preds": 2
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": []
+   },
+   "dollStates": {
+    "closed": 4,
+    "proposed": 6
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 56,
+    "doll": 1198
+   }
+  },
+  {
+   "id": "16",
+   "label": "FW26-001 semaphore shirt (F)",
+   "size": "M",
+   "pieces": 12,
+   "truth": {
+    "rows": 36,
+    "main": 12,
+    "sure": 10,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 12,
+    "lining": 0,
+    "notSewn": 8,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 12,
+    "found": 7,
+    "tpPreds": 7,
+    "fp": 4,
+    "fn": 5,
+    "precision": 0.6363636363636364,
+    "recall": 0.5833333333333334,
+    "sure": {
+     "rows": 10,
+     "found": 5,
+     "recall": 0.5
+    },
+    "ply": {
+     "rows": 12,
+     "found": 3,
+     "preds": 3
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 1,
+    "fps": [
+     {
+      "words": "SLV_M_R#1 ↔ SLV_M_L#0",
+      "cls": "not sewn: two cuffs L↔R",
+      "detail": "the left cuff's end onto the right cuff's — two cuffs"
+     },
+     {
+      "words": "SLV_M_R#3 ↔ SLV_M_L_1#2",
+      "cls": "twin swap: ply bagging (cuff end)",
+      "detail": "one side is the true ply bagging (cuff end) edge; its partner sits on the MIRROR / twin piece of the true one — truth SLV_M_L#2 ↔ SLV_M_L_1#2"
+     },
+     {
+      "words": "SLV_M_R_1#0 ↔ SLV_M_L#2",
+      "cls": "twin swap: ply bagging (cuff end)",
+      "detail": "one side is the true ply bagging (cuff end) edge; its partner sits on the MIRROR / twin piece of the true one — truth SLV_M_L#2 ↔ SLV_M_L_1#2"
+     },
+     {
+      "words": "SLV_M_R_1#2 ↔ SLV_M_L_1#0",
+      "cls": "not sewn: two cuffs L↔R",
+      "detail": "cuff plies of two different cuffs"
+     }
+    ],
+    "fns": [
+     {
+      "words": "SLV_L#0 ↔ FL#1+BP#5",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «back panel with front + right sleeve + left sleeve → Base» · cap 469 onto the left armhole 214 + 253 = 467"
+     },
+     {
+      "words": "SLV_R#1 ↔ BP#1+FR#3",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · cap 469 onto the right armhole 253 + 214 = 467"
+     },
+     {
+      "words": "SLV_L#1 ↔ SLV_L#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «left sleeve» · underarm 419 = 419"
+     },
+     {
+      "words": "SLV_R#0 ↔ SLV_R#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «right sleeve» · underarm 419 = 419 · instead: SLV_R#3 ↔ SLV_M_R#2"
+     },
+     {
+      "words": "CLR#6 ↔ FR#1+BP#3+FL#3",
+      "cls": "collar ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «Collar + Base → shirt regular» · collar neck edge 439 (CF notches 35 / 404, SNP 119 / 320) onto the neck 154 + 271 + 154 = 579: three fold"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 12,
+    "found": 12,
+    "tpPreds": 11,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1,
+    "recall": 1,
+    "sure": {
+     "rows": 10,
+     "found": 10,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 12,
+     "found": 3,
+     "preds": 4
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 1,
+    "fps": [],
+    "fns": []
+   },
+   "dollStates": {
+    "closed": 6,
+    "open": 2,
+    "proposed": 5
+   },
+   "notSewnByDoll": [
+    "SLV_M_R#1 ↔ SLV_M_L_1#0",
+    "SLV_M_R#3 ↔ SLV_M_L_1#2",
+    "SLV_M_R#1 ↔ SLV_M_L_1#2"
+   ],
+   "ms": {
+    "graph": 72,
+    "doll": 1699
+   }
+  },
+  {
+   "id": "1",
+   "label": "SS26-015 garment bag",
+   "size": "OS",
+   "pieces": 8,
+   "truth": {
+    "rows": 23,
+    "main": 11,
+    "sure": 3,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 4,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 0,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 11,
+    "found": 2,
+    "tpPreds": 2,
+    "fp": 2,
+    "fn": 9,
+    "precision": 0.5,
+    "recall": 0.18181818181818182,
+    "sure": {
+     "rows": 3,
+     "found": 1,
+     "recall": 0.3333333333333333
+    },
+    "ply": {
+     "rows": 4,
+     "found": 2,
+     "preds": 2
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "RP_OS#3 ↔ FP_OS#11",
+      "cls": "wrong partner: bag gusset ↔ panel",
+      "detail": "one side is the true bag gusset ↔ panel edge, sewn to RP_OS instead — truth LP_OS#2 ↔ FP_OS#11"
+     },
+     {
+      "words": "BP_OS#2 ↔ LP_OS#2",
+      "cls": "wrong partner: bag gusset ↔ panel",
+      "detail": "one side is the true bag gusset ↔ panel edge, sewn to BP_OS instead — truth LP_OS#2 ↔ FP_OS#11"
+     }
+    ],
+    "fns": [
+     {
+      "words": "FP_OS#14 ↔ BP_OS#15",
+      "cls": "bag bottom",
+      "confidence": "sure",
+      "detail": "technologist's order «FP_OS + BP_OS → Front panel with back» · the bottoms 580 = 580 (the full-width part)"
+     },
+     {
+      "words": "LP_OS#2 ↔ FP_OS#11",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · the left gusset on the front panel’s left side 780 · instead: BP_OS#2 ↔ LP_OS#2; RP_OS#3 ↔ FP_OS#11"
+     },
+     {
+      "words": "RP_OS#3 ↔ BP_OS#12",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «Base» · the right gusset’s other edge on the back: with both panels face up the front’s right side meets the back’s drawing-LEFT side (780 · instead: BP_OS#12 ↔ LP_OS#0; RP_OS#3 ↔ FP_OS#11"
+     },
+     {
+      "words": "FP_OS#13 ↔ BP_OS#14",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "likely",
+      "detail": "below the gusset the panels are full width: the 90 mm side pieces are sewn to each other (front left ↔ back, either side by orientation)"
+     },
+     {
+      "words": "FP_OS#15 ↔ BP_OS#0",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "likely",
+      "detail": "the other bottom 90"
+     },
+     {
+      "words": "FP_OS#3 ↔ BP_OS#4",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "unsure",
+      "detail": "above the gusset the panels are full width again: the top 90 mm sides — sewn if the bag closes at the top round the hanger slot (unsure: the top may be the open"
+     },
+     {
+      "words": "FP_OS#9 ↔ BP_OS#10",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "unsure",
+      "detail": "the other top 90"
+     },
+     {
+      "words": "FP_OS#4 ↔ BP_OS#5",
+      "cls": "bag top (round the hanger slot)",
+      "confidence": "unsure",
+      "detail": "the top edges either side of the hanger slot 250 = 250 — sewn if the bag closes at the top"
+     },
+     {
+      "words": "FP_OS#8 ↔ BP_OS#9",
+      "cls": "bag top (round the hanger slot)",
+      "confidence": "unsure",
+      "detail": "the other top 250"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 11,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 0,
+    "fn": 11,
+    "precision": 1,
+    "recall": 0,
+    "sure": {
+     "rows": 3,
+     "found": 0,
+     "recall": 0
+    },
+    "ply": {
+     "rows": 4,
+     "found": 2,
+     "preds": 2
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "FP_OS#14 ↔ BP_OS#15",
+      "cls": "bag bottom",
+      "confidence": "sure",
+      "detail": "technologist's order «FP_OS + BP_OS → Front panel with back» · the bottoms 580 = 580 (the full-width part)"
+     },
+     {
+      "words": "RP_OS#1 ↔ FP_OS#1",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "sure",
+      "detail": "technologist's order «RP_OS + LP_OS + FP_OS+BP_OS → Base» · the right gusset’s 780 on the front panel’s right side 780 (its drawing-right, x = 0.95)"
+     },
+     {
+      "words": "LP_OS#2 ↔ FP_OS#11",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "sure",
+      "detail": "technologist's order «Base» · the left gusset on the front panel’s left side 780"
+     },
+     {
+      "words": "RP_OS#3 ↔ BP_OS#12",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «Base» · the right gusset’s other edge on the back: with both panels face up the front’s right side meets the back’s drawing-LEFT side (780"
+     },
+     {
+      "words": "LP_OS#0 ↔ BP_OS#2",
+      "cls": "bag gusset ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «Base» · the left gusset’s other edge on the back’s drawing-right side 780"
+     },
+     {
+      "words": "FP_OS#13 ↔ BP_OS#14",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "likely",
+      "detail": "below the gusset the panels are full width: the 90 mm side pieces are sewn to each other (front left ↔ back, either side by orientation)"
+     },
+     {
+      "words": "FP_OS#15 ↔ BP_OS#0",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "likely",
+      "detail": "the other bottom 90"
+     },
+     {
+      "words": "FP_OS#3 ↔ BP_OS#4",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "unsure",
+      "detail": "above the gusset the panels are full width again: the top 90 mm sides — sewn if the bag closes at the top round the hanger slot (unsure: the top may be the open"
+     },
+     {
+      "words": "FP_OS#9 ↔ BP_OS#10",
+      "cls": "bag side (below / above the gusset)",
+      "confidence": "unsure",
+      "detail": "the other top 90"
+     },
+     {
+      "words": "FP_OS#4 ↔ BP_OS#5",
+      "cls": "bag top (round the hanger slot)",
+      "confidence": "unsure",
+      "detail": "the top edges either side of the hanger slot 250 = 250 — sewn if the bag closes at the top"
+     },
+     {
+      "words": "FP_OS#8 ↔ BP_OS#9",
+      "cls": "bag top (round the hanger slot)",
+      "confidence": "unsure",
+      "detail": "the other top 250"
+     }
+    ]
+   },
+   "dollStates": {},
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 51,
+    "doll": 94
+   }
+  },
+  {
+   "id": "12",
+   "label": "SS26-012 Octagon M (bag)",
+   "size": "M",
+   "pieces": 25,
+   "truth": {
+    "rows": 7,
+    "main": 40,
+    "sure": 40,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 6,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 0,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 40,
+    "found": 19,
+    "tpPreds": 19,
+    "fp": 6,
+    "fn": 21,
+    "precision": 0.76,
+    "recall": 0.475,
+    "sure": {
+     "rows": 40,
+     "found": 19,
+     "recall": 0.475
+    },
+    "ply": {
+     "rows": 6,
+     "found": 4,
+     "preds": 4
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "triangle_9_M#2 ↔ triangle_3_M#2",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "triangle_8_M#2 ↔ triangle_16_M#2",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "triangle_2_M#2 ↔ triangle_13_M#2",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "triangle_14_M#2 ↔ triangle_6_M#2",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "Octagon_bottom_M#3 ↔ Octagon_Top_M#5",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "Octagon_bottom_M#6 ↔ Octagon_Top_M#1",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     }
+    ],
+    "fns": [
+     {
+      "words": "^triangle_[1-8]_M#[02]$ ↔ ^triangle_[1-8]_M#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangle_1 … triangle_8 → triangles top» · eight triangles sewn side to side (403 = 403, notches 40 / 75 ↔ 328 / 363) into a ring — any tr — 5 of 8 found"
+     },
+     {
+      "words": "^triangle_(9|1[0-6])_M#[02]$ ↔ ^triangle_(9|1[0-6])_M#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «… triangle_9 … triangle_16 → triangles Bottom» · the bottom ring of eight — 2 of 8 found"
+     },
+     {
+      "words": "^triangle_[1-8]_M#3$ ↔ ^triangle_(9|1[0-6])_M#3$ ×8",
+      "cls": "bag ring ↔ ring (bases)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangles top + triangles Bottom → Base» · the two rings joined base to base: 400 = 400 (centre notch 200), eight seams — 0 of 8 found"
+     },
+     {
+      "words": "^Octagon_(Top|bottom)_M#[0-7]$ ↔ ^triangle_([1-9]|1[0-6])_M#1$ ×16",
+      "cls": "bag octagon ↔ panel tops",
+      "confidence": "sure",
+      "detail": "technologist's order «Base + Octagon_bottom_M + Octagon_Top_M → Base with closed octagon hole» · each octagon edge 91 (centre notch 46) onto a triangle top 91 ( — 12 of 16 found"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 40,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 0,
+    "fn": 40,
+    "precision": 1,
+    "recall": 0,
+    "sure": {
+     "rows": 40,
+     "found": 0,
+     "recall": 0
+    },
+    "ply": {
+     "rows": 6,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "^triangle_[1-8]_M#[02]$ ↔ ^triangle_[1-8]_M#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangle_1 … triangle_8 → triangles top» · eight triangles sewn side to side (403 = 403, notches 40 / 75 ↔ 328 / 363) into a ring — any tr — 0 of 8 found"
+     },
+     {
+      "words": "^triangle_(9|1[0-6])_M#[02]$ ↔ ^triangle_(9|1[0-6])_M#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «… triangle_9 … triangle_16 → triangles Bottom» · the bottom ring of eight — 0 of 8 found"
+     },
+     {
+      "words": "^triangle_[1-8]_M#3$ ↔ ^triangle_(9|1[0-6])_M#3$ ×8",
+      "cls": "bag ring ↔ ring (bases)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangles top + triangles Bottom → Base» · the two rings joined base to base: 400 = 400 (centre notch 200), eight seams — 0 of 8 found"
+     },
+     {
+      "words": "^Octagon_(Top|bottom)_M#[0-7]$ ↔ ^triangle_([1-9]|1[0-6])_M#1$ ×16",
+      "cls": "bag octagon ↔ panel tops",
+      "confidence": "sure",
+      "detail": "technologist's order «Base + Octagon_bottom_M + Octagon_Top_M → Base with closed octagon hole» · each octagon edge 91 (centre notch 46) onto a triangle top 91 ( — 0 of 16 found"
+     }
+    ]
+   },
+   "dollStates": {},
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 290,
+    "doll": 63
+   }
+  },
+  {
+   "id": "13",
+   "label": "SS26-013 Dust Bag M",
+   "size": "OS",
+   "pieces": 5,
+   "truth": {
+    "rows": 12,
+    "main": 3,
+    "sure": 0,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 1,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 0,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 3,
+    "found": 1,
+    "tpPreds": 1,
+    "fp": 4,
+    "fn": 2,
+    "precision": 0.2,
+    "recall": 0.3333333333333333,
+    "sure": {
+     "rows": 0,
+     "found": 0,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 1,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "inner_panel_OS#2 ↔ BLT_OS#2",
+      "cls": "wrong partner: bag bottom strip ↔ panel (composite)",
+      "detail": "one side is the true bag bottom strip ↔ panel (composite) edge, sewn to BLT_OS instead — truth bottom panel_OS#1 ↔ inner_panel_OS#1+inner_panel_OS#2+inner_panel_OS#3"
+     },
+     {
+      "words": "Outer_panel_OS#1 ↔ BLT_1_OS#0",
+      "cls": "wrong partner: bag binding / channel ↔ panel",
+      "detail": "one side is the true bag binding / channel ↔ panel edge, sewn to Outer_panel_OS instead — truth BLT_1_OS#0 ↔ inner_panel_OS#0"
+     },
+     {
+      "words": "Outer_panel_OS#3 ↔ BLT_1_OS#2",
+      "cls": "wrong partner: bag bottom strip ↔ panel (composite)",
+      "detail": "one side is the true bag bottom strip ↔ panel (composite) edge, sewn to BLT_1_OS instead — truth bottom panel_OS#3 ↔ Outer_panel_OS#0+Outer_panel_OS#3+Outer_panel_OS#2"
+     },
+     {
+      "words": "bottom panel_OS#3 ↔ Outer_panel_OS#2",
+      "cls": "wrong partner: bag bottom strip ↔ panel (composite)",
+      "detail": "one side is the true bag bottom strip ↔ panel (composite) edge, sewn to Outer_panel_OS instead — truth bottom panel_OS#3 ↔ inner_panel_OS#1+inner_panel_OS#2+inner_panel_OS#3"
+     }
+    ],
+    "fns": [
+     {
+      "words": "bottom panel_OS#1 ↔ inner_panel_OS#1+inner_panel_OS#2+inner_panel_OS#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «inner_panel_OS+belts + bottom panel_OS → Inner panel with bottom» · the strip 900 (notches 300 / 600) round the inner panel’s side 300 + b · instead: inner_panel_OS#2 ↔ BLT_OS#2; inner_panel_OS#0 ↔ BLT_OS#0"
+     },
+     {
+      "words": "bottom panel_OS#3 ↔ Outer_panel_OS#0+Outer_panel_OS#3+Outer_panel_OS#2",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «inner+belts+bottom + Outer_panel_OS → Dustbag M» · the strip’s other edge round the outer panel’s lower 300 of each side (notches at 300)  · instead: bottom panel_OS#3 ↔ Outer_panel_OS#2; Outer_panel_OS#3 ↔ BLT_1_OS#2"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 3,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 0,
+    "fn": 3,
+    "precision": 1,
+    "recall": 0,
+    "sure": {
+     "rows": 0,
+     "found": 0,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 1,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "bottom panel_OS#1 ↔ inner_panel_OS#1+inner_panel_OS#2+inner_panel_OS#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «inner_panel_OS+belts + bottom panel_OS → Inner panel with bottom» · the strip 900 (notches 300 / 600) round the inner panel’s side 300 + b"
+     },
+     {
+      "words": "bottom panel_OS#3 ↔ Outer_panel_OS#0+Outer_panel_OS#3+Outer_panel_OS#2",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «inner+belts+bottom + Outer_panel_OS → Dustbag M» · the strip’s other edge round the outer panel’s lower 300 of each side (notches at 300) "
+     },
+     {
+      "words": "BLT_OS#0 ↔ inner_panel_OS#0",
+      "cls": "bag binding / channel ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «inner_panel_OS + BLT_OS+BLT_1_OS → Inner panel with belt» · a 300 belt strip on the inner panel’s top edge 300 (which strip, which edge: a"
+     }
+    ]
+   },
+   "dollStates": {},
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 11,
+    "doll": 70
+   }
+  },
+  {
+   "id": "14",
+   "label": "SS26-014 Octagon S (bag)",
+   "size": "OS",
+   "pieces": 25,
+   "truth": {
+    "rows": 7,
+    "main": 40,
+    "sure": 40,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 6,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 0,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 40,
+    "found": 20,
+    "tpPreds": 20,
+    "fp": 2,
+    "fn": 20,
+    "precision": 0.9090909090909091,
+    "recall": 0.5,
+    "sure": {
+     "rows": 40,
+     "found": 20,
+     "recall": 0.5
+    },
+    "ply": {
+     "rows": 6,
+     "found": 4,
+     "preds": 4
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "octagon_outer_OS#5 ↔ Octagon_inner_OS#0",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     },
+     {
+      "words": "octagon_outer_OS#0 ↔ Octagon_inner_OS#5",
+      "cls": "identical panels paired outside the truth",
+      "detail": "two identical cut pieces sewn to each other where the truth has no such seam (a ply to its ply off the bagging edges, a panel of one ring to the other ring)"
+     }
+    ],
+    "fns": [
+     {
+      "words": "^outer_ trapezoid_[1-8]_OS#[02]$ ↔ ^outer_ trapezoid_[1-8]_OS#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «outer_ trapezoid_1 … 8 → triangles top» · eight outer trapezoids side to side (294 = 294, notches 17 / 55 ↔ 239 / 277) into a ring — 4 of 8 found"
+     },
+     {
+      "words": "^inner_ trapezoid(_1[0-6])?_OS#[02]$ ↔ ^inner_ trapezoid(_1[0-6])?_OS#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «… inner_ trapezoid_OS, _10 … _16 → triangles bottom» · the inner ring of eight — 4 of 8 found"
+     },
+     {
+      "words": "^outer_ trapezoid_[1-8]_OS#3$ ↔ ^inner_ trapezoid(_1[0-6])?_OS#3$ ×8",
+      "cls": "bag ring ↔ ring (bases)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangles top + triangles bottom → base» · the rings joined base to base 292 = 292 (centre notch 146) — 0 of 8 found"
+     },
+     {
+      "words": "^(octagon_outer|Octagon_inner)_OS#[0-7]$ ↔ ^(outer|inner)_ trapezoid(_\\d+)?_OS#1$ ×16",
+      "cls": "bag octagon ↔ panel tops",
+      "confidence": "sure",
+      "detail": "technologist's order «base + octagon_outer_OS + Octagon_inner_OS → base with closed octagon pieces» · each octagon edge 66 (notch 33) onto a trapezoid top 66 (n — 12 of 16 found"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 40,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 0,
+    "fn": 40,
+    "precision": 1,
+    "recall": 0,
+    "sure": {
+     "rows": 40,
+     "found": 0,
+     "recall": 0
+    },
+    "ply": {
+     "rows": 6,
+     "found": 0,
+     "preds": 0
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "^outer_ trapezoid_[1-8]_OS#[02]$ ↔ ^outer_ trapezoid_[1-8]_OS#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «outer_ trapezoid_1 … 8 → triangles top» · eight outer trapezoids side to side (294 = 294, notches 17 / 55 ↔ 239 / 277) into a ring — 0 of 8 found"
+     },
+     {
+      "words": "^inner_ trapezoid(_1[0-6])?_OS#[02]$ ↔ ^inner_ trapezoid(_1[0-6])?_OS#[02]$ ×8",
+      "cls": "bag panel ↔ panel (ring)",
+      "confidence": "sure",
+      "detail": "technologist's order «… inner_ trapezoid_OS, _10 … _16 → triangles bottom» · the inner ring of eight — 0 of 8 found"
+     },
+     {
+      "words": "^outer_ trapezoid_[1-8]_OS#3$ ↔ ^inner_ trapezoid(_1[0-6])?_OS#3$ ×8",
+      "cls": "bag ring ↔ ring (bases)",
+      "confidence": "sure",
+      "detail": "technologist's order «triangles top + triangles bottom → base» · the rings joined base to base 292 = 292 (centre notch 146) — 0 of 8 found"
+     },
+     {
+      "words": "^(octagon_outer|Octagon_inner)_OS#[0-7]$ ↔ ^(outer|inner)_ trapezoid(_\\d+)?_OS#1$ ×16",
+      "cls": "bag octagon ↔ panel tops",
+      "confidence": "sure",
+      "detail": "technologist's order «base + octagon_outer_OS + Octagon_inner_OS → base with closed octagon pieces» · each octagon edge 66 (notch 33) onto a trapezoid top 66 (n — 0 of 16 found"
+     }
+    ]
+   },
+   "dollStates": {},
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 110,
+    "doll": 96
+   }
+  },
+  {
+   "id": "15",
+   "label": "SS26-016 dust bag s",
+   "size": "S",
+   "pieces": 5,
+   "truth": {
+    "rows": 12,
+    "main": 3,
+    "sure": 0,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 1,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 0,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 3,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 3,
+    "fn": 3,
+    "precision": 0,
+    "recall": 0,
+    "sure": {
+     "rows": 0,
+     "found": 0,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 1,
+     "found": 1,
+     "preds": 1
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [
+     {
+      "words": "out_S#2 ↔ inn_S#0",
+      "cls": "wrong partner: bag bottom strip ↔ panel (composite)",
+      "detail": "one side is the true bag bottom strip ↔ panel (composite) edge, sewn to inn_S instead — truth brdr_S#0 ↔ out_S#1+out_S#2+out_S#3"
+     },
+     {
+      "words": "blt_1_S#0 ↔ out_S#0",
+      "cls": "wrong partner: bag binding / channel ↔ panel",
+      "detail": "one side is the true bag binding / channel ↔ panel edge, sewn to out_S instead — truth blt_1_S#0 ↔ inn_S#0"
+     },
+     {
+      "words": "blt_S#2 ↔ inn_S#2",
+      "cls": "wrong partner: bag bottom strip ↔ panel (composite)",
+      "detail": "one side is the true bag bottom strip ↔ panel (composite) edge, sewn to blt_S instead — truth brdr_S#2 ↔ inn_S#1+inn_S#2+inn_S#3"
+     }
+    ],
+    "fns": [
+     {
+      "words": "brdr_S#2 ↔ inn_S#1+inn_S#2+inn_S#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «brdr_S+out_S + blt+inn_S → dust bag s» · the border 620 (notches 160 / 310 / 460) round the inner panel’s side 160 + bottom 300 + side 160 · instead: blt_S#2 ↔ inn_S#2"
+     },
+     {
+      "words": "brdr_S#0 ↔ out_S#1+out_S#2+out_S#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «brdr_S + out_S → outer with boarder» · the border round the outer panel’s lower 160 of each side (notches 160 / 190) + bottom 300 = 620 · instead: out_S#2 ↔ inn_S#0"
+     },
+     {
+      "words": "blt_S#0 ↔ inn_S#0",
+      "cls": "bag binding / channel ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «blt_1_S+blt_S + inn_S → inner piece with belt» · a 300 belt strip on the inner panel’s top 300 (centre notch 150), any strip, any edge · instead: out_S#2 ↔ inn_S#0; blt_1_S#2 ↔ blt_S#0"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 3,
+    "found": 0,
+    "tpPreds": 0,
+    "fp": 0,
+    "fn": 3,
+    "precision": 1,
+    "recall": 0,
+    "sure": {
+     "rows": 0,
+     "found": 0,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 1,
+     "found": 1,
+     "preds": 1
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "brdr_S#2 ↔ inn_S#1+inn_S#2+inn_S#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «brdr_S+out_S + blt+inn_S → dust bag s» · the border 620 (notches 160 / 310 / 460) round the inner panel’s side 160 + bottom 300 + side 160"
+     },
+     {
+      "words": "brdr_S#0 ↔ out_S#1+out_S#2+out_S#3",
+      "cls": "bag bottom strip ↔ panel (composite)",
+      "confidence": "likely",
+      "detail": "technologist's order «brdr_S + out_S → outer with boarder» · the border round the outer panel’s lower 160 of each side (notches 160 / 190) + bottom 300 = 620"
+     },
+     {
+      "words": "blt_S#0 ↔ inn_S#0",
+      "cls": "bag binding / channel ↔ panel",
+      "confidence": "likely",
+      "detail": "technologist's order «blt_1_S+blt_S + inn_S → inner piece with belt» · a 300 belt strip on the inner panel’s top 300 (centre notch 150), any strip, any edge"
+     }
+    ]
+   },
+   "dollStates": {},
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 8,
+    "doll": 41
+   }
+  },
+  {
+   "id": "49",
+   "label": "beta card 49 FW26-001 check shirt (double yoke)",
+   "size": "M",
+   "pieces": 9,
+   "truth": {
+    "rows": 23,
+    "main": 10,
+    "sure": 10,
+    "likely": 0,
+    "unsure": 0,
+    "ply": 5,
+    "lining": 0,
+    "notSewn": 0,
+    "closures": 1,
+    "unresolved": []
+   },
+   "graph": {
+    "rows": 10,
+    "found": 2,
+    "tpPreds": 2,
+    "fp": 0,
+    "fn": 8,
+    "precision": 1,
+    "recall": 0.2,
+    "sure": {
+     "rows": 10,
+     "found": 2,
+     "recall": 0.2
+    },
+    "ply": {
+     "rows": 5,
+     "found": 2,
+     "preds": 2
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": [
+     {
+      "words": "BP#5 ↔ BP_1#2",
+      "cls": "yoke ↔ back",
+      "confidence": "sure",
+      "detail": "technologist's order «BP + BP_1 + BP_2 → BACK» · yoke 493 onto the back top 548 with two pleats 223–248 / 274–299 (50 mm) → 498 ≈ 493 · instead: BP#5 ↔ BP_2#5"
+     },
+     {
+      "words": "BP#3 ↔ FP_L#1",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «FP_L + FP_R + back → SHOULDER» · left shoulder: the yoke’s drawing-left 187 onto the left front’s 192 (face up; 5 mm ease)"
+     },
+     {
+      "words": "BP#1 ↔ FP_R#2",
+      "cls": "shoulder",
+      "confidence": "sure",
+      "detail": "technologist's order «SHOULDER» · right shoulder 187 onto 192"
+     },
+     {
+      "words": "SL_L#1 ↔ FP_L#0+BP#4+BP_1#3",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «SL_L + SL_R + body → OUTER» · cap 548 (three notches) onto the left armhole front 260 + yoke 117 + back 169 = 546"
+     },
+     {
+      "words": "SL_R#0 ↔ BP_1#1+BP#0+FP_R#3",
+      "cls": "armhole (composite)",
+      "confidence": "sure",
+      "detail": "technologist's order «OUTER» · cap 548 onto the right armhole 169 + 117 + 260 = 546"
+     },
+     {
+      "words": "SL_L#0 ↔ SL_L#2",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «OUTER» · left underarm 221 ≈ 220"
+     },
+     {
+      "words": "SL_R#1 ↔ SL_R#3",
+      "cls": "underarm",
+      "confidence": "sure",
+      "detail": "technologist's order «OUTER» · right underarm 221 ≈ 220"
+     },
+     {
+      "words": "CLR_3#2 ↔ FP_R#1+BP#2+FP_L#2",
+      "cls": "collar ↔ neckline",
+      "confidence": "sure",
+      "detail": "technologist's order «CLR_3+CLR_4 + body → NECKLINE» · collar neck edge 483 (CF notches 36 / 447, SNP 140 / 343, CB 241) onto the neckline 136 + 203 + 136 = 475"
+     }
+    ]
+   },
+   "doll": {
+    "rows": 10,
+    "found": 10,
+    "tpPreds": 6,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1,
+    "recall": 1,
+    "sure": {
+     "rows": 10,
+     "found": 10,
+     "recall": 1
+    },
+    "ply": {
+     "rows": 5,
+     "found": 2,
+     "preds": 6
+    },
+    "lining": {
+     "rows": 0,
+     "found": 0,
+     "preds": 0
+    },
+    "closuresDrawn": 0,
+    "fps": [],
+    "fns": []
+   },
+   "dollStates": {
+    "closed": 2,
+    "proposed": 8
+   },
+   "notSewnByDoll": [],
+   "ms": {
+    "graph": 56,
+    "doll": 1026
+   }
+  }
+ ]
+}

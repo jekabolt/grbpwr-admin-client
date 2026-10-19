@@ -3,10 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Close, ConfirmationModal, Media, Text } from 'ui';
 import { useDeleteArchive } from './useArchiveQuery';
 
 interface ArchiveItemProps {
@@ -59,7 +56,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
       onClick={handleArchiveClick}
       className='group relative flex cursor-pointer flex-col overflow-hidden border border-borderColor bg-bgColor hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]'
     >
-      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>
+      <div className='aspect-[4/5] w-full overflow-hidden border-b border-borderColor bg-bgColor'>
         {archive.thumbnail?.media?.fullSize?.mediaUrl && (
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
@@ -74,23 +71,23 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           {archive.translations?.[0]?.heading}
         </Text>
         {archive.tag && (
-          <span className='mt-1 inline-block w-fit border border-textInactiveColor px-1.5 py-0.5'>
+          <span className='mt-1 inline-block w-fit border border-borderColor px-1.5 py-0.5'>
             <Text size='small' variant='uppercase'>
               {archive.tag}
             </Text>
           </span>
         )}
       </div>
-      <Button
+      <Close
+        size='sm'
+        aria-label={`delete ${entryName}`}
         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
           e.stopPropagation();
           setConfirmOpen(true);
         }}
-        className='absolute right-1 top-1 z-20 cursor-pointer border border-textInactiveColor bg-bgColor px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100'
+        className='absolute right-1 top-1 z-20 opacity-0 group-hover:opacity-100'
         disabled={deleteArchiveMutation.isPending}
-      >
-        [x]
-      </Button>
+      />
       {/* stopPropagation so a click inside the confirmation dialog doesn't bubble
           up to the card's own onClick and navigate away mid-confirm. */}
       <div onClick={(e) => e.stopPropagation()}>

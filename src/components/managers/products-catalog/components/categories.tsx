@@ -6,7 +6,7 @@ import {
 } from 'lib/features/categories';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSearchParams } from 'react-router-dom';
-import Text from 'ui/components/text';
+import { Text } from 'ui';
 import { CategoryButton } from './category-btn';
 import { TopCategories } from './top-categories';
 import { useRouteParams } from './useRouteParams';

@@ -3,8 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -14,10 +13,10 @@ import {
 import { MaterialPicker } from './material-picker';
 import { usePackagingBom, useUpsertPackagingBom } from './useMaterials';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const th =
-  'border border-textInactiveColor bg-textInactiveColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
-const td = 'border border-textInactiveColor px-2 py-1 align-top text-textBaseSize';
+  'border border-borderColor bg-borderColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
+const td = 'border border-borderColor px-2 py-1 align-top text-textBaseSize';
 
 type Row = {
   materialId: number;
@@ -222,7 +221,7 @@ export function PackagingBomTab() {
                           }
                         />
                       ) : (
-                        <Text size='small'>{r.qtyPerOrder || '—'}</Text>
+                        <Text size='small'>{r.qtyPerOrder || <EmptyCell />}</Text>
                       )}
                       <Text variant='inactive' size='small'>
                         {r.materialUnit}
@@ -241,7 +240,7 @@ export function PackagingBomTab() {
                           }
                         />
                       ) : (
-                        <Text size='small'>{r.qtyPerItem || '—'}</Text>
+                        <Text size='small'>{r.qtyPerItem || <EmptyCell />}</Text>
                       )}
                       <Text variant='inactive' size='small'>
                         {r.materialUnit}
@@ -258,14 +257,7 @@ export function PackagingBomTab() {
                   </td>
                   {canEdit ? (
                     <td className={td}>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        aria-label='remove material'
-                        onClick={() => removeRow(i)}
-                      >
-                        ✕
-                      </Button>
+                      <Close size='sm' aria-label='remove material' onClick={() => removeRow(i)} />
                     </td>
                   ) : null}
                 </tr>

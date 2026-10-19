@@ -1,0 +1,1245 @@
+{
+  "source": "/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/assembly-from-pattern/probe/out/allsizes-M (probe v3, 09.10)",
+  "graph": {
+    "pieces": [
+      {
+        "pieceKey": "BP",
+        "name": "BP",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "BP#0",
+            "pieceKey": "BP",
+            "k": 0,
+            "s": 247,
+            "e": 364,
+            "pts": [],
+            "lenMm": 117.1,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP#1",
+            "pieceKey": "BP",
+            "k": 1,
+            "s": 364,
+            "e": 551,
+            "pts": [],
+            "lenMm": 187,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP#2",
+            "pieceKey": "BP",
+            "k": 2,
+            "s": 551,
+            "e": 749,
+            "pts": [],
+            "lenMm": 203,
+            "chordMm": 0,
+            "turnDeg": -361,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP#3",
+            "pieceKey": "BP",
+            "k": 3,
+            "s": 749,
+            "e": 936,
+            "pts": [],
+            "lenMm": 187,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP#4",
+            "pieceKey": "BP",
+            "k": 4,
+            "s": 936,
+            "e": 1053,
+            "pts": [],
+            "lenMm": 117.1,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP#5",
+            "pieceKey": "BP",
+            "k": 5,
+            "s": 1053,
+            "e": 247,
+            "pts": [],
+            "lenMm": 493.1,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 77242,
+        "perimMm": 1304.3000000000002,
+        "twinOf": [
+          {
+            "key": "BP_2",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "FP_R",
+        "name": "FP_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [1534, 1948],
+        "edges": [
+          {
+            "id": "FP_R#0",
+            "pieceKey": "FP_R",
+            "k": 0,
+            "s": 117,
+            "e": 587,
+            "pts": [],
+            "lenMm": 469.5,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_R#1",
+            "pieceKey": "FP_R",
+            "k": 1,
+            "s": 587,
+            "e": 856,
+            "pts": [],
+            "lenMm": 269,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_R#2",
+            "pieceKey": "FP_R",
+            "k": 2,
+            "s": 856,
+            "e": 1509,
+            "pts": [],
+            "lenMm": 653.4,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_R#3",
+            "pieceKey": "FP_R",
+            "k": 3,
+            "s": 1509,
+            "e": 1636,
+            "pts": [],
+            "lenMm": 127.9,
+            "chordMm": 0,
+            "turnDeg": -230,
+            "notchesMm": [25],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_R#4",
+            "pieceKey": "FP_R",
+            "k": 4,
+            "s": 1636,
+            "e": 1806,
+            "pts": [],
+            "lenMm": 170,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_R#5",
+            "pieceKey": "FP_R",
+            "k": 5,
+            "s": 1806,
+            "e": 117,
+            "pts": [],
+            "lenMm": 258.1,
+            "chordMm": 0,
+            "turnDeg": -324,
+            "notchesMm": [142],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 183114,
+        "perimMm": 1947.9,
+        "twinOf": [
+          {
+            "key": "FP_L",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "SL_R",
+        "name": "SL_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [371, 465, 604],
+        "edges": [
+          {
+            "id": "SL_R#0",
+            "pieceKey": "SL_R",
+            "k": 0,
+            "s": 0,
+            "e": 200,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_R#1",
+            "pieceKey": "SL_R",
+            "k": 1,
+            "s": 200,
+            "e": 724,
+            "pts": [],
+            "lenMm": 524.5,
+            "chordMm": 0,
+            "turnDeg": 151,
+            "notchesMm": [171, 265, 404],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_R#2",
+            "pieceKey": "SL_R",
+            "k": 2,
+            "s": 724,
+            "e": 924,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_R#3",
+            "pieceKey": "SL_R",
+            "k": 3,
+            "s": 924,
+            "e": 0,
+            "pts": [],
+            "lenMm": 387.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 114542,
+        "perimMm": 1312.3,
+        "twinOf": [
+          {
+            "key": "SL_L",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "SL_L",
+        "name": "SL_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [320, 459, 553],
+        "edges": [
+          {
+            "id": "SL_L#0",
+            "pieceKey": "SL_L",
+            "k": 0,
+            "s": 0,
+            "e": 200,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_L#1",
+            "pieceKey": "SL_L",
+            "k": 1,
+            "s": 200,
+            "e": 724,
+            "pts": [],
+            "lenMm": 524.5,
+            "chordMm": 0,
+            "turnDeg": 151,
+            "notchesMm": [120, 259, 353],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_L#2",
+            "pieceKey": "SL_L",
+            "k": 2,
+            "s": 724,
+            "e": 924,
+            "pts": [],
+            "lenMm": 200,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "SL_L#3",
+            "pieceKey": "SL_L",
+            "k": 3,
+            "s": 924,
+            "e": 0,
+            "pts": [],
+            "lenMm": 387.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 114544,
+        "perimMm": 1312.3,
+        "twinOf": [
+          {
+            "key": "SL_R",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "BP_1",
+        "name": "BP_1",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 1135, 1160, 1184],
+        "edges": [
+          {
+            "id": "BP_1#0",
+            "pieceKey": "BP_1",
+            "k": 0,
+            "s": 266,
+            "e": 736,
+            "pts": [],
+            "lenMm": 469.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_1#1",
+            "pieceKey": "BP_1",
+            "k": 1,
+            "s": 736,
+            "e": 899,
+            "pts": [],
+            "lenMm": 165.8,
+            "chordMm": 0,
+            "turnDeg": -248,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_1#2",
+            "pieceKey": "BP_1",
+            "k": 2,
+            "s": 899,
+            "e": 1421,
+            "pts": [],
+            "lenMm": 524.9,
+            "chordMm": 0,
+            "turnDeg": 79,
+            "notchesMm": [236, 261, 285],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_1#3",
+            "pieceKey": "BP_1",
+            "k": 3,
+            "s": 1421,
+            "e": 1584,
+            "pts": [],
+            "lenMm": 165.7,
+            "chordMm": 0,
+            "turnDeg": -248,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_1#4",
+            "pieceKey": "BP_1",
+            "k": 4,
+            "s": 1584,
+            "e": 2054,
+            "pts": [],
+            "lenMm": 469.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_1#5",
+            "pieceKey": "BP_1",
+            "k": 5,
+            "s": 2054,
+            "e": 266,
+            "pts": [],
+            "lenMm": 531.5,
+            "chordMm": 0,
+            "turnDeg": -14,
+            "notchesMm": [266],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 350748,
+        "perimMm": 2327.1000000000004,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "CLR_3",
+        "name": "CLR_3",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 102, 200, 986, 1084],
+        "edges": [
+          {
+            "id": "CLR_3#0",
+            "pieceKey": "CLR_3",
+            "k": 0,
+            "s": 242,
+            "e": 334,
+            "pts": [],
+            "lenMm": 91,
+            "chordMm": 0,
+            "turnDeg": -48,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_3#1",
+            "pieceKey": "CLR_3",
+            "k": 1,
+            "s": 334,
+            "e": 852,
+            "pts": [],
+            "lenMm": 514,
+            "chordMm": 0,
+            "turnDeg": 29,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_3#2",
+            "pieceKey": "CLR_3",
+            "k": 2,
+            "s": 852,
+            "e": 944,
+            "pts": [],
+            "lenMm": 91,
+            "chordMm": 0,
+            "turnDeg": -48,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_3#3",
+            "pieceKey": "CLR_3",
+            "k": 3,
+            "s": 944,
+            "e": 242,
+            "pts": [],
+            "lenMm": 482.7,
+            "chordMm": 0,
+            "turnDeg": -30,
+            "notchesMm": [242, 344, 442, 42, 140],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 44218,
+        "perimMm": 1178.7,
+        "twinOf": [
+          {
+            "key": "CLR_4",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "FP_L",
+        "name": "FP_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [1, 415],
+        "edges": [
+          {
+            "id": "FP_L#0",
+            "pieceKey": "FP_L",
+            "k": 0,
+            "s": 143,
+            "e": 313,
+            "pts": [],
+            "lenMm": 170,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_L#1",
+            "pieceKey": "FP_L",
+            "k": 1,
+            "s": 313,
+            "e": 440,
+            "pts": [],
+            "lenMm": 127.9,
+            "chordMm": 0,
+            "turnDeg": -230,
+            "notchesMm": [102],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_L#2",
+            "pieceKey": "FP_L",
+            "k": 2,
+            "s": 440,
+            "e": 1093,
+            "pts": [],
+            "lenMm": 653.4,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_L#3",
+            "pieceKey": "FP_L",
+            "k": 3,
+            "s": 1093,
+            "e": 1362,
+            "pts": [],
+            "lenMm": 269,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_L#4",
+            "pieceKey": "FP_L",
+            "k": 4,
+            "s": 1362,
+            "e": 1832,
+            "pts": [],
+            "lenMm": 469.5,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "FP_L#5",
+            "pieceKey": "FP_L",
+            "k": 5,
+            "s": 1832,
+            "e": 143,
+            "pts": [],
+            "lenMm": 258.1,
+            "chordMm": 0,
+            "turnDeg": -324,
+            "notchesMm": [120],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 183153,
+        "perimMm": 1947.9,
+        "twinOf": [
+          {
+            "key": "FP_R",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "BP_2",
+        "name": "BP_2",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "BP_2#0",
+            "pieceKey": "BP_2",
+            "k": 0,
+            "s": 247,
+            "e": 364,
+            "pts": [],
+            "lenMm": 117.1,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_2#1",
+            "pieceKey": "BP_2",
+            "k": 1,
+            "s": 364,
+            "e": 551,
+            "pts": [],
+            "lenMm": 187,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_2#2",
+            "pieceKey": "BP_2",
+            "k": 2,
+            "s": 551,
+            "e": 749,
+            "pts": [],
+            "lenMm": 203,
+            "chordMm": 0,
+            "turnDeg": -361,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_2#3",
+            "pieceKey": "BP_2",
+            "k": 3,
+            "s": 749,
+            "e": 936,
+            "pts": [],
+            "lenMm": 187,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_2#4",
+            "pieceKey": "BP_2",
+            "k": 4,
+            "s": 936,
+            "e": 1053,
+            "pts": [],
+            "lenMm": 117.1,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "BP_2#5",
+            "pieceKey": "BP_2",
+            "k": 5,
+            "s": 1053,
+            "e": 247,
+            "pts": [],
+            "lenMm": 493.1,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 77236,
+        "perimMm": 1304.3000000000002,
+        "twinOf": [
+          {
+            "key": "BP",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "CLR_4",
+        "name": "CLR_4",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 102, 200, 986, 1084],
+        "edges": [
+          {
+            "id": "CLR_4#0",
+            "pieceKey": "CLR_4",
+            "k": 0,
+            "s": 242,
+            "e": 334,
+            "pts": [],
+            "lenMm": 91,
+            "chordMm": 0,
+            "turnDeg": -48,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_4#1",
+            "pieceKey": "CLR_4",
+            "k": 1,
+            "s": 334,
+            "e": 852,
+            "pts": [],
+            "lenMm": 514,
+            "chordMm": 0,
+            "turnDeg": 29,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_4#2",
+            "pieceKey": "CLR_4",
+            "k": 2,
+            "s": 852,
+            "e": 944,
+            "pts": [],
+            "lenMm": 91,
+            "chordMm": 0,
+            "turnDeg": -48,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "CLR_4#3",
+            "pieceKey": "CLR_4",
+            "k": 3,
+            "s": 944,
+            "e": 242,
+            "pts": [],
+            "lenMm": 482.7,
+            "chordMm": 0,
+            "turnDeg": -30,
+            "notchesMm": [242, 344, 442, 42, 140],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 44219,
+        "perimMm": 1178.7,
+        "twinOf": [
+          {
+            "key": "CLR_3",
+            "kind": "identical"
+          }
+        ]
+      }
+    ],
+    "chosen": [
+      {
+        "a": "CLR_3#3",
+        "b": "CLR_4#3",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "BP#0",
+        "b": "BP_2#0",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "BP#0",
+            "b": "BP_2#4",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "BP#1",
+        "b": "BP_2#1",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "BP#1",
+            "b": "BP_2#3",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "BP#2",
+        "b": "BP_2#2",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "BP#3",
+        "b": "BP_2#3",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "BP#1",
+            "b": "BP_2#3",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "BP#4",
+        "b": "BP_2#4",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "BP#0",
+            "b": "BP_2#4",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "BP#5",
+        "b": "BP_2#5",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "FP_R#0",
+        "b": "BP_1#0",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0.1,
+          "relLen": 0.0001,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "FP_R#0",
+            "b": "BP_1#4",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0.1,
+              "relLen": 0.0001,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "BP_1#4",
+        "b": "FP_L#4",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "FP_R#0",
+            "b": "BP_1#4",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "CLR_3#0",
+        "b": "CLR_4#0",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "CLR_3#0",
+            "b": "CLR_4#2",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "CLR_3#2",
+        "b": "CLR_4#2",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "CLR_3#0",
+            "b": "CLR_4#2",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "identical",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "CLR_3#1",
+        "b": "CLR_4#1",
+        "score": 0.75,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "FP_R#3",
+        "b": "FP_L#1",
+        "score": 0.7,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "SL_R#1",
+        "b": "SL_L#1",
+        "score": 0.68,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      }
+    ],
+    "rejected": [],
+    "components": [
+      ["BP", "BP_2"],
+      ["FP_R", "BP_1", "FP_L"],
+      ["SL_R", "SL_L"],
+      ["CLR_3", "CLR_4"]
+    ],
+    "warnings": []
+  },
+  "facts": {
+    "pieces": [
+      {
+        "pieceKey": "BP",
+        "name": "BP",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "FP_R",
+        "name": "FP_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "SL_R",
+        "name": "SL_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "SL_L",
+        "name": "SL_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "BP_1",
+        "name": "BP_1",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "CLR_3",
+        "name": "CLR_3",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "FP_L",
+        "name": "FP_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "BP_2",
+        "name": "BP_2",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "CLR_4",
+        "name": "CLR_4",
+        "piecesPerGarment": 1,
+        "cutSymmetry": null,
+        "cloth": "main",
+        "fused": false
+      }
+    ],
+    "category": "shirt",
+    "bom": {
+      "zipper": 0,
+      "buttons": 1,
+      "snaps": 0,
+      "tape": 0,
+      "elastic": 0,
+      "drawcord": 0,
+      "interlining": 0
+    },
+    "defaultMachineType": null
+  },
+  "truth": [
+    {
+      "name": "Collar",
+      "inputs": ["CLR_3", "CLR_4"]
+    },
+    {
+      "name": "Back",
+      "inputs": ["BP", "BP_2", "BP_1"]
+    },
+    {
+      "name": "Body",
+      "inputs": ["FP_L", "FP_R", "Back"]
+    },
+    {
+      "name": "Body with collar",
+      "inputs": ["Collar", "Body"]
+    },
+    {
+      "name": "Shirt",
+      "inputs": ["SL_L", "SL_R", "Body with collar"]
+    }
+  ]
+}

@@ -2,8 +2,7 @@ import { AcctCashFlowSection, googletype_Decimal } from 'api/proto-http/admin';
 import { useCashFlow } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { CheckStrip, Verdict, Waterfall, WaterfallRow } from '../../components/kit';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
+import { Section, Text } from 'ui';
 import { formatBase } from '../../utils/format';
 import { CopyTableButton } from './copy-table-button';
 import { CaveatsNote, ReportState } from './report-utils';
@@ -73,7 +72,7 @@ function SectionBreakdown({
         return (
           <div
             key={label}
-            className='flex items-center justify-between gap-3 border-b border-textInactiveColor py-1.5'
+            className='flex items-center justify-between gap-3 border-b border-borderColor py-1.5'
           >
             <span className='flex min-w-0 flex-wrap items-center gap-2'>
               <Text size='small' className='min-w-0'>
@@ -96,7 +95,7 @@ function SectionBreakdown({
                       type='button'
                       onClick={() => onDrill(code)}
                       title={`open the ${code} ledger for this range`}
-                      className='border border-textInactiveColor px-1 text-[10px] uppercase tabular-nums tracking-wide text-labelColor hover:border-textColor hover:text-textColor'
+                      className='border border-borderColor px-1 text-[10px] uppercase tabular-nums tracking-wide text-labelColor hover:border-textColor hover:text-textColor'
                     >
                       {code}
                     </button>

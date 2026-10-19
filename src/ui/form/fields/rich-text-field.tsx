@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { cn } from 'lib/utility';
 import { useEffect } from 'react';
 import { useFormContext } from 'react-hook-form';
-import Text from 'ui/components/text';
+import Text from '../../components/text';
 import { FormField, FormItem, FormLabel, FormMessage } from '..';
 
 // Email-safe editor: constrained to bold / italic / underline, links and bullet +
@@ -79,7 +79,7 @@ function ToolbarButton({ active, disabled, onClick, label, title }: ToolbarButto
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       className={cn(
-        'h-7 min-w-7 px-1.5 leading-none border border-textInactiveColor transition-colors',
+        'h-7 min-w-7 px-1.5 leading-none border border-borderColor transition-colors',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
         active ? 'bg-textColor text-bgColor' : 'bg-bgColor hover:bg-textColor hover:text-bgColor',
         disabled && 'cursor-not-allowed opacity-40',
@@ -115,7 +115,7 @@ function EmailRichTextEditor({
         // абзацами, а читать его будет покупатель в почте, где он и наберётся примерно так.
         // Двенадцать здесь сравняли бы тело письма с его же подписью-лейблом.
         class:
-          'min-h-[120px] w-full px-3 py-2 text-base focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
+          'min-h-[120px] w-full px-3 py-2 text-reading focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
       },
       transformPastedHTML: stripToEmailSafeHtml,
     },
@@ -127,7 +127,8 @@ function EmailRichTextEditor({
   // UnifiedTranslationFields, copy-to-all) into the editor without echoing an
   // update back out (emitUpdate:false) — the guard prevents cursor-jump loops.
   useEffect(() => {
-    if (!editor) return;
+    // StrictMode's remount hands this effect the instance tiptap just destroyed (schema null).
+    if (!editor || editor.isDestroyed) return;
     const next = value || '';
     if (next !== readHtml(editor)) {
       editor.commands.setContent(next, { emitUpdate: false });
@@ -135,7 +136,7 @@ function EmailRichTextEditor({
   }, [value, editor]);
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled);
   }, [disabled, editor]);
 
   if (!editor) return null;
@@ -144,12 +145,12 @@ function EmailRichTextEditor({
     <div
       className={cn(
         'border',
-        hasError ? 'border-error' : 'border-textInactiveColor',
+        hasError ? 'border-error' : 'border-borderColor',
         disabled && 'opacity-60',
       )}
     >
       {!disabled && (
-        <div className='flex flex-wrap items-center gap-1 border-b border-textInactiveColor p-1'>
+        <div className='flex flex-wrap items-center gap-1 border-b border-borderColor p-1'>
           <ToolbarButton
             title='bold'
             label='B'
@@ -168,7 +169,7 @@ function EmailRichTextEditor({
             active={editor.isActive('underline')}
             onClick={() => editor.chain().focus().toggleUnderline().run()}
           />
-          <span className='mx-0.5 h-5 w-px bg-textInactiveColor' aria-hidden />
+          <span className='mx-0.5 h-5 w-px bg-borderColor' aria-hidden />
           <ToolbarButton
             title='bullet list'
             label='• list'
@@ -181,7 +182,7 @@ function EmailRichTextEditor({
             active={editor.isActive('orderedList')}
             onClick={() => editor.chain().focus().toggleOrderedList().run()}
           />
-          <span className='mx-0.5 h-5 w-px bg-textInactiveColor' aria-hidden />
+          <span className='mx-0.5 h-5 w-px bg-borderColor' aria-hidden />
           <ToolbarButton
             title='add / edit link'
             label='link'

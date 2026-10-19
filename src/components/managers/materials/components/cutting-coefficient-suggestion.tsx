@@ -7,11 +7,7 @@ import {
   MATERIAL_UNIT_LABEL,
   stampWhen,
 } from 'components/managers/production-runs/components/useLays';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Pill, Stat, StatGrid, Text, EmptyCell } from 'ui';
 import { useCuttingCoefficientSuggestion } from './useMaterials';
 
 // ПРЕДЛОЖЕНИЕ КОЭФФИЦИЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (Ф5б.3).
@@ -241,7 +237,7 @@ export function CuttingCoefficientSuggestion({
         <StatGrid min={170}>
           <Stat
             label='median plan↔actual drift'
-            value={median || '—'}
+            value={median || <EmptyCell />}
             sub={`measurement · across ${layCount} lays`}
           />
           {/* Второе число — то самое, что ложится в поле. При OUT_OF_RANGE его нет, и на его месте
@@ -249,7 +245,7 @@ export function CuttingCoefficientSuggestion({
               измерение ближайшим сохраняемым значением и выдать подмену за замер. */}
           <Stat
             label='coefficient to insert'
-            value={applicable ? suggested : '—'}
+            value={applicable ? suggested : <EmptyCell />}
             sub={
               view === 'ready' ? 'multiplier · same as the field above' : 'the field accepts 1–3'
             }

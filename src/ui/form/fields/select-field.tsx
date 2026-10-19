@@ -1,6 +1,6 @@
 import { useFormContext } from 'react-hook-form';
 
-import Select from 'ui/components/select';
+import Select from '../../components/select';
 import { FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = {

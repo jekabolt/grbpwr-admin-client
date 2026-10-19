@@ -3,11 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useNavigate } from 'react-router-dom';
-import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
-import { Row } from 'ui/components/row';
-import { SkeletonLine } from 'ui/components/skeleton';
-import Text from 'ui/components/text';
+import { Button, CalloutBox, Row, SkeletonLine, Text, EmptyCell } from 'ui';
 import { OrderStatus } from './order-status';
 import { formatDateShort, getOrderStatusName } from './utility';
 
@@ -99,7 +95,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                 open(order);
               }
             }}
-            className='cursor-pointer border-b border-hairline transition-colors last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='cursor-pointer border-b border-hairline transition-colors last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             {/* The wrapper is the list item, so it carries the rule between rows and drops it
                 on the last one; the `Row` alone inside it has no sibling row to rule against. */}
@@ -109,7 +105,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                 <span className='flex min-w-0 flex-col gap-0.5'>
                   <span className='flex flex-wrap items-center gap-1.5'>
                     <Text component='span' className='font-bold'>
-                      #{order.id ?? '—'}
+                      #{order.id ?? <EmptyCell />}
                     </Text>
                     <OrderStatus status={statusName} />
                     {who && (
@@ -148,7 +144,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
               value={
                 <span className='flex flex-col items-end gap-0.5'>
                   <Text component='span' className='font-bold'>
-                    {order.totalPrice?.value ?? '—'} {order.currency ?? ''}
+                    {order.totalPrice?.value ?? <EmptyCell />} {order.currency ?? ''}
                   </Text>
                   <Text size='micro' variant='label' component='span'>
                     {formatDateShort(order.placed)}

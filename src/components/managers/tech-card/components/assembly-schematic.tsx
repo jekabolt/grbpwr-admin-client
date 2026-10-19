@@ -1,9 +1,7 @@
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Text from 'ui/components/text';
+import { Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
@@ -27,6 +25,7 @@ import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import { revealDelta } from './canvas-view';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
+import { useActiveStepStore } from './assembly-map/active-step';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -302,7 +301,11 @@ export function AssemblySchematic({
   const [hovered, setHovered] = useState<string | null>(null);
 
   const layout = useMemo(
-    () => applyOverrides(auto, drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions),
+    () =>
+      applyOverrides(
+        auto,
+        drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions,
+      ),
     [auto, positions, drag],
   );
 
@@ -404,6 +407,20 @@ export function AssemblySchematic({
         // даже не фокусируется.
         {};
 
+  // СТРОКА ШАГА В БОКСЕ — ОРГАН ОТКРЫТИЯ ПЛЮС ДВЕРЬ КАРТЫ СБОРКИ: наведение светит шаг на карте,
+  // щелчок выбирает его там липко (assembly-map/active-step). Без провайдера карты — как раньше.
+  const mapStore = useActiveStepStore();
+  const stepOrgan = (i: number) => ({
+    ...activate(
+      clickGuard(() => {
+        onPickStep(i);
+        mapStore?.select(i);
+      }),
+    ),
+    onMouseEnter: () => mapStore?.hover(i),
+    onMouseLeave: () => mapStore?.hover(null),
+  });
+
   /**
    * Обработчики наведения для ноды.
    *
@@ -487,7 +504,8 @@ export function AssemblySchematic({
       const p = toLayoutPoint(e);
       if (!p) return;
       lastClient.current = { x: e.clientX, y: e.clientY };
-      const far = Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
+      const far =
+        Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
       if (!d.started && !far) return;
       commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
     };
@@ -547,7 +565,19 @@ export function AssemblySchematic({
       window.removeEventListener('blur', onLost);
       document.removeEventListener('visibilitychange', onLost);
     };
-  }, [dragActive, auto, positions, res, steps, frozen, onMove, onCreate, showMessage, toLayoutPoint, commitDrag]);
+  }, [
+    dragActive,
+    auto,
+    positions,
+    res,
+    steps,
+    frozen,
+    onMove,
+    onCreate,
+    showMessage,
+    toLayoutPoint,
+    commitDrag,
+  ]);
 
   // Escape во время драга — тот же откат: жест отменён, нода возвращается на прежнее место.
   useEffect(() => {
@@ -628,9 +658,7 @@ export function AssemblySchematic({
    * выделение > наведение. Все три рисуются outline'ом, и складывать их нельзя — у цели под
    * курсором вышла бы каша из двух рамок, поэтому ветки взаимоисключающие.
    *
-   * Выделение до этой правки не рисовало НИЧЕГО: единственным признаком был фон шапки `bg-bgZebra`,
-   * то есть тот же цвет, которым красится шапка под курсором (замерено: контраст 1.000). Различают
-   * теперь толщина и штрих, а не цвет — монохром: 1px сплошная у ховера, 2px пунктир у выделения
+   * Толщина и штрих различают состояния без фоновой заливки: 1px сплошная у ховера, 2px пунктир у выделения
    * (тем же штрихом нарисована рамка маркизы на полотне — это её улов), 2px сплошная у цели жеста.
    */
   const nodeRing = (key: string) => {
@@ -711,7 +739,7 @@ export function AssemblySchematic({
           {/* nonForm по той же причине, что у переключателя режима: сброс раскладки не меняет
               данных, но под внешним `<fieldset disabled>` настоящая кнопка мертва — и сбросить
               чужую расстановку на выпущенной карточке было бы нечем. */}
-          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='restore the automatic layout'>
+          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='reset the layout'>
             auto
           </Chip>
         </ChipRow>
@@ -784,8 +812,13 @@ export function AssemblySchematic({
                 // дока у инлайна нет вовсе, показывать список узла негде, и клик открывает
                 // ПЕРВУЮ операцию узла — всё ещё операцию этого узла, а не выделение.
                 headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep)))}
-                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
-                tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
+                stepProps={stepOrgan}
+                tokenProps={(k) =>
+                  activate(
+                    clickGuard(() => goToNode(k)),
+                    true,
+                  )
+                }
                 // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,
                 // и `revealDelta` здесь двигает прокрутку, а не трансформ; обещать «on the
                 // canvas» значило бы назвать место, которого человек на этом экране не найдёт.
@@ -809,7 +842,7 @@ export function AssemblySchematic({
               ringClassName={nodeRing('')}
               dragProps={dragHandlers('', layout.tail.x, layout.tail.y)}
               hoverProps={hoverHandlers('')}
-              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+              stepProps={stepOrgan}
             />
           )}
 
@@ -852,7 +885,7 @@ export function AssemblySchematic({
                 hoverProps={hoverHandlers(t.key)}
                 // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
                 // способа открыть шаг в системе заводить нельзя.
-                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                stepProps={stepOrgan}
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
@@ -863,23 +896,14 @@ export function AssemblySchematic({
         </div>
       </div>
 
-      <ConfirmationModal
+      <ResetLayoutModal
         open={resetOpen}
         onOpenChange={setResetOpen}
-        onConfirm={() => {
+        onReset={() => {
           onResetPositions();
           setResetOpen(false);
         }}
-        title='restore the automatic layout'
-        confirmLabel='reset'
-        cancelLabel='keep'
-        width='sm'
-      >
-        <Text size='micro' variant='label'>
-          every manual position on this card will be forgotten, and the schematic will place the
-          units by itself again. the card's data doesn't change: positions are only a way of looking.
-        </Text>
-      </ConfirmationModal>
+      />
     </>
   );
 }
@@ -964,5 +988,39 @@ function ActionPanel({
         cancel
       </Chip>
     </ChipRow>
+  );
+}
+
+/**
+ * RESET THE LAYOUT — ONE confirm for both surfaces (the inline schematic and the fullscreen
+ * canvas), so the two can never explain the same act differently. One consequence line, no cancel:
+ * the shell's ✕ closes it.
+ */
+export function ResetLayoutModal({
+  open,
+  onOpenChange,
+  onReset,
+  onCloseAutoFocus,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReset: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
+}) {
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={onReset}
+      title='reset layout'
+      confirmLabel='reset layout'
+      hideCancel
+      width='sm'
+      onCloseAutoFocus={onCloseAutoFocus}
+    >
+      <Text size='micro' variant='label'>
+        manual positions are forgotten
+      </Text>
+    </ConfirmationModal>
   );
 }
