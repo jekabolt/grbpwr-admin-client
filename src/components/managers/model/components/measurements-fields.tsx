@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { ChangeEvent, FocusEvent, KeyboardEvent, useState } from 'react';
+import { ChangeEvent, FocusEvent, KeyboardEvent, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { Button, GroupLabel, Input, Text } from 'ui';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
@@ -51,10 +51,20 @@ function MeasurementInput({ name }: { name: string }) {
   const { setFocus, setFocused } = useSheetMeasurementFocus();
   const { unit } = useMeasurementUnit();
   const [draft, setDraft] = useState<string | null>(null);
+  const editStart = useRef<{ display: string; valueMm: number | undefined }>({
+    display: '',
+    valueMm: undefined,
+  });
   const empty = !(Number(field.value) > 0);
   const shown = draft ?? displayMeasurementValue(field.value, unit);
 
-  const commit = (value: string) => field.onChange(measurementValueInMm(value, unit));
+  const writeEditedValue = (value: string) => {
+    const nextValue =
+      value === editStart.current.display
+        ? editStart.current.valueMm
+        : measurementValueInMm(value, unit);
+    if (nextValue !== field.value) field.onChange(nextValue);
+  };
 
   return (
     <Input
@@ -71,13 +81,14 @@ function MeasurementInput({ name }: { name: string }) {
       value={shown}
       placeholder='—'
       onFocus={(event: FocusEvent<HTMLInputElement>) => {
+        const display = displayMeasurementValue(field.value, unit);
+        editStart.current = { display, valueMm: field.value };
         setFocus(name);
         setFocused(name);
-        setDraft(displayMeasurementValue(field.value, unit));
+        setDraft(display);
         event.currentTarget.select();
       }}
-      onBlur={(event: FocusEvent<HTMLInputElement>) => {
-        commit(event.currentTarget.value);
+      onBlur={() => {
         setDraft(null);
         setFocused(null);
         field.onBlur();
@@ -85,7 +96,6 @@ function MeasurementInput({ name }: { name: string }) {
       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter') {
           event.preventDefault();
-          commit(event.currentTarget.value);
           setDraft(null);
           nextMeasurementInput(event.currentTarget)?.focus();
           return;
@@ -99,7 +109,7 @@ function MeasurementInput({ name }: { name: string }) {
       onChange={(event: ChangeEvent<HTMLInputElement>) => {
         const clean = cleanMeasurementInput(event.target.value, unit);
         setDraft(clean);
-        commit(clean);
+        writeEditedValue(clean);
       }}
       className={cn(
         'h-6 w-full max-w-28 py-0 text-right text-stat tabular-nums',
