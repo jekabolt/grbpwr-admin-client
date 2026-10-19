@@ -6,7 +6,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button, ConfirmationModal, Input, Pill, Placeholder, Select, Text, Tile, Tiles } from 'ui';
+import { Close, ConfirmationModal, Input, Pill, Placeholder, Select, Text, Tile, Tiles } from 'ui';
 import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
 const ALL = 'ALL';
@@ -149,19 +149,15 @@ export function ModelCardList() {
                 </Tile>
                 {canEdit && (
                   <div className='absolute top-1 right-1'>
-                    <Button
-                      type='button'
-                      size='xs'
-                      variant='secondary'
+                    <Close
+                      size='sm'
                       aria-label='delete model'
                       className='bg-bgColor'
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         setPendingDelete({ id, name: insert?.name || `model ${id}` });
                       }}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </div>
                 )}
               </div>

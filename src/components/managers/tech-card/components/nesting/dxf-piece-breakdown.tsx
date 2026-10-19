@@ -248,12 +248,12 @@ export function NettoFormula({
       <Stat label='Σ piece area' value={fmtInt(areaCm2)} sub={`cm² · size ${sizeLabel}`} />
       <Stat
         label='÷ cutting width'
-        value={cuttingWidthCm > 0 ? fmtInt(cuttingWidthCm) : '—'}
+        value={cuttingWidthCm > 0 ? fmtInt(cuttingWidthCm) : <EmptyCell />}
         sub='cm · roll − 2×selvedge'
       />
       <Stat
         label='= netto per unit'
-        value={netto != null ? netto : '—'}
+        value={netto != null ? netto : <EmptyCell />}
         sub={unit ? `${unit} · without the waste between pieces` : 'slot unit not set'}
       />
     </StatGrid>

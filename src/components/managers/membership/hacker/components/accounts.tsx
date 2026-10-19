@@ -1,7 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useNavigate } from 'react-router-dom';
-import { Button, Section, Text } from 'ui';
+import { Button, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import { useHackerAccounts, useRevokeHackerStatus } from '../../utils/hooks';
 import { formatEur } from '../../utils/tier-utils';
@@ -46,16 +46,16 @@ export function HackerAccounts() {
                     <Text size='small'>{m.userId}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.email || '-'}</Text>
+                    <Text size='small'>{m.email || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.name || '-'}</Text>
+                    <Text size='small'>{m.name || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{formatEur(m.qualifyingSpendEur12mo)}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{m.status || '-'}</Text>
+                    <Text size='small'>{m.status || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2 whitespace-nowrap'>
                     <Button variant='underline' onClick={() => navigate(`/members/${m.userId}`)}>

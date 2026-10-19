@@ -2,7 +2,7 @@ import { Member } from 'api/proto-http/admin';
 import { localeLabel } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
-import { Button, Section, SectionStack, Text } from 'ui';
+import { Button, Section, SectionStack, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { useMember, useTierHistory } from '../utils/hooks';
 import {
@@ -21,7 +21,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
       <Text variant='inactive' size='small' className='min-w-36 shrink-0'>
         {label}
       </Text>
-      <Text size='small'>{value || '-'}</Text>
+      <Text size='small'>{value || <EmptyCell />}</Text>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { cn } from 'lib/utility';
+import { Close } from './close';
 
 interface DatePickerProps {
   value?: Date;
@@ -38,18 +39,16 @@ export function DatePicker({
             {value ? format(value, 'PPP') : placeholder}
           </span>
           {value ? (
-            <span
-              role='button'
+            <Close
+              asChild
+              size='sm'
               tabIndex={-1}
               aria-label='clear date'
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(undefined);
               }}
-              className='shrink-0 px-1 text-labelColor hover:text-textColor'
-            >
-              ×
-            </span>
+            />
           ) : (
             <span aria-hidden className='shrink-0 text-labelColor'>
               ▾

@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 
 import type { SpreadMode } from 'lib/nesting/spread';
-import { Button, Chip, Input, Text } from 'ui';
+import { Button, Chip, Input, Text, EmptyCell } from 'ui';
 
 import type { LayMode } from '../use-lay-mode';
 import {
@@ -578,7 +578,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
               faceToFace={faceToFace}
             />
             <Text component='p' className='text-center tabular-nums'>
-              {p.plies} {p.plies === 1 ? 'layer' : 'layers'} × ({parts || '—'}) ={' '}
+              {p.plies} {p.plies === 1 ? 'layer' : 'layers'} × ({parts || <EmptyCell />}) ={' '}
               {p.cutTotal + p.extraTotal}
               {p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal} extra</span>}
             </Text>
@@ -712,10 +712,10 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                   'stack',
                   'layers',
                   <>
-                    {p.stackCm == null ? '—' : f1(p.stackCm)}
+                    {p.stackCm == null ? <EmptyCell /> : f1(p.stackCm)}
                     <span className='text-labelColor'>
                       {' '}
-                      / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)}
+                      / {p.stackLimitCm == null ? <EmptyCell /> : f1(p.stackLimitCm)}
                     </span>{' '}
                     cm
                   </>,

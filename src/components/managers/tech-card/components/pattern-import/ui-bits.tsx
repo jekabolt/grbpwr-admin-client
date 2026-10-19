@@ -3,7 +3,7 @@
 // ui/components/input.tsx and the panel grammar of assembly-fullscreen.tsx, named once.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
-import { FoldCaret, Input, Text } from 'ui';
+import { Close, FoldCaret, Input, Text } from 'ui';
 import type { WizardEvent } from 'lib/pattern-import/types';
 
 /**
@@ -791,16 +791,12 @@ export function AskCoach({
           <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
             ! {target.text}
           </Text>
-          <button
-            type='button'
+          <Close
+            size='sm'
             aria-label='close the hint'
-            className='pointer-events-auto -mr-0.5 shrink-0 leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className='pointer-events-auto -mr-0.5'
             onClick={onClose}
-          >
-            <Text size='micro' component='span'>
-              ✕
-            </Text>
-          </button>
+          />
         </span>
         {hint && hint !== target.text && (
           <Text size='micro' component='p' data-testid='pattern-import-coach-hint'>

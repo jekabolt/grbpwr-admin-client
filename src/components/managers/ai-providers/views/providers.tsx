@@ -5,7 +5,7 @@ import type {
   GetAiProvidersConfigResponse,
 } from 'api/proto-http/admin';
 import { useEffect, useRef, useState } from 'react';
-import { Button, CalloutBox, Input, Pill, Section, Text, ToggleSwitch } from 'ui';
+import { Button, CalloutBox, Input, Pill, Section, Text, ToggleSwitch, EmptyCell } from 'ui';
 import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
 import { WriteError } from './write-error';
 import {
@@ -48,7 +48,7 @@ export function ProvidersView({
       <Section title='providers' question='which services may spend money'>
         {!config ? (
           <Text size='micro' variant='label'>
-            {loading ? 'loading…' : '—'}
+            {loading ? 'loading…' : <EmptyCell />}
           </Text>
         ) : providers.length === 0 ? (
           <Text size='micro' variant='label'>
@@ -71,7 +71,7 @@ export function ProvidersView({
         {config && (
           <Text size='micro' variant='label'>
             master key: {config.masterKeyPresent ? 'present' : 'missing'} · timezone:{' '}
-            {config.timezone || '—'} · prices: {config.priceVersion || '—'}
+            {config.timezone || <EmptyCell />} · prices: {config.priceVersion || <EmptyCell />}
           </Text>
         )}
       </Section>

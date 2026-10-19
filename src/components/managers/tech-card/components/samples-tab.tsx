@@ -5,7 +5,18 @@ import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Media, Pill, Placeholder, Progress, Section, HeaderNote, Text, Tile, Tiles } from 'ui';
+import {
+  Close,
+  Media,
+  Pill,
+  Placeholder,
+  Progress,
+  Section,
+  HeaderNote,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { sampleStatusLabel, sampleThumbUrl } from './sample-options';
 import { fittingsNewestFirst, verdictTone } from './sample-panels';
@@ -244,28 +255,36 @@ function SampleCard({
           )}
         </span>
       </Tile>
-      {onDelete && !deleting && (
-        <button
-          type='button'
-          aria-label={armed ? `delete sample #${sample.number ?? ''}` : 'delete'}
-          disabled={locked}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!armed) return setArmed(true);
-            setArmed(false);
-            onDelete();
-          }}
-          onBlur={() => setArmed(false)}
-          className={cn(
-            'absolute right-2 top-2 z-10 border border-borderColor bg-bgColor px-1 text-micro uppercase leading-none',
-            armed
-              ? 'block text-error'
-              : 'hidden text-labelColor hover:text-error focus-visible:block group-hover/sample:block',
-          )}
-        >
-          {armed ? 'delete' : '✕'}
-        </button>
-      )}
+      {onDelete &&
+        !deleting &&
+        (armed ? (
+          <button
+            type='button'
+            aria-label={`delete sample #${sample.number ?? ''}`}
+            disabled={locked}
+            onClick={(e) => {
+              e.stopPropagation();
+              setArmed(false);
+              onDelete();
+            }}
+            onBlur={() => setArmed(false)}
+            className='absolute right-2 top-2 z-10 border border-borderColor bg-bgColor px-1 text-micro uppercase leading-none text-error'
+          >
+            delete
+          </button>
+        ) : (
+          <Close
+            size='sm'
+            aria-label='delete sample'
+            disabled={locked}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              setArmed(true);
+            }}
+            onBlur={() => setArmed(false)}
+            className='absolute right-2 top-2 z-10 bg-bgColor opacity-0 focus-visible:opacity-100 group-hover/sample:opacity-100'
+          />
+        ))}
     </div>
   );
 }

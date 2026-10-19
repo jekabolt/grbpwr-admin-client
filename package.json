@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:check": "tsc && vite build",
+    "test:ui-kit": "playwright test",
     "preview": "vite preview",
     "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
     "doll:check": "node scripts/doll/check.mjs",
@@ -161,10 +162,12 @@
     "patimport:sizesocg": "node scripts/pattern-import/sizesocg.mjs",
     "patimport:gradep1": "node scripts/pattern-import/gradep1.mjs",
     "patimport:gradep2": "node scripts/pattern-import/gradep2.mjs",
+    "patimport:leaks2": "node scripts/pattern-import/leaks2.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
     "doll:shape": "node scripts/doll/shape.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4.0.9",
     "@types/axios": "^0.14.0",
     "@types/lodash": "^4.17.15",

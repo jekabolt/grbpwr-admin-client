@@ -6,6 +6,7 @@ import { useEffect, useId, useState, type JSX } from 'react';
 import {
   Button,
   Chip,
+  Close,
   Input,
   Media,
   Pill,
@@ -137,17 +138,13 @@ export function LabelCard({
             ! no mockup
           </Pill>
         )}
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
+        <Close
+          size='sm'
           className='ml-auto shrink-0'
           aria-label={`remove ${noun} ${title}`}
           onClick={onRemove}
           data-label-card-remove={cardKey}
-        >
-          ✕
-        </Button>
+        />
       </div>
 
       <div className='mt-4 grid grid-cols-1 gap-6 sm:grid-cols-[160px_minmax(0,1fr)]'>
@@ -254,15 +251,13 @@ function Thumb({
           <span className='flex size-full items-center justify-center text-micro'>#{id}</span>
         )}
       </button>
-      <button
-        type='button'
+      <Close
+        size='sm'
         aria-label='remove this mockup'
         onClick={onRemove}
         data-mockup-drop={id}
-        className='absolute right-0.5 top-0.5 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor'
-      >
-        ✕
-      </button>
+        className='absolute right-0.5 top-0.5 bg-bgColor'
+      />
     </div>
   );
 }

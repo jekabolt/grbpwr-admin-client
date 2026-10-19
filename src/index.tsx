@@ -264,6 +264,9 @@ const FulfillmentCardDetail = lazyRoute(() =>
 const PatternViewerPage = lazyRoute(() =>
   import('components/pattern-viewer/page').then((m) => ({ default: m.PatternViewerPage })),
 );
+const UiKitPage = lazyRoute(() =>
+  import('components/ui-kit/page').then((m) => ({ default: m.UiKitPage })),
+);
 const RunPackViewerPage = lazyRoute(() =>
   import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
 );
@@ -512,6 +515,9 @@ root.render(
                     DictionaryProvider). Всё, что странице нужно, приезжает с публичного
                     `/api/f/{token}?mode=json`. */}
                 <Route path={ROUTES.publicFile} element={<FileShareViewerPage />} />
+                {/* PUBLIC ui-kit: every primitive from 'ui' on one static page, no fetch, no JWT.
+                    Public so the screenshot test (yarn test:ui-kit) opens it without a backend. */}
+                <Route path={ROUTES.uiKit} element={<UiKitPage />} />
                 {/* Стенд печати. DictionaryProvider свой: без токена он ничего не запрашивает и
                     отдаёт пустой словарь — ровно то состояние, в котором документ обязан
                     печататься, называя недостающее, а не падать. */}

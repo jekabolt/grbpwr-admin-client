@@ -3,7 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { Button, ConfirmationModal, Media, Text } from 'ui';
+import { Close, ConfirmationModal, Media, Text } from 'ui';
 import { useDeleteArchive } from './useArchiveQuery';
 
 interface ArchiveItemProps {
@@ -78,16 +78,16 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           </span>
         )}
       </div>
-      <Button
+      <Close
+        size='sm'
+        aria-label={`delete ${entryName}`}
         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
           e.stopPropagation();
           setConfirmOpen(true);
         }}
-        className='absolute right-1 top-1 z-20 cursor-pointer border border-textInactiveColor bg-bgColor px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100'
+        className='absolute right-1 top-1 z-20 opacity-0 group-hover:opacity-100'
         disabled={deleteArchiveMutation.isPending}
-      >
-        [x]
-      </Button>
+      />
       {/* stopPropagation so a click inside the confirmation dialog doesn't bubble
           up to the card's own onClick and navigate away mid-confirm. */}
       <div onClick={(e) => e.stopPropagation()}>

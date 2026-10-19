@@ -129,6 +129,8 @@ export enum ROUTES {
   // файл сразу; отличие в том, что сюда можно прийти по мёртвой ссылке и прочитать об этом
   // фразу вместо голого 404 браузера.
   publicFile = '/f/:token',
+  // PUBLIC kit of every ui primitive: static, no data, no login (screenshot-tested).
+  uiKit = '/ui-kit',
   materials = '/materials',
   productionRuns = '/production-runs',
   productionRun = '/production-runs/:id',

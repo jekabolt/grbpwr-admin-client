@@ -1,7 +1,7 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { annotationKindFromWire } from 'components/managers/tech-card/annotation/wire';
-import { Button, Pill, Text } from 'ui';
+import { Button, Close, Pill, Text } from 'ui';
 
 import { KindGlyph, onDoorKey } from './callout-rail';
 import { missingLabel, suggestionLabel } from './callout-suggest';
@@ -134,16 +134,13 @@ export function SuggestedCallouts({
                         >
                           <span aria-hidden>✓</span>
                         </button>
-                        <button
-                          type='button'
+                        <Close
+                          size='sm'
                           aria-label='dismiss'
                           title='dismiss'
                           data-callout-dismiss={id}
                           onClick={() => onDismiss(id)}
-                          className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor hover:text-textColor'
-                        >
-                          <span aria-hidden>✕</span>
-                        </button>
+                        />
                       </>
                     )}
                   </div>

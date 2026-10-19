@@ -1,6 +1,6 @@
 import type { DesignImageModel } from 'api/proto-http/admin';
 import type { JSX } from 'react';
-import { Text } from 'ui';
+import { Text, EmptyCell } from 'ui';
 
 import { FieldRow } from '../../render/field-row';
 import { OptionRow } from './option-row';
@@ -65,7 +65,7 @@ export function EnginePicker({
       ) : (
         <FieldRow label='Model' className='py-2' data-option-row='engine-model'>
           <Text component='span' className='ml-auto'>
-            {chosen ? labelOf(chosen) : '—'}
+            {chosen ? labelOf(chosen) : <EmptyCell />}
           </Text>
         </FieldRow>
       )}

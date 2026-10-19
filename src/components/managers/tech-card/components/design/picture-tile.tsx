@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Media, GenericPopover, Pill, Text, TILE_CORNER, TILE_QUIET } from 'ui';
+import { Close, Media, GenericPopover, Pill, Text, TILE_CORNER, TILE_QUIET } from 'ui';
 import {
   FILE_MISSING_TITLE,
   FILE_MISSING_WORDS,
@@ -839,6 +839,18 @@ function Corner({
   pendingLabel?: string;
   className: string;
 }) {
+  if (label === '✕' && !action.pending) {
+    return (
+      <Close
+        size='sm'
+        aria-label={action.ariaLabel}
+        title={action.title}
+        disabled={action.disabled}
+        onClick={action.onClick}
+        className={cn('z-20', TILE_QUIET, className)}
+      />
+    );
+  }
   return (
     <button
       type='button'

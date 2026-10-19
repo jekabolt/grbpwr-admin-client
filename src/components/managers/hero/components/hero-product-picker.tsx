@@ -1,6 +1,6 @@
 import { common_Colorway } from 'api/proto-http/admin';
 import { useFormContext } from 'react-hook-form';
-import { Media, Text } from 'ui';
+import { Close, Media, Text } from 'ui';
 import { ProductPickerModal } from './productPickerModal';
 import { ProductSelectionApi } from './useProductSelection';
 
@@ -80,14 +80,12 @@ export function HeroProductPicker({
               aspectRatio='1/1'
               fit='cover'
             />
-            <button
-              type='button'
+            <Close
+              size='sm'
               onClick={() => removeAt(i)}
-              className='absolute right-0 top-0 bg-bgColor px-1.5 py-0.5 leading-none text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+              className='absolute right-0 top-0 bg-bgColor focus-visible:-outline-offset-2'
               aria-label='remove product'
-            >
-              ×
-            </button>
+            />
             {!single && selected.length > 1 && (
               <div className='absolute bottom-0 left-0 flex w-full justify-between'>
                 <button

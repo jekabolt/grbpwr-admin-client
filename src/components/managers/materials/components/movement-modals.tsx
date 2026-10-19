@@ -7,7 +7,7 @@ import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import {
   useAdjustMaterialStock,
@@ -70,9 +70,7 @@ function MovementDialog({
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>{title}</DialogPrimitives.Description>

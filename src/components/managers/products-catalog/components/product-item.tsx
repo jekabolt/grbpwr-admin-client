@@ -8,7 +8,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Media, Tile } from 'ui';
+import { Button, Close, Media, Tile } from 'ui';
 import {
   CatalogCommerceTags,
   CatalogStateBadge,
@@ -154,18 +154,25 @@ export function ProductItem({
       {/* Per-card actions are hidden in selection mode to avoid competing affordances. */}
       {!selectionMode && canEdit && !isArchived && (
         <div className='absolute top-1 right-1 z-30'>
-          <Button
-            type='button'
-            size='xs'
-            variant='secondary'
-            aria-label='archive product'
-            className={cn('bg-bgColor', {
-              '!bg-textColor !text-bgColor': confirmDelete === product.id,
-            })}
-            onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
-          >
-            {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
-          </Button>
+          {confirmDelete === product.id ? (
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              aria-label='confirm archive product'
+              className='!bg-textColor !text-bgColor'
+              onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
+            >
+              <CheckIcon />
+            </Button>
+          ) : (
+            <Close
+              size='sm'
+              aria-label='archive product'
+              className='bg-bgColor'
+              onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
+            />
+          )}
         </div>
       )}
 

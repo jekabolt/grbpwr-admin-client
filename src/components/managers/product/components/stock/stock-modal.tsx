@@ -1,5 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 
 interface Props {
   children: React.ReactNode;
@@ -27,7 +27,7 @@ export function StockModal({ children, title, open, onOpenChange }: Props) {
             <DialogPrimitives.Close asChild>
               <div className='flex shrink-0 items-center justify-between'>
                 <Text variant='uppercase'>{title}</Text>
-                <Button>[x]</Button>
+                <Close />
               </div>
             </DialogPrimitives.Close>
             <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>{children}</div>

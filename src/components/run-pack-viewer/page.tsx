@@ -86,7 +86,7 @@ export function RunPackViewerPage() {
       <Shell>
         <Section>
           <CalloutBox tone='error'>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               <b>the link is invalid</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
@@ -106,7 +106,7 @@ export function RunPackViewerPage() {
       <Shell>
         <Section>
           <CalloutBox tone='error'>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               <b>the viewer is misconfigured</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
@@ -124,7 +124,7 @@ export function RunPackViewerPage() {
       <Shell>
         <Section>
           <div className='space-y-2.5'>
-            <Text component='p'>couldn't load — looks like there's no connection</Text>
+            <Text size='reading' component='p'>couldn't load — looks like there's no connection</Text>
             <Button
               type='button'
               variant='main'
@@ -155,7 +155,7 @@ export function RunPackViewerPage() {
             <Text size='large' component='p' className='uppercase'>
               <b>the plan changed after printing</b>
             </Text>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               the paper in your hands was printed for version {printedVersion}, and the run is now at
               version {currentVersion}. the numbers on the sheet are out of date — cut from THIS
               screen and reprint the run pack.
@@ -252,6 +252,6 @@ export function RunPackViewerPage() {
 // размер отдельно: `DataTable` называет свой (12px) сам, и наследование до них не доходит.
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className='mx-auto w-full max-w-5xl px-2.5 py-4 text-base lg:px-4 lg:py-6'>{children}</div>
+    <div className='mx-auto w-full max-w-5xl px-2.5 py-4 text-reading lg:px-4 lg:py-6'>{children}</div>
   );
 }

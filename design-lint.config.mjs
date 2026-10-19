@@ -47,4 +47,9 @@ export default [
       'design/no-style-design': 'off',
     },
   },
+  {
+    // Paper prints its own dash: sheet.tsx and the invoice read '—' as «empty» to size a cell.
+    files: [...printDocuments, 'src/components/managers/order/components/invoice-document.tsx'],
+    rules: { 'design/no-hand-empty-cell': 'off' },
+  },
 ];

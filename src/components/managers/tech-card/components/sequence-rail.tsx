@@ -17,7 +17,7 @@ import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Text } from 'ui';
+import { Text, EmptyCell } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import type { AssemblyBlock } from './assembly-blocks';
@@ -337,7 +337,7 @@ function RailStep({
               className='w-8 shrink-0 text-right tabular-nums'
               title='SMV, min'
             >
-              {smvMin > 0 ? smvMin.toFixed(1) : '—'}
+              {smvMin > 0 ? smvMin.toFixed(1) : <EmptyCell />}
             </Text>
           </span>
           {/* ЧИП DRAFT — КНОПКА РЯДОМ СО СТРОКОЙ, А НЕ ВНУТРИ НЕЁ: строка сама `role='button'`

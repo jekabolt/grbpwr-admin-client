@@ -1,6 +1,6 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import type { JSX, ReactNode } from 'react';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell } from 'ui';
 
 import { isRunLive } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
@@ -197,7 +197,7 @@ export function InventoryLine({
           }
         >
           <Text size='nano' component='span'>
-            {number ?? '—'}
+            {number ?? <EmptyCell />}
           </Text>
         </span>
       ) : null}

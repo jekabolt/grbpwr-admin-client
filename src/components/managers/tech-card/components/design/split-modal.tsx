@@ -1,7 +1,16 @@
 import type { DesignSplitFrame, common_DesignPicture } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CalloutBox, ConfirmationModal, GroupLabel, Row, Select, Text, TILE_QUIET } from 'ui';
+import {
+  CalloutBox,
+  Close,
+  ConfirmationModal,
+  GroupLabel,
+  Row,
+  Select,
+  Text,
+  TILE_QUIET,
+} from 'ui';
 
 import { detectSplitOf } from './generation/detect-split-image';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
@@ -603,18 +612,13 @@ export function SplitStage({
                 </span>
               )}
               {nameInFrame && mode === 'split' && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove side ${i + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => cut.removeSide(i)}
-                  className={cn(
-                    'absolute right-0 top-0 z-10 cursor-pointer bg-bgColor px-1 text-micro text-labelColor hover:text-textColor',
-                    TILE_QUIET,
-                  )}
-                >
-                  ✕
-                </button>
+                  className={cn('absolute right-0 top-0 z-10 bg-bgColor', TILE_QUIET)}
+                />
               )}
               {/* КРАЙ ХВАТАЕТСЯ НЕВИДИМОЙ ПОЛОСОЙ. Видна только линия рамки в 1px; полоса 12px
                   стоит на ней поровну внутрь и наружу, поэтому край берётся так же легко, как
@@ -680,14 +684,11 @@ function SplitSides({ cut }: { cut: SplitCut }) {
                 }))}
                 onValueChange={(value) => cut.nameSide(i, value)}
               />
-              <button
-                type='button'
+              <Close
+                size='sm'
                 aria-label={`remove side ${i + 1}`}
                 onClick={() => cut.removeSide(i)}
-                className='cursor-pointer px-1 text-labelColor hover:text-textColor'
-              >
-                ✕
-              </button>
+              />
             </span>
           }
         />

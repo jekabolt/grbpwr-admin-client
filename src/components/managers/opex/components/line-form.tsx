@@ -1,7 +1,7 @@
 import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { ConfirmationModal, Text } from 'ui';
+import { ConfirmationModal, Text, EmptyCell } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import { isRecurringLine, opexVatRegimeOptions } from '../utils/options';
@@ -242,7 +242,7 @@ export function LineFormModal({
             className='flex w-full items-center gap-1.5 text-left text-labelColor hover:text-textColor'
           >
             <span aria-hidden className='inline-block w-3 tabular-nums'>
-              {docOpen ? '–' : '+'}
+              {docOpen ? <EmptyCell /> : '+'}
             </span>
             <Text
               size='micro'

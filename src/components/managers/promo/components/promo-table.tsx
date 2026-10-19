@@ -5,7 +5,7 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useForm } from 'react-hook-form';
-import { Button, CheckboxCommon, ConfirmationModal, Section, Text } from 'ui';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell, Close } from 'ui';
 import { PromoCreateRow } from './promo-create-row';
 import { PromoEditRow } from './promo-edit-row';
 import { emptyPromoDraft, promoDraftSchema, type PromoDraftSchema } from './schema';
@@ -150,13 +150,11 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
       label: 'Delete',
       accessor: (p) => (
         <div className='w-full h-full flex items-center justify-center bg-error'>
-          <Button
-            size='lg'
-            className='text-bgColor hover:cursor-pointer'
+          <Close
+            aria-label={`delete promo ${p.promoCodeInsert?.code || ''}`}
+            className='text-bgColor hover:no-underline'
             onClick={() => handleDeletePromo(p.promoCodeInsert?.code || '')}
-          >
-            [x]
-          </Button>
+          />
         </div>
       ),
     },
@@ -232,7 +230,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                         'px-0': col.label === 'Delete' || col.label === 'Edit',
                       })}
                     >
-                      <Text>{col.accessor(p) ?? '-'}</Text>
+                      <Text>{col.accessor(p) ?? <EmptyCell />}</Text>
                     </td>
                   ))}
                 </tr>

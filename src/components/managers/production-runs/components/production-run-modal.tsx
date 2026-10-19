@@ -5,7 +5,7 @@ import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { runStatusLabel, runStatusOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
@@ -169,9 +169,7 @@ export function ProductionRunModal({
               {`production run PR-${run?.id ?? ''}`}
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
