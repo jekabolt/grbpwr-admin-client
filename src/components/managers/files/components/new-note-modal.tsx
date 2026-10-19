@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { notePath } from 'constants/routes';
@@ -49,6 +49,7 @@ export function NewNoteModal({
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [projectOpen, setProjectOpen] = useState(false);
   const [topicsOpen, setTopicsOpen] = useState(false);
+  const topicSearchRef = useRef<HTMLInputElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [roleId, setRoleId] = useState(0);
@@ -121,6 +122,14 @@ export function NewNoteModal({
     }
     setTopicSearch('');
   };
+
+  // ФОКУС В ПОИСК — ПОСЛЕ ДИАЛОГА: `autoFocus` перебивает Radix, ставя фокус на ×, и набранное
+  // уезжало в поле имени под шторкой.
+  useEffect(() => {
+    if (!topicsOpen) return;
+    const t = setTimeout(() => topicSearchRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [topicsOpen]);
 
   // НЕЗАФИКСИРОВАННЫЙ ПОИСК — НЕ ВЫБОР: закрытие листа всегда очищает его.
   const setTopicsSheetOpen = (open: boolean) => {
@@ -427,8 +436,8 @@ export function NewNoteModal({
         <div className='flex flex-col gap-2.5'>
           <Input
             name='newNoteTopicSearch'
+            ref={topicSearchRef}
             value={topicSearch}
-            autoFocus
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTopicSearch(e.target.value)}
             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
               if (e.key !== 'Enter') return;
