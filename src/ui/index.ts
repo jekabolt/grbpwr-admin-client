@@ -39,6 +39,15 @@ export { CopyToClipboard } from './components/copyToClipboard';
 export { DataTable, EmptyCell, TotalRow } from './components/data-table';
 /** @primitive Portalled date field */
 export { DatePicker } from './components/date-picker';
+/** @primitive Date pill scroll handle (touch) */
+export { DateScrubber, scrubLabel, type DateScrubberProps } from './components/date-scrubber';
+/** @primitive Month to list offset index */
+export {
+  buildMonthIndex,
+  useMonthIndex,
+  type MonthIndex,
+  type ScrubMonth,
+} from './hooks/use-month-index';
 /** @primitive Right-docked side panel */
 export { Drawer } from './components/drawer';
 /** @primitive Legacy collapsible field group */
@@ -57,6 +66,8 @@ export {
 export { default as Input, type InputProps } from './components/input';
 /** @primitive Indeterminate loading bar */
 export { Loader } from './components/loader';
+/** @primitive BlurHash-backed image */
+export { BlurhashImage, type BlurhashImageProps } from './components/blurhash-image';
 /** @primitive Image/video in aspect box */
 export { default as Media } from './components/media';
 /** @primitive Bare scrim layer */

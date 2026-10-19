@@ -3,6 +3,31 @@ import { useRef, useState } from 'react';
 import { Button, CalloutBox, PLACEHOLDER_SURFACE, placeholderClass, Text } from 'ui';
 import { usePendingFiles } from '../utils/usePendingFiles';
 
+/**
+ * ОТБРОШЕННОЕ НАЗЫВАЕТСЯ ПО ИМЕНИ. Бросили десять файлов, два из них PDF — до этого про них не
+ * говорилось нигде: ни счётчика, ни имени, ни причины. Exported for the phone's virtual grid,
+ * which has no drop zone around it but takes files from the upload button all the same.
+ */
+export function SkippedFilesNote({
+  pendingFilesHook,
+}: {
+  pendingFilesHook: ReturnType<typeof usePendingFiles>;
+}) {
+  const { skipped, dismissSkipped } = pendingFilesHook;
+  if (!skipped.length) return null;
+  return (
+    <CalloutBox tone='note' className='col-span-full flex flex-wrap items-center gap-2'>
+      <Text size='micro' variant='label' component='p'>
+        skipped {skipped.length} {skipped.length === 1 ? 'file' : 'files'}:{' '}
+        {skipped.map((file) => `${file.name} (${file.why})`).join(' · ')}
+      </Text>
+      <Button size='xs' variant='secondary' className='ml-auto' onClick={dismissSkipped}>
+        got it
+      </Button>
+    </CalloutBox>
+  );
+}
+
 export function DragDropArea({
   children,
   mediaLength,
@@ -38,7 +63,7 @@ export function DragDropArea({
   noMatch?: React.ReactNode;
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  const { previews, addFiles, skipped, dismissSkipped } = pendingFilesHook;
+  const { previews, addFiles } = pendingFilesHook;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -115,19 +140,7 @@ export function DragDropArea({
         onChange={handleFileInputChange}
       />
 
-      {/* ОТБРОШЕННОЕ НАЗЫВАЕТСЯ ПО ИМЕНИ. Бросили десять файлов, два из них PDF — до этого про них
-          не говорилось нигде: ни счётчика, ни имени, ни причины. */}
-      {skipped.length > 0 && (
-        <CalloutBox tone='note' className='col-span-full flex flex-wrap items-center gap-2'>
-          <Text size='micro' variant='label' component='p'>
-            skipped {skipped.length} {skipped.length === 1 ? 'file' : 'files'}:{' '}
-            {skipped.map((file) => `${file.name} (${file.why})`).join(' · ')}
-          </Text>
-          <Button size='xs' variant='secondary' className='ml-auto' onClick={dismissSkipped}>
-            got it
-          </Button>
-        </CalloutBox>
-      )}
+      <SkippedFilesNote pendingFilesHook={pendingFilesHook} />
 
       {showAddTile && mediaLength > 0 && (
         <button

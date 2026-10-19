@@ -11,6 +11,7 @@ import { acceptOf, filesOfKind, refusalOf, usePasteFiles } from '../utils/usePas
 import { isSvgMedia, isSvgUrl, useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 import { MediaIntakeDialog } from './media-intake-dialog';
+import { useCoarsePointer } from './media-mobile';
 
 interface MediaSelectorProps {
   label: string;
@@ -58,6 +59,9 @@ export function MediaSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [dialogKey, setDialogKey] = useState(0);
+  // The sparse grid comes with the date pill, and the pill is touch only: one signal for both.
+  const coarse = useCoarsePointer();
+  const [virtualScrollEl, setVirtualScrollEl] = useState<HTMLDivElement | null>(null);
 
   // Crop-on-select state (slots with a fixed ratio).
   const [cropMedia, setCropMedia] = useState<common_MediaFull | null>(null);
@@ -450,7 +454,7 @@ export function MediaSelector({
                 </Text>
               </DialogPrimitive.Description>
 
-              <div className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
+              <div ref={setVirtualScrollEl} className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
                 <MediaManager
                   key={dialogKey}
                   aspectRatio={undefined}
@@ -466,6 +470,7 @@ export function MediaSelector({
                   disabled={false}
                   showVideos={showVideos}
                   showFilters
+                  virtualScrollEl={coarse ? virtualScrollEl : undefined}
                   onSelectionChange={handleSelectionChange}
                   selectionMode={true}
                 />

@@ -52,6 +52,16 @@ interface MediaItemProps {
   selecting?: boolean;
   /** Phone: a long press enters select mode with this card picked. */
   onLongPress?: () => void;
+  /**
+   * Fetch the thumbnail now (default). The virtual grid holds it while the list is dragged or
+   * flung; the blurhash shows meanwhile. Once loaded, a tile keeps its image.
+   */
+  load?: boolean;
+  /**
+   * The slot cannot take this item (a video in a picker for stills). The tile keeps its place, so
+   * the date pill's counts stay right, but it is dimmed and does not select.
+   */
+  unavailable?: boolean;
 }
 
 const LONG_PRESS_MS = 450;
@@ -101,7 +111,12 @@ export function MediaItem({
   touch = false,
   selecting = false,
   onLongPress,
+  load = true,
+  unavailable = false,
 }: MediaItemProps) {
+  const [loadedOnce, setLoadedOnce] = useState(load);
+  if (load && !loadedOnce) setLoadedOnce(true);
+  const loadNow = load || loadedOnce;
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const fullUrl = media.media?.fullSize?.mediaUrl || mediaUrl || '';
   const deleteMediaMutation = useDeleteMedia();
@@ -121,7 +136,7 @@ export function MediaItem({
     videoSizes[media.id || 0]?.height;
   const aspectRatio = mediaAspectRatio(media, videoSizes);
   const video = isVideo(mediaUrl);
-  const selectable = !disabled;
+  const selectable = !disabled && !unavailable;
   // Unknown usage counts as in use: delete is offered only for a file known to be free.
   const inUse = (usage?.length ?? 0) > 0;
   const deletable = usage !== undefined && usage.length === 0;
@@ -212,8 +227,12 @@ export function MediaItem({
 
   return (
     <div
+      data-media-tile
+      data-created={media.createdAt}
+      aria-disabled={unavailable || undefined}
       className={cn(
         'group relative flex flex-col border border-borderColor bg-bgColor',
+        unavailable && 'opacity-40',
         // Выбор виден ВЕСОМ, а не цветом (правило системы: цвет носит состояние здоровья, вес —
         // выделение). Обводка, а не второй пиксель рамки: `border-2` менял бы ширину плитки, а
         // высота кадра считается от неё, и ряды дёргались бы на каждом щелчке по чекбоксу.
@@ -271,16 +290,19 @@ export function MediaItem({
         className={cn(
           'relative block w-full cursor-pointer bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
           touch && 'select-none',
+          unavailable && 'cursor-default',
         )}
       >
         <Media
           src={mediaUrl || ''}
           type={video ? 'video' : 'image'}
           alt={mediaUrl || 'media not found'}
+          blurhash={media.media?.blurhash}
           // БЕЗ ШТАТНОГО ПРОИГРЫВАТЕЛЯ В СЕТКЕ. Полоса управления браузера — чужая по языку
           // хрома, к тому же клик по перемотке попадал мимо выбора и мимо открытия.
           controls={false}
-          preload='metadata'
+          preload={loadNow ? 'metadata' : 'none'}
+          load={loadNow}
           muted
           aspectRatio='4/5'
           fit='contain'

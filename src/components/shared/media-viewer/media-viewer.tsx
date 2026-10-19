@@ -21,7 +21,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { Button, Close, Drawer, EmptyCell, FoldCaret } from 'ui';
+import { BlurhashImage, Button, Close, Drawer, EmptyCell, FoldCaret } from 'ui';
 import {
   useImageAdjust,
   useImageAnnotate,
@@ -40,6 +40,8 @@ export interface MediaViewerItem {
   type?: 'image' | 'video';
   /** Accessible label / caption. */
   alt?: string;
+  /** Compact placeholder shown while an image rendition loads. */
+  blurhash?: string;
   /** Short word stamped on the filmstrip thumb (`new`). */
   badge?: string;
   /**
@@ -87,7 +89,8 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
     src,
     thumbnail,
     type: isVideo(src) ? 'video' : 'image',
-    alt: media?.blurhash || '',
+    alt: m.id != null ? `media ${m.id}` : 'media',
+    blurhash: media?.blurhash,
     meta: {
       id: m.id,
       createdAt: m.createdAt,
@@ -543,7 +546,8 @@ export function MediaViewer({
   const ownerTools = tools?.(current, safeIndex) ?? [];
   const barTools = ownerTools.filter((t) => t.place !== 'more');
   const moreTools = ownerTools.filter((t) => t.place === 'more');
-  const currentSize = sizeLine(itemSize(current).width, itemSize(current).height);
+  const currentDimensions = itemSize(current);
+  const currentSize = sizeLine(currentDimensions.width, currentDimensions.height);
   const originalUrl = current.meta?.renditions?.[0]?.url || current.src;
   /** Phone chrome pieces vanish together on a stage tap; desktop never hides them. */
   const chromeClass = chromeHidden ? 'max-lg:hidden' : undefined;
@@ -670,10 +674,13 @@ export function MediaViewer({
                   </div>
                 ) : (
                   <>
-                    <img
+                    <BlurhashImage
                       ref={gestures.imgRef}
                       src={current.src}
+                      blurhash={current.blurhash}
                       alt={current.alt || ''}
+                      width={currentDimensions.width}
+                      height={currentDimensions.height}
                       draggable={false}
                       data-probe='viewer-image'
                       onDoubleClick={gestures.onImageDoubleClick}
@@ -683,7 +690,7 @@ export function MediaViewer({
                       className={cn(
                         // White ground behind the picture: transparent PNGs (background-removed
                         // product shots, sketches) are unreadable on the near-black overlay.
-                        'max-h-[calc(100dvh-14rem)] max-w-full select-none bg-bgColor object-contain lg:max-h-[calc(100vh-11rem)]',
+                        'h-auto w-auto max-h-[calc(100dvh-14rem)] max-w-full select-none bg-bgColor object-contain lg:max-h-[calc(100vh-11rem)]',
                         chromeHidden && 'max-lg:max-h-dvh',
                         gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
                         !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',

@@ -8,7 +8,8 @@ import {
 import { MediaUsage, common_MediaFull } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { type ScrubMonth } from 'ui';
 import { MediaUsageMap } from './media-usage';
 
 const ITEMS_PER_PAGE = 50;
@@ -17,25 +18,34 @@ export const mediaKeys = {
   all: ['media'] as const,
   lists: () => [...mediaKeys.all, 'list'] as const,
   list: (filters: { limit: number; offset: number }) => [...mediaKeys.lists(), filters] as const,
+  // Under `lists`: every list invalidation (upload, delete, recrop) re-counts the months too,
+  // otherwise the scrubber's offsets would index a list that has moved.
+  months: () => [...mediaKeys.lists(), 'months'] as const,
   usage: (bucket: number) => [...mediaKeys.all, 'usage', bucket] as const,
 };
 
-export function useMedia(limit: number = ITEMS_PER_PAGE, offset: number = 0) {
-  return useQuery({
+/** One library page by offset. `useMedia`, the window and the deep walk all share this key. */
+function mediaPageQuery(limit: number, offset: number) {
+  return {
     queryKey: mediaKeys.list({ limit, offset }),
     queryFn: async () => {
       const response = await adminService.ListObjectsPaged({
         limit,
         offset,
-        orderFactor: 'ORDER_FACTOR_DESC',
+        orderFactor: 'ORDER_FACTOR_DESC' as const,
       });
       return response.list || [];
     },
     staleTime: 5 * 60 * 1000,
-  });
+  };
+}
+
+export function useMedia(limit: number = ITEMS_PER_PAGE, offset: number = 0) {
+  return useQuery(mediaPageQuery(limit, offset));
 }
 
 export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
+  const queryClient = useQueryClient();
   return useInfiniteQuery({
     queryKey: mediaKeys.lists(),
     queryFn: async ({ pageParam }: { pageParam: number }) => {
@@ -44,6 +54,9 @@ export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
         offset: pageParam,
         orderFactor: 'ORDER_FACTOR_DESC',
       });
+      // Seed the per-offset page: the phone grid (`useMediaWindow`) reads the same page by that
+      // key and does not ask for it again.
+      queryClient.setQueryData(mediaKeys.list({ limit, offset: pageParam }), response.list || []);
       return {
         media: response.list || [],
         nextOffset: response.list?.length === limit ? pageParam + limit : undefined,
@@ -53,6 +66,123 @@ export function useInfiniteMedia(limit: number = ITEMS_PER_PAGE) {
     initialPageParam: 0,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+/** Library size per calendar month (UTC), newest first: the date scrubber's index. */
+export function useMediaMonths(enabled = true) {
+  return useQuery({
+    queryKey: mediaKeys.months(),
+    queryFn: async (): Promise<ScrubMonth[]> => {
+      const response = await adminService.ListMediaMonths({});
+      return (response.months ?? [])
+        .map((m) => ({ year: m.year ?? 0, month: m.month ?? 0, count: m.count ?? 0 }))
+        .filter((m) => m.year > 0 && m.month >= 1 && m.month <= 12);
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Item range the grid shows, inclusive. */
+export type MediaRange = { start: number; end: number };
+
+export type MediaWindow = {
+  /** The item at this list offset, or undefined while its page is not here. */
+  itemAt: (index: number) => common_MediaFull | undefined;
+  /** Every page fetched so far, newest first and deduplicated; pages may have gaps between them. */
+  loaded: common_MediaFull[];
+  /** List offset of a loaded item. */
+  indexOf: (id: number | undefined) => number | undefined;
+  /**
+   * The unbroken run of loaded pages that holds this list offset, in list order. The viewer walks
+   * this run only: stepping across a gap would skip hundreds of items without saying so.
+   */
+  runAround: (index: number) => common_MediaFull[];
+};
+
+/** Declared outside the hook: `useQueries` keeps the combined result only for a stable function. */
+function combinePages(results: { data?: common_MediaFull[] }[]) {
+  return results.map((r) => r.data);
+}
+
+/**
+ * Sparse window over the library for a grid that knows the total up front (from the months).
+ *
+ * Fixed pages of 50 at offsets k*50, keyed exactly like `useMedia(50, offset)`, so the cache is
+ * shared with every other reader. Only pages that meet `range` ± one page are fetched; a jump to
+ * the oldest month asks for the two or three pages around it, not for everything in between.
+ * Pages seen earlier stay subscribed (not fetched) so the viewer and usage keep their items.
+ */
+export function useMediaWindow(
+  total: number,
+  range: MediaRange | null,
+  enabled = true,
+): MediaWindow {
+  const size = ITEMS_PER_PAGE;
+  const last = Math.ceil(total / size) - 1;
+  const from = range ? Math.max(0, Math.floor((range.start - size) / size)) : 0;
+  const to = range && enabled ? Math.min(last, Math.floor((range.end + size) / size)) : -1;
+
+  const [seen, setSeen] = useState<number[]>([]);
+  let grown = seen;
+  for (let p = from; p <= to; p++) if (!grown.includes(p)) grown = [...grown, p];
+  if (grown !== seen) setSeen([...grown].sort((a, b) => a - b));
+
+  const pagesOn = seen.filter((p) => p <= last);
+  const pages = useQueries({
+    queries: pagesOn.map((p) => ({
+      ...mediaPageQuery(size, p * size),
+      enabled: enabled && p >= from && p <= to,
+    })),
+    combine: combinePages,
+  });
+
+  const pagesKey = pagesOn.join(',');
+  return useMemo(() => {
+    const byPage = new Map<number, common_MediaFull[]>();
+    pagesKey
+      .split(',')
+      .filter(Boolean)
+      .forEach((p, i) => {
+        const data = pages[i];
+        if (data) byPage.set(Number(p), data);
+      });
+    // A delete or an upload shifts every later page by one, and a page not yet refetched can
+    // repeat an item of its neighbour: every id holds one slot, the first one (newest page wins).
+    const slots = new Map<number, common_MediaFull>();
+    const indexById = new Map<number, number>();
+    const loaded: common_MediaFull[] = [];
+    for (const p of [...byPage.keys()].sort((a, b) => a - b)) {
+      (byPage.get(p) ?? []).forEach((m, i) => {
+        if (m.id == null || indexById.has(m.id)) return;
+        const at = p * size + i;
+        slots.set(at, m);
+        indexById.set(m.id, at);
+        loaded.push(m);
+      });
+    }
+    const runAround = (index: number) => {
+      const p0 = Math.floor(index / size);
+      if (!byPage.has(p0)) return [];
+      let lo = p0;
+      while (byPage.has(lo - 1)) lo--;
+      let hi = p0;
+      // A short page is the last one: nothing after it belongs to the same run.
+      while (byPage.has(hi + 1) && (byPage.get(hi)?.length ?? 0) === size) hi++;
+      const run: common_MediaFull[] = [];
+      for (let at = lo * size; at < (hi + 1) * size; at++) {
+        const m = slots.get(at);
+        if (m) run.push(m);
+      }
+      return run;
+    };
+    return {
+      itemAt: (index: number) => slots.get(index),
+      loaded,
+      indexOf: (id: number | undefined) => (id == null ? undefined : indexById.get(id)),
+      runAround,
+    };
+  }, [pagesKey, pages, size]);
 }
 
 // id → MediaFull map over the most-recent `limit` library items. Used to resolve media
@@ -75,20 +205,7 @@ export const MEDIA_WINDOW = 500;
 const DEEP_MAX_PAGES = 20;
 
 /** Same request + cache key as `useMedia(limit, offset)`, so a walked page is shared with it. */
-function libraryPageQuery(offset: number) {
-  return {
-    queryKey: mediaKeys.list({ limit: MEDIA_WINDOW, offset }),
-    queryFn: async () => {
-      const response = await adminService.ListObjectsPaged({
-        limit: MEDIA_WINDOW,
-        offset,
-        orderFactor: 'ORDER_FACTOR_DESC' as const,
-      });
-      return response.list || [];
-    },
-    staleTime: 5 * 60 * 1000,
-  };
-}
+const libraryPageQuery = (offset: number) => mediaPageQuery(MEDIA_WINDOW, offset);
 
 const EMPTY_KNOWN: ReadonlyMap<number, common_MediaFull> = new Map();
 
