@@ -36,6 +36,7 @@ import { closeCorners, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
+import { textLabelLookOrder } from './look-order';
 import { ladderMarkMoves, ocgLookMoves, type OcgLookMove } from './ocg-ladder';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
 
@@ -978,6 +979,36 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
           else if (own >= 0) vote(c, own, 0.5);
         }
       });
+    }
+    // SIZESEP (sizes/look-order.ts): every size in a look of its own — the looks are ranked as a
+    // whole where their order across the sheet, the inside vote and the labels beside the look
+    // lines agree; then each look's chains vote its rank in every section they cross (the inside
+    // guess of one section no longer decides alone)
+    if (!debugFlag('SIZESEP_OFF') && labels.length === n) {
+      const lo = textLabelLookOrder(
+        chains,
+        groups.map((g) => ({ units: g.group.units, from: g.x.from })),
+        unit,
+        nUnits,
+        n,
+        rankOfLabel,
+        allTexts,
+      );
+      diag.lookOrder = lo.why;
+      const lr = lo.rank;
+      if (lr) {
+        for (const g of groups)
+          for (const k of g.lanes)
+            for (const c of g.x.lanes[k])
+              if (unit[c] >= 0 && lr[unit[c]] >= 0) vote(c, lr[unit[c]], 1);
+        for (const c of [...votes.keys()])
+          if (unit[c] >= 0 && lr[unit[c]] >= 0) vote(c, lr[unit[c]], 4);
+        lr.forEach((r, u) => {
+          if (r < 0) return;
+          unitRank[u] = r;
+          unitPurity[u] = 1;
+        });
+      }
     }
     for (const [c, ls] of hitByChain) for (const l of ls) vote(c, rankOfLabel.get(l)!, 3);
     settle(0.5);
