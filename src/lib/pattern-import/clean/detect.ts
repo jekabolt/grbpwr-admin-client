@@ -365,6 +365,13 @@ export function textLines(
      * it took).
      */
     growMinFrac?: number;
+    /**
+     * LEAKS-2 · outline lettering is drawn as CLOSED outlines: with this (which chains are closed)
+     * a row is lettering only when at least `OUTLINED_MIN` of its glyphs are closed (every stroke
+     * end meets another end of the same glyph). A row of open pieces is line work cut at the tile
+     * seams (Mood: 0 of 4–6 glyphs closed), not lettering (PAPAVERO: 8–12 of 13).
+     */
+    closed?: (i: number) => boolean;
   },
   keep: (i: number) => boolean = () => true,
 ): GlyphRun[] {
@@ -401,17 +408,30 @@ export function textLines(
     clusters,
   );
   // the letters of a word stand side by side: a "row" whose glyphs overlap along it is a bundle of
-  // nested lines cut at the tile seams (a fan of size lines 10 mm apart), not lettering
-  const lettering = runs.map((r) => !bundled(r));
+  // nested lines cut at the tile seams (a fan of size lines 10 mm apart), not lettering — unless
+  // its glyphs are mostly closed outlines (tightly kerned display lettering overlaps too)
+  const isClosed = o.closed;
+  const lettering = runs.map((r) => {
+    if (!isClosed) return !bundled(r);
+    const sh = outlined(r, polys, isClosed);
+    return sh >= OUTLINED_MIN && (sh >= OUTLINED_BUNDLE || !bundled(r));
+  });
+  // and of a lettering row only the outline-like clusters are masked: an open piece of line work
+  // lined up with the letters (a size line cut at a seam) stays (a letter drawn with a small gap
+  // between its strokes is still taken)
+  const letterLike = (c: GlyphCluster, h: number) =>
+    !isClosed || endGap(c.ids, polys, isClosed) <= Math.max(GLYPH_END_MM, MEMBER_END_FRAC * h);
   const rows = runs.filter((_, k) => lettering[k]);
   for (const r of rows) {
     const core = new Set(r.glyphs);
-    r.members = r.members.filter((c) => core.has(c) || part(c, r.heightMm));
+    r.members = r.members.filter(
+      (c) => (core.has(c) || part(c, r.heightMm)) && letterLike(c, r.heightMm),
+    );
   }
   const grown = growLines(rows, clusters, part);
   const allowed = wide.filter((_, k) => lettering[k]).map((r) => new Set(r.members));
   grown.forEach((r, k) => {
-    r.members = r.members.filter((c) => allowed[k].has(c));
+    r.members = r.members.filter((c) => allowed[k].has(c) && letterLike(c, r.heightMm));
     r.box = {
       minX: Math.min(...r.members.map((c) => c.minX)),
       minY: Math.min(...r.members.map((c) => c.minY)),
@@ -437,6 +457,57 @@ function bundled(r: GlyphRun): boolean {
     ov.push(Math.max(0, Math.min(g[i - 1][1], g[i][1]) - g[i][0]) / r.heightMm);
   ov.sort((a, b) => a - b);
   return ov.length > 0 && ov[Math.floor(ov.length / 2)] >= 0.08;
+}
+
+/** LEAKS-2 · the share of a row's glyphs that must be closed outlines (see `textLines` closed). */
+export const OUTLINED_MIN = 0.4;
+/** With this share closed a row is lettering even when its glyphs overlap along it (kerning). */
+export const OUTLINED_BUNDLE = 0.6;
+/** Two stroke ends of a glyph meet within this, mm (an outline drawn in pieces end to end). */
+const GLYPH_END_MM = 1.0;
+/** A cluster of a lettering row is masked when its ends meet within this share of the height. */
+const MEMBER_END_FRAC = 0.1;
+
+/**
+ * The widest gap at a stroke end of a cluster: per open end the distance to the nearest other end
+ * of the same cluster, the largest of them (0: closed — a closed chain has no ends).
+ */
+function endGap(
+  ids: readonly number[],
+  polys: readonly (readonly PtMm[])[],
+  closed: (i: number) => boolean,
+): number {
+  const ends: PtMm[] = [];
+  for (const i of ids) {
+    const p = polys[i];
+    if (closed(i) || p.length < 2) continue;
+    ends.push(p[0], p[p.length - 1]);
+  }
+  let worst = 0;
+  ends.forEach((e, k) => {
+    let best = Infinity;
+    ends.forEach((x, j) => {
+      if (j !== k) best = Math.min(best, dist(x, e));
+    });
+    worst = Math.max(worst, best);
+  });
+  return worst;
+}
+
+/**
+ * LEAKS-2 · the share of the row's glyphs that are closed outlines: every end of an open stroke
+ * meets another end of the same glyph (a closed chain has none). An outline letter, even drawn in
+ * several pieces, is closed; a piece of a size line cut at a tile seam leaves its ends open.
+ */
+export function outlined(
+  r: GlyphRun,
+  polys: readonly (readonly PtMm[])[],
+  closed: (i: number) => boolean,
+): number {
+  if (!r.glyphs.length) return 0;
+  let n = 0;
+  for (const g of r.glyphs) if (endGap(g.ids, polys, closed) <= GLYPH_END_MM) n++;
+  return n / r.glyphs.length;
 }
 
 /**

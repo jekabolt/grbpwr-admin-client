@@ -275,6 +275,54 @@ function fanParts(kind: 'one path' | 'two strokes'): Part[] {
   return parts;
 }
 
+/**
+ * Pieces of size lines cut at the tile seams, lined up like a word (Mood Jolie / Memoir C): letter
+ * high, side by side without overlapping, widths differ, each an OPEN curve drawn in three strokes
+ * end to end — never lettering. `closedK` of them are closed instead (a mutation: real outlines).
+ */
+function fragmentParts(H: number, pen: 'black' | 'grey', closedK = 0): Part[] {
+  const parts: Part[] = [];
+  let x = 0;
+  const ws = [0.62, 0.4, 0.75, 0.5, 0.58, 0.45];
+  ws.forEach((wf, k) => {
+    const w = wf * H;
+    // an arc bulging right, then a hook: open, ends far apart
+    const pts: PtMm[] = Array.from({ length: 31 }, (_, i) => {
+      const t = i / 30;
+      return { x: x + w * Math.sin(Math.PI * t) * (0.6 + 0.4 * t), y: H * t };
+    });
+    const P = (q: PtMm[], closedOne: boolean) =>
+      parts.push({
+        pts: q,
+        closed: false,
+        grey: pen === 'grey',
+        letter: closedOne,
+        what: closedOne ? 'outline' : 'fragment',
+      });
+    if (k < closedK) {
+      // a closed outline in three strokes end to end
+      const ring = [
+        ...pts,
+        ...pts
+          .slice(1, -1)
+          .reverse()
+          .map((q) => ({ x: q.x - 0.25 * w, y: q.y })),
+        pts[0],
+      ];
+      const n = ring.length - 1;
+      const cuts = [0, Math.floor(n / 3), Math.floor((2 * n) / 3), n];
+      for (let j = 0; j < 3; j++) P(ring.slice(cuts[j], cuts[j + 1] + 1), true);
+    } else {
+      // an open curve met by a tick (the junction splits it: three strokes, three loose ends)
+      P(pts.slice(0, 16), false);
+      P(pts.slice(15), false);
+      P([pts[15], { x: pts[15].x + 0.3 * w, y: pts[15].y + 0.05 * H }], false);
+    }
+    x += w + 0.35 * H;
+  });
+  return parts;
+}
+
 type Res = { lettersLeft: string[]; linesMasked: string[]; rows: number };
 
 function run(parts: Part[]): Res {
@@ -339,12 +387,14 @@ export async function main(): Promise<number> {
         `H${H} lettering alone: found and masked whole (left: ${r.lettersLeft.join(',') || '-'})`,
       );
     }
-    // 0b · tightly kerned lettering (every pair tucked 5 % of the height): still lettering, masked
-    {
-      const r = run(letters(0, 0, H, -0.05));
+    // 0b · tightly kerned lettering (every pair tucked 5–10 % of the height, display tracking):
+    // still lettering — its glyphs are closed outlines — masked (15 % at 25 mm: the row grammar
+    // never found it, before LEAKS-2 either)
+    for (const kern of [0.05, 0.1]) {
+      const r = run(letters(0, 0, H, -kern));
       say(
         r.rows > 0 && !r.lettersLeft.length,
-        `H${H} kerned lettering (pairs overlap 5 % of h): found and masked whole (left: ${r.lettersLeft.join(',') || '-'})`,
+        `H${H} kerned lettering (pairs overlap ${kern * 100} % of h): found and masked whole (left: ${r.lettersLeft.join(',') || '-'})`,
       );
     }
     // 1 · every size-line kind through the band and beside it, black and in the watermark's grey
@@ -406,6 +456,38 @@ export async function main(): Promise<number> {
     say(
       !r.linesMasked.length,
       `fan of nested lines (${kind}, pieces overlapping along): nothing masked (${r.linesMasked.length} masked, ${r.rows} rows)`,
+    );
+  }
+  // 6 · pieces of size lines cut at the tile seams, lined up like a word (Mood: Jolie, Memoir C,
+  // Madison): open curves, not outlines — never a row of letters, nothing masked (both pens)
+  for (const H of [30, 60])
+    for (const pen of ['black', 'grey'] as const) {
+      const r = run(fragmentParts(H, pen));
+      say(
+        !r.linesMasked.length,
+        `H${H} open pieces lined up like a word (${pen}): nothing masked (${r.linesMasked.length} masked, ${r.rows} rows)`,
+      );
+    }
+  // 6b · the honesty side: the same row with most pieces closed outlines is lettering — the
+  // outlines masked, the open pieces lined up with them stay line work
+  {
+    const r = run(fragmentParts(60, 'grey', 4));
+    say(
+      r.rows > 0 && !r.lettersLeft.length && !r.linesMasked.length,
+      `H60 mutation 4 of 6 pieces closed (outlines): a row, the outlines masked (left: ${r.lettersLeft.length}), the open pieces kept (masked: ${r.linesMasked.length})`,
+    );
+  }
+  // 6c · lettering with one letter outline broken (a 2 mm gap): still lettering, the rest masked
+  {
+    const parts = letters(0, 0, 60);
+    const iE = parts.findIndex((p) => p.what === 'E');
+    const e = parts[iE];
+    parts[iE] = { ...e, pts: e.pts.slice(0, -1) };
+    const r = run(parts);
+    const left = r.lettersLeft.filter((w) => w !== 'E');
+    say(
+      r.rows > 0 && !left.length,
+      `H60 mutation one outline broken: still a row, the other letters masked (left: ${left.join(',') || '-'})`,
     );
   }
   // 4 · letters too small for a watermark: nothing masked by the sheet pass's lettering
