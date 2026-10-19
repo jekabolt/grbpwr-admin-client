@@ -155,8 +155,7 @@ export function TaskDetail() {
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select'))
-      return;
+    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
     // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
     window.getSelection()?.removeAllRanges();
     setEditingDescription(true);
@@ -651,14 +650,35 @@ export function TaskDetail() {
                        `seen` приходит ОТ ПИКЕРА, а не берётся из живого `t.assignees`: пока
                        пикер открыт, чужая правка доезжает в кэш незаметно, и сверка с живым
                        сравнивала бы чужую правку саму с собой. */
-                    <div className={FIELD_CONTROL}>
-                      <AssigneesPicker
-                        value={t.assignees}
-                        disabled={inlinePatch.isPending}
-                        onChange={(next, seen) =>
-                          patchInline({ assignees: next }, { assignees: seen })
-                        }
-                      />
+                    <div className='flex w-full min-w-0 items-center gap-2'>
+                      <div className={cn(FIELD_CONTROL, 'min-w-0 flex-1')}>
+                        <AssigneesPicker
+                          value={t.assignees}
+                          disabled={inlinePatch.isPending}
+                          onChange={(next, seen) =>
+                            patchInline({ assignees: next }, { assignees: seen })
+                          }
+                        />
+                      </div>
+                      {/* Себе в один тап — без открытия пикера. */}
+                      {account?.username && !isMine && (
+                        <Button
+                          type='button'
+                          variant='underline'
+                          size='xs'
+                          aria-label='assign to me'
+                          disabled={inlinePatch.isPending}
+                          onClick={() =>
+                            patchInline(
+                              { assignees: [...t.assignees, account.username!] },
+                              { assignees: t.assignees },
+                            )
+                          }
+                          className='min-h-11 shrink-0 text-labelColor hover:text-textColor sm:min-h-0'
+                        >
+                          + me
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <span className='flex items-center justify-end gap-1.5'>

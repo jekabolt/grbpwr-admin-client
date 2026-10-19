@@ -3,6 +3,7 @@ import type { LibraryFile } from 'api/proto-http/admin';
 import { filesService } from 'components/managers/files/api/filesService';
 import { filesKeys } from 'components/managers/files/hooks/useFiles';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { addDays, format, startOfDay } from 'date-fns';
 import { cn } from 'lib/utility';
@@ -173,41 +174,50 @@ export function AssigneesPick({
   const names = [...admins, ...value.filter((n) => !known.has(n))];
   const toggle = (name: string) =>
     onChange(value.includes(name) ? value.filter((n) => n !== name) : [...value, name]);
+  const me = usePermissions().account?.username;
 
   return (
-    <PickerSheet
-      phone={phone}
-      open={open}
-      onOpenChange={setOpen}
-      title='assignees'
-      trigger={
-        <Chip
-          onClick={() => {}}
-          className={cn(PROP, value.length > 0 && SET)}
-          aria-label='assignees'
-        >
-          <AvatarStack names={value} size={16} />
-          <span className='max-w-[16ch] truncate'>
-            {value.length ? value.join(', ') : 'assignee'}
-          </span>
-        </Chip>
-      }
-    >
-      {names.length === 0 && (
-        <Text size='micro' variant='label' component='p' className='px-4 py-2 md:px-1'>
-          {isError ? 'people list failed' : 'nobody to pick'}
-        </Text>
-      )}
-      {names.map((name) => (
-        <OptionRow key={name} selected={value.includes(name)} onClick={() => toggle(name)}>
-          <AvatarStack names={[name]} size={20} />
-          <span className='min-w-0 truncate'>{name}</span>
+    <>
+      <PickerSheet
+        phone={phone}
+        open={open}
+        onOpenChange={setOpen}
+        title='assignees'
+        trigger={
+          <Chip
+            onClick={() => {}}
+            className={cn(PROP, value.length > 0 && SET)}
+            aria-label='assignees'
+          >
+            <AvatarStack names={value} size={16} />
+            <span className='max-w-[16ch] truncate'>
+              {value.length ? value.join(', ') : 'assignee'}
+            </span>
+          </Chip>
+        }
+      >
+        {names.length === 0 && (
+          <Text size='micro' variant='label' component='p' className='px-4 py-2 md:px-1'>
+            {isError ? 'people list failed' : 'nobody to pick'}
+          </Text>
+        )}
+        {names.map((name) => (
+          <OptionRow key={name} selected={value.includes(name)} onClick={() => toggle(name)}>
+            <AvatarStack names={[name]} size={20} />
+            <span className='min-w-0 truncate'>{name}</span>
+          </OptionRow>
+        ))}
+        <OptionRow onClick={() => setOpen(false)} className='justify-center uppercase'>
+          done
         </OptionRow>
-      ))}
-      <OptionRow onClick={() => setOpen(false)} className='justify-center uppercase'>
-        done
-      </OptionRow>
-    </PickerSheet>
+      </PickerSheet>
+      {/* Себе в один тап — без открытия списка. */}
+      {me && !value.includes(me) && (
+        <Chip onClick={() => onChange([...value, me])} className={PROP} aria-label='assign to me'>
+          + me
+        </Chip>
+      )}
+    </>
   );
 }
 
