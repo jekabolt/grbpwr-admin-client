@@ -248,10 +248,10 @@ export function Button({
       {...props}
       {...typeProps}
       {...busyProps}
+      // twMerge only for done: its skin must beat the variant's bg, text and edge.
       className={
         hasDone
-          ? // twMerge here only, so the done skin beats the variant's own bg / text / edge.
-            cn(
+          ? cn(
               buttonVariants({ variant, isLoading: loading, size }),
               'transition-colors duration-150 ease-out motion-reduce:transition-none',
               isDone && DONE_CLASS[variant ?? 'default'],
