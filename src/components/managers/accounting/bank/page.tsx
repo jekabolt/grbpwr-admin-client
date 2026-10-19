@@ -1,7 +1,7 @@
 import { AcctBankTxn } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { Button, ConfirmationModal, Text } from 'ui';
+import { Button, ConfirmationModal, Text, EmptyCell } from 'ui';
 import { EntryDetailModal } from '../components/entry-detail-modal';
 import { Callout, GroupHeader, Note, Pill, RowLine, Verdict } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
@@ -83,7 +83,7 @@ function ToFileCard({
       </p>
       <div className='mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px]'>
         <span className='uppercase tracking-wide'>
-          {txn.bookedAt ? formatAcctDate(txn.bookedAt) : '—'}
+          {txn.bookedAt ? formatAcctDate(txn.bookedAt) : <EmptyCell />}
         </span>
         {txn.counterparty && txn.description ? (
           <span className='break-words'>{txn.description}</span>
@@ -152,11 +152,13 @@ function HandledRow({
       className={cn(ignored && 'text-labelColor')}
       label={
         <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5'>
-          <Pill tone={pillTone}>{txn.state || '—'}</Pill>
+          <Pill tone={pillTone}>{txn.state || <EmptyCell />}</Pill>
           <span className='whitespace-nowrap text-[11px] uppercase tracking-wide text-labelColor'>
-            {txn.bookedAt ? formatAcctDate(txn.bookedAt) : '—'}
+            {txn.bookedAt ? formatAcctDate(txn.bookedAt) : <EmptyCell />}
           </span>
-          <span className='break-words'>{txn.counterparty || txn.description || '—'}</span>
+          <span className='break-words'>
+            {txn.counterparty || txn.description || <EmptyCell />}
+          </span>
           {reason ? (
             <span className='break-words text-[11px] italic text-labelColor'>“{reason}”</span>
           ) : null}
@@ -178,7 +180,7 @@ function HandledRow({
               post
             </Button>
           ) : (
-            <span className='text-labelColor'>—</span>
+            <EmptyCell />
           )}
         </span>
       }

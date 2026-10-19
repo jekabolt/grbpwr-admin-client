@@ -7,7 +7,7 @@ import { stageLabel } from 'components/managers/tech-cards/components/utils';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
-import { Button, Input, Row, Text } from 'ui';
+import { Button, Close, Input, Row, Text } from 'ui';
 import { FittingFormData } from './schema';
 
 // The list endpoint returns lightweight list items (flat header fields); GetTechCard
@@ -102,11 +102,7 @@ export function TechCardField() {
               </Text>
             </div>
           }
-          value={
-            <Button type='button' variant='secondary' aria-label='clear tech card' onClick={clear}>
-              ✕
-            </Button>
-          }
+          value={<Close size='sm' aria-label='clear tech card' onClick={clear} />}
         />
       ) : (
         <Text variant='inactive' size='small'>

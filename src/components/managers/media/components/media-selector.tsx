@@ -3,7 +3,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Pill, RatioGlyph, Text } from 'ui';
+import { Button, Close, Pill, RatioGlyph, Text } from 'ui';
 import { MediaManager } from '..';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
 import { mergeQueue } from '../utils/intake-queue';
@@ -414,9 +414,7 @@ export function MediaSelector({
 
             <div className='ml-auto flex items-center gap-2'>
               <DialogPrimitive.Close asChild>
-                <Button className='py-1' aria-label='close'>
-                  ×
-                </Button>
+                <Close />
               </DialogPrimitive.Close>
             </div>
           </div>
@@ -492,17 +490,15 @@ export function MediaSelector({
                         alt=''
                         className='size-10 border border-borderColor bg-bgZebra object-cover'
                       />
-                      <button
-                        type='button'
+                      <Close
+                        size='sm'
                         aria-label={`remove ${m.id} from the tray`}
                         // Снимается ЗДЕСЬ, и сетка узнаёт об этом сразу: набор у неё тот же самый.
                         onClick={() =>
                           setSelectedMedia((prev) => prev.filter((x) => x.id !== m.id))
                         }
-                        className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:bg-textColor hover:text-bgColor'
-                      >
-                        ×
-                      </button>
+                        className='absolute -right-1 -top-1 bg-bgColor'
+                      />
                     </span>
                   ))}
                 </div>

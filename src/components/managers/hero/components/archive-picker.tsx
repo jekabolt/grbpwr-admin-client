@@ -3,7 +3,7 @@
 import { common_ArchiveList } from 'api/proto-http/admin';
 import { useInfiniteArchives } from 'components/managers/archives/components/useArchiveQuery';
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
-import { Button, Input, Media, Text } from 'ui';
+import { Button, Input, Media, Text, EmptyCell } from 'ui';
 import { HeroModal } from './hero-modal';
 
 interface Props {
@@ -115,10 +115,10 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                       )}
                     </td>
                     <td className='border border-textInactiveColor p-2'>
-                      <Text>{archive.tag || '-'}</Text>
+                      <Text>{archive.tag || <EmptyCell />}</Text>
                     </td>
                     <td className='border border-textInactiveColor p-2'>
-                      <Text>{archive.translations?.[0]?.heading || '-'}</Text>
+                      <Text>{archive.translations?.[0]?.heading || <EmptyCell />}</Text>
                     </td>
                   </tr>
                 );

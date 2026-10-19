@@ -1,6 +1,6 @@
 import { AcctAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Text, Tooltip } from 'ui';
+import { Text, Tooltip, EmptyCell } from 'ui';
 import { Pill } from '../../components/kit';
 
 type Props = {
@@ -57,10 +57,10 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                 </td>
                 <td className='px-2 uppercase'>{a.statement}</td>
                 <td className='px-2'>
-                  <Text variant='inactive'>{a.isSystem ? 'system' : '—'}</Text>
+                  <Text variant='inactive'>{a.isSystem ? 'system' : <EmptyCell />}</Text>
                 </td>
                 <td className='px-2'>
-                  <Text variant='inactive'>{a.archived ? 'archived' : '—'}</Text>
+                  <Text variant='inactive'>{a.archived ? 'archived' : <EmptyCell />}</Text>
                 </td>
                 <td className='px-2 text-right'>
                   {a.isSystem ? (
@@ -93,7 +93,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                       </button>
                     </div>
                   ) : (
-                    <Text variant='inactive'>—</Text>
+                    <EmptyCell />
                   )}
                 </td>
               </tr>

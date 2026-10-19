@@ -43,11 +43,11 @@ export function CutBlockers({ blockers }: { blockers: RpCutBlocker[] }) {
   if (blockers.length === 0) return null;
   return (
     <CalloutBox tone='error' className='space-y-1'>
-      <Text component='p' className='uppercase'>
+      <Text size='reading' component='p' className='uppercase'>
         <b>stop — {blockers.length} piece × colourway not linked to an article</b>
       </Text>
       {blockers.map((b, i) => (
-        <Text key={`${b.piece_id ?? 0}-${b.colorway_id ?? 0}-${i}`} component='p'>
+        <Text size='reading' key={`${b.piece_id ?? 0}-${b.colorway_id ?? 0}-${i}`} component='p'>
           {(b.piece_name ?? '').trim() || `piece #${b.piece_id}`} ·{' '}
           {(b.colorway_name ?? '').trim() || `colourway #${b.colorway_id}`} — {b.garments ?? 0}{' '}
           garments:{' '}
@@ -81,7 +81,7 @@ export function CutList({
   if (rows.length === 0) {
     return (
       <div className='space-y-2.5'>
-        <Text component='p'>{empty}</Text>
+        <Text size='reading' component='p'>{empty}</Text>
         {caveats.map((c, i) => (
           <Text key={i} size='micro' variant='label' component='p'>
             · {c}
@@ -154,7 +154,7 @@ export function CutList({
                     объясняет, как связаны между собой эти n панелей, и только. */}
                 <td>
                   <Text size='stat' component='p'>
-                    {r.pieces_per_garment ?? '—'}
+                    {r.pieces_per_garment ?? <EmptyCell />}
                   </Text>
                   {badge ? (
                     <div className='mt-0.5'>

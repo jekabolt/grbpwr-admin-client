@@ -1,6 +1,7 @@
 import { markAlertBeingRead, muteRepeats, useSnackBarStore } from 'lib/stores/store';
 import { Alert } from 'lib/stores/store-types';
 import { useEffect, useRef, useState } from 'react';
+import { Close } from 'ui';
 
 /**
  * HOW LONG A TOAST STAYS, BY WHAT IT IS. One flat 6s was wrong in both directions at once: a
@@ -249,9 +250,9 @@ export function SnackBar() {
           className='flex w-full shrink-0 items-center justify-between px-3 py-1 text-micro uppercase tracking-label text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-bgColor'
         >
           <span>dismiss all</span>
-          {/* Sits in the same 24px gutter as every row's ✕, so the column has one close edge. */}
+          {/* Decorative echo of the named bulk action; the row close controls above use `Close`. */}
           <span aria-hidden='true' className='flex w-6 justify-center'>
-            ✕
+            {'✕'}
           </span>
         </button>
       ) : null}
@@ -373,18 +374,15 @@ function ToastItem({
           multiplication sign, a different glyph for a different job. `aria-label` is the control's
           only name — a `title` would have added a second, competing one plus a tooltip over the
           prose the operator is reading. */}
-      <button
-        type='button'
+      <Close
         data-toast-close=''
         aria-label='Dismiss notification'
         onClick={(e) => {
           e.stopPropagation();
           closeMessage(id);
         }}
-        className='-my-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-none leading-none transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-bgColor'
-      >
-        ✕
-      </button>
+        className='-my-2 text-bgColor hover:no-underline hover:opacity-70 focus-visible:-outline-offset-2 focus-visible:outline-bgColor'
+      />
     </div>
   );
 }

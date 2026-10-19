@@ -9,7 +9,9 @@ import { compositionToValue } from 'components/managers/product/components/compo
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import {
+  addDoorClass,
   Button,
+  Close,
   ConfirmationModal,
   DataTable,
   EmptyCell,
@@ -282,7 +284,7 @@ export function MaterialSlots({
         const family = e.target.value as Family | '';
         if (family) addSlot(family);
       }}
-      className='block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      className={cn(addDoorClass(), 'block cursor-pointer appearance-none')}
     >
       <option value=''>+ add a slot ▾</option>
       {FAMILY_ORDER.map((family) => (
@@ -831,10 +833,9 @@ function SlotRow({
               есть на вкладке BOM; здесь достаточно НАЗВАТЬ причину и оставить `›` — переход это не
               запись, и он ведёт ровно туда, где отказ разрешается. */}
           {!readOnly && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
+            <Close
+              size='sm'
+              aria-label='remove material slot'
               disabled={blocked}
               data-b16-remove={index}
               data-inert={
@@ -846,9 +847,7 @@ function SlotRow({
                   : 'remove this slot'
               }
               onClick={() => onRemove(index)}
-            >
-              ✕
-            </Button>
+            />
           )}
         </div>
       </td>
@@ -898,16 +897,14 @@ function FibreField({ index, raw, readable }: { index: number; raw: string; read
           {readable || raw || 'not stated'}
         </Text>
         {!!raw && (
-          <button
-            type='button'
+          <Close
+            size='sm'
             data-b16-fiber-clear={index}
             title='clear the composition'
             aria-label='clear the composition'
             onClick={() => write('')}
-            className='flex shrink-0 items-center px-2 text-textBaseSize text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-          >
-            ✕
-          </button>
+            className='focus-visible:-outline-offset-2'
+          />
         )}
         <button
           type='button'

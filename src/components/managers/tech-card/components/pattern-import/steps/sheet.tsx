@@ -10,7 +10,7 @@ import { holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import type { GridOverride, MissingCell, PagePose, BoxMm } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
-import { Button, CalloutBox, Chip, DataTable, GroupLabel, Row, Text } from 'ui';
+import { Button, CalloutBox, Chip, DataTable, GroupLabel, Row, Text, EmptyCell } from 'ui';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
@@ -762,7 +762,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
               </DataTable>
             )}
             <Row label='tiles placed' value={sheet.poses.length} />
-            <Row label='missing tiles' value={missing || '—'} />
+            <Row label='missing tiles' value={missing || <EmptyCell />} />
             <Row label='worst loop closure' value={fmtMm(worst)} />
             <Row label='limit' value={fmtMm(PATIMPORT.registrationMaxResidualMm, 1)} />
             {sheet.overview && (
@@ -810,7 +810,7 @@ export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }
                         <td>{p.score}</td>
                         <td className={low ? 'text-warning' : undefined}>
                           {low ? '! ' : ''}
-                          {p.score > 0 ? p.secondBestRatio.toFixed(2) : '—'}
+                          {p.score > 0 ? p.secondBestRatio.toFixed(2) : <EmptyCell />}
                         </td>
                       </tr>
                     );

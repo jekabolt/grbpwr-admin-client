@@ -3,7 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState, type ReactNode } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { CalloutBox, ConfirmationModal, GroupLabel, Row, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, GroupLabel, Row, Text, EmptyCell, Close } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { useColorwayDeletionPreview, useDeleteColorway } from './useColorwayRecipe';
 
@@ -34,12 +34,12 @@ function EntryRow({ entry }: { entry: ColorwayDeletionEntry }) {
     <Row
       label={
         <Text size='micro' component='span'>
-          {entry.text?.trim() || entry.reason || '—'}
+          {entry.text?.trim() || entry.reason || <EmptyCell />}
         </Text>
       }
       value={
         <Text size='micro' variant='label' component='span'>
-          {count > 0 ? count : '—'}
+          {count > 0 ? count : <EmptyCell />}
         </Text>
       }
     />
@@ -144,28 +144,45 @@ export function ColorwayDeleteControl({
           СПЕЦИФИКАЦИЮ стиля (BOM, детали, операции), а удаление ничего в спецификации не трогает:
           оно убирает продукт, который на неё ссылается. Поэтому гейт здесь — право на ПРОДУКТЫ, а
           не canEdit тех-карты (тот содержит `!frozen` и закрыл бы ровно нужный случай). */}
-      <span
-        role='button'
-        tabIndex={0}
-        aria-label={`delete product ${code} irreversibly`}
-        onClick={openDialog}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openDialog();
+      {trigger === '✕' ? (
+        <Close
+          asChild
+          size='sm'
+          tabIndex={0}
+          aria-label={`delete product ${code} irreversibly`}
+          onClick={openDialog}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openDialog();
+            }
+          }}
+          className={triggerClassName}
+        />
+      ) : (
+        <span
+          role='button'
+          tabIndex={0}
+          aria-label={`delete product ${code} irreversibly`}
+          onClick={openDialog}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openDialog();
+            }
+          }}
+          className={
+            triggerClassName ??
+            'cursor-pointer self-start underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
           }
-        }}
-        className={
-          triggerClassName ??
-          'cursor-pointer self-start underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-        }
-      >
-        {trigger ?? (
-          <Text size='micro' variant='error' tracking='label' component='span'>
-            delete product
-          </Text>
-        )}
-      </span>
+        >
+          {trigger ?? (
+            <Text size='micro' variant='error' tracking='label' component='span'>
+              delete product
+            </Text>
+          )}
+        </span>
+      )}
 
       <ConfirmationModal
         open={open}

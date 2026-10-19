@@ -5,7 +5,7 @@ import { cn } from 'lib/utility';
 import { useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
-import { Chip, ChipRow, Placeholder, Text } from 'ui';
+import { Chip, ChipRow, Close, Placeholder, Text } from 'ui';
 
 import { AnnotationCanvas } from './annotation-canvas';
 import {
@@ -159,10 +159,7 @@ export function OperationMediaStrip({
         </Text>
         {/* ПАНЕЛЬ ВИДОВ ОДНА НА ПОЛОСУ — режимы принадлежат листу, а не кадру. */}
         {!frozen && fields.length > 0 && (
-          <AnnotationToolbar
-            tool={placingKind}
-            onTool={setPlacingKind}
-          />
+          <AnnotationToolbar tool={placingKind} onTool={setPlacingKind} />
         )}
         {(intake.busy || intake.dragging) && (
           <Text size='micro' variant='label' component='span'>
@@ -221,8 +218,7 @@ export function OperationMediaStrip({
                       onChange={frozen ? undefined : (next) => setAnnotations(i, next)}
                       cornerSlot={
                         !frozen ? (
-                          <StripButton
-                            label='✕'
+                          <StripClose
                             title='remove the shot from the step; the file itself stays in the library'
                             onPress={() => {
                               remove(i);
@@ -341,18 +337,11 @@ export function OperationMediaStrip({
  * Кнопка поверх кадра. Не `<button>` по той же причине, что и всё интерактивное на холсте: полоса
  * живёт внутри общего `<fieldset disabled>` выпущенной карточки, а задизейбленность наследуется.
  */
-function StripButton({
-  label,
-  title,
-  onPress,
-}: {
-  label: string;
-  title: string;
-  onPress: () => void;
-}) {
+function StripClose({ title, onPress }: { title: string; onPress: () => void }) {
   return (
-    <span
-      role='button'
+    <Close
+      asChild
+      size='sm'
       tabIndex={0}
       title={title}
       aria-label={title}
@@ -366,9 +355,7 @@ function StripButton({
         e.preventDefault();
         onPress();
       }}
-      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-    >
-      {label}
-    </span>
+      className='cursor-pointer bg-bgColor focus-visible:outline-offset-1'
+    />
   );
 }

@@ -1,7 +1,27 @@
 import { ASPECT_RATIOS } from 'constants/constants';
 import { cn } from 'lib/utility';
-import { FC, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button, CalloutBox, Input, RatioGlyph, Row, SideRailGroup, SideRailItem, Text } from 'ui';
+import {
+  FC,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Button,
+  CalloutBox,
+  Input,
+  RatioGlyph,
+  Row,
+  SideRailGroup,
+  SideRailItem,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 
 import {
   DEFAULT_BACKGROUND,
@@ -155,7 +175,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
   const uniformMax = srcW && srcH ? Math.round(Math.min(srcW, srcH) * UNIFORM_MAX_FRACTION) : 0;
   /** Равномерное поле показывается числом только когда все четыре стороны равны. */
   const uniform =
-    margins.top === margins.right && margins.right === margins.bottom && margins.bottom === margins.left
+    margins.top === margins.right &&
+    margins.right === margins.bottom &&
+    margins.bottom === margins.left
       ? margins.top
       : null;
 
@@ -268,9 +290,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
           <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
             expand image
           </Text>
-          <Button className='cursor-pointer py-1' onClick={onCancel}>
-            [x]
-          </Button>
+          <Close onClick={onCancel} />
         </div>
       )}
 
@@ -404,7 +424,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
               variant='secondary'
               size='xs'
               className='cursor-pointer'
-              onClick={() => applyUniform((uniform ?? 0) - Math.max(1, Math.round(uniformMax / 20)))}
+              onClick={() =>
+                applyUniform((uniform ?? 0) - Math.max(1, Math.round(uniformMax / 20)))
+              }
               disabled={!pixels || (uniform ?? 0) <= 0}
             >
               −
@@ -425,7 +447,9 @@ export const MediaExpander: FC<ExpanderProps> = ({
               variant='secondary'
               size='xs'
               className='cursor-pointer'
-              onClick={() => applyUniform((uniform ?? 0) + Math.max(1, Math.round(uniformMax / 20)))}
+              onClick={() =>
+                applyUniform((uniform ?? 0) + Math.max(1, Math.round(uniformMax / 20)))
+              }
               disabled={!pixels || (uniform ?? 0) >= uniformMax}
             >
               +
@@ -595,7 +619,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
 
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {pixels ? `${outW}×${outH}` : '—'}
+            {pixels ? `${outW}×${outH}` : <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-center gap-2'>
             {blockedReason && (

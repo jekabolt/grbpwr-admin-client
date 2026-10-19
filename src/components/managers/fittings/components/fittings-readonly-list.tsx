@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Link, useNavigate } from 'react-router-dom';
-import { Media, Text } from 'ui';
+import { Media, Text, EmptyCell } from 'ui';
 import { useInfiniteFittings } from './useFittingQuery';
 import { formatFittingDate, statusLabel, verdictLabel } from './utils';
 
@@ -101,7 +101,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                           <Text>#{insert.productId}</Text>
                         </Link>
                       ) : (
-                        <Text>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}
@@ -116,7 +116,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                           <Text>#{insert.modelId}</Text>
                         </Link>
                       ) : (
-                        <Text>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}

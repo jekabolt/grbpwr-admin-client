@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import {
+  BackLink,
   Button,
   CalloutBox,
   Chip,
@@ -1016,15 +1017,11 @@ function WizardBody({
             {/* ── actions: back · the one question · the one button ────────────────────── */}
             <footer className='flex items-center gap-3 border border-borderColor bg-bgColor px-2 py-1.5'>
               {at > 0 && !applied ? (
-                <Button
-                  variant='secondary'
-                  size='sm'
+                <BackLink
                   className='shrink-0'
                   disabled={!!session.busy || applyRunning}
                   onClick={() => void api.dispatch({ type: 'back', to: STEPS[at - 1].id })}
-                >
-                  ← back
-                </Button>
+                />
               ) : null}
               <div className='min-w-0 flex-1'>
                 {stoppedLine ? (

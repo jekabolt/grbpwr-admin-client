@@ -599,7 +599,7 @@ function TicketFact({ label, value }: { label: string; value: string }) {
         {label}
       </Text>
       <Text size='micro' className='truncate'>
-        {value || '—'}
+        {value || <EmptyCell />}
       </Text>
     </div>
   );
@@ -748,7 +748,7 @@ export function SampleFabricMap({
             </span>
             <span className='shrink-0 text-right tabular-nums'>
               <Text size='micro' component='span'>
-                {f.consumption ? `${f.consumption}${f.unit ? ` ${f.unit}` : ''}` : '—'}
+                {f.consumption ? `${f.consumption}${f.unit ? ` ${f.unit}` : ''}` : <EmptyCell />}
               </Text>
               <Text size='nano' variant='label' className='uppercase'>
                 per garment

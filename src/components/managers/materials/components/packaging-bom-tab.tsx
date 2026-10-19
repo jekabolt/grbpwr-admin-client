@@ -3,7 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -221,7 +221,7 @@ export function PackagingBomTab() {
                           }
                         />
                       ) : (
-                        <Text size='small'>{r.qtyPerOrder || '—'}</Text>
+                        <Text size='small'>{r.qtyPerOrder || <EmptyCell />}</Text>
                       )}
                       <Text variant='inactive' size='small'>
                         {r.materialUnit}
@@ -240,7 +240,7 @@ export function PackagingBomTab() {
                           }
                         />
                       ) : (
-                        <Text size='small'>{r.qtyPerItem || '—'}</Text>
+                        <Text size='small'>{r.qtyPerItem || <EmptyCell />}</Text>
                       )}
                       <Text variant='inactive' size='small'>
                         {r.materialUnit}
@@ -257,14 +257,7 @@ export function PackagingBomTab() {
                   </td>
                   {canEdit ? (
                     <td className={td}>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        aria-label='remove material'
-                        onClick={() => removeRow(i)}
-                      >
-                        ✕
-                      </Button>
+                      <Close size='sm' aria-label='remove material' onClick={() => removeRow(i)} />
                     </td>
                   ) : null}
                 </tr>

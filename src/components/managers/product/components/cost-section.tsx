@@ -7,7 +7,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { currencySymbols } from 'constants/constants';
-import { Button, Text, InputField } from 'ui';
+import { Button, Text, InputField, EmptyCell } from 'ui';
 import { ProductMarginPanel } from './margin-panel';
 
 // Internal per-unit COGS + its provenance. Field-shaping (🔒 costing): the whole
@@ -126,7 +126,9 @@ export function ProductCostSection({
           ) : isManual ? (
             <Text size='small'>set manually</Text>
           ) : (
-            <Text size='small'>—</Text>
+            <Text size='small'>
+              <EmptyCell />
+            </Text>
           )}
           {updatedAt && (
             <Text variant='inactive' size='small'>

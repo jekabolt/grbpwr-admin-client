@@ -12,7 +12,7 @@ import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, ConfirmationModal, GroupLabel, Pill, Text } from 'ui';
+import { Button, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   inputToDecimal,
@@ -1093,16 +1093,11 @@ export function MaterialModal({
                           value={r.value}
                           onChange={(e) => setKvRow(i, { value: e.target.value })}
                         />
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          className='shrink-0'
+                        <Close
+                          size='sm'
                           aria-label='remove attribute'
                           onClick={() => removeKvRow(i)}
-                        >
-                          ✕
-                        </Button>
+                        />
                       </div>
                     ))
                   )}
@@ -1212,7 +1207,7 @@ export function MaterialModal({
               <div className='flex flex-wrap gap-1'>
                 {compFilled.map((r, i) => (
                   <Pill key={i} tone='ink'>
-                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
+                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : <EmptyCell />}
                   </Pill>
                 ))}
               </div>

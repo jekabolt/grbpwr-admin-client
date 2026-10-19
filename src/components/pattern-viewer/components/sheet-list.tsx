@@ -86,7 +86,7 @@ export function SheetList({
                 aria-expanded={open}
                 className='min-h-11 min-w-0 flex-1 cursor-pointer py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
               >
-                <Text component='p' className='truncate'>
+                <Text size='reading' component='p' className='truncate'>
                   {open ? '− ' : '+ '}
                   {(sheet.name ?? '').trim() || (sheet.filename ?? '').trim() || 'sheet'}
                 </Text>

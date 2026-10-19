@@ -10,7 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
-import { GroupLabel, Text } from 'ui';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { assetById, assetThumb } from '../assets/model';
@@ -764,8 +764,9 @@ function RecolorBody({
               origin='linked'
               text={
                 <>
-                  media <b>{media.id ?? '—'}</b> — its own paid call, recoloured on its own. The
-                  model is not shown the other {shots.length === 1 ? 'shots' : 'photographs'}.
+                  media <b>{media.id ?? <EmptyCell />}</b> — its own paid call, recoloured on its
+                  own. The model is not shown the other{' '}
+                  {shots.length === 1 ? 'shots' : 'photographs'}.
                 </>
               }
             />
@@ -1015,7 +1016,7 @@ function ThreedBody({
             (threed?.fitOverride ?? '').trim() ? (
               <>
                 <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge, and
-                the card still says {cardFit || '—'}
+                the card still says {cardFit || <EmptyCell />}
               </>
             ) : (
               `${cardFit || '—'} (from the card)`

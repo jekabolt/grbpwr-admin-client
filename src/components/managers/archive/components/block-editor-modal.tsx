@@ -1,7 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { ARCHIVE_ITEM_TYPE_LABEL } from './item-types';
@@ -93,9 +93,7 @@ export function BlockEditorModal({
                 </Text>
               </div>
               <DialogPrimitives.Close asChild>
-                <Button type='button' className='cursor-pointer px-2 py-1'>
-                  [x]
-                </Button>
+                <Close />
               </DialogPrimitives.Close>
             </div>
             <div ref={contentRef} className='min-h-0 flex-1 overflow-y-auto'>

@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Chip, ChipRow, Text } from 'ui';
+import { Chip, ChipRow, Close, Text } from 'ui';
 import { ViewerAction } from 'components/shared/media-viewer/media-viewer';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
@@ -178,11 +178,11 @@ export function AnnotationZoomDialog({
                 )}
               </span>
             )}
-            <Dialog.Close
-              aria-label='close the zoomed view'
-              className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
-            >
-              ✕
+            <Dialog.Close asChild>
+              <Close
+                aria-label='close the zoomed view'
+                className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor'
+              />
             </Dialog.Close>
           </div>
 

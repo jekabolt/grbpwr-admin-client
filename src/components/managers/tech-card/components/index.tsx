@@ -46,6 +46,7 @@ import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   Pill,
   Section,
@@ -3070,11 +3071,7 @@ export function TechCardForm({
           under the header stays whenever a link exists). */}
       <div className='-mx-2.5 border-b border-borderColor bg-bgColor'>
         <div className='flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2'>
-          <Button asChild variant='secondary' size='sm'>
-            <Link to={ROUTES.techCards} aria-label='back to tech cards'>
-              ←
-            </Link>
-          </Button>
+          <BackLink to={ROUTES.techCards}>tech cards</BackLink>
           <div className='min-w-0'>
             <Text variant='uppercase' className='truncate font-bold'>
               {styleNumber || (isEditMode ? 'tech card' : 'new tech card')}

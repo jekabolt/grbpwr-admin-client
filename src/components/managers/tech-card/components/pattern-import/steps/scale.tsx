@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import type { BoxMm, CleanPreview, ScaleCandidate } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
-import { Button, Chip, DataTable, GroupLabel, Pill, Row, Text } from 'ui';
+import { Button, Chip, DataTable, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
 import { CALIBRATION_SURE, scaleUncertain } from '../auto-advance';
 import { anisotropyOf, squareSidesOf } from '../formats';
 import { SHEET_INK, vy } from '../sheet-viewport';
@@ -298,7 +298,7 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
                               tone={c.confidence > 0 ? 'attention' : 'mut'}
                               title={c.confidence > 0 ? fmtPct(c.confidence, 0) : undefined}
                             >
-                              {c.confidence > 0 ? 'check' : '—'}
+                              {c.confidence > 0 ? 'check' : <EmptyCell />}
                             </Pill>
                           )}
                         </button>
@@ -311,10 +311,10 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
           </div>
 
           <DebugFold>
-            <Row label='factor' value={decision ? decision.factor.toFixed(5) : '—'} />
+            <Row label='factor' value={decision ? decision.factor.toFixed(5) : <EmptyCell />} />
             <Row
               label='deviation from 1 : 1'
-              value={decision ? `${dev >= 0 ? '+' : ''}${(dev * 100).toFixed(3)} %` : '—'}
+              value={decision ? `${dev >= 0 ? '+' : ''}${(dev * 100).toFixed(3)} %` : <EmptyCell />}
             />
             <Row
               label='limit without a check'
@@ -371,11 +371,15 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
                                 : 'none'}
                           </td>
                           <td className='whitespace-nowrap tabular-nums'>
-                            {sq
-                              ? `${sq.measuredWMm.toFixed(2)} × ${sq.measuredHMm.toFixed(2)}`
-                              : '—'}
+                            {sq ? (
+                              `${sq.measuredWMm.toFixed(2)} × ${sq.measuredHMm.toFixed(2)}`
+                            ) : (
+                              <EmptyCell />
+                            )}
                           </td>
-                          <td className='tabular-nums'>{sq ? sq.residualMm.toFixed(3) : '—'}</td>
+                          <td className='tabular-nums'>
+                            {sq ? sq.residualMm.toFixed(3) : <EmptyCell />}
+                          </td>
                           <td
                             className={cn(
                               'whitespace-nowrap',

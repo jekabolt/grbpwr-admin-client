@@ -21,7 +21,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button, Pill, Stat, StatGrid, Text } from 'ui';
+import { Button, Pill, Stat, StatGrid, Text, EmptyCell } from 'ui';
 
 /**
  * Человеческий перевод кодов причин. Источник — закрытый словарь `internal/techcardarchive/
@@ -297,12 +297,12 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                   key={`${l.entity ?? ''}-${l.ref ?? ''}-${reason}-${i}`}
                   className='border-b border-textInactiveColor align-top last:border-b-0'
                 >
-                  <td className='px-2 py-1.5 uppercase'>{l.entity || '—'}</td>
+                  <td className='px-2 py-1.5 uppercase'>{l.entity || <EmptyCell />}</td>
                   <td className={`${REF_CELL} py-1.5`} title={l.ref || undefined}>
-                    {l.ref || '—'}
+                    {l.ref || <EmptyCell />}
                   </td>
                   <td className='px-2 py-1.5'>
-                    {status ? <Pill tone={statusTone(status)}>{status}</Pill> : '—'}
+                    {status ? <Pill tone={statusTone(status)}>{status}</Pill> : <EmptyCell />}
                   </td>
                   <td className='px-2 py-1.5'>
                     {reason ? (
@@ -324,7 +324,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                         </Text>
                       </>
                     ) : (
-                      '—'
+                      <EmptyCell />
                     )}
                     {l.detail ? (
                       <Text size='micro' variant='label'>
@@ -336,9 +336,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                     {l.action ? (
                       <Text size='control'>{l.action}</Text>
                     ) : (
-                      <Text size='control' variant='inactive'>
-                        —
-                      </Text>
+                      <Text size='control' variant='inactive'><EmptyCell /></Text>
                     )}
                   </td>
                 </tr>

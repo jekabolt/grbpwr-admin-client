@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Input, Toolbar } from 'ui';
+import { AddDoor, Button, Input, Toolbar } from 'ui';
 import { LABEL_KEY_MAX } from './labels-schema';
 import type { LabelKind } from './tech-card-options';
 
@@ -58,14 +58,9 @@ export function KindPicker({
 
   if (!open) {
     return (
-      <button
-        type='button'
-        onClick={() => setOpen(true)}
-        data-kind-add={noun}
-        className={`${gap}flex w-full items-center border border-dashed border-borderColor bg-bgColor px-3 py-4 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`}
-      >
-        + {noun}
-      </button>
+      <AddDoor afterRows={hasRows} onClick={() => setOpen(true)} data-kind-add={noun}>
+        {noun}
+      </AddDoor>
     );
   }
 

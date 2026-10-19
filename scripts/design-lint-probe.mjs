@@ -20,6 +20,7 @@ const filename = 'src/components/design-lint-probe.tsx';
 tester.run('design/no-raw-control', design.rules['no-raw-control'], {
   valid: [
     { filename, code: "const view = <Button type='button'>save</Button>;" },
+    { filename, code: "const close = <Close aria-label='remove row' />;" },
     { filename, code: "const picker = <input type='file' hidden />;" },
   ],
   invalid: [
@@ -32,6 +33,16 @@ tester.run('design/no-raw-control', design.rules['no-raw-control'], {
         { message: "Use ToggleSwitch from 'ui' instead of raw checkbox switch." },
         { message: "Use Select, Selector, or Combobox from 'ui' instead of raw <select>." },
         { message: "Use Textarea from 'ui' instead of raw <textarea>." },
+      ],
+    },
+    {
+      filename,
+      code: 'const view = <><Button>×</Button><Button><span>✕</span></Button><button>✖</button></>;',
+      errors: [
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
+        { message: "Use Button from 'ui' instead of raw <button>." },
+        { message: "Use Close from 'ui' instead of a raw close glyph." },
       ],
     },
   ],
@@ -182,4 +193,125 @@ tester.run('design/no-deep-ui-import', design.rules['no-deep-ui-import'], {
   ],
 });
 
-console.log('design lint probe: all 8 rules passed');
+tester.run('design/no-hand-back-link', design.rules['no-hand-back-link'], {
+  valid: [
+    { filename, code: 'const view = <BackLink to={ROUTES.orders}>orders</BackLink>;' },
+    {
+      filename,
+      code: "const view = <button aria-label='previous page' onClick={prev}>←</button>;",
+    },
+    { filename, code: 'const view = <Chip onClick={go}>← step 10</Chip>;' },
+    { filename, code: 'const view = <Text>money in ← bank</Text>;' },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const view = <Button asChild variant='secondary'><Link to={ROUTES.models}>← models</Link></Button>;",
+      errors: [{ message: /Use BackLink from 'ui'/u }],
+    },
+    {
+      filename,
+      code: "const view = <><Link to={ROUTES.orders} aria-label='back to orders'>←</Link><Button aria-label='back' onClick={up}>←</Button></>;",
+      errors: 2,
+    },
+    {
+      filename,
+      code: "const view = <button onClick={() => setStep(1)}><Text size='small'>← back to all cases</Text></button>;",
+      errors: 1,
+    },
+  ],
+});
+
+tester.run('design/no-hand-add-door', design.rules['no-hand-add-door'], {
+  valid: [
+    { filename, code: 'const view = <AddDoor afterRows onClick={add}>colour</AddDoor>;' },
+    {
+      filename,
+      code: "const view = <select className={cn(addDoorClass(), 'block')}><option>+ slot</option></select>;",
+    },
+    { filename, code: "const view = <Button variant='underline' onClick={add}>+ add</Button>;" },
+    {
+      filename,
+      code: "const view = <button className='border border-dashed'><span aria-hidden>+</span><Cap label='+ artwork' /></button>;",
+    },
+    {
+      filename,
+      code: "const view = <button className={cn('border', empty && 'border-dashed')}>{empty ? <Pictogram /> : <img />}</button>;",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const view = <button className='flex w-full border border-dashed border-borderColor px-2 py-3'>+ aspect</button>;",
+      errors: [{ message: /Use AddDoor from 'ui'/u }],
+    },
+    {
+      filename,
+      code: "const view = <><button className={cn('border border-dashed', rows && 'mt-4')}><Text>+ operation</Text></button><select className='border border-dashed'><option value=''>+ add a slot</option></select></>;",
+      errors: 2,
+    },
+  ],
+});
+
+tester.run('design/no-hand-empty-cell', design.rules['no-hand-empty-cell'], {
+  valid: [
+    { filename, code: "import { EmptyCell } from 'ui'; const v = <td>{x ?? <EmptyCell />}</td>;" },
+    // string contexts and punctuation stay plain
+    {
+      filename,
+      code: "const t = `${a ?? '—'} cm`; const v = <span title={x ?? '—'}>{a} — {b}</span>;",
+    },
+    {
+      filename,
+      code: "const v = <>{neg ? '-' : ''}{i > 0 ? ' — ' : null}<option>{x || '—'}</option></>;",
+    },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "import { Text } from 'ui';\nconst v = <td>{x ?? '—'}</td>;",
+      output: "import { Text, EmptyCell } from 'ui';\nconst v = <td>{x ?? <EmptyCell />}</td>;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "import { Row } from 'ui';\nconst v = <Row label='a' value={ok ? n : 'n/a'} />;",
+      output:
+        "import { Row, EmptyCell } from 'ui';\nconst v = <Row label='a' value={ok ? n : <EmptyCell />} />;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "const v = <span className='text-labelColor'>—</span>;",
+      errors: 1,
+    },
+  ],
+});
+
+tester.run('design/no-hand-header-warnings', design.rules['no-hand-header-warnings'], {
+  valid: [
+    { filename, code: 'const v = <HeaderWarnings items={warnings} />;' },
+    { filename, code: "const v = <button className='text-error'>!</button>;" },
+    { filename, code: "const v = <Text className='text-error'>{n} failed</Text>;" },
+  ],
+  invalid: [
+    {
+      filename,
+      code: "const v = <span className={cn(HEADER_TEXT, 'x')}><span className='text-warning'>!</span> {n} waiting</span>;",
+      errors: 1,
+    },
+    { filename, code: 'const label = `! ${n} blocking`;', errors: 1 },
+    {
+      filename,
+      code: "const v = <Text variant='errorLabel'>{n} blocking holes</Text>;",
+      errors: 1,
+    },
+    {
+      filename,
+      code: "const v = <button className={cn(HEADER_TEXT, 'text-error underline')}>{n} open</button>;",
+      errors: 2,
+    },
+  ],
+});
+
+console.log(`design lint probe: all ${Object.keys(design.rules).length} rules passed`);

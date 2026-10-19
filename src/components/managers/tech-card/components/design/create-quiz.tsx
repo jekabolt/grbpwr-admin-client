@@ -12,7 +12,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn, getCategoriesByParentId } from 'lib/utility';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button, Chip, ChipRow, Input, Row, Text } from 'ui';
+import { Button, Chip, ChipRow, Input, Row, Text, EmptyCell } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { permittedSizeSystems } from 'utils/size-systems';
 
@@ -627,7 +627,9 @@ export function CreateQuiz({
                   label={r.label}
                   value={
                     <span className='inline-flex items-baseline gap-2'>
-                      <span className={cn(!r.value && 'text-labelColor')}>{r.value || '—'}</span>
+                      <span className={cn(!r.value && 'text-labelColor')}>
+                        {r.value || <EmptyCell />}
+                      </span>
                       <span aria-hidden className='text-labelColor'>
                         ✎
                       </span>

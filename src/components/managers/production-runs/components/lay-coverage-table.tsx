@@ -76,7 +76,7 @@ export function LayCoverageTable({
               <td>
                 {colorwayLabel(cw)}
                 <Text size='micro' variant='label' component='span' className='block'>
-                  {slotSummary(cw) || '—'}
+                  {slotSummary(cw) || <EmptyCell />}
                 </Text>
               </td>
               {sizeIds.map((s) => {

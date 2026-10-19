@@ -7,7 +7,7 @@ import { ADMIN_GROUP, isActiveRoute, NAV_GROUPS, ROUTES } from 'constants/routes
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);
@@ -44,7 +44,7 @@ export function MobileNavMenu() {
               <Text variant='uppercase'>menu</Text>
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button className='cursor-pointer'>[x]</Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <div className='min-h-0 flex-1 overflow-y-auto p-2.5'>

@@ -5,6 +5,7 @@ import React, { useCallback, useRef, useState } from 'react';
 
 import { cn } from 'lib/utility';
 
+import { Close } from './close';
 import Text from './text';
 
 /**
@@ -161,8 +162,8 @@ export function PopoverContent({
             >
               {title}
             </Text>
-            <Popover.Close aria-label='close' className='ml-auto text-labelColor'>
-              ✕
+            <Popover.Close asChild>
+              <Close className='ml-auto' />
             </Popover.Close>
           </div>
         )}
