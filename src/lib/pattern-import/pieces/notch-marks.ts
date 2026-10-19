@@ -139,7 +139,7 @@ const roundMark = (m: Mark) => {
 /**
  * Printed size balloons among the compact closed marks. Direct evidence is a source-size word
  * whose centre is inside the mark. A clipped / missing word may follow only an alike round-mark
- * cluster containing at least two different directly read sizes (the same balloon repeated over
+ * cluster containing at least three different directly read sizes (the same balloon repeated over
  * the graded size run). A triangle / square never inherits this classification.
  */
 function sizeTagMarks(marks: readonly Mark[], source?: MarkSource): Set<ChainId> {
