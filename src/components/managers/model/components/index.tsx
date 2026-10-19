@@ -120,7 +120,7 @@ export function ModelForm({
             <SectionStack>
               <Section>
                 <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
-                  <div className='w-full max-w-60 shrink-0'>
+                  <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
                     <ModelMedia model={model} />
                   </div>
                   <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
