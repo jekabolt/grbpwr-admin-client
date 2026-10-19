@@ -12,6 +12,7 @@ import {
   Button,
   CalloutBox,
   ConfirmationModal,
+  GenericPopover,
   Pill,
   Section,
   Text,
@@ -627,6 +628,10 @@ export function NotePage() {
           ? ` · ${formatWhenShort(file?.createdAt ?? undefined)}`
           : ''
       }`;
+  const mobileMetaWhen = editedBy ? editedAt : formatWhenShort(file?.createdAt ?? undefined);
+  const mobileMeta = `${editedBy || file?.uploadedBy || '—'}${
+    mobileMetaWhen ? ` · ${mobileMetaWhen}` : ''
+  }`;
 
   const sizeHint = tooBig
     ? `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — saving will refuse.`
@@ -812,8 +817,84 @@ export function NotePage() {
           banners={banners}
         />
       ) : (
-        <>
-          <Toolbar>
+        <div className='-mt-10 flex flex-col gap-gutter md:mt-0'>
+          <Toolbar className='grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-2 gap-y-1 md:hidden'>
+            {/* На телефоне имя — первая точка чтения, а действия не выталкивают его за экран.
+                Полное имя остаётся в `title`; видимая строка честно обрезается многоточием. */}
+            <Text
+              component='h1'
+              size='large'
+              title={name || file?.fileName || 'note'}
+              className='min-w-0 truncate font-bold'
+            >
+              {name || file?.fileName || 'note'}
+            </Text>
+            {writable && (
+              <Button size='sm' variant='main' onClick={() => setEditing(true)}>
+                edit
+              </Button>
+            )}
+            <GenericPopover
+              noTail
+              className='w-40'
+              contentProps={{ align: 'end' }}
+              triggerProps={{
+                'aria-label': 'note actions',
+                className:
+                  'flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              }}
+              openElement={
+                <Button asChild size='sm' variant='secondary'>
+                  <span aria-hidden>•••</span>
+                </Button>
+              }
+            >
+              <div role='menu' className='-mx-2 -my-1.5 flex flex-col divide-y divide-hairline'>
+                <Button asChild size='sm' className='w-full py-2 text-left hover:bg-pageBg'>
+                  <Link role='menuitem' to={`${ROUTES.files}/${id}`}>
+                    details
+                  </Link>
+                </Button>
+                {file?.downloadUrl && (
+                  <Button asChild size='sm' className='w-full py-2 text-left hover:bg-pageBg'>
+                    <a role='menuitem' href={file.downloadUrl}>
+                      download .md
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </GenericPopover>
+
+            <div className='col-span-3 flex min-w-0 items-center gap-2'>
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                title={mobileMeta}
+                className='min-w-0 flex-1 truncate'
+              >
+                {mobileMeta}
+              </Text>
+              {dirty && <Pill tone='attention'>not saved</Pill>}
+              {dirty && (
+                <Button
+                  size='sm'
+                  variant='secondary'
+                  disabled={!canSave || saving}
+                  onClick={() => void save(false)}
+                >
+                  {saving ? 'saving…' : 'save'}
+                </Button>
+              )}
+              {!writable && !dirty && (
+                <Text size='micro' variant='label' component='span' className='shrink-0'>
+                  read only
+                </Text>
+              )}
+            </div>
+          </Toolbar>
+
+          <Toolbar className='hidden md:flex'>
             {/* Имя берётся из ПОЛЯ, а не из файла: переименовали, вышли по Esc — в шапке
                 обязано стоять то, что сохранится, иначе pill «not saved» относился бы к
                 чему-то невидимому. */}
@@ -831,7 +912,7 @@ export function NotePage() {
               </Button>
             )}
             <Button asChild size='sm' variant='secondary'>
-              <Link to={`${ROUTES.files}/${id}`}>file card</Link>
+              <Link to={`${ROUTES.files}/${id}`}>details</Link>
             </Button>
             {writable ? (
               <>
@@ -882,7 +963,7 @@ export function NotePage() {
                   }
                 : undefined
             }
-            className='min-h-[50vh] border border-borderColor bg-bgColor p-block'
+            className='min-w-0 bg-bgColor p-block md:min-h-[50vh] md:border md:border-borderColor'
           >
             {/* Граница ⌘A — только документ, без пустой подсказки и рамки (см. обработчик). */}
             {value.trim() ? (
@@ -895,7 +976,7 @@ export function NotePage() {
               </Text>
             )}
           </div>
-        </>
+        </div>
       )}
 
       <ConfirmationModal
