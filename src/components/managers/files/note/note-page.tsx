@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 // Адрес заметки НЕ собирается здесь: он живёт в `constants/routes` рядом с самим шаблоном
@@ -28,6 +29,7 @@ import { NoAccessState } from '../components/gallery-states';
 import { filesKeys, invalidateFileViews, useLibraryFile } from '../hooks/useFiles';
 import { formatBytes, formatWhenShort, stemOf } from '../utils/format';
 import { MarkdownView } from './markdown-view';
+import { NoteBlocksView } from './note-blocks-view';
 import { NoteDiff } from './note-diff';
 import { NoteEditor, type NoteCaret, type NoteEditorHandle } from './note-editor';
 import { readNoteDraft, useNoteDraft } from './use-note-draft';
@@ -131,6 +133,14 @@ export function NotePage() {
   /** Отпечаток версии, от которой произошёл буфер, — база сравнения при записи. */
   const [base, setBase] = useState('');
   const [editing, setEditing] = useState(false);
+  /**
+   * ТЕЛЕФОН: правка — по блокам (`note-blocks-view.tsx`), сырое поле — по «•••» → edit as text.
+   * Флаг живёт до выхода из правки: следующий «edit» снова открывает блоки.
+   */
+  const phone = useMediaQuery(PHONE_QUERY);
+  const [asText, setAsText] = useState(false);
+  /** Перенос строк — один переключатель на поле заметки и на лист блока. */
+  const [wrapLines, setWrapLines] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedLabel, setSavedLabel] = useState('');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -187,6 +197,7 @@ export function NotePage() {
 
     seededRef.current = id;
     caretRef.current = null;
+    setAsText(false);
     setValue(text);
     setServerContent(text);
     setBase(fresh);
@@ -428,6 +439,7 @@ export function NotePage() {
   const exitEdit = useCallback(() => {
     caretRef.current = editorRef.current?.caret() ?? caretRef.current;
     setEditing(false);
+    setAsText(false);
   }, []);
 
   /**
@@ -600,6 +612,11 @@ export function NotePage() {
   useEffect(() => {
     if (editing) editorRef.current?.focus(caretRef.current);
   }, [editing]);
+
+  // Из блоков в сырое поле — фокус в поле: человек пришёл туда писать.
+  useEffect(() => {
+    if (asText) editorRef.current?.focus();
+  }, [asText]);
 
   /* ── отказы ───────────────────────────────────────────────────────────────────────────── */
 
@@ -848,7 +865,24 @@ export function NotePage() {
 
   return (
     <PageShell>
-      {editing ? (
+      {editing && phone && !asText ? (
+        <NoteBlocksView
+          name={name}
+          onNameChange={setName}
+          value={value}
+          onChange={setValue}
+          dirty={dirty}
+          saving={saving}
+          canSave={canSave}
+          onSave={() => void save(false)}
+          onLeave={leaveEdit}
+          onEditAsText={() => setAsText(true)}
+          wrapLines={wrapLines}
+          onWrapLinesChange={setWrapLines}
+          sizeHint={sizeHint}
+          banners={banners}
+        />
+      ) : editing ? (
         // Тот же подъём, что у чтения: на телефоне правка начинается сразу под навигацией. На
         // компьютере обёртка растворяется (`contents`) — раскладка прежняя.
         <div className='-mt-10 flex flex-col gap-gutter md:contents'>
@@ -866,6 +900,8 @@ export function NotePage() {
             onLeaveEdit={leaveEdit}
             sizeHint={sizeHint}
             banners={banners}
+            wrapLines={wrapLines}
+            onWrapLinesChange={setWrapLines}
           />
         </div>
       ) : (
