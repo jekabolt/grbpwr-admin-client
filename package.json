@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:check": "tsc && vite build",
+    "check:expand": "node --experimental-strip-types scripts/check-expand-drag.ts",
     "test:ui-kit": "playwright test",
     "preview": "vite preview",
     "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
