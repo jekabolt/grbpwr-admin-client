@@ -3,6 +3,7 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFiles';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Button, GenericPopover, Text } from 'ui';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
@@ -74,11 +75,21 @@ export function FormatBar({
   areaRef,
   value,
   onChange,
+  compact,
+  onTogglePreview,
 }: {
   areaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (next: string) => void;
+  /**
+   * КОМПАКТНАЯ ПОЛОСА ПОД ПОЛЕМ (форма заведения задачи): пять частых инструментов и «⋯»,
+   * который раскрывает остальные. Логика правок та же — меняется только раскладка.
+   */
+  compact?: boolean;
+  /** Компактная полоса держит у себя и переключатель показа разметки (одно «preview»). */
+  onTogglePreview?: () => void;
 }) {
+  const [moreTools, setMoreTools] = useState(false);
   // Какое окно открыто и, значит, чем станет выбранный файл. `null` — закрыто.
   //
   // У медиатеки своего состояния здесь НЕТ: `MediaSelector` держит своё окно сам и получает
@@ -444,75 +455,175 @@ export function FormatBar({
 
   return (
     <>
-      <div className='flex flex-wrap items-center gap-1 border-b border-hairline px-1.5 py-1.5'>
-        {actions.map((a) => (
+      {compact ? (
+        <>
+          <div className='flex border-t border-hairline'>
+            {PRIMARY_TOOLS.map((t) => {
+              const a = actions.find((x) => x.label === t.label);
+              if (!a) return null;
+              return (
+                <Button
+                  key={t.label}
+                  type='button'
+                  variant='default'
+                  aria-label={t.label}
+                  title={a.title}
+                  onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                  onClick={a.run}
+                  className={TOOL_CELL}
+                >
+                  <span className={t.className}>{t.glyph}</span>
+                </Button>
+              );
+            })}
+            <Button
+              type='button'
+              variant='default'
+              aria-label='more formatting'
+              aria-expanded={moreTools}
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+              onClick={() => setMoreTools((v) => !v)}
+              className={cn(TOOL_CELL, moreTools && 'bg-textColor text-bgColor')}
+            >
+              ⋯
+            </Button>
+          </div>
+          {moreTools && (
+            <div className='grid grid-cols-4 border-t border-hairline'>
+              {MORE_TOOLS.map((label) => {
+                const a = actions.find((x) => x.label === label);
+                if (!a) return null;
+                return (
+                  <Button
+                    key={label}
+                    type='button'
+                    variant='default'
+                    title={a.title}
+                    onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                    onClick={a.run}
+                    className={MORE_CELL}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+              <TableSizePicker
+                cellClassName={MORE_CELL}
+                onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))}
+              />
+              <Button
+                type='button'
+                variant='default'
+                title='insert a link to a library file'
+                onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                onClick={() => setPicker('link')}
+                className={MORE_CELL}
+              >
+                file
+              </Button>
+              <MediaSelector
+                label='media'
+                purpose='a picture in the text'
+                allowMultiple
+                showVideos={false}
+                saveSelectedMedia={insertMedia}
+                trigger={
+                  <Button
+                    type='button'
+                    variant='default'
+                    title='insert pictures from the media library'
+                    onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                    className={MORE_CELL}
+                  >
+                    media
+                  </Button>
+                }
+              />
+              {onTogglePreview && (
+                <Button
+                  type='button'
+                  variant='default'
+                  aria-label='preview markdown'
+                  onClick={onTogglePreview}
+                  className={MORE_CELL}
+                >
+                  preview
+                </Button>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className='flex flex-wrap items-center gap-1 border-b border-hairline px-1.5 py-1.5'>
+          {actions.map((a) => (
+            <Button
+              key={a.label}
+              type='button'
+              size='xs'
+              variant='secondary'
+              title={a.title}
+              // ФОКУС НЕ УХОДИТ ИЗ ПОЛЯ. Без этого нажатие сначала снимает фокус с `textarea`, и в
+              // части браузеров вместе с ним схлопывается видимое выделение — человек видит, как
+              // подсветка пропала ПЕРЕД тем, как что-то произошло.
+              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+              onClick={a.run}
+            >
+              {a.label}
+            </Button>
+          ))}
+
           <Button
-            key={a.label}
             type='button'
             size='xs'
             variant='secondary'
-            title={a.title}
-            // ФОКУС НЕ УХОДИТ ИЗ ПОЛЯ. Без этого нажатие сначала снимает фокус с `textarea`, и в
-            // части браузеров вместе с ним схлопывается видимое выделение — человек видит, как
-            // подсветка пропала ПЕРЕД тем, как что-то произошло.
+            title='insert a link to a library file; a picture will stand shown inside the text'
             onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-            onClick={a.run}
+            onClick={() => setPicker('link')}
           >
-            {a.label}
+            file
           </Button>
-        ))}
 
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
-          title='insert a link to a library file; a picture will stand shown inside the text'
-          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-          onClick={() => setPicker('link')}
-        >
-          file
-        </Button>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            title='insert a library file as a preview: a picture as itself, a pdf and a drawing as their rendered thumbnail'
+            onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+            onClick={() => setPicker('preview')}
+          >
+            preview
+          </Button>
 
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
-          title='insert a library file as a preview: a picture as itself, a pdf and a drawing as their rendered thumbnail'
-          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-          onClick={() => setPicker('preview')}
-        >
-          preview
-        </Button>
+          <TableSizePicker
+            onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))}
+          />
 
-        <TableSizePicker
-          onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))}
-        />
-
-        {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
+          {/* СНИМКИ ИЗ МЕДИАТЕКИ, С МУЛЬТИВЫБОРОМ. Библиотека файлов и медиатека — два разных
             хранилища, и до сих пор из текста заметки был достижим только первый.
 
             Видео здесь скрыто (`showVideos={false}`) намеренно: разметчик заметки умеет только
             `<img>`, и вставленный ролик показался бы битой картинкой — то есть кнопка предлагала
             бы то, что тут же ломается. */}
-        <MediaSelector
-          label='media'
-          purpose='a picture in the text'
-          allowMultiple
-          showVideos={false}
-          saveSelectedMedia={insertMedia}
-          trigger={
-            <Button
-              type='button'
-              size='xs'
-              variant='secondary'
-              title='insert pictures from the media library: pick several, they will stand as a gallery'
-              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-            >
-              media
-            </Button>
-          }
-        />
-      </div>
+          <MediaSelector
+            label='media'
+            purpose='a picture in the text'
+            allowMultiple
+            showVideos={false}
+            saveSelectedMedia={insertMedia}
+            trigger={
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                title='insert pictures from the media library: pick several, they will stand as a gallery'
+                onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+              >
+                media
+              </Button>
+            }
+          />
+        </div>
+      )}
 
       {/* ── ПОЛОСА РЕЖИМА ТАБЛИЦЫ ──────────────────────────────────────────────────────────
           Стоит ОТДЕЛЬНОЙ строкой и только пока каретка в таблице. Постоянно висящие «+ row» и
@@ -576,6 +687,19 @@ export function FormatBar({
   );
 }
 
+/** Компактная полоса: пять частых инструментов, остальное — под «⋯». */
+const PRIMARY_TOOLS: { label: string; glyph: string; className?: string }[] = [
+  { label: 'bold', glyph: 'B', className: 'font-bold' },
+  { label: 'italic', glyph: 'I', className: 'italic' },
+  { label: 'list', glyph: '•' },
+  { label: 'numbering', glyph: '1.' },
+  { label: 'link', glyph: 'link' },
+];
+const MORE_TOOLS = ['heading', 'quote', 'code'];
+const TOOL_CELL = 'min-h-11 flex-1 border-r border-hairline text-micro last:border-r-0 md:min-h-8';
+const MORE_CELL =
+  'flex min-h-11 w-full items-center justify-center border-r border-b border-hairline text-micro uppercase tracking-label md:min-h-8';
+
 /** Кнопки строения таблицы. Порядок — как читают: сначала строки, потом столбцы. */
 const TABLE_ACTIONS: { op: TableOp; label: string; title: string }[] = [
   {
@@ -619,7 +743,14 @@ const PICK_MAX = 6;
  * набирать цифры там, где рука уже на мыши. Потолок 6×6 — не ограничение таблицы, а граница
  * УДОБНОГО жеста: дальше строки и столбцы добираются полосой режима, которая для того и есть.
  */
-function TableSizePicker({ onPick }: { onPick: (rows: number, cols: number) => void }) {
+function TableSizePicker({
+  onPick,
+  cellClassName,
+}: {
+  onPick: (rows: number, cols: number) => void;
+  /** В компактной полосе триггер — клетка сетки, а не кнопка-рамка. */
+  cellClassName?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
   const rows = hover?.r ?? 0;
@@ -632,17 +763,24 @@ function TableSizePicker({ onPick }: { onPick: (rows: number, cols: number) => v
         if (!v) setHover(null);
       }}
       title='table'
-      triggerProps={{ onMouseDown: (e: React.MouseEvent) => e.preventDefault() }}
+      triggerProps={{
+        onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+        ...(cellClassName ? { className: cellClassName } : {}),
+      }}
       openElement={
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
-          title='insert a table: pick the size, then rows and columns are added by the strip that appears when the caret is inside it'
-          asChild
-        >
+        cellClassName ? (
           <span>table</span>
-        </Button>
+        ) : (
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            title='insert a table: pick the size, then rows and columns are added by the strip that appears when the caret is inside it'
+            asChild
+          >
+            <span>table</span>
+          </Button>
+        )
       }
     >
       <div className='space-y-1.5'>

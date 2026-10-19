@@ -420,6 +420,7 @@ export function Tasks() {
         initial={initial}
         saving={createTask.isPending}
         onSubmit={handleCreate}
+        draftKey={projectId ? `${activeBoard}.project-${projectId}` : activeBoard}
       />
     </div>
   );
