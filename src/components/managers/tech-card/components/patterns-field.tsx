@@ -1527,6 +1527,10 @@ export function PatternsField({
             {dxf && row.url && (
               <PatternExportMenu
                 label={labelOf(row)}
+                original={async () => ({
+                  blob: await fetchMediaBlob(row.url as string),
+                  fileName: row.filename || `${labelOf(row)}.dxf`,
+                })}
                 drawing={async () =>
                   drawingFromDxf(
                     await (await fetchMediaBlob(row.url as string)).arrayBuffer(),
