@@ -1,6 +1,7 @@
 import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { cn } from 'lib/utility';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Chip, FormField, FormItem, FormLabel } from 'ui';
+import { Arrow, Chip, FormField, FormItem, FormLabel } from 'ui';
 import { ModelFormData } from './schema';
 import { SizePickerModal } from './size-picker-modal';
 import { useSizeNames } from './use-size-systems';
@@ -29,26 +30,46 @@ export function DefaultSizesField() {
         return (
           <FormItem>
             <FormLabel>sizes</FormLabel>
-            <div className='flex min-h-6 w-full flex-wrap items-center gap-1 border border-borderColor bg-bgColor px-2 py-0.5 focus-within:border-textColor'>
-              {selectedIds.map((id) => (
-                <Chip
-                  key={id}
-                  onRemove={() => remove(id)}
-                  className='h-5 px-1.5 py-0 text-textBaseSize leading-4 text-textColor'
+            {/* The whole box is the popover trigger (a div, so chip × buttons are not nested in a
+                button); × stops propagation, so removing never opens. Box = Input/Select box. */}
+            <SizePickerModal
+              selectedIds={selectedIds}
+              onToggle={toggle}
+              gender={gender}
+              title='sizes'
+              renderTrigger={(isOpen) => (
+                <div
+                  role='button'
+                  tabIndex={0}
+                  aria-label='sizes'
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.currentTarget.click();
+                    }
+                  }}
+                  className='flex min-h-6.5 w-full cursor-pointer flex-wrap items-center gap-1 border border-borderColor bg-bgColor px-2 py-0.5 text-textBaseSize transition-colors focus:border-textColor focus:outline-none data-[state=open]:border-textColor'
                 >
-                  {formatSizeName(sizeById.get(id) ?? `#${id}`)}
-                </Chip>
-              ))}
-              <span aria-hidden className='min-w-2 flex-1 self-stretch' />
-              <SizePickerModal
-                selectedIds={selectedIds}
-                onToggle={toggle}
-                gender={gender}
-                triggerLabel=''
-                title='sizes'
-                triggerClassName='shrink-0 border-0 px-1 py-0'
-              />
-            </div>
+                  {selectedIds.map((id) => (
+                    <Chip
+                      key={id}
+                      onRemove={() => remove(id)}
+                      className='h-5 px-1.5 py-0 text-textBaseSize leading-4 text-textColor'
+                    >
+                      {formatSizeName(sizeById.get(id) ?? `#${id}`)}
+                    </Chip>
+                  ))}
+                  <Arrow
+                    aria-hidden
+                    className={cn(
+                      'ml-auto shrink-0 rotate-180 text-textColor',
+                      isOpen && 'rotate-0',
+                    )}
+                  />
+                </div>
+              )}
+            />
           </FormItem>
         );
       }}
