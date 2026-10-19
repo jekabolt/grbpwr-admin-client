@@ -906,7 +906,9 @@ export default function FilesPage() {
    */
   const renderFiles = (list: LibraryFile[]) =>
     view === 'grid' ? (
-      <Tiles min={190}>{list.map(tile)}</Tiles>
+      <Tiles min={190} className='max-md:grid-cols-2!'>
+        {list.map(tile)}
+      </Tiles>
     ) : (
       <div className='flex min-w-0 flex-col gap-px bg-hairline'>
         <FileRowsHeader />
