@@ -304,6 +304,16 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   opacity: 0.3;
 }
 
+/* Toast job with no known total (snackbar.tsx): a third of the 2px track shuttles across. */
+@keyframes toastShuttle {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 /* Top-bar nav dropdowns (Radix NavigationMenu.Content). A short state-conveying
    drop on open/close; disabled under reduced-motion. */
 @keyframes navDropdownIn {
