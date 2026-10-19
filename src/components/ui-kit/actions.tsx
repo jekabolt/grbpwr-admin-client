@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Button, Chip, ChipRow, CopyToClipboard, ViewSwitch } from 'ui';
+import { Button, Chip, ChipRow, CopyToClipboard, useDoneFlash, ViewSwitch } from 'ui';
 import { addDoorDemo } from './add-door';
 import { backLinkDemo } from './back-link';
 import { closeDemo } from './close';
+import { undoRowDemo } from './undo-row';
 import { KitDemo, KitLines, KitMatrix } from './kit-entry';
 
 const SIZES = ['xs', 'sm', 'default', 'lg'] as const;
@@ -66,8 +67,42 @@ function ButtonDemo() {
             </Button>
           )),
         },
+        {
+          label: 'main done',
+          cells: SIZES.map((size) => (
+            <Button variant='main' size={size} done>
+              save
+            </Button>
+          )),
+        },
+        {
+          label: 'secondary done',
+          cells: SIZES.map((size) => (
+            <Button variant='secondary' size={size} done='published'>
+              publish
+            </Button>
+          )),
+        },
+        { label: 'main flash', cells: SIZES.map((size) => <FlashSave key={size} size={size} />) },
       ]}
     />
+  );
+}
+
+/** Click: a short fake save, then `saved ✓` for 1.5 s. */
+function FlashSave({ size }: { size: (typeof SIZES)[number] }) {
+  const done = useDoneFlash();
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 400));
+    setBusy(false);
+    done.flash();
+  };
+  return (
+    <Button variant='main' size={size} loading={busy} done={done.on} onClick={save}>
+      save
+    </Button>
   );
 }
 
@@ -162,6 +197,7 @@ export const actionDemos: KitDemo[] = [
   backLinkDemo,
   addDoorDemo,
   closeDemo,
+  undoRowDemo,
   { names: ['Chip', 'ChipRow'], Demo: ChipDemo },
   { names: ['ViewSwitch'], Demo: ViewSwitchDemo },
   { names: ['CopyToClipboard'], Demo: CopyDemo },
