@@ -194,7 +194,10 @@ export function AssigneesPicker({
       </Button>
 
       {open && (
-        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-borderColor bg-bgColor'>
+        <div
+          data-assignees-popup
+          className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-borderColor bg-bgColor'
+        >
           <Input
             ref={inputRef}
             type='text'
