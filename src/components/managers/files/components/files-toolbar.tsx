@@ -202,6 +202,8 @@ export function StatusLine({
   onSort,
   view,
   onView,
+  selecting,
+  onToggleSelecting,
 }: {
   /** `undefined` — ответ ещё не приехал. */
   matched?: number;
@@ -215,6 +217,9 @@ export function StatusLine({
   onSort: (v: FilesSort) => void;
   view: FilesView;
   onView: (v: FilesView) => void;
+  /** Телефонный вход в выбор. На десктопе проп не передаётся, и строка остаётся прежней. */
+  selecting?: boolean;
+  onToggleSelecting?: () => void;
 }) {
   const next = SORT_CYCLE[(SORT_CYCLE.indexOf(sort) + 1) % SORT_CYCLE.length];
   return (
@@ -247,6 +252,16 @@ export function StatusLine({
         )}
       </span>
       <span className='ml-auto flex shrink-0 items-center gap-2.5'>
+        {onToggleSelecting && (
+          <Button
+            variant='underline'
+            aria-pressed={!!selecting}
+            className='text-textColor'
+            onClick={onToggleSelecting}
+          >
+            {selecting ? 'done' : 'select'}
+          </Button>
+        )}
         <Button
           className='whitespace-nowrap text-labelColor hover:text-textColor'
           title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[next]}`}
