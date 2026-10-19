@@ -171,7 +171,7 @@ function FittingStart() {
 
   return (
     <Form {...form}>
-      <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter px-4 pt-6 pb-32'>
+      <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
         <div className='flex flex-wrap items-baseline gap-3'>
           <BackLink to={returnTo || ROUTES.fittings} />
           <Text
@@ -310,23 +310,6 @@ function FittingWorkspaceScreen({
     ],
   );
 
-  // Context line: values only, no labels.
-  const { data: techCard } = useTechCard(techCardId || undefined);
-  const model = (models ?? []).find((m) => m.id === modelId);
-  const sizeName = sampleSizeId
-    ? String(findInDictionary(dictionary, sampleSizeId, 'size') || sampleSizeId)
-    : '';
-  const ctx = [
-    techCard?.techCard?.styleNumber || (techCardId ? `#${techCardId}` : ''),
-    sample
-      ? `sample #${sample.number ?? sample.id} ${samplePurposeLabel(sample.sample?.purpose)}`
-      : '',
-    sizeName,
-    sampleRoundNumber ? `round ${sampleRoundNumber}` : '',
-    model?.model?.name || '',
-    formatDate(fittingDate),
-  ].filter(Boolean);
-
   const statusPill =
     status === 'FITTING_STATUS_DONE' ? (
       <Pill tone='ok'>done</Pill>
@@ -339,7 +322,7 @@ function FittingWorkspaceScreen({
   return (
     <Form {...form}>
       <FittingWorkspaceContext.Provider value={workspace}>
-        <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter px-4 pt-6 pb-32'>
+        <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
           <div className='flex flex-col gap-2'>
             <div className='flex flex-wrap items-baseline gap-3'>
               <BackLink to={returnTo || ROUTES.fittings} />
@@ -363,25 +346,6 @@ function FittingWorkspaceScreen({
                 Details
               </Button>
             </div>
-            {ctx.length > 0 && (
-              <div className='flex flex-wrap gap-x-2 gap-y-0.5'>
-                {ctx.map((v, i) => (
-                  <Text
-                    key={i}
-                    component='span'
-                    variant='label'
-                    className='uppercase tracking-label'
-                  >
-                    {i > 0 && (
-                      <span aria-hidden className='mr-2'>
-                        ·
-                      </span>
-                    )}
-                    {v}
-                  </Text>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className='flex flex-col gap-gutter lg:flex-row lg:items-start'>

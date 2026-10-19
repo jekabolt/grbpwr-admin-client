@@ -566,14 +566,14 @@ export function PhotoStage() {
   return (
     <>
       <Section title='Photos' className='min-w-0 lg:flex-[1.5]'>
-        <Toolbar className='flex-nowrap overflow-x-auto md:flex-wrap md:overflow-x-visible'>
+        <Toolbar className='flex-nowrap overflow-x-auto max-md:border-0 max-md:p-0 md:flex-wrap md:overflow-x-visible'>
           <ViewSwitch
             value={tool}
             options={TOOL_OPTIONS}
             onChange={setTool}
             label='drawing tool'
             disabled={readOnly}
-            className='shrink-0'
+            className='w-full shrink-0 md:w-auto max-md:[&>span]:flex-1 max-md:[&>span]:justify-center max-md:[&>span]:py-3'
           />
         </Toolbar>
 
