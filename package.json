@@ -224,6 +224,7 @@
     "@tiptap/starter-kit": "^3.29.2",
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.6.7",
+    "blurhash": "^2.0.5",
     "class-variance-authority": "^0.7.1",
     "clipper2-js": "^1.2.4",
     "date-fns": "2.30.0",

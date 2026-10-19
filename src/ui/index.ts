@@ -57,6 +57,8 @@ export {
 export { default as Input, type InputProps } from './components/input';
 /** @primitive Indeterminate loading bar */
 export { Loader } from './components/loader';
+/** @primitive BlurHash-backed image */
+export { BlurhashImage, type BlurhashImageProps } from './components/blurhash-image';
 /** @primitive Image/video in aspect box */
 export { default as Media } from './components/media';
 /** @primitive Bare scrim layer */

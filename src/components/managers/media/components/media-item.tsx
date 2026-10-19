@@ -277,6 +277,7 @@ export function MediaItem({
           src={mediaUrl || ''}
           type={video ? 'video' : 'image'}
           alt={mediaUrl || 'media not found'}
+          blurhash={media.media?.blurhash}
           // БЕЗ ШТАТНОГО ПРОИГРЫВАТЕЛЯ В СЕТКЕ. Полоса управления браузера — чужая по языку
           // хрома, к тому же клик по перемотке попадал мимо выбора и мимо открытия.
           controls={false}
