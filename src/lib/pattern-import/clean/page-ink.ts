@@ -4,20 +4,22 @@
 // whose lines are long or closed. Read on 24 of them (scripts/pattern-import/page-ink-entry.ts),
 // that line work is, every time, one of:
 //   · rules — a table's grid, a separator, the page's trim line: straight, axis-parallel, open
-//     (on the page or past its edge), or a closed bar ≤ 3 mm thin;
+//     and on the page (nothing drawn past its edge is explained), or a closed bar ≤ 3 mm thin;
 //   · frames — a text box, a table's outline, the cells of the tile-assembly map: an axis-parallel
-//     rectangle in a pen the tiles do not use, holding words or lines (a rectangle in the
+//     rectangle in a pen the tiles do not use, holding words or lines — a piece's label at print
+//     size only as a table of pieces (ids + labels) or a note (running text); a rectangle in the
 //     pattern's pen may be a waistband, whatever lies in it — unless what lies in it says what it
-//     is in any pen: a size line key, the tile-assembly map, a code stamp);
+//     is in any pen: a size line key, the tile-assembly map, a code stamp;
 //   · the test square — 2 in / 5 cm …, where text near it prints its own dimension;
 //   · reduced copies — the pieces at 1:5…1:25 (the pieces index, the tile map, the graded nest of a
 //     pieces inventory): outlines at one scale ≤ 0.35 shaped as ≥ 2 different tile pieces;
 //   · drawings — the garment flats and the sewing-step sketches: small (≤ 0.6 of the page's short
 //     side, ≤ 0.75 of its long side in a hairline), drawn with a pen no line of the tile sheet is
-//     drawn with, and — a closed piece-sized one — full of inner detail (seams, buttons) with no
-//     piece's label at print size in it (CUT 2, ON FOLD), lying inside such a drawing of its pen,
-//     or toned underneath with a second cue: a family of outlines in its pen and tint (a pieces
-//     index), or alone with no word and its line art on it.
+//     drawn with, and — a closed piece-sized one — full of inner detail (seams, buttons: lines
+//     within its polygon) with no name or label at print size in it (POCKET, CUT 2, КАРМАН),
+//     lying within such a drawing of its pen (unnamed), or toned underneath with a second cue: a
+//     family of unnamed outlines in its pen and tint (a pieces index), or alone with no word and
+//     its line art (strokes ≥ 4 mm, not drill dots) on it.
 // A page where EVERY long or piece-sized line is one of these is the second, geometric evidence
 // that it is not pattern (the first is the classifier's text-led role). A curve at 1:1 drawn with
 // the pattern's pen, a large curve, a curve that is no tile piece reduced — anything else — stays
@@ -25,6 +27,7 @@
 // A file with no tile page has no pattern to compare with: nothing is explained.
 import type { Chain, IRPage, PtMm, Style } from '../types';
 import { bboxOf } from '../chains/geom';
+import { pointInPoly } from '../pieces/geom';
 import { parseSizeToken } from '../sizes/tokens';
 import type { PageChains } from './page-chains';
 import { outlineHu, REDUCED_COPY, type Shape } from './reduced-copy';
@@ -57,6 +60,8 @@ export const PAGE_INK = {
   drawingDetail: 6,
   /** A piece's own label (CUT 2, ON FOLD) is printed at least this tall (mm). */
   labelMm: 1.5,
+  /** A line inside an outline: at least this share of its points inside the outline's polygon. */
+  withinShare: 0.9,
   /** Pens: same stroke width within max(abs, rel × width), colour within this per channel. */
   penWidthAbsMm: 0.02,
   penWidthRel: 0.1,
@@ -84,8 +89,11 @@ export const PAGE_INK = {
    *  art: seams, folds, shading drawn as fills) lie on it — each with most of its box on the
    *  outline's box. */
   lineArtFills: 4,
+  lineArtMm: 4,
   lineArtShare: 0.5,
-  /** A toned outline's family member is a closed outline at least this long. */
+  /** A toned outline's family: at least this many other closed outlines (each at least this
+   *  long) in its pen and tint. */
+  familyOthers: 1,
   familyMm: 20,
   /** A size line key: at least this many different size labels, each beside a sample of its
    *  line (at least `keyPens` different pens). */
@@ -96,17 +104,38 @@ export const PAGE_INK = {
   keyBesideMm: 40,
   /** The tile-assembly map: at least this many tile ids (A1 … F9) in a grid, nothing else. */
   mapIds: 6,
+  /** A table of pieces (Mood's cutting legend, a row per piece: «A · FRONT · FABRIC - CUT 2»): at
+   *  least this many piece ids and this many piece labels in it. */
+  tableRows: 2,
+  /** … or a note: running text of at least `noteTokens` words with `noteWords` different function
+   *  words among them (Mood's «Patterns with more than one grainline can be placed …» box). */
+  noteTokens: 12,
+  noteWords: 3,
   /** A code stamp (Mood's «PATTERNS BY mood · MDF474» badge on every page): a square at most this
    *  large (side within `stampSquare`) … */
   stampMm: 60,
   stampSquare: 0.03,
   /** … holding only the pattern's code as words, a row of at least this many closed glyph outlines
-   *  (the logo's letters: one height within `stampGlyphTol`, at most this share of its side) … */
+   *  (the logo's letters: one height within `stampGlyphTol`, at most `stampGlyphShare` of its side,
+   *  each narrower than `stampGlyphAspect` of its height — a letter, not a round hole — centres on
+   *  one line within `stampRowTol` of that height, the row across at least `stampSpan` of the
+   *  side; the badge's letters are 0.8–0.84 as wide as tall, 0.09–0.1 of the side, across
+   *  0.75–0.86 of it) … */
   stampGlyphs: 3,
-  stampGlyphShare: 0.2,
+  stampGlyphShare: 0.12,
   stampGlyphTol: 0.15,
-  /** … and at least this many filled letter shapes (fill-only paths; the badge has 15). */
+  stampGlyphAspect: 0.9,
+  stampRowTol: 0.5,
+  stampSpan: 0.6,
+  /** … and at least this many filled letter shapes (fill-only paths; the badge has 15), every
+   *  fill inside a letter's size (≤ `stampFillShare` of its height) and on the row (within
+   *  `stampBand` heights of it), at least `stampFilledGlyphs` of them a row letter's own box (the
+   *  logo's letters are drawn twice, outline and fill; each edge within `stampGlyphTol` of the
+   *  height). */
   stampFills: 10,
+  stampFillShare: 1.25,
+  stampBand: 1.5,
+  stampFilledGlyphs: 3,
 };
 
 /**
@@ -262,6 +291,11 @@ const TILE_ID = /^([A-Z]{1,2})\s?(\d{1,2})$/;
 /** A piece's label: its cut, its fold, its grain, its material. */
 const PIECE_WORDS =
   /\b(cut\s*:?\s*\d+|cut\s+on\s+fold|on\s+(the\s+)?fold|grain\s*line|(fabric|lining|fusing|interfacing|contrast)\s*:)/i;
+/** A piece's id in a table of pieces: a lone letter or number (A, B, 12). */
+const PIECE_ID = /^(?:[A-Z]|\d{1,2})$/;
+/** The function words of running text (a note's sentences; a piece's label has few or none). */
+const PROSE =
+  /^(the|of|to|and|with|be|that|if|for|in|is|are|can|this|or|from|than|when|your|you|it|as|и|в|на|с|по|для|не|что|это)$/i;
 /** A pattern / brand code: MDF474, MDF-349, B6543. */
 const CODE = /^[A-Z]{1,5}-?\d{2,5}[A-Z]?$/;
 
@@ -369,16 +403,53 @@ export function pageInkItems(
   /** Chains (any length ≥ 3 mm) lying inside box `b`, the chain itself left out. */
   const detailIn = (b: Box, self: number) =>
     pc.chains.filter((c, j) => j !== self && c.lengthMm >= 3 && inside(pc.box[j], b)).length;
+  /** Share of the points lying inside closed chain `i`'s outline (not just its box). */
+  const within = (i: number, q: readonly PtMm[]) =>
+    q.filter((v) => pointInPoly(v, pc.chains[i].pts)).length / Math.max(1, q.length);
+  /** A word at print size inside closed chain `i`'s outline: a piece's name or cut (POCKET,
+   *  КАРМАН 2 ДЕТ.) — a flat carries none, its callouts sit beside it (Codex r4); a lone letter or
+   *  number is a pieces index's id, not a name. */
+  const named = (i: number) =>
+    wordsIn(pc.box[i]).some(
+      (t) =>
+        t.fontSizeMm >= PAGE_INK.labelMm &&
+        /\p{L}.*\p{L}/u.test(t.text) &&
+        pointInPoly(t.anchor, pc.chains[i].pts),
+    );
+  /** The point halfway along a chain. */
+  const midOf = (q: readonly PtMm[]) => {
+    let total = 0;
+    for (let k = 1; k < q.length; k++)
+      total += Math.hypot(q[k].x - q[k - 1].x, q[k].y - q[k - 1].y);
+    let run = 0;
+    for (let k = 1; k < q.length; k++) {
+      const l = Math.hypot(q[k].x - q[k - 1].x, q[k].y - q[k - 1].y);
+      if (run + l >= total / 2 && l > 0) {
+        const u = (total / 2 - run) / l;
+        return {
+          x: q[k - 1].x + u * (q[k].x - q[k - 1].x),
+          y: q[k - 1].y + u * (q[k].y - q[k - 1].y),
+        };
+      }
+      run += l;
+    }
+    return q[0];
+  };
+  /** Chains (≥ 3 mm) inside closed chain `i`'s OUTLINE, by their midpoint — a seam ends on the
+   *  outline — not just its box (Codex r4: an L-shaped box holds other lines). */
+  const detailOf = (i: number) =>
+    pc.chains.filter(
+      (c, j) =>
+        j !== i &&
+        c.lengthMm >= 3 &&
+        inside(pc.box[j], pc.box[i]) &&
+        pointInPoly(midOf(c.pts), pc.chains[i].pts),
+    ).length;
   const wordsIn = (b: Box) =>
     words.filter(
       (t) =>
         t.anchor.x > b.minX && t.anchor.x < b.maxX && t.anchor.y > b.minY && t.anchor.y < b.maxY,
     );
-  const textIn = (b: Box) => wordsIn(b).length;
-  /** A piece's own label at print size (CUT 2, ON FOLD, GRAINLINE): a reduced thumbnail's labels
-   *  shrink with it, far below what a cutter reads. */
-  const pieceLabel = (ws: typeof words) =>
-    ws.some((t) => t.fontSizeMm >= PAGE_INK.labelMm && PIECE_WORDS.test(t.text));
   /** Fill-only paths (no pen): their boxes and fill colours. */
   let fills: { b: Box; rgb: Style['strokeRgb'] }[] | null = null;
   /**
@@ -433,6 +504,8 @@ export function pageInkItems(
     fills ??= fillsOf();
     return fills.filter(({ b: q }) => {
       if (sameBox(q, b)) return false;
+      // a stroke of shading or a fold, not a dot (a drill hole, a notch mark — Codex r4)
+      if (Math.max(q.maxX - q.minX, q.maxY - q.minY) < PAGE_INK.lineArtMm) return false;
       const w = Math.min(q.maxX, b.maxX) - Math.max(q.minX, b.minX);
       const h = Math.min(q.maxY, b.maxY) - Math.max(q.minY, b.minY);
       const a = Math.max(1e-6, (q.maxX - q.minX) * (q.maxY - q.minY));
@@ -443,7 +516,9 @@ export function pageInkItems(
    * A closed piece-sized outline in a pen of its own with little inside is a drawing's when it is
    * toned AND a second cue agrees (Codex r3: a grey-filled pocket template is toned too):
    *   · its family — another closed outline in its pen toned with its tint (a pieces index's
-   *     silhouettes, a step sketch's garments), no piece label inside (cut, fold, grain …);
+   *     silhouettes, a step sketch's garments), itself unnamed (a pieces index letters its
+   *     silhouettes at most) and with no piece label on it (cut, fold, grain …) — Codex r4: two
+   *     grey pocket templates named POCKET stay pieces;
    *   · alone, the illustration around it — no word inside, its tint or an image of its size
    *     under it, and its line art (`lineArtFills` fill-only paths) lying on it (Vixen MDF371 p1).
    */
@@ -453,12 +528,14 @@ export function pageInkItems(
     const tint = toneOf(b);
     if (
       tint &&
-      pc.chains.some((c, j) => {
+      // a silhouette carries no name (a pieces index letters it at most; POCKET names a piece)
+      !named(i) &&
+      pc.chains.filter((c, j) => {
         if (j === i || !c.closed || c.lengthMm < PAGE_INK.familyMm) return false;
         const p = penOf(styles.get(c.style), c);
         const t = p && samePen(p, pen) ? toneOf(pc.box[j]) : null;
         return !!t && t.every((v, k) => Math.abs(v - tint[k]) <= PAGE_INK.penRgb);
-      })
+      }).length >= PAGE_INK.familyOthers
     )
       return true;
     return !ws.length && (!!tint || shaded(b)) && lineArt(b) >= PAGE_INK.lineArtFills;
@@ -543,9 +620,11 @@ export function pageInkItems(
    * A code stamp (Mood's badge «PATTERNS BY mood · MDF474», printed on the cover as the test square
    * and smaller on every page after it, the tile sheet's first tile included — which is how its
    * pen becomes a "tile pen"): a small square whose only words are a pattern code and whose marks
-   * are a lettered logo — a row of ≥ `stampGlyphs` closed glyph outlines of one height (≤
-   * `stampGlyphShare` of the side) and ≥ `stampFills` filled letter shapes — with nothing long or
-   * large inside. Codex r3: a coded square piece with a few placement marks has no such row.
+   * are a lettered logo — a row of ≥ `stampGlyphs` closed letter outlines (one height, narrower
+   * than tall, centres on one line, across most of the side) and ≥ `stampFills` letter-sized fills,
+   * all on that row, ≥ `stampFilledGlyphs` of them a letter's own box (outline + fill) — with
+   * nothing long or large inside. Codex r4: a coded button template (round holes, drill dots) has
+   * no such row; r3: a coded square piece with a few placement marks has none either.
    */
   const stamp = (b: Box, self: number) => {
     const w = b.maxX - b.minX;
@@ -554,20 +633,54 @@ export function pageInkItems(
     if (side > PAGE_INK.stampMm || Math.abs(w - h) > PAGE_INK.stampSquare * side) return false;
     const ws = wordsIn(b);
     if (!ws.length || !ws.every((t) => CODE.test(t.text.trim()))) return false;
-    const glyphs: number[] = [];
+    const glyphs: Box[] = [];
     for (const [j, c] of pc.chains.entries()) {
       const q = pc.box[j];
       if (j === self || c.lengthMm < 3 || !inside(q, b)) continue;
       if (isPatternLike(c) || Math.max(q.maxX - q.minX, q.maxY - q.minY) > 0.6 * side) return false;
-      if (c.closed && q.maxY - q.minY <= PAGE_INK.stampGlyphShare * side)
-        glyphs.push(q.maxY - q.minY);
+      if (c.closed && q.maxY - q.minY <= PAGE_INK.stampGlyphShare * side) glyphs.push(q);
     }
-    glyphs.sort((p, q) => p - q);
-    const med = glyphs[Math.floor(glyphs.length / 2)] ?? 0;
-    const row = glyphs.filter((g) => Math.abs(g - med) <= PAGE_INK.stampGlyphTol * med).length;
+    const hOf = (q: Box) => q.maxY - q.minY;
+    const mid = (v: number[]) => [...v].sort((p, q) => p - q)[Math.floor(v.length / 2)] ?? 0;
+    const med = mid(glyphs.map(hOf));
+    if (!(med > 0)) return false;
+    const tall = glyphs.filter(
+      (q) =>
+        Math.abs(hOf(q) - med) <= PAGE_INK.stampGlyphTol * med &&
+        q.maxX - q.minX <= PAGE_INK.stampGlyphAspect * hOf(q),
+    );
+    const line = mid(tall.map((q) => (q.minY + q.maxY) / 2));
+    const row = tall.filter(
+      (q) => Math.abs((q.minY + q.maxY) / 2 - line) <= PAGE_INK.stampRowTol * med,
+    );
+    if (row.length < PAGE_INK.stampGlyphs) return false;
+    const span = Math.max(...row.map((q) => q.maxX)) - Math.min(...row.map((q) => q.minX));
+    if (span < PAGE_INK.stampSpan * side) return false;
+    const lo = Math.min(...row.map((q) => q.minY)) - PAGE_INK.stampBand * med;
+    const hi = Math.max(...row.map((q) => q.maxY)) + PAGE_INK.stampBand * med;
     fills ??= fillsOf();
-    const letters = fills.filter(({ b: q }) => inside(q, b)).length;
-    return row >= PAGE_INK.stampGlyphs && letters >= PAGE_INK.stampFills;
+    const letters = fills.filter(({ b: q }) => inside(q, b)).map(({ b: q }) => q);
+    if (letters.length < PAGE_INK.stampFills) return false;
+    if (
+      !letters.every(
+        (q) =>
+          Math.max(q.maxX - q.minX, q.maxY - q.minY) <= PAGE_INK.stampFillShare * med &&
+          q.minY >= lo &&
+          q.maxY <= hi,
+      )
+    )
+      return false;
+    const d = PAGE_INK.stampGlyphTol * med;
+    const filled = row.filter((g) =>
+      letters.some(
+        (q) =>
+          Math.abs(q.minX - g.minX) <= d &&
+          Math.abs(q.maxX - g.maxX) <= d &&
+          Math.abs(q.minY - g.minY) <= d &&
+          Math.abs(q.maxY - g.maxY) <= d,
+      ),
+    ).length;
+    return filled >= PAGE_INK.stampFilledGlyphs;
   };
 
   type Item = {
@@ -597,13 +710,13 @@ export function pageInkItems(
     const rule = !c.closed && ax >= PAGE_INK.ruleAxis && Math.min(w, h) <= PAGE_INK.ruleThinMm;
     // drawn off the page (clipped away on paper): nothing on paper says what it is — before any
     // other explanation (Codex r2); the trim line at the page's edge stays within the tolerance.
-    // A straight rule past the edge only in a pen the tiles do not use (the seam between the
-    // sheets of a tiled instruction poster — polupalto, 545 mm across 2 pages): in the tile
-    // sheet's pen it may be a piece's straight edge running off the page (Codex r3)
+    // A straight rule past the edge too, in any pen (a piece's straight edge running off the page
+    // — Codex r3 in the tile sheet's pen, r4 in a foreign one): polupalto p1's 545 mm seam
+    // between the sheets of a tiled instruction poster stays a question
     const t = PAGE_INK.offPageMm;
     const off =
       b.minX < -t || b.minY < -t || b.maxX > page.widthMm + t || b.maxY > page.heightMm + t;
-    if (rule && (!off || (pen && !tilePen(pen)))) return items.push({ i, kind: 'rule' });
+    if (rule && !off) return items.push({ i, kind: 'rule' });
     if (off) return items.push({ i, kind: null, why: `${head}, drawn off the page` });
     // a closed bar at most this thin (a colour bar, a strap's 1:10 copy): no cut piece is
     if (c.closed && Math.min(w, h) <= PAGE_INK.barMm) return items.push({ i, kind: 'rule' });
@@ -643,7 +756,7 @@ export function pageInkItems(
       // hairline or not, has no detail (Codex r2)
       // — or toned with a second cue (`toneDrawing`: a pieces index's silhouettes, a shaded flat)
       const pieceSized = c.closed && areaOf(c.pts) >= PAGE_INK.pieceMm2;
-      if (pieceSized && detailIn(b, i) >= PAGE_INK.drawingDetail && !pieceLabel(wordsIn(b)))
+      if (pieceSized && detailOf(i) >= PAGE_INK.drawingDetail && !named(i))
         return items.push({ i, kind: 'drawing', host: true });
       if (!pieceSized || toneDrawing(i, b, pen)) return items.push({ i, kind: 'drawing' });
       return items.push({
@@ -695,21 +808,45 @@ export function pageInkItems(
   for (const x of items) {
     if (x.kind || !x.part) continue;
     const b = pc.box[x.i];
+    // a piece's name or cut inside it: a piece laid on a flat, never a part of it (Codex r4)
+    if (named(x.i)) continue;
     const host = items.find((y) => {
       if (!y.host || y.i === x.i || !inside(b, pc.box[y.i], 2)) return false;
+      if (within(y.i, pc.chains[x.i].pts) < PAGE_INK.withinShare) return false;
       const p = penOf(styles.get(pc.chains[y.i].style), pc.chains[y.i]);
       return !!p && samePen(p, x.part!);
     });
     if (host) x.kind = 'drawing';
   }
   // frames: only in a pen the tiles do not use (a rectangle in the pattern's pen may be a
-  // waistband, whatever lies inside it — Codex r2), holding words or other line work; in any pen,
-  // a size line key, the tile-assembly map or a code stamp (what lies inside says what it is)
+  // waistband, whatever lies inside it — Codex r2), holding words or other line work, and no
+  // piece's label at print size unless it is a table of pieces or a note (Codex r4: a waistband
+  // in a pen of its own with «CUT 1 ON FOLD», Parker MDF249 p1's bias-strip guide with its
+  // GRAINLINE); in any pen, a size line key, the tile-assembly map or a code stamp (what lies
+  // inside says what it is)
   for (const x of items) {
     if (!x.frame) continue;
     const b = pc.box[x.i];
     const foreign = !!x.frame.pen && !tilePen(x.frame.pen);
-    if (foreign && (textIn(b) >= 1 || detailIn(b, x.i) >= 1)) x.kind = 'frame';
+    const ws = wordsIn(b);
+    const labels = ws.filter((t) => t.fontSizeMm >= PAGE_INK.labelMm && PIECE_WORDS.test(t.text));
+    const ids = new Set(ws.map((t) => t.text.trim()).filter((t) => PIECE_ID.test(t)));
+    const tokens = ws.flatMap((t) => t.text.split(/[^\p{L}\d]+/u).filter(Boolean));
+    const note =
+      tokens.length >= PAGE_INK.noteTokens &&
+      new Set(tokens.filter((t) => PROSE.test(t)).map((t) => t.toLowerCase())).size >=
+        PAGE_INK.noteWords;
+    const label =
+      x.frame.piece &&
+      labels.length > 0 &&
+      !note &&
+      (labels.length < PAGE_INK.tableRows || ids.size < PAGE_INK.tableRows);
+    if (label) {
+      const c = pc.chains[x.i];
+      x.why = `a rectangle ${Math.round(b.maxX - b.minX)}×${Math.round(b.maxY - b.minY)} mm (${fmtPen(x.frame.pen)}) holding a piece's label «${labels[0].text.trim().slice(0, 30)}» — it may be a piece (${Math.round(c.lengthMm)} mm)`;
+      continue;
+    }
+    if (foreign && (ws.length >= 1 || detailIn(b, x.i) >= 1)) x.kind = 'frame';
     else if (sizeKey(b, x.i) || tileMap(b, x.i) || stamp(b, x.i)) x.kind = 'frame';
     else if (
       foreign &&

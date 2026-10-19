@@ -22,7 +22,8 @@ import {
 } from 'lib/pattern-import/ai/pages';
 import { AI_PAGES, aiAsides, exclusionOf } from 'lib/pattern-import/clean/page-roles';
 import { reducedCopy, shapesOf } from 'lib/pattern-import/clean/reduced-copy';
-import { PAGE_INK, pageInk, tilePensOf } from 'lib/pattern-import/clean/page-ink';
+import { PAGE_INK, pageInk, pageInkItems, tilePensOf } from 'lib/pattern-import/clean/page-ink';
+import { pointInPoly } from 'lib/pattern-import/pieces/geom';
 import { pageChains } from 'lib/pattern-import/clean/page-chains';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { mediaLeftovers } from 'lib/pattern-import/ai/discard';
@@ -640,7 +641,11 @@ const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained:
  * tile sheet's pen off the page, a coded 44 mm square with four placement marks. An overview page
  * is checked at the policy instead (its reading never decides it). Then: the small piece with its
  * grainline, arrowheads, three notches and a print-size «POCKET / CUT 2» (as much detail as a
- * drawing — the label tells a piece).
+ * drawing — the label tells a piece). Codex r4: the small piece over a grey fill with four drill
+ * dots, two grey templates of one tint each with a grainline, its marks with a name only («POCKET»)
+ * or a label in Russian, a labelled pocket inside a closed drawing in that drawing's pen, a straight
+ * edge in a pen of its own off the page, coded button templates (round holes / slots + drill dots),
+ * a waistband in a pen of its own with its name and cut (a frame only as a table of pieces).
  */
 function ink5(
   name: string,
@@ -872,6 +877,201 @@ function ink5(
       !photo.explained,
       photo.unexplained ?? photo.explained,
     );
+    const fill = (rgb: [number, number, number]): Omit<Style, 'id'> => ({
+      ...own,
+      strokeRgb: rgb,
+      widthMm: 0,
+      fill: true,
+    });
+    const dot = (x: number, y: number, r: number) =>
+      Array.from({ length: 8 }, (_, k) => ({
+        x: x + r * Math.cos((k * Math.PI) / 4),
+        y: y + r * Math.sin((k * Math.PI) / 4),
+      }));
+    // Codex r4: a grey pocket template with four filled drill marks (dots are no line art)
+    const drill = read([
+      { pts: at, closed: true, style: fill([200, 200, 200]) },
+      { pts: at, closed: true, style: own },
+      ...[
+        [-0.2, -0.2],
+        [0.2, -0.2],
+        [-0.2, 0.2],
+        [0.2, 0.2],
+      ].map(([fx, fy]) => ({
+        pts: dot(cx + fx * w, cy + fy * h, 1),
+        closed: true,
+        style: fill([0, 0, 0]),
+      })),
+    ]);
+    check(
+      name,
+      `${tag}: the same small piece over a grey fill with four filled drill marks → not explained`,
+      !drill.explained,
+      drill.unexplained ?? drill.explained,
+    );
+    // Codex r4: two grey pocket templates of one pen and tint, each with its grainline and its
+    // name (a family of toned outlines, but a silhouette carries no name; with neither name nor
+    // cut it is a known limit — an unlabelled template reads as a pieces index)
+    const twin = moved(at, w + 8 <= pg.widthMm - ab.maxX ? w + 8 : -(w + 8), 0);
+    const tb = box(twin);
+    const tx = (tb.minX + tb.maxX) / 2;
+    const family = read(
+      [at, twin].flatMap((q, k) => [
+        { pts: q, closed: true, style: fill([200, 200, 200]) },
+        { pts: q, closed: true, style: own },
+        {
+          pts: [
+            { x: k ? tx : cx, y: cy - 0.3 * h },
+            { x: k ? tx : cx, y: cy + 0.3 * h },
+          ],
+          closed: false,
+          style: own,
+        },
+      ]),
+      [cx, tx].map((x) => ({ text: 'POCKET', at: { x, y: cy } })),
+    );
+    check(
+      name,
+      `${tag}: two grey pocket templates in one pen and tint, each with its grainline and «POCKET» → not explained`,
+      !family.explained,
+      family.unexplained ?? family.explained,
+    );
+    // Codex r4: a name with no cut (POCKET), a label in another language (КАРМАН / 2 ДЕТ.)
+    for (const words of [['POCKET'], ['КАРМАН', '2 ДЕТ.']]) {
+      const r2 = read(
+        [{ pts: at, closed: true, style: own }, ...marks],
+        words.map((text, k) => ({ text, at: { x: cx - 8, y: cy + 4 - 8 * k } })),
+      );
+      check(
+        name,
+        `${tag}: the same small piece with its marks and only «${words.join(' / ')}» → not explained`,
+        !r2.explained,
+        r2.unexplained ?? r2.explained,
+      );
+    }
+  }
+  // Codex r4: a labelled pocket inside a closed drawing of the page, in that drawing's pen (a
+  // part of a flat is unnamed; a named one is a piece)
+  {
+    const pcs = pageChains(pg);
+    const half = [
+      { x: 0, y: 27.5 },
+      { x: 22.5, y: 27.5 },
+      { x: 22.5, y: 7.5 },
+      { x: 11.25, y: 0 },
+      { x: 0, y: 7.5 },
+    ];
+    let host: { pts: PtMm[]; style: Omit<Style, 'id'> } | null = null;
+    for (const x of pageInkItems(pcs, pens, shapes, pg)) {
+      const c = pcs.chains[x.i];
+      const st = pg.styles.find((s) => s.id === c.style);
+      if (x.kind !== 'drawing' || !c.closed || !st || host) continue;
+      const hb = pcs.box[x.i];
+      for (let y0 = hb.minY + 2; y0 + 28 <= hb.maxY && !host; y0 += 3)
+        for (let x0 = hb.minX + 2; x0 + 23 <= hb.maxX && !host; x0 += 3) {
+          const q = moved(half, x0, y0);
+          if ([...q, { x: x0 + 11.25, y: y0 + 15 }].every((v) => pointInPoly(v, c.pts)))
+            host = { pts: q, style: st };
+        }
+    }
+    if (host) {
+      const hb = box(host.pts);
+      const r = read(
+        [{ pts: host.pts, closed: true, style: host.style }],
+        [
+          { text: 'POCKET', at: { x: hb.minX + 3, y: hb.minY + 18 } },
+          { text: 'CUT 2', at: { x: hb.minX + 3, y: hb.minY + 12 } },
+        ],
+      );
+      check(
+        name,
+        `${tag}: a «POCKET / CUT 2» piece inside a closed drawing of the page, in its pen → not explained`,
+        !r.explained,
+        r.unexplained ?? r.explained,
+      );
+    }
+  }
+  // Codex r4: a waistband in a pen of its own (no tile line drawn with it) with its name and cut —
+  // one label, or two (fabric + interfacing) and a grainline: no table of pieces. Printed where the
+  // page is clear (a piece is never printed over the page's text — that would make it a note):
+  // the tallest band of 36 mm with no word and no line of the page in it, on a 5 mm grid
+  {
+    const w = 36;
+    const pcs = pageChains(pg);
+    let at: { x: number; y: number; h: number; n: number } | null = null;
+    for (const h0 of [Math.min(200, 0.7 * pg.heightMm), 120, 80, 60])
+      for (let y = 10; y + h0 <= pg.heightMm - 10 && !at; y += 5)
+        for (let x = 10; x + w <= pg.widthMm - 10 && !at; x += 5) {
+          const n =
+            pg.texts.filter(
+              (t) =>
+                t.anchor.x > x - 2 &&
+                t.anchor.x < x + w + 2 &&
+                t.anchor.y > y - 2 &&
+                t.anchor.y < y + h0 + 2,
+            ).length +
+            pcs.box.filter(
+              (o) => o.maxX > x - 1 && o.minX < x + w + 1 && o.maxY > y - 1 && o.minY < y + h0 + 1,
+            ).length;
+          if (!n) at = { x, y, h: h0, n };
+        }
+    const h = at?.h ?? Math.min(200, 0.7 * pg.heightMm);
+    const x0 = at?.x ?? pg.widthMm / 2 - w / 2;
+    const y0 = at?.y ?? pg.heightMm / 2 - h / 2;
+    const rect = [
+      { x: x0, y: y0 },
+      { x: x0 + w, y: y0 },
+      { x: x0 + w, y: y0 + h },
+      { x: x0, y: y0 + h },
+    ];
+    for (const words of [
+      ['WAISTBAND', 'CUT 1 ON FOLD'],
+      ['WAISTBAND', 'FABRIC: CUT 1', 'INTERFACING: CUT 1'],
+    ]) {
+      const r = read(
+        [
+          { pts: rect, closed: true, style: own },
+          ...(words.length > 2
+            ? [
+                {
+                  pts: [
+                    { x: x0 + w / 2, y: y0 + 10 },
+                    { x: x0 + w / 2, y: y0 + h - 10 },
+                  ],
+                  closed: false,
+                  style: own,
+                },
+              ]
+            : []),
+        ],
+        words.map((text, k) => ({ text, at: { x: x0 + 4, y: y0 + h - 10 - 8 * k } })),
+      );
+      check(
+        name,
+        `${tag}: a ${Math.round(h)} mm waistband in a pen of its own ${at ? 'where the page is clear' : 'at the centre (no clear band)'} with «${words.join(' / ')}»${words.length > 2 ? ' and a grainline' : ''} → not explained`,
+        !r.explained,
+        r.unexplained ?? r.explained,
+      );
+    }
+  }
+  // Codex r4: a straight piece edge in a pen of its own running off the page
+  {
+    const r = read([
+      {
+        pts: [
+          { x: pg.widthMm - 60, y: pg.heightMm / 2 + 7 },
+          { x: pg.widthMm + 90, y: pg.heightMm / 2 + 7 },
+        ],
+        closed: false,
+        style: own,
+      },
+    ]);
+    check(
+      name,
+      `${tag}: a straight piece edge in a pen of its own running off the page → not explained`,
+      !r.explained,
+      r.unexplained ?? r.explained,
+    );
   }
   if (big?.closed) {
     const b = box(big.pts);
@@ -1054,6 +1254,38 @@ function ink5(
       !marks.explained,
       marks.unexplained ?? marks.explained,
     );
+    // Codex r4: a coded button template — three button holes in a row (round, or vertical slots:
+    // letter-shaped) and ten filled drill marks along them; no letter is drawn twice (outline and
+    // fill) as the logo's are
+    const ring = (x: number, y: number, rx: number, ry: number) =>
+      Array.from({ length: 24 }, (_, k) => ({
+        x: x + rx * Math.cos((k * Math.PI) / 12),
+        y: y + ry * Math.sin((k * Math.PI) / 12),
+      }));
+    const drillFill: Omit<Style, 'id'> = { ...style, strokeRgb: [0, 0, 0], widthMm: 0, fill: true };
+    for (const [kind, xs, rx, ry] of [
+      ['round holes', [10, 22, 34], 3, 3],
+      ['slot buttonholes', [6, 22, 38], 1, 3],
+    ] as const) {
+      const r = read(
+        [
+          { pts: square, closed: true, style },
+          ...xs.map((x) => ({ pts: ring(sx + x, sy + 22, rx, ry), closed: true, style })),
+          ...Array.from({ length: 10 }, (_, k) => ({
+            pts: ring(sx + 5 + 3.7 * k, sy + 22 + (k % 2 ? 5 : -5), 0.75, 0.75),
+            closed: true,
+            style: drillFill,
+          })),
+        ],
+        [{ text: 'MDF000', at: { x: sx + 14, y: sy + 34 } }],
+      );
+      check(
+        name,
+        `${tag}: a 44 mm coded button template (${kind}, ten drill marks) in the tile sheet's pen → not explained`,
+        !r.explained,
+        r.unexplained ?? r.explained,
+      );
+    }
   }
 }
 
