@@ -45,6 +45,8 @@ export function manifestPiece(p: PieceSpec): ManifestPiece {
   if (p.gradeIntended?.length) m.gradeIntended = [...p.gradeIntended];
   // SHAPE-KINK: the operator's one-shape moves (fixShape / dropSize)
   if (p.shapeFixes?.length) m.shapeFixes = p.shapeFixes.map((f) => ({ ...f }));
+  // L13: the half on fold (its mirror line is in the block) — the card cuts it on the fold
+  if (p.halfFold) m.halfFold = true;
   return m;
 }
 

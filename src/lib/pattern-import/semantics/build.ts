@@ -2012,8 +2012,18 @@ export function buildPieceSpecsDetailed(
         // another edge unfolds cleanly (the question's suggestion): the sheet's pointer and the
         // geometry disagree — offered, never auto (D3)
         const sug = ask.suggested != null ? ask.edges[ask.suggested] : null;
-        const half =
-          offer?.auto && sug
+        // the sheet points along the very line that unfolds cleanly (a stretch of it): the
+        // ordinary unfold across that line, no half (review R1 #3)
+        const sameLine =
+          !!offer &&
+          !!sug &&
+          lineAngleOf(offer.edge, sug) <= FOLD_MATCH_ANGLE_DEG &&
+          [offer.edge.a, offer.edge.b].every(
+            (q) => closestOnPolyline(q, [sug.a, sug.b], false).d <= 2 * FOLD_TOL_MM,
+          );
+        const half = sameLine
+          ? null
+          : offer?.auto && sug
             ? {
                 ...offer,
                 auto: false,

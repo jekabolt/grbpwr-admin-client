@@ -45,7 +45,10 @@ import type {
 } from '../types';
 import { MANIFEST_TAG } from '../types';
 import { isInterliningScope, purposeWord } from './scope';
-import { importedCutSymmetry } from 'components/managers/tech-card/components/piece-codes';
+import {
+  FOLD_CUT_SYMMETRY,
+  importedCutSymmetry,
+} from 'components/managers/tech-card/components/piece-codes';
 
 export const IDENTICAL = 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 export const FUSING_FULL = 'TECH_CARD_PIECE_FUSING_MODE_FULL';
@@ -171,6 +174,8 @@ type Group = {
   ungraded: boolean;
   pair: boolean;
   unfolded: boolean;
+  /** L13: a half on fold (the manifest) — the card cuts it on the fold. */
+  half: boolean;
 };
 
 export function buildDraft(
@@ -209,6 +214,7 @@ export function buildDraft(
         ungraded: true,
         pair: false,
         unfolded: false,
+        half: false,
       };
       const slot = g.byScope.get(sc.target.scopeKey) ?? { pieces: [], aliasNames: names };
       slot.pieces.push(mp);
@@ -217,6 +223,7 @@ export function buildDraft(
       g.ungraded &&= mp.ungraded;
       g.pair ||= !!mp.pairOf;
       g.unfolded ||= mp.unfoldedFold;
+      g.half ||= !!mp.halfFold;
       groups.set(cn.toLowerCase(), g);
     }
   }
@@ -267,8 +274,13 @@ export function buildDraft(
     );
     const key = existing?.lineKey ?? mint();
     taken.add(key);
-    const force = g.pair ? 'pair' : g.unfolded ? 'unfolded' : undefined;
-    const symmetry = existing ? importedCutSymmetry(existing.cutSymmetry, ppg, force) : IDENTICAL;
+    const force = g.pair ? 'pair' : g.unfolded ? 'unfolded' : g.half ? 'half' : undefined;
+    // L13: a half on fold is cut on the fold — a new piece too (the drawing carries the half only)
+    const symmetry = existing
+      ? importedCutSymmetry(existing.cutSymmetry, ppg, force)
+      : force === 'half'
+        ? FOLD_CUT_SYMMETRY
+        : IDENTICAL;
     pieces.push({
       lineKey: key,
       name: existing?.name ?? g.name,
@@ -293,9 +305,11 @@ export function buildDraft(
             ? 'the drawing carries both hands as separate pieces — cut as drawn'
             : g.unfolded
               ? 'the drawing carries the unfolded piece — cut flat, not on the fold'
-              : (existing.cutSymmetry ?? '').trim().endsWith('MIRRORED')
-                ? `a mirrored pair cannot be ${ppg} per garment — cut as drawn`
-                : 'not marked — the drawing carries every contour, cut as drawn',
+              : g.half
+                ? 'the drawing carries the half with its fold line — cut on the fold'
+                : (existing.cutSymmetry ?? '').trim().endsWith('MIRRORED')
+                  ? `a mirrored pair cannot be ${ppg} per garment — cut as drawn`
+                  : 'not marked — the drawing carries every contour, cut as drawn',
         );
       }
       if ((existing.piecesPerGarment ?? 1) !== ppg) {

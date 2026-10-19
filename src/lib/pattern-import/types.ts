@@ -1555,7 +1555,7 @@ export type PieceSpec = {
    * itself or leaves a slot when mirrored): the HALF is exported as drawn, its fold edge written as
    * the AAMA mirror line (layer 6, «CUT ON FOLD») with no allowance across it; the cutter folds
    * the fabric. `evidence` = why (the printed claim, the bracket, each size's unfold failure).
-   * Never set with `unfoldedFold`. Not part of the manifest (the block's mirror line is).
+   * Never set with `unfoldedFold`. In the manifest as `halfFold: true` (the card cuts it on the fold).
    */
   halfFold?: { evidence: string[] };
   /** Number of this identity in one garment (both hands of a pair count 1 each). */
@@ -2169,8 +2169,11 @@ export type DraftPiece = {
    * impossible pair; an explicit MIRRORED/FOLD is kept otherwise (F14 MAJOR 2).
    */
   cutSymmetry: string;
-  /** F14: the manifest's proof that every contour is drawn — both hands of a pair / unfolded fold. */
-  symmetryForce?: 'pair' | 'unfolded';
+  /**
+   * F14: the manifest's proof that every contour is drawn — both hands of a pair / unfolded fold;
+   * L13 'half': the manifest's proof that only the half is drawn — cut on the fold (FOLD).
+   */
+  symmetryForce?: 'pair' | 'unfolded' | 'half';
   grainline: string;
   fused: boolean;
   /** Reuse of an existing card piece instead of creating one. */
@@ -2274,6 +2277,8 @@ export type ManifestPiece = {
   gradeIntended?: GradeCountFeature[];
   /** SHAPE-KINK: the operator's one-shape moves (fixShape / dropSize) on this piece. */
   shapeFixes?: ShapeFixRecord[];
+  /** L13: the half is drawn, its fold line the block's mirror line — the card cuts it on the fold. */
+  halfFold?: true;
 };
 
 export type ManifestBlock = {

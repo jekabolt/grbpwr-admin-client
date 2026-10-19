@@ -18,7 +18,7 @@ import type { PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { type CardBlockRules, writeAndGate } from 'lib/pattern-import/gate';
 import { buildPieceSpecsDetailed, detectAllowance } from 'lib/pattern-import/semantics';
 import { proposeSizeMap } from 'lib/pattern-import/sizes/map';
-import { readManifest } from 'lib/pattern-import/manifest';
+import { readManifest, validateManifest } from 'lib/pattern-import/manifest';
 import {
   PURPOSE,
   SECTION,
@@ -927,6 +927,82 @@ export async function main(): Promise<number> {
       u2?.cutSymmetry === IDENTICAL && /unfolded/.test(u2?.reason ?? ''),
       'D1b control: the same FOLD piece with an unfolded manifest → IDENTICAL with the reason',
       u2?.reason ?? '',
+    );
+    // L13: a half on fold (manifest `halfFold`) is cut on the fold — an unmarked piece → FOLD with
+    // the reason, a FOLD piece kept, a new piece created FOLD (draft and apply agree); the
+    // manifest keeps the flag through its JSON round trip and refuses it beside an unfold
+    const halved = r1.scopes.map((sc) =>
+      sc.target.scopeKey !== MAIN.scopeKey
+        ? sc
+        : {
+            ...sc,
+            manifest: {
+              ...sc.manifest,
+              pieces: sc.manifest.pieces.map((mp) =>
+                mp.identity === pf.identity || mp.identity === pu.identity
+                  ? { ...mp, halfFold: true as const }
+                  : mp,
+              ),
+            },
+          },
+    );
+    const d3 = buildDraft({ scopes: halved }, cardOf(live), { mintKey: mint });
+    const u3 = (k: string) => d3.pieceUpdates.find((x) => x.lineKey === k);
+    const empty: LiveCard = { patterns: [], pieces: [], aliases: [] };
+    const d4 = buildDraft({ scopes: halved }, cardOf(empty), { mintKey: mint });
+    const n4 = d4.pieces.find((x) => x.name === pu.identity);
+    const o4 = d4.pieces.find((x) => x.name === pm.identity);
+    const form4 = fakeForm(empty);
+    const res4 = await applyDraft(d4, {
+      upload: fakeUpload(null).upload,
+      read: form4.read,
+      write: form4.write,
+      storageSizeId: 501,
+      save: async () => 'ok',
+    });
+    const c4 = form4.state.pieces.find((x) => x.name === pu.identity);
+    const c4o = form4.state.pieces.find((x) => x.name === pm.identity);
+    ck(
+      !u3('P-F')?.cutSymmetry &&
+        u3('P-U')?.cutSymmetry === FOLD &&
+        /half/.test(u3('P-U')?.reason ?? '') &&
+        n4?.cutSymmetry === FOLD &&
+        n4.symmetryForce === 'half' &&
+        o4?.cutSymmetry === IDENTICAL &&
+        res4.ok &&
+        c4?.cutSymmetry === FOLD &&
+        c4o?.cutSymmetry === IDENTICAL,
+      'L13: a half on fold → FOLD (unmarked rewritten with the reason, FOLD kept, a new piece FOLD); others IDENTICAL',
+      JSON.stringify({
+        pf: u3('P-F') ?? null,
+        pu: u3('P-U') ?? null,
+        draftNew: n4 && [n4.cutSymmetry, n4.symmetryForce],
+        applied: [c4?.cutSymmetry, c4o?.cutSymmetry],
+      }),
+    );
+    const mHalf = halved.find((sc) => sc.target.scopeKey === MAIN.scopeKey)!.manifest;
+    const back = validateManifest(JSON.parse(JSON.stringify(mHalf)));
+    let both = '';
+    try {
+      validateManifest(
+        JSON.parse(
+          JSON.stringify({
+            ...mHalf,
+            pieces: mHalf.pieces.map((mp) =>
+              mp.identity === pu.identity ? { ...mp, unfoldedFold: true } : mp,
+            ),
+          }),
+        ),
+      );
+    } catch (e) {
+      both = String(e);
+    }
+    ck(
+      back.pieces.filter((mp) => mp.halfFold === true).length === 2 &&
+        back.pieces.filter((mp) => 'halfFold' in mp).length === 2 &&
+        /halfFold and unfoldedFold/.test(both),
+      'L13 manifest: halfFold survives the JSON round trip; with unfoldedFold it is refused',
+      both || JSON.stringify(back.pieces.map((mp) => mp.halfFold ?? null)),
     );
   }
 

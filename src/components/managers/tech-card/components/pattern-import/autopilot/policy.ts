@@ -1707,7 +1707,9 @@ function meaningStep(snap: Snap): AutopilotDecision {
       ...(listed.has(b.seed) ? ['the cutting list'] : []),
       ...(hinted.has(b.seed) ? ['the AI read "on fold"'] : []),
     ];
-    if ((!e || !second.length) && q?.half)
+    // a half offered but not auto: the sheet's pointer and the geometry disagree, or a size does
+    // not hold — never unfold across another edge on the text alone (D3, review R1 #3)
+    if (q?.half)
       return stopAt(
         'meaning',
         `${subj(b.seed)}: printed cut on fold, but unfolding fails (overlap/slot) — export the half with a fold line?${q.half.missing ? ` (${q.half.missing})` : ''}`,

@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
+import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
 import { readDxf, segmentDxf, dxfFastPath } from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 import { extractPdf, DEFAULT_EXTRACT_OPTS, setPdfjsLoader } from 'lib/pattern-import/adapters/pdf';
@@ -1606,6 +1607,47 @@ export async function main(): Promise<number> {
               problems: ac.half.problems.map((x) => x.kind),
             }
           : null,
+      }),
+    );
+    // the autopilot on these questions (review R1 #3): the auto half is answered with its fold
+    // line; another edge unfolding cleanly is a stop — never an unfold across that edge
+    const pilot = (sem: typeof d0.output) =>
+      decide({
+        session: {
+          step: 'meaning',
+          busy: null,
+          error: null,
+          files: [],
+          semantics: sem,
+          names: [],
+          pieces: { seeds: [], families: [] },
+        } as never,
+        inputs: {
+          overrides: {},
+          operatorGrain: {},
+          operatorFold: {},
+          sheetIndex: 0,
+          gridOverride: null,
+          cleanEdits: [],
+          legend: [],
+          legendConfirmed: [],
+        } as never,
+        card: { sizes: [] } as never,
+        question: 'q',
+      });
+    const pa = pilot(d0.output);
+    const pc = pilot(dc.output);
+    ck(
+      !pa.stop &&
+        JSON.stringify(pa.actions).includes('"half":true') &&
+        pa.assumptions.some((a) => a.kind === 'fold-edge') &&
+        !!pc.stop &&
+        /export the half with a fold line\?/.test(pc.stop.reason) &&
+        !pc.actions.length,
+      'autopilot: the auto half is answered; another edge unfolds cleanly → a stop, no unfold',
+      JSON.stringify({
+        auto: pa.stop ?? pa.actions.map((x) => x.kind),
+        conflict: pc.stop ?? pc.actions,
       }),
     );
     // a «half» answer whose edge no longer is the cut's straight run: refused, never forced
