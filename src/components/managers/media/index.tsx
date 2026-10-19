@@ -17,7 +17,6 @@ import {
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
 import { TrashIcon } from '@radix-ui/react-icons';
-import { useSnackBarStore } from 'lib/stores/store';
 import { MediaSavedBar } from './components/media-saved-bar';
 import { Filter } from './components/filter';
 import { MediaFilterBar } from './components/media-filter-bar';
@@ -274,7 +273,6 @@ export function MediaManager({
     { original?: common_MediaFull; media: common_MediaFull } | undefined
   >(undefined);
   const deleteMedia = useDeleteMedia();
-  const { showMessage } = useSnackBarStore();
 
   const handleView = (m: common_MediaFull) => {
     if (viewable.some((x) => x.id === m.id)) {
