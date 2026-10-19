@@ -216,19 +216,18 @@ export function Tasks() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
-      <div className='hidden sm:block'>
-        <SectionHeader
-          title='tasks'
-          question='what is each department working on — and what needs a hand?'
-          action={
-            writable && (
-              <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
-                + new task
-              </Button>
-            )
-          }
-        />
-      </div>
+      <SectionHeader
+        className='max-sm:hidden'
+        title='tasks'
+        question='what is each department working on — and what needs a hand?'
+        action={
+          writable && (
+            <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
+              + new task
+            </Button>
+          )
+        }
+      />
 
       <SideRailLayout
         rail={
