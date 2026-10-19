@@ -358,7 +358,7 @@ export function CalloutShape({
                 width={w}
                 halo={halo}
               />
-              {halo && <circle cx={p.x} cy={p.y} r={4.5} fill='#fff' opacity={0.9} />}
+              {halo && <circle cx={p.x} cy={p.y} r={4.5} className='fill-bgColor' opacity={0.9} />}
               <Dot p={p} color={color} r={3} />
             </g>
           ))}
