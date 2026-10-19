@@ -36,7 +36,7 @@ import { closeCorners, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
-import { labelFrames } from './label-frame';
+import { LABEL_FRAME_WHY, labelFrames } from './label-frame';
 import { textLabelLookOrder } from './look-order';
 import { ladderMarkMoves, ocgLookMoves, type OcgLookMove } from './ocg-ladder';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
@@ -1763,7 +1763,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const ignore: { id: number; why: string }[] = [
     ...ocgDropped,
     ...[...joined].map(([id, host]) => ({ id, why: `joined into chain ${host}` })),
-    ...[...frames].map((id) => ({ id, why: 'label frame' })),
+    ...[...frames].map((id) => ({ id, why: LABEL_FRAME_WHY })),
   ];
   const orphans: number[] = [];
   const decided = new Set([

@@ -652,6 +652,12 @@ export type ChainSet = {
   chains: Chain[];
   /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
   cornerWalls?: CornerWall[];
+  /**
+   * LABELFRAME (sizes/label-frame.ts): the closed lines drawn round a size label, put in the
+   * 'ignore' row. Out of every wall and feature; the H1 solver alone still reads them as drawn
+   * lines (pieces/grade/hook.ts). Absent = none found.
+   */
+  labelFrames?: ChainId[];
   classes: LineClass[];
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */

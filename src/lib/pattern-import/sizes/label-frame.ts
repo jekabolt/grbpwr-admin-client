@@ -42,6 +42,9 @@ const SURROUND_GAP_DEG = 135;
 
 export type LabelFrame = { chain: number; label: string; text: IRText };
 
+/** The 'ignore' reason of a label frame (sizes/recover.ts → chains/build.ts `labelFrames`). */
+export const LABEL_FRAME_WHY = 'label frame';
+
 function signedArea(ring: readonly PtMm[]): number {
   let a = 0;
   for (let k = 0; k < ring.length; k++) {
