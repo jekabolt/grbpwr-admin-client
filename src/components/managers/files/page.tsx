@@ -908,10 +908,8 @@ export default function FilesPage() {
     view === 'grid' ? (
       <Tiles min={190}>{list.map(tile)}</Tiles>
     ) : (
-      <div className='flex flex-col'>
-        <div className='hidden lg:block'>
-          <FileRowsHeader />
-        </div>
+      <div className='flex min-w-0 flex-col gap-px bg-hairline'>
+        <FileRowsHeader />
         <FileRows>{list.map(tile)}</FileRows>
       </div>
     );

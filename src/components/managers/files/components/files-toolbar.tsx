@@ -27,6 +27,12 @@ const SORT_SHORT: Record<FilesSort, string> = {
   name: 'by name',
   size: 'by size',
 };
+/** Телефон: строка статуса обязана влезть в одну строку на 390px — порядок короче. */
+const SORT_TINY: Record<FilesSort, string> = {
+  new: 'new ↓',
+  name: 'a–z',
+  size: 'size ↓',
+};
 const SORT_CYCLE: FilesSort[] = ['new', 'name', 'size'];
 
 /**
@@ -214,36 +220,40 @@ export function StatusLine({
   return (
     <div
       role='status'
-      className='flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-hairline px-block py-2.5 text-textBaseSize text-labelColor'
+      className='flex items-center gap-2.5 border-t border-hairline px-block py-2.5 text-textBaseSize text-labelColor'
     >
-      <span className='min-w-0'>
-        <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
-        {matched === 1 ? 'file' : 'files'}
-        {untopiced && (
-          <>
-            {' · '}
-            <span className='text-error'>unsorted</span>
-          </>
+      {/* Одна строка всегда: число впереди и не режется, фильтры уходят в многоточие. */}
+      <span className='flex min-w-0 items-center gap-2.5'>
+        <span className='min-w-0 truncate'>
+          <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
+          {matched === 1 ? 'file' : 'files'}
+          {untopiced && (
+            <>
+              {' · '}
+              <span className='text-error'>unsorted</span>
+            </>
+          )}
+          {parts.map((p) => (
+            <span key={p}>
+              {' · '}
+              <span className='text-textColor'>{p}</span>
+            </span>
+          ))}
+        </span>
+        {filtered && (
+          <Button variant='underline' className='shrink-0 text-textColor' onClick={onReset}>
+            reset
+          </Button>
         )}
-        {parts.map((p) => (
-          <span key={p}>
-            {' · '}
-            <span className='text-textColor'>{p}</span>
-          </span>
-        ))}
       </span>
-      {filtered && (
-        <Button variant='underline' className='text-textColor' onClick={onReset}>
-          reset
-        </Button>
-      )}
-      <span className='ml-auto flex items-center gap-2.5'>
+      <span className='ml-auto flex shrink-0 items-center gap-2.5'>
         <Button
-          className='text-labelColor hover:text-textColor'
+          className='whitespace-nowrap text-labelColor hover:text-textColor'
           title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[next]}`}
           onClick={() => onSort(next)}
         >
-          {SORT_SHORT[sort]}
+          <span className='sm:hidden'>{SORT_TINY[sort]}</span>
+          <span className='hidden sm:inline'>{SORT_SHORT[sort]}</span>
         </Button>
         <ViewSwitch value={view} options={VIEWS} onChange={onView} label='view' />
       </span>
