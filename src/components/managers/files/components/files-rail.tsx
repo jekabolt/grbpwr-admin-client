@@ -78,6 +78,9 @@ export function FilesRail({
           <Link to={ROUTES.filesProjects}>all</Link>
         </Button>
       </div>
+      <Button asChild variant='underline' className='self-start py-1.5 text-labelColor'>
+        <Link to={ROUTES.filesShared}>shared</Link>
+      </Button>
 
       <SideRailGroup
         action={
