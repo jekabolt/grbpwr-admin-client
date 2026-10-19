@@ -52,6 +52,11 @@ interface MediaItemProps {
   selecting?: boolean;
   /** Phone: a long press enters select mode with this card picked. */
   onLongPress?: () => void;
+  /**
+   * Fetch the thumbnail now (default). The virtual grid holds it while the list is dragged or
+   * flung; the blurhash shows meanwhile. Once loaded, a tile keeps its image.
+   */
+  load?: boolean;
 }
 
 const LONG_PRESS_MS = 450;
@@ -101,7 +106,11 @@ export function MediaItem({
   touch = false,
   selecting = false,
   onLongPress,
+  load = true,
 }: MediaItemProps) {
+  const [loadedOnce, setLoadedOnce] = useState(load);
+  if (load && !loadedOnce) setLoadedOnce(true);
+  const loadNow = load || loadedOnce;
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const fullUrl = media.media?.fullSize?.mediaUrl || mediaUrl || '';
   const deleteMediaMutation = useDeleteMedia();
@@ -212,6 +221,7 @@ export function MediaItem({
 
   return (
     <div
+      data-created={media.createdAt}
       className={cn(
         'group relative flex flex-col border border-borderColor bg-bgColor',
         // Выбор виден ВЕСОМ, а не цветом (правило системы: цвет носит состояние здоровья, вес —
@@ -281,7 +291,8 @@ export function MediaItem({
           // БЕЗ ШТАТНОГО ПРОИГРЫВАТЕЛЯ В СЕТКЕ. Полоса управления браузера — чужая по языку
           // хрома, к тому же клик по перемотке попадал мимо выбора и мимо открытия.
           controls={false}
-          preload='metadata'
+          preload={loadNow ? 'metadata' : 'none'}
+          load={loadNow}
           muted
           aspectRatio='4/5'
           fit='contain'

@@ -217,6 +217,7 @@
     "@radix-ui/react-tooltip": "^1.1.6",
     "@tanstack/react-query": "^5.81.5",
     "@tanstack/react-query-devtools": "^5.91.2",
+    "@tanstack/react-virtual": "3.14.13",
     "@tiptap/extension-link": "^3.29.2",
     "@tiptap/extension-underline": "^3.29.2",
     "@tiptap/pm": "^3.29.2",
