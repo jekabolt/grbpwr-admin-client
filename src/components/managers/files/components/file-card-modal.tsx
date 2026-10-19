@@ -1,13 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { FileTopic } from 'api/proto-http/admin';
+import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button, Chip, ChipRow, ConfirmationModal, GroupLabel, Input, Text } from 'ui';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Close,
+  ConfirmationModal,
+  Drawer,
+  GroupLabel,
+  Input,
+  Text,
+} from 'ui';
 import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
 import { isProjectTopic, useFileRoles, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
-import { extensionOf, formatBytes, kindWord } from '../utils/format';
+import { extensionOf, formatBytes, formatDay, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FailureText } from './failure-text';
 import { FileAccessSection } from './file-access-section';
@@ -19,6 +30,7 @@ import { ProjectArchiveMark, projectHint } from './topic-chips';
 
 /** Что из карточки свёрнуто в строку. Ключи — те же четыре, что и строк. */
 type CardLineKey = 'own' | 'acc' | 'task' | 'talk';
+type PhoneSheet = 'projects' | 'topics' | 'more' | 'details' | null;
 
 /** Одна строка «в каком проекте — с какой ролью». */
 type ProjectRole = { id: number; name: string; role?: { roleId: number; roleName: string } };
@@ -42,11 +54,13 @@ function ProjectRoleRow({
   writable,
   saving,
   onPick,
+  compact,
 }: {
   row: ProjectRole;
   writable: boolean;
   saving: boolean;
   onPick: (projectTopicId: number, roleId: number) => void;
+  compact?: boolean;
 }) {
   const rolesQuery = useFileRoles(row.id, false, row.id > 0);
   const roles = rolesQuery.data?.roles ?? [];
@@ -89,13 +103,17 @@ function ProjectRoleRow({
             Пока словарь в пути, чипа НЕТ: иначе живая роль на полсекунды объявлялась бы
             архивной — утверждение, которого никто не проверял. */}
         {!!row.role?.roleId && rolesQuery.isFetched && !known && (
-          <Chip selected pressed title='the role is archived: it can be taken off, but not put on again'>
+          <Chip
+            selected
+            pressed
+            title='the role is archived: it can be taken off, but not put on again'
+          >
             {row.role?.roleName || `#${row.role?.roleId}`}
           </Chip>
         )}
       </ChipRow>
       {/* У ПРОЕКТА МОЖЕТ НЕ БЫТЬ НИ ОДНОГО СВОЕГО СЛОВА — и это состояние, а не сбой пикера. */}
-      {rolesQuery.isFetched && roles.length === 0 && !row.role?.roleId && (
+      {!compact && rolesQuery.isFetched && roles.length === 0 && !row.role?.roleId && (
         <Text size='micro' variant='label' component='span'>
           no roles in this project yet
         </Text>
@@ -155,6 +173,88 @@ function CardLine({
   );
 }
 
+/** Нижние сведения карточки: на компьютере стоят в теле, на телефоне живут в листе details. */
+function FileDetailsLines({
+  file,
+  writable,
+  lines,
+  onToggle,
+  canReadTasks,
+  tasksLoading,
+  tasksFailed,
+  heldByTasks,
+  taskLabels,
+}: {
+  file: LibraryFile;
+  writable: boolean;
+  lines: Record<CardLineKey, boolean>;
+  onToggle: (key: CardLineKey) => void;
+  canReadTasks: boolean;
+  tasksLoading: boolean;
+  tasksFailed: boolean;
+  heldByTasks: number;
+  taskLabels: string[];
+}) {
+  return (
+    <div className='mt-0.5 flex flex-col border-t border-borderColor'>
+      <CardLine
+        label='kept by'
+        value={
+          (file.owners ?? []).length
+            ? (file.owners ?? []).map((o) => o.username || `#${o.id}`).join(', ')
+            : 'nobody'
+        }
+        open={lines.own}
+        onToggle={() => onToggle('own')}
+      >
+        <FileOwnersSection file={file} writable={writable} />
+      </CardLine>
+
+      <CardLine
+        label='access'
+        value={(() => {
+          const lvl = asAccessLevel(file.accessLevel ?? undefined);
+          return lvl ? ACCESS_LEVEL_TITLE[lvl] : 'not said';
+        })()}
+        open={lines.acc}
+        onToggle={() => onToggle('acc')}
+      >
+        <FileAccessSection file={file} writable={writable} />
+      </CardLine>
+
+      <CardLine
+        label='tasks'
+        value={
+          !canReadTasks
+            ? 'no access to tasks'
+            : tasksLoading
+              ? '…'
+              : tasksFailed
+                ? 'unknown'
+                : heldByTasks
+                  ? taskLabels.join(', ')
+                  : 'none'
+        }
+        open={lines.task}
+        onToggle={() => onToggle('task')}
+      >
+        <FileTasksSection file={file} writable={writable} />
+      </CardLine>
+
+      <CardLine
+        label='discussion'
+        value={
+          Number(file.commentsCount ?? 0) > 0 ? `${Number(file.commentsCount ?? 0)}` : 'nothing yet'
+        }
+        open={lines.talk}
+        onToggle={() => onToggle('talk')}
+      >
+        <FileComments file={file} writable={writable} />
+      </CardLine>
+    </div>
+  );
+}
+
 /**
  * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
  *
@@ -181,7 +281,8 @@ export function FileCardModal({
   writable: boolean;
   onClose: () => void;
 }) {
-  const { data, isLoading, isError, error, refetch } = useLibraryFile(id);
+  const phone = useMediaQuery(PHONE_QUERY);
+  const { data, isLoading, error, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile, setRoles } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
   const { canRead } = usePermissions();
@@ -209,6 +310,10 @@ export function FileCardModal({
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [phoneSheet, setPhoneSheet] = useState<PhoneSheet>(null);
+  const [topicSearch, setTopicSearch] = useState('');
+  const deleteAfterMoreCloses = useRef(false);
+  const deleteConfirmFrame = useRef<number | undefined>(undefined);
   // Отказ хранится ОШИБКОЙ, а не строкой: разбор (`rpc-error`) один на раздел и живёт на
   // отрисовке, а запасная фраза у сохранения и у удаления разная — поэтому она едет рядом.
   const [failure, setFailure] = useState<{ e: unknown; fallback: string } | undefined>(undefined);
@@ -284,6 +389,22 @@ export function FileCardModal({
       }));
   }, [carried, projectIds, file]);
 
+  const selectedProjects = projectChips.filter((t) => selected.includes(Number(t.id)));
+  const selectedTopics = topicChips.filter((t) => selected.includes(Number(t.id)));
+  const roleByProject = new Map(inProjects.map((p) => [p.id, p.role]));
+  const normalizedTopicSearch = topicSearch.trim().toLowerCase();
+  const shownTopics = normalizedTopicSearch
+    ? topicChips.filter((t) => (t.name ?? '').toLowerCase().includes(normalizedTopicSearch))
+    : topicChips;
+  const shownNewTopics = normalizedTopicSearch
+    ? newTopics.filter((t) => t.toLowerCase().includes(normalizedTopicSearch))
+    : newTopics;
+  const canCreateTopic =
+    writable &&
+    !!normalizedTopicSearch &&
+    !topicChips.some((t) => (t.name ?? '').trim().toLowerCase() === normalizedTopicSearch) &&
+    !newTopics.some((t) => t.toLowerCase() === normalizedTopicSearch);
+
   const applyRole = async (projectTopicId: number, roleId: number) => {
     setFailure(undefined);
     try {
@@ -292,6 +413,35 @@ export function FileCardModal({
     } catch (e) {
       setFailure({ e, fallback: "couldn't change the role" });
     }
+  };
+
+  const addSearchedTopic = () => {
+    const value = topicSearch.trim();
+    if (!canCreateTopic || !value) return;
+    setNewTopics((current) => [...current, value]);
+    setTopicSearch('');
+  };
+
+  // ЗАКРЫТИЕ ЛИСТА — ТОТ ЖЕ ENTER. На телефоне слово могло остаться только в поле, и крестик,
+  // свайп или done стирали его молча. Сначала превращаем слово в новый чип, потом чистим поле:
+  // форма становится грязной и в подвале появляется save, как на компьютере.
+  const closeTopicsSheet = () => {
+    if (canCreateTopic) addSearchedTopic();
+    setTopicSearch('');
+    setPhoneSheet(null);
+  };
+
+  // ДВА МОДАЛЬНЫХ СЛОЯ НЕ МЕНЯЮТСЯ В ОДНОМ ТАКТЕ. На iOS Radix успевал открыть вопрос раньше,
+  // чем лист ••• снимал свою ловушку указателя, и оставлял body с pointer-events:none. Вопрос
+  // открывается только из close-autofocus закрытого листа и ещё через кадр — после его cleanup.
+  const openDeleteAfterMoreCloses = (event: Event) => {
+    if (!deleteAfterMoreCloses.current) return;
+    event.preventDefault();
+    deleteAfterMoreCloses.current = false;
+    deleteConfirmFrame.current = window.requestAnimationFrame(() => {
+      deleteConfirmFrame.current = undefined;
+      setConfirmDelete(true);
+    });
   };
 
   // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
@@ -313,6 +463,30 @@ export function FileCardModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id]);
 
+  useEffect(() => {
+    setPhoneSheet(null);
+    setTopicSearch('');
+  }, [id, phone]);
+
+  useEffect(() => {
+    return () => {
+      if (deleteConfirmFrame.current !== undefined) {
+        window.cancelAnimationFrame(deleteConfirmFrame.current);
+      }
+      if (!phone) return;
+      // Страховка ПОСЛЕ размонтирования телефонной карточки. Пока жив хоть один диалог,
+      // `none` законен и принадлежит Radix; без диалогов это уже утечка, замораживающая страницу.
+      window.requestAnimationFrame(() => {
+        if (
+          document.body.style.pointerEvents === 'none' &&
+          !document.querySelector('[role="dialog"]')
+        ) {
+          document.body.style.removeProperty('pointer-events');
+        }
+      });
+    };
+  }, [phone]);
+
   const dirty = useMemo(() => {
     if (!file) return false;
     const was = new Set((file.topics ?? []).map((t) => Number(t.id)));
@@ -320,6 +494,15 @@ export function FileCardModal({
     const sameTopics = was.size === now.size && [...was].every((x) => now.has(x));
     return name !== (file.fileName ?? '') || !sameTopics || pendingTopics.length > 0;
   }, [file, name, selected, pendingTopics]);
+
+  const requestClose = () => {
+    if (dirty) {
+      setCloseIntent('close');
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+  };
 
   // Уход на экран заметки — это уход СО СТРАНИЦЫ, а не модалка поверх: карточка размонтируется
   // вместе с несохранённым именем. Поэтому тот же вопрос, что и на закрытии.
@@ -383,20 +566,14 @@ export function FileCardModal({
       open
       onOpenChange={(o) => {
         if (o) return;
-        // ПРОМАХ МИМО ПАНЕЛИ НЕ СТИРАЕТ ПРАВКУ. Карточка теперь форма: имя и набор тем.
-        // Клик вне модалки и Escape у Radix закрывают по умолчанию, и переименование
-        // исчезало бы без единого слова — поэтому здесь стоит вопрос, а не выход.
-        if (dirty) {
-          setCloseIntent('close');
-          setConfirmClose(true);
-          return;
-        }
-        onClose();
+        requestClose();
       }}
       onConfirm={onClose}
       title={file?.fileName || 'file'}
       width='lg'
       hideActions
+      fullScreen={phone}
+      hideHeader={phone && !!file}
     >
       {isLoading ? (
         <Text size='micro' variant='label'>
@@ -424,6 +601,220 @@ export function FileCardModal({
             </Button>
             <Button size='sm' variant='secondary' onClick={onClose}>
               to the list
+            </Button>
+          </div>
+        </div>
+      ) : phone ? (
+        <div className='flex h-full min-h-0 flex-col bg-pageBg pt-[env(safe-area-inset-top)]'>
+          <div className='grid shrink-0 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center border-b border-borderColor bg-bgColor'>
+            <span aria-hidden />
+            <div className='min-w-0 py-1.5'>
+              <Input
+                name='fileNamePhone'
+                value={name}
+                disabled={!writable}
+                aria-label='file name'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+                className='min-h-0 border-0 border-b border-transparent bg-transparent px-0 py-0 text-lg font-bold focus:border-textColor disabled:bg-transparent'
+              />
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='block truncate uppercase'
+              >
+                {formatBytes(Number(file.sizeBytes ?? 0))} ·{' '}
+                {kindWord(file.contentType ?? undefined, file.fileName ?? '')}
+                {formatDay(file.createdAt ?? undefined)
+                  ? ` · ${formatDay(file.createdAt ?? undefined)}`
+                  : ''}
+              </Text>
+            </div>
+            <Close className='size-11 p-3.5' onClick={requestClose} />
+          </div>
+
+          <div className='flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain p-3'>
+            {file.previewUrl ? (
+              <div className='flex max-h-[45dvh] min-h-40 justify-center border border-borderColor bg-bgColor'>
+                <img
+                  src={file.previewUrl}
+                  alt=''
+                  className='max-h-full max-w-full object-contain'
+                />
+              </div>
+            ) : note ? (
+              <Button
+                type='button'
+                variant='default'
+                className='w-full border border-borderColor bg-bgColor p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                onClick={openNote}
+                aria-label='open note'
+              >
+                {(file.contentExcerpt ?? '').trim() ? (
+                  <Text
+                    size='control'
+                    component='span'
+                    className='line-clamp-5 whitespace-pre-wrap break-words'
+                  >
+                    {file.contentExcerpt}
+                  </Text>
+                ) : (
+                  <span className='flex items-center gap-2'>
+                    <Text component='span' className='font-bold uppercase'>
+                      {extensionOf(file.fileName ?? '')}
+                    </Text>
+                    <Text size='micro' variant='label' component='span' className='uppercase'>
+                      {kindWord(file.contentType ?? undefined, file.fileName ?? '')}
+                    </Text>
+                  </span>
+                )}
+              </Button>
+            ) : null}
+
+            <div>
+              <GroupLabel
+                flush
+                action={
+                  <Button
+                    size='xs'
+                    variant='underline'
+                    className='min-h-11 px-2'
+                    disabled={!writable}
+                    onClick={() => setPhoneSheet('projects')}
+                  >
+                    edit
+                  </Button>
+                }
+              >
+                projects
+              </GroupLabel>
+              <div className='flex flex-col items-start gap-1.5'>
+                {selectedProjects.map((project) => {
+                  const pid = Number(project.id);
+                  const role = roleByProject.get(pid);
+                  return (
+                    <div key={pid} className='flex flex-wrap items-center gap-1.5'>
+                      <Chip
+                        selected
+                        pressed
+                        onClick={writable ? () => setPhoneSheet('projects') : undefined}
+                        className='min-h-8'
+                      >
+                        {project.name}
+                        <ProjectArchiveMark project={project} />
+                      </Chip>
+                      <Text size='micro' variant='label' component='span'>
+                        {role?.roleId ? role.roleName || `#${role.roleId}` : 'without a role'}
+                      </Text>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <GroupLabel
+                flush
+                action={
+                  selectedTopics.length + newTopics.length > 0 ? (
+                    <Button
+                      size='xs'
+                      variant='underline'
+                      className='min-h-11 px-2'
+                      disabled={!writable}
+                      onClick={() => setPhoneSheet('topics')}
+                    >
+                      edit
+                    </Button>
+                  ) : undefined
+                }
+              >
+                topics
+              </GroupLabel>
+              <ChipRow>
+                {selectedTopics.map((topic) => (
+                  <Chip
+                    key={topic.id}
+                    selected
+                    pressed
+                    onClick={writable ? () => setPhoneSheet('topics') : undefined}
+                    className='min-h-8'
+                  >
+                    {topic.name}
+                  </Chip>
+                ))}
+                {newTopics.map((topic) => (
+                  <Chip
+                    key={topic}
+                    selected
+                    onClick={writable ? () => setPhoneSheet('topics') : undefined}
+                    className='min-h-8'
+                  >
+                    {topic}
+                  </Chip>
+                ))}
+                {selectedTopics.length + newTopics.length === 0 && (
+                  <Chip
+                    disabled={!writable}
+                    onClick={() => setPhoneSheet('topics')}
+                    className='min-h-8'
+                  >
+                    + add topic
+                  </Chip>
+                )}
+              </ChipRow>
+            </div>
+
+            {failure && (
+              <div className='border border-error px-2.5 py-2'>
+                <Text size='micro'>
+                  <FailureText e={failure.e} fallback={failure.fallback} />
+                </Text>
+              </div>
+            )}
+          </div>
+
+          <div className='flex shrink-0 items-center gap-2 border-t border-borderColor bg-bgColor px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'>
+            {note ? (
+              <Button variant='main' className='min-h-11 flex-1' onClick={openNote}>
+                open
+              </Button>
+            ) : readable ? (
+              <Button variant='main' className='min-h-11 flex-1' onClick={() => setReading(true)}>
+                open
+              </Button>
+            ) : file.url ? (
+              <Button asChild variant='main' className='min-h-11 flex-1'>
+                <a href={file.url} target='_blank' rel='noopener noreferrer'>
+                  open
+                </a>
+              </Button>
+            ) : file.downloadUrl ? (
+              <Button asChild variant='main' className='min-h-11 flex-1'>
+                <a href={file.downloadUrl}>open</a>
+              </Button>
+            ) : (
+              <Button variant='main' className='min-h-11 flex-1' disabled>
+                open
+              </Button>
+            )}
+            {writable && dirty && (
+              <Button
+                variant='secondary'
+                className='min-h-11'
+                disabled={updateFile.isPending}
+                onClick={save}
+              >
+                {updateFile.isPending ? 'saving…' : 'save'}
+              </Button>
+            )}
+            <Button
+              variant='secondary'
+              className='min-h-11 w-11 px-0'
+              aria-label='more'
+              onClick={() => setPhoneSheet('more')}
+            >
+              •••
             </Button>
           </div>
         </div>
@@ -457,9 +848,6 @@ export function FileCardModal({
                   disabled={!writable}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                 />
-                <Text size='micro' variant='label'>
-                  search goes by name — a clear name here is exactly what the file is found by later
-                </Text>
               </div>
 
               <div>
@@ -494,9 +882,7 @@ export function FileCardModal({
                     pressed={on}
                     disabled={!writable}
                     title={
-                      writable
-                        ? d || undefined
-                        : "read-only — the projects can't be moved around"
+                      writable ? d || undefined : "read-only — the projects can't be moved around"
                     }
                     onClick={() =>
                       setSelected((p) =>
@@ -533,9 +919,8 @@ export function FileCardModal({
               if (!losing.length) return null;
               return (
                 <Text size='micro'>
-                  not saved:{' '}
-                  {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} — this role
-                  will go along with the link the moment you press “save”
+                  not saved: {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} —
+                  this role will go along with the link the moment you press “save”
                 </Text>
               );
             })()}
@@ -555,12 +940,6 @@ export function FileCardModal({
                   onPick={applyRole}
                 />
               ))}
-              <Text size='micro' variant='label'>
-                the role applies at once, it does not wait for “save”. a project just ticked shows
-                up here only after saving: before that there is no link for the role to live on.
-                the words on each line are that project's own — the shoot next door keeps its own
-                set, and neither list is offered to the other.
-              </Text>
             </div>
           )}
 
@@ -639,80 +1018,17 @@ export function FileCardModal({
               заводится: строка «discussion · 3» ради выдержки последней реплики стоила бы
               запроса ленты на каждое открытие карточки — ровно того, от чего сворачивание и
               избавляет. */}
-          <div className='mt-0.5 flex flex-col border-t border-borderColor'>
-            <CardLine
-              label='kept by'
-              value={
-                (file.owners ?? []).length
-                  ? (file.owners ?? []).map((o) => o.username || `#${o.id}`).join(', ')
-                  : 'nobody'
-              }
-              open={lines.own}
-              onToggle={() => toggleLine('own')}
-            >
-              {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «save»:
-                  владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
-                  значило бы обещать откат правки, которого у replace-набора нет. */}
-              <FileOwnersSection file={file} writable={writable} />
-            </CardLine>
-
-            <CardLine
-              label='access'
-              value={(() => {
-                const lvl = asAccessLevel(file.accessLevel ?? undefined);
-                // Пустой уровень не заменяется на «team»: угадать здесь значило бы напечатать
-                // «видит вся команда» про файл, о котором сервер ничего не сказал.
-                return lvl ? ACCESS_LEVEL_TITLE[lvl] : 'not said';
-              })()}
-              open={lines.acc}
-              onToggle={() => toggleLine('acc')}
-            >
-              <FileAccessSection file={file} writable={writable} />
-            </CardLine>
-
-            <CardLine
-              label='tasks'
-              value={
-                /**
-                 * «NONE» — ЭТО УТВЕРЖДЕНИЕ, А НЕ ЗАГЛУШКА, и говорить его можно ТОЛЬКО когда
-                 * сервер ответил пустым списком.
-                 *
-                 * Три состояния до ответа различаются, потому что их различает и тело строки:
-                 * оно говорит «loading…» и «сервер ещё не отдаёт задачи файла». Свёрнутая
-                 * строка, утверждающая обратное, врёт молча — а свёрнута она по умолчанию, и
-                 * тела человек не увидит. Отказ здесь навсегда: у `useFileTasks` стоит
-                 * `retry: false`, то есть 404 невыкаченного роута приходит один раз и живёт до
-                 * перезагрузки.
-                 */
-                !canRead(SECTION.tasks)
-                  ? 'no access to tasks'
-                  : tasksLoading
-                    ? '…'
-                    : tasksFailed
-                      ? 'unknown'
-                      : heldByTasks
-                        ? (fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`).join(', ')
-                        : 'none'
-              }
-              open={lines.task}
-              onToggle={() => toggleLine('task')}
-            >
-              <FileTasksSection file={file} writable={writable} />
-            </CardLine>
-
-            <CardLine
-              label='discussion'
-              value={
-                Number(file.commentsCount ?? 0) > 0
-                  ? `${Number(file.commentsCount ?? 0)}`
-                  : 'nothing yet'
-              }
-              open={lines.talk}
-              onToggle={() => toggleLine('talk')}
-            >
-              <FileComments file={file} writable={writable} />
-            </CardLine>
-          </div>
+          <FileDetailsLines
+            file={file}
+            writable={writable}
+            lines={lines}
+            onToggle={toggleLine}
+            canReadTasks={canRead(SECTION.tasks)}
+            tasksLoading={tasksLoading}
+            tasksFailed={tasksFailed}
+            heldByTasks={heldByTasks}
+            taskLabels={(fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`)}
+          />
 
           {failure && (
             <div className='border border-error px-2.5 py-2'>
@@ -790,6 +1106,209 @@ export function FileCardModal({
             </div>
           </div>
         </div>
+      )}
+
+      {phone && file && (
+        <>
+          <Drawer
+            side='bottom'
+            open={phoneSheet === 'projects'}
+            onOpenChange={(open) => !open && setPhoneSheet(null)}
+            title='projects'
+            footer={
+              <Button
+                variant='main'
+                className='min-h-11 flex-1'
+                onClick={() => setPhoneSheet(null)}
+              >
+                done
+              </Button>
+            }
+          >
+            <div className='flex flex-col gap-2.5'>
+              <ChipRow>
+                {projectChips.map((project) => {
+                  const pid = Number(project.id);
+                  const on = selected.includes(pid);
+                  return (
+                    <Chip
+                      key={pid}
+                      selected={on}
+                      pressed={on}
+                      disabled={!writable}
+                      className='min-h-9'
+                      onClick={() =>
+                        setSelected((current) =>
+                          current.includes(pid)
+                            ? current.filter((value) => value !== pid)
+                            : [...current, pid],
+                        )
+                      }
+                    >
+                      {project.name}
+                      <ProjectArchiveMark project={project} />
+                    </Chip>
+                  );
+                })}
+              </ChipRow>
+              {inProjects.some(
+                (project) => !!project.role?.roleId && !selected.includes(project.id),
+              ) && (
+                <Text size='micro' variant='error' component='span' className='self-start'>
+                  role drops
+                </Text>
+              )}
+              {inProjects.some((project) => selected.includes(project.id)) && (
+                <div>
+                  <GroupLabel flush>roles</GroupLabel>
+                  <div className='flex flex-col gap-2'>
+                    {inProjects
+                      .filter((project) => selected.includes(project.id))
+                      .map((project) => (
+                        <ProjectRoleRow
+                          key={project.id}
+                          row={project}
+                          writable={writable}
+                          saving={setRoles.isPending}
+                          onPick={applyRole}
+                          compact
+                        />
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Drawer>
+
+          <Drawer
+            side='bottom'
+            open={phoneSheet === 'topics'}
+            onOpenChange={(open) => {
+              if (open) return;
+              closeTopicsSheet();
+            }}
+            title='topics'
+            footer={
+              <Button variant='main' className='min-h-11 flex-1' onClick={closeTopicsSheet}>
+                done
+              </Button>
+            }
+          >
+            <div className='flex flex-col gap-2.5'>
+              <Input
+                name='topicSearch'
+                value={topicSearch}
+                disabled={!writable}
+                placeholder={writable ? 'find or add' : 'read-only'}
+                aria-label='find or add topic'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setTopicSearch(e.target.value)
+                }
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key !== 'Enter' || !canCreateTopic) return;
+                  e.preventDefault();
+                  addSearchedTopic();
+                }}
+              />
+              <ChipRow>
+                {shownTopics.map((topic) => {
+                  const tid = Number(topic.id);
+                  const on = selected.includes(tid);
+                  return (
+                    <Chip
+                      key={tid}
+                      selected={on}
+                      pressed={on}
+                      disabled={!writable}
+                      className='min-h-9'
+                      onClick={() =>
+                        setSelected((current) =>
+                          current.includes(tid)
+                            ? current.filter((value) => value !== tid)
+                            : [...current, tid],
+                        )
+                      }
+                    >
+                      {topic.name}
+                    </Chip>
+                  );
+                })}
+                {shownNewTopics.map((topic) => (
+                  <Chip
+                    key={topic}
+                    selected
+                    className='min-h-9'
+                    disabled={!writable}
+                    onClick={() =>
+                      setNewTopics((current) => current.filter((value) => value !== topic))
+                    }
+                  >
+                    {topic}
+                  </Chip>
+                ))}
+                {canCreateTopic && (
+                  <Chip dashed className='min-h-9' onClick={addSearchedTopic}>
+                    + {topicSearch.trim()}
+                  </Chip>
+                )}
+              </ChipRow>
+            </div>
+          </Drawer>
+
+          <Drawer
+            side='bottom'
+            open={phoneSheet === 'more'}
+            onOpenChange={(open) => !open && setPhoneSheet(null)}
+            onCloseAutoFocus={openDeleteAfterMoreCloses}
+            title='more'
+          >
+            <div className='flex flex-col divide-y divide-hairline'>
+              {file.downloadUrl && (
+                <Button asChild variant='default' className='min-h-12 px-4 text-left uppercase'>
+                  <a href={file.downloadUrl}>download</a>
+                </Button>
+              )}
+              <Button
+                variant='default'
+                className='min-h-12 px-4 text-left uppercase'
+                onClick={() => setPhoneSheet('details')}
+              >
+                details
+              </Button>
+              <Button
+                variant='default'
+                className='min-h-12 px-4 text-left uppercase text-error disabled:text-borderColor'
+                disabled={!writable || deleteFile.isPending || heldByTasks > 0}
+                title={heldByTasks > 0 ? 'tasks hold this file' : undefined}
+                onClick={() => {
+                  deleteAfterMoreCloses.current = true;
+                  setPhoneSheet(null);
+                }}
+              >
+                delete
+              </Button>
+            </div>
+          </Drawer>
+
+          <Drawer
+            side='bottom'
+            open={phoneSheet === 'details'}
+            onOpenChange={(open) => !open && setPhoneSheet(null)}
+            title='details'
+          >
+            <FileDetailsLines
+              file={file}
+              writable={writable}
+              lines={lines}
+              onToggle={toggleLine}
+              canReadTasks={canRead(SECTION.tasks)}
+              tasksLoading={tasksLoading}
+              tasksFailed={tasksFailed}
+              heldByTasks={heldByTasks}
+              taskLabels={(fileTasks?.tasks ?? []).map((task) => `#${task.taskId}`)}
+            />
+          </Drawer>
+        </>
       )}
 
       {reading && <FileReaderModal id={id} onClose={() => setReading(false)} />}
