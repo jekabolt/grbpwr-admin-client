@@ -441,7 +441,7 @@ function tokenRows(groups) {
     groups.colors,
     (name) => {
       if (/border/iu.test(name) || name === 'hairline') return `border-${name}`;
-      if (/bg/iu.test(name) || ['pageBg', 'trackBg', 'progressBg', 'overlay'].includes(name)) {
+      if (/bg/iu.test(name) || ['pageBg', 'hairline', 'overlay'].includes(name)) {
         return `bg-${name}`;
       }
       return `text-${name}`;

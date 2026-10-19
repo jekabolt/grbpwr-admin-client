@@ -1,9 +1,16 @@
 import { adminService } from 'api/api';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button, FieldsGroupContainer, Text, InputField, SelectField } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  FieldsGroupContainer,
+  Text,
+  InputField,
+  SelectField,
+  useDoneFlash,
+} from 'ui';
 import { ProductFormData } from '../utility/schema';
 import { getFilteredSizes } from '../utility/sizes';
 import { TechCardLink } from './read-only-field';
@@ -32,7 +39,8 @@ export function StyleSection({
 }) {
   const { dictionary } = useDictionary();
   const { getValues, watch } = useFormContext<ProductFormData>();
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Same category -> size filtering <BodyFields/> uses for every other size picker on this form;
@@ -68,6 +76,7 @@ export function StyleSection({
 
   async function saveStyle() {
     setSaving(true);
+    setSaveError(null);
     try {
       await adminService.UpdateStyle({
         styleId,
@@ -75,7 +84,7 @@ export function StyleSection({
         expectedLockVersion: lockVersion,
         updateMask: MODEL_WEARS_UPDATE_MASK,
       });
-      showMessage('Model-wears updated', 'success');
+      saved.flash();
       onChanged?.();
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -83,11 +92,11 @@ export function StyleSection({
       // siblings — use clone-for-season instead) -> 400, whose server message names the cause.
       const message =
         err?.status === 409
-          ? 'This style changed since you loaded it — reload and retry.'
+          ? 'changed since you loaded it — reload'
           : err instanceof Error
             ? err.message
-            : 'Failed to update style';
-      showMessage(message, 'error');
+            : 'save failed';
+      setSaveError(message);
       console.error('UpdateStyle error', e);
     } finally {
       setSaving(false);
@@ -98,7 +107,7 @@ export function StyleSection({
     <FieldsGroupContainer
       title='model presentation'
       isOpen={hasModelWears}
-      className='border border-textInactiveColor p-4'
+      className='border border-borderColor p-4'
       childrenSpacingClass='space-y-3'
       headerContentGapClass='space-y-3'
       preview={
@@ -131,6 +140,13 @@ export function StyleSection({
         }))}
         readOnly={!canEdit}
       />
+      {saveError && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {saveError}
+          </Text>
+        </CalloutBox>
+      )}
       {canEdit && (
         <Button
           type='button'
@@ -138,6 +154,7 @@ export function StyleSection({
           size='lg'
           className='uppercase'
           disabled={saving}
+          done={saved.on}
           onClick={saveStyle}
         >
           {saving ? 'saving…' : 'save model-wears'}

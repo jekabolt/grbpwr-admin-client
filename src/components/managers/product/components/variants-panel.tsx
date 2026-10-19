@@ -1,10 +1,11 @@
 import { adminService } from 'api/api';
 import { common_Variant } from 'api/proto-http/admin';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button, ConfirmationModal, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, Text } from 'ui';
 import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { formatSizeName } from '../utility/sizes';
 
@@ -23,7 +24,8 @@ export function VariantsPanel({
   onChanged?: () => void;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // The add row's refusal stands under it until the next try.
+  const [addError, setAddError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sizeToAdd, setSizeToAdd] = useState<string>('');
   const [pendingArchive, setPendingArchive] = useState<common_Variant | null>(null);
@@ -67,8 +69,9 @@ export function VariantsPanel({
 
   async function addVariant() {
     const sizeId = sizeToAdd ? parseInt(sizeToAdd, 10) : NaN;
+    setAddError(null);
     if (!sizeId || Number.isNaN(sizeId)) {
-      showMessage('Pick a size to add', 'error');
+      setAddError('pick a size');
       return;
     }
     setBusy(true);
@@ -78,18 +81,16 @@ export function VariantsPanel({
         sizeId,
         expectedColorwayVersion: lockVersion,
       });
-      showMessage('Variant added', 'success');
       setSizeToAdd('');
       onChanged?.();
     } catch (e) {
       const err = e as Error & { status?: number };
-      showMessage(
+      setAddError(
         err?.status === 409
-          ? 'This colourway changed since you loaded it — reload and retry.'
+          ? 'changed since you loaded it — reload'
           : err instanceof Error
             ? err.message
-            : 'Failed to add variant',
-        'error',
+            : 'add failed',
       );
     } finally {
       setBusy(false);
@@ -101,18 +102,19 @@ export function VariantsPanel({
     setBusy(true);
     try {
       await adminService.ArchiveVariant({ variantId: v.variantId, expectedVersion: v.lockVersion });
-      showMessage('Variant archived', 'success');
       onChanged?.();
     } catch (e) {
       const err = e as Error & { status?: number };
-      showMessage(
-        err?.status === 409
-          ? 'This variant changed since you loaded it — reload and retry.'
-          : err instanceof Error
-            ? err.message
-            : 'Failed to archive variant',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: `SIZE ${sizeName(v.sizeId)}`,
+        text: 'not archived',
+        bad: err?.status === 409 ? 'changed elsewhere' : 'refused',
+        detail: err instanceof Error ? err.message : undefined,
+        ...(failureClassOfError(e) === 'transient'
+          ? { action: { label: 'retry', onClick: () => archiveVariant(v) } }
+          : {}),
+      });
     } finally {
       setBusy(false);
     }
@@ -130,25 +132,26 @@ export function VariantsPanel({
         patch: { status: 'VARIANT_LIFECYCLE_STATUS_ACTIVE' },
         updateMask: 'status',
       });
-      showMessage('Variant restored', 'success');
       onChanged?.();
     } catch (e) {
       const err = e as Error & { status?: number };
-      showMessage(
-        err?.status === 409
-          ? 'This variant changed since you loaded it — reload and retry.'
-          : err instanceof Error
-            ? err.message
-            : 'Failed to restore variant',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: `SIZE ${sizeName(v.sizeId)}`,
+        text: 'not restored',
+        bad: err?.status === 409 ? 'changed elsewhere' : 'refused',
+        detail: err instanceof Error ? err.message : undefined,
+        ...(failureClassOfError(e) === 'transient'
+          ? { action: { label: 'retry', onClick: () => restoreVariant(v) } }
+          : {}),
+      });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-2 border-t border-borderColor pt-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           sellable sizes &amp; stock
@@ -179,7 +182,7 @@ export function VariantsPanel({
           {activeVariants.map((v) => (
             <span
               key={v.variantId}
-              className='flex items-center gap-2 border border-textInactiveColor px-2 py-1'
+              className='flex items-center gap-2 border border-borderColor px-2 py-1'
             >
               <Text size='small' variant='uppercase'>
                 {sizeName(v.sizeId)}
@@ -203,11 +206,11 @@ export function VariantsPanel({
       )}
 
       {showArchived && archivedVariants.length > 0 && (
-        <div className='flex flex-wrap gap-2 border-t border-textInactiveColor pt-2'>
+        <div className='flex flex-wrap gap-2 border-t border-borderColor pt-2'>
           {archivedVariants.map((v) => (
             <span
               key={v.variantId}
-              className='flex items-center gap-2 border border-dashed border-textInactiveColor px-2 py-1 opacity-70'
+              className='flex items-center gap-2 border border-dashed border-borderColor px-2 py-1 opacity-70'
             >
               <Text size='small' variant='uppercase'>
                 {sizeName(v.sizeId)}
@@ -235,7 +238,7 @@ export function VariantsPanel({
           value={sizeToAdd}
           onChange={(e) => setSizeToAdd(e.target.value)}
           disabled={busy || availableSizes.length === 0}
-          className='border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize'
+          className='border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize'
         >
           <option value=''>
             {availableSizes.length === 0 ? 'no sizes available' : 'add size…'}
@@ -257,6 +260,13 @@ export function VariantsPanel({
           add variant
         </Button>
       </div>
+      {addError && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not added</b> · {addError}
+          </Text>
+        </CalloutBox>
+      )}
 
       <ConfirmationModal
         open={pendingArchive != null}

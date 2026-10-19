@@ -16,7 +16,7 @@ export function BarRow({
   return (
     <div className='grid grid-cols-[130px_1fr_88px] items-center gap-2 py-0.5'>
       <span className='truncate font-bold'>{name}</span>
-      <span className='block h-3 bg-trackBg'>
+      <span className='block h-3 bg-pageBg'>
         <span
           className={`block h-3 ${fill}`}
           style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
@@ -53,7 +53,7 @@ export function WaterfallRow({
   return (
     <div className='grid grid-cols-[150px_1fr_90px] items-center gap-2 py-0.5'>
       <span className={`truncate ${emphasis ? 'font-bold' : 'text-labelColor'}`}>{name}</span>
-      <span className='relative block h-[13px] bg-trackBg'>
+      <span className='relative block h-[13px] bg-pageBg'>
         <span
           className={`absolute top-0 h-[13px] ${fill}`}
           style={{ left: `${left}%`, width: `${Math.max(0.5, width)}%` }}

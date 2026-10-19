@@ -8,7 +8,7 @@ import { cardMarkers } from 'components/managers/tech-card/components/nesting/ma
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { AddDoor, Button, CalloutBox, ConfirmationModal, Section, Text } from 'ui';
 import { wireInt } from 'components/managers/tech-card/components/schema';
@@ -19,6 +19,7 @@ import {
   layClothInput,
   pairNormInput,
 } from '../utils/cloth-per-unit';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { LayCard } from './lay-card';
 import { buildLaySectionPlotterFile } from './lay-plotter';
 import { LayCoverageTable } from './lay-coverage-table';
@@ -61,7 +62,8 @@ export function LayPlan({
   const runId = run.id ?? 0;
   const techCardId = run.run?.techCardId ?? 0;
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // The delete dialog's own refusal line.
+  const [deleteFail, setDeleteFail] = useState<string | null>(null);
   const { data, isLoading, isError } = useRunLays(runId, runId > 0);
   // isError карточки нужен отдельно от data: «ещё читается» и «запрос упал» — разные состояния,
   // и строка «к норме» на карточке настила обязана назвать второе словами, а не исчезать молча.
@@ -105,7 +107,7 @@ export function LayPlan({
         new Date().toISOString(),
       );
       if (!out.ok) {
-        showMessage(`the plotter file didn't build — ${out.reason}`, 'error');
+        notify({ sev: 'error', subject: 'PLOTTER FILE', text: 'not built', detail: out.reason });
         return;
       }
       const url = URL.createObjectURL(new Blob([out.dxf], { type: 'application/dxf' }));
@@ -136,7 +138,10 @@ export function LayPlan({
   // именно затем, чтобы четвёртая копия условия `productionRunId === 0` не разъехалась с тремя
   // первыми. Копировать раскройную раскладку этого же прогона и незачем — она уже в нём.
   const cardOnlyMarkers = useMemo(() => cardMarkers(techCard?.markers), [techCard?.markers]);
-  const bomItems = useMemo(() => techCard?.techCard?.bomItems ?? [], [techCard?.techCard?.bomItems]);
+  const bomItems = useMemo(
+    () => techCard?.techCard?.bomItems ?? [],
+    [techCard?.techCard?.bomItems],
+  );
 
   // Колорвей = продукт (R1), имя резолвится из словаря по коду цвета — тем же способом, что
   // lines-grid.tsx и material-plan.tsx, чтобы три блока одной страницы не называли цвет по-разному.
@@ -272,9 +277,7 @@ export function LayPlan({
   // Колонки — градация карточки в её порядке, плюс любой размер, встретившийся в клетках.
   const sizeIds = useMemo(() => {
     const grade = techCard?.techCard?.sizeIds ?? [];
-    const extra = coverage
-      .map((c) => wireInt(c.sizeId))
-      .filter((s) => s > 0 && !grade.includes(s));
+    const extra = coverage.map((c) => wireInt(c.sizeId)).filter((s) => s > 0 && !grade.includes(s));
     return [...grade, ...new Set(extra)];
   }, [techCard?.techCard?.sizeIds, coverage]);
 
@@ -347,9 +350,15 @@ export function LayPlan({
         reaffirmQuantities: true,
       },
       {
-        onSuccess: () =>
-          showMessage('quantities reaffirmed — the lay covers the plan', 'success'),
-        onError: (e) => showMessage(layErrorMessage(e), 'error'),
+        // The cleared badge on the lay card is the receipt.
+        onError: (e) =>
+          notifyFailure(
+            `LAY ${lay.name || lay.bomItemName || ''}`.trim(),
+            'not reaffirmed',
+            e,
+            layErrorMessage(e),
+            () => reaffirmQuantities(lay),
+          ),
       },
     );
   };
@@ -361,7 +370,13 @@ export function LayPlan({
       question='lays: how many plies we spread with which marker, and whether they cover the run plan.'
       action={
         neededPairs.length > 0 ? (
-          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
             spread: {layedPairs} of {neededPairs.length} pairs
           </Text>
         ) : null
@@ -418,9 +433,7 @@ export function LayPlan({
                     })
                   }
                   onDelete={() => setDeleting(lay)}
-                  reaffirming={
-                    reaffirm.isPending && reaffirm.variables?.lay?.layKey === lay.layKey
-                  }
+                  reaffirming={reaffirm.isPending && reaffirm.variables?.lay?.layKey === lay.layKey}
                   onPlotter={(section, key) => void downloadLayPlotter(lay, section, key)}
                   plottingKey={plottingKey}
                   onReaffirm={() => reaffirmQuantities(lay)}
@@ -442,7 +455,11 @@ export function LayPlan({
                   // fk SET NULL): настил на него построить нечем, и молчаливое исчезновение пары
                   // было бы хуже, чем сказанное вслух.
                   return (
-                    <Text key={`${p.colorwayId}:${p.bomItemId}`} size='micro' className='text-error'>
+                    <Text
+                      key={`${p.colorwayId}:${p.bomItemId}`}
+                      size='micro'
+                      className='text-error'
+                    >
                       {colorwayLabel(p.colorwayId)} · slot #{p.bomItemId} was removed from the BOM —
                       no lay can be built on it
                     </Text>
@@ -506,9 +523,7 @@ export function LayPlan({
           }}
           runId={runId}
           techCardId={techCardId}
-          existing={
-            editing.layKey ? lays.find((l) => l.layKey === editing.layKey) : undefined
-          }
+          existing={editing.layKey ? lays.find((l) => l.layKey === editing.layKey) : undefined}
           seedColorwayId={editing.colorwayId}
           seedBomLineKey={editing.bomLineKey}
           colorwayLabel={colorwayLabel}
@@ -524,6 +539,7 @@ export function LayPlan({
         open={deleting != null}
         onOpenChange={(o) => {
           if (!o) setDeleting(null);
+          setDeleteFail(null);
         }}
         title={`delete the lay ${deleting?.name || deleting?.bomItemName || ''}?`}
         confirmLabel={del.isPending ? 'deleting…' : 'delete'}
@@ -534,11 +550,12 @@ export function LayPlan({
           del.mutate(
             { runId, layKey: deleting.layKey },
             {
-              onSuccess: () => {
-                setDeleting(null);
-                showMessage('lay deleted', 'success');
-              },
-              onError: (e) => showMessage(layErrorMessage(e), 'error'),
+              // The lay card leaving the plan is the receipt.
+              onSuccess: () => setDeleting(null),
+              onError: (e) =>
+                isRefusal(e)
+                  ? setDeleteFail(layErrorMessage(e))
+                  : notifyFailure('LAY', 'not deleted', e, layErrorMessage(e)),
             },
           );
         }}
@@ -548,6 +565,7 @@ export function LayPlan({
           be reused in another lay. the material requirement for this pair falls back to the tech
           card norm.
         </Text>
+        <FailNote verb='not deleted' text={deleteFail} className='mt-2' />
       </ConfirmationModal>
     </Section>
   );

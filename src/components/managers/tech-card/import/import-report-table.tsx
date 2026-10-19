@@ -20,7 +20,7 @@ import {
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Button, Pill, Stat, StatGrid, Text, EmptyCell } from 'ui';
 
 /**
@@ -187,7 +187,6 @@ export function ApplyColorwaysAction({
   onApplied: (report: TechCardImportReport) => void;
 }) {
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
 
   const apply = useMutation({
     // ПОВТОР ЗДЕСЬ СОЗДАЁТ ПРОДУКТЫ. Глобальный `mutations.retry: 1` (`src/index.tsx`) шлёт
@@ -201,24 +200,16 @@ export function ApplyColorwaysAction({
     onSuccess: (res) => {
       // Отчёт подменяем ДО тоста: тост исчезает, а таблица под ним остаётся, и она обязана
       // говорить то же, что сервер только что записал.
+      // The refreshed report is the receipt: created colours leave it, the rest say why per row.
       if (res.report) onApplied(res.report);
-      const created = res.createdColorwayIds?.length ?? 0;
-      showMessage(
-        created > 0
-          ? `${created} colourway(s) created from the archive`
-          : // ПУСТО — ЭТО НЕ ОТКАЗ. Либо всё, что вёз архив, уже стоит на карточке (повторное
-            // нажатие), либо ни один цвет не завёлся и почему — сказано построчно в отчёте,
-            // который в этот момент уже обновлён. Врать «создано 0 — успех» нельзя, звать это
-            // ошибкой тоже: отправляем читать отчёт.
-            'no new colourway was created — the report says what happened to each colour',
-        'success',
-      );
     },
     onError: (error: unknown) =>
-      showMessage(
-        error instanceof Error ? error.message : 'could not create the colourways',
-        'error',
-      ),
+      notify({
+        sev: 'error',
+        subject: 'COLOURWAYS',
+        text: 'not created',
+        detail: error instanceof Error ? error.message : undefined,
+      }),
   });
 
   const pending = pendingColours(lines);
@@ -227,19 +218,17 @@ export function ApplyColorwaysAction({
   if (!canWrite(SECTION.products)) {
     return (
       <Text size='micro' variant='label'>
-        {pending} colour(s) from the archive are not on this card. Creating them writes to
-        products, and this account does not have that — ask somebody who keeps the catalogue to
-        press «create colourways from archive» on this report.
+        {pending} colour(s) from the archive are not on this card. Creating them writes to products,
+        and this account does not have that — ask somebody who keeps the catalogue to press «create
+        colourways from archive» on this report.
       </Text>
     );
   }
 
   return (
-    <div className='flex flex-col gap-1.5 border border-textInactiveColor p-2.5'>
+    <div className='flex flex-col gap-1.5 border border-borderColor p-2.5'>
       <div className='flex flex-wrap items-center gap-2.5'>
-        <Text size='control'>
-          {pending} colour(s) from the archive are not on this card
-        </Text>
+        <Text size='control'>{pending} colour(s) from the archive are not on this card</Text>
         <Button
           type='button'
           variant='main'
@@ -259,8 +248,8 @@ export function ApplyColorwaysAction({
       <Text size='micro' variant='label'>
         They land as DRAFT products with the archive&apos;s recipes — no SKU, no prices. A colour
         already on the card is left alone, recipe and all, so pressing twice is safe. A colour this
-        base&apos;s dictionary does not carry needs the colour added first; a row the archive
-        itself broke is not fixed by pressing again.
+        base&apos;s dictionary does not carry needs the colour added first; a row the archive itself
+        broke is not fixed by pressing again.
       </Text>
     </div>
   );
@@ -269,9 +258,9 @@ export function ApplyColorwaysAction({
 export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[] }) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>entity</th>
             <th className={TH}>ref</th>
             <th className={TH}>status</th>
@@ -295,7 +284,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
               return (
                 <tr
                   key={`${l.entity ?? ''}-${l.ref ?? ''}-${reason}-${i}`}
-                  className='border-b border-textInactiveColor align-top last:border-b-0'
+                  className='border-b border-borderColor align-top last:border-b-0'
                 >
                   <td className='px-2 py-1.5 uppercase'>{l.entity || <EmptyCell />}</td>
                   <td className={`${REF_CELL} py-1.5`} title={l.ref || undefined}>
@@ -336,7 +325,9 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
                     {l.action ? (
                       <Text size='control'>{l.action}</Text>
                     ) : (
-                      <Text size='control' variant='inactive'><EmptyCell /></Text>
+                      <Text size='control' variant='inactive'>
+                        <EmptyCell />
+                      </Text>
                     )}
                   </td>
                 </tr>

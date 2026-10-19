@@ -2,10 +2,11 @@ import { adminService } from 'api/api';
 import { ACCESS, accessSatisfies } from 'components/managers/accounts/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { failureClassOfError } from './useTechCardAutosave';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { ConfirmationModal, Input, Select, Text, FormLabel } from 'ui';
+import { CalloutBox, ConfirmationModal, Input, Select, Text, FormLabel } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { TechCardFormData } from './schema';
 
@@ -50,7 +51,7 @@ export function CollectionField({
   readOnly?: boolean;
   /**
    * The account cannot write the style's collection (UpdateStyle is `products:write`, Codex R3):
-   * a dead control like FIT's — disabled, zebra ground — and no «+ new collection…» door.
+   * a dead control like FIT's — disabled, pageBg ground — and no «+ new collection…» door.
    */
   locked?: boolean;
 }) {
@@ -91,7 +92,7 @@ export function CollectionField({
         value={collection ? nameItem(collection) : NONE}
         readOnly={readOnly}
         disabled={locked}
-        className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+        className={locked ? 'bg-pageBg text-labelColor' : undefined}
         onValueChange={(v?: string) => {
           if (v === NEW) {
             // Opened on the next frame: the list is still closing and hands focus back to its
@@ -129,14 +130,16 @@ function NewCollectionDialog({
   onCreated: (name: string) => void;
 }) {
   const { refetch } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // The server's refusal of the name: in the dialog, until the next edit.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const inputId = useId();
 
   useEffect(() => {
     if (open) setName('');
   }, [open]);
+  useEffect(() => setRefusal(null), [name, open]);
 
   const trimmed = name.trim();
 
@@ -147,13 +150,25 @@ function NewCollectionDialog({
       const res = await adminService.CreateCollection({ name: trimmed, expectedVersion: 0 });
       const created = res.collection?.name?.trim() || trimmed;
       onCreated(created);
+      // The field now holding the new name is the receipt.
       onOpenChange(false);
-      showMessage(`collection ${created} created`, 'success');
       // Re-read so the new name is a dictionary entry, not only the card's own value. The field
       // shows it either way (see `items`), so a slow or failed re-read costs nothing visible.
       void refetch();
     } catch (e) {
-      showMessage(fieldErrorSummary(e, 'could not create the collection'), 'error');
+      const sentence = fieldErrorSummary(e, 'could not create the collection');
+      if (failureClassOfError(e) === 'refused') setRefusal(sentence);
+      else
+        notify({
+          sev: 'error',
+          subject: `COLLECTION ${trimmed}`,
+          text: 'not created',
+          detail: sentence,
+          action:
+            failureClassOfError(e) === 'transient'
+              ? { label: 'retry', onClick: () => void create() }
+              : undefined,
+        });
     } finally {
       setBusy(false);
     }
@@ -189,6 +204,7 @@ function NewCollectionDialog({
             maxLength={255}
             placeholder='SS27 DROP 1'
             disabled={busy}
+            aria-invalid={refusal !== null || undefined}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
               // `isComposing`: an IME confirming a word presses Enter too — that is not «create».
@@ -199,6 +215,7 @@ function NewCollectionDialog({
             }}
           />
         </div>
+        {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

@@ -249,7 +249,7 @@ function Organ({
       className={width}
       triggerProps={{ className: `flex items-center ${FOCUS}`, 'aria-label': `${label}, details` }}
       openElement={
-        <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-bgZebra' data-organ={testId}>
+        <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-pageBg' data-organ={testId}>
           <span>{label}</span>
           <span aria-hidden>▾</span>
         </Pill>
@@ -470,7 +470,7 @@ export function StageProgress({
                       <button
                         type='button'
                         onClick={() => onRevealError(e.path)}
-                        className={`flex w-full items-baseline gap-2 py-1 text-left hover:bg-bgZebra ${FOCUS}`}
+                        className={`flex w-full items-baseline gap-2 py-1 text-left hover:bg-pageBg ${FOCUS}`}
                       >
                         <span className='flex min-w-0 flex-1 flex-col'>
                           <Text size='micro' component='span' className='truncate'>

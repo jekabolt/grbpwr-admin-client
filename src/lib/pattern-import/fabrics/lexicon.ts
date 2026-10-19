@@ -208,6 +208,17 @@ export function fabricKindsIn(text: string): { kind: FabricKind; stem: string; a
   const t = normaliseFabricText(text);
   const hits: { kind: FabricKind; stem: string; at: number }[] = [];
   const claimed: [number, number][] = [];
+  // Mood's older tiled sheets print «OF FABRIC AND LINING» on the piece. `fabric` alone is too
+  // broad to mean main cloth (for example «lining fabric»), but this coordinated phrase is
+  // unambiguous. It is also clipped at tile edges to RIC… on the left or …LI / …LININ on the
+  // right, while the remaining letters land on an adjacent page; keep those strong coordinated
+  // fragments instead of silently making the piece lining-only or main-only.
+  const fabricAndLining = /\b(?:fab)?ric\s+and\s+li(?:n(?:i(?:n(?:g)?)?)?)?\b/u.exec(t);
+  if (fabricAndLining) {
+    const at = fabricAndLining.index;
+    hits.push({ kind: 'main', stem: 'fabric and lining', at });
+    hits.push({ kind: 'lining', stem: 'lining', at: at + fabricAndLining[0].lastIndexOf('li') });
+  }
   for (const row of FABRIC_WORDS)
     for (const raw of row.stems) {
       const stem = stemKey(raw);

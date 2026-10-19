@@ -6,13 +6,21 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { nearestOnPolyline } from 'components/managers/tech-card/annotation/geometry';
-import { Button, CalloutBox, Chip, ChipRow, ConfirmationModal, Pill, Text } from 'ui';
+import { Button, CalloutBox, Chip, ChipRow, ConfirmationModal, Pill, Text, useDoneFlash } from 'ui';
 
-import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } from '../../canvas-view';
+import {
+  FIT_INSET,
+  FIT_MIN,
+  fitView,
+  revealDelta,
+  toWorld,
+  zoomAt,
+  type View,
+} from '../../canvas-view';
 import { exactPalette, isMapInk, planHex } from '../colour-plan/model';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
@@ -166,12 +174,7 @@ import {
   thinLasso,
   type SelectionArea,
 } from './vector-lasso';
-import {
-  DEFAULT_TOLERANCE,
-  bucketFill,
-  parseFillColor,
-  selectionAlpha,
-} from './vector-fill';
+import { DEFAULT_TOLERANCE, bucketFill, parseFillColor, selectionAlpha } from './vector-fill';
 import { DEFAULT_NIB, clampNib, eraseAlong, stampAlong } from './vector-nib';
 import {
   PLATE_W,
@@ -194,7 +197,6 @@ import {
   smoothSegment,
   rasterCtx,
   rasterBox,
-
   renderView,
   seedRaster,
   selectionMask,
@@ -357,6 +359,10 @@ type Tool =
  */
 type Material = 'lines' | 'pixels' | 'view';
 
+/** A refused gesture or file has no field to stand on: it is news. Successes say nothing. */
+const say = (sev: 'error' | 'warn', text: string, detail?: string, bad?: string) =>
+  notify({ sev, subject: 'VECTOR EDIT', text, bad, detail });
+
 const TOOL_LABEL: Record<Tool, string> = {
   line: 'line',
   freehand: 'freehand',
@@ -420,13 +426,11 @@ const TOOL_HINT: Record<Tool, string> = {
     'rub away everything under the nib — the pixels are rubbed to PAPER WHITE, the photo included, and the drawn lines are cut through. Lines are only cut at full opacity (a line cannot be half-erased), never while the lines layer is hidden, and never outside an active area',
   stamp: 'copy PIXELS from the source to under your hand, as in photoshop',
   fill: 'flood the area under the cursor with the ink in hand — an active area holds it in',
-  heal:
-    'brush over a spot — a mole, a speck, a stray mark — and let go: it grows over with the texture around it. The colour in hand is not used; opacity is how hard it heals. An active area holds it in. When nothing nearby matches, that spot is smoothed instead of grown, and the tool says so',
+  heal: 'brush over a spot — a mole, a speck, a stray mark — and let go: it grows over with the texture around it. The colour in hand is not used; opacity is how hard it heals. An active area holds it in. When nothing nearby matches, that spot is smoothed instead of grown, and the tool says so',
   patch:
     'lasso a region, then drag it onto a clean place — the region is REBUILT from where you dropped it and the seam is blended into what surrounds it. Nothing is invented: the pixels come from the place you chose, not from the rest of the picture. Lines are never touched',
   lasso: 'draw an area — it holds the raster tools in and cuts the lines at its edge',
-  crop:
-    'drag the frame — outward grows the sheet, inward crops it. Enter applies, esc cancels. This cannot be undone and survives only as a NEW picture',
+  crop: 'drag the frame — outward grows the sheet, inward crops it. Enter applies, esc cancels. This cannot be undone and survives only as a NEW picture',
   pan: 'move the sheet',
 };
 
@@ -685,9 +689,7 @@ const straightDir = (
  */
 const rayRange = (o: number, d: number, size: number): [number, number] => {
   if (Math.abs(d) < 1e-9) {
-    return o < 0 || o > size
-      ? [0, 0]
-      : [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+    return o < 0 || o > size ? [0, 0] : [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
   }
   const a = -o / d;
   const b = (size - o) / d;
@@ -904,7 +906,10 @@ const cutQuadOf = (quad: Quad, r: WarpRegion): Quad => {
 /** Одно и то же ли попадание. Сравнение по РОДУ и НОМЕРУ: объект приезжает новой ссылкой всегда. */
 const sameHit = (a: FrameHit, b: FrameHit): boolean =>
   a === b ||
-  (!!a && !!b && a.kind === b.kind && (a.kind === 'body' || b.kind === 'body' || a.handle === b.handle));
+  (!!a &&
+    !!b &&
+    a.kind === b.kind &&
+    (a.kind === 'body' || b.kind === 'body' || a.handle === b.handle));
 
 type FrameDrag = {
   id: number;
@@ -1143,14 +1148,10 @@ export function VectorModal({
    */
   initialImage?: { media: common_MediaFull } | null;
 }) {
-  const { showMessage } = useSnackBarStore();
+  // The receipt of «save the drawing only» stands on that button: the editor stays open.
+  const drawingSaved = useDoneFlash();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  const {
-    saveLayer,
-    flattenLayer,
-    invalidate: rereadBand,
-    reread: bandNow,
-  } = useEditLayerWrites(techCardId);
+  const { saveLayer, flattenLayer, invalidate: rereadBand } = useEditLayerWrites(techCardId);
   /** The host's `replace` as of the last render — for the continuations that outlive a press. */
   const replaceRef = useRef(replace);
   replaceRef.current = replace;
@@ -1882,15 +1883,12 @@ export function VectorModal({
    * «до» — для возврата этого мало, и второй писатель мимо ленты означал бы ⌘⇧Z, который иногда
    * работает.
    */
-  const commitLines = useCallback(
-    (next: VectorStroke[]) => {
-      timeline.current.recordLines(strokesRef.current, next);
-      strokesRef.current = next;
-      setStrokes(next);
-      setTl(timeline.current.state());
-    },
-    [],
-  );
+  const commitLines = useCallback((next: VectorStroke[]) => {
+    timeline.current.recordLines(strokesRef.current, next);
+    strokesRef.current = next;
+    setStrokes(next);
+    setTl(timeline.current.state());
+  }, []);
 
   const resetHistory = useCallback(() => {
     timeline.current.reset();
@@ -1965,11 +1963,6 @@ export function VectorModal({
          пуговиц 4000×4000 — это сотни мегабайт, которые без этого вызова не отпустит никто до
          перезагрузки вкладки. Следующий визит заплатит сетью — это дешевле и это заметно. */
       clearImageBytes();
-      /* ⚠ ПРИЗНАК «ПРО ПОЛ УЖЕ СКАЗАНО» ГАСИТСЯ НА ЗАКРЫТИИ, А НЕ НИЖЕ ПО ТЕЛУ СИДА. Ниже —
-         значит после РАННЕГО ВЫХОДА (`knownId > 0 && !loaded`), которого на повторном входе не
-         миновать: «один раз за визит» превращалось в «один раз на два визита». Закрытие
-         наступает всегда и ровно один раз. */
-      cropFloorSaid.current = false;
       return;
     }
     if (seeded.current) return;
@@ -2093,7 +2086,20 @@ export function VectorModal({
     resetHistory();
     // `baseSrc` и `disabled` ушли из зависимостей вместе с развилкой входа (H-1): читала их
     // только она. Оставленные, они пересеивали бы визит на каждое прибытие подложки.
-  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory, colourMode, seedInks, initialImage]);
+  }, [
+    open,
+    knownId,
+    knownRev,
+    known,
+    band,
+    baseMediaId,
+    loaded,
+    wireRatio,
+    resetHistory,
+    colourMode,
+    seedInks,
+    initialImage,
+  ]);
 
   /**
    * THE EDITOR IS FROZEN UNTIL IT KNOWS WHAT IS ALREADY THERE — a correctness gate, not a spinner:
@@ -2288,13 +2294,7 @@ export function VectorModal({
       const vp = viewportRef.current;
       if (!vp) return;
       const r = viewportRect(vp);
-      viewRef.current = zoomAt(
-        viewRef.current,
-        factor,
-        r.width / 2,
-        r.height / 2,
-        EDITOR_ZOOM_MAX,
-      );
+      viewRef.current = zoomAt(viewRef.current, factor, r.width / 2, r.height / 2, EDITOR_ZOOM_MAX);
       userMoved.current = true;
       applyView();
     },
@@ -2506,7 +2506,7 @@ export function VectorModal({
       if (!alive) return;
       if (!probe.ok) {
         forgetBackdrop(bdKey);
-        showMessage(BACKDROP_GONE_TEXT, 'error');
+        say('error', 'template gone', BACKDROP_GONE_TEXT);
         return;
       }
       // Без записи: это ЧТЕНИЕ, а не правка, и трогать хранимое здесь нечем.
@@ -2622,7 +2622,10 @@ export function VectorModal({
      * новому ключу пусто), а не выдумано здесь.
      */
     const sameSheet =
-      !!prev && prev !== bdKey && prev.endsWith(':0') && prev.slice(0, -2) === bdKey.slice(0, bdKey.lastIndexOf(':'));
+      !!prev &&
+      prev !== bdKey &&
+      prev.endsWith(':0') &&
+      prev.slice(0, -2) === bdKey.slice(0, bdKey.lastIndexOf(':'));
     if (!stored.length && sameSheet && guidesRef.current.length) {
       saveGuidesSoon(bdKey, guidesRef.current);
       return;
@@ -2726,7 +2729,7 @@ export function VectorModal({
       if (event.code === 'KeyD') {
         event.preventDefault();
         if (event.shiftKey) reselect();
-        else if (dropSel()) showMessage('area dropped — ⇧⌘D brings it back', 'success');
+        else dropSel();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -2820,7 +2823,16 @@ export function VectorModal({
       seeding.current = false;
       setBusy(null);
     }
-  }, [baseMedia, baseSrc, ratio, storedRasterId, storedRasterUrl, storedRasterGone, colourMode, mapSrc]);
+  }, [
+    baseMedia,
+    baseSrc,
+    ratio,
+    storedRasterId,
+    storedRasterUrl,
+    storedRasterGone,
+    colourMode,
+    mapSrc,
+  ]);
 
   /**
    * НАРИСОВАТЬ ДОКУМЕНТ В ВИДИМЫЙ ХОЛСТ — и когда растр только появился, и КАЖДЫЙ РАЗ, когда холст
@@ -2893,11 +2905,7 @@ export function VectorModal({
     // фотографию восстановленной, а на сервере лежит прежняя живопись.
     rasterDirtyRef.current = true;
     setRasterDirty(true);
-    showMessage(
-      'the pixel layer will be dropped on the next save — the picture underneath comes back untouched',
-      'success',
-    );
-  }, [showMessage]);
+  }, []);
 
   /**
    * Режим пиксельного жеста: кисть и штамп кладут, ластик кладёт бумагу — а НА КАРТЕ ЦВЕТОВ
@@ -2964,7 +2972,10 @@ export function VectorModal({
     const layer = rasterRef.current;
     if (!layer) return;
     clearGesture(layer);
-    liveRef.current = { mode: paintModeOf(t), opacity: t === 'heal' ? HEAL_PREVIEW_ALPHA : opacity / 100 };
+    liveRef.current = {
+      mode: paintModeOf(t),
+      opacity: t === 'heal' ? HEAL_PREVIEW_ALPHA : opacity / 100,
+    };
   };
 
   /** Продолжение жеста: в буфер уходит ТОЛЬКО НОВЫЙ участок следа, а не весь след заново. */
@@ -2979,11 +2990,7 @@ export function VectorModal({
          `commitStage`: композит у кисти и ластика теперь один, и различает их ровно то, чем они
          красят, — плюс резка линий на отпускании, которая осталась ластику одному. */
       ink:
-        t === 'heal'
-          ? HEAL_PREVIEW_INK
-          : t === 'erase'
-            ? PAPER_INK
-            : readInk(ink) ?? DEFAULT_INK,
+        t === 'heal' ? HEAL_PREVIEW_INK : t === 'erase' ? PAPER_INK : readInk(ink) ?? DEFAULT_INK,
     };
     if (t === 'stamp') {
       const off = stampOffset.current;
@@ -3251,80 +3258,80 @@ export function VectorModal({
    * Функция дешёвая, зовут её от нажатия пальцем, и мемоизация здесь покупала бы только этот риск.
    */
   const switchTool = (t: Tool) => {
-      /* ⚠ ГЛАГОЛ-КЛАВИША ТОЖЕ ПРОХОДИТ ЗДЕСЬ, И ЭТО ЕДИНСТВЕННАЯ ДВЕРЬ. В режиме карты полос две,
+    /* ⚠ ГЛАГОЛ-КЛАВИША ТОЖЕ ПРОХОДИТ ЗДЕСЬ, И ЭТО ЕДИНСТВЕННАЯ ДВЕРЬ. В режиме карты полос две,
          но клавиши инструментов живут всё время: `p` открыло бы перо, которого на экране нет, — и
          человек рисовал бы линии, которых скан палитры не увидит никогда. Гейт стоит у ОДНОГО
          писателя `tool`, а не у ряда чипов, потому что ряд чипов — не единственный вход. */
-      if (colourMode && !COLOUR_TOOLS.has(t)) return;
-      if (penRef.current) commitPen();
-      /**
-       * СМЕНА ИНСТРУМЕНТА ЗАКРЫВАЕТ РАМКУ — И ПО-РАЗНОМУ У РАЗНЫХ ХОЗЯЕВ.
-       *
-       * Шаблон и вставка СТАВЯТСЯ: построенное не выбрасывается, ровно как коммитится недоложенный
-       * контур пера. Кадр ОТМЕНЯЕТСЯ: его применение необратимо и сносит ленту, и запускать такое
-       * от нажатия на соседний чип нельзя — там ставят только Enter или двойной клик.
-       */
-      const fr = frameRef.current;
-      if (fr && !(t === 'crop' && fr.owner === 'crop')) {
-        if (fr.owner === 'crop') closeFrame();
-        else commitFrame();
-      }
-      setTool(t);
-      toolRef.current = t;
-      /* ВЫБОР КАРТИНКИ ЖИВЁТ РОВНО ПОКА В РУКЕ ВЫБОР. Пережив смену инструмента, он оставил бы
+    if (colourMode && !COLOUR_TOOLS.has(t)) return;
+    if (penRef.current) commitPen();
+    /**
+     * СМЕНА ИНСТРУМЕНТА ЗАКРЫВАЕТ РАМКУ — И ПО-РАЗНОМУ У РАЗНЫХ ХОЗЯЕВ.
+     *
+     * Шаблон и вставка СТАВЯТСЯ: построенное не выбрасывается, ровно как коммитится недоложенный
+     * контур пера. Кадр ОТМЕНЯЕТСЯ: его применение необратимо и сносит ленту, и запускать такое
+     * от нажатия на соседний чип нельзя — там ставят только Enter или двойной клик.
+     */
+    const fr = frameRef.current;
+    if (fr && !(t === 'crop' && fr.owner === 'crop')) {
+      if (fr.owner === 'crop') closeFrame();
+      else commitFrame();
+    }
+    setTool(t);
+    toolRef.current = t;
+    /* ВЫБОР КАРТИНКИ ЖИВЁТ РОВНО ПОКА В РУКЕ ВЫБОР. Пережив смену инструмента, он оставил бы
          Delete нацеленным на пуговицу у человека, который уже держит ластик. */
-      if (t !== 'select') setPictureAt(null);
-      /**
-       * ⚠ СМЕНА ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ЛИЧНОСТЬ НАЖАТИЯ — И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО
-       * ПРАВДА ДЛЯ ВСЕХ ПУТЕЙ. Отметка значит «ЭТО нажатие сняло область». Гасил её только хвост
-       * жеста лассо, а `putTrace([at])` на нажатии не спрашивает инструмент ВООБЩЕ: `line`,
-       * `freehand` и мазковые заводят живой жест, НЕ трогая ни `sel`, ни отметку. Оба читателя
-       * (Esc-ступень и ветка `settleLasso`) спрашивают инструмент на ОТПУСКАНИИ, поэтому смена
-       * инструмента посреди протяжки разводила запись и чтение: отпускание уходило в общий хвост
-       * `commitTrace`, гашение не исполнялось, и отметка доживала до СЛЕДУЮЩЕГО жеста. Дальше
-       * Esc воскрешал область позапрошлого жеста — ровно тот сценарий, который абзац у
-       * Esc-ступени объявляет закрытым, — а нулевое по длине отпускание печатало «area dropped»
-       * за нажатие, не снявшее ничего.
-       */
-      pressDropped.current = false;
-      /**
-       * РАМКА КАДРА ОТКРЫВАЕТСЯ ПОСЛЕ ХОЛСТА, А НЕ ДО НЕГО — но только когда холст ещё надо завести.
-       *
-       * Порядок несущий в обе стороны. Открой рамку раньше — и отказ прокси оставил бы на экране
-       * живой жест, чьё применение растянуло бы подложку ровно так, как жалуется владелец. Жди
-       * холста ТАМ, ГДЕ ОН УЖЕ ЕСТЬ, — и рамка появлялась бы кадром позже без всякой причины,
-       * а рука, привыкшая к мгновенному отклику, успела бы нажать мимо.
-       */
-      /* ⚠ `needsRaster(t)` В УСЛОВИИ — НЕ ИЗБЫТОЧНОСТЬ, А СЦЕПКА ДВУХ ПОЛОВИН ОДНОГО РЕШЕНИЯ.
+    if (t !== 'select') setPictureAt(null);
+    /**
+     * ⚠ СМЕНА ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ЛИЧНОСТЬ НАЖАТИЯ — И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО
+     * ПРАВДА ДЛЯ ВСЕХ ПУТЕЙ. Отметка значит «ЭТО нажатие сняло область». Гасил её только хвост
+     * жеста лассо, а `putTrace([at])` на нажатии не спрашивает инструмент ВООБЩЕ: `line`,
+     * `freehand` и мазковые заводят живой жест, НЕ трогая ни `sel`, ни отметку. Оба читателя
+     * (Esc-ступень и ветка `settleLasso`) спрашивают инструмент на ОТПУСКАНИИ, поэтому смена
+     * инструмента посреди протяжки разводила запись и чтение: отпускание уходило в общий хвост
+     * `commitTrace`, гашение не исполнялось, и отметка доживала до СЛЕДУЮЩЕГО жеста. Дальше
+     * Esc воскрешал область позапрошлого жеста — ровно тот сценарий, который абзац у
+     * Esc-ступени объявляет закрытым, — а нулевое по длине отпускание печатало «area dropped»
+     * за нажатие, не снявшее ничего.
+     */
+    pressDropped.current = false;
+    /**
+     * РАМКА КАДРА ОТКРЫВАЕТСЯ ПОСЛЕ ХОЛСТА, А НЕ ДО НЕГО — но только когда холст ещё надо завести.
+     *
+     * Порядок несущий в обе стороны. Открой рамку раньше — и отказ прокси оставил бы на экране
+     * живой жест, чьё применение растянуло бы подложку ровно так, как жалуется владелец. Жди
+     * холста ТАМ, ГДЕ ОН УЖЕ ЕСТЬ, — и рамка появлялась бы кадром позже без всякой причины,
+     * а рука, привыкшая к мгновенному отклику, успела бы нажать мимо.
+     */
+    /* ⚠ `needsRaster(t)` В УСЛОВИИ — НЕ ИЗБЫТОЧНОСТЬ, А СЦЕПКА ДВУХ ПОЛОВИН ОДНОГО РЕШЕНИЯ.
          Ждать холста имеет смысл ровно тогда, когда его кто-то заводит. Без этой связки снятие
          `'crop'` из `needsRaster` дало бы кроп, у которого рамка НЕ ОТКРЫВАЕТСЯ ВОВСЕ: ждать
          некого, а синхронная ветка пропущена. Замерено иглой C7. */
-      const seedForCrop =
-        t === 'crop' &&
-        needsRaster(t) &&
-        !frozen &&
-        baseMediaId > 0 &&
-        !rasterRef.current &&
-        frameRef.current?.owner !== 'crop';
-      if (t === 'crop' && frameRef.current?.owner !== 'crop' && !seedForCrop) openCropFrame();
-      if (t !== 'select') {
-        setSelected(null);
-        putNodeEdit(null);
-      }
-      if (needsRaster(t) && !frozen) {
-        // ЗАПЕРТЫЙ ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ НЕ ОСТАЁТСЯ В РУКЕ. Чип, выбранный и молча ничего не
-        // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
-        // стоит отказом над холстом.
-        void ensureRaster().then((layer) => {
-          if (!layer) {
-            setTool((cur) => (needsRaster(cur) ? 'select' : cur));
-            return;
-          }
-          if (seedForCrop && toolRef.current === 'crop' && frameRef.current?.owner !== 'crop') {
-            openCropFrame();
-          }
-        });
-      }
+    const seedForCrop =
+      t === 'crop' &&
+      needsRaster(t) &&
+      !frozen &&
+      baseMediaId > 0 &&
+      !rasterRef.current &&
+      frameRef.current?.owner !== 'crop';
+    if (t === 'crop' && frameRef.current?.owner !== 'crop' && !seedForCrop) openCropFrame();
+    if (t !== 'select') {
+      setSelected(null);
+      putNodeEdit(null);
+    }
+    if (needsRaster(t) && !frozen) {
+      // ЗАПЕРТЫЙ ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ НЕ ОСТАЁТСЯ В РУКЕ. Чип, выбранный и молча ничего не
+      // делающий, читается как сломанный редактор; рука возвращается к `select`, а причина
+      // стоит отказом над холстом.
+      void ensureRaster().then((layer) => {
+        if (!layer) {
+          setTool((cur) => (needsRaster(cur) ? 'select' : cur));
+          return;
+        }
+        if (seedForCrop && toolRef.current === 'crop' && frameRef.current?.owner !== 'crop') {
+          openCropFrame();
+        }
+      });
+    }
   };
 
   /** Пороги пера в мировых пикселях платы — доля по x и по y весят по-разному, мерить надо в мире. */
@@ -3611,13 +3618,13 @@ export function VectorModal({
 
   /**
    * ПОСТАНОВКА ШАБЛОНА ИЗ-ПОД ЖИВОЙ РАМКИ — ОБЩИЙ ПИСАТЕЛЬ ТРЁХ ДВЕРЕЙ ИЗ ПЯТИ.
- *
- * ⚠ ЗАГОЛОВОК ОДНАЖДЫ ГОВОРИЛ «ОДИН ПИСАТЕЛЬ НА ВСЕ ТРИ ДВЕРИ», И ЭТО БЫЛО НЕПРАВДОЙ УЖЕ ТОГДА.
- * Дверей, ставящих шаблон, ПЯТЬ: отпускание указателя, чип «flatten» и выход из warp ходят сюда,
- * а `commitFrame` и `cancelFrame` пишут САМИ — им надо ещё и запереть подложку
- * (`setBackdropLocked(…, true)`), чего этот писатель не делает. Свести их сюда нельзя без того,
- * чтобы дверь начала делать разное в зависимости от аргумента. Общим сделано ПРАВИЛО, а не дверь:
- * «тождественная сетка не хранится» живёт в `keptGrid` наверху файла и написано ровно один раз.
+   *
+   * ⚠ ЗАГОЛОВОК ОДНАЖДЫ ГОВОРИЛ «ОДИН ПИСАТЕЛЬ НА ВСЕ ТРИ ДВЕРИ», И ЭТО БЫЛО НЕПРАВДОЙ УЖЕ ТОГДА.
+   * Дверей, ставящих шаблон, ПЯТЬ: отпускание указателя, чип «flatten» и выход из warp ходят сюда,
+   * а `commitFrame` и `cancelFrame` пишут САМИ — им надо ещё и запереть подложку
+   * (`setBackdropLocked(…, true)`), чего этот писатель не делает. Свести их сюда нельзя без того,
+   * чтобы дверь начала делать разное в зависимости от аргумента. Общим сделано ПРАВИЛО, а не дверь:
+   * «тождественная сетка не хранится» живёт в `keptGrid` наверху файла и написано ровно один раз.
    *
    * ⚠ ДВЕРЕЙ ТРИ, А ПИСАТЕЛЬ БЫЛ ОДИН — У ОТПУСКАНИЯ УКАЗАТЕЛЯ, — И ЭТО СТОИЛО ДЕФЕКТА. «Flatten
    * the warp» это НАЖАТИЕ ЧИПА: никакой драг за ним не следует, значит `onStagePointerUp` не
@@ -3665,9 +3672,10 @@ export function VectorModal({
          когда `prev` хорош, а в записи лежит легаси-пересечение, — но молчащая дверь на нём
          выглядела бы как сломанная кнопка: нажал, и НИЧЕГО. Это та же форма, что чинится у
          `flattenWarp`, и лечится тем же: назвать причину и назвать выход. */
-      showMessage(
-        'this template cannot be placed while another frame is open: its stored corners cross the vanishing line. Press Esc to close the current frame, then place it',
+      say(
         'error',
+        'not placed',
+        'this template cannot be placed while another frame is open: its stored corners cross the vanishing line. Press Esc to close the current frame, then place it',
       );
       return;
     }
@@ -3702,9 +3710,10 @@ export function VectorModal({
        ВООБЩЕ, — но вердикт всё равно читается: дверь, чей отказ никто не проверяет, однажды снова
        начнёт отказывать. */
     if (!putFrame({ ...fr, grid: gridIsUsable(fr.grid) ? fr.grid : identityGrid(), warp: true })) {
-      showMessage(
-        'the nodes cannot be shown here: this template already crosses the vanishing line. Move a corner back first, then bend it',
+      say(
         'error',
+        'no nodes',
+        'the nodes cannot be shown here: this template already crosses the vanishing line. Move a corner back first, then bend it',
       );
       return;
     }
@@ -3732,9 +3741,10 @@ export function VectorModal({
        отказ ровно по той же причине. Писать запись после отказа означало бы развести её с рамкой
        молча, без единого слова на экране. */
     if (!putFrame({ ...fr, grid: kept, warp: false })) {
-      showMessage(
-        'the handles cannot take over here: without its mesh this template crosses the vanishing line. Move a corner back first',
+      say(
         'error',
+        'no handles',
+        'the handles cannot take over here: without its mesh this template crosses the vanishing line. Move a corner back first',
       );
       return;
     }
@@ -3761,24 +3771,16 @@ export function VectorModal({
        то, чего не произошло, — рамка оставалась с сеткой, запись уезжала без неё, и они
        расходились. Это тот же дефект «слово впереди дела», что уже чинился в этом файле. */
     if (!putFrame({ ...fr, grid: undefined, warp: false })) {
-      showMessage(
-        'the warp cannot be flattened: without its mesh this template crosses the vanishing line. Move a corner back first, then flatten',
+      say(
         'error',
+        'not flattened',
+        'the warp cannot be flattened: without its mesh this template crosses the vanishing line. Move a corner back first, then flatten',
       );
       return;
     }
     if (fr.owner === 'backdrop') writeBackdropFrame(fr.quad, undefined);
     setFrameHover(null);
-    showMessage('the warp was flattened — the template keeps its place and size', 'success');
   };
-
-  /**
-   * ⚠ ПОЛ ВПИСЫВАНИЯ НАЗЫВАЕТСЯ ВСЛУХ, ОДИН РАЗ ЗА ВИЗИТ. `fitView` не опускается ниже
-   * `FIT_MIN` (0.35), а кадру разрешено вырасти до `CROP_MAX_GROWTH` (×4) — то есть примерно
-   * с 3.2 ширины платы «показать целиком» перестаёт быть выполнимым, и без слов это выглядит
-   * ровно как жалоба H-14: тяну, а экран не отвечает.
-   */
-  const cropFloorSaid = useRef(false);
 
   /**
    * ВИД ОТСТУПАЕТ И ПОКАЗЫВАЕТ КАДР — НА ОТПУСКАНИИ, И ТОЛЬКО КОГДА ЕМУ ПРАВДА ТЕСНО.
@@ -3809,8 +3811,7 @@ export function VectorModal({
     const b = quadBounds(fr.quad);
     /* Пол-юнита допуска — от арифметики клампа, а не от вкуса: кадр, «ровно по плате», не обязан
        совпасть с ней до последнего бита, и дрожь в шестом знаке не повод двигать экран. */
-    const grew =
-      b.x0 < -0.5 || b.y0 < -0.5 || b.x1 > PLATE_W + 0.5 || b.y1 > plateH + 0.5;
+    const grew = b.x0 < -0.5 || b.y0 < -0.5 || b.x1 > PLATE_W + 0.5 || b.y1 > plateH + 0.5;
     if (!grew) return;
     const view = viewRef.current;
     const box = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
@@ -3846,25 +3847,6 @@ export function VectorModal({
       const y1 = Math.max(plateH, b.y1);
       const next = fitView({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, port);
       viewRef.current = next;
-      const floored =
-        next.zoom <= FIT_MIN + 1e-6 &&
-        ((x1 - x0) * next.zoom > port.w - FIT_INSET * 2 ||
-          (y1 - y0) * next.zoom > port.h - FIT_INSET * 2);
-      if (floored && !cropFloorSaid.current) {
-        cropFloorSaid.current = true;
-        /**
-         * ⚠ ЭТО СПРАВКА, А НЕ ОТКАЗ — И ТИП ТОСТА ОБЯЗАН ЭТО ГОВОРИТЬ (круг 15, J-32).
-         *
-         * Владелец: «когда мы хотим увеличить полотно через кроп выдаёт ошибку». Ничего не
-         * ломалось: лист рос, жест продолжался, — но красный тост читается как «редактор
-         * отказал», и человек бросает жест на середине. Ровно из-за этого «выдаёт ошибку» и
-         * «функциональность вообще не работает» слились у него в одну жалобу.
-         */
-        showMessage(
-          'the sheet no longer fits the view — scroll to reach the edge you are pulling',
-          'success',
-        );
-      }
     }
     /* ⚠ `userMoved` ЗДЕСЬ НЕ ВЗВОДИТСЯ. Это поправка МАШИНЫ, а не жест человека, и объявлять ею
        вид «человек распорядился сам» значило бы заглушить до конца визита и перевписывание по
@@ -3935,7 +3917,9 @@ export function VectorModal({
          ничего — а записанная «на всякий случай» единичная сетка перевела бы показ шаблона с
          резкого `img` + `matrix3d` на канвас навсегда. Пессимизация без причины и есть враньё. */
       if (b) {
-        putBackdrop(setBackdropLocked(setBackdropGrid(setBackdropQuad(b, fr.quad), keptGrid(fr.grid)), true));
+        putBackdrop(
+          setBackdropLocked(setBackdropGrid(setBackdropQuad(b, fr.quad), keptGrid(fr.grid)), true),
+        );
       }
       return;
     }
@@ -3968,12 +3952,13 @@ export function VectorModal({
          искривление — то есть отменяла бы ровно половину того, что человек сделал. */
       if (b) {
         const back = keptGrid(fr.snapshotGrid);
-        putBackdrop(setBackdropLocked(setBackdropGrid(setBackdropQuad(b, fr.snapshot), back), true));
+        putBackdrop(
+          setBackdropLocked(setBackdropGrid(setBackdropQuad(b, fr.snapshot), back), true),
+        );
       }
       return;
     }
     if (fr.owner === 'paste') {
-      showMessage('the pasted piece was dropped — the drawing was never touched', 'success');
       return;
     }
     /* У КАРТИНКИ ОТМЕНА ВОЗВРАЩАЕТ ХОД, А НЕ САМУ КАРТИНКУ. Квад в записи меняет только
@@ -4015,7 +4000,10 @@ export function VectorModal({
     closeFrame();
     if (!f || frozenRef.current) return;
     const map = warpMapper({ quad: fr.quad });
-    const toFrac = (p: readonly [number, number]): [number, number] => [p[0] / PLATE_W, p[1] / plateH];
+    const toFrac = (p: readonly [number, number]): [number, number] => [
+      p[0] / PLATE_W,
+      p[1] / plateH,
+    ];
 
     /**
      * ТОЛЩИНА НИТИ УМНОЖАЕТСЯ НА КОРЕНЬ ИЗ ОТНОШЕНИЯ ПЛОЩАДЕЙ, и это НАЗВАННАЯ АППРОКСИМАЦИЯ.
@@ -4059,7 +4047,9 @@ export function VectorModal({
       const cut = f.cut;
       const kx = layer.w / PLATE_W;
       const ky = layer.h / plateH;
-      const quadPx = fr.quad.map((p) => [p[0] * kx, p[1] * ky] as [number, number]) as unknown as Quad;
+      const quadPx = fr.quad.map(
+        (p) => [p[0] * kx, p[1] * ky] as [number, number],
+      ) as unknown as Quad;
       // Коробка размечается ДО записи: лента снимает «как было» по ней, и пустая коробка означала
       // бы шаг, ничего не восстанавливающий.
       const corners = [
@@ -4104,10 +4094,9 @@ export function VectorModal({
     }
     if (done.lines || done.pixels) {
       bumpTl();
-      showMessage('placed', 'success');
       return;
     }
-    showMessage('the pasted piece held nothing that could be put down here', 'error');
+    say('error', 'not placed', 'the pasted piece held nothing that could be put down here');
   };
 
   /* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ: ПИСАТЕЛИ ══════════════════════════════════════════════════════════
@@ -4168,7 +4157,6 @@ export function VectorModal({
   /** Отменить ход: снимок на открытии рамки, целиком. Квад в записи и не менялся — писать нечего. */
   const cancelPictureFrame = () => {
     setPictureAt(null);
-    showMessage('the picture went back where it was', 'success');
   };
 
   /**
@@ -4200,7 +4188,11 @@ export function VectorModal({
     const src = placedSrc(media);
     const mediaId = media?.id ?? 0;
     if (!src || !mediaId) {
-      showMessage('that media has no full-size file to place — pick another picture', 'error');
+      say(
+        'error',
+        'not placed',
+        'that media has no full-size file to place — pick another picture',
+      );
       return;
     }
     const [natW, natH] = wireSize(media);
@@ -4218,10 +4210,6 @@ export function VectorModal({
     setPictureAt(next.length - 1);
     const quad = imageQuadPlate(born, PLATE_W, plateH);
     putFrame({ owner: 'image', imageAt: next.length - 1, quad, axis: false, snapshot: quad });
-    showMessage(
-      'placed — drag it, pull a handle to size it, ⌘-drag a corner for perspective. It stays a picture: reopen this layer tomorrow and it still moves',
-      'success',
-    );
   };
 
   /** Снять картинку со слоя. ⌘Z её возвращает — лента у этого материала теперь общая со всеми. */
@@ -4297,9 +4285,10 @@ export function VectorModal({
       if (!seeded) {
         closeFrame();
         setTool('select');
-        showMessage(
-          'the sheet was not changed: the pixel layer could not be started, and growing the sheet without it would only stretch the picture instead of adding room. The reason stands above the canvas',
+        say(
           'error',
+          'sheet unchanged',
+          'the sheet was not changed: the pixel layer could not be started, and growing the sheet without it would only stretch the picture instead of adding room. The reason stands above the canvas',
         );
         return;
       }
@@ -4323,7 +4312,7 @@ export function VectorModal({
     if (same) {
       closeFrame();
       setTool('select');
-      showMessage('the frame is exactly the sheet — nothing to crop or grow', 'error');
+      say('error', 'sheet unchanged', 'the frame is exactly the sheet — nothing to crop or grow');
       return;
     }
     const plan = planFrame(from, rect);
@@ -4421,15 +4410,19 @@ export function VectorModal({
       /* СНЯТЫЕ ПУГОВИЦЫ НАЗЫВАЮТСЯ ЧИСЛОМ. Молча уехавшая за край картинка — это ровно та потеря,
          которую человек заметит через неделю и не свяжет с кропом. */
       const lostPics = beforeImages.length - nextImages.length;
-      showMessage(
-        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}${lostPics > 0 ? `, ${lostPics} placed picture${lostPics === 1 ? '' : 's'} fell off the sheet` : ''}. ⌘Z brings the old sheet back; as it stands it survives only as a NEW picture — use “save as a new picture”`,
-        'success',
-      );
+      if (cuts || lostPics > 0)
+        say(
+          'warn',
+          'cropped',
+          `the sheet is now ${plan.to.w}×${plan.to.h}; ⌘Z brings the old sheet back`,
+          lostPics > 0 ? `${lostPics} pictures cut` : 'edges cut',
+        );
     } catch (err) {
       if (err instanceof ExpandGuardError) {
-        showMessage(
-          `the sheet was not changed: a stroke carries a field this screen does not know how to move (${err.unknownKeys.join(', ')}). Nothing was changed`,
+        say(
           'error',
+          'sheet unchanged',
+          `the sheet was not changed: a stroke carries a field this screen does not know how to move (${err.unknownKeys.join(', ')}). Nothing was changed`,
         );
         return;
       }
@@ -4535,7 +4528,7 @@ export function VectorModal({
         guideDrag.current = { id: event.pointerId, index: twin, dir };
         return;
       }
-      showMessage(`${MAX_GUIDES} guides is all one sheet holds — «clear guides» empties it`, 'error');
+      say('error', 'not added', undefined, `${MAX_GUIDES} max`);
       return;
     }
     grab();
@@ -4723,18 +4716,17 @@ export function VectorModal({
       event.preventDefault();
       setStampSrc(at);
       stampOffset.current = null;
-      showMessage('source taken. Now drag where it should be printed', 'success');
       return;
     }
     if (isSourceTool(tool) && !stampSrc) {
-      showMessage('alt-click the place to copy FROM first, then drag', 'error');
+      say('error', 'no source', 'alt-click the place to copy FROM first, then drag');
       return;
     }
     // ПИКСЕЛЬНЫЙ ИНСТРУМЕНТ БЕЗ РАСТРА НЕ РИСУЕТ В ПУСТОТУ. `ensureRaster` уже сработал на смене
     // чипа; сюда попадают только случаи, когда копия подложки не приехала — и молчаливый мазок
     // «в никуда» был бы худшим из возможных ответов.
     if (needsRaster(tool) && !rasterRef.current) {
-      showMessage('the pixel layer is not ready yet — one moment', 'error');
+      say('error', 'not ready', 'the pixel layer is not ready yet — one moment');
       void ensureRaster();
       return;
     }
@@ -5077,28 +5069,18 @@ export function VectorModal({
        * жесту: он живёт через оконный слушатель и после клика по чипу отстаёт на кадр.
        */
       const straight =
-        event.shiftKey &&
-        !!prev.length &&
-        (tool === 'line' || tool === 'freehand' || smears(tool));
+        event.shiftKey && !!prev.length && (tool === 'line' || tool === 'freehand' || smears(tool));
       if (!straight) shiftAxis.current = null;
-      const dir = straight
-        ? (shiftAxis.current ?? straightDir(prev[0], at, plateH))
-        : null;
+      const dir = straight ? shiftAxis.current ?? straightDir(prev[0], at, plateH) : null;
       if (straight && dir && smears(tool)) shiftAxis.current = dir;
       /* ⚠ SHIFT СТАРШЕ ПРИВЯЗКИ, И ПОРЯДОК ЗДЕСЬ — ЭТО ПРАВИЛО, А НЕ СЛУЧАЙНОСТЬ. Притянуть
          конец УЖЕ ВЫПРЯМЛЕННОЙ линии к направляющей значило бы сломать угол, который человек
          держит пальцем: он попросил ровно, а получил бы «почти ровно, зато по разметке». */
-      const fixed = dir
-        ? alongDir(prev[0], at, dir, plateH)
-        : tool === 'line'
-          ? snapDraw(at)
-          : at;
+      const fixed = dir ? alongDir(prev[0], at, dir, plateH) : tool === 'line' ? snapDraw(at) : at;
       // ПИКСЕЛИ КЛАДУТСЯ ПРЯМО СЕЙЧАС. Копить след и красить его целиком на отпускании значило бы
       // рисовать вслепую: мазок появлялся бы после того, как рука его закончила.
       if (smears(tool)) feedRasterSamples(tool, dir ? [fixed] : samples);
-      putTrace(
-        tool === 'line' || dir ? [prev[0], fixed] : [...prev, ...samples],
-      );
+      putTrace(tool === 'line' || dir ? [prev[0], fixed] : [...prev, ...samples]);
     }
   };
 
@@ -5198,16 +5180,6 @@ export function VectorModal({
          * вырожденности площади, а не по порогу сдвига в пикселях: дрогнувшая рука отделена от
          * обводки тем же критерием, каким прореживается сам след.
          */
-        /* ⚠ СПРАШИВАЕТСЯ НАЖАТИЕ, А НЕ `dropSel()` ВТОРОЙ РАЗ. К этому моменту область уже снята
-           нажатием, поэтому повторный вызов вернул бы `false`, и единственная строка, которая учит
-           человека про ⇧⌘D, не печаталась бы никогда: клик лассо сносил бы обводку МОЛЧА. */
-        /* ⚠ У ЭТОГО СООБЩЕНИЯ ЕСТЬ ПОТОЛОК, И ОН НЕ В СКЛЕЙКЕ. Склейка честна — колонка рисует
-           «×N». Глушит `muteRepeats`: тост, доживший до потолка жизни в 20 с при `count > 1`,
-           переводит СВОЙ текст в немые на 20 с, и каждое подавленное повторение сдвигает окно
-           дальше. Значит человек, снимающий области подряд дольше двадцати секунд, перестаёт
-           получать уведомление совсем. Это сделка общего хранилища, а не этого экрана, и здесь
-           она только записана — чинить её тут значило бы завести второе правило про тосты. */
-        if (pressDropped.current) showMessage('area dropped — ⇧⌘D brings it back', 'success');
       }
       /* Отметка нажатия живёт РОВНО ОДИН ЖЕСТ — снимается на обеих ветках, и на обводке, и на
          клике. Пережив жест, она разрешила бы следующему Esc воскресить чужое. */
@@ -5245,9 +5217,10 @@ export function VectorModal({
       }
       const born = stampAlong(strokesRef.current, liveTrace, stampOffset.current, radius, world);
       if (!born.length) {
-        showMessage(
-          'no line under the source: «clone» copies lines, «stamp» copies pixels',
+        say(
           'error',
+          'not cloned',
+          'no line under the source: «clone» copies lines, «stamp» copies pixels',
         );
         return;
       }
@@ -5349,7 +5322,7 @@ export function VectorModal({
       }
     }
     if (!born.length && !cut) {
-      showMessage('the selection holds nothing to copy', 'error');
+      say('error', 'not copied', 'the selection holds nothing to copy');
       return;
     }
     clip.current = { strokes: born, cut, cutFrac, pastes: 0 };
@@ -5359,7 +5332,6 @@ export function VectorModal({
     ]
       .filter(Boolean)
       .join(' and ');
-    showMessage(`${what} copied — ⌘V puts them down`, 'success');
   };
 
   /**
@@ -5383,7 +5355,7 @@ export function VectorModal({
   const pasteClip = async () => {
     const c = clip.current;
     if (!c || frozen) {
-      if (!c) showMessage('nothing in the clipboard — copy an area first', 'error');
+      if (!c) say('error', 'not pasted', 'nothing in the clipboard — copy an area first');
       return;
     }
     await settleFloatFirst();
@@ -5411,8 +5383,13 @@ export function VectorModal({
       x1 = Math.max(x1, c.cutFrac.x1);
       y1 = Math.max(y1, c.cutFrac.y1);
     }
-    if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
-      showMessage('the clipboard held nothing that could be put down here', 'error');
+    if (
+      !Number.isFinite(x0) ||
+      !Number.isFinite(y0) ||
+      !Number.isFinite(x1) ||
+      !Number.isFinite(y1)
+    ) {
+      say('error', 'not pasted', 'the clipboard held nothing that could be put down here');
       return;
     }
     /* ⚠ ВЫРОЖДЕННАЯ КОРОБКА РАЗДАЁТСЯ СИММЕТРИЧНО. Копия ОДНОЙ ГОРИЗОНТАЛЬНОЙ линии имеет нулевую
@@ -5431,7 +5408,10 @@ export function VectorModal({
     }
     const sw = x1 - x0;
     const sh = y1 - y0;
-    const norm = (p: readonly [number, number]): [number, number] => [(p[0] - x0) / sw, (p[1] - y0) / sh];
+    const norm = (p: readonly [number, number]): [number, number] => [
+      (p[0] - x0) / sw,
+      (p[1] - y0) / sh,
+    ];
 
     const strokes = c.strokes.map((st) => {
       const out: VectorStroke = { ...st, pts: st.pts.map(norm) };
@@ -5471,10 +5451,6 @@ export function VectorModal({
       float: { strokes, cut: c.cut, cutRegion, srcW: sw, srcH: sh },
     });
     clip.current = { ...c, pastes: step };
-    showMessage(
-      'pasted — drag it, pull a handle to size it, ⌘-drag a corner for perspective; enter puts it down',
-      'success',
-    );
   };
 
   const reselect = () => {
@@ -5521,9 +5497,10 @@ export function VectorModal({
      * пиксельных инструментов.
      */
     if (storedRasterId > 0 && !storedRasterUrl && !dropRasterRef.current) {
-      showMessage(
-        'the painted pixels of this layer have not arrived, so «delete inside» cannot reach them — and cutting only the lines would leave the painting inside the area untouched while looking done. Reopen the layer, then try again.',
+      say(
         'error',
+        'not deleted',
+        'the painted pixels of this layer have not arrived, so «delete inside» cannot reach them — and cutting only the lines would leave the painting inside the area untouched while looking done. Reopen the layer, then try again.',
       );
       return;
     }
@@ -5580,7 +5557,7 @@ export function VectorModal({
     if (gone.lines || gone.pixels) bumpTl();
 
     if (!gone.lines && !gone.pixels) {
-      showMessage('the selection holds nothing to delete', 'error');
+      say('error', 'not deleted', 'the selection holds nothing to delete');
       return;
     }
     /**
@@ -5591,16 +5568,19 @@ export function VectorModal({
      * неверное слово.
      */
     if (!layer && baseMediaId > 0) {
-      showMessage(
+      say(
+        'warn',
+        'lines deleted',
         'lines inside the area were cut, but the pixel layer could not be opened — the picture underneath is untouched. Reopen the layer and repeat if you meant to erase it too.',
-        'error',
+        'pixels untouched',
       );
       return;
     }
     // Сообщение называет, ЧТО именно ушло: «удалено» без материала не даёт человеку понять, надо ли
     // ему жать ⌘Z, если он ждал другого.
-    const what = [gone.pixels ? 'pixels' : '', gone.lines ? 'lines' : ''].filter(Boolean).join(' and ');
-    showMessage(`${what} inside the area deleted`, 'success');
+    const what = [gone.pixels ? 'pixels' : '', gone.lines ? 'lines' : '']
+      .filter(Boolean)
+      .join(' and ');
   };
 
   /**
@@ -5613,7 +5593,11 @@ export function VectorModal({
   const softenSel = async () => {
     if (!sel || frozen) return;
     if (sel.feather <= 0) {
-      showMessage('give this area a feather first — it is the radius the pixels soften by', 'error');
+      say(
+        'error',
+        'not softened',
+        'give this area a feather first — it is the radius the pixels soften by',
+      );
       return;
     }
     const layer = await ensureRaster();
@@ -5639,7 +5623,6 @@ export function VectorModal({
     rasterDirtyRef.current = true;
     setRasterDirty(true);
     bumpTl();
-    showMessage(`pixels inside the area softened by ${sel.feather}px`, 'success');
   };
 
   /**
@@ -5719,9 +5702,10 @@ export function VectorModal({
   const warnPlainFallback = (key: StitchKey, stepPx: number) => {
     const need = stitchMinLength(key, stepPx);
     if (need <= PLATE_W) return;
-    showMessage(
+    say(
+      'warn',
+      'drawn plain',
       `at this stitch length ${stitchName(key)} needs a line ${Math.round(need / PLATE_W)}× wider than the sheet — shorter lines are drawn plain`,
-      'error',
     );
   };
 
@@ -5777,7 +5761,7 @@ export function VectorModal({
     if (!res.rect) {
       clearGesture(layer);
       paintView();
-      showMessage('nothing under the brush to heal', 'error');
+      say('error', 'not healed', 'nothing under the brush to heal');
       return;
     }
     const r = res.rect;
@@ -5796,11 +5780,12 @@ export function VectorModal({
     // гладко — результат ВИДИМО другой (мыло вместо зерна), и человек, не предупреждённый об
     // этом, спишет разницу на кривой инструмент. Молчать здесь дешевле и хуже.
     if (res.donors < res.spots) {
-      showMessage(
+      say(
+        'warn',
+        'smoothed over',
         res.donors === 0
           ? 'no matching texture nearby — the spot was smoothed over instead of grown'
           : `${res.spots - res.donors} of ${res.spots} spots had no matching texture nearby and were smoothed over`,
-        'error',
       );
     }
   };
@@ -5857,7 +5842,7 @@ export function VectorModal({
       setBusy(null);
     }
     if (!res.rect) {
-      if (res.refusal) showMessage(res.refusal, 'error');
+      if (res.refusal) say('error', 'not rebuilt', res.refusal);
       return;
     }
     const r = res.rect;
@@ -5871,10 +5856,6 @@ export function VectorModal({
     rasterDirtyRef.current = true;
     setRasterDirty(true);
     bumpTl();
-    showMessage(
-      'the area was rebuilt from where you dropped it, seam blended — the lines are untouched',
-      'success',
-    );
   };
 
   const fillAt = async (at: [number, number]) => {
@@ -5903,7 +5884,7 @@ export function VectorModal({
       },
     );
     if (!res.rect) {
-      showMessage('nothing under the cursor to fill', 'error');
+      say('error', 'not filled', 'nothing under the cursor to fill');
       return;
     }
     const r = res.rect;
@@ -5989,7 +5970,7 @@ export function VectorModal({
        не изменение документа; шаг ленты «ничего на ничего» означал бы, что одно ⌘Z после него не
        делает ровно ничего, а нажатие человек уже потратил. */
     if (res.strokes.length === 0) {
-      showMessage('nothing on this plate reads as a drawn line', 'error');
+      say('error', 'not traced', 'nothing on this plate reads as a drawn line');
       return;
     }
     commitLines([...strokesRef.current, ...res.strokes]);
@@ -5997,10 +5978,6 @@ export function VectorModal({
     const parts = [`${res.strokes.length} line${res.strokes.length === 1 ? '' : 's'} traced`];
     if (res.rows > 0) parts.push(`${res.rows} stitch row${res.rows === 1 ? '' : 's'}`);
     if (res.spots > 0) parts.push(`${res.spots} filled spot${res.spots === 1 ? '' : 's'}`);
-    showMessage(
-      `${parts.join(' · ')} — click one to edit it, drag its nodes, ⌫ deletes it`,
-      'success',
-    );
   };
 
   const pickStep = (px: number) => {
@@ -6055,11 +6032,10 @@ export function VectorModal({
       at,
     );
     if (!hex) {
-      showMessage('the colour under the pointer could not be read', 'error');
+      say('error', 'not picked', 'the colour under the pointer could not be read');
       return;
     }
     pickInk(hex);
-    showMessage(`ink ${hex}`, 'success');
   };
 
   // ── the wire ───────────────────────────────────────────────────────────────────────────────
@@ -6205,14 +6181,8 @@ export function VectorModal({
     setBusy('saving the drawing…');
     setRefusal(null);
     try {
-      const carriedPixels = rasterDirtyRef.current;
       await persist();
-      showMessage(
-        carriedPixels
-          ? 'the drawing AND the painted pixels are saved — no picture was made'
-          : 'the drawing is saved — no picture was made',
-        'success',
-      );
+      drawingSaved.flash();
     } catch (error) {
       setRefusal(layerRefusalText(error));
     } finally {
@@ -6520,9 +6490,11 @@ export function VectorModal({
       });
       return placement;
     } catch {
-      showMessage(
-        `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
+      say(
         'error',
+        'not placed',
+        `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
+        'slot moved',
       );
       return null;
     }
@@ -6530,36 +6502,19 @@ export function VectorModal({
 
   const filed = async (gesture: FlattenGesture, picture: common_DesignPicture | undefined) => {
     const superseded = (picture?.replacedBy ?? 0) > 0;
-    const placed = await placeAsRecorded(gesture, picture);
+    await placeAsRecorded(gesture, picture);
     if (picture) onFlattened?.(picture);
     onOpenChange(false);
     if (superseded) {
       rereadBand();
-      showMessage('saved, but another edit has already taken its place — re-read', 'error');
-    } else if (gesture.replacePictureId) {
-      /* THE SLOT IS NAMED OFF A FRESH READ, OR NOT AT ALL (review r3). The read is bounded
-         (`REREAD_BOUND_MS`): one that timed out or failed still says «saved», without a slot, and
-         the workbench catches up on its next poll — the answer to the person never waits on it. */
-      const band = await bandNow();
-      if (!band) showMessage('saved — could not re-read its slot yet', 'success');
-      else {
-        const where = picture?.id ? replaceRef.current?.slotOf?.(band, picture.id) ?? null : null;
-        showMessage(
-          `saved — the edit took the original’s place${where ? ` in the ${where} slot` : ''}`,
-          'success',
-        );
-      }
-    } else if (placed) showMessage(`saved and put into ${placed.label}`, 'success');
-    else if (replaceRef.current)
-      showMessage('saved as a new picture beside the original', 'success');
-    else if (!gesture.placement && slot)
-      /* A resend, from a slot's editor, of a gesture that named no slot (D-72″): filed, placed
-         nowhere — said so, or the person would look for it in this slot. */
-      showMessage(
-        'saved as a new picture — that save named no side, so none was changed',
-        'success',
+      say(
+        'warn',
+        'saved',
+        'saved, but another edit has already taken its place — re-read',
+        'already replaced',
       );
-    else if (!slot) showMessage('saved as a new picture', 'success');
+    }
+    // Filed: the picture lands in the band, which is the receipt.
   };
 
   /** The flatten's own failure, in words — the save, the raster and the upload have theirs. */
@@ -6571,7 +6526,7 @@ export function VectorModal({
          an open editor is not swapped under it, `outputPlan`'s `keep`); the drawing stays on
          screen and saved as the layer, and «save as new» is still open. */
       rereadBand();
-      showMessage('this picture was already replaced — re-read', 'error');
+      say('error', 'not saved', 'this picture was already replaced — re-read', 'already replaced');
     } else if (flattenOutcomeUnknown(error)) {
       /* THE WAY BACK IS THE QUESTION'S FIRST DOOR (D-53, review r3): the door below opens it, and
          «retry the earlier save ›» resends this very body — a fresh save beside it would be a
@@ -6768,19 +6723,17 @@ export function VectorModal({
       const picture = await sendGesture(gesture);
       const put = await placeAsRecorded(gesture, picture);
       rereadBand();
-      showMessage(
-        `${what} is filed${put ? ` and put into ${put.label}` : ''} — ${next}`,
-        'success',
-      );
     } catch (error) {
       if (error instanceof LedgerAtCeiling) openQuestion();
       else if (flattenOutcomeUnknown(error))
-        showMessage(`${what} still got no answer — it stays on the list`, 'error');
+        say('error', 'no answer', `${what} still got no answer — it stays on the list`);
       else {
         rereadBand();
-        showMessage(
+        say(
+          'error',
+          'not filed',
           `${what} was refused, so nothing was filed under it — it is off the list; ${next}`,
-          'success',
+          'refused',
         );
       }
     } finally {
@@ -6890,9 +6843,11 @@ export function VectorModal({
      * называет себя подмена оригинала производителя двумя ветками ниже. За пикселями — флэт.
      */
     if (imagesRef.current.length) {
-      showMessage(
+      say(
+        'warn',
+        'downloaded',
         `${imagesRef.current.length} placed picture${imagesRef.current.length === 1 ? '' : 's'} stay out of the SVG — it is a vector file and a picture inside it is a raster. Use «save as picture» when you need them in the pixels.`,
-        'error',
+        `${imagesRef.current.length} left out`,
       );
     }
     const w = RASTER_FALLBACK_W;
@@ -6910,14 +6865,17 @@ export function VectorModal({
           const svg = layerVectorSvg(strokesRef.current, { width: w, height: h });
           if (svg) {
             saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
-            showMessage(
+            say(
+              'warn',
+              'downloaded',
               'the vectoriser’s original could not be fetched — exported the editable projection instead',
-              'error',
+              'projection only',
             );
           } else {
-            showMessage(
-              'the vector file could not be fetched from the bucket, and this layer holds no strokes of its own to export instead',
+            say(
               'error',
+              'not downloaded',
+              'the vector file could not be fetched from the bucket, and this layer holds no strokes of its own to export instead',
             );
           }
         } finally {
@@ -6936,9 +6894,11 @@ export function VectorModal({
      * построить сам. Молчаливая подмена здесь стоила бы чужого чертежа у поставщика.
      */
     if (fileMediaId > 0 && !fileUrl) {
-      showMessage(
+      say(
+        'warn',
+        'downloaded',
         'the vectoriser’s original is not on this screen, so it cannot be handed back — exporting the editable projection instead',
-        'error',
+        'projection only',
       );
     }
 
@@ -6947,11 +6907,10 @@ export function VectorModal({
     if (drawn.length > 0) {
       const svg = layerVectorSvg(drawn, { width: w, height: h });
       if (!svg) {
-        showMessage('nothing on the plate yet', 'error');
+        say('error', 'not downloaded', undefined, 'nothing drawn');
         return;
       }
       saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
-      showMessage(`${drawn.length} line${drawn.length === 1 ? '' : 's'} written to ${name()}-vector.svg`, 'success');
       return;
     }
 
@@ -6961,7 +6920,7 @@ export function VectorModal({
       try {
         const layer = await ensureRaster();
         if (!layer) {
-          showMessage('nothing on the plate yet', 'error');
+          say('error', 'not downloaded', undefined, 'nothing drawn');
           return;
         }
         const src = rasterCtx(layer.doc).getImageData(0, 0, layer.w, layer.h);
@@ -6973,20 +6932,16 @@ export function VectorModal({
           onStage: (stage) => setDownloadStage(STAGE_WORDS[stage]),
         });
         if (!res.ok) {
-          showMessage(res.reason, 'error');
+          say('error', 'not downloaded', res.reason);
           return;
         }
         setDownloadStage('writing the file…');
         const svg = layerVectorSvg(res.strokes, { width: w, height: h });
         if (!svg) {
-          showMessage('nothing on the plate yet', 'error');
+          say('error', 'not downloaded', undefined, 'nothing drawn');
           return;
         }
         saveBlob(new Blob([svg], { type: 'image/svg+xml' }));
-        showMessage(
-          `${res.strokes.length} line${res.strokes.length === 1 ? '' : 's'} traced from the pixels and written to ${name()}-vector.svg — the drawing itself was not changed`,
-          'success',
-        );
       } finally {
         downloadingRef.current = false;
         setDownloadStage(null);
@@ -7144,7 +7099,8 @@ export function VectorModal({
       const up = e.code === 'BracketRight';
       // Шаг МУЛЬТИПЛИКАТИВНЫЙ: на тонком краю прибавка в единицу — это удвоение, на толстом —
       // полпроцента. Одна и та же доля на всём ходу и есть то, чего ждёт рука.
-      const grow = (v: number) => (up ? Math.max(v * 1.15, v + 0.25) : Math.min(v / 1.15, v - 0.25));
+      const grow = (v: number) =>
+        up ? Math.max(v * 1.15, v + 0.25) : Math.min(v / 1.15, v - 0.25);
       if (isNibTool(tool)) setNib((v) => clampNib(grow(v)));
       else pickGauge(grow(selected !== null ? strokeGauge(strokes[selected]) : gauge));
       return;
@@ -7347,7 +7303,10 @@ export function VectorModal({
     const f = frame?.owner === 'paste' ? frame.float : null;
     if (!f || !f.strokes.length) return [];
     const map = warpMapper({ quad: frame!.quad });
-    const toFrac = (p: readonly [number, number]): [number, number] => [p[0] / PLATE_W, p[1] / plateH];
+    const toFrac = (p: readonly [number, number]): [number, number] => [
+      p[0] / PLATE_W,
+      p[1] / plateH,
+    ];
     return f.strokes.map((st) => {
       const out: VectorStroke = { ...st, pts: st.pts.map(([u, v]) => toFrac(map(u, v))) };
       if (st.segs) {
@@ -7487,7 +7446,7 @@ export function VectorModal({
               /* ⚠ С СООБЩЕНИЕМ, КАК И ⌘D. Обе двери снимают одно и то же и обе возвращаются одним
                  ⇧⌘D, но говорила про возврат только одна: снятие по Esc уносило обводку молча.
                  Тот же дефект, что был на клике лассо, в соседней ступени той же лестницы. */
-              if (dropSel()) showMessage('area dropped — ⇧⌘D brings it back', 'success');
+              dropSel();
               return;
             }
             if (busy || (dirty && !frozen)) {
@@ -7672,33 +7631,34 @@ export function VectorModal({
                 ) : (
                   /* Писатели живут вместе с холстом — и он здесь безусловен (H-1). */
                   <>
-                      <Button
-                        variant='secondary'
-                        size='sm'
-                        disabled={!ready}
-                        onClick={saveDrawingOnly}
-                        title='store the strokes without producing a picture — comes back tomorrow'
-                      >
-                        save the drawing only
-                      </Button>
-                      <Button
-                        type='button'
-                        variant='main'
-                        size='sm'
-                        disabled={!ready}
-                        data-save-picture={replace ? (replace.direct ? 'direct' : 'ask') : 'new'}
-                        onClick={savePicture}
-                        title={
-                          replace?.direct
-                            ? 'make a picture of this edit — it takes the place of the one it is drawn over; undo on the tile brings that one back'
-                            : replace
-                              ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
-                              : undefined
-                        }
-                      >
-                        {busy ??
-                          (replace ? (replace.direct ? 'save' : 'save ›') : 'save as a new picture')}
-                      </Button>
+                    <Button
+                      variant='secondary'
+                      size='sm'
+                      disabled={!ready}
+                      done={drawingSaved.on && 'saved'}
+                      onClick={saveDrawingOnly}
+                      title='store the strokes without producing a picture — comes back tomorrow'
+                    >
+                      save the drawing only
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='main'
+                      size='sm'
+                      disabled={!ready}
+                      data-save-picture={replace ? (replace.direct ? 'direct' : 'ask') : 'new'}
+                      onClick={savePicture}
+                      title={
+                        replace?.direct
+                          ? 'make a picture of this edit — it takes the place of the one it is drawn over; undo on the tile brings that one back'
+                          : replace
+                            ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
+                            : undefined
+                      }
+                    >
+                      {busy ??
+                        (replace ? (replace.direct ? 'save' : 'save ›') : 'save as a new picture')}
+                    </Button>
                   </>
                 )}
                 <Chip nonForm onClick={requestClose} title='leave the editor (esc)'>
@@ -7795,179 +7755,179 @@ export function VectorModal({
                 редактор. Бесплатная обводка стоит чипом в рейке (`data-trace-run`), платного
                 прогона нет нигде. */}
             <div className='flex min-h-0 min-w-0 flex-1 gap-2'>
-                <VectorBrushRail
-                  frozen={frozen}
-                  brush={brush}
-                  dashed={dashed}
-                  ink={ink}
-                  gauge={gauge}
-                  selected={selected}
-                  selectedStroke={selectedStroke}
-                  onBrush={pickBrush}
-                  onDashed={pickDashed}
-                  onInk={pickInk}
-                  onGauge={pickGauge}
-                  step={step}
-                  stepOwn={stepOwn}
-                  onStep={pickStep}
-                  onStepFollow={followStep}
-                  nib={nib}
-                  onNib={(px: number) => setNib(clampNib(px))}
-                  nibLabel={isNibTool(tool) ? TOOL_LABEL[tool] : ''}
-                  rasterTool={needsRaster(tool)}
-                  lineTool={!needsRaster(tool)}
-                  colourMode={colourMode}
-                  usedInks={usedInks}
-                  hardness={hardness}
-                  /* ⚠ ВТОРОЙ ЗАМОК НА ТЕХ ЖЕ ДВУХ ЧИСЛАХ, И ОН НЕ ЛИШНИЙ. Первый — отсутствие
+              <VectorBrushRail
+                frozen={frozen}
+                brush={brush}
+                dashed={dashed}
+                ink={ink}
+                gauge={gauge}
+                selected={selected}
+                selectedStroke={selectedStroke}
+                onBrush={pickBrush}
+                onDashed={pickDashed}
+                onInk={pickInk}
+                onGauge={pickGauge}
+                step={step}
+                stepOwn={stepOwn}
+                onStep={pickStep}
+                onStepFollow={followStep}
+                nib={nib}
+                onNib={(px: number) => setNib(clampNib(px))}
+                nibLabel={isNibTool(tool) ? TOOL_LABEL[tool] : ''}
+                rasterTool={needsRaster(tool)}
+                lineTool={!needsRaster(tool)}
+                colourMode={colourMode}
+                usedInks={usedInks}
+                hardness={hardness}
+                /* ⚠ ВТОРОЙ ЗАМОК НА ТЕХ ЖЕ ДВУХ ЧИСЛАХ, И ОН НЕ ЛИШНИЙ. Первый — отсутствие
                      органа на рейке; но `RailProps` принимает обработчик, а не запрет, и
                      единственный способ гарантировать сотню на карте — не пустить сюда другое
                      значение. Иначе замок держался бы разметкой, то есть держался бы до первой
                      правки соседнего файла. */
-                  onHardness={(n: number) =>
-                    setHardness(colourMode ? 100 : Math.min(100, Math.max(0, Math.round(n) || 0)))
+                onHardness={(n: number) =>
+                  setHardness(colourMode ? 100 : Math.min(100, Math.max(0, Math.round(n) || 0)))
+                }
+                opacity={opacity}
+                onOpacity={(n: number) =>
+                  setOpacity(colourMode ? 100 : Math.min(100, Math.max(1, Math.round(n) || 1)))
+                }
+                undoDepth={tl.depth}
+                undoBytes={tl.bytes}
+                undoEvicted={tl.evicted}
+                undoCeiling={RASTER_UNDO_DEPTH}
+                undoByteCeiling={RASTER_UNDO_BYTES / 1024 / 1024}
+                picking={picking}
+                onPicking={setPicking}
+                onRemoveSelected={removeSelected}
+                onDeselect={() => setSelected(null)}
+                sel={sel}
+                onFeatherSel={featherSel}
+                onCopySel={copySel}
+                onDeleteSel={deleteSel}
+                onDropSel={dropSel}
+                onSoftenSel={() => void softenSel()}
+                vecOn={vecOn}
+                onVecOn={() => setVecOn((v) => !v)}
+                rasterOn={rasterOn}
+                onRasterOn={() => setRasterOn((v) => !v)}
+                strokesCount={strokes.length}
+                baseLabel={base ? pictureHandle(base) : null}
+                rasterReady={rasterReady}
+                rasterDirty={rasterDirty}
+                rasterStored={storedRasterId > 0 && !dropRasterRef.current}
+                onDropRaster={dropRasterPixels}
+                rasterSize={
+                  rasterRef.current ? `${rasterRef.current.w}×${rasterRef.current.h}` : ''
+                }
+                // Слой-файл отдаёт ФАЙЛ (и только когда URL известен); рисованный слой —
+                // экспорт своих штрихов; плита без штрихов — обводку в памяти. Довод — у
+                // `download`. Запрета нет ни у одной ветки: у каждой есть ответ.
+                downloadStage={downloadStage}
+                onDownload={download}
+                outNote={
+                  fileMediaId > 0
+                    ? '«download SVG» hands back the layer’s ORIGINAL file — the one the vectoriser produced — never a re-serialisation. Strokes drawn here live on the layer and in saved pictures, not inside the file.'
+                    : undefined
+                }
+                saveNote={saveNote}
+                backdrop={backdrop}
+                backdropKey={bdKey}
+                expanded={expanded}
+                cropTool={tool === 'crop'}
+                cropFill={cropFill}
+                onCropFill={setCropFill}
+                cropRatio={cropRatio}
+                sheetRatio={PLATE_W / plateH}
+                onCropRatio={chooseCropRatio}
+                penTool={tool === 'curve'}
+                penCanClose={!!pen && pen.anchors.length >= 3}
+                onPathToSelection={makeSelectionFromPen}
+                nodeCount={nodeEdit?.path.nodes.length ?? 0}
+                nodeSelected={nodeEdit?.sel ?? -1}
+                nodeSmooth={
+                  nodeEdit && nodeEdit.sel >= 0
+                    ? nodeEdit.path.nodes[nodeEdit.sel]?.linked === true
+                    : false
+                }
+                onNodeConvert={() => {
+                  const ne = nodeEditRef.current;
+                  if (ne && ne.sel >= 0) commitNodes(editConvert(ne, ne.sel, penWorld()));
+                }}
+                onNodeDelete={() => {
+                  const ne = nodeEditRef.current;
+                  if (ne && ne.sel >= 0) commitNodes(editDelete(ne, ne.sel));
+                }}
+                plate={plateRect}
+                picturesCount={images.length}
+                picsOn={picsOn}
+                onPicsOn={() => setPicsOn((v) => !v)}
+                onPicturePick={addPicture}
+                pictureAt={pictureAt}
+                pictureOpacity={
+                  pictureAt === null ? 100 : Math.round((images[pictureAt]?.opacity ?? 1) * 100)
+                }
+                onPictureOpacity={setPictureOpacity}
+                onPictureUp={() => movePicture(true)}
+                onPictureDown={() => movePicture(false)}
+                onPictureRemove={removePicture}
+                onBackdropPick={(media) => {
+                  const r = adoptBackdrop(media[0], plateRect);
+                  if (!r.ok) {
+                    say('error', 'not placed', r.reason);
+                    return;
                   }
-                  opacity={opacity}
-                  onOpacity={(n: number) =>
-                    setOpacity(colourMode ? 100 : Math.min(100, Math.max(1, Math.round(n) || 1)))
-                  }
-                  undoDepth={tl.depth}
-                  undoBytes={tl.bytes}
-                  undoEvicted={tl.evicted}
-                  undoCeiling={RASTER_UNDO_DEPTH}
-                  undoByteCeiling={RASTER_UNDO_BYTES / 1024 / 1024}
-                  picking={picking}
-                  onPicking={setPicking}
-                  onRemoveSelected={removeSelected}
-                  onDeselect={() => setSelected(null)}
-                  sel={sel}
-                  onFeatherSel={featherSel}
-                  onCopySel={copySel}
-                  onDeleteSel={deleteSel}
-                  onDropSel={dropSel}
-                  onSoftenSel={() => void softenSel()}
-                  vecOn={vecOn}
-                  onVecOn={() => setVecOn((v) => !v)}
-                  rasterOn={rasterOn}
-                  onRasterOn={() => setRasterOn((v) => !v)}
-                  strokesCount={strokes.length}
-                  baseLabel={base ? pictureHandle(base) : null}
-                  rasterReady={rasterReady}
-                  rasterDirty={rasterDirty}
-                  rasterStored={storedRasterId > 0 && !dropRasterRef.current}
-                  onDropRaster={dropRasterPixels}
-                  rasterSize={
-                    rasterRef.current ? `${rasterRef.current.w}×${rasterRef.current.h}` : ''
-                  }
-                  // Слой-файл отдаёт ФАЙЛ (и только когда URL известен); рисованный слой —
-                  // экспорт своих штрихов; плита без штрихов — обводку в памяти. Довод — у
-                  // `download`. Запрета нет ни у одной ветки: у каждой есть ответ.
-                  downloadStage={downloadStage}
-                  onDownload={download}
-                  outNote={
-                    fileMediaId > 0
-                      ? '«download SVG» hands back the layer’s ORIGINAL file — the one the vectoriser produced — never a re-serialisation. Strokes drawn here live on the layer and in saved pictures, not inside the file.'
-                      : undefined
-                  }
-                  saveNote={saveNote}
-                  backdrop={backdrop}
-                  backdropKey={bdKey}
-                  expanded={expanded}
-                  cropTool={tool === 'crop'}
-                  cropFill={cropFill}
-                  onCropFill={setCropFill}
-                  cropRatio={cropRatio}
-                  sheetRatio={PLATE_W / plateH}
-                  onCropRatio={chooseCropRatio}
-                  penTool={tool === 'curve'}
-                  penCanClose={!!pen && pen.anchors.length >= 3}
-                  onPathToSelection={makeSelectionFromPen}
-                  nodeCount={nodeEdit?.path.nodes.length ?? 0}
-                  nodeSelected={nodeEdit?.sel ?? -1}
-                  nodeSmooth={
-                    nodeEdit && nodeEdit.sel >= 0
-                      ? nodeEdit.path.nodes[nodeEdit.sel]?.linked === true
-                      : false
-                  }
-                  onNodeConvert={() => {
-                    const ne = nodeEditRef.current;
-                    if (ne && ne.sel >= 0) commitNodes(editConvert(ne, ne.sel, penWorld()));
-                  }}
-                  onNodeDelete={() => {
-                    const ne = nodeEditRef.current;
-                    if (ne && ne.sel >= 0) commitNodes(editDelete(ne, ne.sel));
-                  }}
-                  plate={plateRect}
-                  picturesCount={images.length}
-                  picsOn={picsOn}
-                  onPicsOn={() => setPicsOn((v) => !v)}
-                  onPicturePick={addPicture}
-                  pictureAt={pictureAt}
-                  pictureOpacity={
-                    pictureAt === null ? 100 : Math.round((images[pictureAt]?.opacity ?? 1) * 100)
-                  }
-                  onPictureOpacity={setPictureOpacity}
-                  onPictureUp={() => movePicture(true)}
-                  onPictureDown={() => movePicture(false)}
-                  onPictureRemove={removePicture}
-                  onBackdropPick={(media) => {
-                    const r = adoptBackdrop(media[0], plateRect);
-                    if (!r.ok) {
-                      showMessage(r.reason, 'error');
-                      return;
-                    }
-                    /* ВЫБРАЛ КАРТИНКУ — СРАЗУ СТАВИШЬ ЕЁ. Прежде шаблон приезжал вписанным и
+                  /* ВЫБРАЛ КАРТИНКУ — СРАЗУ СТАВИШЬ ЕЁ. Прежде шаблон приезжал вписанным и
                        незапертым, то есть уже «в режиме постановки», просто без органа, которым
                        это видно. Рамка и есть тот орган. */
-                    putBackdrop(r.backdrop);
-                    openBackdropFrame(r.backdrop);
-                  }}
-                  onBackdropOp={(next) => putBackdrop(next)}
-                  backdropPlacing={frame?.owner === 'backdrop'}
-                  onBackdropPlace={() => {
-                    const b = backdropRef.current;
-                    if (!b) return;
-                    if (frameRef.current?.owner === 'backdrop') commitFrame();
-                    else openBackdropFrame(b);
-                  }}
-                  /* `warpOn` — ЧТО НА ЭКРАНЕ (узлы или ручки), `warpBent` — ИСКРИВЛЕНА ЛИ КАРТИНКА.
+                  putBackdrop(r.backdrop);
+                  openBackdropFrame(r.backdrop);
+                }}
+                onBackdropOp={(next) => putBackdrop(next)}
+                backdropPlacing={frame?.owner === 'backdrop'}
+                onBackdropPlace={() => {
+                  const b = backdropRef.current;
+                  if (!b) return;
+                  if (frameRef.current?.owner === 'backdrop') commitFrame();
+                  else openBackdropFrame(b);
+                }}
+                /* `warpOn` — ЧТО НА ЭКРАНЕ (узлы или ручки), `warpBent` — ИСКРИВЛЕНА ЛИ КАРТИНКА.
                      Два разных вопроса, и чип задаёт оба: залитый значит «сейчас узлы», а соседний
                      «flatten» появляется только когда гнуть уже есть что. */
-                  warpOn={frameShowsNodes(frame)}
-                  warpBent={frame?.owner === 'backdrop' && !gridIsIdentity(frame.grid)}
-                  onWarpToggle={() => {
-                    if (frameShowsNodes(frameRef.current)) leaveWarp();
-                    else enterWarp();
-                  }}
-                  onWarpFlatten={flattenWarp}
-                  onBackdropDepth={() => {
-                    const b = backdropRef.current;
-                    if (!b) return;
-                    putBackdrop(setBackdropDepth(b, b.depth === 'over' ? 'under' : 'over'));
-                  }}
-                  onBackdropRemove={() => {
-                    if (frameRef.current?.owner === 'backdrop') closeFrame();
-                    putBackdrop(null);
-                  }}
-                  traceStage={traceStage}
-                  traceHasSelection={!!sel}
-                  traceSuggest={traceSuggest}
-                  onTraceRun={() => void runTraceOnePress()}
-                  /* ЧИП ЗАПУСКАЕТ САМ, А НЕ СТАВИТ ЧИСЛО В ПОЛЕ. Поля больше нет, и «поставил
+                warpOn={frameShowsNodes(frame)}
+                warpBent={frame?.owner === 'backdrop' && !gridIsIdentity(frame.grid)}
+                onWarpToggle={() => {
+                  if (frameShowsNodes(frameRef.current)) leaveWarp();
+                  else enterWarp();
+                }}
+                onWarpFlatten={flattenWarp}
+                onBackdropDepth={() => {
+                  const b = backdropRef.current;
+                  if (!b) return;
+                  putBackdrop(setBackdropDepth(b, b.depth === 'over' ? 'under' : 'over'));
+                }}
+                onBackdropRemove={() => {
+                  if (frameRef.current?.owner === 'backdrop') closeFrame();
+                  putBackdrop(null);
+                }}
+                traceStage={traceStage}
+                traceHasSelection={!!sel}
+                traceSuggest={traceSuggest}
+                onTraceRun={() => void runTraceOnePress()}
+                /* ЧИП ЗАПУСКАЕТ САМ, А НЕ СТАВИТ ЧИСЛО В ПОЛЕ. Поля больше нет, и «поставил
                      допуск» превратилось бы в жест, после которого надо вспомнить нажать ещё
                      что-то. Оценку назвал движок — он же её и применяет. */
-                  onTraceCoarser={(tolerance) => void runTraceOnePress(tolerance)}
-                />
+                onTraceCoarser={(tolerance) => void runTraceOnePress(tolerance)}
+              />
 
-                <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
-                  {/* Инструменты — НАД холстом, во всю его ширину: рейка отдана кистям.
+              <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-1'>
+                {/* Инструменты — НАД холстом, во всю его ширину: рейка отдана кистям.
                       ВЫСОТА ЭТОГО БЛОКА НЕ ЗАВИСИТ ОТ ИНСТРУМЕНТА. Подсказка стоит СВОЕЙ строкой
                       фиксированной высоты, а не в одном ряду с чипами: она у каждого инструмента
                       своей длины, и в общем ряду длинная подсказка переносила бы чипы на вторую
                       строку — то есть СДВИГАЛА БЫ ХОЛСТ на смене инструмента. Тот же дефект уже
                       был замерен пробой 43 на чипе «path → selection». */}
-                  <div className='flex flex-col gap-1 border border-borderColor bg-bgColor px-2 py-1'>
-                    <div className='flex flex-wrap items-center gap-2'>
+                <div className='flex flex-col gap-1 border border-borderColor bg-bgColor px-2 py-1'>
+                  <div className='flex flex-wrap items-center gap-2'>
                     {/* ПОЛОСЫ ПО МАТЕРИАЛУ. Надпись «lines» / «pixels» — не украшение группы, а
                         то, ЧТО инструмент производит: линию, которую потом можно править вечно,
                         или пиксели, которые лягут в картинку. Один общий ряд чипов стёр бы это
@@ -8016,39 +7976,39 @@ export function VectorModal({
                         Правило этого файла старше и сильнее: НАД ХОЛСТОМ НЕТ МЕСТА НИЧЕМУ
                         УСЛОВНОМУ. Рейка — колонка со своей прокруткой, её рост не стоит холсту ни
                         пикселя, и дверь живёт теперь там, рядом с областями, которые она рождает. */}
-                    </div>
-                    <Text
-                      size='nano'
-                      variant='label'
-                      component='p'
-                      className='h-4 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'
-                      data-tool-hint={frame ? `frame-${frame.owner}` : tool}
-                    >
-                      {/* ЖИВАЯ РАМКА ГОВОРИТ ЗА ИНСТРУМЕНТ: пока она на экране, работа — это она.
+                  </div>
+                  <Text
+                    size='nano'
+                    variant='label'
+                    component='p'
+                    className='h-4 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'
+                    data-tool-hint={frame ? `frame-${frame.owner}` : tool}
+                  >
+                    {/* ЖИВАЯ РАМКА ГОВОРИТ ЗА ИНСТРУМЕНТ: пока она на экране, работа — это она.
                           Строка стоит В ТОЙ ЖЕ коробке фиксированной высоты (`h-4`, без переноса,
                           с многоточием) — холст от смены текста не двигается ни на пиксель, и
                           сторожем этому стоит проба 83. */}
-                      {frame
-                        ? frame.owner === 'crop'
-                          ? 'drag the frame — outward grows the sheet, inward crops it · enter or double-click applies, esc cancels · cannot be undone'
-                          : `drag to move · handles scale (shift keeps the proportion) · drag outside a corner to rotate (shift snaps 15°) · ⌘-drag a corner for perspective · enter ${frame.owner === 'paste' ? 'puts it down' : frame.owner === 'image' ? 'leaves the picture there — it stays movable' : 'places the template'}`
-                        : tool === 'curve'
+                    {frame
+                      ? frame.owner === 'crop'
+                        ? 'drag the frame — outward grows the sheet, inward crops it · enter or double-click applies, esc cancels · cannot be undone'
+                        : `drag to move · handles scale (shift keeps the proportion) · drag outside a corner to rotate (shift snaps 15°) · ⌘-drag a corner for perspective · enter ${frame.owner === 'paste' ? 'puts it down' : frame.owner === 'image' ? 'leaves the picture there — it stays movable' : 'places the template'}`
+                      : tool === 'curve'
                         ? // ОДНА строка на весь путь: смена текста посреди жеста — тот же сдвиг холста.
                           'click = corner · drag = curve · grab a handle to bend, alt splits the pair · click the first anchor closes · enter/esc finish'
                         : tool === 'lasso'
                           ? 'draw around an area · it holds the pixel tools in and cuts the lines at its edge · feather is each area’s own'
                           : tool === 'patch'
-                          ? 'lasso a region, then drag it onto a clean place — the region is rebuilt from there and the seam blended. No texture is invented; the lines are not touched'
-                          : tool === 'select'
-                            ? /* Единственное место, где сказано, что направляющую можно взять:
+                            ? 'lasso a region, then drag it onto a clean place — the region is rebuilt from there and the seam blended. No texture is invented; the lines are not touched'
+                            : tool === 'select'
+                              ? /* Единственное место, где сказано, что направляющую можно взять:
                                  тонкая синяя нить сама об этом не говорит, а курсор над ней не
                                  меняется — рамка перехватывает наведение раньше. Строка растёт
                                  ТОЛЬКО когда разметка на листе есть; болтаться постоянно она не
                                  имеет права (высота блока над холстом неизменна — проба 83). */
-                              guides.length && rulersOn
-                              ? 'click a stroke — the rail edits its stitch · drag a guide to move it, onto a ruler to remove it'
-                              : 'click a stroke — the rail edits its stitch'
-                            : tool === 'clone'
+                                guides.length && rulersOn
+                                ? 'click a stroke — the rail edits its stitch · drag a guide to move it, onto a ruler to remove it'
+                                : 'click a stroke — the rail edits its stitch'
+                              : tool === 'clone'
                                 ? 'alt-click to take the source, then drag. The LINES under the source are laid under your hand'
                                 : tool === 'erase'
                                   ? 'drag the nib: it rubs the PIXELS to paper white, the photo included, and CUTS the drawn lines it covers. One eraser for both'
@@ -8059,91 +8019,89 @@ export function VectorModal({
                                       : tool === 'pan'
                                         ? 'drag to move the sheet · scroll pans · pinch zooms'
                                         : 'press and drag to draw · space pans · ⌘z takes back the last gesture'}
-                    </Text>
-                  </div>
+                  </Text>
+                </div>
 
-                  {/* ХОЛСТ. Мир (плата) — белый блок на сером грунте вьюпорта: граница платы —
+                {/* ХОЛСТ. Мир (плата) — белый блок на сером грунте вьюпорта: граница платы —
                       это край белого на сером, по правилу «зазор и есть разделитель», без
                       нарисованной рамки, которая съедала бы пиксель системы координат. */}
-                  <div
-                    ref={attachViewport}
-                    onPointerDown={onStagePointerDown}
-                    onPointerMove={onStagePointerMove}
-                    onPointerUp={onStagePointerUp}
-                    onPointerCancel={onStagePointerUp}
-                    // Круг ниба гаснет вместе с уходом курсора: иначе он остался бы висеть на
-                    // краю платы и читался бы как след, которого нет.
-                    onPointerLeave={() => {
-                      /* И ПАМЯТЬ О ПОЛОЖЕНИИ РУКИ ГАСНЕТ ВМЕСТЕ С НИМ. Иначе следующий зум
+                <div
+                  ref={attachViewport}
+                  onPointerDown={onStagePointerDown}
+                  onPointerMove={onStagePointerMove}
+                  onPointerUp={onStagePointerUp}
+                  onPointerCancel={onStagePointerUp}
+                  // Круг ниба гаснет вместе с уходом курсора: иначе он остался бы висеть на
+                  // краю платы и читался бы как след, которого нет.
+                  onPointerLeave={() => {
+                    /* И ПАМЯТЬ О ПОЛОЖЕНИИ РУКИ ГАСНЕТ ВМЕСТЕ С НИМ. Иначе следующий зум
                          кнопкой, сделанный уже без курсора над холстом, ВОСКРЕСИЛ БЫ круг на
                          месте, где руки давно нет. */
-                      lastClient.current = null;
-                      setNibHover(null);
-                    }}
-                    onPointerEnter={(event) => {
-                      lastClient.current = { x: event.clientX, y: event.clientY };
-                    }}
-                    onDoubleClick={() => {
-                      // Двойной клик применяет КАДР — второй фотошопный способ сказать «да» там,
-                      // где клика мимо нет нарочно (применение необратимо).
-                      if (frameRef.current?.owner === 'crop') {
-                        commitFrame();
-                        return;
-                      }
-                      if (tool === 'curve' && penRef.current) commitPen();
-                    }}
-                    className={cn(
-                      'relative min-h-0 min-w-0 flex-1 touch-none select-none overflow-hidden border border-borderColor bg-pageBg',
-                      stageCursor,
-                    )}
-                  >
-                    <div
-                      ref={worldRef}
-                      className='absolute left-0 top-0 bg-bgColor'
-                      /* КТО ВЗЯТ В РУКУ — В РАЗМЕТКЕ, А НЕ ТОЛЬКО НА КАРТИНКЕ. Накладка рамки
+                    lastClient.current = null;
+                    setNibHover(null);
+                  }}
+                  onPointerEnter={(event) => {
+                    lastClient.current = { x: event.clientX, y: event.clientY };
+                  }}
+                  onDoubleClick={() => {
+                    // Двойной клик применяет КАДР — второй фотошопный способ сказать «да» там,
+                    // где клика мимо нет нарочно (применение необратимо).
+                    if (frameRef.current?.owner === 'crop') {
+                      commitFrame();
+                      return;
+                    }
+                    if (tool === 'curve' && penRef.current) commitPen();
+                  }}
+                  className={cn(
+                    'relative min-h-0 min-w-0 flex-1 touch-none select-none overflow-hidden border border-borderColor bg-pageBg',
+                    stageCursor,
+                  )}
+                >
+                  <div
+                    ref={worldRef}
+                    className='absolute left-0 top-0 bg-bgColor'
+                    /* КТО ВЗЯТ В РУКУ — В РАЗМЕТКЕ, А НЕ ТОЛЬКО НА КАРТИНКЕ. Накладка рамки
                          печатает `paste` и у вставки, и у картинки (довод у её `owner`), поэтому
                          различить их снаружи можно только здесь. Пусто — никого. */
-                      data-picture-frame={
-                        frame?.owner === 'image' ? String(frame.imageAt ?? '') : ''
-                      }
-                      style={{
-                        width: `${PLATE_W}px`,
-                        height: `${plateH}px`,
-                        transformOrigin: '0 0',
-                        willChange: 'transform',
-                      }}
-                    >
-                      {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
+                    data-picture-frame={frame?.owner === 'image' ? String(frame.imageAt ?? '') : ''}
+                    style={{
+                      width: `${PLATE_W}px`,
+                      height: `${plateH}px`,
+                      transformOrigin: '0 0',
+                      willChange: 'transform',
+                    }}
+                  >
+                    {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Указатель он не ловит никогда — протяжку ведёт
                           сама сцена, и `pointer-events` на картинке только отняли бы у неё
                           события. Когда его ставят, поверх стоит трансформ-рамка — она и есть
                           признак того, что экран сейчас двигает шаблон, а не рисует. Чем он
                           нарисован — `img` с матрицей или канвасом — решает `renderBackdrop`. */}
-                      {backdrop && backdrop.depth === 'under' && renderBackdrop('under')}
-                      {/* ПОДЛОЖКА ЖИВЁТ ДО ПЕРВОГО ПИКСЕЛЬНОГО ИНСТРУМЕНТА, а потом ГАСНЕТ, но
+                    {backdrop && backdrop.depth === 'under' && renderBackdrop('under')}
+                    {/* ПОДЛОЖКА ЖИВЁТ ДО ПЕРВОГО ПИКСЕЛЬНОГО ИНСТРУМЕНТА, а потом ГАСНЕТ, но
                           остаётся в разметке: она — оракул натуральных пропорций (`onLoad`), и
                           снять её значило бы потерять форму платы у того, кто взял кисть раньше,
                           чем картинка договорила. Прячется прозрачностью, а не размонтированием:
                           растр УЖЕ содержит её пиксели, и нарисовать её ещё раз под ним значило бы
                           заклеить каждую дырку от ластика оригиналом. */}
-                      {baseSrc && rasterOn && (
-                        <img
-                          src={baseSrc}
-                          alt=''
-                          draggable={false}
-                          onLoad={(event) => {
-                            const img = event.currentTarget;
-                            if (baseMediaId > 0 && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                              if (!expandedRef.current) {
-                                setRatio(img.naturalWidth / img.naturalHeight);
-                              }
+                    {baseSrc && rasterOn && (
+                      <img
+                        src={baseSrc}
+                        alt=''
+                        draggable={false}
+                        onLoad={(event) => {
+                          const img = event.currentTarget;
+                          if (baseMediaId > 0 && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            if (!expandedRef.current) {
+                              setRatio(img.naturalWidth / img.naturalHeight);
                             }
-                          }}
-                          data-base-img=''
-                          className='pointer-events-none absolute inset-0 block h-full w-full'
-                          style={{ objectFit: 'fill', opacity: rasterReady ? 0 : 1 }}
-                        />
-                      )}
-                      {/* ═══ ШАХМАТКА ПРОЗРАЧНОСТИ — ЗЕМЛЯ ПОД РАСТРОМ (N-4) ══════════════════
+                          }
+                        }}
+                        data-base-img=''
+                        className='pointer-events-none absolute inset-0 block h-full w-full'
+                        style={{ objectFit: 'fill', opacity: rasterReady ? 0 : 1 }}
+                      />
+                    )}
+                    {/* ═══ ШАХМАТКА ПРОЗРАЧНОСТИ — ЗЕМЛЯ ПОД РАСТРОМ (N-4) ══════════════════
                           Владелец: «на фабрик рендерах в эдит моде не работает erase». Ластик
                           РАБОТАЛ: замер стенда на настоящих байтах беты показывает альфу в нуле
                           под кистью и на флэте, и на рендере. Не работал ЭКРАН — плата белая
@@ -8158,77 +8116,77 @@ export function VectorModal({
                           плата остаётся белой бумагой для линий, а копия подложки непрозрачна и
                           сама её закрывает. Видно её становится только там, где прозрачность
                           ПОЯВИЛАСЬ, — то есть только там, где ластик действительно взял. */}
-                      {showChecker && (
-                        <div
-                          data-raster-checker=''
-                          aria-hidden
-                          className='pointer-events-none absolute inset-0'
-                          style={{
-                            backgroundColor: '#ffffff',
-                            backgroundImage:
-                              'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%),' +
-                              'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%)',
-                            backgroundSize: '24px 24px',
-                            backgroundPosition: '0 0, 12px 12px',
-                          }}
-                        />
-                      )}
-                      {/* ПИКСЕЛЬНЫЙ КАНАЛ. Холст в разрешении растра, растянутый в плату теми же
+                    {showChecker && (
+                      <div
+                        data-raster-checker=''
+                        aria-hidden
+                        className='pointer-events-none absolute inset-0'
+                        style={{
+                          backgroundColor: '#ffffff',
+                          backgroundImage:
+                            'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%),' +
+                            'linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%)',
+                          backgroundSize: '24px 24px',
+                          backgroundPosition: '0 0, 12px 12px',
+                        }}
+                      />
+                    )}
+                    {/* ПИКСЕЛЬНЫЙ КАНАЛ. Холст в разрешении растра, растянутый в плату теми же
                           правилами, что и подложка: доли кадра значат одно и то же на обоих. */}
-                      {rasterReady && rasterOn && rasterRef.current && (
-                        <canvas
-                          ref={viewCanvasRef}
-                          width={rasterRef.current.w}
-                          height={rasterRef.current.h}
-                          data-raster-canvas=''
-                          role='img'
-                          aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
-                          className='pointer-events-none absolute inset-0 block h-full w-full'
-                          /* ═══ БЛИЖЕ ТРЁХКРАТНОГО СМОТРЯТ НА ПИКСЕЛИ, А НЕ НА КАРТИНКУ (G-6) ═══
+                    {rasterReady && rasterOn && rasterRef.current && (
+                      <canvas
+                        ref={viewCanvasRef}
+                        width={rasterRef.current.w}
+                        height={rasterRef.current.h}
+                        data-raster-canvas=''
+                        role='img'
+                        aria-label={`the pixel layer${base ? ` over «${pictureHandle(base)}»` : ''} — ${rasterDirty ? 'painted' : 'a copy of the picture underneath'}`}
+                        className='pointer-events-none absolute inset-0 block h-full w-full'
+                        /* ═══ БЛИЖЕ ТРЁХКРАТНОГО СМОТРЯТ НА ПИКСЕЛИ, А НЕ НА КАРТИНКУ (G-6) ═══
                              Билинейное сглаживание браузера на 8× размазывает край краски на
                              половину экранного сантиметра, и ретушь нибом в один юнит делается
                              вслепую: видно пятно, а не то, какие пиксели оно накрыло. Атрибут
                              ставится ПОРОГОМ, а не всегда, потому что на 100% то же правило дало
                              бы лестницу на всякой фотографической подложке. */
-                          style={{
-                            imageRendering: zoomPct >= PIXELATED_FROM * 100 ? 'pixelated' : 'auto',
-                          }}
-                        />
-                      )}
-                      {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ПИКСЕЛЬНАЯ ПОЛОВИНА (G-13) ══════════════════
+                        style={{
+                          imageRendering: zoomPct >= PIXELATED_FROM * 100 ? 'pixelated' : 'auto',
+                        }}
+                      />
+                    )}
+                    {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ПИКСЕЛЬНАЯ ПОЛОВИНА (G-13) ══════════════════
                           Стоит НАД пиксельным каналом и ПОД линиями: вставленный кусок ложится
                           поверх краски, как ложится и при постановке (`source-over` у выреза), —
                           иначе превью обещало бы одно, а Enter давал другое.
                           Холст, а не картинка: вырезка живёт в памяти как canvas, и перегонять её
                           в data-URL ради показа значило бы кодировать PNG на каждую вставку. */}
-                      {frame?.owner === 'paste' && frame.float?.cut && (
-                        <canvas
-                          ref={floatCanvasRef}
-                          width={frame.float.cut.width}
-                          height={frame.float.cut.height}
-                          data-paste-float=''
-                          aria-hidden
-                          className='pointer-events-none absolute left-0 top-0 block max-w-none'
-                          style={{
-                            width: `${frame.float.cut.width}px`,
-                            height: `${frame.float.cut.height}px`,
-                            transformOrigin: '0 0',
-                            transform: quadCss(
-                              cutQuadOf(frame.quad, frame.float.cutRegion),
-                              frame.float.cut.width,
-                              frame.float.cut.height,
-                            ),
-                          }}
-                        />
-                      )}
-                      {/* ⚠ ЖИВОЙ БИНАРИЗАЦИИ ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Синяя заливка показывала,
+                    {frame?.owner === 'paste' && frame.float?.cut && (
+                      <canvas
+                        ref={floatCanvasRef}
+                        width={frame.float.cut.width}
+                        height={frame.float.cut.height}
+                        data-paste-float=''
+                        aria-hidden
+                        className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                        style={{
+                          width: `${frame.float.cut.width}px`,
+                          height: `${frame.float.cut.height}px`,
+                          transformOrigin: '0 0',
+                          transform: quadCss(
+                            cutQuadOf(frame.quad, frame.float.cutRegion),
+                            frame.float.cut.width,
+                            frame.float.cut.height,
+                          ),
+                        }}
+                      />
+                    )}
+                    {/* ⚠ ЖИВОЙ БИНАРИЗАЦИИ ЗДЕСЬ БОЛЬШЕ НЕТ (G-7). Синяя заливка показывала,
                           что движок СЧИТАЕТ КРАСКОЙ при выбранной человеком полярности, — то есть
                           существовала ради проверки ответа, которого человек больше не даёт.
                           Оставить её значило бы держать холст в стопке платы ради утверждения,
                           которое некому опровергнуть. */}
-                      {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ — см. близнеца выше: он же под растром. */}
-                      {backdrop && backdrop.depth === 'over' && renderBackdrop('over')}
-                      {/* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ — ТРЕТИЙ МАТЕРИАЛ, НАД КРАСКОЙ И ПОД ЧЕРТЕЖОМ ═══
+                    {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ — см. близнеца выше: он же под растром. */}
+                    {backdrop && backdrop.depth === 'over' && renderBackdrop('over')}
+                    {/* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ — ТРЕТИЙ МАТЕРИАЛ, НАД КРАСКОЙ И ПОД ЧЕРТЕЖОМ ═══
                           Тот же ярус, на котором стоит превью плавающей вставки, и по тому же
                           доводу: положенное ложится поверх краски, но чертёж поверх него читают.
                           Каждая — обычный `<img>` с матрицей квада: перспектива двумерной
@@ -8238,107 +8196,111 @@ export function VectorModal({
                           `nat × nat` на квад, а сама коробка растягивается `objectFit: fill`,
                           ровно как подложка растягивается в плату. Настоящие пропорции живут в
                           квадe, куда их положил `fitImageQuad`. */}
-                      {picsOn &&
-                        images.map((img, i) => {
-                          const live =
-                            frame?.owner === 'image' && frame.imageAt === i ? frame.quad : null;
-                          const quad = live ?? imageQuadPlate(img, PLATE_W, plateH);
-                          const gone = goneSrc.includes(img.src) || !img.src;
-                          if (gone) {
-                            /* ПРОПАВШЕЕ МЕДИА — ПЛАШКА, А НЕ ПУСТОТА И НЕ ПАДЕНИЕ. Коробка
+                    {picsOn &&
+                      images.map((img, i) => {
+                        const live =
+                          frame?.owner === 'image' && frame.imageAt === i ? frame.quad : null;
+                        const quad = live ?? imageQuadPlate(img, PLATE_W, plateH);
+                        const gone = goneSrc.includes(img.src) || !img.src;
+                        if (gone) {
+                          /* ПРОПАВШЕЕ МЕДИА — ПЛАШКА, А НЕ ПУСТОТА И НЕ ПАДЕНИЕ. Коробка
                                осе-выровненная нарочно: подпись внутри перспективной матрицы
                                читалась бы скошенной ровно тогда, когда её и надо прочесть. */
-                            const b = imageBox({ ...img, quad: imageQuadFrac(quad, PLATE_W, plateH) }, PLATE_W, plateH);
-                            return (
-                              <div
-                                key={`gone-${i}`}
-                                data-placed-picture={i}
-                                data-picture-gone={img.mediaId}
-                                className='pointer-events-none absolute flex items-center justify-center border border-dashed border-textColor bg-bgColor/70 text-center'
-                                style={{
-                                  left: `${b.x0}px`,
-                                  top: `${b.y0}px`,
-                                  width: `${Math.max(1, b.x1 - b.x0)}px`,
-                                  height: `${Math.max(1, b.y1 - b.y0)}px`,
-                                }}
-                              >
-                                <Text size='micro' variant='label' component='span'>
-                                  {`picture ${i + 1} is gone`}
-                                </Text>
-                              </div>
-                            );
-                          }
-                          return (
-                            <img
-                              key={`pic-${i}-${img.mediaId}`}
-                              src={img.src}
-                              alt=''
-                              draggable={false}
-                              data-placed-picture={i}
-                              data-picture-media={img.mediaId}
-                              onError={() =>
-                                setGoneSrc((prev) =>
-                                  prev.includes(img.src) ? prev : [...prev, img.src],
-                                )
-                              }
-                              className='pointer-events-none absolute left-0 top-0 block max-w-none'
-                              style={{
-                                width: `${PLACED_BOX}px`,
-                                height: `${PLACED_BOX}px`,
-                                objectFit: 'fill',
-                                opacity: img.opacity,
-                                transformOrigin: '0 0',
-                                transform: imageCss(quad, PLACED_BOX, PLACED_BOX),
-                              }}
-                            />
+                          const b = imageBox(
+                            { ...img, quad: imageQuadFrac(quad, PLATE_W, plateH) },
+                            PLATE_W,
+                            plateH,
                           );
-                        })}
-                      {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
+                          return (
+                            <div
+                              key={`gone-${i}`}
+                              data-placed-picture={i}
+                              data-picture-gone={img.mediaId}
+                              className='pointer-events-none absolute flex items-center justify-center border border-dashed border-textColor bg-bgColor/70 text-center'
+                              style={{
+                                left: `${b.x0}px`,
+                                top: `${b.y0}px`,
+                                width: `${Math.max(1, b.x1 - b.x0)}px`,
+                                height: `${Math.max(1, b.y1 - b.y0)}px`,
+                              }}
+                            >
+                              <Text size='micro' variant='label' component='span'>
+                                {`picture ${i + 1} is gone`}
+                              </Text>
+                            </div>
+                          );
+                        }
+                        return (
+                          <img
+                            key={`pic-${i}-${img.mediaId}`}
+                            src={img.src}
+                            alt=''
+                            draggable={false}
+                            data-placed-picture={i}
+                            data-picture-media={img.mediaId}
+                            onError={() =>
+                              setGoneSrc((prev) =>
+                                prev.includes(img.src) ? prev : [...prev, img.src],
+                              )
+                            }
+                            className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                            style={{
+                              width: `${PLACED_BOX}px`,
+                              height: `${PLACED_BOX}px`,
+                              objectFit: 'fill',
+                              opacity: img.opacity,
+                              transformOrigin: '0 0',
+                              transform: imageCss(quad, PLACED_BOX, PLACED_BOX),
+                            }}
+                          />
+                        );
+                      })}
+                    {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
                           вектор выглядел бы как пустой холст. Штрихи, когда они появятся, рисуются
                           ПОВЕРХ и живут отдельно от файла; предупреждение над холстом говорит это
                           словами. `fill», как и у растра: доли кадра растягиваются в плату. */}
-                      {vecOn && strokes.length === 0 && fileMediaId > 0 && fileUrl && (
-                        <img
-                          src={fileUrl}
-                          alt=''
-                          draggable={false}
-                          className='pointer-events-none absolute inset-0 block h-full w-full'
-                          style={{ objectFit: 'fill' }}
-                        />
-                      )}
-                      {vecOn && (
-                        <svg
-                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
-                          preserveAspectRatio='none'
-                          className='pointer-events-none absolute inset-0 h-full w-full'
-                        >
-                          {strokes.map((stroke, i) => {
-                            const g = strokeGeometry(stroke, PLATE_W, plateH);
-                            if (!g.d) return null;
-                            const strokeInk = readInk(stroke.ink) ?? 'currentColor';
-                            return (
-                              <g
-                                key={i}
-                                opacity={selected !== null && selected !== i ? 0.45 : 1}
-                                data-stroke-ink={readInk(stroke.ink) ?? ''}
-                              >
-                                {g.offsets.map((dy, k) => (
-                                  <path
-                                    key={k}
-                                    d={g.d}
-                                    transform={`translate(0 ${dy})`}
-                                    fill='none'
-                                    stroke={strokeInk}
-                                    strokeWidth={g.strokeWidth * (selected === i ? 1.8 : 1)}
-                                    strokeDasharray={g.dash || undefined}
-                                    strokeLinecap='round'
-                                    strokeLinejoin='round'
-                                  />
-                                ))}
-                              </g>
-                            );
-                          })}
-                          {/* ── ОБЛАСТЬ ЛАССО, И ОНА ОДНА (H-2). Дорожка — двойной штрих (белая
+                    {vecOn && strokes.length === 0 && fileMediaId > 0 && fileUrl && (
+                      <img
+                        src={fileUrl}
+                        alt=''
+                        draggable={false}
+                        className='pointer-events-none absolute inset-0 block h-full w-full'
+                        style={{ objectFit: 'fill' }}
+                      />
+                    )}
+                    {vecOn && (
+                      <svg
+                        viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                        preserveAspectRatio='none'
+                        className='pointer-events-none absolute inset-0 h-full w-full'
+                      >
+                        {strokes.map((stroke, i) => {
+                          const g = strokeGeometry(stroke, PLATE_W, plateH);
+                          if (!g.d) return null;
+                          const strokeInk = readInk(stroke.ink) ?? 'currentColor';
+                          return (
+                            <g
+                              key={i}
+                              opacity={selected !== null && selected !== i ? 0.45 : 1}
+                              data-stroke-ink={readInk(stroke.ink) ?? ''}
+                            >
+                              {g.offsets.map((dy, k) => (
+                                <path
+                                  key={k}
+                                  d={g.d}
+                                  transform={`translate(0 ${dy})`}
+                                  fill='none'
+                                  stroke={strokeInk}
+                                  strokeWidth={g.strokeWidth * (selected === i ? 1.8 : 1)}
+                                  strokeDasharray={g.dash || undefined}
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                />
+                              ))}
+                            </g>
+                          );
+                        })}
+                        {/* ── ОБЛАСТЬ ЛАССО, И ОНА ОДНА (H-2). Дорожка — двойной штрих (белая
                               подложка + чёрный пунктир), видимый на любом растре; ореол
                               растушёвки — блюр в мировых пикселях, то есть свойство ПЛАТЫ, а не
                               экрана: приближение честно приближает и мягкость.
@@ -8349,11 +8311,11 @@ export function VectorModal({
                               мы переписали бы их все ради нуля информации. Индекс отныне
                               КОНСТАНТА, а не порядковый номер, и это сказано здесь, у места
                               порождения, чтобы следующий читатель не искал вторую область. */}
-                          {(() => {
-                            if (!sel) return null;
-                            const d = selectionPathD(sel.pts, PLATE_W, plateH);
-                            if (!d) return null;
-                            /* ⚠ `data-sel-active` ОТРАЖАЕТ СОСТОЯНИЕ, А НЕ ПЕЧАТАЕТ ЕДИНИЦУ.
+                        {(() => {
+                          if (!sel) return null;
+                          const d = selectionPathD(sel.pts, PLATE_W, plateH);
+                          if (!d) return null;
+                          /* ⚠ `data-sel-active` ОТРАЖАЕТ СОСТОЯНИЕ, А НЕ ПЕЧАТАЕТ ЕДИНИЦУ.
                                Раньше здесь стоял литерал `'1'`, а узел рождается только при живом
                                `sel`, — значит атрибут не мог принять другого значения НИКОГДА.
                                Пробы читают его сегодня только как локатор, поэтому ложной зелени
@@ -8361,494 +8323,507 @@ export function VectorModal({
                                построению — сторож у двери, которой нет. Различие настоящее: на
                                запертой карточке область РИСУЕТСЯ, но не делает ничего — Delete
                                закрыт `!frozen`, кисть тоже. */
-                            return (
-                              <g
-                                data-sel='0'
-                                data-sel-active={frozen ? '0' : '1'}
-                                data-sel-feather={sel.feather}
-                              >
-                                {sel.feather > 0 && (
-                                  <path
-                                    d={d}
-                                    fill='currentColor'
-                                    opacity={0.12}
-                                    style={{ filter: `blur(${sel.feather / 2}px)` }}
-                                    data-sel-halo='0'
-                                  />
-                                )}
+                          return (
+                            <g
+                              data-sel='0'
+                              data-sel-active={frozen ? '0' : '1'}
+                              data-sel-feather={sel.feather}
+                            >
+                              {sel.feather > 0 && (
                                 <path
                                   d={d}
                                   fill='currentColor'
-                                  fillOpacity={0.04}
-                                  stroke='#fff'
-                                  strokeWidth={2.5 / zoomK}
+                                  opacity={0.12}
+                                  style={{ filter: `blur(${sel.feather / 2}px)` }}
+                                  data-sel-halo='0'
                                 />
-                                <path
-                                  d={d}
-                                  fill='none'
-                                  stroke='currentColor'
-                                  strokeWidth={1.25 / zoomK}
-                                  strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
-                                  data-sel-ants='0'
-                                />
-                              </g>
-                            );
-                          })()}
-                          {/* ⚠ ПРЕВЬЮ РИСУЕТСЯ ПРОРЕЖЕННЫМ СЛЕДОМ, А НЕ СЫРЫМ (круг 15, J-36/J-35).
+                              )}
+                              <path
+                                d={d}
+                                fill='currentColor'
+                                fillOpacity={0.04}
+                                stroke='#fff'
+                                strokeWidth={2.5 / zoomK}
+                              />
+                              <path
+                                d={d}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={1.25 / zoomK}
+                                strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                                data-sel-ants='0'
+                              />
+                            </g>
+                          );
+                        })()}
+                        {/* ⚠ ПРЕВЬЮ РИСУЕТСЯ ПРОРЕЖЕННЫМ СЛЕДОМ, А НЕ СЫРЫМ (круг 15, J-36/J-35).
                               Пока превью вело сырую ломаную, а итог получался из прореженной,
                               «что видел — то и получил» было обещанием: на отпускании контур
                               подменялся другим, и человек видел, как его обводка дёргается. Одна
                               функция на оба — и тождество держится устройством. Цена — RDP на
                               сотнях точек каждый кадр: доли миллисекунды. */}
-                          {((raw: [number, number][] | null) => {
-                            if (!raw || raw.length <= 1) return null;
-                            /* ⚠ ИМЯ ДРУГОЕ НАРОЧНО. `const trace = …` внутри этой функции затенил
+                        {((raw: [number, number][] | null) => {
+                          if (!raw || raw.length <= 1) return null;
+                          /* ⚠ ИМЯ ДРУГОЕ НАРОЧНО. `const trace = …` внутри этой функции затенил
                                бы внешний `trace` целиком, включая строку, которая его читает, —
                                то есть обращение в мёртвую зону и падение экрана на первом же
                                движении руки. Сырой след приходит параметром. */
-                            const shown =
-                              tool === 'lasso'
-                                ? thinLasso(raw, { w: PLATE_W, h: plateH }, thinEps())
-                                : tool === 'freehand'
-                                  ? thinTrace(raw, { w: PLATE_W, h: plateH }, thinEps())
-                                  : raw;
-                            if (shown.length <= 1) return null;
-                            return tool === 'lasso' ? (
-                              /* Живая обводка лассо: лёгкая линия + пунктир к началу — видно, где
+                          const shown =
+                            tool === 'lasso'
+                              ? thinLasso(raw, { w: PLATE_W, h: plateH }, thinEps())
+                              : tool === 'freehand'
+                                ? thinTrace(raw, { w: PLATE_W, h: plateH }, thinEps())
+                                : raw;
+                          if (shown.length <= 1) return null;
+                          return tool === 'lasso' ? (
+                            /* Живая обводка лассо: лёгкая линия + пунктир к началу — видно, где
                                  контур замкнётся, когда кнопка отпустится. */
-                              <g>
-                                <path
-                                  d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
-                                  fill='currentColor'
-                                  fillOpacity={0.05}
-                                  stroke='currentColor'
-                                  strokeWidth={1.5 / zoomK}
-                                />
-                                <line
-                                  x1={shown[shown.length - 1][0] * PLATE_W}
-                                  y1={shown[shown.length - 1][1] * plateH}
-                                  x2={shown[0][0] * PLATE_W}
-                                  y2={shown[0][1] * plateH}
-                                  stroke='currentColor'
-                                  strokeWidth={1 / zoomK}
-                                  strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
-                                  opacity={0.6}
-                                />
-                              </g>
-                            ) : isLineNib(tool) ? (
-                              /* СЛЕД НИБА В НАТУРАЛЬНУЮ ШИРИНУ — не намёк линией, а ровно та
+                            <g>
+                              <path
+                                d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                                fill='currentColor'
+                                fillOpacity={0.05}
+                                stroke='currentColor'
+                                strokeWidth={1.5 / zoomK}
+                              />
+                              <line
+                                x1={shown[shown.length - 1][0] * PLATE_W}
+                                y1={shown[shown.length - 1][1] * plateH}
+                                x2={shown[0][0] * PLATE_W}
+                                y2={shown[0][1] * plateH}
+                                stroke='currentColor'
+                                strokeWidth={1 / zoomK}
+                                strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
+                                opacity={0.6}
+                              />
+                            </g>
+                          ) : isLineNib(tool) ? (
+                            /* СЛЕД НИБА В НАТУРАЛЬНУЮ ШИРИНУ — не намёк линией, а ровно та
                                  полоса, которую резчик вырежет (или клон напечатает). Ширина в
                                  МИРОВЫХ пикселях и на зум НЕ делится: ниб — свойство платы, и
                                  приближение обязано приближать и его.
                                  ПИКСЕЛЬНЫМ ИНСТРУМЕНТАМ ЭТА ПОЛОСА НЕ РИСУЕТСЯ: у них мазок УЖЕ
                                  виден — он лежит на холсте под этим SVG, — и призрак поверх него
                                  показывал бы мазок вдвое темнее, чем он есть. */
-                              <path
-                                d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
-                                fill='none'
-                                stroke='currentColor'
-                                strokeWidth={nib}
-                                strokeLinecap='round'
-                                strokeLinejoin='round'
-                                opacity={0.18}
-                                data-nib-swath=''
-                              />
-                            ) : isRasterTool(tool) ? null : (
-                              /**
-                               * ЖИВОЙ ШТРИХ РИСУЕТСЯ ТЕМ ЖЕ, ЧЕМ И ЗАФИКСИРОВАННЫЙ (Y-4).
-                               *
-                               * ⚠ Здесь был ЖИРНЫЙ ПУНКТИР шириной 6px — намёк на линию вместо
-                               * линии. Владелец: «когда ведёшь линию, хочется, чтобы под зажатым
-                               * курсором отображалось именно то, что рисуется, а не пунктирная
-                               * линия». Пунктир врал дважды: он не той толщины, что нить, и не
-                               * того вида, что шов, — человек отпускал кнопку и видел ДРУГОЕ.
-                               *
-                               * Пиксельные инструменты не получают призрака ВОВСЕ: их мазок уже
-                               * лежит на холсте под этим SVG, и линия поверх него — та самая
-                               * пунктирная помеха, на которую владелец жаловался особо («особенно
-                               * это конфьюзит на ластике»): у ластика под пунктиром пусто, и
-                               * пунктир читался как след, которого нет.
-                               *
-                               * Геометрия берётся у ОДНОГО рисовальщика с зафиксированными
-                               * штрихами. Второй, «облегчённый» рисовальщик превью и был бы тем
-                               * самым враньём: он разошёлся бы с настоящим первой же правкой шва.
-                               */
-                              (() => {
-                                const g = strokeGeometry(
-                                  { tool: tool === 'line' ? 'line' : 'freehand', ...paint, pts: shown },
-                                  PLATE_W,
-                                  plateH,
-                                );
-                                if (!g.d) return null;
-                                const liveInk = readInk(paint.ink) ?? 'currentColor';
-                                return (
-                                  <g data-live-stroke=''>
-                                    {g.offsets.map((dy, k) => (
-                                      <path
-                                        key={k}
-                                        d={g.d}
-                                        transform={`translate(0 ${dy})`}
-                                        fill='none'
-                                        stroke={liveInk}
-                                        strokeWidth={g.strokeWidth}
-                                        strokeDasharray={g.dash || undefined}
-                                        strokeLinecap='round'
-                                        strokeLinejoin='round'
-                                      />
-                                    ))}
-                                  </g>
-                                );
-                              })()
-                            );
-                          })(trace)}
-                          {/* ── КРУГЛЫЙ НИБ: где он сейчас и откуда штамп берёт. Обводка чёрным по
+                            <path
+                              d={`M${shown.map(([x, y]) => `${x * PLATE_W},${y * plateH}`).join(' L')}`}
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth={nib}
+                              strokeLinecap='round'
+                              strokeLinejoin='round'
+                              opacity={0.18}
+                              data-nib-swath=''
+                            />
+                          ) : isRasterTool(tool) ? null : (
+                            /**
+                             * ЖИВОЙ ШТРИХ РИСУЕТСЯ ТЕМ ЖЕ, ЧЕМ И ЗАФИКСИРОВАННЫЙ (Y-4).
+                             *
+                             * ⚠ Здесь был ЖИРНЫЙ ПУНКТИР шириной 6px — намёк на линию вместо
+                             * линии. Владелец: «когда ведёшь линию, хочется, чтобы под зажатым
+                             * курсором отображалось именно то, что рисуется, а не пунктирная
+                             * линия». Пунктир врал дважды: он не той толщины, что нить, и не
+                             * того вида, что шов, — человек отпускал кнопку и видел ДРУГОЕ.
+                             *
+                             * Пиксельные инструменты не получают призрака ВОВСЕ: их мазок уже
+                             * лежит на холсте под этим SVG, и линия поверх него — та самая
+                             * пунктирная помеха, на которую владелец жаловался особо («особенно
+                             * это конфьюзит на ластике»): у ластика под пунктиром пусто, и
+                             * пунктир читался как след, которого нет.
+                             *
+                             * Геометрия берётся у ОДНОГО рисовальщика с зафиксированными
+                             * штрихами. Второй, «облегчённый» рисовальщик превью и был бы тем
+                             * самым враньём: он разошёлся бы с настоящим первой же правкой шва.
+                             */
+                            (() => {
+                              const g = strokeGeometry(
+                                {
+                                  tool: tool === 'line' ? 'line' : 'freehand',
+                                  ...paint,
+                                  pts: shown,
+                                },
+                                PLATE_W,
+                                plateH,
+                              );
+                              if (!g.d) return null;
+                              const liveInk = readInk(paint.ink) ?? 'currentColor';
+                              return (
+                                <g data-live-stroke=''>
+                                  {g.offsets.map((dy, k) => (
+                                    <path
+                                      key={k}
+                                      d={g.d}
+                                      transform={`translate(0 ${dy})`}
+                                      fill='none'
+                                      stroke={liveInk}
+                                      strokeWidth={g.strokeWidth}
+                                      strokeDasharray={g.dash || undefined}
+                                      strokeLinecap='round'
+                                      strokeLinejoin='round'
+                                    />
+                                  ))}
+                                </g>
+                              );
+                            })()
+                          );
+                        })(trace)}
+                        {/* ── КРУГЛЫЙ НИБ: где он сейчас и откуда штамп берёт. Обводка чёрным по
                               белому, чтобы круг был виден и на тёмной фотографии. */}
-                          {/* КРУГ НИБА ВИДЕН И ВО ВРЕМЯ ЖЕСТА, а не только при наведении: у
+                        {/* КРУГ НИБА ВИДЕН И ВО ВРЕМЯ ЖЕСТА, а не только при наведении: у
                               ластика собственного следа нет по определению — он убирает, — и без
                               круга рука во время стирания не видит ни границы, ни размера того,
                               чем стирает. Прежде круг гас ровно в тот момент, когда нужен. */}
-                          {nodeEdit && (
-                            /**
-                             * УЗЛЫ И РУКОЯТКИ ПРАВЯЩЕЙСЯ КРИВОЙ.
-                             *
-                             * Тонкая обводка живого пути рисуется ОТДЕЛЬНО от самого штриха: пока
-                             * рука тянет узел, документ ещё не тронут (запись — на отпускании), и
-                             * без этой обводки экран показывал бы старую форму до самого конца
-                             * жеста, то есть рука тянула бы вслепую.
-                             *
-                             * Все размеры делятся на зум: узел обязан оставаться одного размера
-                             * под пальцем на любом приближении, иначе на 400 % он закрывает то,
-                             * что двигают.
-                             */
-                            <g data-node-edit='' pointerEvents='none'>
-                              <path
-                                d={editPreviewD(nodeEdit.path, PLATE_W, plateH)}
-                                fill='none'
-                                stroke='currentColor'
-                                strokeWidth={1 / zoomK}
-                                opacity={0.5}
-                              />
-                              {nodeEdit.path.nodes.map((an, i) => {
-                                const cx = an.a[0] * PLATE_W;
-                                const cy = an.a[1] * plateH;
-                                const r = (i === nodeEdit.sel ? 5 : 3.5) / zoomK;
-                                return (
-                                  <g key={i}>
-                                    {(['in', 'out'] as const).map((side) => {
-                                      const h = handleEnd(an, side);
-                                      if (!h) return null;
-                                      const hx = h[0] * PLATE_W;
-                                      const hy = h[1] * plateH;
-                                      return (
-                                        <g key={side}>
-                                          <line
-                                            x1={cx}
-                                            y1={cy}
-                                            x2={hx}
-                                            y2={hy}
-                                            stroke='currentColor'
-                                            strokeWidth={0.8 / zoomK}
-                                            opacity={0.6}
-                                          />
-                                          <circle
-                                            cx={hx}
-                                            cy={hy}
-                                            r={3 / zoomK}
-                                            fill='#fff'
-                                            stroke='currentColor'
-                                            strokeWidth={1 / zoomK}
-                                            data-node-handle={`${i}:${side}`}
-                                          />
-                                        </g>
-                                      );
-                                    })}
-                                    <rect
-                                      x={cx - r}
-                                      y={cy - r}
-                                      width={r * 2}
-                                      height={r * 2}
-                                      fill={i === nodeEdit.sel ? '#fff' : 'currentColor'}
-                                      stroke='currentColor'
-                                      strokeWidth={1.2 / zoomK}
-                                      data-node={i}
-                                    />
-                                  </g>
-                                );
-                              })}
-                            </g>
-                          )}
-                          {isThreadTool(tool) && nibHover && (
-                            /* ТОЧКА В НАТУРАЛЬНУЮ ТОЛЩИНУ НИТИ. Не кольцо: кольцо означает
-                               «столько заберётся», а нить — это то, что ЛЯЖЕТ, и показывать её
-                               надо тем же телом, каким она рисуется. Белая подложка — чтобы
-                               тонкая тёмная точка была видна и на тёмной фотографии. */
-                            <g data-thread-cursor='' pointerEvents='none'>
-                              <circle
-                                cx={nibHover[0] * PLATE_W}
-                                cy={nibHover[1] * plateH}
-                                r={Math.max(gauge / 2 + 1.5 / zoomK, 1 / zoomK)}
-                                fill='#fff'
-                                opacity={0.85}
-                              />
-                              <circle
-                                cx={nibHover[0] * PLATE_W}
-                                cy={nibHover[1] * plateH}
-                                r={Math.max(gauge / 2, 0.2)}
-                                fill={ink}
-                              />
-                            </g>
-                          )}
-                          {isNibTool(tool) && nibHover && (
-                            <g data-nib-cursor='' pointerEvents='none'>
-                              <circle
-                                cx={nibHover[0] * PLATE_W}
-                                cy={nibHover[1] * plateH}
-                                r={nib / 2}
-                                fill='none'
-                                stroke='#fff'
-                                strokeWidth={2.5 / zoomK}
-                              />
-                              <circle
-                                cx={nibHover[0] * PLATE_W}
-                                cy={nibHover[1] * plateH}
-                                r={nib / 2}
-                                fill='none'
-                                stroke='currentColor'
-                                strokeWidth={1.25 / zoomK}
-                              />
-                            </g>
-                          )}
-                          {isSourceTool(tool) && stampSrc && (
-                            /* ИСТОЧНИК — перекрестие, как в фотошопе, и линия к нибу: без неё
-                               смещение «источник → курсор» невидимо, и печатается непонятно что. */
-                            <g data-stamp-src='' pointerEvents='none'>
-                              {nibHover && (
-                                <line
-                                  x1={stampSrc[0] * PLATE_W}
-                                  y1={stampSrc[1] * plateH}
-                                  x2={nibHover[0] * PLATE_W}
-                                  y2={nibHover[1] * plateH}
-                                  stroke='currentColor'
-                                  strokeWidth={1 / zoomK}
-                                  strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
-                                  opacity={0.5}
-                                />
-                              )}
-                              <circle
-                                cx={stampSrc[0] * PLATE_W}
-                                cy={stampSrc[1] * plateH}
-                                r={nib / 2}
-                                fill='none'
-                                stroke='currentColor'
-                                strokeWidth={1 / zoomK}
-                                strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
-                              />
-                              <line
-                                x1={stampSrc[0] * PLATE_W - 9 / zoomK}
-                                y1={stampSrc[1] * plateH}
-                                x2={stampSrc[0] * PLATE_W + 9 / zoomK}
-                                y2={stampSrc[1] * plateH}
-                                stroke='currentColor'
-                                strokeWidth={1.5 / zoomK}
-                              />
-                              <line
-                                x1={stampSrc[0] * PLATE_W}
-                                y1={stampSrc[1] * plateH - 9 / zoomK}
-                                x2={stampSrc[0] * PLATE_W}
-                                y2={stampSrc[1] * plateH + 9 / zoomK}
-                                stroke='currentColor'
-                                strokeWidth={1.5 / zoomK}
-                              />
-                            </g>
-                          )}
-                          {pen && (
-                            /**
-                             * ПРЕВЬЮ ПЕРА РИСУЕТСЯ ТЕМ ЖЕ ШВОМ, КАКОЙ ВЫБРАН (M-1).
-                             *
-                             * ⚠ ЗДЕСЬ БЫЛ СЕРЫЙ ПУНКТИР — ОДИН И ТОТ ЖЕ ПРИ ЛЮБОМ ШВЕ. Владелец
-                             * называл этот дефект уже дважды: в круге 7 про линию и след руки
-                             * («хочется что бы под зажатием курсора отображалось именно то что
-                             * рисуется а не пунктирная линия»), теперь про перо. Тогда починили
-                             * две ветки из трёх; у пера осталась своя резинка, и она про шов не
-                             * знала ничего.
-                             *
-                             * Геометрия берётся ТЕМ ЖЕ вызовом, что рисует уложенные штрихи, — не
-                             * похожим, а тем же: иначе превью и результат разошлись бы в первый же
-                             * день, когда кто-нибудь поправит один из двух.
-                             */
-                            <g>
-                              {(() => {
-                                const st = penStroke(pen, paint);
-                                const g = st ? strokeGeometry(st, PLATE_W, plateH) : null;
-                                if (!g?.d) {
-                                  // Один якорь — швом рисовать ещё нечего; точка, а не пунктир.
-                                  return null;
-                                }
-                                const previewInk = readInk(st!.ink) ?? 'currentColor';
-                                return (g.offsets ?? [0]).map((dy: number, k: number) => (
-                                  <path
-                                    key={k}
-                                    d={g.d}
-                                    transform={`translate(0 ${dy})`}
-                                    fill='none'
-                                    stroke={previewInk}
-                                    strokeWidth={g.strokeWidth}
-                                    strokeDasharray={g.dash || undefined}
-                                    strokeLinecap='round'
-                                    strokeLinejoin='round'
-                                    data-pen-preview=''
-                                  />
-                                ));
-                              })()}
-                              {/* Резинка: кривая, которая родится, если кликнуть сейчас, — с
-                                  кривизной от исходящей рукоятки последнего якоря. */}
-                              {penHover && !pen.drag && !pen.closed && (
-                                <path
-                                  d={penRubberD(pen, penHover, PLATE_W, plateH, penWorld(), shiftHeld)}
-                                  fill='none'
-                                  stroke='currentColor'
-                                  strokeWidth={1.5 / zoomK}
-                                  strokeDasharray={`${4 / zoomK} ${3 / zoomK}`}
-                                  opacity={0.7}
-                                  data-pen-rubber=''
-                                />
-                              )}
-                              {pen.anchors.map((an, i) => (
+                        {nodeEdit && (
+                          /**
+                           * УЗЛЫ И РУКОЯТКИ ПРАВЯЩЕЙСЯ КРИВОЙ.
+                           *
+                           * Тонкая обводка живого пути рисуется ОТДЕЛЬНО от самого штриха: пока
+                           * рука тянет узел, документ ещё не тронут (запись — на отпускании), и
+                           * без этой обводки экран показывал бы старую форму до самого конца
+                           * жеста, то есть рука тянула бы вслепую.
+                           *
+                           * Все размеры делятся на зум: узел обязан оставаться одного размера
+                           * под пальцем на любом приближении, иначе на 400 % он закрывает то,
+                           * что двигают.
+                           */
+                          <g data-node-edit='' pointerEvents='none'>
+                            <path
+                              d={editPreviewD(nodeEdit.path, PLATE_W, plateH)}
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth={1 / zoomK}
+                              opacity={0.5}
+                            />
+                            {nodeEdit.path.nodes.map((an, i) => {
+                              const cx = an.a[0] * PLATE_W;
+                              const cy = an.a[1] * plateH;
+                              const r = (i === nodeEdit.sel ? 5 : 3.5) / zoomK;
+                              return (
                                 <g key={i}>
-                                  {/* Обе рукоятки КАЖДОГО якоря — их видно и их можно взять. */}
-                                  {(['inH', 'outH'] as const).map((side) => {
-                                    const off = an[side];
-                                    if (!off) return null;
-                                    const hx = (an.a[0] + off[0]) * PLATE_W;
-                                    const hy = (an.a[1] + off[1]) * plateH;
+                                  {(['in', 'out'] as const).map((side) => {
+                                    const h = handleEnd(an, side);
+                                    if (!h) return null;
+                                    const hx = h[0] * PLATE_W;
+                                    const hy = h[1] * plateH;
                                     return (
                                       <g key={side}>
                                         <line
-                                          x1={an.a[0] * PLATE_W}
-                                          y1={an.a[1] * plateH}
+                                          x1={cx}
+                                          y1={cy}
                                           x2={hx}
                                           y2={hy}
                                           stroke='currentColor'
-                                          strokeWidth={1 / zoomK}
-                                          opacity={0.8}
+                                          strokeWidth={0.8 / zoomK}
+                                          opacity={0.6}
                                         />
                                         <circle
                                           cx={hx}
                                           cy={hy}
-                                          r={3.5 / zoomK}
+                                          r={3 / zoomK}
                                           fill='#fff'
                                           stroke='currentColor'
-                                          strokeWidth={1.25 / zoomK}
-                                          data-pen-handle={`${i}:${side === 'inH' ? 'in' : 'out'}`}
+                                          strokeWidth={1 / zoomK}
+                                          data-node-handle={`${i}:${side}`}
                                         />
                                       </g>
                                     );
                                   })}
-                                  {/* Первый якорь при живом пути — полый и крупнее: «клик сюда
-                                      замыкает контур». Остальные — залитые квадраты. */}
-                                  {i === 0 && pen.anchors.length >= 2 ? (
-                                    <rect
-                                      x={an.a[0] * PLATE_W - 5 / zoomK}
-                                      y={an.a[1] * plateH - 5 / zoomK}
-                                      width={10 / zoomK}
-                                      height={10 / zoomK}
-                                      fill='#fff'
-                                      stroke='currentColor'
-                                      strokeWidth={1.5 / zoomK}
-                                      data-pen-anchor={i}
-                                    />
-                                  ) : (
-                                    <rect
-                                      x={an.a[0] * PLATE_W - 4 / zoomK}
-                                      y={an.a[1] * plateH - 4 / zoomK}
-                                      width={8 / zoomK}
-                                      height={8 / zoomK}
-                                      fill='currentColor'
-                                      data-pen-anchor={i}
-                                    />
-                                  )}
+                                  <rect
+                                    x={cx - r}
+                                    y={cy - r}
+                                    width={r * 2}
+                                    height={r * 2}
+                                    fill={i === nodeEdit.sel ? '#fff' : 'currentColor'}
+                                    stroke='currentColor'
+                                    strokeWidth={1.2 / zoomK}
+                                    data-node={i}
+                                  />
                                 </g>
-                              ))}
-                            </g>
-                          )}
-                        </svg>
-                      )}
-                      {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ЛИНЕЙНАЯ ПОЛОВИНА (G-13) ════════════════════
+                              );
+                            })}
+                          </g>
+                        )}
+                        {isThreadTool(tool) && nibHover && (
+                          /* ТОЧКА В НАТУРАЛЬНУЮ ТОЛЩИНУ НИТИ. Не кольцо: кольцо означает
+                               «столько заберётся», а нить — это то, что ЛЯЖЕТ, и показывать её
+                               надо тем же телом, каким она рисуется. Белая подложка — чтобы
+                               тонкая тёмная точка была видна и на тёмной фотографии. */
+                          <g data-thread-cursor='' pointerEvents='none'>
+                            <circle
+                              cx={nibHover[0] * PLATE_W}
+                              cy={nibHover[1] * plateH}
+                              r={Math.max(gauge / 2 + 1.5 / zoomK, 1 / zoomK)}
+                              fill='#fff'
+                              opacity={0.85}
+                            />
+                            <circle
+                              cx={nibHover[0] * PLATE_W}
+                              cy={nibHover[1] * plateH}
+                              r={Math.max(gauge / 2, 0.2)}
+                              fill={ink}
+                            />
+                          </g>
+                        )}
+                        {isNibTool(tool) && nibHover && (
+                          <g data-nib-cursor='' pointerEvents='none'>
+                            <circle
+                              cx={nibHover[0] * PLATE_W}
+                              cy={nibHover[1] * plateH}
+                              r={nib / 2}
+                              fill='none'
+                              stroke='#fff'
+                              strokeWidth={2.5 / zoomK}
+                            />
+                            <circle
+                              cx={nibHover[0] * PLATE_W}
+                              cy={nibHover[1] * plateH}
+                              r={nib / 2}
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth={1.25 / zoomK}
+                            />
+                          </g>
+                        )}
+                        {isSourceTool(tool) && stampSrc && (
+                          /* ИСТОЧНИК — перекрестие, как в фотошопе, и линия к нибу: без неё
+                               смещение «источник → курсор» невидимо, и печатается непонятно что. */
+                          <g data-stamp-src='' pointerEvents='none'>
+                            {nibHover && (
+                              <line
+                                x1={stampSrc[0] * PLATE_W}
+                                y1={stampSrc[1] * plateH}
+                                x2={nibHover[0] * PLATE_W}
+                                y2={nibHover[1] * plateH}
+                                stroke='currentColor'
+                                strokeWidth={1 / zoomK}
+                                strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                                opacity={0.5}
+                              />
+                            )}
+                            <circle
+                              cx={stampSrc[0] * PLATE_W}
+                              cy={stampSrc[1] * plateH}
+                              r={nib / 2}
+                              fill='none'
+                              stroke='currentColor'
+                              strokeWidth={1 / zoomK}
+                              strokeDasharray={`${4 / zoomK} ${4 / zoomK}`}
+                            />
+                            <line
+                              x1={stampSrc[0] * PLATE_W - 9 / zoomK}
+                              y1={stampSrc[1] * plateH}
+                              x2={stampSrc[0] * PLATE_W + 9 / zoomK}
+                              y2={stampSrc[1] * plateH}
+                              stroke='currentColor'
+                              strokeWidth={1.5 / zoomK}
+                            />
+                            <line
+                              x1={stampSrc[0] * PLATE_W}
+                              y1={stampSrc[1] * plateH - 9 / zoomK}
+                              x2={stampSrc[0] * PLATE_W}
+                              y2={stampSrc[1] * plateH + 9 / zoomK}
+                              stroke='currentColor'
+                              strokeWidth={1.5 / zoomK}
+                            />
+                          </g>
+                        )}
+                        {pen && (
+                          /**
+                           * ПРЕВЬЮ ПЕРА РИСУЕТСЯ ТЕМ ЖЕ ШВОМ, КАКОЙ ВЫБРАН (M-1).
+                           *
+                           * ⚠ ЗДЕСЬ БЫЛ СЕРЫЙ ПУНКТИР — ОДИН И ТОТ ЖЕ ПРИ ЛЮБОМ ШВЕ. Владелец
+                           * называл этот дефект уже дважды: в круге 7 про линию и след руки
+                           * («хочется что бы под зажатием курсора отображалось именно то что
+                           * рисуется а не пунктирная линия»), теперь про перо. Тогда починили
+                           * две ветки из трёх; у пера осталась своя резинка, и она про шов не
+                           * знала ничего.
+                           *
+                           * Геометрия берётся ТЕМ ЖЕ вызовом, что рисует уложенные штрихи, — не
+                           * похожим, а тем же: иначе превью и результат разошлись бы в первый же
+                           * день, когда кто-нибудь поправит один из двух.
+                           */
+                          <g>
+                            {(() => {
+                              const st = penStroke(pen, paint);
+                              const g = st ? strokeGeometry(st, PLATE_W, plateH) : null;
+                              if (!g?.d) {
+                                // Один якорь — швом рисовать ещё нечего; точка, а не пунктир.
+                                return null;
+                              }
+                              const previewInk = readInk(st!.ink) ?? 'currentColor';
+                              return (g.offsets ?? [0]).map((dy: number, k: number) => (
+                                <path
+                                  key={k}
+                                  d={g.d}
+                                  transform={`translate(0 ${dy})`}
+                                  fill='none'
+                                  stroke={previewInk}
+                                  strokeWidth={g.strokeWidth}
+                                  strokeDasharray={g.dash || undefined}
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                  data-pen-preview=''
+                                />
+                              ));
+                            })()}
+                            {/* Резинка: кривая, которая родится, если кликнуть сейчас, — с
+                                  кривизной от исходящей рукоятки последнего якоря. */}
+                            {penHover && !pen.drag && !pen.closed && (
+                              <path
+                                d={penRubberD(
+                                  pen,
+                                  penHover,
+                                  PLATE_W,
+                                  plateH,
+                                  penWorld(),
+                                  shiftHeld,
+                                )}
+                                fill='none'
+                                stroke='currentColor'
+                                strokeWidth={1.5 / zoomK}
+                                strokeDasharray={`${4 / zoomK} ${3 / zoomK}`}
+                                opacity={0.7}
+                                data-pen-rubber=''
+                              />
+                            )}
+                            {pen.anchors.map((an, i) => (
+                              <g key={i}>
+                                {/* Обе рукоятки КАЖДОГО якоря — их видно и их можно взять. */}
+                                {(['inH', 'outH'] as const).map((side) => {
+                                  const off = an[side];
+                                  if (!off) return null;
+                                  const hx = (an.a[0] + off[0]) * PLATE_W;
+                                  const hy = (an.a[1] + off[1]) * plateH;
+                                  return (
+                                    <g key={side}>
+                                      <line
+                                        x1={an.a[0] * PLATE_W}
+                                        y1={an.a[1] * plateH}
+                                        x2={hx}
+                                        y2={hy}
+                                        stroke='currentColor'
+                                        strokeWidth={1 / zoomK}
+                                        opacity={0.8}
+                                      />
+                                      <circle
+                                        cx={hx}
+                                        cy={hy}
+                                        r={3.5 / zoomK}
+                                        fill='#fff'
+                                        stroke='currentColor'
+                                        strokeWidth={1.25 / zoomK}
+                                        data-pen-handle={`${i}:${side === 'inH' ? 'in' : 'out'}`}
+                                      />
+                                    </g>
+                                  );
+                                })}
+                                {/* Первый якорь при живом пути — полый и крупнее: «клик сюда
+                                      замыкает контур». Остальные — залитые квадраты. */}
+                                {i === 0 && pen.anchors.length >= 2 ? (
+                                  <rect
+                                    x={an.a[0] * PLATE_W - 5 / zoomK}
+                                    y={an.a[1] * plateH - 5 / zoomK}
+                                    width={10 / zoomK}
+                                    height={10 / zoomK}
+                                    fill='#fff'
+                                    stroke='currentColor'
+                                    strokeWidth={1.5 / zoomK}
+                                    data-pen-anchor={i}
+                                  />
+                                ) : (
+                                  <rect
+                                    x={an.a[0] * PLATE_W - 4 / zoomK}
+                                    y={an.a[1] * plateH - 4 / zoomK}
+                                    width={8 / zoomK}
+                                    height={8 / zoomK}
+                                    fill='currentColor'
+                                    data-pen-anchor={i}
+                                  />
+                                )}
+                              </g>
+                            ))}
+                          </g>
+                        )}
+                      </svg>
+                    )}
+                    {/* ═══ ПЛАВАЮЩАЯ ВСТАВКА — ЛИНЕЙНАЯ ПОЛОВИНА (G-13) ════════════════════
                           Своим слоем, а не внутри общего SVG штрихов: тот гаснет вместе с
                           галочкой «lines», а вставка обязана быть видна, пока её ставят — иначе
                           Enter клал бы то, чего человек не видит. Геометрия — ОДНА функция с
                           зафиксированными штрихами (`strokeGeometry`), поэтому превью не может
                           соврать про шов или толщину. */}
-                      {floatPreview.length > 0 && (
-                        <svg
-                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
-                          preserveAspectRatio='none'
-                          className='pointer-events-none absolute inset-0 h-full w-full'
-                          data-paste-strokes={floatPreview.length}
-                        >
-                          {floatPreview.map((stroke, i) => {
-                            const g = strokeGeometry(stroke, PLATE_W, plateH);
-                            if (!g.d) return null;
-                            const strokeInk = readInk(stroke.ink) ?? 'currentColor';
-                            return (
-                              <g key={i}>
-                                {g.offsets.map((dy, k) => (
-                                  <path
-                                    key={k}
-                                    d={g.d}
-                                    transform={`translate(0 ${dy})`}
-                                    fill='none'
-                                    stroke={strokeInk}
-                                    strokeWidth={g.strokeWidth}
-                                    strokeDasharray={g.dash || undefined}
-                                    strokeLinecap='round'
-                                    strokeLinejoin='round'
-                                  />
-                                ))}
-                              </g>
-                            );
-                          })}
-                        </svg>
-                      )}
-                      {/* ═══ ЗАПЛАТКА: ОТКУДА БЕРУТСЯ ПИКСЕЛИ (G-12) ═════════════════════════
+                    {floatPreview.length > 0 && (
+                      <svg
+                        viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                        preserveAspectRatio='none'
+                        className='pointer-events-none absolute inset-0 h-full w-full'
+                        data-paste-strokes={floatPreview.length}
+                      >
+                        {floatPreview.map((stroke, i) => {
+                          const g = strokeGeometry(stroke, PLATE_W, plateH);
+                          if (!g.d) return null;
+                          const strokeInk = readInk(stroke.ink) ?? 'currentColor';
+                          return (
+                            <g key={i}>
+                              {g.offsets.map((dy, k) => (
+                                <path
+                                  key={k}
+                                  d={g.d}
+                                  transform={`translate(0 ${dy})`}
+                                  fill='none'
+                                  stroke={strokeInk}
+                                  strokeWidth={g.strokeWidth}
+                                  strokeDasharray={g.dash || undefined}
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                />
+                              ))}
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    )}
+                    {/* ═══ ЗАПЛАТКА: ОТКУДА БЕРУТСЯ ПИКСЕЛИ (G-12) ═════════════════════════
                           Дорожка области стоит на месте — она и есть то, что перестраивается, — а
                           призрак показывает МЕСТО-ДОНОР под рукой. Без него человек видел бы, как
                           содержимое области меняется, и не понимал бы, чем он управляет. */}
-                      {patchOffset && sel && (
-                        <svg
-                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
-                          preserveAspectRatio='none'
-                          className='pointer-events-none absolute inset-0 h-full w-full'
-                          data-patch-ghost=''
-                        >
-                          <path
-                            d={selectionPathD(
-                              sel.pts.map(
-                                ([x, y]) => [x + patchOffset[0], y + patchOffset[1]] as [number, number],
-                              ),
-                              PLATE_W,
-                              plateH,
-                            )}
-                            fill='none'
-                            stroke='#fff'
-                            strokeWidth={2.5 / zoomK}
-                          />
-                          <path
-                            d={selectionPathD(
-                              sel.pts.map(
-                                ([x, y]) => [x + patchOffset[0], y + patchOffset[1]] as [number, number],
-                              ),
-                              PLATE_W,
-                              plateH,
-                            )}
-                            fill='none'
-                            stroke='currentColor'
-                            strokeWidth={1.25 / zoomK}
-                            strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
-                          />
-                        </svg>
-                      )}
-                      {/* ═══ НАПРАВЛЯЮЩИЕ (E-17) ═══════════════════════════════════════════
+                    {patchOffset && sel && (
+                      <svg
+                        viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                        preserveAspectRatio='none'
+                        className='pointer-events-none absolute inset-0 h-full w-full'
+                        data-patch-ghost=''
+                      >
+                        <path
+                          d={selectionPathD(
+                            sel.pts.map(
+                              ([x, y]) =>
+                                [x + patchOffset[0], y + patchOffset[1]] as [number, number],
+                            ),
+                            PLATE_W,
+                            plateH,
+                          )}
+                          fill='none'
+                          stroke='#fff'
+                          strokeWidth={2.5 / zoomK}
+                        />
+                        <path
+                          d={selectionPathD(
+                            sel.pts.map(
+                              ([x, y]) =>
+                                [x + patchOffset[0], y + patchOffset[1]] as [number, number],
+                            ),
+                            PLATE_W,
+                            plateH,
+                          )}
+                          fill='none'
+                          stroke='currentColor'
+                          strokeWidth={1.25 / zoomK}
+                          strokeDasharray={`${5 / zoomK} ${4 / zoomK}`}
+                        />
+                      </svg>
+                    )}
+                    {/* ═══ НАПРАВЛЯЮЩИЕ (E-17) ═══════════════════════════════════════════
                           В МИРЕ, А НЕ НА ЭКРАНЕ: они привязаны к листу, значит обязаны ехать с
                           ним на панораме и зуме — своей арифметики вида им не нужно вовсе,
                           трансформ мира уже сделан. Толщина делится на зум по тому же правилу,
@@ -8865,108 +8840,108 @@ export function VectorModal({
                           Указателя не ловит НИКОГДА (`pointer-events: none`): жест ведёт сама
                           сцена — иначе тонкая линия отнимала бы нажатие у кисти раньше, чем
                           инструмент успеет о нём узнать. */}
-                      {rulersOn && guides.length > 0 && (
-                        <svg
-                          viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
-                          preserveAspectRatio='none'
-                          className='pointer-events-none absolute inset-0 h-full w-full'
-                          data-guides={guides.length}
-                        >
-                          {guides.map((g, i) => {
-                            const held = guideDrag.current?.index === i;
-                            const p =
-                              g.dir === 'h'
-                                ? { x1: 0, y1: g.at * plateH, x2: PLATE_W, y2: g.at * plateH }
-                                : { x1: g.at * PLATE_W, y1: 0, x2: g.at * PLATE_W, y2: plateH };
-                            return (
-                              <g key={`${g.dir}${i}`}>
-                                <line {...p} stroke='#fff' strokeWidth={3 / zoomK} opacity={0.6} />
-                                <line
-                                  {...p}
-                                  stroke='#2323ff'
-                                  strokeWidth={(held ? 2 : 1) / zoomK}
-                                  data-guide={i}
-                                  data-guide-dir={g.dir}
-                                  data-guide-at={g.at.toFixed(4)}
-                                />
-                              </g>
-                            );
-                          })}
-                        </svg>
-                      )}
-                      {/* ТРАНСФОРМ-РАМКА — ПОВЕРХ ВСЕГО И ВСЕГДА ОДНА (G-3, G-13, G-4). */}
-                      {frame && (
-                        <TransformFrameOverlay
-                          quad={frame.quad}
-                          /* НАКЛАДКЕ РОД ХОЗЯИНА НУЖЕН ТОЛЬКО ДЛЯ АТРИБУТА, а органы у картинки
+                    {rulersOn && guides.length > 0 && (
+                      <svg
+                        viewBox={`0 0 ${PLATE_W} ${plateH.toFixed(2)}`}
+                        preserveAspectRatio='none'
+                        className='pointer-events-none absolute inset-0 h-full w-full'
+                        data-guides={guides.length}
+                      >
+                        {guides.map((g, i) => {
+                          const held = guideDrag.current?.index === i;
+                          const p =
+                            g.dir === 'h'
+                              ? { x1: 0, y1: g.at * plateH, x2: PLATE_W, y2: g.at * plateH }
+                              : { x1: g.at * PLATE_W, y1: 0, x2: g.at * PLATE_W, y2: plateH };
+                          return (
+                            <g key={`${g.dir}${i}`}>
+                              <line {...p} stroke='#fff' strokeWidth={3 / zoomK} opacity={0.6} />
+                              <line
+                                {...p}
+                                stroke='#2323ff'
+                                strokeWidth={(held ? 2 : 1) / zoomK}
+                                data-guide={i}
+                                data-guide-dir={g.dir}
+                                data-guide-at={g.at.toFixed(4)}
+                              />
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    )}
+                    {/* ТРАНСФОРМ-РАМКА — ПОВЕРХ ВСЕГО И ВСЕГДА ОДНА (G-3, G-13, G-4). */}
+                    {frame && (
+                      <TransformFrameOverlay
+                        quad={frame.quad}
+                        /* НАКЛАДКЕ РОД ХОЗЯИНА НУЖЕН ТОЛЬКО ДЛЯ АТРИБУТА, а органы у картинки
                              ровно те же, что у вставки, — поэтому союз накладки не расширяется, а
                              сюда едет её ближайший родственник. Кто взят в руку, экран говорит
                              отдельно: `data-picture-frame` на плате. */
-                          owner={frame.owner === 'image' ? 'paste' : frame.owner}
-                          axis={frame.axis}
-                          zoom={zoomK}
-                          hover={frameHover}
-                          plateW={PLATE_W}
-                          plateH={plateH}
-                          /* Органы, а не геометрия: изогнутая рамка под восемью ручками сетку
+                        owner={frame.owner === 'image' ? 'paste' : frame.owner}
+                        axis={frame.axis}
+                        zoom={zoomK}
+                        hover={frameHover}
+                        plateW={PLATE_W}
+                        plateH={plateH}
+                        /* Органы, а не геометрия: изогнутая рамка под восемью ручками сетку
                              ИМЕЕТ, но не показывает — иначе на экране жили бы оба набора разом. */
-                          grid={frameShowsNodes(frame) ? frame.grid : undefined}
-                          /* Кольцо роста рисуется ТЕМ ЖЕ цветом, каким `expandRasterLayer`
+                        grid={frameShowsNodes(frame) ? frame.grid : undefined}
+                        /* Кольцо роста рисуется ТЕМ ЖЕ цветом, каким `expandRasterLayer`
                              потом зальёт новое поле: экран показывает не «где будет край», а
                              буквально что там появится. */
-                          cropFill={frame.owner === 'crop' ? cropFill : undefined}
-                        />
-                      )}
-                    </div>
-                    {/* ═══ ЛИНЕЙКИ (E-17) ══════════════════════════════════════════════════
+                        cropFill={frame.owner === 'crop' ? cropFill : undefined}
+                      />
+                    )}
+                  </div>
+                  {/* ═══ ЛИНЕЙКИ (E-17) ══════════════════════════════════════════════════
                         СЁСТРЫ МИРА, А НЕ ЕГО ДЕТИ: мир двигается трансформом, и линейка внутри
                         него уехала бы вместе с ним — то есть перестала бы быть кромкой экрана.
                         Лежат ПОВЕРХ вьюпорта, размера ему не меняя (довод у `RULER_PX`).
 
                         Указатель они ЛОВЯТ, в отличие от всех прочих накладок редактора, и это
                         и есть орган «добавить направляющую»: нажать на линейку и повести. */}
-                    {rulersOn && (
-                      <>
-                        <canvas
-                          ref={rulerTopRef}
-                          data-ruler='top'
-                          onPointerDown={(e) => beginGuideFromRuler(e, 'h')}
-                          className='absolute left-0 top-0 cursor-row-resize'
-                          style={{ width: '100%', height: `${RULER_PX}px` }}
-                        />
-                        <canvas
-                          ref={rulerLeftRef}
-                          data-ruler='left'
-                          onPointerDown={(e) => beginGuideFromRuler(e, 'v')}
-                          className='absolute left-0 top-0 cursor-col-resize'
-                          style={{ width: `${RULER_PX}px`, height: '100%' }}
-                        />
-                        {/* Угол: место, где сходятся обе шкалы. Ничего не делает нарочно — он не
+                  {rulersOn && (
+                    <>
+                      <canvas
+                        ref={rulerTopRef}
+                        data-ruler='top'
+                        onPointerDown={(e) => beginGuideFromRuler(e, 'h')}
+                        className='absolute left-0 top-0 cursor-row-resize'
+                        style={{ width: '100%', height: `${RULER_PX}px` }}
+                      />
+                      <canvas
+                        ref={rulerLeftRef}
+                        data-ruler='left'
+                        onPointerDown={(e) => beginGuideFromRuler(e, 'v')}
+                        className='absolute left-0 top-0 cursor-col-resize'
+                        style={{ width: `${RULER_PX}px`, height: '100%' }}
+                      />
+                      {/* Угол: место, где сходятся обе шкалы. Ничего не делает нарочно — он не
                             орган, а стык хрома, и кнопка здесь обещала бы жест, которого нет. */}
-                        <div
-                          data-ruler='corner'
-                          className='pointer-events-none absolute left-0 top-0 border-b border-r border-hairline bg-bgColor'
-                          style={{ width: `${RULER_PX}px`, height: `${RULER_PX}px` }}
-                        />
-                        {/* ГДЕ РУКА — ДВЕ НИТИ ПО ШКАЛАМ. Единственное, что здесь чернильное:
+                      <div
+                        data-ruler='corner'
+                        className='pointer-events-none absolute left-0 top-0 border-b border-r border-hairline bg-bgColor'
+                        style={{ width: `${RULER_PX}px`, height: `${RULER_PX}px` }}
+                      />
+                      {/* ГДЕ РУКА — ДВЕ НИТИ ПО ШКАЛАМ. Единственное, что здесь чернильное:
                             это ответ на вопрос «сколько», и он обязан читаться сразу. */}
-                        <div
-                          ref={markXRef}
-                          data-ruler-cursor='x'
-                          className='pointer-events-none absolute left-0 top-0 bg-textColor'
-                          style={{ width: '1px', height: `${RULER_PX}px` }}
-                        />
-                        <div
-                          ref={markYRef}
-                          data-ruler-cursor='y'
-                          className='pointer-events-none absolute left-0 top-0 bg-textColor'
-                          style={{ width: `${RULER_PX}px`, height: '1px' }}
-                        />
-                      </>
-                    )}
-                  </div>
+                      <div
+                        ref={markXRef}
+                        data-ruler-cursor='x'
+                        className='pointer-events-none absolute left-0 top-0 bg-textColor'
+                        style={{ width: '1px', height: `${RULER_PX}px` }}
+                      />
+                      <div
+                        ref={markYRef}
+                        data-ruler-cursor='y'
+                        className='pointer-events-none absolute left-0 top-0 bg-textColor'
+                        style={{ width: `${RULER_PX}px`, height: '1px' }}
+                      />
+                    </>
+                  )}
                 </div>
               </div>
+            </div>
           </div>
 
           {/* Страж выхода. Возврат фокуса экрану — тем же приёмом, что у фулскрина сборки: без
@@ -8989,9 +8964,8 @@ export function VectorModal({
             }}
           >
             <Text size='micro' component='p'>
-              The drawing changed since it was read and was not saved. Leaving now throws the
-              change away — «save the drawing only» in the header keeps it without making a
-              picture.
+              The drawing changed since it was read and was not saved. Leaving now throws the change
+              away — «save the drawing only» in the header keeps it without making a picture.
             </Text>
           </ConfirmationModal>
 

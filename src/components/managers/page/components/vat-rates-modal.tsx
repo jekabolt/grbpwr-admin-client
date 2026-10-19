@@ -3,25 +3,29 @@ import { adminService } from 'api/api';
 import { VatRate } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { AddDoor, ConfirmationModal, Text, Close } from 'ui';
+import { AddDoor, CalloutBox, ConfirmationModal, Text, Close } from 'ui';
 
 type Row = { countryCode: string; ratePct: string; validFrom: string };
-const cell =
-  'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Destination-country VAT rates used to compute net-of-VAT revenue. Get + Upsert.
 export function VatRatesModal({
   open,
   onOpenChange,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Saved and closed: the opener flashes its receipt. */
+  onSaved?: () => void;
 }) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.analytics);
-  const { showMessage } = useSnackBarStore();
+  // A refusal stands in the dialog until the next attempt.
+  const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
   const [rows, setRows] = useState<Row[]>([]);
 
@@ -33,6 +37,7 @@ export function VatRatesModal({
 
   useEffect(() => {
     if (!open) return;
+    setError(null);
     setRows(
       (data?.rates ?? []).map((r) => ({
         countryCode: r.countryCode ?? '',
@@ -46,16 +51,29 @@ export function VatRatesModal({
     mutationFn: (rates: VatRate[]) => adminService.UpsertVatRates({ rates }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['vatRates'] });
-      showMessage('VAT rates saved', 'success');
       onOpenChange(false);
+      onSaved?.();
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to save VAT rates', 'error'),
+    onError: (e, vars) => {
+      const msg = e instanceof Error ? e.message : 'Failed to save VAT rates';
+      if (failureClassOfError(e) === 'refused') return setError(msg);
+      notify({
+        sev: 'error',
+        subject: 'VAT RATES',
+        text: 'not saved',
+        detail: msg,
+        action:
+          failureClassOfError(e) === 'transient'
+            ? { label: 'retry', onClick: () => save.mutate(vars) }
+            : undefined,
+      });
+    },
   });
 
   const upd = (i: number, patch: Partial<Row>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  const handleSave = () =>
+  const handleSave = () => {
+    setError(null);
     save.mutate(
       rows
         .filter((r) => r.countryCode.trim() && r.ratePct.trim())
@@ -65,6 +83,7 @@ export function VatRatesModal({
           validFrom: r.validFrom ? new Date(r.validFrom).toISOString() : undefined,
         })),
     );
+  };
 
   return (
     <ConfirmationModal
@@ -74,6 +93,7 @@ export function VatRatesModal({
       title='VAT rates by country'
       confirmLabel={save.isPending ? 'saving…' : 'save'}
       confirmDisabled={!canEdit || save.isPending}
+      closeOnConfirm={false}
     >
       <div className='flex min-w-[min(90vw,30rem)] flex-col gap-2'>
         <Text variant='inactive' size='small'>
@@ -145,6 +165,13 @@ export function VatRatesModal({
           </div>
         )}
       </div>
+      {error && (
+        <CalloutBox tone='error' className='mt-3'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {error}
+          </Text>
+        </CalloutBox>
+      )}
     </ConfirmationModal>
   );
 }

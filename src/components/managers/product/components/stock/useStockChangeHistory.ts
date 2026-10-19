@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_OrderFactor, common_StockChangeSource } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 
 export type StockChangeHistoryFilters = {
   dateFrom?: string;
@@ -34,7 +34,6 @@ export function useStockChangeHistory(
   filters: StockChangeHistoryFilters = {},
   options?: { enabled?: boolean },
 ) {
-  const { showMessage } = useSnackBarStore();
   const { enabled = true } = options ?? {};
   const {
     dateFrom,
@@ -64,8 +63,14 @@ export function useStockChangeHistory(
         const nextOffset = pageParam + changes.length;
         return { changes, total, nextOffset };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to fetch stock history';
-        showMessage(msg, 'error');
+        notify({
+          sev: 'error',
+          subject: 'STOCK HISTORY',
+          text: 'not loaded',
+          bad: 'fetch failed',
+          detail: err instanceof Error ? err.message : undefined,
+          key: `stock-history-${productId}`,
+        });
         throw err;
       }
     },

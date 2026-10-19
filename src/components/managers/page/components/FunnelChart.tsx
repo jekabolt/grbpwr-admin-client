@@ -68,7 +68,7 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
                   {dropOff > 0 && <Text className='text-error'>-{dropOff.toFixed(1)}%</Text>}
                 </div>
               </div>
-              <div className='h-6 bg-bgSecondary relative overflow-hidden'>
+              <div className='h-6 bg-pageBg relative overflow-hidden'>
                 <div
                   className='h-full bg-textColor transition-all'
                   style={{ width: `${percentage}%` }}

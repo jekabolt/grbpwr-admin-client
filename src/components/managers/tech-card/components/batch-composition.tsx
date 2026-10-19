@@ -19,10 +19,9 @@ import {
 } from 'components/managers/production-runs/components/useProductionRuns';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, GroupLabel, Text, EmptyCell } from 'ui';
+import { Button, GroupLabel, Text, EmptyCell, useDoneFlash } from 'ui';
 import { ulid } from 'utils/ulid';
 
 // СОСТАВ ПАРТИИ ПРЯМО В КОСТИНГЕ — колорвей × размер × количество, без ухода с вкладки.
@@ -75,7 +74,8 @@ export function BatchComposition({
   onCancel?: () => void;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // The button says «saved ✓»; a new draft opens itself.
+  const saved = useDoneFlash();
   const save = useSaveProductionRun();
 
   const isNew = !run;
@@ -200,7 +200,6 @@ export function BatchComposition({
       {
         onSuccess: (res) => {
           setDirty(false);
-          showMessage('run draft created — no fabric is committed', 'success');
           const id = (res as { id?: number })?.id ?? 0;
           if (id) onCreated?.(id);
         },
@@ -229,7 +228,7 @@ export function BatchComposition({
       {
         onSuccess: () => {
           setDirty(false);
-          showMessage('the draft composition is saved', 'success');
+          saved.flash();
         },
         onError: (e) => setError(updateRunErrorMessage(e)),
       },
@@ -345,6 +344,7 @@ export function BatchComposition({
             variant='secondary'
             disabled={!!blockedReason || save.isPending}
             title={blockedReason || undefined}
+            done={!isNew && saved.on}
             onClick={isNew ? create : update}
           >
             {save.isPending ? 'saving…' : isNew ? 'create a draft' : 'save the composition'}

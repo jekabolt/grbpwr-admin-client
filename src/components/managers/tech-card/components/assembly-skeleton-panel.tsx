@@ -1042,7 +1042,7 @@ function AssemblySkeletonPanel({
           // scrolling body, ruled footer.
           className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] focus:outline-none lg:inset-x-auto lg:left-1/2 lg:w-full lg:max-w-5xl lg:-translate-x-1/2'
         >
-          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
             <Dialog.Title asChild>
               <Text
                 size='micro'

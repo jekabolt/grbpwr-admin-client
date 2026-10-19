@@ -54,13 +54,13 @@ export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
       render={({ field }) => (
         <label className='flex flex-col gap-1'>
           <Text variant='uppercase' size='small' component='span'>
-            recorded by (optional)
+            recorded by
           </Text>
           <Select
             name='recordedBy'
             items={items}
             value={field.value ? String(field.value) : UNSET}
-            onValueChange={(val?: string) => field.onChange(val === UNSET ? '' : (val ?? ''))}
+            onValueChange={(val?: string) => field.onChange(val === UNSET ? '' : val ?? '')}
             fullWidth
           />
         </label>

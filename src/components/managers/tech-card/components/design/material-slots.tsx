@@ -891,7 +891,7 @@ function FibreField({ index, raw, readable }: { index: number; raw: string; read
           data-b16-fiber={index}
           className={cn(
             'flex min-w-0 flex-1 items-center truncate px-[7px] py-[3px]',
-            !readable && !raw && 'text-textInactiveColor',
+            !readable && !raw && 'text-borderColor',
           )}
         >
           {readable || raw || 'not stated'}

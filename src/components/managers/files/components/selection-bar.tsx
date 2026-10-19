@@ -816,7 +816,7 @@ export function FilesSelectionBar({
                         setRoleChoice(LEAVE_ROLES);
                       }}
                       className={`flex w-full items-center gap-2 border-b border-hairline px-2 py-1.5 text-left last:border-b-0 ${
-                        on ? 'bg-textColor text-bgColor' : 'bg-bgColor hover:bg-bgSecondary'
+                        on ? 'bg-textColor text-bgColor' : 'bg-bgColor hover:bg-pageBg'
                       }`}
                     >
                       <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>

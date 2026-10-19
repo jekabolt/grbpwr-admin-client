@@ -1,16 +1,21 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useState } from 'react';
-import { Button, Input, Text } from 'ui';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
+import { Button, CalloutBox, Input, Text } from 'ui';
 import { useSendMemberEmail } from '../../utils/hooks';
 
 interface SendEmailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   userId: number;
+  /** Fired after the dialog closes on a sent email: the caller shows the receipt. */
+  onSent?: () => void;
 }
 
-export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalProps) {
+export function SendEmailModal({ open, onOpenChange, onSent, userId }: SendEmailModalProps) {
   const sendEmail = useSendMemberEmail();
+  // The server's refusal stands in the dialog until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [heading, setHeading] = useState('');
   const [body, setBody] = useState('');
   const [ctaLabel, setCtaLabel] = useState('');
@@ -20,6 +25,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
 
   const handleSend = () => {
     if (!canSend) return;
+    setRefusal(null);
     sendEmail.mutate(
       { userId, heading, body, ctaLabel: ctaLabel || undefined, ctaUrl: ctaUrl || undefined },
       {
@@ -29,7 +35,9 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
           setCtaLabel('');
           setCtaUrl('');
           onOpenChange(false);
+          onSent?.();
         },
+        onError: (e) => isRefusal(e) && setRefusal(errorSentence(e, 'not sent')),
       },
     );
   };
@@ -38,7 +46,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex h-auto -translate-y-1/2 flex-col gap-3 border border-textInactiveColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex h-auto -translate-y-1/2 flex-col gap-3 border border-borderColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
           <DialogPrimitives.Title asChild>
             <Text variant='uppercase' size='large'>
               Send custom email
@@ -68,7 +76,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={5}
-              className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
+              className='w-full resize-none border border-borderColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
             />
           </div>
 
@@ -96,6 +104,14 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
               />
             </div>
           </div>
+
+          {refusal && (
+            <CalloutBox tone='error'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not sent</b> · {refusal}
+              </Text>
+            </CalloutBox>
+          )}
 
           <div className='mt-2 flex justify-end gap-2'>
             <Button

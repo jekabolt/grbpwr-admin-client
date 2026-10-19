@@ -105,7 +105,7 @@ export function CatalogCommerceTags({ product }: { product: common_Colorway }) {
       {tags.map((tag) => (
         <span
           key={tag}
-          className='border border-textInactiveColor bg-bgColor px-1 py-0.5 leading-none'
+          className='border border-borderColor bg-bgColor px-1 py-0.5 leading-none'
         >
           <Text size='small' variant='label' component='span'>
             {tag}

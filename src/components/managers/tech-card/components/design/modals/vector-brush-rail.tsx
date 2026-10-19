@@ -650,7 +650,7 @@ function InkPicker({
         'relative flex h-5 w-5 shrink-0 items-center justify-center border',
         'focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-textColor',
         disabled
-          ? 'cursor-default border-borderColor text-textInactiveColor'
+          ? 'cursor-default border-borderColor text-borderColor'
           : 'cursor-pointer border-borderColor text-textColor hover:border-textColor',
       )}
     >
@@ -1655,7 +1655,7 @@ export function VectorBrushRail(p: RailProps) {
               // Запертый список обязан ВЫГЛЯДЕТЬ запертым: Radix метит кнопку `disabled`, но у
               // примитива на этот случай цвета нет, и в режиме только-чтения выбор видов читался
               // как живой (замерено на пресете `unreadable`).
-              className='disabled:text-textInactiveColor'
+              className='disabled:text-borderColor'
               // ВЫБРАННАЯ СТРОКА ИНВЕРТИРОВАНА — ступень `chip-selected` из DESIGN.md. Образец
               // рисуется `currentColor` и потому выворачивается сам, без второго правила о цвете.
               // Подсветка клавиатурой (`data-[highlighted]`) слабее заливки нарочно: она говорит
@@ -1811,7 +1811,7 @@ export function VectorBrushRail(p: RailProps) {
             className={cn(
               'flex h-5 w-5 shrink-0 items-center justify-center border',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-              'disabled:cursor-default disabled:text-textInactiveColor',
+              'disabled:cursor-default disabled:text-borderColor',
               p.picking
                 ? 'border-textColor bg-textColor text-bgColor'
                 : 'cursor-pointer border-borderColor bg-bgColor text-textColor hover:border-textColor',

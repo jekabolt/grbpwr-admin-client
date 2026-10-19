@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Button } from 'ui';
 
 import { EmptyState } from '../core';
@@ -28,14 +28,12 @@ export function EmptyStudio({
   /** Opens the generation form when the caller has one; absent, only the input door is drawn. */
   onGenerate?: () => void;
 }) {
-  const { showMessage } = useSnackBarStore();
-
   // The door leads to INPUT — REFERENCES: «bring files» means «put them into the input» since the
   // uploads shelf was removed (R-18). The anchor `#design-input` is stamped by `studio-tab.tsx`.
   const gotoInput = () => {
     const el = document.getElementById('design-input');
     if (!el) {
-      showMessage('the input block is not on this screen', 'error');
+      notify({ sev: 'error', subject: 'INPUT', text: 'not found' });
       return;
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });

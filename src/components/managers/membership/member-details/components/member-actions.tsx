@@ -2,7 +2,17 @@ import { Member, TierCode } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { ConfirmationModal, Button, Input, Section, Selector, Text } from 'ui';
+import {
+  ConfirmationModal,
+  Button,
+  CalloutBox,
+  Input,
+  Section,
+  Selector,
+  Text,
+  useDoneFlash,
+} from 'ui';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
 import {
   useHardEraseMember,
   useOverrideTier,
@@ -32,6 +42,10 @@ export function MemberActions({ member }: { member: Member }) {
   const [eraseOpen, setEraseOpen] = useState(false);
   const [eraseConfirm, setEraseConfirm] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  // The server's refusal of the override stands in the form until the next edit.
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  // The dialog is gone by the time the email leaves: the receipt lands on the door that opened it.
+  const sent = useDoneFlash();
 
   const isErased = member.status === 'erased';
   const tierChanged = newTier !== member.currentTier;
@@ -44,7 +58,10 @@ export function MemberActions({ member }: { member: Member }) {
     if (!tierChanged || !reason.trim()) return;
     overrideTier.mutate(
       { userId, newTier, reason: reason.trim() },
-      { onSuccess: () => setReason('') },
+      {
+        onSuccess: () => setReason(''),
+        onError: (e) => isRefusal(e) && setOverrideError(errorSentence(e, 'not changed')),
+      },
     );
   };
 
@@ -58,7 +75,7 @@ export function MemberActions({ member }: { member: Member }) {
           Manual tier change
         </Text>
         <div className='flex flex-wrap gap-2 items-center'>
-          <span className='inline-block px-2 py-0.5 bg-textInactiveColor/30'>
+          <span className='inline-block px-2 py-0.5 bg-borderColor/30'>
             <Text>{formatTierLabel(member.currentTier, member.currentTierDisplay)}</Text>
           </span>
           <Text variant='inactive'>&rarr;</Text>
@@ -66,7 +83,10 @@ export function MemberActions({ member }: { member: Member }) {
             label='New tier'
             options={TIER_OPTIONS}
             value={newTier}
-            onChange={(v: string) => setNewTier(v as TierCode)}
+            onChange={(v: string) => {
+              setOverrideError(null);
+              setNewTier(v as TierCode);
+            }}
             disabled={isErased}
           />
         </div>
@@ -75,7 +95,11 @@ export function MemberActions({ member }: { member: Member }) {
           type='text'
           placeholder='reason (required)'
           value={reason}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            setOverrideError(null);
+            setReason(e.target.value);
+          }}
+          aria-invalid={overrideError !== null || undefined}
           disabled={isErased}
           className='w-full'
         />
@@ -88,6 +112,13 @@ export function MemberActions({ member }: { member: Member }) {
         >
           Override tier
         </Button>
+        {overrideError && (
+          <CalloutBox tone='error'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not changed</b> · {overrideError}
+            </Text>
+          </CalloutBox>
+        )}
       </div>
 
       {/* Status toggle */}
@@ -138,6 +169,7 @@ export function MemberActions({ member }: { member: Member }) {
           variant='secondary'
           size='lg'
           onClick={() => setEmailOpen(true)}
+          done={sent.on && 'sent'}
           disabled={isErased}
         >
           Send custom email
@@ -164,7 +196,12 @@ export function MemberActions({ member }: { member: Member }) {
         </Button>
       </div>
 
-      <SendEmailModal open={emailOpen} onOpenChange={setEmailOpen} userId={userId} />
+      <SendEmailModal
+        open={emailOpen}
+        onOpenChange={setEmailOpen}
+        onSent={sent.flash}
+        userId={userId}
+      />
 
       <ConfirmationModal
         open={deleteOpen}

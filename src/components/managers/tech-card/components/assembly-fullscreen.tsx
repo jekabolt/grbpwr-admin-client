@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { refuseGesture } from './refuse-gesture';
 import {
   Fragment,
   useCallback,
@@ -490,7 +490,6 @@ export function AssemblyFullscreen({
   renamedUnit,
   onExit,
 }: AssemblyFullscreenProps) {
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   // КАТАЛОГ РАБОТ ДЛЯ РЕЛЬСА СПИСКА (R8). Тот же модуль рельса, что у инлайна, обязан звать шаг
   // тем же словом — а до обязательного пропа фулскрин каталога НЕ передавал, и работа, знакомая
   // каталогу, ехала здесь токеном, расходясь с рельсом на странице. Ключ у запроса один на
@@ -1191,69 +1190,72 @@ export function AssemblyFullscreen({
 
   const sewSelection = useCallback(() => {
     if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('ASSEMBLY', 'frozen', FROZEN_REFUSAL);
       return;
     }
     const free = freeOfPicked();
     const spent = picked.length - free.length;
     if (free.length < 2) {
       const areIn = `${spent} of the picked ${spent === 1 ? 'is' : 'are'} already in units`;
-      showMessage(
+      refuseGesture(
+        'ASSEMBLY',
+        'no unit',
         spent
           ? `a unit needs two nodes still on the table — ${areIn}`
           : 'a unit needs at least two nodes picked — draw a marquee or ⌘/⇧-click their heads',
-        'error',
       );
       return;
     }
     setPendingCreate({ inputKeys: free, intent: 'unit' });
     setPicked([]);
-  }, [frozen, picked, freeOfPicked, setPendingCreate, showMessage]);
+  }, [frozen, picked, freeOfPicked, setPendingCreate]);
 
   const processSelection = useCallback(() => {
     if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('ASSEMBLY', 'frozen', FROZEN_REFUSAL);
       return;
     }
     const free = freeOfPicked();
     const spent = picked.length - free.length;
     if (free.length === 0) {
       const nodes = `${spent} ${spent === 1 ? 'node' : 'nodes'}`;
-      showMessage(
+      refuseGesture(
+        'ASSEMBLY',
+        'nothing to process',
         spent
           ? `everything picked is already in units — ${nodes}, and none of them can be an input`
           : 'pick a piece or a unit first',
-        'error',
       );
       return;
     }
     setPendingCreate({ inputKeys: free, intent: 'process' });
     setPicked([]);
-  }, [frozen, picked, freeOfPicked, setPendingCreate, showMessage]);
+  }, [frozen, picked, freeOfPicked, setPendingCreate]);
 
   const dissolveSelection = useCallback(() => {
     if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('ASSEMBLY', 'frozen', FROZEN_REFUSAL);
       return;
     }
     // ТОТ ЖЕ ГЕЙТ, ЧТО У КНОПКИ В БОКСЕ: ровно один узел, и он на столе. В прототипе это был
     // починенный дефект — клавиша растворяла произвольного члена маркизы.
     const free = freeOfPicked();
     if (free.length !== 1 || !res.units.has(free[0])) {
-      showMessage(
+      refuseGesture(
+        'ASSEMBLY',
+        'not dissolved',
         'dissolve needs exactly one unit picked, and it must still be on the table',
-        'error',
       );
       return;
     }
     const block = blocks.find((b) => b.key === free[0]);
     if (!block) {
-      showMessage(`“${free[0]}” has no producing step to dissolve`, 'error');
+      refuseGesture('ASSEMBLY', 'not dissolved', `“${free[0]}” has no producing step to dissolve`);
       return;
     }
     dissolveUnit(block.producedAt);
     setPicked([]);
-  }, [frozen, freeOfPicked, res, blocks, dissolveUnit, showMessage]);
+  }, [frozen, freeOfPicked, res, blocks, dissolveUnit]);
 
   /**
    * РЕЖИМ УЗЛА ПО КЛАВИШЕ — ЖЕСТ БЕЗ ГЕЙТА ЗАМОРОЗКИ, и это не забывчивость: читать и раскладывать
@@ -1267,9 +1269,10 @@ export function AssemblyFullscreen({
     if (listMode) {
       // В СПИСКЕ ДОКА НЕТ ВОВСЕ, и отказ обязан назвать не только препятствие, но и выход — как это
       // делает `]`. Шаги узла в списке видны и так: рельс врезает шапки блоков.
-      showMessage(
+      refuseGesture(
+        'ASSEMBLY',
+        'no unit editor',
         'the unit editor lives in the dock, and the list has none — ⌘l goes back to the schematic',
-        'error',
       );
       return;
     }
@@ -1278,15 +1281,16 @@ export function AssemblyFullscreen({
       openUnitDock(units[0]);
       return;
     }
-    showMessage(
+    refuseGesture(
+      'ASSEMBLY',
+      'no unit editor',
       units.length > 1
         ? `${units.length} units picked — the unit editor opens one at a time`
         : picked.length === 0
           ? 'pick a unit first — ⌘/⇧-click its head, or drag a marquee around it'
           : 'nothing picked is a unit: pieces have no steps of their own, units do',
-      'error',
     );
-  }, [listMode, picked, res, openUnitDock, showMessage]);
+  }, [listMode, picked, res, openUnitDock]);
 
   // ⌘Z И ⇧⌘Z ИДУТ НАСКВОЗЬ, БЕЗ ЗДЕШНЕГО ГЕЙТА ЗАМОРОЗКИ — в отличие от трёх глаголов выше, и это
   // намеренно. Гейт тут был и резал оба рода записей скопом; после того как он стал по-родовым
@@ -1296,11 +1300,11 @@ export function AssemblyFullscreen({
 
   const fitSelection = useCallback(() => {
     if (picked.length === 0) {
-      showMessage('nothing picked — the view has nothing to frame', 'error');
+      refuseGesture('ASSEMBLY', 'nothing picked', 'nothing picked — the view has nothing to frame');
       return;
     }
     canvasRef.current?.fitSelection();
-  }, [picked, showMessage]);
+  }, [picked]);
 
   // --- find-палитра -------------------------------------------------------------------------------
   //
@@ -1578,7 +1582,7 @@ export function AssemblyFullscreen({
         // дефект прототипа: `]` в списке открывал док с теми же полями поверх той же строки).
         // Клавиша жива в обоих видах, значит и объяснить обязана в обоих.
         if (listMode) {
-          showMessage('the list already carries the step editor', 'error');
+          refuseGesture('ASSEMBLY', 'no dock', 'the list already carries the step editor');
           e.preventDefault();
           break;
         }

@@ -8,7 +8,7 @@ import Text from './text';
 /**
  * The one modal shell in the app. Reference grammar:
  *   panel  white, 1px INK border (not borderColor), --shadow-modal
- *   head   bgSecondary strip, 10px bold uppercase title, ✕ pushed right
+ *   head   pageBg strip, 10px bold uppercase title, ✕ pushed right
  *   body   p-2.5, scrolls, capped at 90vh
  *   foot   ruled top, right-aligned actions
  *
@@ -91,6 +91,13 @@ interface Props {
   headerActions?: React.ReactNode;
   /** Drop the footer's cancel button: the head's ✕ is the one way out. */
   hideCancel?: boolean;
+  /**
+   * Полноэкранная оболочка для телефонной страницы. Без этого флага разметка и метрики
+   * обычной модалки остаются прежними.
+   */
+  fullScreen?: boolean;
+  /** Полноэкранный экран рисует собственные шапку и подвал внутри тела. */
+  hideHeader?: boolean;
 }
 
 export function ConfirmationModal({
@@ -113,6 +120,8 @@ export function ConfirmationModal({
   cancelDisabled,
   headerActions,
   hideCancel,
+  fullScreen,
+  hideHeader,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
@@ -147,13 +156,17 @@ export function ConfirmationModal({
         <DialogPrimitives.Content
           onOpenAutoFocus={onOpenAutoFocus}
           onCloseAutoFocus={onCloseAutoFocus}
-          className={`fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`}
+          className={
+            fullScreen
+              ? 'fixed inset-0 z-[var(--z-modal)] flex max-h-none w-full flex-col overflow-hidden bg-bgColor text-textColor'
+              : `fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`
+          }
         >
           <DialogPrimitives.Description className='sr-only'>
             Confirmation
           </DialogPrimitives.Description>
-          {title ? (
-            <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+          {title && !hideHeader ? (
+            <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
               <DialogPrimitives.Title asChild>
                 <Text
                   size='micro'
@@ -173,10 +186,18 @@ export function ConfirmationModal({
               </DialogPrimitives.Close>
             </div>
           ) : (
-            <DialogPrimitives.Title className='sr-only'>Confirmation</DialogPrimitives.Title>
+            <DialogPrimitives.Title className='sr-only'>
+              {title || 'Confirmation'}
+            </DialogPrimitives.Title>
           )}
 
-          <div className='min-h-0 flex-1 overflow-y-auto p-2.5'>
+          <div
+            className={
+              fullScreen && hideHeader
+                ? 'min-h-0 flex-1 overflow-hidden'
+                : 'min-h-0 flex-1 overflow-y-auto p-2.5'
+            }
+          >
             {children}
             {typeToConfirm && (
               <div className='mt-2.5'>

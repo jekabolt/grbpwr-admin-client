@@ -854,7 +854,7 @@ export function CompositionLabelBlock({
     const region = openHere?.regions.find((r) => r.key === open?.key);
     return (
       <div key={row.label} className='flex flex-col' data-ribbon-row={row.label}>
-        <div className='group/bench bg-bgSecondary' style={{ padding: pad }} data-bench={row.label}>
+        <div className='group/bench bg-pageBg' style={{ padding: pad }} data-bench={row.label}>
           <div className='grid' style={grid}>
             {sides.map((sd) => (
               <Ribbon

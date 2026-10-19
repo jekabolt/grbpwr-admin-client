@@ -3,14 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runStatusLabel, runStatusOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
@@ -60,14 +60,16 @@ export function ProductionRunModal({
   onOpenChange: (v: boolean) => void;
   run?: common_ProductionRun;
 }) {
-  const { showMessage } = useSnackBarStore();
   const update = useUpdateRunSection();
   const isEdit = !!run?.id;
   const busy = update.isPending;
   const [d, setD] = useState<Draft>(emptyDraft);
+  // The server's refusal stands above the save button; a lost request goes to the inbox.
+  const [fail, setFail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     const ins = run?.run;
     setD(
       ins
@@ -130,9 +132,10 @@ export function ProductionRunModal({
     // No create branch: this modal is only ever opened on an existing run. A missing id here is a
     // caller bug, not an operator one — refuse loudly rather than silently minting a run.
     if (!isEdit || !run?.id) {
-      showMessage('no run to edit — creation lives in a separate modal', 'error');
+      setFail('no run to edit');
       return;
     }
+    setFail(null);
     // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
     update.mutate(
       {
@@ -150,11 +153,12 @@ export function ProductionRunModal({
         },
       },
       {
-        onSuccess: () => {
-          showMessage('Run updated', 'success');
-          onOpenChange(false);
-        },
-        onError: (e) => showMessage(updateRunErrorMessage(e), 'error'),
+        // The run's own page / row shows the change.
+        onSuccess: () => onOpenChange(false),
+        onError: (e) =>
+          isRefusal(e)
+            ? setFail(updateRunErrorMessage(e))
+            : notifyFailure(`PR-${run.id}`, 'not saved', e, updateRunErrorMessage(e), submit),
       },
     );
   };
@@ -163,8 +167,8 @@ export function ProductionRunModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               {`production run PR-${run?.id ?? ''}`}
             </DialogPrimitives.Title>
@@ -294,7 +298,8 @@ export function ProductionRunModal({
             </label>
           </div>
 
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
+            <FailNote verb='not saved' text={fail} className='w-full' />
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>

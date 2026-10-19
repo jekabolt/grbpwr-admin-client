@@ -14,7 +14,7 @@ import {
 } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { getCategoriesByParentId } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
@@ -57,7 +57,6 @@ function parseSeason(raw: string | null): common_SkuSeason | undefined {
 }
 
 export function TechCardList() {
-  const { showMessage } = useSnackBarStore();
   const deleteTechCard = useDeleteTechCard();
   const canEdit = usePermissions().canWrite(SECTION.techCards);
   // The category tree is already in memory (DictionaryProvider loads it once at startup).
@@ -273,10 +272,16 @@ export function TechCardList() {
 
   function confirmDelete() {
     if (!pendingDelete) return;
-    deleteTechCard.mutate(pendingDelete.id, {
-      onSuccess: () => showMessage('tech card deleted', 'success'),
+    const id = pendingDelete.id;
+    // The tile leaving the list is the receipt.
+    deleteTechCard.mutate(id, {
       onError: (error) =>
-        showMessage(error instanceof Error ? error.message : 'Failed to delete tech card', 'error'),
+        notify({
+          sev: 'error',
+          subject: `TECH CARD ${id}`,
+          text: 'not deleted',
+          detail: error instanceof Error ? error.message : undefined,
+        }),
     });
     setPendingDelete(null);
   }

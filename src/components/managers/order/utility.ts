@@ -1,14 +1,13 @@
 import { adminService } from 'api/api';
 import type { RefundReason } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { getOrderStatusName } from '../orders-catalog/components/utility';
 import { OrderDetailsState } from './interface';
 
 export const useOrderDetails = (uuid: string) => {
   const { dictionary } = useDictionary();
-  const showMessage = useSnackBarStore((state) => state.showMessage);
   const [state, setState] = useState<OrderDetailsState>({
     orderDetails: undefined,
     stripeDetails: undefined,
@@ -22,6 +21,19 @@ export const useOrderDetails = (uuid: string) => {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [selectedUnitKeys, setSelectedUnitKeys] = useState<string[]>([]);
 
+  // MONEY PATH: only the feedback changed here. Errors go to the inbox with the order on them;
+  // writes get no retry action (a lost response may still have landed). Receipts: the status,
+  // the cost and the tracking code on the page.
+  const orderSubject = () => `ORDER ${state.orderDetails?.order?.id ?? uuid.slice(0, 8)}`;
+  const failed = (text: string, error: unknown, fallback: string, retry?: () => void) =>
+    notify({
+      sev: 'error',
+      subject: orderSubject(),
+      text,
+      detail: error instanceof Error ? error.message : fallback,
+      action: retry ? { label: 'retry', onClick: retry } : undefined,
+    });
+
   async function fetchOrderDetails() {
     setState((prev) => ({ ...prev, isLoading: true }));
     try {
@@ -34,8 +46,7 @@ export const useOrderDetails = (uuid: string) => {
         orderStatus: getOrderStatusName(dictionary, order.order?.order?.orderStatusId),
       }));
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Error fetching order details';
-      showMessage(msg, 'error');
+      failed('not loaded', error, 'Error fetching order details', () => void fetchOrderDetails());
     } finally {
       setState((prev) => ({ ...prev, isLoading: false }));
     }
@@ -84,8 +95,7 @@ export const useOrderDetails = (uuid: string) => {
       fetchOrderDetails();
       setIsEdit(false);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to save tracking number';
-      showMessage(msg, 'error');
+      failed('tracking not saved', error, 'Failed to save tracking number');
     }
   };
 
@@ -103,11 +113,9 @@ export const useOrderDetails = (uuid: string) => {
           ? { value: returnShippingCost.trim() }
           : undefined,
       });
-      showMessage('Actual shipping cost recorded', 'success');
       return true;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to record shipping cost';
-      showMessage(msg, 'error');
+      failed('cost not saved', error, 'Failed to record shipping cost');
       return false;
     }
   }
@@ -120,10 +128,8 @@ export const useOrderDetails = (uuid: string) => {
         orderUuid: state.orderDetails?.order?.uuid,
       });
       fetchOrderDetails();
-      showMessage('Order marked as delivered successfully', 'success');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to mark as delivered';
-      showMessage(msg, 'error');
+      failed('not delivered', error, 'Failed to mark as delivered');
     }
   }
 
@@ -135,10 +141,8 @@ export const useOrderDetails = (uuid: string) => {
         orderUuid: state.orderDetails?.order?.uuid,
       });
       fetchOrderDetails();
-      showMessage('Order cancelled', 'success');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to cancel order';
-      showMessage(msg, 'error');
+      failed('not cancelled', error, 'Failed to cancel order');
     }
   }
 
@@ -173,10 +177,8 @@ export const useOrderDetails = (uuid: string) => {
       });
       fetchOrderDetails();
       setSelectedUnitKeys([]);
-      showMessage('Order refunded successfully', 'success');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to refund order';
-      showMessage(msg, 'error');
+      failed('not refunded', error, 'Failed to refund order');
     }
   }
 

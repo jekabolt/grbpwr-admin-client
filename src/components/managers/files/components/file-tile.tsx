@@ -245,7 +245,7 @@ export function FileTile({
         // `min-w-0 max-w-full` — ЛОВУШКА ПРИМИТИВА, а не украшение: `button` меряется по
         // содержимому, вылезает за колонку грида и ложится поверх соседней плитки, а `truncate`
         // внутри неё при этом молчит — обрезать нечего, разъехалась сама коробка.
-        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (
           <img
@@ -263,13 +263,14 @@ export function FileTile({
           //
           // Обрезка строками, а не символами: `line-clamp` считает по отрисованным строкам,
           // поэтому одинаково выглядит и на узкой плитке вложений задачи (от 130px), и на
-          // широкой холста. Сервер и так режет выдержку по 500 символов.
+          // широкой холста. Пяти строк хватает узнать заметку, но они не превращают превью в
+          // высокий текстовый блок. Сервер и так режет выдержку по 500 символов.
           <span className='flex aspect-square w-full flex-col justify-start overflow-hidden p-2'>
             <Text
-              size='micro'
+              size='nano'
               variant='label'
               component='span'
-              className='line-clamp-[9] whitespace-pre-wrap break-words text-left'
+              className='line-clamp-5 whitespace-pre-wrap break-words text-left'
             >
               {excerpt}
             </Text>

@@ -13,6 +13,7 @@ import type { LibraryFile } from 'api/proto-http/admin';
  */
 export function useFileSelection() {
   const [selected, setSelected] = useState<LibraryFile[]>([]);
+  const [selecting, setSelecting] = useState(false);
 
   const isSelected = useCallback(
     (id: number) => selected.some((f) => Number(f.id) === id),
@@ -29,6 +30,13 @@ export function useFileSelection() {
   }, []);
 
   const clear = useCallback(() => setSelected([]), []);
+
+  const startSelecting = useCallback(() => setSelecting(true), []);
+
+  const finishSelecting = useCallback(() => {
+    setSelected([]);
+    setSelecting(false);
+  }, []);
 
   /** Убрать из набора то, чего больше нет (удалили — своей рукой или чужой). */
   const drop = useCallback((ids: number[]) => {
@@ -48,5 +56,15 @@ export function useFileSelection() {
     setSelected((prev) => prev.filter(fits));
   }, []);
 
-  return { selected, isSelected, toggle, clear, drop, keep };
+  return {
+    selected,
+    selecting,
+    isSelected,
+    toggle,
+    clear,
+    drop,
+    keep,
+    startSelecting,
+    finishSelecting,
+  };
 }

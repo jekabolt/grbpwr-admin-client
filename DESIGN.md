@@ -4,19 +4,11 @@ description: Brutalist monochrome control surface for store operators — white 
 colors:
   textColor: '#000000' # ink
   bgColor: '#ffffff' # block
-  bgSecondary: '#ededed' # panel
   borderColor: '#cccccc' # edge
-  textInactiveColor: '#cccccc'
   labelColor: '#666666' # label
   hairline: '#e6e6e6' # rule
-  pageBg: '#f2f2f2' # ground
-  bgZebra: '#fafafa' # zebra
-  trackBg: '#f0f0f0' # track
-  progressBg: '#e2e2e2' # progress
-  red: '#ff0000'
+  pageBg: '#f2f2f2' # panel
   error: '#ff0000'
-  blue: '#2323ff'
-  purple: '#311eee'
   highlightColor: '#311eee'
   success: '#0f7a34' # green
   warning: '#2323ff'
@@ -125,10 +117,12 @@ components:
 | AvatarPicker         | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#AvatarPicker)         |
 | BackLink             | «← word» way back                  | `src/ui/components/button.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BackLink)             |
 | BarRow               | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | tone: ink\|up\|down                                                                                                                                                                                                                                                             | [view](/ui-kit#BarRow)               |
+| BlurhashImage        | BlurHash-backed image              | `src/ui/components/blurhash-image.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BlurhashImage)        |
 | Board                | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Board)                |
 | BoardCard            | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardCard)            |
 | BoardColumn          | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardColumn)          |
 | BoardEmpty           | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardEmpty)           |
+| buildMonthIndex      | Month to list offset index         | `src/ui/hooks/use-month-index.ts`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#buildMonthIndex)      |
 | Button               | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                                  | [view](/ui-kit#Button)               |
 | buttonVariants       | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                                  | [view](/ui-kit#buttonVariants)       |
 | CalloutBox           | Inline message box                 | `src/ui/components/callout-box.tsx`         | tone: error\|warning\|note                                                                                                                                                                                                                                                      | [view](/ui-kit#CalloutBox)           |
@@ -145,6 +139,7 @@ components:
 | CopyToClipboard      | Copy value on click                | `src/ui/components/copyToClipboard.tsx`     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#CopyToClipboard)      |
 | DataTable            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | variant: list\|grid                                                                                                                                                                                                                                                             | [view](/ui-kit#DataTable)            |
 | DatePicker           | Portalled date field               | `src/ui/components/date-picker.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#DatePicker)           |
+| DateScrubber         | Date pill scroll handle (touch)    | `src/ui/components/date-scrubber.tsx`       | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#DateScrubber)         |
 | DecimalField         | Form-bound decimal input           | `src/ui/form/fields/decimal-field.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#DecimalField)         |
 | Drawer               | Right-docked side panel            | `src/ui/components/drawer.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Drawer)               |
 | EmptyCell            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#EmptyCell)            |
@@ -183,6 +178,7 @@ components:
 | RichTextField        | Rich text field                    | `src/ui/form/fields/rich-text-field.tsx`    | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#RichTextField)        |
 | Row                  | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                                     | [view](/ui-kit#Row)                  |
 | RowTotal             | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                                     | [view](/ui-kit#RowTotal)             |
+| scrubLabel           | Date pill scroll handle (touch)    | `src/ui/components/date-scrubber.tsx`       | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#scrubLabel)           |
 | Section              | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Section)              |
 | SectionHeader        | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SectionHeader)        |
 | SectionStack         | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SectionStack)         |
@@ -218,7 +214,10 @@ components:
 | Tooltip              | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Tooltip)              |
 | TooltipProvider      | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TooltipProvider)      |
 | TotalRow             | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TotalRow)             |
+| UndoRow              | Ghost row with undo                | `src/ui/components/undo-row.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#UndoRow)              |
+| useDoneFlash         | Clickable action, all styles       | `src/ui/components/button.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#useDoneFlash)         |
 | useFormField         | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#useFormField)         |
+| useMonthIndex        | Month to list offset index         | `src/ui/hooks/use-month-index.ts`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#useMonthIndex)        |
 | ViewSwitch           | Exclusive view switch              | `src/ui/components/view-switch.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ViewSwitch)           |
 | WaterfallRow         | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | kind: pos\|neg\|final                                                                                                                                                                                                                                                           | [view](/ui-kit#WaterfallRow)         |
 
@@ -228,47 +227,39 @@ components:
 
 ## Tokens
 
-| Kind           | Token                       | Value                                                                 | Class                    |
-| -------------- | --------------------------- | --------------------------------------------------------------------- | ------------------------ |
-| color          | `--color-textColor`         | `#000000`                                                             | `text-textColor`         |
-| color          | `--color-bgColor`           | `#ffffff`                                                             | `bg-bgColor`             |
-| color          | `--color-bgSecondary`       | `#ededed`                                                             | `bg-bgSecondary`         |
-| color          | `--color-borderColor`       | `#cccccc`                                                             | `border-borderColor`     |
-| color          | `--color-textInactiveColor` | `#cccccc`                                                             | `text-textInactiveColor` |
-| color          | `--color-labelColor`        | `#666666`                                                             | `text-labelColor`        |
-| color          | `--color-hairline`          | `#e6e6e6`                                                             | `border-hairline`        |
-| color          | `--color-pageBg`            | `#f2f2f2`                                                             | `bg-pageBg`              |
-| color          | `--color-bgZebra`           | `#fafafa`                                                             | `bg-bgZebra`             |
-| color          | `--color-trackBg`           | `#f0f0f0`                                                             | `bg-trackBg`             |
-| color          | `--color-progressBg`        | `#e2e2e2`                                                             | `bg-progressBg`          |
-| color          | `--color-red`               | `#ff0000`                                                             | `text-red`               |
-| color          | `--color-error`             | `#ff0000`                                                             | `text-error`             |
-| color          | `--color-blue`              | `#2323ff`                                                             | `text-blue`              |
-| color          | `--color-purple`            | `#311eee`                                                             | `text-purple`            |
-| color          | `--color-highlightColor`    | `#311eee`                                                             | `text-highlightColor`    |
-| color          | `--color-success`           | `#0f7a34`                                                             | `text-success`           |
-| color          | `--color-warning`           | `#2323ff`                                                             | `text-warning`           |
-| color          | `--color-overlay`           | `rgba(0, 0, 0, 0.4)`                                                  | `bg-overlay`             |
-| font size      | `--text-textBaseSize`       | `12px`                                                                | `text-textBaseSize`      |
-| font size      | `--text-small`              | `12px`                                                                | `text-small`             |
-| font size      | `--text-control`            | `11px`                                                                | `text-control`           |
-| font size      | `--text-micro`              | `10px`                                                                | `text-micro`             |
-| font size      | `--text-nano`               | `9px`                                                                 | `text-nano`              |
-| font size      | `--text-stat`               | `16px`                                                                | `text-stat`              |
-| font size      | `--text-reading`            | `16px`                                                                | `text-reading`           |
-| font size      | `--text-statBig`            | `22px`                                                                | `text-statBig`           |
-| font size      | `--text-lg`                 | `18px`                                                                | `text-lg`                |
-| font size      | `--text-giantSmall`         | `110px`                                                               | `text-giantSmall`        |
-| font size      | `--text-giant`              | `200px`                                                               | `text-giant`             |
-| font family    | `--font-family-sans`        | `'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif`         | `font-family-sans`       |
-| font family    | `--font-family-mono`        | `'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace` | `font-family-mono`       |
-| letter spacing | `--tracking-pill`           | `0.03em`                                                              | `tracking-pill`          |
-| letter spacing | `--tracking-label`          | `0.04em`                                                              | `tracking-label`         |
-| letter spacing | `--tracking-group`          | `0.05em`                                                              | `tracking-group`         |
-| letter spacing | `--tracking-section`        | `0.06em`                                                              | `tracking-section`       |
-| spacing        | `--spacing-gutter`          | `24px`                                                                | `gap-gutter`             |
-| spacing        | `--spacing-block`           | `16px`                                                                | `gap-block`              |
-| spacing        | `--spacing-stack`           | `10px`                                                                | `gap-stack`              |
+| Kind           | Token                    | Value                                                                 | Class                 |
+| -------------- | ------------------------ | --------------------------------------------------------------------- | --------------------- |
+| color          | `--color-textColor`      | `#000000`                                                             | `text-textColor`      |
+| color          | `--color-bgColor`        | `#ffffff`                                                             | `bg-bgColor`          |
+| color          | `--color-borderColor`    | `#cccccc`                                                             | `border-borderColor`  |
+| color          | `--color-labelColor`     | `#666666`                                                             | `text-labelColor`     |
+| color          | `--color-hairline`       | `#e6e6e6`                                                             | `border-hairline`     |
+| color          | `--color-pageBg`         | `#f2f2f2`                                                             | `bg-pageBg`           |
+| color          | `--color-error`          | `#ff0000`                                                             | `text-error`          |
+| color          | `--color-highlightColor` | `#311eee`                                                             | `text-highlightColor` |
+| color          | `--color-success`        | `#0f7a34`                                                             | `text-success`        |
+| color          | `--color-warning`        | `#2323ff`                                                             | `text-warning`        |
+| color          | `--color-overlay`        | `rgba(0, 0, 0, 0.4)`                                                  | `bg-overlay`          |
+| font size      | `--text-textBaseSize`    | `12px`                                                                | `text-textBaseSize`   |
+| font size      | `--text-small`           | `12px`                                                                | `text-small`          |
+| font size      | `--text-control`         | `11px`                                                                | `text-control`        |
+| font size      | `--text-micro`           | `10px`                                                                | `text-micro`          |
+| font size      | `--text-nano`            | `9px`                                                                 | `text-nano`           |
+| font size      | `--text-stat`            | `16px`                                                                | `text-stat`           |
+| font size      | `--text-reading`         | `16px`                                                                | `text-reading`        |
+| font size      | `--text-statBig`         | `22px`                                                                | `text-statBig`        |
+| font size      | `--text-lg`              | `18px`                                                                | `text-lg`             |
+| font size      | `--text-giantSmall`      | `110px`                                                               | `text-giantSmall`     |
+| font size      | `--text-giant`           | `200px`                                                               | `text-giant`          |
+| font family    | `--font-family-sans`     | `'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif`         | `font-family-sans`    |
+| font family    | `--font-family-mono`     | `'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace` | `font-family-mono`    |
+| letter spacing | `--tracking-pill`        | `0.03em`                                                              | `tracking-pill`       |
+| letter spacing | `--tracking-label`       | `0.04em`                                                              | `tracking-label`      |
+| letter spacing | `--tracking-group`       | `0.05em`                                                              | `tracking-group`      |
+| letter spacing | `--tracking-section`     | `0.06em`                                                              | `tracking-section`    |
+| spacing        | `--spacing-gutter`       | `24px`                                                                | `gap-gutter`          |
+| spacing        | `--spacing-block`        | `16px`                                                                | `gap-block`           |
+| spacing        | `--spacing-stack`        | `10px`                                                                | `gap-stack`           |
 
 <!-- design-sync:end tokens -->
 
@@ -289,28 +280,22 @@ glyphs. `pageBg` is the page canvas; `bgColor` is the material of a logical bloc
 
 Use the token name in prose and the matching Tailwind class in code.
 
-| Token name          | Value                | Typical class                | Contract                                             |
-| ------------------- | -------------------- | ---------------------------- | ---------------------------------------------------- |
-| `textColor`         | `#000000`            | `text-textColor`             | Body text, headings, selected fills, strongest rules |
-| `pageBg`            | `#f2f2f2`            | `bg-pageBg`                  | Page canvas and the visible gutter between blocks    |
-| `bgColor`           | `#ffffff`            | `bg-bgColor`                 | Blocks, inputs, menus, and other white surfaces      |
-| `borderColor`       | `#cccccc`            | `border-borderColor`         | Outer outlines                                       |
-| `textInactiveColor` | `#cccccc`            | `text-textInactiveColor`     | Disabled text and placeholders, not readable copy    |
-| `hairline`          | `#e6e6e6`            | `border-hairline`            | Inner rules between rows                             |
-| `labelColor`        | `#666666`            | `text-labelColor`            | Readable secondary text                              |
-| `bgSecondary`       | `#ededed`            | `bg-bgSecondary`             | Header strips and secondary fills                    |
-| `bgZebra`           | `#fafafa`            | `bg-bgZebra`                 | Accordion headers, grid lead cells, and sub-rows     |
-| `trackBg`           | `#f0f0f0`            | `bg-trackBg`                 | Bar tracks                                           |
-| `progressBg`        | `#e2e2e2`            | `bg-progressBg`              | Progress rails                                       |
-| `overlay`           | `rgba(0, 0, 0, 0.4)` | `bg-overlay`                 | Modal and drawer scrims                              |
-| `error`             | `#ff0000`            | `text-error`, `border-error` | Broken, missing, blocking, destructive               |
-| `warning`           | `#2323ff`            | `text-warning`, `bg-warning` | Mid-flight, unsaved, stale, or needing a human       |
-| `success`           | `#0f7a34`            | `text-success`, `bg-success` | Done, approved, in stock, or under budget            |
-| `highlightColor`    | `#311eee`            | `text-highlightColor`        | Links and the single highlight accent                |
+| Token name       | Value                | Typical class                  | Contract                                           |
+| ---------------- | -------------------- | ------------------------------ | -------------------------------------------------- |
+| `textColor`      | `#000000`            | `text-textColor`               | Body text, headings, selected fills, strongest rules |
+| `bgColor`        | `#ffffff`            | `bg-bgColor`                   | Blocks, inputs, menus, and other white surfaces    |
+| `pageBg`         | `#f2f2f2`            | `bg-pageBg`                    | Canvas, header strips, tracks, and inactive surfaces |
+| `borderColor`    | `#cccccc`            | `border-borderColor`, `text-borderColor` | Outer outlines, disabled text, and placeholders |
+| `hairline`       | `#e6e6e6`            | `border-hairline`, `bg-hairline` | Inner rules and progress rails                   |
+| `labelColor`     | `#666666`            | `text-labelColor`              | Readable secondary text                            |
+| `overlay`        | `rgba(0, 0, 0, 0.4)` | `bg-overlay`                   | Modal and drawer scrims                            |
+| `error`          | `#ff0000`            | `text-error`, `border-error`   | Broken, missing, blocking, destructive             |
+| `warning`        | `#2323ff`            | `text-warning`, `bg-warning`   | Mid-flight, unsaved, stale, or needing a human     |
+| `success`        | `#0f7a34`            | `text-success`, `bg-success`   | Done, approved, in stock, or under budget          |
+| `highlightColor` | `#311eee`            | `text-highlightColor`          | Links and the single highlight accent              |
 
-`error`, `warning`, `success`, and `highlightColor` are the semantic names. `red`, `blue`, and
-`purple` are raw aliases, not the names to reach for in feature code. `warning` is deliberately
-blue.
+`error`, `warning`, `success`, and `highlightColor` are the semantic accents. `warning` is
+deliberately blue.
 
 `Placeholder` and `Skeleton*` use the same `#f4f4f4` / `#ececec` hatch to distinguish empty or
 loading space from an unpainted surface. Technical drawings currently use local `#dedede` fills
@@ -321,7 +306,7 @@ named tokens above.
 
 ### Rules
 
-- Only layout exposes `pageBg`; page wrappers and tab panels do not paint over it.
+- `pageBg` is the canvas and the shared neutral fill for headers, tracks, and inactive surfaces.
 - A `borderColor` outline always encloses a `bgColor` surface.
 - `borderColor` is the outer rule and `hairline` is the inner rule. Do not swap them.
 - Semantic colour never acts alone and is not used as decoration or category colour.
@@ -375,11 +360,11 @@ Document-flow surfaces are flat. The only elevation tokens are:
 | ----------------------------- | ------------------- | ------------------ | ------------- |
 | `ConfirmationModal`, `Drawer` | `textColor`         | `--shadow-modal`   | `--z-modal`   |
 | `GenericPopover`              | `textColor`         | `--shadow-popover` | `--z-popover` |
-| `DatePicker`                  | `textInactiveColor` | `--shadow-popover` | `--z-popover` |
-| `Select`, `Combobox`          | `textInactiveColor` | none               | `--z-popover` |
+| `DatePicker`                  | `borderColor`       | `--shadow-popover` | `--z-popover` |
+| `Select`, `Combobox`          | `borderColor`       | none               | `--z-popover` |
 | `Tooltip`                     | `borderColor`       | none               | `--z-popover` |
 
-`ConfirmationModal` is the modal shell: `bgColor`, a `textColor` frame, a `bgSecondary` header,
+`ConfirmationModal` is the modal shell: `bgColor`, a `textColor` frame, a `pageBg` header,
 scrolling body, ruled footer, and `sm` / `md` / `lg` widths. `Drawer` uses the same anatomy at the
 right edge.
 
@@ -460,10 +445,10 @@ implement this. Feature-local row helpers follow the same rule but are not primi
 Variant and size are independent.
 
 - `main` uses a `textColor` fill, `bgColor` text, and a `textColor` frame. It inverts on hover.
-- `secondary` is transparent with a `textInactiveColor` frame and `textColor` text. It fills
+- `secondary` is transparent with a `borderColor` frame and `textColor` text. It fills
   `textColor` on hover.
 - Disabled `main` and `secondary` buttons become `bgColor` outlines with
-  `textInactiveColor` text and frame.
+  `borderColor` text and frame.
 - `xs` and `sm` are 10px uppercase sizes for dense rows and panels. The default is
   `size='default'`: 12px with no padding added by the size. `lg` adds 10px / 16px padding at 12px
   for page actions.
@@ -490,14 +475,14 @@ A `Pill` is read-only; a `Chip` is interactive.
 
 ### Stat Grid
 
-`StatGrid` fills `bgColor` once at the container and divides cells with `borderColor`; cells are not
-`bgZebra` cards. `Stat` is a label / value / sub triple with `success` and `error` as the only
-tones. Missing data renders `—`, never `0`.
+`StatGrid` fills `bgColor` once at the container and divides cells with `borderColor`; cells remain
+white. `Stat` is a label / value / sub triple with `success` and `error` as the only tones. Missing
+data renders `—`, never `0`.
 
 ### Board (kanban / fulfilment lanes)
 
 `Board` is a horizontal row of `BoardColumn` surfaces. A column has a `borderColor` outline and
-`bgColor` fill; its header uses `bgSecondary`. `BoardCard` has a full `borderColor` frame, not only
+`bgColor` fill; its header uses `pageBg`. `BoardCard` has a full `borderColor` frame, not only
 a bottom rule. `BoardEmpty` is the dashed empty/add door.
 
 ### Callout Box
@@ -511,11 +496,11 @@ a bottom rule. `BoardEmpty` is the dashed empty/add door.
 `DataTable` owns scrolling, tabular numbers, right-aligned numeric columns, `borderColor` headers,
 and `hairline` body rows. Put `data-align="left"` on both `th` and `td` for a word column.
 `TotalRow` closes with a `textColor` rule above; `EmptyCell` renders `—`. The `grid` variant frames
-every cell and uses `bgZebra` only on the first column. An absent value in a table cell, `Row`
-value or `Stat` value is `<EmptyCell />`; a literal `'—'`, `'-'` or `'n/a'` there fails
+every cell without adding a first-column fill. An absent value in a table cell, `Row` value or
+`Stat` value is `<EmptyCell />`; a literal `'—'`, `'-'` or `'n/a'` there fails
 `design/no-hand-empty-cell` (print documents keep their own dash).
 
-`BarRow` and `WaterfallRow` use `trackBg` with `textColor`, `success`, or `error` fills. `Stepper`
+`BarRow` and `WaterfallRow` use `pageBg` with `textColor`, `success`, or `error` fills. `Stepper`
 shows a lifecycle as words and `›`, not as a percentage.
 
 ### Repeated and transient surfaces
@@ -524,9 +509,9 @@ shows a lifecycle as words and `›`, not as a percentage.
   `TILE_CORNER` and `TILE_QUIET`.
 - `Placeholder` marks empty space with the hatch. `SkeletonLine`, `SkeletonRows`, and
   `SkeletonBlocks` keep the shape of the result while it loads.
-- `Toolbar` is the bordered control strip; its sticky form uses `bgSecondary`. `ViewSwitch` is the
+- `Toolbar` is the bordered control strip; its sticky form uses `pageBg`. `ViewSwitch` is the
   exclusive view selector.
-- `Accordion` is a bordered `bgColor` surface with an `bgZebra` header and `FoldCaret`.
+- `Accordion` is a bordered `bgColor` surface with a white header and `FoldCaret`.
 
 ### Navigation and shell
 

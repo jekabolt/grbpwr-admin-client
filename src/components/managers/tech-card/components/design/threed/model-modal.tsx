@@ -1,7 +1,7 @@
 import { adminService } from 'api/api';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, CalloutBox, ConfirmationModal, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, Text, useDoneFlash } from 'ui';
 import { formatBytes } from 'utils/pattern';
 
 import { RENDER_SHEET_ORDER, benchName } from '../render/model';
@@ -123,7 +123,8 @@ export function ThreedModelModal({
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const startedAt = useRef(0);
-  const { showMessage } = useSnackBarStore();
+  const filedAngle = useDoneFlash();
+  const filedSides = useDoneFlash();
 
   const indexed = useModelCard(url);
   const card = techCardId || indexed;
@@ -240,20 +241,13 @@ export function ThreedModelModal({
         displayOnly: false,
       };
       await registerUpload.mutateAsync({ clientRequestId: requestId, items: [item] });
-      /* ИМЯ ЦЕЛИ СТОИТ И В ИТОГЕ, А НЕ ТОЛЬКО ПОД ДВЕРЬЮ. «It stands in 3D MODELS OF THIS CARD»
-         верно ТОЛЬКО на этом цвете: полка сужена целью студии, и фраза без имени обещала бы кадр
-         на любом открытом верстаке. */
-      showMessage(
-        mode === 'sides'
-          ? `four sides filed on the card under ${targetName} as one multi-view (${sides.map(viewLabel).join(', ')}) — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab; split it to select a side`
-          : `snapshot filed on the card under ${targetName}${ghostView ? ` as a guess of ${viewLabel(ghostView)}` : ''} — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab`,
-        'success',
-      );
+      // The receipt stands on the door that was pressed.
+      (mode === 'sides' ? filedSides : filedAngle).flash();
     } catch (e) {
       /**
        * ═══ ОТКАЗ ОСТАЁТСЯ НА ЭКРАНЕ СЛОВАМИ, А НЕ УЛЕТАЕТ СЕКУНДАМИ СНЕКБАРА ═══════════════════
        *
-       * Здесь стоял ОДИН `showMessage(..., 'error')`, и его хватало ровно до того дня, когда отказ
+       * Здесь стоял ОДИН тост ошибки, и его хватало ровно до того дня, когда отказ
        * оказался постоянным: строка «invalid base64 image format: expected …» — это то, что сервер
        * отвечал НА КАЖДОЕ нажатие, а всплывашка уносила её через несколько секунд, оставляя
        * человека в окне, где кнопка снова живая и снова ничего не делает. Полоса держит слова
@@ -318,6 +312,7 @@ export function ThreedModelModal({
                 variant='secondary'
                 size='xs'
                 data-snapshot-door='angle'
+                done={filedAngle.on && 'filed'}
                 disabled={!!snapshotInert}
                 aria-busy={busy ? true : undefined}
                 title={
@@ -333,6 +328,7 @@ export function ThreedModelModal({
                 variant='secondary'
                 size='xs'
                 data-snapshot-door='sides'
+                done={filedSides.on && 'filed'}
                 disabled={!!snapshotInert}
                 aria-busy={busy ? true : undefined}
                 title={

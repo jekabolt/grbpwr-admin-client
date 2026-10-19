@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { refuseGesture } from './refuse-gesture';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 
@@ -239,7 +239,6 @@ export function AssemblySchematic({
     });
   }, [auto, res, renamedUnit]);
 
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   /** Человеческое имя ноды: имя детали или код узла. */
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
 
@@ -529,7 +528,7 @@ export function AssemblySchematic({
       if (v && !v.ok) {
         // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
         // отказ. Причина словами движка.
-        showMessage(v.reason, 'error');
+        refuseGesture('ASSEMBLY', 'not joined', v.reason);
       } else if (v?.ok && hit) {
         onCreate({
           inputKeys: [d.key, hit.key],
@@ -574,7 +573,6 @@ export function AssemblySchematic({
     frozen,
     onMove,
     onCreate,
-    showMessage,
     toLayoutPoint,
     commitDrag,
   ]);
@@ -658,9 +656,7 @@ export function AssemblySchematic({
    * выделение > наведение. Все три рисуются outline'ом, и складывать их нельзя — у цели под
    * курсором вышла бы каша из двух рамок, поэтому ветки взаимоисключающие.
    *
-   * Выделение до этой правки не рисовало НИЧЕГО: единственным признаком был фон шапки `bg-bgZebra`,
-   * то есть тот же цвет, которым красится шапка под курсором (замерено: контраст 1.000). Различают
-   * теперь толщина и штрих, а не цвет — монохром: 1px сплошная у ховера, 2px пунктир у выделения
+   * Толщина и штрих различают состояния без фоновой заливки: 1px сплошная у ховера, 2px пунктир у выделения
    * (тем же штрихом нарисована рамка маркизы на полотне — это её улов), 2px сплошная у цели жеста.
    */
   const nodeRing = (key: string) => {

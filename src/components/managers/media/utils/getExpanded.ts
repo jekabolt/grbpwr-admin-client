@@ -22,6 +22,9 @@ export const NO_MARGINS: Margins = { top: 0, right: 0, bottom: 0, left: 0 };
 
 export const DEFAULT_BACKGROUND = '#ffffff';
 
+/** Образцы заливки мобильного экспанда: белый, светло-серый, чёрный. Остальное — свой цвет. */
+export const FILL_SWATCHES = [DEFAULT_BACKGROUND, '#e5e5e3', '#000000'] as const;
+
 /**
  * Сторона квадрата, который усредняет пипетка. НЕ ОДИН ПИКСЕЛЬ, и это главное решение этого файла:
  * JPEG хранит цвет блоками 8×8 с потерями, поэтому одиночный пиксель ровного студийного фона

@@ -3,12 +3,23 @@ import { common_ArchiveFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { BackLink, Button, ConfirmationModal, Section, Text, Form, InputField } from 'ui';
+import {
+  BackLink,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  Section,
+  Text,
+  Form,
+  InputField,
+  useDoneFlash,
+} from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { useCreateArchive, useUpdateArchive } from '../../archives/components/useArchiveQuery';
 import { HeroSectionModal } from '../../hero/components/hero-section-modal';
@@ -34,7 +45,9 @@ export function ArchiveForm({
   id?: string;
   archive?: common_ArchiveFull;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  // A refused save stands over the form until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { canWrite } = usePermissions();
 
@@ -146,21 +159,34 @@ export function ArchiveForm({
       items: (data.items || []).filter((e: any) => !deletedIndicesRef.current.has(e._uid)),
     };
     const archiveInsert = mapFormToArchiveInsert(filtered);
+    setFormError(null);
     try {
       if (isEditMode) {
         await updateArchive.mutateAsync({ id: parseInt(id || '0'), archiveData: archiveInsert });
-        showMessage('timeline entry updated', 'success');
+        saved.flash();
         form.reset(filtered);
         deletedIndicesRef.current.clear();
         setDeletedVersion((v) => v + 1);
       } else {
         await createArchive.mutateAsync(archiveInsert);
-        showMessage('timeline entry created', 'success');
+        // Leaving for the list is the receipt.
         setLeaving(true);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to submit archive';
-      showMessage(msg, 'error');
+      const cls = failureClassOfError(error);
+      if (cls === 'refused') setFormError(msg);
+      else
+        notify({
+          sev: 'error',
+          subject: `TIMELINE ${id ?? ''}`.trim(),
+          text: isEditMode ? 'not saved' : 'not created',
+          detail: msg,
+          action:
+            cls === 'transient'
+              ? { label: 'retry', onClick: () => void handleSubmit(data) }
+              : undefined,
+        });
       console.error('Failed to submit archive', error);
     }
   }
@@ -217,7 +243,7 @@ export function ArchiveForm({
   }, [isSaving, editingUid, addMenuOpen, confirmOpen, isEditMode, hasChanges, handleSaveClick]);
 
   function onError(errors: any) {
-    showMessage('please fill in all required fields', 'error');
+    setFormError('fill in the required fields');
     const values = form.getValues();
     if (errors.items) {
       const firstIdx = (errors.items as any[]).findIndex(
@@ -241,7 +267,7 @@ export function ArchiveForm({
         className='flex flex-col gap-gutter px-2 pt-0 pb-12 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, onError)}
       >
-        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
+        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
           <div className='flex flex-wrap items-center gap-3'>
             <BackLink to={ROUTES.archives}>timeline</BackLink>
             <Text variant='uppercase' size='large'>
@@ -263,12 +289,21 @@ export function ArchiveForm({
               className='uppercase cursor-pointer'
               disabled={(isEditMode && !hasChanges) || isSaving}
               loading={isSaving}
+              done={saved.on}
               onClick={handleSaveClick}
             >
               {isEditMode ? 'save' : 'create'}
             </Button>
           )}
         </div>
+
+        {formError && (
+          <CalloutBox tone='error'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {formError}
+            </Text>
+          </CalloutBox>
+        )}
 
         <Section title='card' question='how this entry appears in the timeline list'>
           <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>

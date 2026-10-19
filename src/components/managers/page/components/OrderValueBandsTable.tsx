@@ -79,10 +79,10 @@ export const OrderValueBandsTable: FC<OrderValueBandsTableProps> = ({ bands, aov
                 </Text>
               </div>
               <div className='space-y-0.5'>
-                <div className='h-1.5 w-full bg-bgSecondary/40'>
+                <div className='h-1.5 w-full bg-pageBg/40'>
                   <div className='h-1.5 bg-textColor/70' style={{ width: `${clamp(revShare)}%` }} />
                 </div>
-                <div className='h-1.5 w-full bg-bgSecondary/40'>
+                <div className='h-1.5 w-full bg-pageBg/40'>
                   <div className='h-1.5 bg-labelColor/40' style={{ width: `${clamp(ordShare)}%` }} />
                 </div>
               </div>

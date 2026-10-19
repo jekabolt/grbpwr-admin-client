@@ -558,7 +558,7 @@ function AspectRow({
           const url = urlOf(id);
           return (
             <div key={id} className='min-w-[100px]' data-c19-aspect-pic={id}>
-              <div className='relative size-[100px] border border-borderColor bg-bgZebra'>
+              <div className='relative size-[100px] border border-borderColor bg-pageBg'>
                 <button
                   type='button'
                   onClick={() => url && onOpenViewer(imgIndex, ids)}

@@ -216,7 +216,7 @@ export function SaveStatusChip({
           title={decision.title}
           className={`flex items-stretch ${FOCUS}`}
         >
-          <Pill tone={tone} className='cursor-pointer hover:bg-bgZebra'>
+          <Pill tone={tone} className='cursor-pointer hover:bg-pageBg'>
             {label}
           </Pill>
         </button>
@@ -241,7 +241,7 @@ export function SaveStatusChip({
           'aria-label': decision ? 'saving details and history' : `${label}, details and history`,
         }}
         openElement={
-          <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-bgZebra'>
+          <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-pageBg'>
             {!decision && <span>{label}</span>}
             <span aria-hidden>▾</span>
           </Pill>
@@ -257,7 +257,7 @@ export function SaveStatusChip({
                 setOpen(false);
                 onRevealError(walk.path);
               }}
-              className={`flex w-full items-baseline gap-2 border-b border-hairline pb-1 text-left hover:bg-bgZebra ${FOCUS}`}
+              className={`flex w-full items-baseline gap-2 border-b border-hairline pb-1 text-left hover:bg-pageBg ${FOCUS}`}
             >
               <span className='flex min-w-0 flex-1 flex-col'>
                 <Text size='micro' component='span' className='truncate'>

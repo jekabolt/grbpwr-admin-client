@@ -5,7 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useId, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Button,
@@ -227,7 +227,6 @@ function ClothIntake({
   onMakePattern?: () => void;
 }): JSX.Element {
   const writes = useAssetWrites(techCardId);
-  const { showMessage } = useSnackBarStore();
   const { full, reason } = clothCeiling(band, shelf);
 
   /* ВТОРАЯ ПРОВЕРКА ПОТОЛКА, И ОНА ГОВОРИТ ВСЛУХ. Дверь погашена по полосе, прочитанной ЭТИМ
@@ -237,7 +236,13 @@ function ClothIntake({
     const first = media[0];
     if (!first?.id) return;
     if ((band.assets ?? []).length >= ASSETS_PER_CARD_MAX) {
-      showMessage(reason, 'error');
+      notify({
+        sev: 'error',
+        subject: 'PALETTE',
+        text: 'not added',
+        bad: 'shelf full',
+        detail: reason,
+      });
       return;
     }
     writes.upsertAsset.mutate({

@@ -9,7 +9,7 @@ import {
   GetDesignBandResponse,
   common_DesignRunParams,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
 
 import { settleRunLedger } from './generation/run-ledger';
@@ -326,7 +326,6 @@ export function cardOnScreen(card: number): boolean {
 
 export function useDesignWrites(techCardId?: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = designKeys.band(techCardId ?? 0);
 
   const invalidate = useCallback(() => {
@@ -405,9 +404,15 @@ export function useDesignWrites(techCardId?: number) {
       const silent = !!(variables as SilentWrite | undefined)?.silent;
       if (silent || !cardOnScreen(card)) return;
       const message = (error as Error)?.message || 'the change did not go through';
-      showMessage(aborted ? `someone changed this first — ${message}` : message, 'error');
+      notify({
+        sev: 'error',
+        subject: 'DESIGN',
+        text: 'not saved',
+        bad: aborted ? 'changed first' : undefined,
+        detail: message,
+      });
     },
-    [showMessage, qc, techCardId],
+    [qc, techCardId],
   );
   /**
    * ОТКАЗ ЗАПИСИ СЛОТА ПЕРЕЧИТЫВАЕТ ПОЛОСУ ВСЕГДА, не только на 409. `picture_already_in_slot`,
@@ -821,7 +826,6 @@ export function useDesignQuizAnswers(techCardId?: number) {
 
 export function useDesignQuizWrites(techCardId?: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const id = techCardId ?? 0;
   useCardOnScreen(id);
 
@@ -866,7 +870,12 @@ export function useDesignQuizWrites(techCardId?: number) {
       // Откат — только если на экране всё ещё наш оптимистичный список.
       if (context && qc.getQueryData(key) === context.sent) qc.setQueryData(key, context.previous);
       if (!cardOnScreen(card)) return;
-      showMessage((error as Error)?.message || 'the answer was not saved', 'error');
+      notify({
+        sev: 'error',
+        subject: 'QUIZ',
+        text: 'not saved',
+        detail: (error as Error)?.message || undefined,
+      });
     },
     onSuccess: (res, _answers, context) => {
       const key = designKeys.quiz(context?.card ?? id);

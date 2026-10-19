@@ -79,7 +79,7 @@ window.__intake = probe;
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 
 probe.said = () => {
-  const alerts = useSnackBarStore.getState().alerts;
+  const alerts = useSnackBarStore.getState().toasts;
   return alerts.length ? alerts[alerts.length - 1].message : '';
 };
 

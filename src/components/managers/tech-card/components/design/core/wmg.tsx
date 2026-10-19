@@ -1,6 +1,16 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import type { JSX, ReactNode } from 'react';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell } from 'ui';
+import { notify } from 'lib/stores/store';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Text,
+  EmptyCell,
+  useDoneFlash,
+} from 'ui';
 
 import { isRunLive } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
@@ -30,8 +40,6 @@ import { clockStamp, runHandle } from '../handles';
 
 /** The four origins the contract names, plus nothing. A part is one of these or it is not a part. */
 export type WmgOrigin = 'typed' | 'pasted' | 'linked' | 'recipe';
-
-export type Say = (message: string, type: 'error' | 'success') => void;
 
 /**
  * THE SHELL. `width='lg'`, no decision buttons (L-7): the dialog decides nothing, so it has no
@@ -309,7 +317,7 @@ export function WordsAsSent({
           {/* A PANEL FILL, NOT A SECOND BOX: a tint inside the block, never a bordered rectangle
               (a box in a box). Paragraphs long, so it scrolls INSIDE its own frame — wrapped and
               broken, never widening the page. */}
-          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
             {text}
           </pre>
           {caveat ? (
@@ -345,13 +353,12 @@ export type WmgDoor = { label: string; onClick: () => void };
  */
 export function CopyWords({
   words,
-  say,
   doors,
 }: {
   words: string;
-  say: Say;
   doors?: readonly WmgDoor[];
 }): JSX.Element {
+  const copied = useDoneFlash();
   return (
     <div>
       <GroupLabel
@@ -360,7 +367,8 @@ export function CopyWords({
             variant='underline'
             size='xs'
             className='text-labelColor hover:text-textColor'
-            onClick={() => copyText(words, say)}
+            done={copied.on && 'copied'}
+            onClick={() => void copyText(words).then((ok) => ok && copied.flash())}
           >
             copy as text
           </Button>
@@ -368,7 +376,7 @@ export function CopyWords({
       >
         words
       </GroupLabel>
-      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
         {words}
       </pre>
       {doors && doors.length > 0 ? (
@@ -390,16 +398,23 @@ export function CopyWords({
  * took a selection was somebody's text field, and the copy would silently land there instead. That
  * has happened in this repo before.
  */
-export async function copyText(words: string, say: Say): Promise<void> {
-  if (!navigator.clipboard?.writeText) {
-    say('this browser does not offer the clipboard — select the text and copy it', 'error');
-    return;
-  }
+export async function copyText(words: string): Promise<boolean> {
+  const refuse = (bad: string): false => {
+    notify({
+      sev: 'error',
+      subject: 'CLIPBOARD',
+      text: 'not copied',
+      bad,
+      detail: 'select the text and copy it',
+    });
+    return false;
+  };
+  if (!navigator.clipboard?.writeText) return refuse('no clipboard');
   try {
     await navigator.clipboard.writeText(words);
-    say('copied as text', 'success');
+    return true; // the button says «copied ✓»
   } catch {
-    say('the browser refused the clipboard — select the text and copy it', 'error');
+    return refuse('browser refused');
   }
 }
 

@@ -176,7 +176,7 @@ export function RunOutputs({
               <Text
                 size='micro'
                 component='p'
-                className='mt-1 max-w-[75ch] whitespace-pre-wrap break-words bg-bgZebra px-2 py-1.5'
+                className='mt-1 max-w-[75ch] whitespace-pre-wrap break-words bg-pageBg px-2 py-1.5'
               >
                 {outputText}
               </Text>

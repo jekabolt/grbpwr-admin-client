@@ -1,3 +1,4 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
@@ -5,11 +6,12 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import { ProductCustomsSection, type ProductCustomsHandle } from './customs/customs-section';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
 import { generatePath, useNavigate } from 'react-router-dom';
-import { BackLink, Button, CalloutBox, Section, SectionStack, Text, Form } from 'ui';
+import { BackLink, Button, CalloutBox, Section, SectionStack, Text, Form, useDoneFlash } from 'ui';
 import { SkuToken } from 'components/managers/tech-card/components/colourway-palette';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
@@ -47,7 +49,11 @@ export function ProductForm({
   onEditModeChange,
   onStockUpdated,
 }: Props) {
-  const { showMessage } = useSnackBarStore();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, []);
+  const saved = useDoneFlash();
+  // A refused save stands in the save bar until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [mediaClearKey, setMediaClearKey] = useState(0);
   const editMode = isEditMode || isAddingProduct;
@@ -90,19 +96,19 @@ export function ProductForm({
   async function handleSubmit(data: ProductFormData) {
     const loaded = isAddingProduct ? undefined : initialValues;
     const common = buildColorwayWrite(data, loaded);
+    setFormError(null);
     try {
       if (isAddingProduct) {
         // A colourway attaches to an existing style — there is no CreateStyle RPC (a style is a tech
         // card). Copy mode prefills styleId from the source; a from-scratch add needs it entered.
         const styleId = data.styleId ? parseInt(data.styleId, 10) : NaN;
         if (!styleId || Number.isNaN(styleId)) {
-          showMessage('Enter the style (tech card) id to attach this colourway to', 'error');
+          setFormError('enter the style id');
           return;
         }
         const res = await adminService.CreateColorway({ styleId, ...common });
         setIsFormChanged(false);
         form.reset(data, { keepValues: true });
-        showMessage('Draft colourway created', 'success');
         if (res.colorwayId) {
           // Open the fresh DRAFT so the operator can add variants, the size chart, then publish.
           navigate(generatePath(ROUTES.singleProduct, { id: String(res.colorwayId) }));
@@ -114,7 +120,7 @@ export function ProductForm({
 
       const colorwayId = product?.colorway?.id;
       if (colorwayId == null) {
-        showMessage('Missing colourway id', 'error');
+        setFormError('missing colourway id');
         return;
       }
       // T45: a palette, once given, holds at least one colour — the server refuses an empty list
@@ -123,7 +129,7 @@ export function ProductForm({
         (loaded?.product.development.colours.length ?? 0) > 0 &&
         developmentDelta(data, loaded).colours.length === 0
       ) {
-        showMessage('a palette cannot be removed — keep at least one colour', 'error');
+        setFormError('keep at least one colour');
         return;
       }
       await adminService.UpdateColorway({
@@ -146,9 +152,15 @@ export function ProductForm({
       }
       setIsFormChanged(false);
       form.reset(data, { keepValues: true });
-      showMessage('Colourway updated', 'success');
+      saved.flash();
       if (customsFlushError) {
-        showMessage(`Colourway saved, but customs didn't update: ${customsFlushError}`, 'error');
+        notify({
+          sev: 'warn',
+          subject: `PRODUCT ${colorwayId}`,
+          text: 'customs not saved',
+          bad: 'customs failed',
+          detail: customsFlushError,
+        });
       }
       onEditModeChange(false);
       onStockUpdated?.();
@@ -157,11 +169,22 @@ export function ProductForm({
       // gRPC ABORTED (stale optimistic lock) surfaces as HTTP 409 through the gateway.
       const message =
         err?.status === 409
-          ? 'This colourway changed since you loaded it — reload and retry.'
+          ? 'changed since you loaded it — reload'
           : err instanceof Error
             ? err.message
-            : 'Failed to save colourway';
-      showMessage(message, 'error');
+            : 'save failed';
+      if (failureClassOfError(e) === 'transient') {
+        notify({
+          sev: 'error',
+          subject: isAddingProduct ? 'PRODUCT' : `PRODUCT ${product?.colorway?.id ?? ''}`.trim(),
+          text: isAddingProduct ? 'not created' : 'not saved',
+          bad: 'network',
+          detail: message,
+          ...(isAddingProduct ? {} : { action: { label: 'retry', onClick: () => submitForm() } }),
+        });
+      } else {
+        setFormError(message);
+      }
       console.error('Colorway save error', e);
     }
   }
@@ -186,8 +209,8 @@ export function ProductForm({
 
   const handleFormError = (errors: FieldErrors<ProductFormData>) => {
     const message =
-      getFirstErrorMessage(errors as Record<string, unknown>) ?? 'Please fix the form errors';
-    showMessage(message, 'error');
+      getFirstErrorMessage(errors as Record<string, unknown>) ?? 'fix the form errors';
+    setFormError(message);
   };
 
   const display = product?.colorway?.display;
@@ -232,7 +255,7 @@ export function ProductForm({
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
         {/* Header — identity + status */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             <BackLink to={ROUTES.product}>products</BackLink>
             <Text variant='uppercase' size='large'>
@@ -314,11 +337,7 @@ export function ProductForm({
                 isAddingProduct={isAddingProduct}
                 styleId={product?.colorway?.styleId}
               />
-              <Tags
-                isAddingProduct={isAddingProduct}
-                isEditMode={isEditMode}
-                editMode={editMode}
-              />
+              <Tags isAddingProduct={isAddingProduct} isEditMode={isEditMode} editMode={editMode} />
             </Section>
           </SectionStack>
 
@@ -385,10 +404,21 @@ export function ProductForm({
       </form>
 
       {/* Sticky action bar */}
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
-        <Text variant='inactive' size='small'>
-          {editMode && isFormChanged ? 'unsaved changes' : ' '}
-        </Text>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2 print:hidden'
+      >
+        {formError ? (
+          <CalloutBox tone='error' className='min-w-0'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {formError}
+            </Text>
+          </CalloutBox>
+        ) : (
+          <Text variant='inactive' size='small'>
+            {editMode && isFormChanged ? 'unsaved changes' : ' '}
+          </Text>
+        )}
         {canWrite(SECTION.products) && (
           <div className='flex items-center gap-2'>
             {!editMode ? (
@@ -397,6 +427,7 @@ export function ProductForm({
                 variant='main'
                 size='lg'
                 className='uppercase cursor-pointer'
+                done={saved.on}
                 onClick={() => onEditModeChange(true)}
               >
                 edit
@@ -439,7 +470,7 @@ function SectionNav({ items }: { items: { id: string; label: string }[] }) {
   const jump = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
-    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-textInactiveColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
+    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-borderColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
       {items.map((it) => (
         <Button
           key={it.id}

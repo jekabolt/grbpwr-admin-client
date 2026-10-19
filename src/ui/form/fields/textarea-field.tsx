@@ -59,7 +59,7 @@ export default function TextareaField({
             {/* FormControl's aria-invalid lands on this wrapper (it owns the visible border, so the
                 red outline belongs here); the textarea gets its own so screen readers hear it on
                 the control the user is actually in, not just on a decorative div. */}
-            <div className='relative border border-textInactiveColor aria-[invalid=true]:border-error'>
+            <div className='relative border border-borderColor aria-[invalid=true]:border-error'>
               <Textarea
                 disabled={loading}
                 aria-invalid={!!fieldState.error || undefined}
@@ -87,7 +87,7 @@ export default function TextareaField({
                 </Button>
               )}
               {showCharCount && (
-                <div className='absolute bottom-2 right-2 text-textBaseSize text-textInactiveColor'>
+                <div className='absolute bottom-2 right-2 text-textBaseSize text-borderColor'>
                   {value.length}
                   {maxLength && `/${maxLength}`}
                 </div>

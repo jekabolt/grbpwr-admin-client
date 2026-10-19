@@ -32,6 +32,6 @@ export const TILE_QUIET =
  */
 export const TILE_CORNER =
   'pointer-events-auto border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label ' +
-  'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor ' +
+  'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-borderColor ' +
   'data-[state=open]:border-textColor data-[state=open]:bg-textColor data-[state=open]:text-bgColor ' +
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';

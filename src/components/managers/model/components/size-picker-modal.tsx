@@ -1,6 +1,7 @@
 import { common_SizeSkuSystem } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { cn } from 'lib/utility';
+import type { ReactNode } from 'react';
 import { Chip, ChipRow, GroupLabel, GenericPopover, Text } from 'ui';
 import { useSizeSystems } from './use-size-systems';
 
@@ -28,6 +29,7 @@ export function SizePickerModal({
   triggerClassName,
   scope = 'all',
   disabled,
+  renderTrigger,
 }: {
   selectedIds: number[];
   onToggle: (id: number) => void;
@@ -41,6 +43,8 @@ export function SizePickerModal({
   /** 'other' shows only what the category filtered out (its permitted systems are inline already). */
   scope?: 'all' | 'other';
   disabled?: boolean;
+  /** Replaces the default text trigger; must render ONE element (it becomes the trigger via asChild). */
+  renderTrigger?: (isOpen: boolean) => ReactNode;
 }) {
   const { permitted, other } = useSizeSystems({ gender, allowedSizeSystems, selectedIds });
   const groups = scope === 'other' ? other : [...permitted, ...other];
@@ -53,19 +57,21 @@ export function SizePickerModal({
     <GenericPopover
       title={title}
       className='w-[270px] max-w-[calc(100vw-1.5rem)]'
-      triggerProps={{ disabled }}
+      triggerProps={{ disabled, asChild: !!renderTrigger }}
       openElement={
-        <span
-          className={cn(
-            'inline-flex items-center gap-1 border border-borderColor bg-bgColor px-2.5 py-1',
-            'text-micro uppercase tracking-label',
-            disabled ? 'text-textInactiveColor' : 'text-textColor hover:border-textColor',
-            triggerClassName,
-          )}
-        >
-          {triggerLabel}
-          {selectedIds.length ? ` (${selectedIds.length})` : ''} ▾
-        </span>
+        renderTrigger ?? (
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 border border-borderColor bg-bgColor px-2.5 py-1',
+              'text-micro uppercase tracking-label',
+              disabled ? 'text-borderColor' : 'text-textColor hover:border-textColor',
+              triggerClassName,
+            )}
+          >
+            {triggerLabel}
+            {selectedIds.length ? ` (${selectedIds.length})` : ''} ▾
+          </span>
+        )
       }
     >
       <div className='flex flex-col'>

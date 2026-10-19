@@ -105,7 +105,7 @@ export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: ()
       to={data?.to ?? link.to}
       onClick={onNavigate}
       title={text}
-      className='inline-flex max-w-full items-center truncate border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:bg-textColor hover:text-bgColor'
+      className='inline-flex min-h-11 max-w-full items-center truncate border border-borderColor px-2 py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:bg-textColor hover:text-bgColor sm:min-h-0'
     >
       {text}
     </Link>

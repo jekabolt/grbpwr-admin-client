@@ -2,13 +2,14 @@ import { adminService } from 'api/api';
 import { common_PaymentMethodNameEnum, PaymentMethodFee } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button, ConfirmationModal, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, Text, useDoneFlash } from 'ui';
 
 const label = (m: string) => m.replace('PAYMENT_METHOD_NAME_ENUM_', '').replace(/_/g, ' ');
 const cellClass =
-  'w-24 border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'w-24 border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Estimated processing-fee model per payment method — feeds contribution margin for
 // non-Stripe methods. Blind write: the contract has no read RPC, so current values are never
@@ -29,15 +30,19 @@ export function PaymentFeesEditor({
 }) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.settings);
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  // Nothing to save, or a refusal: stands under the button until the next edit.
+  const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, { pct: string; fixed: string }>>({});
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const relevant = methods.filter((m) => m && m !== 'PAYMENT_METHOD_NAME_ENUM_UNKNOWN');
   const get = (m: string) => rows[m] ?? { pct: '', fixed: '' };
-  const set = (m: string, patch: Partial<{ pct: string; fixed: string }>) =>
+  const set = (m: string, patch: Partial<{ pct: string; fixed: string }>) => {
+    setError(null);
     setRows((r) => ({ ...r, [m]: { ...get(m), ...patch } }));
+  };
 
   const buildFees = (): PaymentMethodFee[] =>
     relevant
@@ -54,7 +59,7 @@ export function PaymentFeesEditor({
 
   const requestSave = () => {
     if (!pendingFees.length) {
-      showMessage('Enter at least one fee before saving', 'error');
+      setError('enter at least one fee');
       return;
     }
     setConfirmOpen(true);
@@ -64,11 +69,24 @@ export function PaymentFeesEditor({
     const fees = buildFees();
     if (!fees.length) return;
     setSaving(true);
+    setError(null);
     try {
       await adminService.UpsertPaymentMethodFees({ fees });
-      showMessage('Payment fees saved', 'success');
+      saved.flash();
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save payment fees', 'error');
+      const msg = e instanceof Error ? e.message : 'Failed to save payment fees';
+      if (failureClassOfError(e) === 'refused') setError(msg);
+      else
+        notify({
+          sev: 'error',
+          subject: 'PAYMENT FEES',
+          text: 'not saved',
+          detail: msg,
+          action:
+            failureClassOfError(e) === 'transient'
+              ? { label: 'retry', onClick: () => void save() }
+              : undefined,
+        });
     } finally {
       setSaving(false);
     }
@@ -124,10 +142,18 @@ export function PaymentFeesEditor({
           variant='secondary'
           className='self-start uppercase'
           disabled={saving}
+          done={saved.on}
           onClick={requestSave}
         >
           {saving ? 'saving…' : 'save fees'}
         </Button>
+      )}
+      {error && (
+        <CalloutBox tone='error' className='self-start'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {error}
+          </Text>
+        </CalloutBox>
       )}
       <ConfirmationModal
         open={confirmOpen}

@@ -100,7 +100,7 @@ export function Shipping() {
                 <th
                   key={col.label}
                   className={cn(
-                    'h-10 border border-r border-borderColor bg-bgSecondary px-2 text-center',
+                    'h-10 border border-r border-borderColor bg-pageBg px-2 text-center',
                     col.width ?? 'min-w-26',
                   )}
                 >
@@ -131,8 +131,8 @@ export function Shipping() {
                   className={cn(
                     'h-10 border-b border-borderColor last:border-b-0',
                     isAllowed
-                      ? 'cursor-pointer hover:bg-textInactiveColor/20'
-                      : 'cursor-default bg-textInactiveColor/60',
+                      ? 'cursor-pointer hover:bg-borderColor/20'
+                      : 'cursor-default bg-borderColor/60',
                   )}
                   onClick={() => handleRowClick(carrier)}
                 >

@@ -2,7 +2,7 @@ import { AdminAccount } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { Button, Text, useDoneFlash } from 'ui';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
 import { ResetPasswordModal } from './components/reset-password-modal';
@@ -32,6 +32,9 @@ export function Accounts() {
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [resetting, setResetting] = useState<AdminAccount | null>(null);
+  // The reset receipt lands on that account's «password» door.
+  const passwordDone = useDoneFlash();
+  const [resetFor, setResetFor] = useState<string>();
 
   const accounts = data?.accounts ?? [];
   const sections = sectionsData?.sections ?? [];
@@ -47,7 +50,7 @@ export function Accounts() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-16'>
-      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='flex flex-wrap items-end justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex flex-col gap-1'>
           <Text variant='uppercase' size='large'>
             admin accounts{accounts.length > 0 && ` · ${accounts.length}`}
@@ -86,6 +89,7 @@ export function Accounts() {
           setFormMode('edit');
         }}
         onResetPassword={(a) => setResetting(a)}
+        passwordDoneFor={passwordDone.on ? resetFor : undefined}
       />
 
       <AccountFormModal
@@ -101,6 +105,10 @@ export function Accounts() {
         open={resetting !== null}
         onOpenChange={(o) => !o && setResetting(null)}
         username={resetting?.username ?? ''}
+        onReset={() => {
+          setResetFor(resetting?.username);
+          passwordDone.flash();
+        }}
       />
     </div>
   );

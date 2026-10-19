@@ -172,7 +172,7 @@ export function ProductPicker({
             </div>
 
             {/* basket pane — what is staged for the order */}
-            <aside className='flex max-h-[58vh] flex-col gap-2 border border-borderColor bg-bgSecondary p-2'>
+            <aside className='flex max-h-[58vh] flex-col gap-2 border border-borderColor bg-pageBg p-2'>
               <GroupLabel flush>basket · {pendingSelection.length}</GroupLabel>
               {pendingSelection.length === 0 ? (
                 <Text size='micro' variant='label' component='span'>

@@ -119,7 +119,7 @@ beta-ветку клиента → Vercel-превью `admin.beta.grbpwr.com` �
 | Снэкбар | `src/lib/stores/store.ts` `useSnackBarStore().showMessage(msg,'success'|'error')` |
 | ConfirmationModal | `src/ui/components/confirmation-modal.tsx` (`closeOnConfirm` есть) |
 | Дата-форматирование | `src/components/managers/orders-catalog/components/utility.ts` (`formatDateShort` → '20 JUL 2026') |
-| Токены Tailwind 4 | `src/global.css` `@theme` (`--color-textInactiveColor`, `--color-error`, `--z-modal`); `cn()` — `src/lib/utility` |
+| Токены Tailwind 4 | `src/global.css` `@theme` (`--color-borderColor`, `--color-error`, `--z-modal`); `cn()` — `src/lib/utility` |
 | Query defaults | `src/index.tsx` :127–138 (staleTime 5m, retry 1, no refetchOnWindowFocus) |
 | Проверка типов | `yarn build:check` (tsc+build); тест-раннера НЕТ; финал — `yarn fix` |
 | USDT в валютном селекте | УЖЕ есть: `EXPENSE_CURRENCIES` (`src/constants/constants.ts:49-52` = SELLING + USDT), `currency-select` строит items из него — USDT-проводка работает из коробки |

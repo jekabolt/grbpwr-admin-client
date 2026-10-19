@@ -1,9 +1,10 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { errorText, isRefused, reasonOf } from 'components/managers/accounting/utils/feedback';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { Button, CalloutBox, Close, Text } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,
@@ -68,8 +69,9 @@ export function OpexWizard({
   defaultKind?: Kind;
   defaultMonth?: string;
 }) {
-  const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
+  // The server's refusal stands on the review step until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const base = (dictionary?.baseCurrency || 'EUR').toUpperCase();
 
   const upsertLine = useUpsertOpexLines();
@@ -186,26 +188,29 @@ export function OpexWizard({
     }));
   };
 
+  // A refusal of what was typed stays on the review step; a lost request is news.
+  const fail = (e: unknown, text: string, fallback: string) => {
+    const said = errorText(e, fallback) ?? '';
+    if (isRefused(e)) {
+      setRefusal(said);
+      return;
+    }
+    notify({
+      sev: 'error',
+      subject: `${kind === 'oneoff' ? 'EXPENSE' : 'TEMPLATE'} ${d.label.trim()}`.trim(),
+      text,
+      bad: reasonOf(e),
+      detail: said,
+    });
+  };
+
   const submit = async () => {
+    setRefusal(null);
     if (kind === 'oneoff') {
-      if (collisionChecking) {
-        // Defense in depth alongside the disabled Create button below: don't let a submit through
-        // while we still don't know whether this (month, category, label) is taken.
-        showMessage(
-          'Still checking for a conflicting line this month — try again in a moment',
-          'error',
-        );
-        return;
-      }
-      if (collision) {
-        showMessage(
-          isRecurringLine(collision)
-            ? 'A recurring (⟳) line already uses this category + label this month'
-            : 'A line with this category + label already exists this month — edit that line instead',
-          'error',
-        );
-        return;
-      }
+      // Defense in depth alongside the disabled Create button below: don't let a submit through
+      // while we still don't know whether this (month, category, label) is taken. Both states are
+      // already said on the review step.
+      if (collisionChecking || collision) return;
       try {
         await upsertLine.mutateAsync([
           {
@@ -223,10 +228,10 @@ export function OpexWizard({
             supplierName: undefined,
           },
         ]);
-        showMessage('One-off expense added', 'success');
+        // No receipt: the line shows in the month's table.
         onOpenChange(false);
       } catch (e) {
-        showMessage(e instanceof Error ? e.message : 'Failed to add expense', 'error');
+        fail(e, 'not added', 'failed to add expense');
       }
       return;
     }
@@ -256,10 +261,10 @@ export function OpexWizard({
           employeeId: d.employeeId || 0,
         },
       });
-      showMessage('Recurring template added', 'success');
+      // No receipt: the template shows in the recurring list.
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to add template', 'error');
+      fail(e, 'not added', 'failed to add template');
     }
   };
 
@@ -275,7 +280,7 @@ export function OpexWizard({
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
             <DialogPrimitives.Title asChild>
               <Text
                 size='micro'
@@ -479,6 +484,8 @@ export function OpexWizard({
                     Checking for a conflicting line this month…
                   </Text>
                 )}
+
+                {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
 
                 {collision && (
                   <Text variant='error' size='small'>

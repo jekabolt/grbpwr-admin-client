@@ -56,7 +56,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
                   {action}
                 </Text>
               </div>
-              <div className='my-2 h-2 bg-bgSecondary'>
+              <div className='my-2 h-2 bg-pageBg'>
                 <div className={`h-2 ${barCls}`} style={{ width: `${Math.min(100, pct)}%` }} />
               </div>
               <Text className='text-labelColor text-textBaseSize block'>

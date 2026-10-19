@@ -1,4 +1,3 @@
-import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { ChecklistEditor, Chip, ChipRow, Text } from 'ui';
 import { FulfillmentChecklistItem } from '../api/types';
@@ -26,7 +25,6 @@ export function FulfillmentChecklist({
   items: FulfillmentChecklistItem[];
   canWrite: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   const add = useAddFulfillmentChecklistItem(orderUuid);
   const toggle = useSetFulfillmentChecklistItemDone(orderUuid);
   const remove = useDeleteFulfillmentChecklistItem(orderUuid);
@@ -39,7 +37,7 @@ export function FulfillmentChecklist({
       for (const step of t.items) {
         await add.mutateAsync(step);
       }
-      showMessage(`Applied “${t.label}” template`, 'success');
+      // The steps showing up in the checklist are the receipt.
     } catch {
       // the add hook already surfaces the error; stop looping on the first failure.
     } finally {
@@ -79,12 +77,7 @@ export function FulfillmentChecklist({
           </Text>
           <ChipRow>
             {CHECKLIST_TEMPLATES.map((t) => (
-              <Chip
-                key={t.id}
-                dashed
-                disabled={applying !== null}
-                onClick={() => applyTemplate(t)}
-              >
+              <Chip key={t.id} dashed disabled={applying !== null} onClick={() => applyTemplate(t)}>
                 {applying === t.id ? 'applying…' : t.label}
               </Chip>
             ))}

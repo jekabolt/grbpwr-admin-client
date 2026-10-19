@@ -65,7 +65,14 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, dartOf, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
+import {
+  PAGE_SURE,
+  dartOf,
+  defaultedFabrics,
+  openAsides,
+  sizeFlags,
+  weakAsides,
+} from '../auto-advance';
 import { heldCells, holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import { fallbackGrain } from './grain';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
@@ -669,7 +676,7 @@ function inkRole(c: ImportSession['pages'][number]): boolean {
   return c.cls === 'cover' && !!c.ink && (c.ink.raster >= 0.3 || c.ink.texts >= 10);
 }
 
-function notPatternEvidence(
+export function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
 ): string | null {
@@ -1452,6 +1459,15 @@ function piecesStep(snap: Snap): AutopilotDecision {
       ),
     );
   const why = weak.map((a) => {
+    // KOMBI-AP: the pieces stage exposes only verdicts backed by two independent facts. They are
+    // data for the UI as well as the policy; an absent id stays in the one operator question.
+    const decided = s.pieces?.asideEvidence?.find((x) => x.id === a.id);
+    if (decided)
+      return {
+        a,
+        ev: decided.evidence,
+        kind: decided.kind,
+      };
     // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
     if (a.layerLoop) return { a, ev: a.layerLoop };
     // DARTS: a dart word and a wedge whose mouth is on its seeded piece's outline (dartOf)
@@ -1475,20 +1491,22 @@ function piecesStep(snap: Snap): AutopilotDecision {
     );
   return {
     actions: [{ kind: 'proceed' }],
-    assumptions: why.map(({ a, ev }) =>
-      A(
+    assumptions: why.map((w) => {
+      const { a, ev } = w;
+      const kind = 'kind' in w ? w.kind : undefined;
+      return A(
         'pieces',
         'set-aside',
         `outline ${a.id} at ${mm(a.at)} (${Math.round(a.areaMm2 / 100)} cm²${a.seed?.text ? ` · «${a.seed.text.text.slice(0, 24)}»` : ''})`,
         'not a piece',
-        'a piece-sized outline is kept aside only on positive evidence that it is not a piece',
-        [a.reason, ev!],
+        `a piece-sized outline is kept aside only on positive evidence that it is not a piece${kind ? ` (${kind})` : ''}`,
+        [a.reason, ...(Array.isArray(ev) ? ev : [ev!])],
         0.5,
         true,
         undefined,
         `aside:${a.id}`,
-      ),
-    ),
+      );
+    }),
   };
 }
 

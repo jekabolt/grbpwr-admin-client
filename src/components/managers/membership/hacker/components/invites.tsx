@@ -2,6 +2,7 @@ import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
 import { Button, CalloutBox, CopyToClipboard, Input, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
@@ -20,10 +21,13 @@ export function HackerInvites() {
   const [email, setEmail] = useState('');
   const [expiresInDays, setExpiresInDays] = useState('14');
   const [lastGenerated, setLastGenerated] = useState<GenerateHackerInviteResponse | null>(null);
+  // The server's refusal of the form stands under it until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const invites = data?.invites ?? [];
 
   const handleGenerate = () => {
+    setRefusal(null);
     generate.mutate(
       {
         email: email || undefined,
@@ -34,6 +38,7 @@ export function HackerInvites() {
           setLastGenerated(res);
           setEmail('');
         },
+        onError: (e) => isRefusal(e) && setRefusal(errorSentence(e, 'not generated')),
       },
     );
   };
@@ -76,6 +81,14 @@ export function HackerInvites() {
         </div>
       )}
 
+      {refusal && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not generated</b> · {refusal}
+          </Text>
+        </CalloutBox>
+      )}
+
       {lastGenerated && (
         <CalloutBox tone='note' className='flex flex-col gap-1 bg-highlightColor/10'>
           <Text variant='inactive' size='small'>
@@ -102,11 +115,11 @@ export function HackerInvites() {
       </label>
 
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
+        <table className='w-full border-collapse border border-borderColor min-w-max'>
+          <thead className='bg-borderColor h-9'>
             <tr>
               {['ID', 'Email', 'Created by', 'Created', 'Expires', 'Status', ''].map((h) => (
-                <th key={h} className='border border-textInactiveColor px-2 h-9'>
+                <th key={h} className='border border-borderColor px-2 h-9'>
                   <Text variant='uppercase' size='small'>
                     {h}
                   </Text>
@@ -131,29 +144,26 @@ export function HackerInvites() {
                       ? 'active'
                       : 'expired';
                 return (
-                  <tr
-                    key={inv.id}
-                    className='border-b border-textInactiveColor last:border-b-0 h-9'
-                  >
-                    <td className='border border-textInactiveColor text-center px-2'>
+                  <tr key={inv.id} className='border-b border-borderColor last:border-b-0 h-9'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{inv.id}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{inv.email || <EmptyCell />}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{inv.createdBy || <EmptyCell />}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.createdAt)}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.expiresAt)}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{statusLabel}</Text>
                     </td>
-                    <td className='border border-textInactiveColor text-center px-2'>
+                    <td className='border border-borderColor text-center px-2'>
                       {inv.active && canWrite(SECTION.members) && (
                         <Button
                           variant='underline'

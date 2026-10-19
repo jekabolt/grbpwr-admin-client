@@ -22,9 +22,9 @@ const TH = 'px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wide te
 export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchiveToggle }: Props) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>code</th>
             <th className={TH}>name</th>
             <th className={TH}>section</th>
@@ -46,7 +46,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
               <tr
                 key={a.code}
                 className={cn(
-                  'h-10 border-b border-textInactiveColor last:border-b-0',
+                  'h-10 border-b border-borderColor last:border-b-0',
                   a.archived && 'opacity-50',
                 )}
               >
@@ -66,7 +66,7 @@ export function AccountsTable({ accounts, canWrite, isLoading, onRename, onArchi
                   {a.isSystem ? (
                     <Tooltip
                       trigger={
-                        <button type='button' className='cursor-help text-textInactiveColor'>
+                        <button type='button' className='cursor-help text-borderColor'>
                           <Text variant='inactive'>managed</Text>
                         </button>
                       }

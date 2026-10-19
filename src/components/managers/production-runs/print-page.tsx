@@ -1,9 +1,5 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
-import {
-  depStatus,
-  usePrintReady,
-  type PrintDep,
-} from 'components/managers/print/use-print-ready';
+import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
 import { parsePrintQuery } from 'components/managers/print/scope';
 import { ROUTES } from 'constants/routes';
 import { useMemo, useState } from 'react';
@@ -66,7 +62,7 @@ export function RunPackPrint() {
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='runpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='runpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
           <BackLink to={runId > 0 ? runDetailPath(runId) : ROUTES.productionRuns} />
           <Text variant='uppercase' size='large'>
@@ -107,7 +103,7 @@ export function RunPackPrint() {
           <BackLink to={ROUTES.productionRuns}>production runs</BackLink>
         </div>
       ) : (
-        <div className='runpack-doc border border-textInactiveColor shadow-sm'>
+        <div className='runpack-doc border border-borderColor shadow-sm'>
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .runpack-doc. */}
           <div className='px-8 pt-6'>
             <PrintDegradedNotice items={degraded} />

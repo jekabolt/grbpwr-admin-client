@@ -1,5 +1,5 @@
 import type { common_MediaFull, GetDesignBandResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { type JSX, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { TILE_CORNER, TILE_QUIET } from 'ui';
@@ -106,7 +106,6 @@ export function useBoardCutout({
   land: (original: common_MediaFull, cut: common_MediaFull) => CutLanding;
 }) {
   const seen = useSyncExternalStore(subscribe, snapshot);
-  const { showMessage } = useSnackBarStore();
   const run = useStartDesignRun(techCardId, { scope: BOARD_CUTOUT_SCOPE });
   const mine = techCardId > 0 ? cuts.get(techCardId) : undefined;
 
@@ -150,7 +149,6 @@ export function useBoardCutout({
         params: { ...emptyParams(), extraInputMediaIds: [mediaId] },
       },
       {
-        startedSay: '',
         beforeSend: (key) => {
           patch(card, mediaId, { key });
           return true;
@@ -206,14 +204,19 @@ export function useBoardCutout({
         }
         drop(techCardId, mediaId);
         if (landed === 'gone')
-          showMessage(
-            'the picture left the board while its background was removed — the cut-out is in the playground history',
-            'success',
-          );
+          notify({
+            sev: 'warn',
+            subject: 'REMOVE BG',
+            text: 'not placed',
+            bad: 'picture left board',
+            detail:
+              'the picture left the board while its background was removed — the cut-out is in the playground history',
+          });
         continue;
       }
       const why = (r.lastError ?? '').trim() || (r.errorCode ?? '').trim() || runStatus(r);
-      if (c.state !== 'failed') showMessage(`remove bg failed — ${why}`, 'error');
+      if (c.state !== 'failed')
+        notify({ sev: 'error', subject: 'REMOVE BG', text: 'failed', bad: why });
       patch(techCardId, mediaId, { state: 'failed', why });
     }
     if (!again) return;

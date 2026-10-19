@@ -44,7 +44,7 @@ function BrowserRow({
       aria-pressed={selected}
       className={cn(
         'flex w-full items-center justify-between gap-1.5 border-b border-hairline px-1.5 py-0.5 text-left last:border-b-0',
-        selected ? 'bg-textColor text-bgColor' : 'text-textColor hover:bg-bgZebra',
+        selected ? 'bg-textColor text-bgColor' : 'text-textColor hover:bg-pageBg',
       )}
     >
       {/* option-label size (11px), not the 10px label size — these are the choices themselves */}
@@ -433,7 +433,7 @@ export function BaseModelFields() {
         items={sampleSizeOptions}
         valueAsNumber
         disabled={noCategory}
-        className={noCategory ? 'bg-bgZebra text-labelColor' : undefined}
+        className={noCategory ? 'bg-pageBg text-labelColor' : undefined}
         onAfterChange={seedRange}
       />
     </div>

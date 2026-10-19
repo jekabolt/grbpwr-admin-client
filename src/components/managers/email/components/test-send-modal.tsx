@@ -1,7 +1,9 @@
 import { common_EmailCampaignInsert } from 'api/proto-http/admin';
 import { LANGUAGES } from 'constants/constants';
+import { errorText, isRefused, reasonOf } from 'components/managers/accounting/utils/feedback';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
-import { ConfirmationModal, Input, Select, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, Input, Select, Text } from 'ui';
 import { useTestSend } from './useCampaign';
 
 interface TestSendModalProps {
@@ -11,14 +13,24 @@ interface TestSendModalProps {
   buildDraft: () => common_EmailCampaignInsert;
   /** Saved campaign id, if any (sent alongside the draft). */
   campaignId?: number;
+  /** Sent: the door that opened the modal shows the receipt. */
+  onSent?: () => void;
 }
 
 /**
  * Recipient-email entry + language select -> SendTestEmail. The backend enforces
  * the recipient allowlist; the UI just collects addresses and the language/variant.
  */
-export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: TestSendModalProps) {
+export function TestSendModal({
+  open,
+  onOpenChange,
+  buildDraft,
+  campaignId,
+  onSent,
+}: TestSendModalProps) {
   const [emails, setEmails] = useState('');
+  // The server's refusal (the allowlist, a bad address) stands in the modal until the next edit.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [languageId, setLanguageId] = useState<number>(LANGUAGES[0].id);
   const testSend = useTestSend();
 
@@ -30,7 +42,10 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
   return (
     <ConfirmationModal
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(o) => {
+        if (!o) setRefusal(null);
+        onOpenChange(o);
+      }}
       title='send a test email'
       confirmLabel='send test'
       cancelLabel='cancel'
@@ -40,10 +55,32 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
         // SendTestEmailRequest.source is a proto oneof(draft, campaign_id): send ONLY the current
         // draft (mirrors the preview) — passing campaignId too sets the oneof twice and the backend
         // rejects it ("oneof source is already set").
-        testSend.mutate(
-          { draft: buildDraft(), languageId, variantId: 0, toEmails },
-          { onSuccess: () => onOpenChange(false) },
-        )
+        {
+          setRefusal(null);
+          testSend.mutate(
+            { draft: buildDraft(), languageId, variantId: 0, toEmails },
+            {
+              onSuccess: () => {
+                onOpenChange(false);
+                onSent?.();
+              },
+              onError: (e) => {
+                const said = errorText(e, 'unknown error') ?? '';
+                if (isRefused(e)) {
+                  setRefusal(said);
+                  return;
+                }
+                notify({
+                  sev: 'error',
+                  subject: campaignId ? `CAMPAIGN ${campaignId}` : 'TEST EMAIL',
+                  text: 'not sent',
+                  bad: reasonOf(e),
+                  detail: said,
+                });
+              },
+            },
+          );
+        }
       }
     >
       <div className='space-y-3'>
@@ -55,10 +92,14 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
           <Text component='label' size='small' variant='label'>
             recipient email(s)
           </Text>
-          <div className='border-b border-textInactiveColor'>
+          <div className='border-b border-borderColor'>
             <Input
               value={emails}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmails(e.target.value)}
+              aria-invalid={refusal !== null || undefined}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setRefusal(null);
+                setEmails(e.target.value);
+              }}
               placeholder='you@grbpwr.com'
               className='w-full border-none bg-transparent'
             />
@@ -75,6 +116,7 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
             onValueChange={(v: string) => setLanguageId(Number(v))}
           />
         </div>
+        {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

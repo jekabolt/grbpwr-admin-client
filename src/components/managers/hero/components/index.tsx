@@ -4,11 +4,11 @@ import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
-import { Button, ConfirmationModal, SectionStack, Text, Form } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, SectionStack, Text, Form, useDoneFlash } from 'ui';
 import { BlockEditorModal } from './block-editor-modal';
 import { BlockRail } from './block-rail';
 import { HeroPreviewPanel } from './hero-preview-panel';
@@ -61,7 +61,10 @@ export function Hero() {
   const { data: heroData, isLoading, isError, refetch } = useHero();
   const saveHero = useSaveHero();
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  const published = useDoneFlash();
+  const reverted = useDoneFlash();
+  // Blocks left incomplete on publish: stands under the header until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
   const productsByEntityUidRef = useRef<Record<string, any[]>>({});
   const deletedIndicesRef = useRef<Set<string>>(new Set());
@@ -236,7 +239,8 @@ export function Hero() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage('hero published to the live storefront', 'success');
+      setFormError(null);
+      published.flash();
     } catch {
       // The error toast is surfaced by useSaveHero's onError; swallow the
       // rejected mutateAsync here so it doesn't bubble as an unhandled rejection
@@ -256,7 +260,7 @@ export function Hero() {
       raw = null;
     }
     if (!raw) {
-      showMessage('no earlier published snapshot to revert to', 'error');
+      notify({ sev: 'error', subject: 'HERO', text: 'not reverted', bad: 'no snapshot' });
       setRevertConfirmOpen(false);
       return;
     }
@@ -271,15 +275,13 @@ export function Hero() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage(
-        'loaded the last published snapshot — review it, then click publish to make it live',
-        'success',
-      );
+      // Loaded, not live: the «unsaved changes» badge and the flash say it.
+      reverted.flash();
     } catch {
-      showMessage("couldn't read the last published snapshot", 'error');
+      notify({ sev: 'error', subject: 'HERO', text: 'not reverted', bad: 'snapshot unreadable' });
     }
     setRevertConfirmOpen(false);
-  }, [form, showMessage]);
+  }, [form, reverted]);
 
   // Pre-flight before publishing: validate everything (so every incomplete block
   // gets flagged in the rail), tally live vs incomplete blocks, then open the
@@ -362,7 +364,7 @@ export function Hero() {
       });
     }
 
-    showMessage('please fill in all required fields', 'error');
+    setFormError('fill in the required fields');
 
     if (errors.entities) {
       const firstErrorIndex = errors.entities.findIndex(
@@ -383,7 +385,7 @@ export function Hero() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, onError)} className='flex flex-col'>
-        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               hero
@@ -406,6 +408,7 @@ export function Hero() {
                   variant='secondary'
                   size='lg'
                   className='uppercase'
+                  done={reverted.on && 'loaded'}
                   onClick={() => setRevertConfirmOpen(true)}
                   disabled={isLoading || isError || saveHero.isPending}
                 >
@@ -431,6 +434,7 @@ export function Hero() {
                 onClick={handlePublishClick}
                 disabled={isLoading || isError || form.formState.isSubmitting || saveHero.isPending}
                 loading={saveHero.isPending}
+                done={published.on && 'published'}
                 className='uppercase'
               >
                 publish
@@ -438,6 +442,14 @@ export function Hero() {
             </div>
           )}
         </div>
+
+        {formError && (
+          <CalloutBox tone='error' className='mb-6'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not published</b> · {formError}
+            </Text>
+          </CalloutBox>
+        )}
 
         {isLoading ? (
           <div className='flex justify-center py-20'>

@@ -1,5 +1,5 @@
 import type { common_DesignPartsPieces } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { Button, Chip, Pill, Text } from 'ui';
 
@@ -120,7 +120,6 @@ export function PiecesRow({
   /** The draft differs from the saved list (the header says `unsaved`). */
   onDirty?: (dirty: boolean) => void;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const saved = useMemo(() => namesOf(pieces), [pieces]);
   const rev = pieces.rev ?? 0;
   const [draft, setDraft] = useState<string[]>(saved);
@@ -159,7 +158,7 @@ export function PiecesRow({
      designer sees theirs against the new one and saves again over it, or cancels. */
   const save = async (names: string[], expectedRev: number, settle = false) => {
     if (names.length === 0) {
-      showMessage('keep at least one piece', 'error');
+      notify({ sev: 'error', subject: 'PIECES', text: 'not removed', bad: 'last piece' });
       return;
     }
     setBusy(true);
@@ -170,12 +169,15 @@ export function PiecesRow({
       const msg = (e instanceof Error && e.message) || 'the pieces were not saved';
       const moved = /rev_mismatch|aborted/i.test(msg);
       if (moved && !settle) setBase(null);
-      showMessage(
-        moved
+      notify({
+        sev: 'error',
+        subject: 'PIECES',
+        text: 'not saved',
+        bad: moved ? 'changed meanwhile' : undefined,
+        detail: moved
           ? 'the pieces changed meanwhile (another tab or a new read); your edit is kept: save again to replace them, or cancel'
           : msg,
-        'error',
-      );
+      });
     } finally {
       setBusy(false);
     }
