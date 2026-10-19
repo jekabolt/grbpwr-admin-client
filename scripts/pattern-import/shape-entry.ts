@@ -5,7 +5,7 @@
 //   node scripts/pattern-import/shape.mjs [unit|case|mood:<id>…]   (default: unit + every e2e case + MOOD;
 //   unit = SHAPE-MAJ synthetic turnHold / gate cases)
 //   env SHAPE_PNG=<dir>: per-size PNGs of every graded piece (outline, seam, notches, drills)
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { ChainSet, PieceCandidate, PieceSpec, PtMm, StageIO } from 'lib/pattern-import/types';
@@ -117,8 +117,47 @@ function analyse(
   png: string | null,
   caseId: string,
 ): FamRec[] {
+  if (process.env.SHAPE_SHEET) {
+    const debug = s as unknown as {
+      sheet: {
+        poses: unknown[];
+        paths: { id: number; pts: PtMm[]; closed: boolean; style: number; src: unknown }[];
+        styles: { id: number; fill: boolean; widthMm: number; layer: string | null }[];
+        texts: { text: string; bbox: unknown; anchor: PtMm; layer: string | null }[];
+      };
+    };
+    const styles = new Map(debug.sheet.styles.map((st) => [st.id, st]));
+    writeFileSync(
+      process.env.SHAPE_SHEET,
+      JSON.stringify({
+        poses: debug.sheet.poses,
+        styles: debug.sheet.styles,
+        texts: debug.sheet.texts,
+        filled: debug.sheet.paths.filter((p) => styles.get(p.style)?.fill),
+      }),
+    );
+  }
   const S = s as unknown as { semantics: { pieces: PieceSpec[] } | null };
   const specs = S.semantics?.pieces ?? [];
+  if (process.env.SHAPE_NOTCHES)
+    writeFileSync(
+      process.env.SHAPE_NOTCHES,
+      JSON.stringify(
+        specs.flatMap((p) =>
+          p.sizes.flatMap((z) =>
+            z.notches.map((n) => ({
+              identity: p.identity,
+              size: z.sizeToken,
+              at: n.at,
+              cutBox: z.bbox,
+              ranges: n.ranges,
+              graded: n.graded,
+              chord: n.chord,
+            })),
+          ),
+        ),
+      ),
+    );
   // blocks that a block-severity check names (per scope); a check naming no block holds all
   const bad = new Set<string>();
   const badBlock = new Set<string>();
@@ -682,6 +721,120 @@ function unitCase(): CaseRes {
   {
     const f = gateOf([false, false, false]);
     expect('gate one shape: nothing held', !f.failed.length, `failed [${f.failed}]`);
+  }
+  // ── NOTCH: size balloons are tags; repeated filled triangles touching their own size line
+  // are the notches. This is synthetic source geometry, independent of kombinezon's expected file.
+  {
+    const labels = ['6', '8', '10'];
+    const circle = (x: number, y: number, r = 4): PtMm[] =>
+      Array.from({ length: 16 }, (_, i) => ({
+        x: x + r * Math.cos((2 * Math.PI * i) / 16),
+        y: y + r * Math.sin((2 * Math.PI * i) / 16),
+      }));
+    const chains: { id: number; pts: PtMm[]; closed: boolean; lengthMm: number }[] = [];
+    const classes: { id: number; role: string; sizeLabel: string | null; chains: number[] }[] = [];
+    const cands = labels.map((label, rank) => {
+      const w = 100 + rank * 10;
+      const lineId = chains.length;
+      chains.push({
+        id: lineId,
+        pts: [
+          { x: 0, y: 0 },
+          { x: w, y: 0 },
+          { x: w, y: w },
+          { x: 0, y: w },
+        ],
+        closed: true,
+        lengthMm: 4 * w,
+      });
+      const tagId = chains.length;
+      chains.push({ id: tagId, pts: circle(25, w), closed: true, lengthMm: 8 * Math.PI });
+      classes.push({ id: rank, role: 'size', sizeLabel: label, chains: [lineId, tagId] });
+      return {
+        rank,
+        outer: chains[lineId].pts,
+        walls: [lineId],
+        bbox: { minX: 0, minY: 0, maxX: w, maxY: w },
+        areaMm2: w * w,
+        rankFrom: 'class',
+      };
+    });
+    const styles = labels.map((layer, id) => ({
+      id,
+      strokeRgb: [0, 0, 0] as [number, number, number],
+      widthMm: 0,
+      dash: null,
+      layer,
+      fill: true,
+      clip: null,
+    }));
+    const paths = labels.map((_, rank) => {
+      const y = 100 + rank * 10;
+      return {
+        id: 100 + rank,
+        pts: [
+          { x: 67.8, y },
+          { x: 66, y },
+          { x: 66.9, y: y - 1.56 },
+          { x: 67.8, y: y - 3.12 },
+          { x: 68.7, y: y - 1.56 },
+          { x: 69.6, y },
+        ],
+        closed: true,
+        style: rank,
+        src: { file: 'unit', page: 0, op: rank, sub: 0 },
+      };
+    });
+    // a repeated triangle on the right size layers but away from every line is not a notch
+    paths.push(
+      ...labels.map((_, rank) => ({
+        id: 200 + rank,
+        pts: [
+          { x: 86.8, y: 70 },
+          { x: 85, y: 70 },
+          { x: 85.9, y: 68.44 },
+          { x: 86.8, y: 66.88 },
+          { x: 87.7, y: 68.44 },
+          { x: 88.6, y: 70 },
+        ],
+        closed: true,
+        style: rank,
+        src: { file: 'unit', page: 0, op: 10 + rank, sub: 0 },
+      })),
+    );
+    const texts = labels.map((text, rank) => {
+      const y = 100 + rank * 10;
+      return {
+        id: rank,
+        text,
+        anchor: { x: 24, y },
+        bbox: { minX: 23, minY: y - 2, maxX: 27, maxY: y + 2 },
+        fontSizeMm: 3,
+        rotationDeg: 0,
+        layer: labels[rank],
+        src: { file: 'unit', page: 0, op: 20 + rank, sub: 0 },
+      };
+    });
+    const set = { chains, classes } as unknown as ChainSet;
+    const read = readNotchMarks(cands as unknown as PieceCandidate[], set, undefined, {
+      paths,
+      styles,
+      texts,
+      run: {
+        encoding: 'ocg',
+        evidence: ['unit'],
+        sizes: labels.map((label, rank) => ({ label, rank, classId: rank, file: null })),
+      },
+    } as never);
+    const got = labels.map((_, rank) => ({
+      notches: read.get(rank)?.notches.length ?? 0,
+      tags: read.get(rank)?.tags.length ?? 0,
+    }));
+    expect(
+      'notch tags vs filled glyphs: balloons write none, touching triangles write one per size',
+      got.every((x) => x.notches === 1 && x.tags === 3),
+      JSON.stringify(got),
+    );
   }
   // ── SHAPE-KINK honesty (18.10): what is straightened, and what never is ──
   {
