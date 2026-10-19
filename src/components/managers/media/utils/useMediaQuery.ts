@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 import { MediaUsage, common_MediaFull } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useMemo } from 'react';
 import { MediaUsageMap } from './media-usage';
 
@@ -316,4 +317,47 @@ export function useDeleteManyMedia() {
       queryClient.invalidateQueries({ queryKey: mediaKeys.lists() });
     },
   });
+}
+
+/** File name for a saved original: the media id plus the extension its url carries. */
+function originalFileName(m: common_MediaFull, url: string): string {
+  const ext = url.split('?')[0].match(/\.([a-z0-9]{2,5})$/i)?.[1];
+  return ext ? `${m.id}.${ext.toLowerCase()}` : String(m.id);
+}
+
+export type BulkDownloadResult = { saved: number; opened: number };
+
+/**
+ * Saves the selected ORIGINALS one by one: fetch → blob → object url → anchor click.
+ *
+ * `fetchMediaBlob` goes through the media proxy when the CDN answers without CORS headers. If even
+ * that fails, the file is opened in a new tab instead, so the person can still save it by hand;
+ * the count of such files comes back so the caller can say so.
+ */
+export async function downloadMediaOriginals(
+  items: common_MediaFull[],
+): Promise<BulkDownloadResult> {
+  let saved = 0;
+  let opened = 0;
+  for (const m of items) {
+    const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl;
+    if (!url) continue;
+    try {
+      const blob = await fetchMediaBlob(url);
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = originalFileName(m, url);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoked on the next tick: revoking synchronously can cancel the download in Safari.
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+      saved += 1;
+    } catch {
+      window.open(url, '_blank', 'noopener');
+      opened += 1;
+    }
+  }
+  return { saved, opened };
 }

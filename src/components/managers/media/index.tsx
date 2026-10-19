@@ -2,6 +2,8 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
+import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +19,14 @@ import { Filter } from './components/filter';
 import { MediaFilterBar } from './components/media-filter-bar';
 import { SlotFit } from './components/media-item';
 import { MediaList } from './components/media-list';
+import {
+  MediaFiltersSheet,
+  MobileBottomBar,
+  MobileLibraryHead,
+  MobileSelectHead,
+} from './components/media-mobile';
 import { MediaRail } from './components/media-rail';
+import { MediaDeleteSheet } from './components/media-delete-sheet';
 import { MediaExpandDialog } from './components/media-expand-dialog';
 import { MediaRecropDialog } from './components/media-recrop-dialog';
 import { MediaSelectionBar } from './components/media-selection-bar';
@@ -26,7 +35,8 @@ import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
 import { mediaUsageRefs, usageRefHref, usageRefName, usageRefSlot } from './utils/media-usage';
 import { useFilter } from './utils/useFilter';
 import { usePasteFiles } from './utils/usePasteFiles';
-import { useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
+import { useIsMobile } from './utils/useIsMobile';
+import { downloadMediaOriginals, useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
 import { useSelection } from './utils/useSelectMedia';
 
@@ -90,6 +100,16 @@ export function MediaManager({
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
   const canUpload = canWrite(SECTION.media);
+  // ТЕЛЕФОН — только у самостоятельной страницы: встроенный выбор под слот остаётся как был.
+  const isMobile = useIsMobile();
+  const mobileLib = isStandalone && isMobile;
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectView, setSelectView] = useState<'all' | 'selected'>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const { showMessage } = useSnackBarStore();
+  const selecting = mobileLib && selectMode;
 
   // ЗАНЯТОСТЬ СПРАШИВАЕТСЯ ОДИН РАЗ НА СТРАНИЦУ И ПО ВСЕЙ ЗАГРУЖЕННОЙ БИБЛИОТЕКЕ, а не по
   // отфильтрованному: счётчики полки обязаны относиться к тому же знаменателю, что и остальные
@@ -311,10 +331,43 @@ export function MediaManager({
 
   const usageOf = useCallback((m: common_MediaFull) => mediaUsageRefs(usage, m.id), [usage]);
 
+  const enterSelect = (m?: common_MediaFull) => {
+    setSelectMode(true);
+    if (m && !selection.isSelected(m.id ?? 0)) selection.selectMedia(m);
+  };
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectView('all');
+    selection.clearSelection();
+  };
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const { saved, opened } = await downloadMediaOriginals(selection.selectedMedia);
+      showMessage(opened ? `saved ${saved} · opened ${opened}` : `saved ${saved}`, 'success');
+    } finally {
+      setDownloading(false);
+    }
+  };
+  // Выбранное показывается ЦЕЛИКОМ, мимо фильтров: набор переживает смену отбора.
+  const gridMedia =
+    selecting && selectView === 'selected' ? selection.selectedMedia : filteredMedia || [];
+  const facets = {
+    type,
+    ratio,
+    usageShelf,
+    typeCounts,
+    ratioCounts,
+    usageCounts,
+    onType: setType,
+    onRatio: setRatio,
+    onUsage: setUsageShelf,
+  };
+
   const list = (
     <>
       <MediaList
-        media={filteredMedia || []}
+        media={gridMedia}
         bands={bands}
         fitOf={fitOf}
         usageOf={usageOf}
@@ -329,10 +382,21 @@ export function MediaManager({
         // приёмку слота, на странице библиотеки — в очередь пачки.
         onFilesPicked={onFilesPicked}
         showAddButton={false}
-        showAddTile={isStandalone && canUpload}
-        noMatch={noMatch}
+        showAddTile={isStandalone && canUpload && !mobileLib}
+        noMatch={
+          selecting && selectView === 'selected' ? (
+            <Text variant='label' className='py-10 text-center'>
+              nothing selected
+            </Text>
+          ) : (
+            noMatch
+          )
+        }
+        touch={mobileLib}
+        selecting={selecting}
+        onLongPress={mobileLib && !disabled ? enterSelect : undefined}
       />
-      {isStandalone && !disabled && (
+      {isStandalone && !disabled && !mobileLib && (
         <MediaSelectionBar
           selected={selection.selectedMedia}
           usage={usage}
@@ -343,8 +407,96 @@ export function MediaManager({
   );
 
   return (
-    <div className='flex flex-col gap-6 pb-16'>
-      {isStandalone ? (
+    <div className={cn('flex flex-col gap-6 pb-16', mobileLib && 'gap-2.5 pb-24')}>
+      {mobileLib ? (
+        <>
+          {selecting ? (
+            <MobileSelectHead
+              count={selection.selectedMedia.length}
+              view={selectView}
+              allCount={shown}
+              onView={setSelectView}
+              onExit={exitSelect}
+              onDeselectAll={selection.clearSelection}
+            />
+          ) : (
+            <MobileLibraryHead
+              loaded={media.length}
+              shown={shown}
+              search={search}
+              order={order}
+              facets={facets}
+              onSearch={setSearch}
+              onOrder={setOrder}
+              onOpenFilters={() => setFiltersOpen(true)}
+              onSelect={() => enterSelect()}
+            />
+          )}
+          {pendingPlate}
+          <input
+            ref={fileInputRef}
+            type='file'
+            accept='image/*,video/*'
+            multiple
+            className='hidden'
+            onChange={handleFileChange}
+          />
+          <MediaFiltersSheet
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            shown={shown}
+            facets={facets}
+            onReset={reset}
+          />
+          <MediaDeleteSheet
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            selected={selection.selectedMedia}
+            usage={usage}
+            onDeleted={(ids) => {
+              selection.deselectMany(ids);
+              if (ids.length && ids.length === selection.selectedMedia.length) {
+                setSelectMode(false);
+                setSelectView('all');
+              }
+            }}
+          />
+          {selecting ? (
+            <MobileBottomBar dark>
+              <Button
+                variant='underlineReverse'
+                size='sm'
+                className='min-h-11'
+                disabled={!selection.selectedMedia.length || downloading}
+                onClick={handleDownload}
+              >
+                {downloading ? 'saving…' : 'download'}
+              </Button>
+              <Button
+                size='sm'
+                className='ml-auto min-h-11 border-l border-labelColor pl-4 text-error disabled:text-labelColor'
+                disabled={!selection.selectedMedia.length}
+                onClick={() => setDeleteOpen(true)}
+              >
+                delete
+              </Button>
+            </MobileBottomBar>
+          ) : (
+            canUpload && (
+              <MobileBottomBar>
+                <Button
+                  variant='main'
+                  size='lg'
+                  className='min-h-11 w-full'
+                  onClick={handleUploadClick}
+                >
+                  + upload
+                </Button>
+              </MobileBottomBar>
+            )
+          )}
+        </>
+      ) : isStandalone ? (
         <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
@@ -421,7 +573,7 @@ export function MediaManager({
         )
       )}
 
-      {isStandalone ? (
+      {isStandalone && !mobileLib ? (
         <SideRailLayout
           rail={
             <MediaRail
