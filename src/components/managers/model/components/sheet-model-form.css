@@ -1,0 +1,18 @@
+@media (min-width: 768px) {
+  .sheet-comment-fill > [data-field='comment'] {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .sheet-comment-fill > [data-field='comment'] > div {
+    min-height: 0;
+    flex: 1;
+  }
+
+  .sheet-comment-fill textarea {
+    height: 100%;
+    min-height: 0;
+  }
+}
