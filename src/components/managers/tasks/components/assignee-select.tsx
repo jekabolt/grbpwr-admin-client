@@ -48,6 +48,7 @@ export function AssigneeSelect({
         placeholder='username (unassigned if empty)'
         value={value}
         disabled={disabled}
+        className='min-h-11 sm:min-h-0'
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       />
     );
@@ -68,6 +69,7 @@ export function AssigneeSelect({
       placeholder='unassigned'
       items={items}
       disabled={disabled}
+      className='min-h-11 sm:min-h-0'
       fullWidth
     />
   );

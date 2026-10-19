@@ -5,7 +5,7 @@ import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef } from 'react';
-import { Pill, Text, Tiles } from 'ui';
+import { Button, Media, Pill, Text, Tiles } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark } from '../components/task-media-viewer';
 import { tasksKeys } from '../hooks/useTasks';
@@ -129,8 +129,9 @@ export function AttachmentTiles({
               key={`m-${i}-${m.id}`}
               className='flex h-full min-w-0 flex-col border border-borderColor bg-bgColor'
             >
-              <button
+              <Button
                 type='button'
+                variant='default'
                 disabled={!openable}
                 title='site media · public'
                 aria-label={
@@ -142,12 +143,7 @@ export function AttachmentTiles({
                 className='relative block w-full cursor-zoom-in bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
               >
                 {thumb ? (
-                  <img
-                    src={thumb}
-                    alt=''
-                    loading='lazy'
-                    className='aspect-square w-full object-contain'
-                  />
+                  <Media src={thumb} alt='' aspectRatio='1/1' fit='contain' />
                 ) : (
                   <span className='flex aspect-square w-full items-center justify-center'>
                     <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -179,7 +175,7 @@ export function AttachmentTiles({
                 >
                   media
                 </Text>
-              </button>
+              </Button>
               <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
                 {/* «Публичное» — не украшение, а разница «увидит покупатель» / «не увидит»:
                     медиа уезжает на CDN сайта, файл библиотеки лежит в приватном бакете.
@@ -214,18 +210,6 @@ export function AttachmentTiles({
           />
         ))}
       </Tiles>
-
-      {media.length > 0 && (
-        <Text size='micro' variant='label'>
-          media is badged in the corner: it goes out to the site, library files stay private.
-        </Text>
-      )}
-      {files.length > 0 && !mayOpenLibrary && (
-        <Text size='micro' variant='label'>
-          the files section is closed to you: a file tile hands you the file itself, its card
-          won’t open.
-        </Text>
-      )}
     </div>
   );
 }

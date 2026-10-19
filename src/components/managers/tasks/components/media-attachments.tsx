@@ -1,14 +1,14 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { moveItem } from 'components/managers/media/components/gallery-order';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { Button, Close, Text } from 'ui';
+import { Button, Close, Media, Text } from 'ui';
 import { rememberMedia, resolveMedia } from '../api/tasksService';
 import type { TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark, useTaskMediaViewer } from './task-media-viewer';
 
 /** Та же кнопка-глиф, что в подвале плитки галереи: 16 пикселей, серая, чёрная под курсором. */
 const ARROW =
-  'flex size-4 shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-textInactiveColor disabled:hover:text-textInactiveColor';
+  'flex min-h-11 w-full shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-textInactiveColor disabled:hover:text-textInactiveColor sm:size-4 sm:min-h-0 sm:w-4';
 
 // Attach reference images/files from the existing media bucket. Stores media ids
 // on the task; the MediaSelector (same one tech cards use) handles the gallery.
@@ -69,17 +69,18 @@ export function MediaAttachments({
           return (
             // КЛЮЧ С ПОЗИЦИЕЙ: один и тот же файл может оказаться в списке дважды (через пикер не
             // пройдёт, а с провода — да), и одинаковые ключи React'а перепутали бы плитки местами.
-            <div key={`${id}:${index}`} className='w-16'>
-              <div className='relative h-16 w-16 border border-borderColor'>
+            <div key={`${id}:${index}`} className='w-24 sm:w-16'>
+              <div className='relative h-24 w-24 border border-borderColor sm:h-16 sm:w-16'>
                 {m?.thumbnail ? (
-                  <button
+                  <Button
                     type='button'
+                    variant='default'
                     aria-label='view attachment'
                     onClick={() => viewer.openIndex(index)}
                     className='block h-full w-full cursor-zoom-in'
                   >
-                    <img src={m.thumbnail} alt='' className='h-full w-full object-cover' />
-                  </button>
+                    <Media src={m.thumbnail} alt='' aspectRatio='auto' />
+                  </Button>
                 ) : (
                   <div className='flex h-full w-full items-center justify-center'>
                     <Text size='nano' variant='label' component='span'>
@@ -108,18 +109,23 @@ export function MediaAttachments({
                 </div>
               )}
               {value.length > 1 && (
-                <div className='flex items-center gap-1 border-t border-hairline px-0.5'>
+                <div className='grid grid-cols-2 items-center border-t border-hairline px-0.5 sm:flex sm:gap-1'>
                   <Button
                     type='button'
                     aria-label={`move attachment ${index + 1} earlier`}
                     title='earlier in the order; the first becomes the cover'
                     disabled={index === 0}
                     onClick={() => onChange(moveItem(value, index, index - 1))}
-                    className={ARROW}
+                    className={`${ARROW} order-2 sm:order-none`}
                   >
                     ←
                   </Button>
-                  <Text size='nano' variant='label' component='span' className='tabular-nums'>
+                  <Text
+                    size='nano'
+                    variant='label'
+                    component='span'
+                    className='order-1 col-span-2 text-center tabular-nums sm:order-none sm:col-span-1'
+                  >
                     {index + 1}
                   </Text>
                   <Button
@@ -128,7 +134,7 @@ export function MediaAttachments({
                     title='later in the order'
                     disabled={index === value.length - 1}
                     onClick={() => onChange(moveItem(value, index, index + 1))}
-                    className={ARROW}
+                    className={`${ARROW} order-3 sm:order-none`}
                   >
                     →
                   </Button>

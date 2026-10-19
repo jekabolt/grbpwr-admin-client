@@ -83,7 +83,7 @@ function TaskRow({
       <Link
         to={`/tasks/${id}`}
         className={cn(
-          'min-w-0 flex-1 truncate underline decoration-transparent underline-offset-2 hover:decoration-borderColor',
+          'inline-flex min-h-11 min-w-0 flex-1 items-center truncate underline decoration-transparent underline-offset-2 hover:decoration-borderColor sm:min-h-0',
           muted && 'text-labelColor',
         )}
         title={title}
@@ -152,7 +152,10 @@ function TaskCombobox({
   );
 
   return (
-    <div className='min-w-0 flex-1' onPointerDownCapture={() => setArmed(true)}>
+    <div
+      className='min-w-0 flex-1 [&_button]:min-h-11 sm:[&_button]:min-h-0'
+      onPointerDownCapture={() => setArmed(true)}
+    >
       <Combobox
         name='task-target'
         placeholder={placeholder}
@@ -291,13 +294,14 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
           </div>
         )}
         {canWrite && (
-          <div className='flex items-center gap-2 pt-1'>
+          <div className='flex flex-col items-stretch gap-2 pt-1 sm:flex-row sm:items-center'>
             <Input
               name='new-subtask'
               aria-label='new subtask title'
               placeholder='add a subtask…'
               value={subtitle}
               disabled={createTask.isPending}
+              className='min-h-11 sm:min-h-0'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtitle(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                 // Enter и Escape сравниваются по `e.key` сознательно: они не буквы и на любой
@@ -316,6 +320,7 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
               type='button'
               variant='secondary'
               size='sm'
+              className='min-h-11 sm:min-h-0'
               loading={createTask.isPending}
               disabled={!subtitle.trim()}
               onClick={addSubtask}
@@ -372,7 +377,7 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
         })}
 
         {canWrite && (
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
             {/* Три пункта, все три ВСЕГДА среди items: значение, которого нет в списке, скрытый
                 нативный select у Radix стирает — а стирать здесь нечего, потому что стартовое
                 значение тоже из этого списка. */}
@@ -381,7 +386,7 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
               items={kindOptions}
               value={kind}
               onValueChange={(v: string) => setKind(v as TaskRelationKind)}
-              className='w-36 shrink-0'
+              className='min-h-11 w-full shrink-0 sm:min-h-0 sm:w-36'
             />
             <TaskCombobox
               placeholder='link a task…'
