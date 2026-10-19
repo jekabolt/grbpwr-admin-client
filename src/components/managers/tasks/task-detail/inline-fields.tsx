@@ -313,19 +313,26 @@ export function DueField({
   disabled?: boolean;
   onChange: (next: string | undefined) => void;
 }) {
+  // ОДНА СТРОКА ОДНОГО РАЗМЕРА: подпись, дата, ×/▾ — всё 11px капсом, как соседние чипы. Просрочка
+  // меняет саму подпись `due` → `overdue` (слово несёт состояние без цвета) и красит всю рамку.
   return (
     <div
       className={cn(
-        'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2 sm:min-h-8',
+        'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8',
         overdue && 'border-error text-error',
       )}
     >
-      <Text size='micro' component='span' className='shrink-0 uppercase tracking-label'>
-        {label}
+      <Text
+        size='control'
+        component='span'
+        className={cn('shrink-0 uppercase tracking-label', !overdue && 'text-labelColor')}
+      >
+        {overdue ? 'overdue' : label}
       </Text>
       {canWrite ? (
-        <div className='min-w-0 [&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-0'>
+        <div className='min-w-0 [&>button]:min-h-11 sm:[&>button]:min-h-0'>
           <DatePicker
+            compact
             value={value ? new Date(value) : undefined}
             disabled={disabled}
             placeholder='none'
@@ -333,13 +340,12 @@ export function DueField({
           />
         </div>
       ) : (
-        <Text component='span' className={cn(!value && 'text-labelColor')}>
-          {value ? format(new Date(value), 'PP') : 'none'}
-        </Text>
-      )}
-      {overdue && (
-        <Text size='micro' component='span' className='shrink-0 uppercase tracking-label'>
-          overdue
+        <Text
+          size='control'
+          component='span'
+          className={cn('uppercase', !value && 'text-labelColor')}
+        >
+          {value ? format(new Date(value), 'd MMM yyyy') : 'none'}
         </Text>
       )}
     </div>
@@ -359,7 +365,7 @@ export function RowDate({
   onChange: (next: string | undefined) => void;
 }) {
   return (
-    <div className='[&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-8'>
+    <div className='w-full [&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-8'>
       <DatePicker
         value={value ? new Date(value) : undefined}
         disabled={disabled}

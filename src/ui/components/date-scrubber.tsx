@@ -303,6 +303,17 @@ function Scrubber({
     scrollEl.scrollTop = max > min ? ((top - min) / (max - min)) * room : 0;
   };
 
+  // The pill slides left on grab, so the browser's synthesized click lands on whatever tile was
+  // under the finger. Eat that one click.
+  const swallowNextClick = () => {
+    const eat = (ev: MouseEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    window.addEventListener('click', eat, { capture: true, once: true });
+    window.setTimeout(() => window.removeEventListener('click', eat, { capture: true }), 400);
+  };
+
   const openSheet = () => {
     const at = live.current.labelAt(scrollEl.scrollTop);
     window.clearTimeout(s.hideT);
@@ -312,6 +323,7 @@ function Scrubber({
   const release = () => {
     if (!s.dragging) return;
     s.dragging = false;
+    swallowNextClick();
     s.grab = false;
     live.current.onDragStateChange?.(false);
     const tap = !s.moved && Date.now() - s.downT < TAP_MS;

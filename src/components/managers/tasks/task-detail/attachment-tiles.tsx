@@ -215,7 +215,7 @@ export function AttachmentTiles({
 
         {onAdd && (
           <AddDoor shape='tile' className='aspect-square w-full' onClick={onAdd}>
-            file
+            media
           </AddDoor>
         )}
       </Tiles>

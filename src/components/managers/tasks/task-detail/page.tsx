@@ -1,7 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { format } from 'date-fns';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
@@ -11,10 +11,9 @@ import {
   CalloutBox,
   ConfirmationModal,
   EmptyCell,
-  FoldCaret,
+  Arrow,
   GenericPopover,
   Pill,
-  Row,
   Section,
   SectionStack,
   Select,
@@ -46,7 +45,9 @@ import {
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
-import { DueField, InlineDescription, InlineTitle, RowDate } from './inline-fields';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { mergePickedMedia } from '../components/media-attachments';
+import { DueField, InlineDescription, InlineTitle } from './inline-fields';
 import { AssigneesPicker } from '../components/assignees-picker';
 import { TaskDescriptionView } from '../components/task-description';
 import { ParentPicker, TaskRelations } from '../components/task-relations';
@@ -82,39 +83,18 @@ const priorityOptions = [
 // литерал на каждый рендер пересобирал бы его мемоизацию впустую.
 const NO_ANNOTATIONS: TaskMediaAnnotations[] = [];
 
-// Local label node matching the fact rows' previous uppercase micro styling — the
-// shared `Row` takes a plain ReactNode label, it doesn't style it itself.
-function FactLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-      {children}
-    </Text>
-  );
-}
-
-// One editable fact: label left, the field's own control in a fixed value column, so the
-// values of all lines start on one vertical.
-function FieldLine({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className='flex min-h-11 items-center gap-3 border-b border-hairline sm:min-h-8'>
-      <span className='min-w-0 flex-1'>
-        <FactLabel>{label}</FactLabel>
-      </span>
-      <div className='flex w-3/5 min-w-0 items-center'>{children}</div>
-    </div>
-  );
-}
-
 /** The «⋯» menu's rows: one footprint, a hairline between, the last one bare. */
 const MENU_ITEM =
   'flex min-h-11 w-full items-center border-b border-hairline px-1 text-left text-control uppercase tracking-label hover:bg-bgSecondary sm:min-h-8';
-/** The chips under the title: status, priority (Selects) share the due field's height. */
-const CHIP = 'min-h-11 w-auto gap-3 px-2.5 sm:min-h-8';
-/** A select that is the value of a field line: no box of its own, the line is the box. */
-const FIELD_SELECT = 'min-h-11 border-0 px-0 sm:min-h-8';
-/** Same for the assignees picker's trigger. */
-const FIELD_CONTROL =
-  'w-full [&_[data-assignees-trigger]]:border-0 [&_[data-assignees-trigger]]:px-0 sm:[&_[data-assignees-trigger]]:min-h-8';
+/** The chips under the title: every property, one size and one type (11px caps), Select or not. */
+const CHIP =
+  'min-h-11 w-auto gap-3 px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8';
+/** A chip that is not a Select (assignee, more): the same box, drawn by hand. */
+const CHIP_BOX =
+  'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8';
+/** The assignees picker inside a chip: its trigger loses its own box; the list keeps a usable width. */
+const ASSIGNEE_IN_CHIP =
+  'min-w-0 [&_[data-assignees-trigger]]:min-h-0 [&_[data-assignees-trigger]]:border-0 [&_[data-assignees-trigger]]:bg-transparent [&_[data-assignees-trigger]]:px-0 [&_[data-assignees-trigger]]:py-0 [&_[data-assignees-trigger]]:text-control [&_[data-assignees-trigger]]:uppercase [&_[data-assignees-popup]]:min-w-60';
 
 // Centered chrome shared by the loading / not-found states.
 function Centered({ children }: { children: React.ReactNode }) {
@@ -147,17 +127,18 @@ export function TaskDetail() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickingParent, setPickingParent] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const mediaTrigger = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
 
-  function editDescriptionOnDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
+  function editDescriptionOnClick(e: React.MouseEvent<HTMLDivElement>) {
     // ТОЛЬКО ИЗ СВОЕГО DOM. Просмотрщик вложений, открытый из описания, рисуется порталом, а
     // React ведёт всплытие по дереву КОМПОНЕНТОВ, а не по DOM: двойной щелчок по холсту
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
     if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
-    // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
-    window.getSelection()?.removeAllRanges();
+    // Протянутое выделение — это чтение (копируют кусок), а не просьба править.
+    if (window.getSelection()?.toString()) return;
     setEditingDescription(true);
   }
 
@@ -324,8 +305,8 @@ export function TaskDetail() {
    * по общему правилу формы, и это отдельный разговор — про вторую дверь, а не про гонку двух
    * инлайнов.
    *
-   * Дверей к модалке на странице две — «edit all fields» в меню «⋯» и «+ file» у вложений, —
-   * и замок стоит на обеих.
+   * Дверь к модалке на странице одна — «edit all fields» в меню «⋯»; тот же замок стоит и на
+   * «+ media», которая пишет инлайновой дверью.
    */
   const editLocked = inlinePatch.isPending;
   const openEditor = () => {
@@ -337,19 +318,17 @@ export function TaskDetail() {
     (board !== task.board || status !== task.status) &&
     move.mutate({ id: task.id, board, status, position: 0 });
 
-  const fileDoor = canWrite ? (
-    <AddDoor
-      shape='inline'
-      className='min-h-11 sm:min-h-0'
-      disabled={editLocked}
-      onClick={openEditor}
-    >
-      file
-    </AddDoor>
-  ) : null;
+  /**
+   * «+ MEDIA» ОТКРЫВАЕТ МЕДИАТЕКУ, А НЕ МОДАЛКУ ПРАВКИ (владелец 19.10: «+ file открывает не
+   * селектор файлов, а edit task»). Выбранное дописывается к `mediaIds` той же инлайн-дверью, что
+   * и остальные поля, — со сверкой по тому списку, какой был на экране при открытии.
+   */
+  const openMediaPicker = () => {
+    if (!editLocked) mediaTrigger.current?.click();
+  };
 
   return (
-    <div className='mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-5 overflow-x-clip pb-10'>
+    <div className='mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 overflow-x-clip pb-10'>
       {/* ── 1. Верхняя полоса: дорога назад и меню действий ─────────────────────────────── */}
       <div className='flex items-center justify-between gap-3 border-b border-borderColor'>
         <BackLink className='inline-flex min-h-11 items-center sm:min-h-8' to={ROUTES.tasks}>
@@ -464,7 +443,122 @@ export function TaskDetail() {
             disabled={inlinePatch.isPending}
             onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
           />
+          <DueField
+            label='start'
+            value={t.startDate}
+            canWrite={canWrite}
+            disabled={inlinePatch.isPending}
+            onChange={(startDate) => patchInline({ startDate }, { startDate: t.startDate })}
+          />
+          {/* Доска — через `MoveTask`, как и колонка. Подпись внутри чипа: «production» рядом со
+              статусом без неё читалось бы как ещё один статус. */}
+          <Select
+            name='detail-board'
+            placeholder='board'
+            items={boardOptions}
+            value={task.board}
+            onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
+            readOnly={!canWrite}
+            className={CHIP}
+            renderValue={(_, item) => (
+              <span className='flex items-center gap-2'>
+                <span className='text-labelColor'>board</span>
+                {item?.label}
+              </span>
+            )}
+          />
+          {/* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). `seen` приходит ОТ ПИКЕРА, а не берётся из
+              живого `t.assignees`: пока пикер открыт, чужая правка доезжает в кэш незаметно. */}
+          <div className={CHIP_BOX}>
+            <Text size='control' component='span' className='shrink-0 uppercase text-labelColor'>
+              assignee
+            </Text>
+            {canWrite ? (
+              <div className={ASSIGNEE_IN_CHIP}>
+                <AssigneesPicker
+                  value={t.assignees}
+                  disabled={inlinePatch.isPending}
+                  onChange={(next, seen) => patchInline({ assignees: next }, { assignees: seen })}
+                />
+              </div>
+            ) : (
+              <span className='flex items-center gap-1.5'>
+                <AvatarStack names={t.assignees} />
+                <Text
+                  size='control'
+                  component='span'
+                  className={cn('uppercase', !t.assignees.length && 'text-labelColor')}
+                >
+                  {t.assignees.join(', ') || 'unassigned'}
+                </Text>
+              </span>
+            )}
+          </div>
+          {/* Себе в один тап — без открытия пикера. */}
+          {canWrite && account?.username && !isMine && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              aria-label='assign to me'
+              disabled={inlinePatch.isPending}
+              onClick={() =>
+                patchInline(
+                  { assignees: [...t.assignees, account.username!] },
+                  { assignees: t.assignees },
+                )
+              }
+              className='min-h-11 shrink-0 self-center text-labelColor hover:text-textColor sm:min-h-0'
+            >
+              + me
+            </Button>
+          )}
+          <Button
+            type='button'
+            variant='default'
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+            className={cn(CHIP_BOX, 'text-labelColor hover:text-textColor')}
+          >
+            {moreOpen ? 'less' : 'more'}
+            <span
+              aria-hidden
+              className={cn(
+                'shrink-0 text-textColor transition-transform duration-150 ease-out motion-reduce:transition-none',
+                !moreOpen && 'rotate-180',
+              )}
+            >
+              <Arrow />
+            </span>
+          </Button>
         </div>
+
+        {moreOpen && (
+          <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='uppercase tracking-label'
+            >
+              started {task.startedAt ? format(new Date(task.startedAt), 'PP') : <EmptyCell />}
+            </Text>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='uppercase tracking-label'
+            >
+              created {task.createdBy ? `${task.createdBy} · ` : ''}
+              {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
+            </Text>
+            {t.labels.map((l) => (
+              <Pill key={l} tone='mut'>
+                {l}
+              </Pill>
+            ))}
+          </div>
+        )}
 
         {canWrite && pickingParent && (
           <ParentPicker task={task} onDone={() => setPickingParent(false)} />
@@ -507,84 +601,84 @@ export function TaskDetail() {
         )}
       </div>
 
-      {/* Body. На телефоне обе колонки — `contents`, и порядок задают `order-N` блоков:
-          описание → поля → чеклист → вложения → связи → комментарии. С `lg` слева чтение
-          задачи, справа рабочая рейка: поля над обсуждением. */}
-      <div className='grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
-        <SectionStack className='contents min-w-0 lg:order-1 lg:flex'>
-          {/* ── 4. Описание ─────────────────────────────────────────────────────────────── */}
-          <Section
-            title='description'
-            className='order-1 min-w-0 lg:order-none'
-            action={
-              canWrite &&
-              !editingDescription && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='min-h-11 sm:min-h-0'
-                  /* Имя РАЗЛИЧИМОЕ: на этой странице есть и «edit all fields» в меню, открывающий
+      {/* Body — ОДНА КОЛОНКА (выбор владельца 19.10): рейки справа нет, свойства живут чипами
+          под заголовком, поэтому сбоку не остаётся пустого места ни при каком содержимом.
+          Порядок: описание → чеклист → вложения → связи → комментарии. */}
+      <SectionStack className='min-w-0'>
+        {/* ── 4. Описание ─────────────────────────────────────────────────────────────── */}
+        <Section
+          title='description'
+          className='min-w-0'
+          action={
+            canWrite &&
+            !editingDescription && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className='min-h-11 sm:min-h-0'
+                /* Имя РАЗЛИЧИМОЕ: на этой странице есть и «edit all fields» в меню, открывающий
                      модалку. Два одинаковых имени на одном экране — это загадка для читалки с
                      экрана и ловушка для стенда. */
-                  aria-label='edit description'
-                  onClick={() => setEditingDescription(true)}
-                >
-                  {t.description ? 'edit' : '+ add'}
-                </Button>
-              )
-            }
-          >
-            {editingDescription ? (
-              /* БЕЗ `key` ПО СЕРВЕРНОМУ ЗНАЧЕНИЮ. Он здесь стоял и размонтировал редактор на
+                aria-label='edit description'
+                onClick={() => setEditingDescription(true)}
+              >
+                {t.description ? 'edit' : '+ add'}
+              </Button>
+            )
+          }
+        >
+          {editingDescription ? (
+            /* БЕЗ `key` ПО СЕРВЕРНОМУ ЗНАЧЕНИЮ. Он здесь стоял и размонтировал редактор на
                  каждом фоновом перечитывании описания — то есть молча заменял набранное чужим
                  текстом. Черновик редактор засеивает сам, один раз при открытии. */
-              <InlineDescription
-                value={t.description}
-                media={media}
-                saving={inlinePatch.isPending}
-                onSave={async (description, seenDescription) => {
-                  if (await patchInline({ description }, { description: seenDescription }))
-                    setEditingDescription(false);
-                }}
-                onCancel={() => setEditingDescription(false)}
-              />
-            ) : (
-              /* ДВОЙНОЙ ЩЕЛЧОК ОТКРЫВАЕТ ПРАВКУ — по слову владельца. Одинарный остаётся за
-                 чтением: по нему переходят по ссылкам, открывают вложения и выделяют текст.
-                 Двойной щелчок ПО живому элементу (ссылка, чип вложения, снимок) правку не
-                 открывает: первый щелчок уже сделал своё дело, и поверх открытой вкладки
-                 или просмотрщика редактор был бы вторым, непрошеным действием. */
-              <div onDoubleClick={canWrite ? editDescriptionOnDoubleClick : undefined}>
-                {t.description ? (
-                  /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок
+            <InlineDescription
+              value={t.description}
+              media={media}
+              saving={inlinePatch.isPending}
+              onSave={async (description, seenDescription) => {
+                if (await patchInline({ description }, { description: seenDescription }))
+                  setEditingDescription(false);
+              }}
+              onCancel={() => setEditingDescription(false)}
+            />
+          ) : (
+            /* ЩЕЛЧОК ОТКРЫВАЕТ ПРАВКУ, наведение подчёркивает — по слову владельца. Щелчок
+                 ПО живому элементу (ссылка, чип вложения, снимок) правку не открывает: он уже
+                 сделал своё дело. Протянутое выделение — тоже нет. */
+            <div
+              onClick={canWrite ? editDescriptionOnClick : undefined}
+              className={cn(canWrite && 'cursor-text hover:underline')}
+            >
+              {t.description ? (
+                /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок
                      библиотеки. Ссылки на вложения карточки при этом остаются чипами: шов между
                      двумя языками одной строки описан в `task-description.tsx`. */
-                  <TaskDescriptionView
-                    text={t.description}
-                    media={media}
-                    onOpen={attachments.openMedia}
-                  />
-                ) : (
-                  <Text size='micro' variant='label' component='span'>
-                    No description.
-                  </Text>
-                )}
-              </div>
-            )}
-          </Section>
+                <TaskDescriptionView
+                  text={t.description}
+                  media={media}
+                  onOpen={attachments.openMedia}
+                />
+              ) : (
+                <Text size='micro' variant='label' component='span'>
+                  No description.
+                </Text>
+              )}
+            </div>
+          )}
+        </Section>
 
-          {/* ── 6. Чеклист ──────────────────────────────────────────────────────────────── */}
-          <TaskChecklist
-            taskId={task.id}
-            items={task.checklist}
-            canWrite={canWrite}
-            className='order-3 min-w-0 lg:order-none'
-          />
+        {/* ── 6. Чеклист ──────────────────────────────────────────────────────────────── */}
+        <TaskChecklist
+          taskId={task.id}
+          items={task.checklist}
+          canWrite={canWrite}
+          className='min-w-0'
+        />
 
-          {/* ── 7. Вложения ─────────────────────────────────────────────────────────────── */}
-          {attachmentCount > 0 && (
-            /* Одна секция на оба источника: для читающего карточку «вложение» — это
+        {/* ── 7. Вложения ─────────────────────────────────────────────────────────────── */}
+        {(attachmentCount > 0 || canWrite) && (
+          /* Одна секция на оба источника: для читающего карточку «вложение» — это
                вложение, независимо от того, в каком бакете лежат байты.
 
                ШОВ ДВУХ ВЕТОК, разрешённый в пользу ОБЕИХ. Плитки заменили список документов
@@ -599,195 +693,75 @@ export function TaskDetail() {
                 самой карточки, и если сервер не разрешил какой-то id, два экрана назвали бы одно
                 вложение разными номерами.
 
-                «+ file» открывает модалку правки: вложения правятся только там. */
-            <Section
-              title={`attachments · ${attachmentCount}`}
-              className='order-4 min-w-0 lg:order-none'
-            >
+                Пусто — секция всё равно стоит (с правом записи): одна дверь «+ media», чтобы
+                было видно, что к задаче можно добавить медиа. */
+          <Section title={`attachments · ${attachmentCount}`} className='min-w-0'>
+            {attachmentCount > 0 ? (
               <AttachmentTiles
                 taskId={task.id}
                 media={media}
                 files={task.files}
                 annotations={annotations}
                 onOpenMedia={attachments.openIndex}
-                onAdd={canWrite && !editLocked ? openEditor : undefined}
+                onAdd={canWrite && !editLocked ? openMediaPicker : undefined}
               />
-            </Section>
-          )}
+            ) : (
+              <AddDoor
+                className='min-h-11 justify-center py-6'
+                disabled={editLocked}
+                onClick={openMediaPicker}
+              >
+                media
+              </AddDoor>
+            )}
+          </Section>
+        )}
 
-          {/* ── 8. Сабтаски, блокеры, связи. Пусто — один ряд дверей «+ …» (туда же встаёт
-              «+ file», пока вложений нет). */}
-          <TaskRelations
-            task={task}
-            canWrite={canWrite}
-            doors={attachmentCount === 0 ? fileDoor : undefined}
-            className='order-5 min-w-0 lg:order-none'
-          />
+        {/* ── 8. Сабтаски, блокеры, связи. Пусто — один ряд дверей «+ …». */}
+        <TaskRelations task={task} canWrite={canWrite} className='min-w-0' />
 
-          {links.length > 0 && (
-            <Section title='links' className='order-5 min-w-0 lg:order-none'>
-              <div className='flex flex-wrap gap-2'>
-                {links.map((l) => (
-                  <LinkChip key={`${l.kind}-${l.to}`} link={l} />
-                ))}
-              </div>
-            </Section>
-          )}
-        </SectionStack>
+        {links.length > 0 && (
+          <Section title='links' className='min-w-0'>
+            <div className='flex flex-wrap gap-2'>
+              {links.map((l) => (
+                <LinkChip key={`${l.kind}-${l.to}`} link={l} />
+              ))}
+            </div>
+          </Section>
+        )}
 
-        {/* Right — поля + обсуждение */}
-        <aside className='contents lg:order-2 lg:block'>
-          <SectionStack className='contents lg:flex'>
-            {/* ── 5. Список полей ───────────────────────────────────────────────────────── */}
-            <Section className='order-2 min-w-0 lg:order-none'>
-              <div className='flex flex-col'>
-                <FieldLine label='assignee'>
-                  {canWrite ? (
-                    /* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). Не `<label>`: внутри пикера живут
-                       кнопка-триггер и поле поиска — клик по подписи стал бы вторым нажатием
-                       триггера.
-
-                       `seen` приходит ОТ ПИКЕРА, а не берётся из живого `t.assignees`: пока
-                       пикер открыт, чужая правка доезжает в кэш незаметно, и сверка с живым
-                       сравнивала бы чужую правку саму с собой. */
-                    <div className='flex w-full min-w-0 items-center gap-2'>
-                      <div className={cn(FIELD_CONTROL, 'min-w-0 flex-1')}>
-                        <AssigneesPicker
-                          value={t.assignees}
-                          disabled={inlinePatch.isPending}
-                          onChange={(next, seen) =>
-                            patchInline({ assignees: next }, { assignees: seen })
-                          }
-                        />
-                      </div>
-                      {/* Себе в один тап — без открытия пикера. */}
-                      {account?.username && !isMine && (
-                        <Button
-                          type='button'
-                          variant='underline'
-                          size='xs'
-                          aria-label='assign to me'
-                          disabled={inlinePatch.isPending}
-                          onClick={() =>
-                            patchInline(
-                              { assignees: [...t.assignees, account.username!] },
-                              { assignees: t.assignees },
-                            )
-                          }
-                          className='min-h-11 shrink-0 text-labelColor hover:text-textColor sm:min-h-0'
-                        >
-                          + me
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <span className='flex items-center justify-end gap-1.5'>
-                      <AvatarStack names={t.assignees} />
-                      <Text
-                        component='span'
-                        className={cn(
-                          !t.assignees.length && 'text-labelColor',
-                          isMine && 'font-bold',
-                        )}
-                      >
-                        {t.assignees.join(', ') || 'unassigned'}
-                      </Text>
-                    </span>
-                  )}
-                </FieldLine>
-                <FieldLine label='board'>
-                  {/* Доска — через `MoveTask`, как и колонка. */}
-                  <Select
-                    name='detail-board'
-                    placeholder='board'
-                    items={boardOptions}
-                    value={task.board}
-                    onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
-                    readOnly={!canWrite}
-                    className={FIELD_SELECT}
-                    fullWidth
-                  />
-                </FieldLine>
-                <FieldLine label='planned start'>
-                  {canWrite ? (
-                    <RowDate
-                      value={t.startDate}
-                      disabled={inlinePatch.isPending}
-                      onChange={(startDate) =>
-                        patchInline({ startDate }, { startDate: t.startDate })
-                      }
-                    />
-                  ) : (
-                    <Text component='span' className={cn(!t.startDate && 'text-labelColor')}>
-                      {t.startDate ? format(new Date(t.startDate), 'PP') : <EmptyCell />}
-                    </Text>
-                  )}
-                </FieldLine>
-
-                <Button
-                  type='button'
-                  variant='default'
-                  aria-expanded={moreOpen}
-                  onClick={() => setMoreOpen((v) => !v)}
-                  className='flex min-h-11 w-full items-center text-micro uppercase tracking-label text-labelColor hover:text-textColor sm:min-h-8'
-                >
-                  {moreOpen ? 'less' : 'more'}
-                  <FoldCaret open={moreOpen} />
-                </Button>
-
-                {moreOpen && (
-                  <div className='flex flex-col gap-2 pb-1'>
-                    <div className='flex flex-col'>
-                      <Row
-                        label={<FactLabel>started</FactLabel>}
-                        value={
-                          <Text size='micro' variant='label' component='span'>
-                            {task.startedAt
-                              ? format(new Date(task.startedAt), 'PP')
-                              : 'not started'}
-                          </Text>
-                        }
-                      />
-                      <Row
-                        label={<FactLabel>created</FactLabel>}
-                        value={
-                          <Text size='micro' variant='label' component='span'>
-                            {task.createdBy ? `${task.createdBy} · ` : ''}
-                            {task.createdAt ? (
-                              format(new Date(task.createdAt), 'PP')
-                            ) : (
-                              <EmptyCell />
-                            )}
-                          </Text>
-                        }
-                      />
-                    </div>
-                    {t.labels.length > 0 && (
-                      <div className='flex flex-wrap gap-1'>
-                        {t.labels.map((l) => (
-                          <Pill key={l} tone='mut'>
-                            {l}
-                          </Pill>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </Section>
-
-            {/* ── 9. Комментарии — последними ───────────────────────────────────────────── */}
-            <TaskComments
-              taskId={task.id}
-              media={media}
-              onOpenMedia={attachments.openMedia}
-              className='order-6 min-w-0 lg:order-none'
-            />
-          </SectionStack>
-        </aside>
-      </div>
+        {/* ── 9. Комментарии — последними, под чтением задачи (и на телефоне, и на столе). */}
+        <TaskComments
+          taskId={task.id}
+          media={media}
+          onOpenMedia={attachments.openMedia}
+          className='min-w-0'
+        />
+      </SectionStack>
 
       {attachments.node}
+
+      {/* Медиатека держит своё окно сама и открывается только своим триггером; триггер спрятан,
+          его жмут «+ media» секции вложений и плитка «+ media». */}
+      {canWrite && (
+        <MediaSelector
+          label='media'
+          purpose='attachment'
+          aspectRatio={['Custom']}
+          allowMultiple
+          showVideos
+          saveSelectedMedia={(picked) => {
+            const seen = t.mediaIds ?? [];
+            const next = mergePickedMedia(seen, picked);
+            if (next !== seen) patchInline({ mediaIds: next }, { mediaIds: seen });
+          }}
+          trigger={
+            <Button ref={mediaTrigger} type='button' tabIndex={-1} aria-hidden className='sr-only'>
+              media
+            </Button>
+          }
+        />
+      )}
 
       {initial && (
         <TaskFormModal
