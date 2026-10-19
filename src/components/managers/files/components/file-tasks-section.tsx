@@ -376,7 +376,7 @@ export function FileTasksSection({
                   type='button'
                   disabled={attach.isPending}
                   onClick={() => attach.mutate(t.id)}
-                  className='flex items-center gap-1.5 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
+                  className='flex items-center gap-1.5 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
                 >
                   <Pill tone='ink' className='flex-none tabular-nums'>
                     #{t.id}

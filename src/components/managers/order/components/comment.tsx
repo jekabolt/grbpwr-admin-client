@@ -72,7 +72,7 @@ export function Comment({
             name='newOrderComment'
             variant='secondary'
             placeholder='leave a comment…'
-            className='mb-0 min-h-16 border border-borderColor placeholder:uppercase placeholder:text-textInactiveColor'
+            className='mb-0 min-h-16 border border-borderColor placeholder:uppercase placeholder:text-borderColor'
             value={body}
             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBody(e.target.value)}
           />

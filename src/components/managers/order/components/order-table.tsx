@@ -144,7 +144,7 @@ export function OrderTable({
     <div className='w-full'>
       <div className='overflow-x-auto w-full bg-bgColor'>
         <table className='w-full border-collapse min-w-max print:border-separate print:border-spacing-0'>
-          <thead className='bg-bgZebra'>
+          <thead>
             <tr>
               {showPartialRefundCheckboxes && (
                 <th className='w-10 border-b border-borderColor px-1.5 py-1 text-center'>
@@ -225,7 +225,7 @@ export function OrderTable({
                               isDataCell &&
                               'relative after:content-[""] after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:bg-current',
                             {
-                              'bg-bgZebra': orderDetails?.refundedOrderItems?.some(
+                              'bg-pageBg': orderDetails?.refundedOrderItems?.some(
                                 (refundedItem) => refundedItem.id === orderItemId,
                               ),
                             },

@@ -1,10 +1,11 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctBankTxn } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Button, Close, Form, ComboField, Input, Selector, Text } from 'ui';
+import { Button, CalloutBox, Close, Form, ComboField, Input, Selector, Text } from 'ui';
 import { extractLeadingCode } from '../../journal/components/schema';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { formatBase, isNegative } from '../../utils/format';
 import { useAcctAccounts, usePostBankTxn, useSuppliers } from '../../utils/hooks';
 
@@ -15,8 +16,9 @@ type FormValues = { account: string; occurredAt: string };
 // suggestion carried on the line; the date defaults to the line's booked date. A raw dialog (not
 // ConfirmationModal) so a server rejection keeps the picked account on screen.
 export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: () => void }) {
-  const { showMessage } = useSnackBarStore();
   const { data, isLoading: accountsLoading } = useAcctAccounts(false);
+  // The server's refusal stands in the dialog until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const { data: suppliersData } = useSuppliers();
   const post = usePostBankTxn();
 
@@ -80,6 +82,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
       setSupplierError(true);
       return;
     }
+    setRefusal(null);
     post.mutate(
       {
         id: txn.id ?? 0,
@@ -88,12 +91,23 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
         supplierId: code === '2010' ? supplierId : undefined,
       },
       {
-        onSuccess: () => {
-          showMessage('Transaction posted', 'success');
-          onClose();
+        // No receipt: the line leaves the inbox.
+        onSuccess: () => onClose(),
+        onError: (e) => {
+          const said = errorText(e, 'failed to post transaction') ?? '';
+          if (isRefused(e)) {
+            setRefusal(said);
+            return;
+          }
+          // No retry: a lost reply may still have posted the line.
+          notify({
+            sev: 'error',
+            subject: `BANK LINE ${txn.id ?? ''}`.trim(),
+            text: 'not posted',
+            bad: reasonOf(e),
+            detail: said,
+          });
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to post transaction', 'error'),
       },
     );
   };
@@ -106,9 +120,9 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               post transaction
             </DialogPrimitives.Title>
@@ -121,7 +135,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
           <Form {...form}>
             <div className='flex flex-col gap-4 p-4'>
               {/* The line under review — read-only context for the posting decision. */}
-              <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+              <div className='flex flex-col gap-1 border border-borderColor p-3'>
                 <div className='flex items-baseline justify-between gap-2'>
                   <Text size='small' variant='inactive'>
                     amount
@@ -150,7 +164,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
               />
 
               {postsToAP && (
-                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                <div className='flex flex-col gap-2 border border-borderColor p-3'>
                   <Text variant='inactive' size='small'>
                     supplier — required: 2010 payables are tracked per supplier
                   </Text>
@@ -201,6 +215,8 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
                   </label>
                 )}
               />
+
+              {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
 
               <div className='flex items-center justify-end gap-2'>
                 <Button type='button' variant='secondary' size='lg' onClick={onClose}>

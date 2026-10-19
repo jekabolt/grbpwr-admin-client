@@ -7,7 +7,7 @@ import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
@@ -247,8 +247,7 @@ type Receipt = 'added' | 'replaced' | 'restored';
  * НАВЕДЕНИЕ НА СТРОКУ ЖУРНАЛА (O-39, 26.09). Владелец: «при ховере на строчки во WRITTEN, DISMISSED,
  * HINTS затемняй её немного, чтобы было понятно, куда мы смотрим». Тон — грунт страницы (`pageBg`,
  * #f2f2f2): на белом материале блока это «немного», и цвет на экране уже есть (`style-projects`
- * ведёт строки списка тем же). `bgZebra` (#fafafa) на этом мониторе не отличим от белого — он
- * подсветка ячейки, а не ответ на вопрос «где курсор». Строки TO DECIDE не трогаются: там строка —
+ * ведёт строки списка тем же). Строки TO DECIDE не трогаются: там строка —
  * работа с отметкой и раскрытием, а не запись для чтения.
  */
 const ROW_HOVER = 'hover:bg-pageBg';
@@ -402,7 +401,6 @@ export function ConstructionDraft({
   conceptMax: number;
 }): JSX.Element {
   const { control, getValues, setValue, trigger } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const draftIdea = useDraftDesignIdea(techCardId);
   const [inspecting, setInspecting] = useState(false);
   /* ═══ АВТОСЕЙВ (волна 25.09, D-07 / ревью Codex B-05) ═══════════════════════════════════════
@@ -662,10 +660,13 @@ export function ConstructionDraft({
     }
     if (!onScreen(card)) {
       patchRun(card, { phase: null });
-      showMessage(
-        'the draft was not started — you left it while the card was saving; nothing was charged',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'DRAFT',
+        text: 'not started',
+        detail:
+          'the draft was not started — you left it while the card was saving; nothing was charged',
+      });
       return;
     }
     const now = getValues();
@@ -772,10 +773,13 @@ export function ConstructionDraft({
       // предложение, потерявшее хвост без единого слова об этом. Не влезшее описание остаётся
       // строкой предложения, а не пропадает: `ok:false` не пишет и не заводит записи журнала.
       if (w.text.length > conceptMax) {
-        showMessage(
-          `this description does not fit — the field holds ${conceptMax} characters and the draft is ${w.text.length}`,
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'DRAFT',
+          text: 'not taken',
+          bad: 'too long',
+          detail: `this description does not fit — the field holds ${conceptMax} characters and the draft is ${w.text.length}`,
+        });
         return { ok: false, value: '' };
       }
       setValue('concept', w.text, { shouldDirty: true });
@@ -797,10 +801,13 @@ export function ConstructionDraft({
        `bom-kind.ts`), и снятие на каждой строке молча теряло их вид. */
     const section = pickedSection || w.line.section || '';
     if (!isDraftSection(section)) {
-      showMessage(
-        `pick a section for ${w.line.name ?? 'this line'} — the card does not keep a line without one`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'DRAFT',
+        text: 'not taken',
+        bad: 'no section',
+        detail: `pick a section for ${w.line.name ?? 'this line'} — the card does not keep a line without one`,
+      });
       return { ok: false, value: '' };
     }
     const line = { ...w.line, section };
@@ -1346,7 +1353,12 @@ export function ConstructionDraft({
     if (p.kind === 'refusal') {
       // Отказ, дождавшийся возвращения, говорится с именем: без него строка сервера на экране,
       // где человек ничего не нажимал, не сказала бы, о чём она.
-      showMessage(p.away ? `the draft did not come back — ${p.words}` : p.words, 'error');
+      notify({
+        sev: 'error',
+        subject: 'DRAFT',
+        text: 'not drafted',
+        detail: p.away ? `the draft did not come back — ${p.words}` : p.words,
+      });
       return;
     }
     setPrice(runPrice(p.run ?? undefined));
@@ -1356,7 +1368,7 @@ export function ConstructionDraft({
     if (!p.draft) {
       // ПУСТОЙ ОТВЕТ — НЕ ЧЕРНОВИК. Строка в реестре есть, деньги списаны, а предлагать нечего:
       // сказать это прямо честнее, чем нарисовать пустую рамку «черновика».
-      showMessage('the run came back with nothing to propose', 'error');
+      notify({ sev: 'error', subject: 'DRAFT', text: 'empty', bad: 'nothing proposed' });
       return;
     }
     const draft = p.draft;
@@ -1487,10 +1499,13 @@ export function ConstructionDraft({
     if (w.kind === 'concept') {
       const joined = appendedText((getValues('concept') ?? '') as string, w.text);
       if (joined.length > conceptMax) {
-        showMessage(
-          `this does not fit — the description holds ${conceptMax} characters and with the draft appended it would be ${joined.length}`,
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'DRAFT',
+          text: 'not appended',
+          bad: 'too long',
+          detail: `this does not fit — the description holds ${conceptMax} characters and with the draft appended it would be ${joined.length}`,
+        });
         return { ok: false, value: '' };
       }
       setValue('concept', joined, { shouldDirty: true });
@@ -1679,7 +1694,13 @@ export function ConstructionDraft({
       for (const idea of ideas) if (lost.has(idea.name)) next[idea.id] = true;
       return next;
     });
-    showMessage(couldNotAdd(failed), 'error');
+    notify({
+      sev: 'error',
+      subject: 'DRAFT',
+      text: 'details not added',
+      bad: `${failed.length} failed`,
+      detail: couldNotAdd(failed),
+    });
   }
 
   /** Ручная дверь — только для того, что не завелось само (или завелось и было снесено). */
@@ -1690,7 +1711,14 @@ export function ConstructionDraft({
     // ответа значило бы дёрнуть страницу под рукой человека.
     setLogOpen(true);
     const failed = await mintDetailSlots(picked);
-    if (failed.length) showMessage(couldNotAdd(failed), 'error');
+    if (failed.length)
+      notify({
+        sev: 'error',
+        subject: 'DRAFT',
+        text: 'details not added',
+        bad: `${failed.length} failed`,
+        detail: couldNotAdd(failed),
+      });
   }
 
   /**

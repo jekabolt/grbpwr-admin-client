@@ -1,9 +1,8 @@
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
-import { Text, Textarea } from 'ui';
+import { Button, Text, Textarea } from 'ui';
 import type { TaskMedia } from '../api/types';
-import { MediaRefRow } from './media-ref-row';
 import { TaskDescriptionView } from './task-description';
 
 /**
@@ -16,6 +15,10 @@ import { TaskDescriptionView } from './task-description';
  * просил «тот же самый функционал», и это буквально он: те же кнопки, та же работа с кареткой,
  * та же вставка файлов библиотеки. Своя похожая панель означала бы вторую реализацию правил
  * разметки, которая разойдётся с разметчиком на первой же правке.
+ *
+ * ПОЛОСА ОДНА И КОМПАКТНАЯ — ПОД ПОЛЕМ: пять частых инструментов и «⋯», остальное и «preview»
+ * под «⋯». Полная панель в три ряда кнопок на телефоне съедала пол-экрана над полем (жалоба
+ * владельца по скриншоту). Ряда «link to attachment» под полем больше нет — владелец снял его.
  *
  * ── ПЕРЕКЛЮЧАТЕЛЬ «ПИШУ ↔ СМОТРЮ» ───────────────────────────────────────────────────────────
  *
@@ -40,7 +43,7 @@ export function DescriptionEditor({
 }: {
   value: string;
   onChange: (next: string) => void;
-  /** Вложения карточки — из них ряд `▣` собирает ссылки на вложения. */
+  /** Вложения карточки — по ним показ разметки рисует ссылки `▣`. */
   media: TaskMedia[];
   /** Заморозка на время летящей записи. Пропом, а не `fieldset` (см. шапку). */
   disabled?: boolean;
@@ -56,6 +59,7 @@ export function DescriptionEditor({
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
+  const [toolsShown, setToolsShown] = useState(false);
 
   /** Фокус ставится ОДИН раз за открытие — но именно поставится, а не «попытается». */
   const focusedRef = useRef(false);
@@ -85,39 +89,16 @@ export function DescriptionEditor({
     el.scrollIntoView({ block: 'nearest' });
   }, [autoFocus, disabled]);
 
+  const showTools = toolsShown || preview || !!value.trim();
   return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex items-center justify-between gap-2'>
-        {preview ? (
-          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-            preview
-          </Text>
-        ) : (
-          <FormatBar areaRef={areaRef} value={value} onChange={onChange} />
-        )}
-        <button
-          type='button'
-          aria-label={preview ? 'back to writing' : 'preview markdown'}
-          onClick={() => setPreview((p) => !p)}
-          className='shrink-0 text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
-        >
-          {preview ? 'write' : 'preview'}
-        </button>
-      </div>
-
+    <div className='flex flex-col border border-borderColor'>
       {preview ? (
-        <div
-          className={cn(
-            // Та же коробка, что у поля, — иначе переключение прыгает рамкой.
-            'min-h-32 border border-borderColor px-[7px] py-[3px]',
-            className,
-          )}
-        >
+        <div className={cn('min-h-24 px-3 py-2', className)}>
           {value.trim() ? (
             <TaskDescriptionView text={value} media={media} />
           ) : (
             <Text size='micro' variant='label' component='span'>
-              nothing to preview yet
+              nothing yet
             </Text>
           )}
         </div>
@@ -128,31 +109,36 @@ export function DescriptionEditor({
           aria-label={ariaLabel}
           variant='secondary'
           placeholder={placeholder}
-          /**
-           * ПОТОЛОК ВЫСОТЫ — ЗАЩИТА, А НЕ ВКУС, и он назван замером.
-           *
-           * Примитив поля в ЭТОЙ базе под текст не растёт, но в волне он этому учится, и тогда
-           * описание на сорок строк станет полем в полторы тысячи пикселей. Замерено на стенде
-           * (`task-queue-b-probe.mjs`, Ц14): у такого поля ЛЮБОЕ нажатие на панели форматирования
-           * уносит прокрутку страницы к его верху — причём не автогроу, а `area.focus()` внутри
-           * самой панели, который браузер сопровождает прокруткой к элементу. След замера
-           * однозначен: прокрутка уже равна нулю в обработчике `focus`, ДО того как автогроу
-           * что-либо померил.
-           *
-           * `max-height` побеждает inline-`height`, которым автогроу выставляет размер, поэтому
-           * потолок работает и против будущей версии примитива, не зная о ней ничего.
-           */
-          className={cn('mb-0 max-h-[60vh] min-h-32 border border-borderColor', className)}
+          className={cn('mb-0 max-h-[60vh] min-h-24 border-0 px-3 py-2', className)}
           value={value}
           disabled={disabled}
+          onFocus={() => setToolsShown(true)}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
       )}
-
-      {!preview && (
-        <MediaRefRow media={media} targetRef={areaRef} value={value} onChange={onChange} />
-      )}
+      {showTools &&
+        (preview ? (
+          <div className='flex border-t border-hairline'>
+            <Button
+              type='button'
+              variant='default'
+              aria-label='back to writing'
+              onClick={() => setPreview(false)}
+              className='min-h-11 flex-1 text-micro uppercase tracking-label md:min-h-8'
+            >
+              write
+            </Button>
+          </div>
+        ) : (
+          <FormatBar
+            compact
+            areaRef={areaRef}
+            value={value}
+            onChange={onChange}
+            onTogglePreview={() => setPreview(true)}
+          />
+        ))}
     </div>
   );
 }

@@ -13,7 +13,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { baseModel, POM } from 'lib/pom';
 import type { EdgeId, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
 import type { StoredSeam, StoredSeamDirection } from 'lib/seams';
-import { useSnackBarStore } from 'lib/stores/store';
+import { refuseGesture } from '../refuse-gesture';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Chip, Progress, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
@@ -98,7 +98,6 @@ export function SeamsReview({
   const grainDeg = useSeamsStore((s) => s.grainDeg);
   const unreadable = useSeamsStore((s) => s.unreadable);
   const writes = useSeamWrites(cardId, frozen);
-  const showMessage = useSnackBarStore((s) => s.showMessage);
   const roles = useMemo(() => (open ? rolesOf(facts, graph) : new Map()), [open, facts, graph]);
 
   const [filter, setFilter] = useState<Filter>('all');
@@ -146,12 +145,16 @@ export function SeamsReview({
   };
 
   const gone = () =>
-    showMessage('this seam is not on today’s pattern any more — wait for the re-read', 'error');
+    refuseGesture(
+      'SEAMS',
+      'seam gone',
+      'this seam is not on today’s pattern any more — wait for the re-read',
+    );
 
   /** A write door is shut: released card, the row in flight, or the graph being re-read. */
   const shut = (it?: ReviewItem) => {
     if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
       return true;
     }
     return !!it?.pending || rereading;
@@ -217,7 +220,11 @@ export function SeamsReview({
       if (!ctx) return;
       const row = reconfirmRow(it, ctx);
       if (!row) {
-        showMessage('it no longer fits today’s pattern — connect it again by hand', 'error');
+        refuseGesture(
+          'SEAMS',
+          'not reconfirmed',
+          'it no longer fits today’s pattern — connect it again by hand',
+        );
         return;
       }
       void writes.upsert([row]);
@@ -227,7 +234,7 @@ export function SeamsReview({
       if (it.row) void writes.remove([it.row, ...(it.dupes ?? [])]);
     },
     connectAgain: (it) => {
-      if (frozen) return showMessage(FROZEN_REFUSAL, 'error');
+      if (frozen) return refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
       setHand({
         a: [],
         b: [],
@@ -251,7 +258,7 @@ export function SeamsReview({
   };
 
   const startHand = (first?: EdgeId) => {
-    if (frozen) return showMessage(FROZEN_REFUSAL, 'error');
+    if (frozen) return refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
     setWords(null);
     setHand({ a: first ? [first] : [], b: [], direction: 'reversed', replace: null });
   };
@@ -287,9 +294,10 @@ export function SeamsReview({
       ...(hand.replace ? { seamKey: hand.replace.seamKey, note: hand.replace.note } : {}),
     });
     if (!row) {
-      showMessage(
+      refuseGesture(
+        'SEAMS',
+        'not connected',
         'these edges cannot be anchored — pick whole edges of a contoured piece',
-        'error',
       );
       return;
     }

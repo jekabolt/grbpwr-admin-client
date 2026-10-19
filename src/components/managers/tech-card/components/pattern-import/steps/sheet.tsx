@@ -943,7 +943,7 @@ function CellMap({
               className={cn(
                 'flex items-center justify-center border text-micro tabular-nums',
                 hover === k
-                  ? 'border-warning bg-bgZebra text-textColor'
+                  ? 'border-warning bg-pageBg text-textColor'
                   : 'border-borderColor bg-bgColor text-labelColor',
               )}
               style={{ gridRow: p.row! + 1, gridColumn: p.col! + 1 }}
@@ -975,7 +975,7 @@ function CellMap({
               title={`row ${m.row + 1}, column ${m.col + 1}: no page`}
               className={cn(
                 'flex items-center justify-center border border-dashed border-warning text-micro text-warning',
-                hover === k && 'bg-bgZebra',
+                hover === k && 'bg-pageBg',
               )}
               style={{ gridRow: m.row + 1, gridColumn: m.col + 1 }}
             >

@@ -1,5 +1,5 @@
 import type { DesignQuizAnswer, DesignQuizQuestion } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -178,7 +178,6 @@ export function MoodQuiz({
   const { draftIdea } = useGenerationWrites(card || undefined);
   const autosave = useTechCardAutosave();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const record = useDraftMemory((s) => s.record);
 
   const [live, setLive] = useState<Live | null>(null);
@@ -535,7 +534,12 @@ export function MoodQuiz({
         flushed = 'error';
       }
       if (!flushAllowsRun(flushed)) {
-        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        notify({
+          sev: 'error',
+          subject: 'MOOD QUIZ',
+          text: 'not drafted',
+          detail: flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal),
+        });
         return;
       }
       const before = ((getValues('concept') as string | null | undefined) ?? '') as string;
@@ -544,10 +548,7 @@ export function MoodQuiz({
       if (!text || shownCard.current !== card) return;
       const now = ((getValues('concept') as string | null | undefined) ?? '') as string;
       if (now !== before) {
-        showMessage(
-          'the description changed while the model wrote, so it was left as typed',
-          'error',
-        );
+        notify({ sev: 'error', subject: 'MOOD QUIZ', text: 'not applied', bad: 'text changed' });
         return;
       }
       if (text === before) return;
@@ -874,7 +875,7 @@ const pictureWords = (p: QuizPicture | null) =>
 const roleWords = (p: QuizPicture | null) => (p ? `role · picture ${p.n}` : 'role');
 /** C3: двери строки заголовка (`‹`, `later`) — слово цвета подписи, без подчёркивания. */
 export const headDoor =
-  'inline-flex cursor-pointer items-center justify-center text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor';
+  'inline-flex cursor-pointer items-center justify-center text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-borderColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor';
 
 /**
  * 96: вопрос про картинку доски несёт саму картинку на месте пиктограммы — тот же слот, кадр
@@ -892,7 +893,7 @@ function PictureThumb({
   return (
     <span
       data-quiz-picture={mediaId}
-      className={cn('block overflow-hidden border border-textColor bg-bgZebra', className)}
+      className={cn('block overflow-hidden border border-textColor bg-pageBg', className)}
     >
       {picture?.url ? (
         <img
@@ -949,7 +950,7 @@ function AnswerLine({
       type='button'
       disabled={readOnly}
       onClick={onOpen}
-      className='grid w-full grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-3 py-1 text-left enabled:cursor-pointer enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
+      className='grid w-full grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-3 py-1 text-left enabled:cursor-pointer enabled:hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
     >
       {mediaId > 0 ? (
         <PictureThumb

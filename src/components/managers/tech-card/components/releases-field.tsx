@@ -56,12 +56,7 @@ import { AnnotationCanvas } from './annotation-canvas';
 import { printCutSymmetryCaption } from 'components/managers/print/labels';
 import { fusingPrintCaption } from './piece-codes';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
-import {
-  annotationFromWire,
-  annotationKindFromWire,
-  wireInt,
-  type AnnotationForm,
-} from './schema';
+import { annotationFromWire, annotationKindFromWire, wireInt, type AnnotationForm } from './schema';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 
 const bomSectionLabel = (v?: string) =>
@@ -149,7 +144,7 @@ function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
 const seamClassLabel = (v?: string) =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''
-    : (seamClassOptions.find((o) => o.value === v)?.label ?? v);
+    : seamClassOptions.find((o) => o.value === v)?.label ?? v;
 
 function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   if (!c) return null;
@@ -767,7 +762,7 @@ export function ReleasesField({
                   className={cn(
                     'flex w-full cursor-pointer flex-col gap-0.5 border-b border-hairline px-2 py-1.5 text-left last:border-b-0',
                     'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-                    active ? 'bg-textColor text-bgColor' : 'hover:bg-bgZebra',
+                    active ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg',
                   )}
                 >
                   <Text size='micro' component='span' className='font-bold uppercase'>

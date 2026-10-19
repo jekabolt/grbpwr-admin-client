@@ -1,6 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_Colorway, common_EmailCampaignInsert, common_EmailCampaignStatus } from 'api/proto-http/admin';
+import {
+  common_Colorway,
+  common_EmailCampaignInsert,
+  common_EmailCampaignStatus,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   EDITABLE_STATUSES,
@@ -10,11 +14,21 @@ import {
 } from 'constants/email-campaign';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BackLink, Button, Section, SectionStack, Text, Form, InputField, SelectField } from 'ui';
+import {
+  BackLink,
+  Button,
+  Section,
+  SectionStack,
+  Text,
+  Form,
+  InputField,
+  SelectField,
+  useDoneFlash,
+} from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
 import { useProductSelection } from '../../hero/components/useProductSelection';
@@ -43,7 +57,11 @@ export function CampaignBuilder() {
   const routeId = idParam && /^\d+$/.test(idParam) ? Number(idParam) : 0;
   const navigate = useNavigate();
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  // Receipts on the controls: save, the translate count, the test send's door.
+  const { on: savedOn, flash: flashSaved } = useDoneFlash();
+  const { on: translatedOn, flash: flashTranslated } = useDoneFlash();
+  const [translatedCount, setTranslatedCount] = useState(0);
+  const testSent = useDoneFlash();
 
   const { data: campaignData, isLoading, isError, refetch } = useCampaign(routeId);
   const saveCampaign = useSaveCampaign();
@@ -161,9 +179,7 @@ export function CampaignBuilder() {
 
   const buildInsert = useCallback((): common_EmailCampaignInsert => {
     const values = form.getValues();
-    const liveBody = (values.body || []).filter(
-      (b: any) => !deletedIndicesRef.current.has(b._uid),
-    );
+    const liveBody = (values.body || []).filter((b: any) => !deletedIndicesRef.current.has(b._uid));
     // status is server-owned (the upsert accepts drafts only), so the mapper always
     // declares DRAFT — never echo currentStatus back or every save of a
     // paused/scheduled campaign is rejected with "campaign status is server-owned".
@@ -187,12 +203,12 @@ export function CampaignBuilder() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage('campaign saved', 'success');
+      flashSaved();
       if (routeId === 0 && res?.id) navigate(`${ROUTES.emailCampaigns}/${res.id}`);
     } catch {
       // error toast surfaced by useSaveCampaign.onError
     }
-  }, [form, buildInsert, saveCampaign, routeId, navigate, showMessage]);
+  }, [form, buildInsert, saveCampaign, routeId, navigate, flashSaved]);
 
   // Auto-translate runs server-side over the LAST SAVED copy and then refetches the
   // campaign, so firing it with unsaved edits would translate stale copy and pull a
@@ -201,11 +217,25 @@ export function CampaignBuilder() {
   const handleAutoTranslate = useCallback(() => {
     if (!routeId || readOnly) return;
     if (hasUserMadeChanges || form.formState.isDirty) {
-      showMessage('save your changes first — auto-translate runs on the saved campaign', 'error');
+      notify({
+        sev: 'error',
+        subject: `CAMPAIGN ${routeId}`,
+        text: 'not translated',
+        bad: 'unsaved changes',
+        detail: 'save first — auto-translate runs on the saved campaign',
+      });
       return;
     }
-    autoTranslate.mutate({ id: routeId });
-  }, [routeId, readOnly, hasUserMadeChanges, form, autoTranslate, showMessage]);
+    autoTranslate.mutate(
+      { id: routeId },
+      {
+        onSuccess: (res) => {
+          setTranslatedCount(res?.translatedCount ?? 0);
+          flashTranslated();
+        },
+      },
+    );
+  }, [routeId, readOnly, hasUserMadeChanges, form, autoTranslate, flashTranslated]);
 
   // Cmd/Ctrl+S saves (when editable and no sub-modal is open).
   useEffect(() => {
@@ -244,13 +274,13 @@ export function CampaignBuilder() {
   return (
     <Form {...form}>
       <form onSubmit={(e) => e.preventDefault()} className='flex flex-col'>
-        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+        <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <BackLink onClick={() => navigate(ROUTES.emailCampaigns)}>campaigns</BackLink>
             <Text variant='uppercase' size='large'>
               {routeId > 0 ? 'edit campaign' : 'new campaign'}
             </Text>
-            <span className='border border-textInactiveColor px-1.5 py-0.5 leading-none'>
+            <span className='border border-borderColor px-1.5 py-0.5 leading-none'>
               <Text size='small' variant='uppercase'>
                 {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS] ?? currentStatus}
               </Text>
@@ -278,6 +308,7 @@ export function CampaignBuilder() {
                 saveCampaign.isPending
               }
               loading={autoTranslate.isPending}
+              done={translatedOn && `translated ${translatedCount}`}
               title={
                 readOnly
                   ? 'auto-translate can only run on a draft.'
@@ -293,6 +324,7 @@ export function CampaignBuilder() {
               className='uppercase'
               onClick={() => setTestOpen(true)}
               disabled={!canWrite(SECTION.marketing)}
+              done={testSent.on && 'sent'}
             >
               test send
             </Button>
@@ -304,6 +336,7 @@ export function CampaignBuilder() {
               onClick={handleSave}
               disabled={!canEdit || saveCampaign.isPending}
               loading={saveCampaign.isPending}
+              done={savedOn}
             >
               save
             </Button>
@@ -313,8 +346,9 @@ export function CampaignBuilder() {
         {readOnly && (
           <div className='mb-4 border border-warning p-2'>
             <Text size='small' variant='uppercase' className='text-warning'>
-              read-only — this campaign is {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS]}. only
-              DRAFT campaigns can be edited; the content of a scheduled or sent campaign is frozen.
+              read-only — this campaign is{' '}
+              {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS]}. only DRAFT campaigns can
+              be edited; the content of a scheduled or sent campaign is frozen.
             </Text>
           </div>
         )}
@@ -433,7 +467,7 @@ export function CampaignBuilder() {
         <DialogPrimitives.Root open={addMenuOpen} onOpenChange={setAddMenuOpen}>
           <DialogPrimitives.Portal>
             <DialogPrimitives.Overlay className='fixed inset-0 z-50 h-screen bg-overlay' />
-            <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col overflow-y-auto border border-textInactiveColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[900px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
+            <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-50 flex flex-col overflow-y-auto border border-borderColor bg-bgColor px-2.5 pb-4 pt-5 text-textColor lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:h-[88vh] lg:w-[92vw] lg:max-w-[900px] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:p-4'>
               <DialogPrimitives.Title className='mb-3 shrink-0'>
                 <Text variant='uppercase' size='large'>
                   add a block
@@ -460,6 +494,7 @@ export function CampaignBuilder() {
           onOpenChange={setTestOpen}
           buildDraft={buildInsert}
           campaignId={routeId || undefined}
+          onSent={testSent.flash}
         />
       </form>
     </Form>

@@ -6,7 +6,8 @@ import {
   AcctReconBlock,
   googletype_Decimal,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { errorText, isTransient, reasonOf } from './feedback';
 
 // Accounting module (backend `feature/accounting-core`; docs/plan-accounting-ui/
 // 01-contract-and-api.md §1.3). One query-key domain for the whole section — small enough that
@@ -361,20 +362,34 @@ export function useCreateFixedAsset() {
 // caller so they can reopen the period or post a manual catch-up).
 export function usePostDepreciation() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (vars: { upTo: string }) => adminService.PostDepreciation(vars),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: acctKeys.all });
       const posted = res.posted ?? 0;
       const skipped = res.skipped ?? 0;
-      const base = posted === 0 ? 'No depreciation due' : `Posted ${posted} depreciation charge(s)`;
-      const tail = skipped > 0 ? ` · ${skipped} skipped (closed periods)` : '';
-      showMessage(`${base}${tail}`, skipped > 0 ? 'error' : 'success');
+      // The counts show nowhere else: one result toast.
+      notify({
+        sev: skipped > 0 ? 'warn' : 'ok',
+        subject: 'DEPRECIATION',
+        text: posted === 0 ? 'nothing due' : `posted ${posted}`,
+        bad: skipped > 0 ? `${skipped} skipped` : undefined,
+        detail: skipped > 0 ? 'closed periods' : undefined,
+      });
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to post depreciation', 'error'),
+    // Idempotent: a re-run only fills gaps, so retry is safe.
+    onError: (e, vars) =>
+      notify({
+        sev: 'error',
+        subject: 'DEPRECIATION',
+        text: 'not posted',
+        bad: reasonOf(e),
+        detail: errorText(e),
+        action: isTransient(e) ? { label: 'retry', onClick: () => again(vars) } : undefined,
+      }),
   });
+  const again = (vars: { upTo: string }): void => m.mutate(vars);
+  return m;
 }
 
 export function useAccrueCorporationTax() {
@@ -401,34 +416,49 @@ export function useAcctEventsNeedingReview() {
   });
 }
 
+// No receipts: the row leaves the review queue.
 export function useReprocessAcctEvent() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (vars: { id: number }) => adminService.ReprocessAcctEvent(vars),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: acctKeys.eventsReview() });
       qc.invalidateQueries({ queryKey: acctKeys.all });
-      showMessage('Event queued for reprocessing', 'success');
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to reprocess event', 'error'),
+    onError: (e, vars) =>
+      notify({
+        sev: 'error',
+        subject: `EVENT ${vars.id}`,
+        text: 'not reprocessed',
+        bad: reasonOf(e),
+        detail: errorText(e),
+        action: isTransient(e) ? { label: 'retry', onClick: () => again(vars) } : undefined,
+      }),
   });
+  const again = (vars: { id: number }): void => m.mutate(vars);
+  return m;
 }
 
 export function useResolveAcctEvent() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (vars: { id: number }) => adminService.ResolveAcctEvent(vars),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: acctKeys.eventsReview() });
       qc.invalidateQueries({ queryKey: acctKeys.all });
-      showMessage('Event marked resolved', 'success');
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to resolve event', 'error'),
+    onError: (e, vars) =>
+      notify({
+        sev: 'error',
+        subject: `EVENT ${vars.id}`,
+        text: 'not resolved',
+        bad: reasonOf(e),
+        detail: errorText(e),
+        action: isTransient(e) ? { label: 'retry', onClick: () => again(vars) } : undefined,
+      }),
   });
+  const again = (vars: { id: number }): void => m.mutate(vars);
+  return m;
 }
 
 // ---- Bank inbox (phase 2, wave 4 — docs/plan-accounting-phase2/04-wave4-money.md §4.1) ----

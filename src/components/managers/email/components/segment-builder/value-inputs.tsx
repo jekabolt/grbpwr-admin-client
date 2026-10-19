@@ -123,7 +123,7 @@ function TokenInput({
           {values.map((v, i) => (
             <span
               key={`${v}-${i}`}
-              className='flex items-center gap-1 border border-textInactiveColor px-1.5 py-0.5'
+              className='flex items-center gap-1 border border-borderColor px-1.5 py-0.5'
             >
               <Text size='small'>{v}</Text>
               {!disabled && (
@@ -203,7 +203,7 @@ function EnumChips({
               'border px-2 py-1 leading-none transition-colors',
               active
                 ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor hover:bg-textColor hover:text-bgColor',
+                : 'border-borderColor hover:bg-textColor hover:text-bgColor',
               disabled && 'pointer-events-none opacity-60',
             )}
           >

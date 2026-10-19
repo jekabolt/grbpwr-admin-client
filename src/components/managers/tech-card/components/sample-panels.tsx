@@ -17,7 +17,7 @@ import {
   useMaterialStock,
   warehouseKeys,
 } from 'components/managers/materials/components/useWarehouse';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Button, GroupLabel, Row, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
@@ -277,7 +277,6 @@ export function SampleReturns({
   /** A scrapped sample takes no return (checkSampleOpen) — no button that only answers an error. */
   scrapped: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   const issue = useIssueMaterialStock();
   const { data } = useMaterialMovements({ sampleId }, 50);
   const { data: matData } = useMaterials('', true);
@@ -336,9 +335,14 @@ export function SampleReturns({
         productId: 0,
         lotId: 0,
       });
-      showMessage('the material is back in stock', 'success');
+      // The row leaving the outstanding list is the receipt.
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : "couldn't return the material", 'error');
+      notify({
+        sev: 'error',
+        subject: 'SAMPLE MATERIAL',
+        text: 'not returned',
+        detail: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setPending(0);
     }

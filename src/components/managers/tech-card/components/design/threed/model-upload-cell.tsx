@@ -1,6 +1,6 @@
 import { adminService } from 'api/api';
 import { getBase64File } from 'lib/features/getBase64';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import {
@@ -181,7 +181,6 @@ export type BringOwnModel = {
  *      человека значило бы приписать карточке решение, которого он не принимал.
  */
 export function useBringOwnModel(techCardId: number): BringOwnModel {
-  const { showMessage } = useSnackBarStore();
   const { registerUpload } = useDesignWrites(techCardId);
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<'' | 'sending' | 'filing'>('');
@@ -236,7 +235,6 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
         setError(null);
         // Поднос опустошается только по факту записи: до неё файлы человека остаются в кадре.
         setStaged(NOTHING);
-        showMessage('the model is on the card', 'success');
       } catch {
         // `registerUpload` УЖЕ сказал своё слово снекбаром (общий `onError` полосы), и второе
         // всплывающее сообщение о том же отказе было бы одним фактом, сказанным дважды. Здесь
@@ -249,7 +247,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
         setBusy('');
       }
     },
-    [registerUpload, showMessage],
+    [registerUpload],
   );
 
   /**
@@ -285,10 +283,9 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
       setStaged(next);
       if (refusals.length) {
         setError(refusals.join(' '));
-        showMessage(refusals[0], 'error');
       }
     },
-    [busy, staged, showMessage],
+    [busy, staged],
   );
 
   /** ОТПРАВИТЬ ПАРУ — одним запросом, с превью или без. */
@@ -312,12 +309,11 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
     } catch (e) {
       const message = modelUploadErrorMessage(e);
       setError(message);
-      showMessage(message, 'error');
       setBusy('');
       return;
     }
     await fileOnCard(mediaId, requestId);
-  }, [staged, busy, fileOnCard, showMessage]);
+  }, [staged, busy, fileOnCard]);
 
   const discard = () => {
     setStaged(NOTHING);
@@ -383,7 +379,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
           style={{ ...PLACEHOLDER_SURFACE, aspectRatio: STRIP_FRAME_ASPECT }}
           className={cn(
             placeholderClass({ dashed: true }),
-            // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `textInactiveColor`
+            // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `borderColor`
             // (#ccc), годный для рамок и выключенного, но на полосатом фоне дающий полтора к одному.
             // Здесь это единственное, что объясняет жест.
             'relative w-full cursor-pointer flex-col gap-1 overflow-hidden px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',

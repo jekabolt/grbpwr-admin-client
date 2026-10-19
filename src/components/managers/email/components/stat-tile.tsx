@@ -7,14 +7,14 @@ export type StatTone = 'default' | 'muted' | 'warning' | 'error';
 // for failures/loss. No pastel washes — border + text tone carry meaning.
 const TONE_BORDER: Record<StatTone, string> = {
   default: 'border-textColor',
-  muted: 'border-textInactiveColor',
+  muted: 'border-borderColor',
   warning: 'border-warning',
   error: 'border-error',
 };
 
 const TONE_VALUE: Record<StatTone, string> = {
   default: 'text-textColor',
-  muted: 'text-textInactiveColor',
+  muted: 'text-borderColor',
   warning: 'text-warning',
   error: 'text-error',
 };

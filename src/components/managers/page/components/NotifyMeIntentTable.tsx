@@ -76,7 +76,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+              <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}

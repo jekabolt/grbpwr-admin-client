@@ -21,6 +21,7 @@ import {
   Close,
 } from 'ui';
 import './cropper.css';
+import { EditorTopBar, editorToolClass, FREE_CHIP, RATIO_CHIPS, RatioChips } from './editor-mobile';
 
 // Ratios are compared with a small tolerance rather than strict equality: ASPECT_RATIOS rounds
 // 16:9 to 1.7778, but a caller-supplied ratio computes it as the repeating 16/9 = 1.77778… —
@@ -117,6 +118,14 @@ interface CropperInterface {
    * слот формы), передаёт свою.
    */
   footerNote?: ReactNode;
+  /**
+   * `mobile` — полноэкранная раскладка ниже `lg` (MEDIA-MOBILE, кадр 3): шапка «cancel · title ·
+   * save», сцена на всю середину, чипы пропорций и одна строка инструментов. Хост сам решает,
+   * когда её просить; по умолчанию — прежняя настольная раскладка, побайтово.
+   */
+  layout?: 'default' | 'mobile';
+  /** Заголовок мобильной шапки. */
+  title?: string;
 }
 
 export const MediaCropper: FC<CropperInterface> = ({
@@ -134,6 +143,8 @@ export const MediaCropper: FC<CropperInterface> = ({
   originalLabel = 'use as is',
   hideHeader = false,
   footerNote,
+  layout = 'default',
+  title = 'crop',
 }) => {
   const { showMessage } = useSnackBarStore();
 
@@ -386,6 +397,183 @@ export const MediaCropper: FC<CropperInterface> = ({
   const resultLabel = rect ? resultRatio ?? ratioLabel(rect.width, rect.height) : '—';
   const sourceRatio = srcW && srcH ? presetLabel(srcW / srcH) ?? ratioLabel(srcW, srcH) : '—';
   const capBelow = (crop?.y ?? 0) < 6;
+  const mobile = layout === 'mobile';
+  // Рамка во весь кадр без поворота — это тот же файл: копию такого «кропа» делать незачем.
+  const noChange =
+    !!rect &&
+    rotation === 0 &&
+    rect.x === 0 &&
+    rect.y === 0 &&
+    rect.width === srcW &&
+    rect.height === srcH;
+
+  const stageContent =
+    disp && !loadFailed ? (
+      <ReactCrop
+        className='crop-rc'
+        crop={crop}
+        aspect={aspect}
+        onChange={(pixelCrop, percentCrop) => {
+          // Нажатие без протяжки библиотека объявляет рамкой 0×0 — то самое молчаливое
+          // стирание кадра, из-за которого раньше приходилось начинать заново. Пустая
+          // рамка не принимается: клик мимо оставляет всё как было, а протяжка растёт
+          // из точки нажатия и приезжает сюда уже настоящей.
+          if (pixelCrop.width < 1 || pixelCrop.height < 1) return;
+          setCrop(percentCrop);
+        }}
+        ruleOfThirds
+        minWidth={MIN_FRAME_PX}
+        minHeight={MIN_FRAME_PX}
+        disabled={busy}
+        renderSelectionAddon={() =>
+          rect && !mobile ? (
+            <span
+              className={cn(
+                'pointer-events-none absolute -left-px whitespace-nowrap bg-textColor px-1 text-nano uppercase tracking-label text-bgColor',
+                capBelow ? 'top-0' : 'bottom-full mb-0.5',
+              )}
+            >
+              {rect.width}×{rect.height} · {resultLabel}
+            </span>
+          ) : null
+        }
+      >
+        <div style={{ width: disp.w, height: disp.h }} className='relative overflow-hidden'>
+          <img
+            src={selectedFile}
+            alt=''
+            draggable={false}
+            className='select-none'
+            style={
+              turned
+                ? {
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: disp.h,
+                    height: disp.w,
+                    maxWidth: 'none',
+                    maxHeight: 'none',
+                    transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
+                  }
+                : {
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    width: disp.w,
+                    height: disp.h,
+                    transform: rotation === 180 ? 'rotate(180deg)' : undefined,
+                  }
+            }
+          />
+        </div>
+      </ReactCrop>
+    ) : loadFailed ? null : (
+      // Про отказ источника сцена молчит: он сказан красной коробкой в подвале, вместе
+      // с причиной и кнопкой «прочитать снова». Здесь остаётся только ожидание.
+      <Text size='micro' variant='uppercase' className='text-bgColor'>
+        loading the image
+      </Text>
+    );
+
+  const loadFailedBox = loadFailed && (
+    <CalloutBox tone='error'>
+      <Text size='micro' component='span'>
+        source not loading
+      </Text>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        className='ml-2 inline-block cursor-pointer align-middle'
+        onClick={() => {
+          setLoadFailed(false);
+          setReloadKey((k) => k + 1);
+        }}
+      >
+        load again
+      </Button>
+    </CalloutBox>
+  );
+  const saveErrorBox = saveError && !loadFailed && (
+    <CalloutBox tone='error'>
+      <Text size='micro' component='span'>
+        <b>cropping failed.</b> {saveError}
+      </Text>
+    </CalloutBox>
+  );
+
+  if (mobile) {
+    const chipOptions = lockedAspect
+      ? [{ key: ratios[0].label, label: ratios[0].label, value: ratios[0].value }]
+      : [FREE_CHIP, ...RATIO_CHIPS];
+    const selectedChip =
+      aspect === undefined
+        ? FREE_CHIP.key
+        : chipOptions.find(
+            (o) => o.value !== undefined && Math.abs(o.value - aspect) < RATIO_EPSILON,
+          )?.key;
+    return (
+      <div className='flex h-full min-h-0 w-full flex-col'>
+        <EditorTopBar
+          title={title}
+          onCancel={onCancel}
+          onSave={handleSave}
+          saveDisabled={blocked || noChange}
+          busy={busy}
+          saveLabel={saveLabel}
+        />
+        <div className='crop-stage crop-stage-mobile relative min-h-0 flex-1 touch-none overflow-hidden p-6'>
+          <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
+            {stageContent}
+          </div>
+        </div>
+        {(loadFailedBox || saveErrorBox) && (
+          <div className='shrink-0 px-2.5 pb-2'>
+            {loadFailedBox}
+            {saveErrorBox}
+          </div>
+        )}
+        <div className='flex shrink-0 flex-col gap-2.5 border-t border-bgColor/20 pt-2.5 pb-3'>
+          <RatioChips
+            options={chipOptions}
+            selected={selectedChip}
+            disabled={!natural || busy}
+            onSelect={(o) => applyRatio(o.value)}
+          />
+          <div className='flex items-center gap-1.5 px-2.5'>
+            <Button
+              type='button'
+              variant={null}
+              className={editorToolClass}
+              onClick={() => rotate(90)}
+              disabled={!natural || busy}
+            >
+              ↻ rotate
+            </Button>
+            <Button
+              type='button'
+              variant={null}
+              className={editorToolClass}
+              onClick={resetFrame}
+              disabled={!natural || busy}
+            >
+              reset
+            </Button>
+            <span className='ml-auto text-control tabular-nums text-bgColor'>
+              {!rect ? (
+                <EmptyCell />
+              ) : noChange ? (
+                'no change'
+              ) : (
+                `${rect.width}×${rect.height} · ${resultLabel}`
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-3'>
@@ -402,79 +590,10 @@ export const MediaCropper: FC<CropperInterface> = ({
 
       <div className='grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_224px] lg:items-start'>
         <div className='min-w-0'>
-          <div className='crop-stage relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-bgSecondary p-3'>
+          <div className='crop-stage relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-3'>
             <div aria-hidden className='pointer-events-none absolute inset-0 bg-textColor/55' />
             <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
-              {disp && !loadFailed ? (
-                <ReactCrop
-                  className='crop-rc'
-                  crop={crop}
-                  aspect={aspect}
-                  onChange={(pixelCrop, percentCrop) => {
-                    // Нажатие без протяжки библиотека объявляет рамкой 0×0 — то самое молчаливое
-                    // стирание кадра, из-за которого раньше приходилось начинать заново. Пустая
-                    // рамка не принимается: клик мимо оставляет всё как было, а протяжка растёт
-                    // из точки нажатия и приезжает сюда уже настоящей.
-                    if (pixelCrop.width < 1 || pixelCrop.height < 1) return;
-                    setCrop(percentCrop);
-                  }}
-                  ruleOfThirds
-                  minWidth={MIN_FRAME_PX}
-                  minHeight={MIN_FRAME_PX}
-                  disabled={busy}
-                  renderSelectionAddon={() =>
-                    rect ? (
-                      <span
-                        className={cn(
-                          'pointer-events-none absolute -left-px whitespace-nowrap bg-textColor px-1 text-nano uppercase tracking-label text-bgColor',
-                          capBelow ? 'top-0' : 'bottom-full mb-0.5',
-                        )}
-                      >
-                        {rect.width}×{rect.height} · {resultLabel}
-                      </span>
-                    ) : null
-                  }
-                >
-                  <div
-                    style={{ width: disp.w, height: disp.h }}
-                    className='relative overflow-hidden'
-                  >
-                    <img
-                      src={selectedFile}
-                      alt=''
-                      draggable={false}
-                      className='select-none'
-                      style={
-                        turned
-                          ? {
-                              position: 'absolute',
-                              left: '50%',
-                              top: '50%',
-                              width: disp.h,
-                              height: disp.w,
-                              maxWidth: 'none',
-                              maxHeight: 'none',
-                              transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
-                            }
-                          : {
-                              position: 'absolute',
-                              left: 0,
-                              top: 0,
-                              width: disp.w,
-                              height: disp.h,
-                              transform: rotation === 180 ? 'rotate(180deg)' : undefined,
-                            }
-                      }
-                    />
-                  </div>
-                </ReactCrop>
-              ) : loadFailed ? null : (
-                // Про отказ источника сцена молчит: он сказан красной коробкой в подвале, вместе
-                // с причиной и кнопкой «прочитать снова». Здесь остаётся только ожидание.
-                <Text size='micro' variant='uppercase' className='text-bgColor'>
-                  loading the image
-                </Text>
-              )}
+              {stageContent}
             </div>
           </div>
           <Text size='nano' variant='label' className='mt-1.5'>
@@ -642,33 +761,8 @@ export const MediaCropper: FC<CropperInterface> = ({
       </div>
 
       <div className='flex flex-col gap-2 border-t border-hairline pt-2.5'>
-        {loadFailed && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='span'>
-              <b>the source will not load.</b> There is nothing for the browser to cut: the image
-              never opened — the bucket may not have sent a CORS header, or the url is dead.
-            </Text>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='ml-2 inline-block cursor-pointer align-middle'
-              onClick={() => {
-                setLoadFailed(false);
-                setReloadKey((k) => k + 1);
-              }}
-            >
-              load again
-            </Button>
-          </CalloutBox>
-        )}
-        {saveError && !loadFailed && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='span'>
-              <b>cropping failed.</b> {saveError}
-            </Text>
-          </CalloutBox>
-        )}
+        {loadFailedBox}
+        {saveErrorBox}
 
         <Text size='nano' variant='label'>
           {footerNote ??

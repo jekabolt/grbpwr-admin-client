@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { ROUTES } from 'constants/routes';
-import { Avatar, Button, Chip, Input, Select, Text, Toolbar } from 'ui';
+import { Avatar, Button, Chip, GenericPopover, Input, Select, Text, ViewSwitch } from 'ui';
 import {
   PERSON_ROLE_CHIP,
   PERSON_ROLE_HINT,
@@ -10,12 +11,29 @@ import {
   type PersonRoleFilter,
 } from '../hooks/useFiles';
 
-const SORT_ITEMS = (Object.keys(SORT_LABEL) as FilesSort[]).map((k) => ({
-  value: k,
-  label: SORT_LABEL[k],
-}));
-
 const ROLES: PersonRoleFilter[] = ['any', 'uploaded', 'owner'];
+
+/** Вид выдачи. Живёт в адресе (`?view=grid`), умолчание — список. */
+export type FilesView = 'list' | 'grid';
+
+const VIEWS = [
+  { value: 'list', label: 'list' },
+  { value: 'grid', label: 'grid' },
+] as const;
+
+/** Порядок называется коротко и со стрелкой: это кнопка-слово, а не выпадающий список. */
+const SORT_SHORT: Record<FilesSort, string> = {
+  new: 'newest ↓',
+  name: 'by name',
+  size: 'by size',
+};
+/** Телефон: строка статуса обязана влезть в одну строку на 390px — порядок короче. */
+const SORT_TINY: Record<FilesSort, string> = {
+  new: 'new ↓',
+  name: 'a–z',
+  size: 'size ↓',
+};
+const SORT_CYCLE: FilesSort[] = ['new', 'name', 'size'];
 
 /**
  * ФИЛЬТР ПО ЧЕЛОВЕКУ: один пикер человека и переключатель роли при нём.
@@ -31,17 +49,13 @@ const ROLES: PersonRoleFilter[] = ['any', 'uploaded', 'owner'];
  * историю ушедшего. Поэтому список людей здесь — источник ВЫБОРА (`ListAdmins` отдаёт только
  * живые аккаунты), а не источник подписи.
  *
- * ПЕРЕКЛЮЧАТЕЛЬ РОЛИ СПРЯТАН, ПОКА ЧЕЛОВЕК НЕ ВЫБРАН, и это осознанное отступление от правила
- * раздела «выключено и подписано, а не спрятано». То правило защищает орган, которого человеку
- * НЕ ДАЮТ: право `files:write`, круг правки владельцев — спрятанного не попросишь, и потому
- * такой орган стоит выключенным с подписью, у кого просить. Здесь просить не у кого: роль
- * бессмысленна не по чужому решению, а потому что вопрос ещё не задан, и задаётся он соседним
- * органом в одном движении мыши. Выключенный трёхпозиционный переключатель стоял бы в полосе
- * ВСЕГДА — в том числе во всех сеансах, где фильтром по человеку не пользуются вовсе, — и был
- * бы единственным неживым органом полосы. Сам пикер человека не прячется никогда: он и
- * рассказывает, что фильтр существует.
+ * ПЕРЕКЛЮЧАТЕЛЬ РОЛИ СПРЯТАН, ПОКА ЧЕЛОВЕК НЕ ВЫБРАН: роль бессмысленна, пока вопрос не задан, и
+ * задаётся он соседним органом в одном движении. Разница ролей — в подсказке чипа, а не строкой.
+ *
+ * МЕСТО — РЕЙЛ на десктопе и переполнение ряда тем на телефоне, а не полоса во всю ширину над
+ * файлами: это уточнение выдачи, которым пользуются редко.
  */
-function PersonFilter({
+export function PersonFilter({
   personId,
   personRole,
   onPerson,
@@ -70,7 +84,7 @@ function PersonFilter({
   ];
 
   return (
-    <>
+    <div className='flex flex-col gap-1.5'>
       <Select
         name='person'
         value={String(personId)}
@@ -78,167 +92,259 @@ function PersonFilter({
         placeholder='person'
         items={items}
         customWidth={200}
-        className='max-w-[190px]'
+        className='w-full'
         renderValue={(value: string | number) =>
           Number(value) > 0 ? (
             <span className='flex min-w-0 items-center gap-1.5'>
               <Avatar name={picked?.username ?? ''} size={16} />
-              <Text size='micro' component='span' className='truncate uppercase'>
+              <Text component='span' className='truncate'>
                 {picked?.username ?? `#${personId}`}
               </Text>
             </span>
           ) : (
-            <Text size='micro' variant='label' component='span' className='uppercase'>
+            <Text variant='label' component='span'>
               all people
             </Text>
           )
         }
       />
       {personId > 0 && (
-        <>
-          <div role='group' aria-label='the person’s role on the file' className='flex items-center gap-1'>
-            {ROLES.map((r) => (
-              <Chip
-                key={r}
-                selected={personRole === r}
-                pressed={personRole === r}
-                title={PERSON_ROLE_HINT[r]}
-                onClick={() => onPersonRole(r)}
-              >
-                {PERSON_ROLE_CHIP[r]}
-              </Chip>
-            ))}
-          </div>
-          {/* Подпись меняется вместе с положением: разницу между «загрузил» и «ведёт» проще
-              один раз увидеть, чем прочитать заранее. */}
-          <Text size='micro' variant='label' className='max-w-[44ch]'>
-            {PERSON_ROLE_HINT[personRole]}
-          </Text>
-        </>
+        <div role='group' aria-label='role on the file' className='flex items-center gap-1'>
+          {ROLES.map((r) => (
+            <Chip
+              key={r}
+              selected={personRole === r}
+              pressed={personRole === r}
+              title={PERSON_ROLE_HINT[r]}
+              onClick={() => onPersonRole(r)}
+            >
+              {PERSON_ROLE_CHIP[r]}
+            </Chip>
+          ))}
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
 /**
- * Полоса управления холстом.
- *
- * Подпись поиска — обязательство, а не украшение: сервер ищет по имени файла, по названию
- * темы и по имени того, кто загрузил, и НЕ смотрит внутрь файла (текст из pdf, выгруженного
- * фигмой, не извлекается вообще). Подпись уже поведения хуже её отсутствия: человек ищет по
- * имени коллеги, не находит и делает вывод, что поиск сломан.
+ * ОДИН «+» ВМЕСТО ТРЁХ КНОПОК. Загрузка, заметка и вставка — три способа положить в библиотеку
+ * новый файл, и для читающего шапку разницы между ними нет; рядом с ними словарь тем, потому что
+ * правится он на своём экране. Тумблера «запись / чтение» больше нет: есть право — можно писать.
  */
-export function FilesToolbar({
-  search,
-  onSearch,
-  sort,
-  onSort,
-  personId,
-  personRole,
-  onPerson,
-  onPersonRole,
-  mode,
-  onMode,
-  canWrite,
+export function AddMenu({
+  writable,
   onUpload,
   onNewNote,
-  className,
+  onPaste,
 }: {
-  search: string;
-  onSearch: (v: string) => void;
-  sort: FilesSort;
-  onSort: (v: FilesSort) => void;
-  /**
-   * ФИЛЬТР, А НЕ ПРАВО: режим «только чтение» его не касается — читать можно всё. Поэтому он и
-   * стоит слева, с поиском и порядком, а не справа с писателями полосы.
-   */
-  personId: number;
-  personRole: PersonRoleFilter;
-  onPerson: (id: number) => void;
-  onPersonRole: (role: PersonRoleFilter) => void;
-  /** Добровольный режим. Без `files:write` принудительно `read` и заблокирован. */
-  mode: 'write' | 'read';
-  onMode: (v: 'write' | 'read') => void;
-  canWrite: boolean;
+  writable: boolean;
   onUpload: () => void;
   onNewNote: () => void;
-  /** Полоса — часть общего блока со словарём тем, поэтому свой внешний бордер она снимает. */
-  className?: string;
+  onPaste: () => void;
 }) {
-  const writing = canWrite && mode === 'write';
+  const [open, setOpen] = useState(false);
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+  const item = 'w-full border-b border-hairline px-3.5 py-3 text-left last:border-b-0';
   return (
-    <Toolbar className={className}>
-      <Input
-        name='search'
-        value={search}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onSearch(e.target.value)}
-        placeholder='file name, topic or person'
-        className='max-w-[260px]'
-      />
-      <Text size='micro' variant='label' className='max-w-[40ch]'>
-        searches by names, topics and people, not by the contents of a file
-      </Text>
-      <Select
-        name='sort'
-        value={sort}
-        onValueChange={(v: string) => onSort(v as FilesSort)}
-        placeholder='order'
-        items={SORT_ITEMS}
-        customWidth={160}
-        className='max-w-[170px]'
-      />
-      <PersonFilter
-        personId={personId}
-        personRole={personRole}
-        onPerson={onPerson}
-        onPersonRole={onPersonRole}
-      />
-      {/* ПРАВАЯ ГРУППА ПЕРЕНОСИТСЯ ЦЕЛИКОМ, а не рассыпается. `ToolbarSpacer` — это `ml-auto` на
-          отдельном элементе, и в переносимой строке он растаскивал четыре кнопки по двум
-          строкам: «темы» одиноко у правого края первой, остальные три у левого края второй.
-          Пока полоса помещалась в одну строку, этого не было видно; фильтр по человеку сделал
-          перенос обычным делом. Отступ переехал на саму группу — теперь она едет вправо и
-          переносится как одно целое. */}
-      <div className='ml-auto flex flex-wrap items-center justify-end gap-2'>
-        {/* Словарь тем правится на своём экране: здесь чип по клику фильтрует, и правка имени
-            на том же элементе потребовала бы второго жеста. */}
-        <Button asChild size='xs' variant='secondary'>
-          <Link to={ROUTES.fileTopics}>topics</Link>
-        </Button>
-        {/* Тумблер и права — ОДИН механизм. Без files:write он не «спрятан», а заблокирован в
-            «чтении»: спрятанного не попросишь, а строка над сеткой объясняет, чего не хватает.
-
-            ПОДПИСЬ НАЗЫВАЕТ СОСТОЯНИЕ, А НАЖАТИЕ ДЕЛАЕТ ОБРАТНОЕ — и это законно ровно потому,
-            что кнопка объявлена `aria-pressed`: положение переключателя и есть то, что она
-            показывает. Глазами это всё равно двусмысленно («запись» — я в ней или включаю её?),
-            поэтому действие названо подсказкой. Тот же приём, что у «разворота» в читалке, только
-            зеркальный: там подпись — действие, а состояние ушло в подсказку. */}
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      noTail
+      triggerProps={{ asChild: true }}
+      contentProps={{ align: 'end' }}
+      className='w-44'
+      openElement={
         <Button
-          size='xs'
-          variant='secondary'
-          aria-pressed={mode === 'write'}
-          disabled={!canWrite}
-          title={
-            canWrite
-              ? writing
-                ? 'switch writing off — only reading will be left'
-                : 'switch writing on'
-              : 'the files:write right is needed'
-          }
-          onClick={() => onMode(mode === 'write' ? 'read' : 'write')}
+          variant='main'
+          aria-label='add'
+          className='flex h-10 min-w-10 items-center justify-center px-3.5 uppercase tracking-label'
         >
-          {writing ? 'mode: writing' : 'mode: read-only'}
+          <span aria-hidden className='lg:hidden'>
+            +
+          </span>
+          <span className='hidden lg:inline'>+ add</span>
         </Button>
-        {/* Заметка стоит РЯДОМ с загрузкой, а не в отдельном месте: и то и другое кладёт в
-            библиотеку новый файл, и для читающего полосу разницы между ними нет. Глушится тем же
-            `writing`, потому что создание — это запись. */}
-        <Button size='xs' variant='secondary' disabled={!writing} onClick={onNewNote}>
-          note
+      }
+    >
+      <Button className={item} disabled={!writable} onClick={run(onUpload)}>
+        upload file
+      </Button>
+      <Button className={item} disabled={!writable} onClick={run(onNewNote)}>
+        new note
+      </Button>
+      <Button className={item} disabled={!writable} onClick={run(onPaste)}>
+        paste
+      </Button>
+      <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
+        <Link to={ROUTES.fileTopics}>manage topics</Link>
+      </Button>
+      <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
+        <Link to={ROUTES.filesShared}>shared</Link>
+      </Button>
+    </GenericPopover>
+  );
+}
+
+/**
+ * Строка статуса: сколько найдено, чем сужено, как сбросить — одной строкой под шапкой.
+ *
+ * Она заменяет подписи под рядами чипов: «пересечение» сказано знаком `&` между темами, а не
+ * фразой. «unsorted» красным — тем же цветом, что и его чип.
+ */
+export function StatusLine({
+  matched,
+  parts,
+  untopiced,
+  filtered,
+  onReset,
+  sort,
+  onSort,
+  view,
+  onView,
+  selecting,
+  selectedCount = 0,
+  onToggleSelecting,
+}: {
+  /** `undefined` — ответ ещё не приехал. */
+  matched?: number;
+  /** Названия действующих фильтров, уже собранные: «design & atelier», «pasha», «“logo”». */
+  parts: string[];
+  untopiced: boolean;
+  /** Есть ли что сбрасывать. Без этого «reset» не рисуется вовсе. */
+  filtered: boolean;
+  onReset: () => void;
+  sort: FilesSort;
+  onSort: (v: FilesSort) => void;
+  view: FilesView;
+  onView: (v: FilesView) => void;
+  /**
+   * ТЕЛЕФОННЫЙ ВХОД В ВЫБОР — САМО ЧИСЛО. «6 files» подчёркнуто и включает выбор; в режиме
+   * то же место говорит «N selected · done». Отдельного слова «select» нет: оно стояло рядом с
+   * сортировкой и видом и читалось третьим переключателем. На десктопе пропы не передаются.
+   */
+  selecting?: boolean;
+  selectedCount?: number;
+  onToggleSelecting?: () => void;
+}) {
+  const next = SORT_CYCLE[(SORT_CYCLE.indexOf(sort) + 1) % SORT_CYCLE.length];
+  return (
+    <div
+      role='status'
+      className='flex items-center gap-2.5 border-t border-hairline px-block py-2.5 text-textBaseSize text-labelColor'
+    >
+      {/* Одна строка всегда: число впереди и не режется, фильтры уходят в многоточие. */}
+      <span className='flex min-w-0 items-center gap-2.5'>
+        {selecting && onToggleSelecting ? (
+          <span className='flex min-w-0 items-center gap-1'>
+            <span className='min-w-0 truncate'>
+              <span className='font-bold tabular-nums text-textColor'>{selectedCount}</span>{' '}
+              selected
+            </span>
+            <span aria-hidden>·</span>
+            <Button
+              variant='underline'
+              aria-pressed
+              className='shrink-0 text-textColor'
+              onClick={onToggleSelecting}
+            >
+              done
+            </Button>
+          </span>
+        ) : (
+          <span className='min-w-0 truncate'>
+            {onToggleSelecting ? (
+              <Button variant='underline' aria-pressed={false} onClick={onToggleSelecting}>
+                <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
+                {matched === 1 ? 'file' : 'files'}
+              </Button>
+            ) : (
+              <>
+                <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
+                {matched === 1 ? 'file' : 'files'}
+              </>
+            )}
+            {untopiced && (
+              <>
+                {' · '}
+                <span className='text-error'>unsorted</span>
+              </>
+            )}
+            {parts.map((p) => (
+              <span key={p}>
+                {' · '}
+                <span className='text-textColor'>{p}</span>
+              </span>
+            ))}
+          </span>
+        )}
+        {filtered && (
+          <Button variant='underline' className='shrink-0 text-textColor' onClick={onReset}>
+            reset
+          </Button>
+        )}
+      </span>
+      <span className='ml-auto flex shrink-0 items-center gap-2.5'>
+        <Button
+          className='whitespace-nowrap text-labelColor hover:text-textColor'
+          title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[next]}`}
+          onClick={() => onSort(next)}
+        >
+          <span className='sm:hidden'>{SORT_TINY[sort]}</span>
+          <span className='hidden sm:inline'>{SORT_SHORT[sort]}</span>
         </Button>
-        <Button size='xs' variant='main' disabled={!writing} onClick={onUpload}>
-          upload
-        </Button>
+        <ViewSwitch value={view} options={VIEWS} onChange={onView} label='view' />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * ШАПКА ХОЛСТА — содержимое первым.
+ *
+ * Телефон: заголовок-проект, под ним поиск и «+», под ними один ряд тем. Десктоп: заголовок,
+ * поиск и «+ add» в одну строку, темы уходят в рейл. Строка статуса и описание темы — внутри
+ * того же блока, под волосяной линией.
+ */
+export function FilesHeader({
+  title,
+  search,
+  onSearch,
+  actions,
+  chips,
+  children,
+}: {
+  title: React.ReactNode;
+  search: string;
+  onSearch: (v: string) => void;
+  actions: React.ReactNode;
+  /** Ряд тем телефона; на десктопе спрятан — там рейл. */
+  chips: React.ReactNode;
+  /** Строка статуса и всё, что ниже линии. */
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className='border border-borderColor bg-bgColor'>
+      <div className='flex flex-col gap-stack p-block lg:flex-row lg:items-center lg:gap-3'>
+        {title}
+        <div className='flex min-w-0 items-center gap-2 lg:flex-1'>
+          <Input
+            name='search'
+            type='text'
+            value={search}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onSearch(e.target.value)}
+            placeholder='name, topic, person'
+            aria-label='search'
+            className='h-10 min-w-0 flex-1 px-3 lg:max-w-md'
+          />
+          <div className='flex shrink-0 items-center gap-2 lg:ml-auto'>{actions}</div>
+        </div>
+        <div className='lg:hidden'>{chips}</div>
       </div>
-    </Toolbar>
+      {children}
+    </div>
   );
 }

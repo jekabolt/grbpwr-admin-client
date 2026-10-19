@@ -131,7 +131,7 @@ const gone: GoCall[] = [];
 const probe = {} as AuditProbe;
 window.__audit = probe;
 probe.gone = () => gone;
-probe.alerts = () => useSnackBarStore.getState().alerts.map((a) => a.message);
+probe.alerts = () => useSnackBarStore.getState().toasts.map((a) => a.message);
 probe.sha256 = sha256Hex;
 probe.fp = operationFingerprint;
 probe.formFps = (ops) => formOperationFingerprints(ops as never);
@@ -221,7 +221,7 @@ function Harness({
 
 probe.mount = (opts) => {
   gone.length = 0;
-  useSnackBarStore.setState({ alerts: [] });
+  useSnackBarStore.setState({ toasts: [] });
   window.__auditNetCalls = [];
   window.__auditIssueCalls = [];
   const host = document.getElementById('root')!;

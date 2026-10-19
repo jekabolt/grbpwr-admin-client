@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   useCallback,
@@ -1068,7 +1068,7 @@ function PaintSide({
       const pick = hardwareAt(flat.ink, w, h, px, py);
       if (!pick) return;
       if (pick.open) {
-        useSnackBarStore.getState().showMessage(OPEN_REASON, 'error');
+        notify({ sev: 'error', subject: 'HARDWARE', text: 'not filled', bad: OPEN_REASON });
         return;
       }
       session.apply(view.view, pick.idx);
@@ -1268,7 +1268,6 @@ export function PartsCanvas({
 
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
   const writes = useAssetWrites(session.techCardId);
-  const { showMessage } = useSnackBarStore();
   const pictures = useMemo(() => (band ? flatPictureIds(band) : new Map<string, number>()), [band]);
   const arts = useMemo(() => new Map((artworks ?? []).map((a) => [a.assetId, a])), [artworks]);
   const [pending, setPending] = useState<Map<string, Pending>>(() => new Map());
@@ -1311,7 +1310,8 @@ export function PartsCanvas({
 
   const placedCount = [...pictures.keys()].reduce((n, view) => n + placedOf(view).length, 0);
   const full = placedCount >= MAX_RENDER_ARTWORKS;
-  const refuseFull = () => showMessage(FULL_REASON, 'error');
+  const refuseFull = () =>
+    notify({ sev: 'error', subject: 'ARTWORK', text: 'not added', bad: FULL_REASON });
 
   /* One request in flight per placement; a move made meanwhile waits, and only the LATEST geometry
      goes once the request settles (no out-of-order writes). */

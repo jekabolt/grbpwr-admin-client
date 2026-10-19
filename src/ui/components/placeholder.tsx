@@ -16,7 +16,7 @@ export function placeholderClass(opts?: { dashed?: boolean; tone?: 'default' | '
     opts?.dashed ? 'border-dashed' : '',
     opts?.tone === 'error'
       ? 'border-error text-error'
-      : 'border-borderColor text-textInactiveColor',
+      : 'border-borderColor text-borderColor',
   );
 }
 

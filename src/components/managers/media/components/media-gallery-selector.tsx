@@ -215,7 +215,8 @@ export function MediaGallerySelector({
                 <Media
                   type={video ? 'video' : 'image'}
                   src={url}
-                  alt={m.media?.blurhash || ''}
+                  alt={m.id != null ? `media ${m.id}` : `frame ${i + 1}`}
+                  blurhash={m.media?.blurhash}
                   fit={video ? 'contain' : fit}
                   aspectRatio='auto'
                 />

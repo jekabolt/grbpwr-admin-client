@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService, frontendService } from 'api/api';
 import { common_HeroFullInsert } from 'api/proto-http/admin';
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 
 export const heroKeys = {
   all: ['hero'] as const,
@@ -28,16 +29,24 @@ export function useHero() {
 
 export function useSaveHero() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
 
-  return useMutation({
+  const m = useMutation({
     mutationFn: (heroData: common_HeroFullInsert) => adminService.AddHero({ hero: heroData }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: heroKeys.detail() });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't publish hero — ${msg}`, 'error');
+    onError: (error, vars) => {
+      notify({
+        sev: 'error',
+        subject: 'HERO',
+        text: 'not published',
+        detail: error instanceof Error ? error.message : undefined,
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => m.mutate(vars) }
+            : undefined,
+      });
     },
   });
+  return m;
 }

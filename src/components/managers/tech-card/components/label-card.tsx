@@ -233,7 +233,7 @@ function Thumb({
   return (
     <div
       className={cn(
-        'relative border border-borderColor bg-bgZebra',
+        'relative border border-borderColor bg-pageBg',
         size === 'lg' ? 'size-40' : 'size-12',
       )}
       data-mockup-pic={id}

@@ -73,7 +73,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
               // Low sell-through on a wide run = real overbuy; single-digit runs are too small to judge.
               const isPoor = pct < 50 && totalSizes >= 4;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

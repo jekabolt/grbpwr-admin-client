@@ -5,8 +5,21 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, CalloutBox, Placeholder, Section, HeaderCount, Text, Tiles, FoldCaret, EmptyCell } from 'ui';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
+import {
+  Button,
+  CalloutBox,
+  Placeholder,
+  Section,
+  HeaderCount,
+  Text,
+  Tiles,
+  FoldCaret,
+  EmptyCell,
+} from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import { serverSpeaksDesign } from '../capability';
 import { ReplacingEditor } from '../generation/propagating-editor';
@@ -65,10 +78,8 @@ import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
  * несущая в этой системе, а 4px на неё не стоят ничего: по горизонтали грунт и так виден в
  * междурядьях, а под подписями и дверьми — во всю ширину группы.
  *
- * ⚠ ТОН — `bgSecondary` (#ededed), И ЭТО ЕДИНСТВЕННАЯ СВОБОДНАЯ КЛЕТКА СЛОВАРЯ. DESIGN.md: panel
- * «a fill, not a container… where a tint is wanted but a new box is not» — дословно этот случай.
- * Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка внутри — это box-in-box, прямой
- * запрет системы. `bgZebra` (#fafafa) на белом не читается вовсе: 5 единиц яркости против 18.
+ * ⚠ ТОН — `pageBg` (#f2f2f2). Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка
+ * внутри — это box-in-box, прямой запрет системы.
  */
 function Bay({
   groupOf,
@@ -87,7 +98,7 @@ function Bay({
   return (
     <div
       data-deck-group={groupOf || undefined}
-      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
+      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-pageBg' : '')}
       style={spanTwo ? { gridColumn: 'span 2' } : undefined}
     >
       {children}
@@ -247,19 +258,6 @@ export function OutputsSection({
   const split = useSplitToInput({
     techCardId,
     band,
-    /**
-     * ═══ ИТОГ РЕЗА НЕ ОБЕЩАЕТ СЛОТОВ ТАМ, ГДЕ ИХ НЕТ (r3f) ═══════════════════════════════════
-     *
-     * Умолчание хука — «mark them into slots from the band», и оно верно у рендера: под его
-     * плиткой стоит дверь `mark ▸`, и человек делает ровно то, что ему сказали. На полке 3D
-     * этой двери НЕТ И БЫТЬ НЕ МОЖЕТ: слот верстака кадр рода `threed` не принимает вовсе
-     * (сервер ответил бы `wrong_kind`), и та же строка отправляла человека искать орган,
-     * которого на экране не нарисовано ни одного.
-     *
-     * Поэтому слово называет то, что у кусков ЕСТЬ, и не называет ничего сверх: у каждого куска
-     * стоит угол `edit`, и каждый открывается зумом, как всякий кадр полосы.
-     */
-    cutSays: (views) => `${views} cut — each can be edited or zoomed`,
   });
   /* КАКУЮ ИМЕННО КАРТИНКУ ПРАВИМ. Не булево `editing`: ячеек в полосе много, а модалка одна,
      и флаг открыл бы редактор сразу над всеми. Ноль — закрыто. */
@@ -286,7 +284,6 @@ export function OutputsSection({
     if (openDeck !== null) setOpenDeck(null);
     if (editing) setEditing(null);
   }
-
 
   /**
    * ═══ ДВЕРЬ «ПРИНЕСТИ СВОЮ МОДЕЛЬ» — ДВА УЗЛА В РАЗНЫХ МЕСТАХ ДОКУМЕНТА (E-13) ══════════════
@@ -537,7 +534,10 @@ export function OutputsSection({
       <StripCell
         key={picture.id}
         onOpen={
-          deckSheet ? () => setOpenDeck((current) => (current === (picture.id ?? 0) ? null : picture.id ?? 0)) : undefined
+          deckSheet
+            ? () =>
+                setOpenDeck((current) => (current === (picture.id ?? 0) ? null : picture.id ?? 0))
+            : undefined
         }
         cellPictureId={picture.id}
         /* On the 3D shelf the cell is a GRID track, not a strip cell: it takes the track's width. */
@@ -629,7 +629,8 @@ export function OutputsSection({
           !writesOff && !modelUrl && !composite
             ? {
                 onClick: () => setEditing(picture),
-                ariaLabel: `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
+                ariaLabel:
+                  `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
                 title:
                   'draw over this picture — the edit takes its place here and in every slot it stands in',
               }
@@ -644,7 +645,8 @@ export function OutputsSection({
         onSplit={
           !writesOff && !modelUrl && pictureOffersSplit(picture, !!deck)
             ? {
-                onClick: () => split.openForPicture(picture, `${spokenNoun} ${picture.ordinal ?? ''}`.trim()),
+                onClick: () =>
+                  split.openForPicture(picture, `${spokenNoun} ${picture.ordinal ?? ''}`.trim()),
                 ariaLabel: `split ${spokenNoun} ${picture.ordinal ?? ''} into views`,
               }
             : undefined
@@ -706,9 +708,9 @@ export function OutputsSection({
            лист этой системы; у одиночного снимка под кадром по-прежнему нет ничего. */
         action={
           deck ? (
-          /* Метрика ряда — одна на все двери студии: `DOOR_ROW` (`./render-tile`, F-9). */
-          <div data-door-row='' className={DOOR_ROW}>
-            {/* ═══ КОЛОДА ЛИСТА 3D — ДВЕ ДВЕРИ И НИ ОДНОЙ ТРЕТЬЕЙ ══════════════════════════════
+            /* Метрика ряда — одна на все двери студии: `DOOR_ROW` (`./render-tile`, F-9). */
+            <div data-door-row='' className={DOOR_ROW}>
+              {/* ═══ КОЛОДА ЛИСТА 3D — ДВЕ ДВЕРИ И НИ ОДНОЙ ТРЕТЬЕЙ ══════════════════════════════
                 Владелец, дословно (2026-09-07): у листа `snapshot 4 sides` «будет мультивью».
                 Жест мультивью в этой системе один и тот же на всех экранах — раскрыть колоду и
                 свернуть её обратно, — и здесь он написан теми же словами и тем же классом
@@ -728,35 +730,35 @@ export function OutputsSection({
                 ⚠ ОБЯЗАТЕЛЬНА ИМЕННО ОБЪЯВЛЕННАЯ КНОПКА: веер `CropDeck` объявленно нем при
                 `hostDoor` (`aria-hidden`, `tabIndex={-1}`), поэтому без этих двух дверей колода
                 была бы мышиной — ни таб-стопа, ни `aria-expanded`, ни слова читалке. */}
-            {deck &&
-              (deck.open ? (
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className={DOOR}
-                  aria-expanded
-                  data-deck-fold={picture.id || undefined}
-                  title='fold these views back behind the sheet'
-                  onClick={() => setOpenDeck(null)}
-                >
-                  fold
-                  <FoldCaret open />
-                </Button>
-              ) : (
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className={DOOR}
-                  aria-expanded={false}
-                  data-deck-expand={picture.id || undefined}
-                  onClick={() => setOpenDeck(picture.id ?? 0)}
-                  title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' view was' : ' views were'} cut from this sheet — open them as cards on the shelf`}
-                >
-                  expand
-                  <FoldCaret open={false} />
-                </Button>
-              ))}
-          </div>
+              {deck &&
+                (deck.open ? (
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    className={DOOR}
+                    aria-expanded
+                    data-deck-fold={picture.id || undefined}
+                    title='fold these views back behind the sheet'
+                    onClick={() => setOpenDeck(null)}
+                  >
+                    fold
+                    <FoldCaret open />
+                  </Button>
+                ) : (
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    className={DOOR}
+                    aria-expanded={false}
+                    data-deck-expand={picture.id || undefined}
+                    onClick={() => setOpenDeck(picture.id ?? 0)}
+                    title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' view was' : ' views were'} cut from this sheet — open them as cards on the shelf`}
+                  >
+                    expand
+                    <FoldCaret open={false} />
+                  </Button>
+                ))}
+            </div>
           ) : undefined
         }
       />

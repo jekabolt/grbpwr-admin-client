@@ -3,7 +3,7 @@ import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, Media, RatioGlyph, Text } from 'ui';
 import { VideoSize } from '..';
 import { mediaAspectRatio, ratioLabel } from '../utils/calculate-aspect';
@@ -43,7 +43,28 @@ interface MediaItemProps {
    * невыясненном кадре — обещание, за которое отвечает бакет, а не мы.
    */
   usage?: MediaUsageRef[];
+  /**
+   * Phone layout of the library page. Hover actions go away, the footer reads `id · N uses`, a tap
+   * opens the viewer — or, while `selecting`, toggles the card. Embedded pickers never set it.
+   */
+  touch?: boolean;
+  /** Phone select mode: a check sits top-left on every card and a tap toggles. */
+  selecting?: boolean;
+  /** Phone: a long press enters select mode with this card picked. */
+  onLongPress?: () => void;
+  /**
+   * Fetch the thumbnail now (default). The virtual grid holds it while the list is dragged or
+   * flung; the blurhash shows meanwhile. Once loaded, a tile keeps its image.
+   */
+  load?: boolean;
+  /**
+   * The slot cannot take this item (a video in a picker for stills). The tile keeps its place, so
+   * the date pill's counts stay right, but it is dimmed and does not select.
+   */
+  unavailable?: boolean;
 }
+
+const LONG_PRESS_MS = 450;
 
 /** Квадратная кнопка-действие поверх кадра. Появляется по наведению и по фокусу с клавиатуры. */
 function TileAction({
@@ -66,7 +87,9 @@ function TileAction({
       className={cn(
         'flex size-6 items-center justify-center border-b border-l border-borderColor bg-bgColor text-textColor',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-        tone === 'danger' ? 'hover:bg-error hover:text-bgColor' : 'hover:bg-textColor hover:text-bgColor',
+        tone === 'danger'
+          ? 'hover:bg-error hover:text-bgColor'
+          : 'hover:bg-textColor hover:text-bgColor',
       )}
     >
       {children}
@@ -85,7 +108,15 @@ export function MediaItem({
   selectionMode = false,
   fit,
   usage,
+  touch = false,
+  selecting = false,
+  onLongPress,
+  load = true,
+  unavailable = false,
 }: MediaItemProps) {
+  const [loadedOnce, setLoadedOnce] = useState(load);
+  if (load && !loadedOnce) setLoadedOnce(true);
+  const loadNow = load || loadedOnce;
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const fullUrl = media.media?.fullSize?.mediaUrl || mediaUrl || '';
   const deleteMediaMutation = useDeleteMedia();
@@ -105,10 +136,43 @@ export function MediaItem({
     videoSizes[media.id || 0]?.height;
   const aspectRatio = mediaAspectRatio(media, videoSizes);
   const video = isVideo(mediaUrl);
-  const selectable = !disabled;
-  // ЗАНЯТО — ЭТО ТОЧНОЕ ЗНАНИЕ, а не отсутствие ответа: пока `usage` не приехал, плитка ведёт
-  // себя ровно как раньше (удаление предлагается, отказ бакета ловится постфактум).
+  const selectable = !disabled && !unavailable;
+  // Unknown usage counts as in use: delete is offered only for a file known to be free.
   const inUse = (usage?.length ?? 0) > 0;
+  const deletable = usage !== undefined && usage.length === 0;
+
+  // ДОЛГОЕ НАЖАТИЕ — вход в режим выбора. Клик, который браузер шлёт следом за отпусканием,
+  // гасится, иначе та же карточка тут же снялась бы с выбора или открыла просмотрщик.
+  const pressTimer = useRef<number | undefined>(undefined);
+  const pressStart = useRef<{ x: number; y: number } | undefined>(undefined);
+  const swallowClick = useRef(false);
+  const cancelPress = () => {
+    window.clearTimeout(pressTimer.current);
+    pressTimer.current = undefined;
+    pressStart.current = undefined;
+  };
+  const pressHandlers =
+    touch && onLongPress && !selecting
+      ? {
+          onPointerDown: (e: React.PointerEvent) => {
+            pressStart.current = { x: e.clientX, y: e.clientY };
+            window.clearTimeout(pressTimer.current);
+            pressTimer.current = window.setTimeout(() => {
+              swallowClick.current = true;
+              pressTimer.current = undefined;
+              onLongPress();
+            }, LONG_PRESS_MS);
+          },
+          onPointerMove: (e: React.PointerEvent) => {
+            const start = pressStart.current;
+            if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancelPress();
+          },
+          onPointerUp: cancelPress,
+          onPointerCancel: cancelPress,
+          onPointerLeave: cancelPress,
+          onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+        }
+      : {};
 
   const handleVideoLoadEvent = (event: React.SyntheticEvent<HTMLVideoElement>) => {
     if (media.id) onVideoLoad(media.id, event);
@@ -117,6 +181,14 @@ export function MediaItem({
   // Клик по кадру: в режиме выбора — выбрать, на странице библиотеки — открыть.
   const handleClick = (event: React.MouseEvent) => {
     event.stopPropagation();
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      return;
+    }
+    if (selecting) {
+      if (selectable) onToggle();
+      return;
+    }
     if (selectionMode || !onView) {
       if (selectable) onToggle();
       return;
@@ -138,6 +210,7 @@ export function MediaItem({
   // и что это навсегда. Теперь взвод разворачивает подпись плитки в вопрос с двумя разными
   // кнопками.
   const handleDelete = () => {
+    if (!deletable) return;
     setFailure(undefined);
     deleteMediaMutation.mutate(media.id || 0, {
       onError: (error) => {
@@ -154,15 +227,35 @@ export function MediaItem({
 
   return (
     <div
+      data-media-tile
+      data-created={media.createdAt}
+      aria-disabled={unavailable || undefined}
       className={cn(
         'group relative flex flex-col border border-borderColor bg-bgColor',
+        unavailable && 'opacity-40',
         // Выбор виден ВЕСОМ, а не цветом (правило системы: цвет носит состояние здоровья, вес —
         // выделение). Обводка, а не второй пиксель рамки: `border-2` менял бы ширину плитки, а
         // высота кадра считается от неё, и ряды дёргались бы на каждом щелчке по чекбоксу.
         isSelected && 'outline outline-2 -outline-offset-2 outline-textColor',
       )}
     >
-      {selectable && (
+      {/* Телефон: отметка только в режиме выбора, всегда видна и не ловит касание сама —
+          касание по всей карточке переключает выбор (см. `handleClick`). */}
+      {touch && selecting && (
+        <span
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute left-1.5 top-1.5 z-20 flex size-5 items-center justify-center border',
+            isSelected
+              ? 'border-textColor bg-textColor text-bgColor'
+              : 'border-textColor bg-bgColor',
+          )}
+        >
+          {isSelected && <span className='text-micro leading-none'>✓</span>}
+        </span>
+      )}
+
+      {selectable && !touch && (
         <button
           type='button'
           aria-pressed={isSelected}
@@ -188,19 +281,28 @@ export function MediaItem({
       <button
         type='button'
         onClick={handleClick}
+        aria-pressed={touch && selecting ? isSelected : undefined}
+        aria-label={touch && selecting ? `select ${media.id}` : undefined}
+        {...pressHandlers}
         // ЕДИНАЯ РАМКА НА ВСЮ СЕТКУ, кадр внутри неё целиком. Плитка в собственных пропорциях
         // рвёт ряды (портрет вдвое выше панорамы), а `cover` показывает не тот кадр, который
         // человек ищет глазами. Серый мат по краям и есть сообщение о форме снимка.
-        className='relative block w-full cursor-pointer bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        className={cn(
+          'relative block w-full cursor-pointer bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+          touch && 'select-none',
+          unavailable && 'cursor-default',
+        )}
       >
         <Media
           src={mediaUrl || ''}
           type={video ? 'video' : 'image'}
           alt={mediaUrl || 'media not found'}
+          blurhash={media.media?.blurhash}
           // БЕЗ ШТАТНОГО ПРОИГРЫВАТЕЛЯ В СЕТКЕ. Полоса управления браузера — чужая по языку
           // хрома, к тому же клик по перемотке попадал мимо выбора и мимо открытия.
           controls={false}
-          preload='metadata'
+          preload={loadNow ? 'metadata' : 'none'}
+          load={loadNow}
           muted
           aspectRatio='4/5'
           fit='contain'
@@ -211,7 +313,10 @@ export function MediaItem({
             Считается ОТ КАДРА, а не от ячейки: ячейка у всех одна (4:5), а снимок внутри неё
             вписан с полями, и рамка, посчитанная от ячейки, у панорамы легла бы мимо снимка. */}
         {fit?.target && !fit.ok && width && height && (
-          <span aria-hidden className='pointer-events-none absolute inset-0 flex items-center justify-center'>
+          <span
+            aria-hidden
+            className='pointer-events-none absolute inset-0 flex items-center justify-center'
+          >
             <span
               className='relative'
               // Коробка самого кадра внутри ячейки: что упирается первым, ширина или высота.
@@ -244,65 +349,58 @@ export function MediaItem({
       </button>
 
       {/* z-20 — тот же локальный стек плитки, что и у чекбокса: порядок внутри карточки. */}
-      <div className='absolute right-0 top-0 z-20 flex opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'>
-        <TileAction label='copy url' onClick={handleCopy}>
-          <CopyIcon className='size-3' />
-        </TileAction>
-        {onView && !selectionMode && (
-          <TileAction
-            label='open'
-            onClick={(e) => {
-              e.stopPropagation();
-              onView(media);
-            }}
-          >
-            <EnterFullScreenIcon className='size-3' />
+      {!touch && (
+        <div className='absolute right-0 top-0 z-20 flex opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'>
+          <TileAction label='copy url' onClick={handleCopy}>
+            <CopyIcon className='size-3' />
           </TileAction>
-        )}
-        <TileAction
-          label='delete'
-          tone='danger'
-          onClick={(e) => {
-            e.stopPropagation();
-            setArmed((v) => !v);
-          }}
-        >
-          <TrashIcon className='size-3' />
-        </TileAction>
-      </div>
+          {onView && !selectionMode && (
+            <TileAction
+              label='open'
+              onClick={(e) => {
+                e.stopPropagation();
+                onView(media);
+              }}
+            >
+              <EnterFullScreenIcon className='size-3' />
+            </TileAction>
+          )}
+          {!selectionMode && (
+            <TileAction
+              label='delete'
+              tone='danger'
+              onClick={(e) => {
+                e.stopPropagation();
+                setArmed((v) => !v);
+              }}
+            >
+              <TrashIcon className='size-3' />
+            </TileAction>
+          )}
+        </div>
+      )}
 
       {armed ? (
         <div className='border-t border-textColor px-1.5 py-1'>
           <Text size='micro' variant='label' className='block'>
-            delete {media.id} for good?
+            {inUse ? `${media.id} in use` : `delete ${media.id} for good?`}
           </Text>
-          {/* ЗАНЯТО — ЭТО ПРЕДУПРЕЖДЕНИЕ, А НЕ ЗАПРЕТ, и ровно потому, что клиент не может знать
-              исход. Из семнадцати ссылок на медиа пять объявлены ON DELETE SET NULL (свотч
-              колорвея и раунда лаб-дипа, картинка материала, выноска тех-карты и примерки) —
-              там удаление ПРОЙДЁТ и просто обнулит указатель; остальные откажут по внешнему
-              ключу. Какая из них держит файл, `MediaUsageRef` не сообщает, а повторять эту
-              таблицу здесь нельзя: следующая миграция сменит действие, и клиент начнёт врать
-              молча. Поэтому места названы, исход назван возможным, а кнопка остаётся: убрать её
-              значило бы навсегда запретить удаление свотчей и выносок, которое до этой ветки
-              работало. */}
+          {/* ЗАНЯТОЕ НЕ УДАЛЯЕТСЯ. Сервер отказывает в удалении медиа, на которое есть ссылка
+              (FailedPrecondition), поэтому кнопка гаснет заранее, а места названы — чтобы было
+              понятно, откуда файл сначала убрать. */}
           {inUse && (
-            <>
-              <ul className='mt-0.5 space-y-px'>
-                {usage?.map((ref, i) => (
-                  <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`} className='truncate'>
-                    <Text size='micro' component='span'>
-                      {usageRefName(ref)}
-                    </Text>{' '}
-                    <Text size='micro' variant='label' component='span'>
-                      {usageRefSlot(ref)}
-                    </Text>
-                  </li>
-                ))}
-              </ul>
-              <Text size='micro' variant='label' className='mt-0.5 block'>
-                the bucket may refuse; where it does not, the picture leaves those places.
-              </Text>
-            </>
+            <ul className='mt-0.5 space-y-px'>
+              {usage?.map((ref, i) => (
+                <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`} className='truncate'>
+                  <Text size='micro' component='span'>
+                    {usageRefName(ref)}
+                  </Text>{' '}
+                  <Text size='micro' variant='label' component='span'>
+                    {usageRefSlot(ref)}
+                  </Text>
+                </li>
+              ))}
+            </ul>
           )}
           <div className='mt-1 flex gap-1'>
             {/* Красная кнопка остаётся своей вёрсткой: у `Button` нет тона «опасно», а цвет
@@ -311,10 +409,16 @@ export function MediaItem({
             <button
               type='button'
               onClick={handleDelete}
-              disabled={deleteMediaMutation.isPending}
-              className='border border-error px-1.5 py-px text-micro uppercase leading-4 tracking-label text-error hover:bg-error hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:border-borderColor disabled:text-textInactiveColor'
+              disabled={deleteMediaMutation.isPending || !deletable}
+              className='border border-error px-1.5 py-px text-micro uppercase leading-4 tracking-label text-error hover:bg-error hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:border-borderColor disabled:text-borderColor'
             >
-              {deleteMediaMutation.isPending ? 'deleting…' : 'delete'}
+              {deleteMediaMutation.isPending
+                ? 'deleting…'
+                : inUse
+                  ? 'in use'
+                  : !deletable
+                    ? 'not checked'
+                    : 'delete'}
             </button>
             <Button type='button' size='xs' variant='secondary' onClick={() => setArmed(false)}>
               cancel
@@ -331,16 +435,26 @@ export function MediaItem({
               подписывается ничем: подпись «free» на каждой второй плитке утопила бы подвал, а
               полка отбора и так называет обе цифры. Список мест уходит в `title` — верстать его
               в полосе высотой в строку негде. */}
-          {inUse && (
-            <Text
-              size='micro'
-              component='span'
-              className='flex-none tabular-nums'
-              title={usage?.map(usageRefLine).join('\n')}
-            >
-              used {usage?.length}
-            </Text>
-          )}
+          {inUse &&
+            (touch ? (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='flex-none tabular-nums'
+              >
+                · {usage?.length} {usage?.length === 1 ? 'use' : 'uses'}
+              </Text>
+            ) : (
+              <Text
+                size='micro'
+                component='span'
+                className='flex-none tabular-nums'
+                title={usage?.map(usageRefLine).join('\n')}
+              >
+                used {usage?.length}
+              </Text>
+            ))}
           <span className='ml-auto flex min-w-0 items-center gap-1 text-labelColor'>
             {fit ? (
               <Text size='micro' variant={fit.ok ? 'label' : undefined} component='span'>

@@ -16,7 +16,7 @@ import { depStatus, usePrintReady, type PrintDep } from 'components/managers/pri
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -331,7 +331,6 @@ export function TechCardAssemblyPrint() {
       { replace: true },
     );
   };
-  const showMessage = useSnackBarStore((s) => s.showMessage);
 
   const { data: techCard, isLoading, isError } = useTechCard(numId);
   const {
@@ -455,7 +454,13 @@ export function TechCardAssemblyPrint() {
     try {
       await exportPaperPdf(doc, pdfSize(doc, target));
     } catch (e) {
-      showMessage(`pdf failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'ASSEMBLY PDF',
+        text: 'not exported',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void download() },
+      });
     } finally {
       setExporting(false);
     }
@@ -465,7 +470,7 @@ export function TechCardAssemblyPrint() {
     <div className='flex min-h-screen flex-col'>
       <style>{SCREEN_CSS}</style>
 
-      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-borderColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
           <BackLink to={id ? `/tech-cards/${id}` : ROUTES.techCards} />
           <Text variant='uppercase' size='large'>

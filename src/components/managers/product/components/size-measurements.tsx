@@ -18,9 +18,9 @@ import { ToggleSizeNames } from './toggle-sizenames';
 import { VariantsPanel } from './variants-panel';
 import { WaitlistPanel } from './waitlist-panel';
 
-const cellClass = 'text-center border-r border-textInactiveColor';
-const qtyCellClass = 'text-center border-r-2 border-textInactiveColor';
-const measurementCellClass = 'text-center border-r border-textInactiveColor w-20 lg:w-auto';
+const cellClass = 'text-center border-r border-borderColor';
+const qtyCellClass = 'text-center border-r-2 border-borderColor';
+const measurementCellClass = 'text-center border-r border-borderColor w-20 lg:w-auto';
 const lastCellClass = 'text-center w-20 lg:w-auto';
 
 export function SizeMeasurements({
@@ -243,9 +243,9 @@ export function SizeMeasurements({
       >
         <div className='overflow-x-auto'>
           <table className='w-full border-collapse border border-borderColor min-w-max'>
-            <thead className='bg-textInactiveColor'>
+            <thead className='bg-borderColor'>
               <tr className='border-b border-text'>
-                <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>
+                <th className={cn(cellClass, 'sticky left-0 bg-borderColor z-10')}>
                   <Text variant='uppercase'>size</Text>
                 </th>
                 <th className={qtyCellClass}>
@@ -278,7 +278,7 @@ export function SizeMeasurements({
                     <td className={cn(cellClass, 'sticky left-0 bg-bgColor z-10')}>
                       <Text
                         variant='uppercase'
-                        className={cn({ 'text-textInactiveColor': isOutOfStock })}
+                        className={cn({ 'text-borderColor': isOutOfStock })}
                       >
                         {formatSizeName(size.name)}
                       </Text>
@@ -297,7 +297,7 @@ export function SizeMeasurements({
                       <Text
                         size='small'
                         className={cn('block text-center', {
-                          'text-textInactiveColor': isOutOfStock,
+                          'text-borderColor': isOutOfStock,
                         })}
                       >
                         {qty && qty !== '0' ? qty : '0'}
@@ -319,7 +319,7 @@ export function SizeMeasurements({
                           <Text
                             size='small'
                             className={cn('block text-center', {
-                              'text-textInactiveColor': !measurementValue,
+                              'text-borderColor': !measurementValue,
                             })}
                           >
                             {measurementValue || <EmptyCell />}

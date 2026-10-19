@@ -9,7 +9,21 @@ import {
   common_EmailCampaignTopic,
   common_EmailSegment,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { errorText, isTransient, reasonOf } from 'components/managers/accounting/utils/feedback';
+import { notify } from 'lib/stores/store';
+
+// A failure with no place on the page: toast + inbox, subject = the campaign or segment.
+const fail = (subject: string, text: string, e: unknown, retry?: () => void) =>
+  notify({
+    sev: 'error',
+    subject,
+    text,
+    bad: reasonOf(e),
+    detail: errorText(e, 'unknown error'),
+    action: retry && isTransient(e) ? { label: 'retry', onClick: retry } : undefined,
+  });
+const campaignSubject = (id?: number) => (id ? `CAMPAIGN ${id}` : 'CAMPAIGN');
+const segmentSubject = (id?: number) => (id ? `SEGMENT ${id}` : 'SEGMENT');
 
 // React Query hooks for the email-campaign builder — mirrors hero's useHero.ts and
 // promo's useInfiniteQuery pattern.
@@ -74,7 +88,6 @@ export function useCampaignsPaged(filter: CampaignListFilter) {
 
 export function useSaveCampaign() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { id: number; campaign: common_EmailCampaignInsert }) =>
       adminService.UpsertEmailCampaign(vars),
@@ -82,26 +95,21 @@ export function useSaveCampaign() {
       queryClient.invalidateQueries({ queryKey: emailCampaignKeys.lists() });
       if (vars.id) queryClient.invalidateQueries({ queryKey: emailCampaignKeys.detail(vars.id) });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't save campaign — ${msg}`, 'error');
-    },
+    onError: (error, vars) => fail(campaignSubject(vars.id), 'not saved', error),
   });
 }
 
 export function useDeleteCampaign() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (id: number) => adminService.DeleteEmailCampaign({ id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: emailCampaignKeys.lists() });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't delete campaign — ${msg}`, 'error');
-    },
+    onError: (error, id) => fail(campaignSubject(id), 'not deleted', error, () => again(id)),
   });
+  const again = (id: number): void => m.mutate(id);
+  return m;
 }
 
 export type RenderPreviewVars = {
@@ -129,16 +137,10 @@ export type TestSendVars = {
 };
 
 // SendTestEmail delivers a one-off test to an allowlisted address; the backend
-// enforces the allowlist.
+// enforces the allowlist. Feedback is the modal's: refusals stand in it, the receipt is on the door.
 export function useTestSend() {
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: TestSendVars) => adminService.SendTestEmail(vars),
-    onSuccess: () => showMessage('test email sent', 'success'),
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`test send failed — ${msg}`, 'error');
-    },
   });
 }
 
@@ -217,89 +219,80 @@ export function useRecipients(id: number, enabled = true) {
 
 // Shared onSuccess for the lifecycle mutations: refetch the campaign detail + its
 // dispatch status (the source of truth for which controls are valid next) and the
-// list so status chips update, then surface a toast.
+// list so status chips update. No receipt toast: the status chip flipping is the receipt.
+// `retryable` is false for a send: a lost reply may still have started it.
 function useLifecycleMutation<TVars extends { id: number }>(
   fn: (vars: TVars) => Promise<unknown>,
-  successMsg: string,
-  errPrefix: string,
+  failText: string,
+  retryable = true,
 ) {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: fn,
     onSuccess: async (_res, vars) => {
-      showMessage(successMsg, 'success');
       queryClient.invalidateQueries({ queryKey: emailCampaignKeys.lists() });
       queryClient.invalidateQueries({ queryKey: emailCampaignKeys.detail(vars.id) });
       // Refetch dispatch status so the control set reflects the new state immediately.
       await queryClient.refetchQueries({ queryKey: emailCampaignKeys.dispatch(vars.id) });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`${errPrefix} — ${msg}`, 'error');
-    },
+    onError: (error, vars) =>
+      fail(campaignSubject(vars.id), failText, error, retryable ? () => again(vars) : undefined),
   });
+  const again = (vars: TVars): void => m.mutate(vars);
+  return m;
 }
 
 export function useSendCampaignNow() {
   return useLifecycleMutation(
     (vars: { id: number }) => adminService.SendCampaignNow({ id: vars.id }),
-    'campaign sending now',
-    "couldn't start send",
+    'not sent',
+    false,
   );
 }
 
 // useAutoTranslateCampaign asks the backend to fill the non-English locales' subject + block
 // translations from the English source via AI, then refetches the campaign so the editor shows the
 // filled translations for review. overwrite re-translates all locales; default fills only missing.
+// The receipt (the count) goes on the button at the call site.
 export function useAutoTranslateCampaign() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (vars: { id: number; overwrite?: boolean }) =>
       adminService.AutoTranslateEmailCampaign({ id: vars.id, overwrite: vars.overwrite ?? false }),
-    onSuccess: async (res, vars) => {
-      const n = res?.translatedCount ?? 0;
-      showMessage(`auto-translated ${n} string${n === 1 ? '' : 's'} — review before sending`, 'success');
+    onSuccess: async (_res, vars) => {
       await queryClient.refetchQueries({ queryKey: emailCampaignKeys.detail(vars.id) });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't auto-translate — ${msg}`, 'error');
-    },
+    onError: (error, vars) => fail(campaignSubject(vars.id), 'not translated', error),
   });
+  return m;
 }
 
 export function useScheduleCampaign() {
   return useLifecycleMutation(
     (vars: { id: number; scheduleAt: number }) =>
       adminService.ScheduleCampaign({ id: vars.id, scheduleAt: vars.scheduleAt }),
-    'campaign scheduled',
-    "couldn't schedule",
+    'not scheduled',
   );
 }
 
 export function usePauseCampaign() {
   return useLifecycleMutation(
     (vars: { id: number }) => adminService.PauseCampaign({ id: vars.id }),
-    'campaign paused',
-    "couldn't pause",
+    'not paused',
   );
 }
 
 export function useResumeCampaign() {
   return useLifecycleMutation(
     (vars: { id: number }) => adminService.ResumeCampaign({ id: vars.id }),
-    'campaign resumed',
-    "couldn't resume",
+    'not resumed',
   );
 }
 
 export function useCancelCampaign() {
   return useLifecycleMutation(
     (vars: { id: number }) => adminService.CancelCampaign({ id: vars.id }),
-    'campaign cancelled',
-    "couldn't cancel",
+    'not cancelled',
   );
 }
 
@@ -339,7 +332,6 @@ export function useSegment(id: number) {
 // { id, segment: common_EmailSegment } — matches the generated client exactly.
 export function useUpsertSegment() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { id: number; segment: common_EmailSegment }) =>
       adminService.UpsertEmailSegment(vars),
@@ -348,24 +340,19 @@ export function useUpsertSegment() {
       if (vars.id)
         queryClient.invalidateQueries({ queryKey: emailCampaignKeys.segmentDetail(vars.id) });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't save segment — ${msg}`, 'error');
-    },
+    onError: (error, vars) => fail(segmentSubject(vars.id), 'not saved', error),
   });
 }
 
 export function useDeleteSegment() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  const m = useMutation({
     mutationFn: (id: number) => adminService.DeleteEmailSegment({ id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: emailCampaignKeys.segments });
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'unknown error';
-      showMessage(`couldn't delete segment — ${msg}`, 'error');
-    },
+    onError: (error, id) => fail(segmentSubject(id), 'not deleted', error, () => again(id)),
   });
+  const again = (id: number): void => m.mutate(id);
+  return m;
 }

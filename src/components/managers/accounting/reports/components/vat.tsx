@@ -142,7 +142,12 @@ export function VatTab({ from }: Props) {
           plain: 'VAT paid at customs, reclaimable',
           value: ret.inputImport,
         },
-        { label: 'Net VAT to pay', plain: 'output minus input', value: ret.netPayable, total: true },
+        {
+          label: 'Net VAT to pay',
+          plain: 'output minus input',
+          value: ret.netPayable,
+          total: true,
+        },
       ]
     : [];
   // Lines JPK declares for completeness but that are settled on another return (OSS, UK) or carry
@@ -303,7 +308,7 @@ export function VatTab({ from }: Props) {
                 </thead>
                 <tbody>
                   {ossRows.map((r, i) => (
-                    <tr key={r.country ?? i} className='border-b border-textInactiveColor'>
+                    <tr key={r.country ?? i} className='border-b border-borderColor'>
                       <td className='whitespace-nowrap px-2 py-1'>{r.country}</td>
                       <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
                         {formatPercent(r.ratePct)}

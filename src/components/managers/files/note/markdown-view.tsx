@@ -7,6 +7,7 @@ import {
   parse,
 } from 'components/shared/markdown/doc';
 import { MarkdownRefsProvider, type MarkdownRefs } from 'components/shared/markdown/refs';
+import { cn } from 'lib/utility';
 import { FileRefImage, FileRefsProvider } from './file-refs';
 import { NoteImage, NotePicturesProvider, useNotePictures } from './note-pictures';
 
@@ -118,7 +119,14 @@ export function MarkdownView({
     <FileRefsProvider ids={refIds}>
       <NotePicturesProvider pictures={pictures}>
         <MarkdownRefsProvider value={linksInNewTab ? ADMIN_REFS_NEW_TAB : ADMIN_REFS}>
-          <MarkdownDoc blocks={blocks} className={className} />
+          <MarkdownDoc
+            blocks={blocks}
+            className={cn(
+              '[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre',
+              '[&_pre]:font-family-mono [&_pre]:text-textBaseSize',
+              className,
+            )}
+          />
         </MarkdownRefsProvider>
       </NotePicturesProvider>
     </FileRefsProvider>

@@ -382,7 +382,7 @@ export function FileOwnersSection({
                       prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
                     )
                   }
-                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                 >
                   <span
                     aria-hidden

@@ -7,7 +7,7 @@ import type {
   common_Model,
 } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { useMemo, type JSX } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
 import { GroupLabel, Text, EmptyCell } from 'ui';
@@ -227,7 +227,6 @@ export function WhatModelGetsRenderModal({
   mapLooks?: ReadonlyMap<string, MapLook>;
 }): JSX.Element {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
 
   // The card's own words. Read defensively: the studio is also mounted by composers that are not
   // inside a form (a print root, a harness), and `useFormContext` answers `null` there while its
@@ -350,13 +349,12 @@ export function WhatModelGetsRenderModal({
 
       <CopyWords
         words={words}
-        say={showMessage}
         doors={[
           /* M14: the card's description is no longer edited on FLAT (its WORDS show only what a flat
              sends), so there is no door to it from here; it is written from the moodboard. */
           {
             label: 'edit the fit ▸',
-            onClick: () => openDoor('fit', FIT_WHERE, showMessage),
+            onClick: () => openDoor('fit', FIT_WHERE),
           },
         ]}
       />

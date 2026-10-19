@@ -51,7 +51,7 @@ function VariantComparison({
       <div className='overflow-x-auto'>
         <table className='w-full min-w-[560px] border-collapse text-left'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-borderColor'>
               {['variant', 'sent', 'delivered', 'open', 'click', 'bounce'].map((h) => (
                 <th key={h} className='py-2 pr-3'>
                   <Text variant='label' size='small' className='uppercase'>
@@ -67,7 +67,7 @@ function VariantComparison({
               return (
                 <tr
                   key={v.variantId}
-                  className='border-b border-textInactiveColor/40 tabular-nums'
+                  className='border-b border-borderColor/40 tabular-nums'
                 >
                   <td className='py-2 pr-3'>
                     <div className='flex items-center gap-2'>

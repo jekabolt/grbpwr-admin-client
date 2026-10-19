@@ -1,6 +1,6 @@
 import { adminService } from 'api/api';
 import { common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, CalloutBox, ConfirmationModal, Section, Pill, Text } from 'ui';
 
@@ -53,7 +53,6 @@ export function LifecycleControls({
   canWrite: boolean;
   onChanged?: () => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const [busy, setBusy] = useState(false);
   const [publishReasons, setPublishReasons] = useState<string[]>([]);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -64,16 +63,24 @@ export function LifecycleControls({
   const isHidden = status === 'COLORWAY_LIFECYCLE_STATUS_HIDDEN';
   const isArchived = status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
 
-  async function run(action: () => Promise<unknown>, okMsg: string) {
+  // The status badge is the receipt; a failure notifies unless the caller shows it in place.
+  async function run(action: () => Promise<unknown>, failText: string, inPlace = false) {
     setBusy(true);
     setPublishReasons([]);
     try {
       await action();
-      showMessage(okMsg, 'success');
       onChanged?.();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Transition failed';
-      showMessage(msg, 'error');
+      const msg = e instanceof Error ? e.message : '';
+      if (!inPlace || !msg) {
+        notify({
+          sev: 'error',
+          subject: `PRODUCT ${colorwayId}`,
+          text: failText,
+          bad: 'refused',
+          detail: msg || undefined,
+        });
+      }
       throw e;
     } finally {
       setBusy(false);
@@ -83,30 +90,31 @@ export function LifecycleControls({
   const publish = () =>
     run(
       () => adminService.PublishColorway({ colorwayId, expectedVersion }),
-      'Colorway published',
+      'not published',
+      true,
     ).catch((e) => {
       // Surface publish preconditions (FAILED_PRECONDITION) as an actionable checklist.
       const msg = e instanceof Error ? e.message : '';
       if (msg) setPublishReasons(splitReasons(msg));
     });
 
-  const transition = (target: common_ColorwayLifecycleStatus, okMsg: string) =>
+  const transition = (target: common_ColorwayLifecycleStatus, failText: string) =>
     run(
       () => adminService.TransitionColorwayStatus({ colorwayId, expectedVersion, target }),
-      okMsg,
+      failText,
     ).catch(() => {});
 
   const archive = () =>
     run(
       () => adminService.ArchiveColorwayByID({ colorwayId, expectedVersion }),
-      'Colorway archived',
+      'not archived',
     ).catch(() => {});
 
   // #60: archiving is reversible. The SERVER picks where it lands — HIDDEN for something that was
   // published, DRAFT for a discarded draft, which must not be handed a publication it never earned.
   // The requested target stays HIDDEN because that is the RPC's "unarchive" edge; the message stays
   // neutral because the outcome is the server's call.
-  const restore = () => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway restored');
+  const restore = () => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'not restored');
 
   return (
     <Section
@@ -135,7 +143,7 @@ export function LifecycleControls({
                   size='sm'
                   className='uppercase'
                   disabled={busy}
-                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway hidden')}
+                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'not hidden')}
                 >
                   hide
                 </Button>
@@ -147,7 +155,7 @@ export function LifecycleControls({
                   size='sm'
                   className='uppercase'
                   disabled={busy}
-                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_ACTIVE', 'Colorway shown')}
+                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_ACTIVE', 'not shown')}
                 >
                   unhide
                 </Button>

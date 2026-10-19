@@ -6,16 +6,17 @@ import {
   useDeleteFittingChangeRequest,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button, Chip, ChipRow, Close, GroupLabel, Text } from 'ui';
+import { Button, CalloutBox, Chip, ChipRow, Close, GroupLabel, Text, useDoneFlash } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
 import { crPieceIds, FittingFormData } from './schema';
 import { fittingZoneOptions, normalizeFittingZone } from './zone-options';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 const statusOptions = [
   { value: 'open', label: 'open' },
   { value: 'resolved', label: 'resolved' },
@@ -310,6 +311,16 @@ function CreateModeList({
 
 // One editable structured remark (edit-mode CRUD): local draft + save/delete. Also used as the "add"
 // form (onDelete omitted). carriedFromId (if any) is preserved read-only.
+// What the parent tells a row of its save: `done` flashes the button, `fail` stands under it.
+type SaveCbs = { done: () => void; fail: (msg: string) => void };
+
+/** Errors of a change request: a refusal stays under the row, a lost request is news. */
+function reportCR(e: unknown, what: string, text: string, fail?: (msg: string) => void) {
+  const msg = fieldErrorSummary(e, `Failed to ${what}`);
+  if (fail && failureClassOfError(e) === 'refused') return fail(msg);
+  notify({ sev: 'error', subject: 'CHANGE REQUEST', text, detail: msg });
+}
+
 function EditableCR({
   initial,
   pieceOptions,
@@ -323,7 +334,7 @@ function EditableCR({
   initial: CRValue;
   pieceOptions: PieceOption[];
   piecesReady: boolean;
-  onSave: (v: CRValue) => void;
+  onSave: (v: CRValue, cbs: SaveCbs) => void;
   onDelete?: () => void;
   saving: boolean;
   isNew?: boolean;
@@ -331,8 +342,11 @@ function EditableCR({
 }) {
   const [v, setV] = useState<CRValue>(initial);
   const [dirty, setDirty] = useState(false);
+  const saved = useDoneFlash();
+  const [error, setError] = useState<string | null>(null);
   const onChange = (patch: Partial<CRValue>) => {
     setDirty(true);
+    setError(null);
     setV((prev) => ({ ...prev, ...patch }));
   };
   return (
@@ -370,8 +384,10 @@ function EditableCR({
           size='lg'
           className='uppercase'
           disabled={saving || (!isNew && !dirty) || !(v.note?.trim() || v.target?.trim())}
+          done={saved.on && (isNew ? 'added' : 'saved')}
           onClick={() => {
-            onSave(v);
+            setError(null);
+            onSave(v, { done: saved.flash, fail: setError });
             if (isNew) setV(initial);
             setDirty(false);
           }}
@@ -379,6 +395,13 @@ function EditableCR({
           {isNew ? 'add' : 'save'}
         </Button>
       </div>
+      {error && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>{isNew ? 'not added' : 'not saved'}</b> · {error}
+          </Text>
+        </CalloutBox>
+      )}
     </div>
   );
 }
@@ -397,7 +420,6 @@ function EditModeList({
   pieceOptions: PieceOption[];
   piecesReady: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   const { control } = useFormContext<FittingFormData>();
   const roundNumber = (useWatch({ control, name: 'roundNumber' }) as number) ?? 0;
   const add = useAddFittingChangeRequest(fittingId, techCardId);
@@ -440,28 +462,28 @@ function EditModeList({
               status: cr.status || (cr.resolved ? 'resolved' : 'open'),
               carriedFromId: cr.carriedFromId || 0,
             }}
-            onSave={(v) =>
+            onSave={(v, cbs) =>
               cr.id &&
               update.mutate(
                 { id: cr.id, changeRequest: toInsert(v) },
                 {
-                  onSuccess: () => showMessage('Change request saved', 'success'),
-                  onError: (e) => showMessage(fieldErrorSummary(e, 'Failed to save'), 'error'),
+                  onSuccess: cbs.done,
+                  onError: (e) => reportCR(e, 'save', 'not saved', cbs.fail),
                 },
               )
             }
+            // The row leaving the list is the receipt.
             onDelete={() =>
               cr.id &&
               del.mutate(cr.id, {
-                onSuccess: () => showMessage('Change request removed', 'success'),
-                onError: (e) => showMessage(fieldErrorSummary(e, 'Failed to delete'), 'error'),
+                onError: (e) => reportCR(e, 'delete', 'not deleted'),
               })
             }
           />
         ))
       )}
 
-      <div className='border-t border-textInactiveColor pt-3'>
+      <div className='border-t border-borderColor pt-3'>
         <Text variant='uppercase' size='small'>
           add change request
         </Text>
@@ -479,10 +501,10 @@ function EditModeList({
             status: 'open',
             carriedFromId: 0,
           }}
-          onSave={(v) =>
+          onSave={(v, cbs) =>
             add.mutate(toInsert(v), {
-              onSuccess: () => showMessage('Change request added', 'success'),
-              onError: (e) => showMessage(fieldErrorSummary(e, 'Failed to add'), 'error'),
+              onSuccess: cbs.done,
+              onError: (e) => reportCR(e, 'add', 'not added', cbs.fail),
             })
           }
         />

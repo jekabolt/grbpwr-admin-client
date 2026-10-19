@@ -7,14 +7,14 @@ import {
 import { activeVariantCount } from 'components/managers/tech-card/components/output-variants-field';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Pill, Text } from 'ui';
+import { Button, Pill, Text, useDoneFlash } from 'ui';
 import { ulid } from 'utils/ulid';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
-const input = 'w-32 border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const input = 'w-32 border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 export function materialLabel(m?: common_Material, fallbackId = 0): string {
   if (m) return `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`;
@@ -109,7 +109,9 @@ function VariantRunPlan({
   outputVariants: common_TechCardOutputVariant[];
   onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
+  // Receipt on the save button; a failed check or a refusal stands under it.
+  const saved = useDoneFlash();
+  const [fail, setFail] = useState<string | null>(null);
   const { dictionary } = useDictionary();
   const update = useUpdateRunSection();
   const editable = canEdit && !locked;
@@ -239,9 +241,8 @@ function VariantRunPlan({
     // A retired colour may keep the line it already has, but a new one is refused at plan time.
     const revived = rows.find((r) => !r.active && !r.lineKey && qtyOf(r) > 0);
     if (revived) {
-      showMessage(
+      setFail(
         `${revived.colorCode || 'this colour'} is retired — reactivate it on the tech card before planning it`,
-        'error',
       );
       return;
     }
@@ -262,7 +263,7 @@ function VariantRunPlan({
         lineKey: r.lineKey || ulid(),
       }));
     if (payload.length === 0) {
-      showMessage('Enter a planned quantity greater than 0 for at least one colour', 'error');
+      setFail('enter a planned quantity greater than 0 for at least one colour');
       return;
     }
     try {
@@ -274,9 +275,11 @@ function VariantRunPlan({
       // Not setDirty(false) — the effect above clears it once the refetched run reports this plan,
       // so the inputs never flash the pre-save quantities in between.
       savedPlan.current = planSignature(payload);
-      showMessage('Plan saved', 'success');
+      setFail(null);
+      saved.flash();
     } catch (e) {
-      showMessage(updateRunErrorMessage(e), 'error');
+      if (isRefusal(e)) setFail(updateRunErrorMessage(e));
+      else notifyFailure(`PR-${run.id}`, 'plan not saved', e, updateRunErrorMessage(e), save);
     }
   };
 
@@ -349,6 +352,7 @@ function VariantRunPlan({
                 disabled={!editable || blocked}
                 onChange={(e) => {
                   setDirty(true);
+                  setFail(null);
                   setQtyById((prev) => ({
                     ...prev,
                     [r.rowKey]: e.target.value.replace(/[^0-9]/g, ''),
@@ -368,10 +372,12 @@ function VariantRunPlan({
             size='lg'
             className='uppercase'
             disabled={update.isPending || blocked}
+            done={saved.on && 'saved'}
             onClick={save}
           >
             {update.isPending ? 'saving…' : 'save plan'}
           </Button>
+          <FailNote verb='not saved' text={fail} className='mt-2' />
         </div>
       ) : null}
     </div>
@@ -415,7 +421,9 @@ function SingleOutputRunPlan({
   outputMaterial?: common_Material;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
+  // Receipt on the save button; a failed check or a refusal stands under it.
+  const saved = useDoneFlash();
+  const [fail, setFail] = useState<string | null>(null);
   const update = useUpdateRunSection();
   const editable = canEdit && !locked;
 
@@ -443,7 +451,7 @@ function SingleOutputRunPlan({
   const save = async () => {
     const planned = Number(qty);
     if (!qty.trim() || !Number.isFinite(planned) || planned <= 0) {
-      showMessage('Enter a planned quantity greater than 0', 'error');
+      setFail('enter a planned quantity greater than 0');
       return;
     }
     // Replace the run's lines with the single aux line; keep any already-counted received/defect
@@ -470,9 +478,11 @@ function SingleOutputRunPlan({
         },
       });
       setDirty(false);
-      showMessage('Plan saved', 'success');
+      setFail(null);
+      saved.flash();
     } catch (e) {
-      showMessage(updateRunErrorMessage(e), 'error');
+      if (isRefusal(e)) setFail(updateRunErrorMessage(e));
+      else notifyFailure(`PR-${run.id}`, 'plan not saved', e, updateRunErrorMessage(e), save);
     }
   };
 
@@ -507,6 +517,7 @@ function SingleOutputRunPlan({
             disabled={!editable}
             onChange={(e) => {
               setDirty(true);
+              setFail(null);
               setQty(e.target.value.replace(/[^0-9]/g, ''));
             }}
           />
@@ -524,12 +535,14 @@ function SingleOutputRunPlan({
             size='lg'
             className='uppercase'
             disabled={update.isPending}
+            done={saved.on && 'saved'}
             onClick={save}
           >
             {update.isPending ? 'saving…' : 'save plan'}
           </Button>
         ) : null}
       </div>
+      <FailNote verb='not saved' text={fail} />
     </div>
   );
 }

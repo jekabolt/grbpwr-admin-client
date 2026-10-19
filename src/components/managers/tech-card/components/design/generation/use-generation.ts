@@ -8,7 +8,7 @@ import type {
   common_DesignRunParams,
   StartDesignRunResponse,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { cardOnScreen, designKeys, useDesignWrites, type WriteContext } from '../use-design-band';
@@ -41,7 +41,6 @@ import { awaitRun, runLedger } from './run-ledger';
 /** The generative RPCs. Nothing else in the band calls them. */
 export function useGenerationWrites(techCardId?: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   // Called for the one thing it does besides writing: it marks this card as held on screen
   // (`cardOnScreen`). Its `invalidate` is not re-exported — the refreshes here go to the WRITTEN
   // card (`invalidateWritten`), and nobody read the returned one (review round 3, nit).
@@ -68,9 +67,14 @@ export function useGenerationWrites(techCardId?: number) {
       // the band is re-read rather than left showing prices from before the attempt.
       qc.invalidateQueries({ queryKey: designKeys.band(card) });
       if (!cardOnScreen(card)) return;
-      showMessage((error as Error)?.message || 'the run did not start', 'error');
+      notify({
+        sev: 'error',
+        subject: 'GENERATE',
+        text: 'not started',
+        detail: (error as Error)?.message || undefined,
+      });
     },
-    [showMessage, qc, techCardId],
+    [qc, techCardId],
   );
 
   /**
@@ -235,7 +239,6 @@ export type StartRunState = {
 const FLAT_LEDGER_SCOPE = 'flat';
 
 export function useStartRun(techCardId?: number): StartRunState {
-  const { showMessage } = useSnackBarStore();
   const { startRun } = useGenerationWrites(techCardId);
 
   const start = useCallback(
@@ -292,15 +295,6 @@ export function useStartRun(techCardId?: number): StartRunState {
         operator,
         scope: FLAT_LEDGER_SCOPE,
       });
-      // The run comes back PENDING, not done: the pictures arrive when the provider answers.
-      // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
-      // while the card is on screen, whether or not the row that pressed is still mounted. WHERE
-      // they land is said too, and since 26.09 it is under GENERATE — the latest-generation row of
-      // the same block (O-53); the history below starts folded (O-54). Only the flat's GENERATE
-      // presses this door; FABRIC RENDER and 3D speak through `render/use-design-run.ts`.
-      if (cardOnScreen(card)) {
-        showMessage('run started — the pictures land under GENERATE when it finishes', 'success');
-      }
       // …and the workbench goes to it (O-53 review, `bench-store.ts`): a pin left by earlier work
       // stops holding the run it kept. Not a release — an editor opened while this answer travelled
       // keeps its run until it closes.
@@ -316,7 +310,7 @@ export function useStartRun(techCardId?: number): StartRunState {
       onStarted?.();
       return null;
     },
-    [techCardId, startRun, showMessage],
+    [techCardId, startRun],
   );
 
   // `isPending` is gone (review round 3, nit): nobody read it — the flat row's «starting…» comes

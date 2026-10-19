@@ -12,7 +12,6 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -34,6 +33,7 @@ import {
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { CutReceipts } from './components/cut-receipts';
+import { isRefusal, notifyFailure } from './components/feedback';
 import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
@@ -84,7 +84,6 @@ export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
   const navigate = useNavigate();
-  const { showMessage } = useSnackBarStore();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
   const { dictionary } = useDictionary();
@@ -146,7 +145,13 @@ export function ProductionRunDetail() {
   );
   // Phase 6: reversing a receipt needs a mandatory reason — the dialog carries it. null = closed.
   const [reverseTarget, setReverseTarget] = useState<number | null>(null);
-  const [reverseReason, setReverseReason] = useState('');
+  const [reverseReason, setReverseReasonState] = useState('');
+  // The server's refusal of the reversal: stands in the dialog until the reason is edited.
+  const [reverseError, setReverseError] = useState<string | null>(null);
+  const setReverseReason = (v: string) => {
+    setReverseError(null);
+    setReverseReasonState(v);
+  };
   const reverse = useReverseRunReceipt();
   // The server demands production:write + products:write + costing:write (it moves stock and
   // rolls back cost_price); the client gates on the two it can see.
@@ -302,13 +307,12 @@ export function ProductionRunDetail() {
     techCardId: ins?.techCardId,
   });
 
-  const confirmDelete = () =>
+  const confirmDelete = (): void =>
     del.mutate(runId, {
-      onSuccess: () => {
-        showMessage('Run deleted', 'success');
-        navigate(ROUTES.productionRuns);
-      },
-      onError: (e) => showMessage(deleteRunErrorMessage(e), 'error'),
+      // Navigation back to the list is the receipt.
+      onSuccess: () => navigate(ROUTES.productionRuns),
+      onError: (e) =>
+        notifyFailure(`PR-${runId}`, 'not deleted', e, deleteRunErrorMessage(e), confirmDelete),
     });
 
   if (isLoading) return <Text size='small'>loading…</Text>;
@@ -541,7 +545,7 @@ export function ProductionRunDetail() {
                         <Text size='small'>#{rc.id}</Text>
                         <Text size='small'>{runDate(rc.receivedAt) || <EmptyCell />}</Text>
                         {isReversalRow ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversal of receipt #{rc.reversalOf}
                           </span>
                         ) : (
@@ -557,14 +561,14 @@ export function ProductionRunDetail() {
                                 final
                               </span>
                             ) : (
-                              <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                              <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                                 partial
                               </span>
                             )}
                           </>
                         )}
                         {isReversed ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversed · #{rc.reversedBy}
                           </span>
                         ) : null}
@@ -938,11 +942,17 @@ export function ProductionRunDetail() {
               expectedLockVersion: run?.lockVersion ?? 0,
             },
             {
-              onSuccess: () => {
-                setReverseTarget(null);
-                showMessage('receipt reversed: stock removed, money returned to WIP', 'success');
-              },
-              onError: (e) => showMessage(reversalErrorMessage(e), 'error'),
+              // The receipt table shows the reversal; no toast. Money path: no retry offered.
+              onSuccess: () => setReverseTarget(null),
+              onError: (e) =>
+                isRefusal(e)
+                  ? setReverseError(reversalErrorMessage(e))
+                  : notifyFailure(
+                      `RECEIPT #${reverseTarget}`,
+                      'not reversed',
+                      e,
+                      reversalErrorMessage(e),
+                    ),
             },
           );
         }}
@@ -961,6 +971,13 @@ export function ProductionRunDetail() {
             value={reverseReason}
             onChange={(e) => setReverseReason(e.target.value)}
           />
+          {reverseError && (
+            <CalloutBox tone='error'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not reversed</b> · {reverseError}
+              </Text>
+            </CalloutBox>
+          )}
         </div>
       </ConfirmationModal>
 
@@ -1334,7 +1351,7 @@ function CostLedger({
 // Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
 // for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
 // without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
-const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cwCell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 // Colourway identity for the label lookup below (R1: a colourway is a product) — sourced from the
 // run's tech card (techCard?.colorways) by the caller, the same as lines-grid.tsx.
 type ColorwayLabelRef = { productId?: number; code?: string; name?: string };

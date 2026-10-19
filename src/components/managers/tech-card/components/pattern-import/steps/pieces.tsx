@@ -2518,7 +2518,7 @@ export function PiecesStep({
               className={cn(
                 'flex flex-col gap-1 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default',
                 x.suggested ? 'border-2 border-textColor' : 'border border-borderColor',
-                x.pressed && 'bg-bgZebra',
+                x.pressed && 'bg-pageBg',
               )}
             >
               <TouchCrop
@@ -3158,8 +3158,8 @@ export function PiecesStep({
                       className={cn(
                         'w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
                         sel === it.seed && (it.rank == null || it.rank === rank)
-                          ? 'bg-bgZebra'
-                          : 'hover:bg-bgZebra',
+                          ? 'bg-pageBg'
+                          : 'hover:bg-pageBg',
                       )}
                     >
                       <Text size='micro' component='span' className='font-bold'>
@@ -3685,7 +3685,7 @@ export function PiecesStep({
                           setDoing(x.label);
                           x.onClick();
                         }}
-                        className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-bgZebra')}
+                        className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-pageBg')}
                       >
                         {doing === x.label && session.busy ? `${x.label}…` : x.label}
                       </Button>
@@ -3770,7 +3770,7 @@ export function PiecesStep({
                     aria-pressed={tool === 'reseed'}
                     disabled={!!session.busy}
                     onClick={() => setTool('reseed')}
-                    className={cn(tool === 'reseed' && 'bg-bgZebra')}
+                    className={cn(tool === 'reseed' && 'bg-pageBg')}
                   >
                     try another spot
                   </Button>
@@ -3857,7 +3857,7 @@ export function PiecesStep({
                         }}
                         className={cn(
                           'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                          asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                          asideOpen === k ? 'bg-pageBg' : 'hover:bg-pageBg',
                         )}
                       >
                         <Text size='micro' component='span' className='min-w-0 flex-1'>
@@ -3875,7 +3875,7 @@ export function PiecesStep({
                                 onClick={() => setAsideAt(a === asideAt ? null : a)}
                                 className={cn(
                                   'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                                  a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                                  a === asideAt ? 'bg-pageBg' : 'hover:bg-pageBg',
                                 )}
                               >
                                 <Text size='micro' component='span' className='tabular-nums'>

@@ -1,3 +1,5 @@
+import { format } from 'date-fns';
+import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { Button, DatePicker, Input, Text } from 'ui';
 import { DescriptionEditor } from '../components/description-editor';
@@ -28,13 +30,7 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 /** Обёртка «подпись сверху, контрол снизу» — тем же узором, что доска и колонка в рейке. */
-export function InlineField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+export function InlineField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className='flex flex-col gap-1'>
       <FieldLabel>{label}</FieldLabel>
@@ -91,16 +87,17 @@ export function InlineTitle({
 
   if (!editing) {
     return canWrite ? (
-      <button
+      <Button
         type='button'
+        variant='default'
         onClick={() => setEditing(true)}
         aria-label='edit title'
-        className='w-fit max-w-full text-left text-lg leading-tight underline decoration-transparent underline-offset-4 outline-none hover:decoration-borderColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className='min-h-11 w-fit max-w-full text-left text-lg font-bold leading-tight underline decoration-transparent underline-offset-4 outline-none hover:decoration-borderColor sm:min-h-0 sm:text-statBig'
       >
         {value}
-      </button>
+      </Button>
     ) : (
-      <h1 className='text-lg leading-tight'>{value}</h1>
+      <h1 className='text-lg font-bold leading-tight sm:text-statBig'>{value}</h1>
     );
   }
 
@@ -116,12 +113,12 @@ export function InlineTitle({
   };
 
   return (
-    <div className='flex items-center gap-2'>
+    <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
       <Input
         ref={inputRef}
         name='inline-title'
         aria-label='task title'
-        className='text-lg'
+        className='min-h-11 min-w-0 flex-1 text-lg font-bold sm:min-h-0 sm:text-statBig'
         value={draft}
         disabled={saving}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
@@ -140,6 +137,7 @@ export function InlineTitle({
         type='button'
         variant='secondary'
         size='sm'
+        className='min-h-11 sm:min-h-0'
         data-inline-save='title'
         loading={saving}
         disabled={!draft.trim()}
@@ -147,7 +145,13 @@ export function InlineTitle({
       >
         save
       </Button>
-      <Button type='button' variant='underline' size='xs' onClick={() => setEditing(false)}>
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        className='min-h-11 sm:min-h-0'
+        onClick={() => setEditing(false)}
+      >
         cancel
       </Button>
     </div>
@@ -243,13 +247,20 @@ export function InlineDescription({
           type='button'
           variant='secondary'
           size='sm'
+          className='min-h-11 sm:min-h-0'
           data-inline-save='description'
           loading={saving}
           onClick={commit}
         >
           save
         </Button>
-        <Button type='button' variant='underline' size='xs' onClick={onCancel}>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='min-h-11 sm:min-h-0'
+          onClick={onCancel}
+        >
           cancel
         </Button>
       </div>
@@ -271,11 +282,96 @@ export function InlineDate({
 }) {
   return (
     <InlineField label={label}>
+      <div className='[&_button]:min-h-11 sm:[&_button]:min-h-0'>
+        <DatePicker
+          value={value ? new Date(value) : undefined}
+          disabled={disabled}
+          onChange={(d) => onChange(d ? d.toISOString() : undefined)}
+        />
+      </div>
+    </InlineField>
+  );
+}
+
+/**
+ * ДАТА В РЯДУ ПОД ЗАГОЛОВКОМ (detail v2): «due · дата», просрочка — красной рамкой И словом
+ * `overdue` (цвет не несёт состояние в одиночку). Тот же `DatePicker`; выбор пишет сразу.
+ * Без права записи — та же рамка с текстом, без контрола.
+ */
+export function DueField({
+  label,
+  value,
+  overdue,
+  canWrite,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  overdue?: boolean;
+  canWrite: boolean;
+  disabled?: boolean;
+  onChange: (next: string | undefined) => void;
+}) {
+  // ОДНА СТРОКА ОДНОГО РАЗМЕРА: подпись, дата, ×/▾ — всё 11px капсом, как соседние чипы. Просрочка
+  // меняет саму подпись `due` → `overdue` (слово несёт состояние без цвета) и красит всю рамку.
+  return (
+    <div
+      className={cn(
+        'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8',
+        overdue && 'border-error text-error',
+      )}
+    >
+      <Text
+        size='control'
+        component='span'
+        className={cn('shrink-0 uppercase tracking-label', !overdue && 'text-labelColor')}
+      >
+        {overdue ? 'overdue' : label}
+      </Text>
+      {canWrite ? (
+        <div className='min-w-0 [&>button]:min-h-11 sm:[&>button]:min-h-0'>
+          <DatePicker
+            compact
+            value={value ? new Date(value) : undefined}
+            disabled={disabled}
+            placeholder='none'
+            onChange={(d) => onChange(d ? d.toISOString() : undefined)}
+          />
+        </div>
+      ) : (
+        <Text
+          size='control'
+          component='span'
+          className={cn('uppercase', !value && 'text-labelColor')}
+        >
+          {value ? format(new Date(value), 'd MMM yyyy') : 'none'}
+        </Text>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Дата строкой списка полей: только сам `DatePicker`, без подписи — подпись держит строка.
+ */
+export function RowDate({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string | undefined;
+  disabled?: boolean;
+  onChange: (next: string | undefined) => void;
+}) {
+  return (
+    <div className='w-full [&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-8'>
       <DatePicker
         value={value ? new Date(value) : undefined}
         disabled={disabled}
+        placeholder='none'
         onChange={(d) => onChange(d ? d.toISOString() : undefined)}
       />
-    </InlineField>
+    </div>
   );
 }

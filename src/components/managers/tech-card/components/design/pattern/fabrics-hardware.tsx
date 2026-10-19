@@ -16,7 +16,7 @@ import {
   subscribePantone,
 } from 'components/managers/tech-card/components/pantone-swatches';
 import { useMutationState, useQueryClient } from '@tanstack/react-query';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -194,7 +194,6 @@ function MaterialBench({
   labelLogo?: common_MediaFull;
   onGoStep: (step: StepId) => void;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const speaks = serverSpeaksDesign();
   const capable = bindingsSpoken(band);
   const run = useStartDesignRun(techCardId, { scope: RUN_SCOPE });
@@ -708,7 +707,13 @@ function MaterialBench({
     // The previous asset is kept for undo, so a replace takes one shelf place — but no more: runs
     // in flight do not hold an own picture back.
     if (!shelfRoom) {
-      showMessage(SHELF_REASON, 'error');
+      notify({
+        sev: 'error',
+        subject: 'FABRICS',
+        text: 'not added',
+        bad: 'shelf full',
+        detail: SHELF_REASON,
+      });
       return;
     }
     // The picture carries THIS slot's spec (not necessarily the selected one's).
@@ -857,7 +862,7 @@ function MaterialBench({
       // and recompute the strict predicate on that copy; a live run there stops the clean.
       const fresh = await adminService.GetDesignBand({ techCardId, benchColorwayId: 0 });
       if ((fresh.runs ?? []).some(isRunLive)) {
-        showMessage('generating — clean after it lands', 'error');
+        notify({ sev: 'error', subject: 'HARDWARE', text: 'not cleaned', bad: 'run live' });
         return;
       }
       const ids = unusedHardwareIds(fresh, held, cutting, Date.now());
@@ -865,7 +870,13 @@ function MaterialBench({
         await adminService.DeleteDesignAsset({ techCardId, assetId });
       }
     } catch (error) {
-      showMessage((error as Error)?.message || 'the change did not go through', 'error');
+      notify({
+        sev: 'error',
+        subject: 'HARDWARE',
+        text: 'not cleaned',
+        detail: (error as Error)?.message || undefined,
+        action: { label: 'retry', onClick: () => void cleanUnused() },
+      });
     } finally {
       await writes.invalidate();
       setCleaning(false);
@@ -1276,10 +1287,13 @@ function MaterialBench({
                     const at = arrivedCw.current.get(slot.bomItemId);
                     arrivedCw.current.delete(slot.bomItemId);
                     if (at !== undefined && at !== cwId) {
-                      showMessage(
-                        'the colourway changed while the picture uploaded · drop it again',
-                        'error',
-                      );
+                      notify({
+                        sev: 'error',
+                        subject: 'FABRICS',
+                        text: 'not bound',
+                        bad: 'colourway changed',
+                        detail: 'the colourway changed while the picture uploaded · drop it again',
+                      });
                       return;
                     }
                     pick(slot);
@@ -1454,7 +1468,13 @@ function MaterialBench({
             const first = media[0];
             if (!target || !first?.id) return;
             if (target.cw !== cwId) {
-              showMessage('the colourway changed while the library was open · pick again', 'error');
+              notify({
+                sev: 'error',
+                subject: 'FABRICS',
+                text: 'not bound',
+                bad: 'colourway changed',
+                detail: 'the colourway changed while the library was open · pick again',
+              });
               return;
             }
             void place(target.slot, first);
@@ -1643,7 +1663,6 @@ function SpecPanel({
   /** The words in the open (fabric); otherwise they live behind `custom ▸`. */
   words?: boolean;
 }): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const hardware = slot.family === 'hardware';
   const label = isLabelSlot(slot);
   const artwork = isArtworkSlot(slot);
@@ -1656,19 +1675,25 @@ function SpecPanel({
     // Label logo / artwork photo: raster only — the image model is sent this picture.
     const incoming = label || artwork ? picked.filter(isRasterPicture) : picked;
     if (incoming.length < picked.length) {
-      showMessage(
-        label ? NOT_RASTER_MESSAGE : NOT_RASTER_MESSAGE.replace('the logo', 'the photo'),
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'FABRICS',
+        text: 'not added',
+        bad: 'not raster',
+        detail: label ? NOT_RASTER_MESSAGE : NOT_RASTER_MESSAGE.replace('the logo', 'the photo'),
+      });
     }
     const have = new Set(pictures.map((m) => m.id ?? 0));
     const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, room);
     if (fresh.length > kept.length) {
-      showMessage(
-        `took ${kept.length} of ${fresh.length}: this slot holds ${max} at most`,
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: 'FABRICS',
+        text: 'partly added',
+        bad: `${fresh.length - kept.length} dropped`,
+        detail: `took ${kept.length} of ${fresh.length}: this slot holds ${max} at most`,
+      });
     }
     if (kept.length > 0) onChange({ ...spec, pictures: [...pictures, ...kept] });
   };
@@ -1679,10 +1704,13 @@ function SpecPanel({
     const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, refRoom);
     if (fresh.length > kept.length) {
-      showMessage(
-        `took ${kept.length} of ${fresh.length}: ${artwork ? 'an artwork' : 'a label'} holds ${LABEL_REFS_MAX} references at most`,
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: 'FABRICS',
+        text: 'partly added',
+        bad: `${fresh.length - kept.length} dropped`,
+        detail: `took ${kept.length} of ${fresh.length}: ${artwork ? 'an artwork' : 'a label'} holds ${LABEL_REFS_MAX} references at most`,
+      });
     }
     if (kept.length > 0) onChange({ ...spec, refs: [...refs, ...kept] });
   };
@@ -2407,7 +2435,7 @@ function NewArtworkTile({ gate, onAdd }: { gate: Gate; onAdd: () => void }): JSX
           style={{ aspectRatio: BENCH_FRAME_ASPECT }}
           className={cn(
             'flex w-full items-center justify-center',
-            off ? 'text-textInactiveColor' : 'text-labelColor group-hover:text-textColor',
+            off ? 'text-borderColor' : 'text-labelColor group-hover:text-textColor',
           )}
         >
           <Text component='span' size='control' className='font-bold'>

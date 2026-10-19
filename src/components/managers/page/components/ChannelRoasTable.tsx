@@ -55,7 +55,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
           </thead>
           <tbody>
             {sorted.map((r, i) => (
-              <tr key={i} className='border-b border-hairline hover:bg-bgSecondary'>
+              <tr key={i} className='border-b border-hairline hover:bg-pageBg'>
                 <td className='p-2'>{channelLabel(r.utmSource, r.utmMedium, r.utmCampaign)}</td>
                 <td className='p-2 text-right'>
                   {formatCurrency(parseDecimal(r.settledRevenue), currency)}

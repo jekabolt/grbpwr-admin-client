@@ -39,7 +39,7 @@ const MARGIN_DEVIATION_PP = 10;
 // Health tint: red = losing money, amber = thin (<40%), green = healthy. Matches the text-* color
 // override pattern used in price-fields.
 function marginClass(pct: number | null): string {
-  if (pct == null) return 'text-textInactiveColor';
+  if (pct == null) return 'text-borderColor';
   if (pct < 0) return 'text-error';
   if (pct < 40) return 'text-warning';
   return 'text-success';
@@ -203,7 +203,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
   const outlierCount = withDev.filter((r) => r.isOutlier).length;
 
   return (
-    <div className='flex flex-col gap-3 border-t border-textInactiveColor pt-3'>
+    <div className='flex flex-col gap-3 border-t border-borderColor pt-3'>
       <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
         <Text variant='uppercase' size='small' className='font-bold'>
           margin
@@ -265,7 +265,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
               <div
                 key={r.currency}
                 className={`flex flex-col gap-0.5 border p-2 ${
-                  r.isOutlier ? 'border-warning bg-warning/10' : 'border-textInactiveColor'
+                  r.isOutlier ? 'border-warning bg-warning/10' : 'border-borderColor'
                 }`}
               >
                 <div className='flex items-center justify-between gap-1'>
@@ -288,7 +288,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
                 </div>
                 <Text size='small'>
                   {formatLocal(r.effective, r.currency)}
-                  {sale > 0 && <span className='text-textInactiveColor'> · −{sale}%</span>}
+                  {sale > 0 && <span className='text-borderColor'> · −{sale}%</span>}
                 </Text>
                 {r.marginPct == null ? (
                   <Text size='small' variant='inactive'>
@@ -298,7 +298,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
                   <Text size='small' className={marginClass(r.marginPct)}>
                     {fmtPct(r.marginPct)} · {formatCurrency(r.marginEur ?? 0)}
                     {!r.exact && r.eur != null && (
-                      <span className='text-textInactiveColor'> (≈{formatCurrency(r.eur)})</span>
+                      <span className='text-borderColor'> (≈{formatCurrency(r.eur)})</span>
                     )}
                   </Text>
                 )}

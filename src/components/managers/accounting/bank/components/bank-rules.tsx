@@ -1,6 +1,7 @@
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { Button, CalloutBox, Close, Text } from 'ui';
+import { errorText, isRefused, isTransient, reasonOf } from '../../utils/feedback';
 import {
   useAcctAccounts,
   useBankRules,
@@ -8,7 +9,7 @@ import {
   useDeleteBankRule,
 } from '../../utils/hooks';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 // Import-time matching rules (4.1): a case-insensitive substring of a statement line's description
 // → the counter-account to pre-suggest when that line imports. Purely advisory — a rule only
@@ -23,7 +24,6 @@ export function BankRules({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 } = {}) {
-  const { showMessage } = useSnackBarStore();
   const [openLocal, setOpenLocal] = useState(false);
   const open = openProp ?? openLocal;
   const setOpen = (o: boolean | ((prev: boolean) => boolean)) => {
@@ -38,6 +38,11 @@ export function BankRules({
 
   const [pattern, setPattern] = useState('');
   const [accountCode, setAccountCode] = useState('');
+  // The add row's error (empty field or the server's refusal), until the next edit or attempt.
+  const [addError, setAddError] = useState<{
+    text: string;
+    field?: 'pattern' | 'account';
+  } | null>(null);
 
   const rules = data?.rules ?? [];
   const activeAccounts = useMemo(
@@ -48,33 +53,54 @@ export function BankRules({
   const addRule = () => {
     const p = pattern.trim();
     if (!p) {
-      showMessage('Enter a text pattern to match', 'error');
+      setAddError({ text: 'enter a text pattern', field: 'pattern' });
       return;
     }
     if (!accountCode) {
-      showMessage('Pick the account to suggest', 'error');
+      setAddError({ text: 'pick an account', field: 'account' });
       return;
     }
+    setAddError(null);
     create.mutate(
       { pattern: p, accountCode },
       {
+        // No receipt: the rule appears in the list below.
         onSuccess: () => {
-          showMessage('Rule added', 'success');
           setPattern('');
           setAccountCode('');
         },
-        onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to add rule', 'error'),
+        onError: (e) => {
+          const said = errorText(e, 'failed to add rule') ?? '';
+          if (isRefused(e)) {
+            setAddError({ text: said });
+            return;
+          }
+          notify({
+            sev: 'error',
+            subject: `RULE ${p}`,
+            text: 'not added',
+            bad: reasonOf(e),
+            detail: said,
+          });
+        },
       },
     );
   };
 
-  const removeRule = (id: number) =>
+  // No receipt: the row leaves the list.
+  const removeRule = (id: number): void =>
     del.mutate(
       { id },
       {
-        onSuccess: () => showMessage('Rule removed', 'success'),
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to remove rule', 'error'),
+          notify({
+            sev: 'error',
+            subject: 'RULE',
+            text: 'not removed',
+            bad: reasonOf(e),
+            detail: errorText(e),
+            action: isTransient(e) ? { label: 'retry', onClick: () => removeRule(id) } : undefined,
+          }),
       },
     );
 
@@ -107,7 +133,11 @@ export function BankRules({
                 className={cell}
                 value={pattern}
                 placeholder='e.g. AWS or STRIPE'
-                onChange={(e) => setPattern(e.target.value)}
+                aria-invalid={addError?.field === 'pattern' || undefined}
+                onChange={(e) => {
+                  setAddError(null);
+                  setPattern(e.target.value);
+                }}
               />
             </label>
             <label className='flex min-w-[200px] flex-1 flex-col gap-1'>
@@ -117,7 +147,11 @@ export function BankRules({
               <select
                 className={cell}
                 value={accountCode}
-                onChange={(e) => setAccountCode(e.target.value)}
+                aria-invalid={addError?.field === 'account' || undefined}
+                onChange={(e) => {
+                  setAddError(null);
+                  setAccountCode(e.target.value);
+                }}
               >
                 <option value=''>— pick account —</option>
                 {activeAccounts.map((a) => (
@@ -137,6 +171,7 @@ export function BankRules({
               {create.isPending ? 'adding…' : 'add rule'}
             </Button>
           </div>
+          {addError && <CalloutBox tone='error'>{addError.text}</CalloutBox>}
 
           {/* Existing rules. */}
           {isLoading ? (
@@ -152,7 +187,7 @@ export function BankRules({
               {rules.map((r) => (
                 <div
                   key={r.id}
-                  className='flex items-center justify-between gap-2 border-b border-textInactiveColor py-1.5'
+                  className='flex items-center justify-between gap-2 border-b border-borderColor py-1.5'
                 >
                   <div className='flex min-w-0 flex-wrap items-center gap-x-2'>
                     <Text size='small' className='break-words'>

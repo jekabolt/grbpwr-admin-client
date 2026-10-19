@@ -7,7 +7,6 @@ import {
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { useMaterialLots } from 'components/managers/materials/components/useWarehouse';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import {
   Button,
@@ -20,10 +19,12 @@ import {
   Stat,
   StatGrid,
   Text,
-  Select, EmptyCell,
+  Select,
+  EmptyCell,
 } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { LAY_MODE_LABEL, stampWhen } from './lay-card';
 import { layGeometry } from './lay-geometry';
 import { LaySectionRows, SectionDraft, newSectionDraft, sectionPlies } from './lay-section-rows';
@@ -125,7 +126,8 @@ export function LayEditor({
   /** Концевые потери, см на один конец одного слоя. Без них — умолчание формы. */
   seedEndLossCm?: string;
 }) {
-  const { showMessage } = useSnackBarStore();
+  // The server's refusal stands in the dialog; a lost request goes to the inbox.
+  const [fail, setFail] = useState<{ verb: string; text: string } | null>(null);
   const save = useSaveLay();
   const copy = useCopyMarkerToRun();
 
@@ -192,8 +194,7 @@ export function LayEditor({
     existing?.actualUom && existing.actualUom !== 'MATERIAL_UNIT_UNKNOWN' ? existing.actualUom : '',
   );
   const [actualMethod, setActualMethod] = useState<common_ProductionLayActualMethod | ''>(() =>
-    existing?.actualMethod &&
-    existing.actualMethod !== 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
+    existing?.actualMethod && existing.actualMethod !== 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
       ? existing.actualMethod
       : '',
   );
@@ -255,10 +256,12 @@ export function LayEditor({
 
   const problems: string[] = [];
   if (!bomLineKey) problems.push("the fabric (BOM slot) this lay cuts isn't selected");
-  if (colorwayId <= 0) problems.push("the lay isn't bound to a colourway — there is nothing to lay it on");
+  if (colorwayId <= 0)
+    problems.push("the lay isn't bound to a colourway — there is nothing to lay it on");
   if (sections.length === 0) problems.push('no sections at all');
   if (sections.some((s) => s.markerId <= 0)) problems.push('some section has no marker selected');
-  if (sections.some((s) => sectionPlies(s) <= 0)) problems.push('some section has no ply count set');
+  if (sections.some((s) => sectionPlies(s) <= 0))
+    problems.push('some section has no ply count set');
   if (
     mode === 'PRODUCTION_LAY_MODE_FACE_TO_FACE' &&
     sections.some((s) => sectionPlies(s) > 0 && sectionPlies(s) % 2 !== 0)
@@ -287,6 +290,7 @@ export function LayEditor({
 
   const submit = () => {
     if (problems.length > 0) return;
+    setFail(null);
     // Генерированные типы запроса НЕ опциональны: каждое поле перечислено явно, включая те, что
     // уезжают пустыми (§14 п.15). Пропуск поля здесь — ошибка компиляции, и это ровно то, чего мы
     // от неё хотим.
@@ -341,11 +345,12 @@ export function LayEditor({
         reaffirmQuantities: false,
       },
       {
-        onSuccess: () => {
-          showMessage(isNew ? 'lay created' : 'lay saved', 'success');
-          onOpenChange(false);
-        },
-        onError: (e) => showMessage(layErrorMessage(e), 'error'),
+        // The lay card in the plan is the receipt.
+        onSuccess: () => onOpenChange(false),
+        onError: (e) =>
+          isRefusal(e)
+            ? setFail({ verb: 'not saved', text: layErrorMessage(e) })
+            : notifyFailure('LAY', 'not saved', e, layErrorMessage(e), submit),
       },
     );
   };
@@ -421,13 +426,13 @@ export function LayEditor({
             spreading mode
           </Text>
           <ChipRow>
-            {(
-              ['PRODUCTION_LAY_MODE_FACE_UP', 'PRODUCTION_LAY_MODE_FACE_TO_FACE'] as const
-            ).map((m) => (
-              <Chip key={m} selected={mode === m} pressed={mode === m} onClick={() => setMode(m)}>
-                {LAY_MODE_LABEL[m]}
-              </Chip>
-            ))}
+            {(['PRODUCTION_LAY_MODE_FACE_UP', 'PRODUCTION_LAY_MODE_FACE_TO_FACE'] as const).map(
+              (m) => (
+                <Chip key={m} selected={mode === m} pressed={mode === m} onClick={() => setMode(m)}>
+                  {LAY_MODE_LABEL[m]}
+                </Chip>
+              ),
+            )}
           </ChipRow>
           <Text size='micro' variant='label'>
             {mode === 'PRODUCTION_LAY_MODE_FACE_TO_FACE'
@@ -472,9 +477,12 @@ export function LayEditor({
             copy.mutate(
               { runId, techCardId, sourceMarkerId },
               {
-                onSuccess: () =>
-                  showMessage('marker copied into the run — select it in the section', 'success'),
-                onError: (e) => showMessage(layErrorMessage(e), 'error'),
+                // The copy shows up in the section's marker list.
+                onSuccess: () => setFail(null),
+                onError: (e) =>
+                  isRefusal(e)
+                    ? setFail({ verb: 'not copied', text: layErrorMessage(e) })
+                    : notifyFailure('MARKER', 'not copied', e, layErrorMessage(e)),
               },
             )
           }
@@ -482,8 +490,14 @@ export function LayEditor({
 
         <GroupLabel>how much fabric this will eat</GroupLabel>
         <StatGrid>
-          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : <EmptyCell />} />
-          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : <EmptyCell />} />
+          <Stat
+            label='plies in total'
+            value={totalPlies > 0 ? String(totalPlies) : <EmptyCell />}
+          />
+          <Stat
+            label='fabric'
+            value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : <EmptyCell />}
+          />
           <Stat
             label='end losses'
             value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : <EmptyCell />}
@@ -656,8 +670,8 @@ export function LayEditor({
             onChange={(e) => setNote(e.target.value)}
           />
           <Text size='micro' variant='label'>
-            editing the name, the note or the order does NOT touch the quantity snapshot —
-            otherwise the “quantities changed” badge would be washed off by accident.
+            editing the name, the note or the order does NOT touch the quantity snapshot — otherwise
+            the “quantities changed” badge would be washed off by accident.
           </Text>
         </div>
 
@@ -670,6 +684,7 @@ export function LayEditor({
             ))}
           </CalloutBox>
         ) : null}
+        <FailNote verb={fail?.verb ?? ''} text={fail?.text ?? null} />
       </div>
     </ConfirmationModal>
   );

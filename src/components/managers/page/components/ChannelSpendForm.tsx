@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { FC, useState } from 'react';
-import { Button, ConfirmationModal, Input, Text } from 'ui';
+import { Button, CalloutBox, ConfirmationModal, Input, Text, useDoneFlash } from 'ui';
 import { tabMetricsKeys } from '../useTabMetricsQuery';
 
 const EMPTY = { date: '', utmSource: '', utmMedium: '', utmCampaign: '', amount: '' };
@@ -10,12 +11,17 @@ const EMPTY = { date: '', utmSource: '', utmMedium: '', utmCampaign: '', amount:
 /** Operator entry for per-channel, per-day marketing spend — the input that feeds ROAS. */
 export const ChannelSpendForm: FC = () => {
   const queryClient = useQueryClient();
-  const showMessage = useSnackBarStore((s) => s.showMessage);
+  // Receipt at the button that opened the dialog: the dialog is gone by then.
+  const saved = useDoneFlash();
+  // A refusal stands in the dialog until the next edit.
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY);
 
-  const set = (k: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
+  const set = (k: keyof typeof EMPTY) => (e: { target: { value: string } }) => {
+    setError(null);
     setForm((f) => ({ ...f, [k]: e.target.value }));
+  };
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -32,19 +38,41 @@ export const ChannelSpendForm: FC = () => {
         ],
       }),
     onSuccess: () => {
-      showMessage('Channel spend saved', 'success');
+      saved.flash();
       queryClient.invalidateQueries({ queryKey: tabMetricsKeys.all });
       setForm(EMPTY);
       setOpen(false);
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save spend', 'error'),
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : 'Failed to save spend';
+      if (failureClassOfError(e) === 'refused') return setError(msg);
+      notify({
+        sev: 'error',
+        subject: 'CHANNEL SPEND',
+        text: 'not saved',
+        detail: msg,
+        action:
+          failureClassOfError(e) === 'transient'
+            ? { label: 'retry', onClick: () => mutation.mutate() }
+            : undefined,
+      });
+    },
   });
 
   const valid = Boolean(form.date) && Boolean(form.utmSource) && Number(form.amount) > 0;
 
   return (
     <>
-      <Button type='button' variant='secondary' size='lg' onClick={() => setOpen(true)}>
+      <Button
+        type='button'
+        variant='secondary'
+        size='lg'
+        done={saved.on}
+        onClick={() => {
+          setError(null);
+          setOpen(true);
+        }}
+      >
         + Add channel spend
       </Button>
       <ConfirmationModal
@@ -54,6 +82,7 @@ export const ChannelSpendForm: FC = () => {
         title='Add channel spend'
         confirmLabel='save'
         confirmDisabled={!valid || mutation.isPending}
+        closeOnConfirm={false}
       >
         <div className='flex flex-col gap-3 lg:w-[380px]'>
           <Text size='small' variant='inactive'>
@@ -83,6 +112,13 @@ export const ChannelSpendForm: FC = () => {
             />
           </Field>
         </div>
+        {error && (
+          <CalloutBox tone='error' className='mt-3'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {error}
+            </Text>
+          </CalloutBox>
+        )}
       </ConfirmationModal>
     </>
   );
@@ -90,7 +126,7 @@ export const ChannelSpendForm: FC = () => {
 
 const Field: FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className='flex flex-col gap-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+    <Text variant='uppercase' className='text-borderColor text-[10px]'>
       {label}
     </Text>
     {children}

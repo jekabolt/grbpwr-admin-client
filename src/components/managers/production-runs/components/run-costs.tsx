@@ -4,14 +4,14 @@ import {
   common_ProductionRunCostKind,
 } from 'api/proto-http/admin';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { Button, Close, Text, useDoneFlash } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runCostKindOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
@@ -53,7 +53,8 @@ export function RunCosts({
   // guaranteed rejection. The list stays readable; only the writes go away.
   locked?: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  const [fail, setFail] = useState<string | null>(null);
   const update = useUpdateRunSection();
   const canEditCosts = canEdit && !locked;
   const [costs, setCosts] = useState<CostDraft[]>([]);
@@ -114,7 +115,7 @@ export function RunCosts({
       (c) => !c.amount.trim() && (c.description.trim() || c.incurredAt),
     );
     if (incomplete) {
-      showMessage('A cost article is missing its amount — fill or remove it', 'error');
+      setFail('a cost article is missing its amount');
       return;
     }
     const next: common_ProductionRunCost[] = costs
@@ -148,9 +149,12 @@ export function RunCosts({
         patch: { costs: next },
       });
       setDirty(false);
-      showMessage('Costs saved', 'success');
+      setFail(null);
+      saved.flash();
     } catch (e) {
-      showMessage(updateRunErrorMessage(e), 'error');
+      // Money path: no retry from the toast.
+      if (isRefusal(e)) setFail(updateRunErrorMessage(e));
+      else notifyFailure(`PR-${run.id}`, 'costs not saved', e, updateRunErrorMessage(e));
     }
   };
 
@@ -180,6 +184,7 @@ export function RunCosts({
               size='lg'
               className='uppercase'
               disabled={update.isPending}
+              done={saved.on && 'saved'}
               onClick={save}
             >
               {update.isPending ? 'saving…' : 'save costs'}
@@ -187,6 +192,7 @@ export function RunCosts({
           </div>
         )}
       </div>
+      <FailNote verb='not saved' text={fail} />
 
       {costs.length === 0 ? (
         <Text variant='inactive' size='small'>

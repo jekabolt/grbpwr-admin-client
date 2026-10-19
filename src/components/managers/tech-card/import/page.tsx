@@ -13,10 +13,18 @@ import { adminService } from 'api/api';
 import { TechCardImportReport } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BackLink, Button, Section, SectionStack, Text, Toolbar, ToolbarSpacer } from 'ui';
+import {
+  BackLink,
+  Button,
+  CalloutBox,
+  Section,
+  SectionStack,
+  Text,
+  Toolbar,
+  ToolbarSpacer,
+} from 'ui';
 import { ImportReportCounters, ImportReportTable } from './import-report-table';
 
 const UPLOAD_PATH = '/api/techcard-archive/upload';
@@ -79,7 +87,8 @@ function alreadyImportedCardId(error: unknown): number | null {
 
 export function TechCardImport() {
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  // A refusal of the archive or of the import: on the page, over the place it came from.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -125,8 +134,7 @@ export function TechCardImport() {
     // ВТОРЫЕ 256 мегабайт и вдвое оттягивает момент, когда человек прочтёт отказ.
     retry: false,
     onSuccess: (r) => setResult(r),
-    onError: (e: unknown) =>
-      showMessage(e instanceof Error ? e.message : 'upload failed', 'error'),
+    onError: (e: unknown) => setRefusal(e instanceof Error ? e.message : 'upload failed'),
   });
 
   const commit = useMutation({
@@ -140,10 +148,10 @@ export function TechCardImport() {
     onSuccess: (res) => {
       const id = res.techCardId ?? 0;
       if (!id) {
-        showMessage('the import finished but named no card', 'error');
+        setRefusal('the import finished but named no card');
         return;
       }
-      showMessage('tech card imported', 'success');
+      // The card opening is the receipt.
       navigate(`/tech-cards/${id}`);
     },
     onError: (error: unknown) => {
@@ -151,11 +159,10 @@ export function TechCardImport() {
       // и у него есть готовый ответ: карта уже существует, надо просто её открыть.
       const existing = alreadyImportedCardId(error);
       if (existing) {
-        showMessage('this archive was already imported — opening the card', 'success');
         navigate(`/tech-cards/${existing}`);
         return;
       }
-      showMessage(error instanceof Error ? error.message : 'import failed', 'error');
+      setRefusal(error instanceof Error ? error.message : 'import failed');
     },
   });
 
@@ -165,13 +172,14 @@ export function TechCardImport() {
     // заливку. От брошенной первой остаются строка `tech_card_import` и объект в бакете, на
     // которые уже никто не смотрит: их некому ни зафиксировать, ни убрать.
     if (upload.isPending) {
-      showMessage('an archive is already being read — wait for it to finish', 'error');
+      setRefusal('an archive is already being read — wait for it to finish');
       return;
     }
     const file = files?.[0];
     if (!file) return;
+    setRefusal(null);
     if (!file.name.toLowerCase().endsWith('.zip')) {
-      showMessage('only a .zip archive can be imported', 'error');
+      setRefusal('only a .zip archive can be imported');
       return;
     }
     setFileName(file.name);
@@ -180,6 +188,7 @@ export function TechCardImport() {
   }
 
   function reset() {
+    setRefusal(null);
     setResult(null);
     setFileName('');
     if (inputRef.current) inputRef.current.value = '';
@@ -233,7 +242,7 @@ export function TechCardImport() {
                 accept(e.dataTransfer.files);
               }}
               className={`flex flex-col items-center justify-center gap-2.5 border border-dashed p-10 ${
-                dragging ? 'border-textColor bg-bgZebra' : 'border-borderColor'
+                dragging ? 'border-textColor bg-pageBg' : 'border-borderColor'
               }`}
             >
               <Text variant='uppercase'>
@@ -259,6 +268,11 @@ export function TechCardImport() {
                 onChange={(e) => accept(e.target.files)}
               />
             </div>
+            {refusal && (
+              <CalloutBox tone='error' className='mt-2.5'>
+                {refusal}
+              </CalloutBox>
+            )}
           </Section>
         ) : (
           <>
@@ -290,7 +304,10 @@ export function TechCardImport() {
                   // клик проходит насквозь. Фиксация тяжёлая — перенос всех медиа и выкроек, —
                   // поэтому гасим явно; данные при этом целы, гонку закрывает сервер.
                   disabled={commit.isPending}
-                  onClick={() => commit.mutate(result.importId)}
+                  onClick={() => {
+                    setRefusal(null);
+                    commit.mutate(result.importId);
+                  }}
                 >
                   import
                 </Button>
@@ -300,6 +317,11 @@ export function TechCardImport() {
                   видит только строки. Пустой отчёт означает «импорт чистый» и говорит это
                   словами; отсутствующий отчёт не означает ничего, и сказать за него «nothing
                   needs attention» значило бы поручиться за проверку, которой не было. */}
+              {refusal && (
+                <CalloutBox tone='error' className='mb-2.5'>
+                  {refusal}
+                </CalloutBox>
+              )}
               {result.report ? (
                 <ImportReportTable lines={lines} />
               ) : (

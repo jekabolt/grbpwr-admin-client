@@ -250,6 +250,11 @@ export interface ListTasksFilter {
    */
   parentTaskId?: number;
   includeArchived?: boolean; // false/undefined = active only; true = include archived
+  /**
+   * Free-text search across title, description, comments and checklist (backend T2). Empty =
+   * no search. With no `board` it spans every board.
+   */
+  query?: string;
 }
 
 // Form values = content + its (initial or edited) placement. The modal edits

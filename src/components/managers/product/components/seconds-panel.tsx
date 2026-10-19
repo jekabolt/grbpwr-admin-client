@@ -2,9 +2,8 @@ import { adminService } from 'api/api';
 import { SecondsVariant } from 'api/proto-http/admin';
 import { SELLING_CURRENCIES, currencySymbols } from 'constants/constants';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button, Input, Text } from 'ui';
+import { Button, CalloutBox, Input, Text, useDoneFlash } from 'ui';
 import { formatSizeName } from '../utility/sizes';
 
 // B-grade seconds surface (0251). B variants are factory seconds of this SAME colourway
@@ -14,7 +13,10 @@ import { formatSizeName } from '../utility/sizes';
 // replace, so an empty save intentionally clears prices and un-sells the row again.
 export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  const [savedId, setSavedId] = useState<number | null>(null);
+  // A refused price save stands under its row; eur marks the EUR field.
+  const [rowError, setRowError] = useState<{ id: number; msg: string; eur?: boolean } | null>(null);
   const [rows, setRows] = useState<SecondsVariant[]>([]);
   const [drafts, setDrafts] = useState<Record<number, Record<string, string>>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -72,8 +74,9 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
 
     // EUR is the base currency — the server rejects a non-empty price set without it. Catch it here
     // so the operator doesn't round-trip on a 400.
+    setRowError(null);
     if (filled.length > 0 && !filled.some((c) => c.value === 'EUR')) {
-      showMessage('EUR price is required whenever any price is set', 'error');
+      setRowError({ id: variantId, msg: 'EUR price required', eur: true });
       return;
     }
 
@@ -85,16 +88,11 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
     setBusyId(variantId);
     try {
       await adminService.SetVariantPrice({ variantId, prices });
-      showMessage(
-        prices.length > 0
-          ? 'Seconds price saved'
-          : 'Prices cleared — variant is no longer sellable',
-        'success',
-      );
+      setSavedId(variantId);
+      saved.flash();
       load();
     } catch (e) {
-      const err = e as Error;
-      showMessage(err instanceof Error ? err.message : 'Failed to save price', 'error');
+      setRowError({ id: variantId, msg: e instanceof Error ? e.message : 'save failed' });
     } finally {
       setBusyId(null);
     }
@@ -103,7 +101,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
   if (rows.length === 0) return null;
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-2 border-t border-borderColor pt-3'>
       <Text variant='uppercase' size='small'>
         seconds (b-grade)
       </Text>
@@ -119,9 +117,10 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
           const isSellable = (row.prices?.length ?? 0) > 0;
           const byCurrency = drafts[variantId] ?? {};
           const busy = busyId === variantId;
+          const error = rowError?.id === variantId ? rowError : null;
 
           return (
-            <div key={variantId} className='space-y-2 border border-textInactiveColor p-2'>
+            <div key={variantId} className='space-y-2 border border-borderColor p-2'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex flex-wrap items-center gap-2'>
                   <Text size='small' variant='uppercase'>
@@ -156,6 +155,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
                         min='0'
                         placeholder={isIntegerCurrency ? '0' : '0.00'}
                         disabled={busy}
+                        aria-invalid={(c.value === 'EUR' && error?.eur) || undefined}
                         value={byCurrency[c.value] ?? ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           setDraft(variantId, c.value, e.target.value)
@@ -166,6 +166,13 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
                 })}
               </div>
 
+              {error && (
+                <CalloutBox tone='error'>
+                  <Text size='micro' component='span' role='alert'>
+                    <b>not saved</b> · {error.msg}
+                  </Text>
+                </CalloutBox>
+              )}
               <div className='flex justify-end'>
                 <Button
                   type='button'
@@ -173,6 +180,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
                   variant='main'
                   className='uppercase'
                   disabled={busy}
+                  done={saved.on && savedId === variantId}
                   onClick={() => savePrice(row)}
                 >
                   save price

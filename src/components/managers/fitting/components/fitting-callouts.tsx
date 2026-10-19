@@ -74,7 +74,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
   ];
 
   return (
-    <div className='border-t border-textInactiveColor pt-3'>
+    <div className='border-t border-borderColor pt-3'>
       <button
         type='button'
         onClick={toggle}

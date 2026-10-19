@@ -2,14 +2,9 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, CalloutBox, ConfirmationModal, GroupLabel, Text } from 'ui';
-import {
-  MediaUsageMap,
-  isMediaInUse,
-  mediaUsageRefs,
-  usageRefName,
-  usageRefSlot,
-} from '../utils/media-usage';
+import { MediaUsageMap, isMediaInUse } from '../utils/media-usage';
 import { BulkDeleteResult, useDeleteManyMedia } from '../utils/useMediaQuery';
+import { KeptRow, splitForDelete } from './media-delete-sheet';
 
 /**
  * Полоса групповых действий над выбранными снимками.
@@ -36,20 +31,11 @@ export function MediaSelectionBar({
 
   if (!selected.length && !result) return null;
 
-  const ids = selected.map((m) => m.id).filter((id): id is number => id != null);
-
-  // РАЗБОР ДО ПОПЫТКИ, А НЕ ПОСЛЕ — но именно РАЗБОР, а не отсев: удаляется по-прежнему весь
-  // набор. Занятость не предсказывает исход, потому что из семнадцати ссылок на медиа пять
-  // объявлены ON DELETE SET NULL (свотчи колорвея и лаб-дипа, картинка материала, выноски
-  // тех-карты и примерки) — там удаление ПРОЙДЁТ, обнулив указатель. Выкидывать занятые из
-  // пачки значило бы навсегда запретить чистку именно этих, служебных файлов.
-  //
-  // ТРИ ГРУППЫ, А НЕ ДВЕ. «Не выяснено» — не «свободно»: если корзина занятости не доехала или
-  // ответила ошибкой, назвать такой набор свободным было бы тем же враньём, от которого карта
-  // отличает отсутствие ключа от пустого списка.
+  // ТОЛЬКО ТОЧНО СВОБОДНЫЕ УХОДЯТ НА УДАЛЕНИЕ. Занятые и невыясненные остаются: сервер теперь
+  // сам отказывает в удалении занятого (FailedPrecondition), а «не проверено» — не «свободно».
+  const { free, kept } = splitForDelete(selected, usage);
+  const freeIds = free.map((m) => m.id).filter((id): id is number => id != null);
   const busy = selected.filter((m) => isMediaInUse(usage, m.id));
-  const knownFreeIds = ids.filter((id) => mediaUsageRefs(usage, id)?.length === 0);
-  const uncheckedIds = ids.filter((id) => mediaUsageRefs(usage, id) === undefined);
 
   const handleCopyUrls = () => {
     const urls = selected
@@ -61,7 +47,8 @@ export function MediaSelectionBar({
   };
 
   const handleDelete = () => {
-    deleteMany.mutate(ids, {
+    if (!freeIds.length) return;
+    deleteMany.mutate(freeIds, {
       onSuccess: (res) => {
         setResult(res);
         setConfirming(false);
@@ -81,9 +68,7 @@ export function MediaSelectionBar({
       {result && result.failed.length > 0 && (
         <CalloutBox tone='error' className='mt-2.5'>
           <Text component='span' className='block'>
-            {result.deleted.length} deleted, the bucket refused {result.failed.length}. A refusal
-            almost always means one thing: the image is live on the storefront and something links
-            to it.
+            {result.deleted.length} deleted · {result.failed.length} kept
           </Text>
           <ul className='mt-1.5 space-y-0.5'>
             {result.failed.map((f) => (
@@ -134,81 +119,40 @@ export function MediaSelectionBar({
         open={confirming}
         onOpenChange={setConfirming}
         onConfirm={handleDelete}
-        title={`delete ${ids.length} from the library`}
-        confirmLabel={deleteMany.isPending ? 'deleting…' : 'delete for good'}
-        confirmDisabled={deleteMany.isPending}
+        title={`delete ${freeIds.length} of ${selected.length}`}
+        confirmLabel={
+          deleteMany.isPending
+            ? 'deleting…'
+            : freeIds.length
+              ? `delete ${freeIds.length}`
+              : '0 free'
+        }
+        confirmDisabled={deleteMany.isPending || !freeIds.length}
         closeOnConfirm={false}
         width='sm'
       >
-        {/* ПОДТВЕРЖДЕНИЕ НАЗЫВАЕТ, ЧТО СЛОМАЕТСЯ. Раньше здесь стоял голый список id и обещание,
-            что причины отказов будут названы ПОСЛЕ удаления. Уходит по-прежнему весь набор —
-            занятость не предсказывает исход, — но теперь до нажатия видно, какие кадры где
-            стоят, а какие вообще не проверены. */}
         <div className='space-y-2.5'>
-          <Text component='p'>
-            The files leave the bucket for good, and there will be nothing to bring them back with.
-          </Text>
-
-          {busy.length > 0 && (
+          {freeIds.length > 0 && (
             <div>
-              <GroupLabel flush>in use · {busy.length}</GroupLabel>
-              <ul className='space-y-1'>
-                {busy.map((m) => (
-                  <li key={m.id}>
-                    <Text size='micro' component='span' className='tabular-nums'>
-                      {m.id}
-                    </Text>
-                    <ul className='pl-3'>
-                      {mediaUsageRefs(usage, m.id)?.map((ref, i) => (
-                        <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`}>
-                          <Text size='micro' component='span'>
-                            {usageRefName(ref)}
-                          </Text>{' '}
-                          <Text size='micro' variant='label' component='span'>
-                            {usageRefSlot(ref)}
-                          </Text>
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
+              <GroupLabel flush>free · deleted · {freeIds.length}</GroupLabel>
+              <Text size='micro' component='p' className='tabular-nums'>
+                {freeIds.join(', ')}
+              </Text>
+            </div>
+          )}
+          {kept.length > 0 && (
+            <div className='border border-error'>
+              <div className='flex justify-between px-2 py-1.5 text-micro uppercase tracking-label text-error'>
+                <span>in use · kept</span>
+                <span className='tabular-nums'>{kept.length}</span>
+              </div>
+              <ul>
+                {kept.map((m) => (
+                  <KeptRow key={m.id} media={m} usage={usage} />
                 ))}
               </ul>
-              <Text variant='label' component='p' className='mt-1'>
-                The bucket refuses most of these. Where it does not, the picture leaves the places
-                above and they are left without one.
-              </Text>
             </div>
           )}
-
-          {knownFreeIds.length > 0 && (
-            <div>
-              <GroupLabel flush={busy.length === 0}>free · {knownFreeIds.length}</GroupLabel>
-              {/* Чернилами, а не серым: это тот самый список, который сейчас исчезнет без следа. */}
-              <Text size='micro' component='p' className='tabular-nums'>
-                {knownFreeIds.join(', ')}
-              </Text>
-            </div>
-          )}
-
-          {uncheckedIds.length > 0 && (
-            <div>
-              {/* НЕ ПРОВЕРЕНО — СВОЯ ГРУППА, А НЕ ДОБАВКА К СВОБОДНЫМ. Записать их в «free»
-                  значило бы утверждать то, чего никто не спрашивал: корзина занятости могла не
-                  доехать или ответить ошибкой. */}
-              <GroupLabel>not checked · {uncheckedIds.length}</GroupLabel>
-              <Text size='micro' component='p' className='tabular-nums'>
-                {uncheckedIds.join(', ')}
-              </Text>
-              <Text variant='label' component='p' className='mt-1'>
-                Where these stand was not looked up, so they go in unexamined.
-              </Text>
-            </div>
-          )}
-
-          <Text variant='label' component='p'>
-            A file linked up since this list was checked will be refused by the bucket, and you
-            will see it named afterwards.
-          </Text>
         </div>
       </ConfirmationModal>
     </>

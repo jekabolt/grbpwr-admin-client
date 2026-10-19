@@ -1,10 +1,10 @@
 import { LANGUAGES } from 'constants/constants';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { translateToAllLanguages } from 'lib/translate';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
-import { Button, Input, Text, RichTextField } from 'ui';
+import { Button, Input, Text, RichTextField, useDoneFlash } from 'ui';
 import { LanguageButtons } from './language-buttons';
 
 type FieldConfig = {
@@ -40,7 +40,8 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
     name: fieldPrefix,
   });
 
-  const { showMessage } = useSnackBarStore();
+  // The filled languages are the result; the button says it once.
+  const translateDone = useDoneFlash();
   const translations = watch(fieldPrefix) || [];
   const [selectedLanguageId, setSelectedLanguageId] = useState<number>(LANGUAGES[0].id);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -203,9 +204,15 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
         });
       });
 
-      showMessage('translated into all languages', 'success');
+      translateDone.flash();
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'translation failed', 'error');
+      notify({
+        sev: 'error',
+        subject: 'TRANSLATION',
+        text: 'not translated',
+        detail: e instanceof Error ? e.message : undefined,
+        action: { label: 'retry', onClick: () => void handleTranslateToAll() },
+      });
     } finally {
       setIsTranslating(false);
     }
@@ -233,7 +240,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   };
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
+    <div className='space-y-3 border border-borderColor p-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
           <Text variant='uppercase'>translations</Text>
@@ -256,6 +263,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
               type='button'
               variant='main'
               onClick={handleTranslateToAll}
+              done={translateDone.on && 'translated'}
               disabled={!hasAnyValue || isTranslating}
               loading={isTranslating}
               className='px-2 py-1'
@@ -318,7 +326,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   placeholder={placeholder}
                   className={cn(
                     'w-full border leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2',
-                    errorMessage || over ? 'border-error' : 'border-textInactiveColor',
+                    errorMessage || over ? 'border-error' : 'border-borderColor',
                   )}
                   rows={field.rows || 4}
                   readOnly={!editMode}
@@ -334,7 +342,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
               <div
                 className={cn(
                   'border-b',
-                  errorMessage || over ? 'border-error' : 'border-textInactiveColor',
+                  errorMessage || over ? 'border-error' : 'border-borderColor',
                 )}
               >
                 <Input

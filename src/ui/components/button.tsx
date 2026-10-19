@@ -1,6 +1,7 @@
 import { Slot } from '@radix-ui/react-slot';
 import { cva, VariantProps } from 'class-variance-authority';
 import { cn } from 'lib/utility';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, type To } from 'react-router-dom';
 import { Loader } from './loader';
 
@@ -16,7 +17,7 @@ export const buttonVariants = cva(
           'text-textColor',
           'bg-bgColor',
           'border',
-          'border-textInactiveColor',
+          'border-borderColor',
           'leading-4',
         ],
         main: [
@@ -29,39 +30,37 @@ export const buttonVariants = cva(
           'hover:text-textColor',
           // Disabled reads as an outline, not a filled grey slab (reference grammar).
           'disabled:bg-bgColor',
-          'disabled:text-textInactiveColor',
-          'disabled:border-textInactiveColor',
+          'disabled:text-borderColor',
+          'disabled:border-borderColor',
           'leading-4',
           'text-center',
         ],
         secondary: [
           'border',
-          'border-textInactiveColor',
+          'border-borderColor',
           'text-textBaseSize',
           'text-textColor',
           'hover:bg-textColor',
           'hover:text-bgColor',
-          'hover:border-textInactiveColor',
           'disabled:bg-bgColor',
-          'disabled:text-textInactiveColor',
-          'disabled:border-textInactiveColor',
+          'disabled:text-borderColor',
           'disabled:hover:bg-bgColor',
-          'disabled:hover:text-textInactiveColor',
+          'disabled:hover:text-borderColor',
           'leading-4',
           'text-center',
         ],
-        underline: ['underline', 'disabled:text-textInactiveColor'],
-        underlineReverse: ['text-bgColor', 'underline', 'disabled:text-textInactiveColor'],
+        underline: ['underline', 'disabled:text-borderColor'],
+        underlineReverse: ['text-bgColor', 'underline', 'disabled:text-borderColor'],
         underlineWithColors: [
           'underline',
           'text-highlightColor',
-          'disabled:text-textInactiveColor',
+          'disabled:text-borderColor',
           'visited:text-visitedLinkColor',
         ],
         strikeThrough: [
           'relative',
           'text-textBaseSize',
-          'text-textInactiveColor',
+          'text-borderColor',
           'before:absolute',
           'before:top-1/2',
           'before:left-0',
@@ -120,7 +119,35 @@ interface Props extends VariantProps<typeof buttonVariants> {
    * `submit`. Отправку формы теперь надо ЗАЯВИТЬ — `type='submit'`.
    */
   type?: 'button' | 'submit' | 'reset';
+  /**
+   * Saved receipt at the control. Opt-in: passing the prop (even `false`) reserves the width of
+   * both labels. `true` shows `saved ✓`, a string shows that word + ✓. Drive it with `useDoneFlash`.
+   */
+  done?: boolean | string;
   [k: string]: unknown;
+}
+
+/** Done: inverted back to white stock, ink text and edge, no hover swap. */
+const DONE_CLASS: Partial<Record<string, string>> = {
+  main: 'bg-bgColor text-textColor border-textColor hover:bg-bgColor hover:text-textColor',
+  secondary: 'bg-bgColor text-textColor border-textColor hover:bg-bgColor hover:text-textColor',
+  simple: 'bg-bgColor text-textColor hover:bg-bgColor hover:text-textColor',
+};
+
+/**
+ * `const done = useDoneFlash(); … await save(); done.flash();` + `<Button done={done.on}>`.
+ * `on` is true for `ms` (1.5 s) after the last `flash()`.
+ */
+export function useDoneFlash(ms = 1500) {
+  const [on, setOn] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const flash = useCallback(() => {
+    clearTimeout(timer.current);
+    setOn(true);
+    timer.current = setTimeout(() => setOn(false), ms);
+  }, [ms]);
+  return { on, flash };
 }
 
 export function Button({
@@ -133,6 +160,7 @@ export function Button({
   variant,
   className,
   type,
+  done,
   ...props
 }: Props) {
   // When asChild is true and loading, we can't use Slot because loading changes the content
@@ -175,7 +203,32 @@ export function Button({
   // как только `loading` истинно, — значит атрибут всегда садится на элемент, который его знает.
   const busyProps = loading ? { disabled: true } : {};
 
+  // Opt-in only: other buttons keep their plain DOM. Slot needs a single child, so not with asChild.
+  const hasDone = done !== undefined && Component === 'button';
+  const isDone = hasDone && !loading && done !== false;
+  const doneLabel = typeof done === 'string' ? done : 'saved';
+
   const renderContent = () => {
+    if (hasDone && !loading) {
+      // All three share one grid cell: the widest sets the width, so nothing jumps. The sizer always
+      // holds the done word; the live span only gets it when done, so the change is announced.
+      return (
+        <span className='grid place-items-center'>
+          <span
+            aria-hidden={isDone}
+            className={cn('col-start-1 row-start-1', isDone && 'invisible')}
+          >
+            {children}
+          </span>
+          <span aria-hidden className='invisible col-start-1 row-start-1 whitespace-nowrap'>
+            {doneLabel} ✓
+          </span>
+          <span aria-live='polite' className='col-start-1 row-start-1 whitespace-nowrap'>
+            {isDone ? `${doneLabel} ✓` : null}
+          </span>
+        </span>
+      );
+    }
     if (!loading) return children;
 
     if (loadingType === 'overlay') {
@@ -195,12 +248,18 @@ export function Button({
       {...props}
       {...typeProps}
       {...busyProps}
-      className={buttonVariants({
-        variant,
-        isLoading: loading,
-        size,
-        className,
-      })}
+      // twMerge only for done: its skin must beat the variant's bg, text and edge.
+      className={
+        hasDone
+          ? cn(
+              buttonVariants({ variant, isLoading: loading, size }),
+              'transition-colors duration-150 ease-out motion-reduce:transition-none',
+              isDone && DONE_CLASS[variant ?? 'default'],
+              className,
+            )
+          : buttonVariants({ variant, isLoading: loading, size, className })
+      }
+      data-done={isDone || undefined}
     >
       {renderContent()}
     </Component>
@@ -209,7 +268,7 @@ export function Button({
 
 /** The back door's skin: one underlined label word, quiet until hovered. */
 const BACK_LINK =
-  'inline-block w-fit text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+  'inline-block w-fit text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor disabled:cursor-not-allowed disabled:text-borderColor disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
 /**
  * The one way back: `← word`, an underlined word at the top of a screen, a drawer, a wizard step or

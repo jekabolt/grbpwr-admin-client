@@ -10,7 +10,7 @@ import {
 } from 'components/managers/opex/utils/options';
 import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { errorSentence, isRefusal, notifyFailure } from 'components/shared/notify-failure';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -74,7 +74,8 @@ const monthFirst = (v?: string) => {
 
 // value + currency CODE, per the design's money rule (never a symbol; right-aligned in the card
 // footer).
-const money = (n: number, code?: string) => `${formatMoney(n)} ${(code || '').toUpperCase()}`.trim();
+const money = (n: number, code?: string) =>
+  `${formatMoney(n)} ${(code || '').toUpperCase()}`.trim();
 
 // Today as YYYY-MM-DD from local wall-clock parts. YYYY-MM-DD compares lexicographically, so string
 // `<` is a real date comparison — no Date parsing needed for the employment-window checks.
@@ -155,7 +156,6 @@ type RoleGroup = { key: string; label: string; isNoRole: boolean; employees: Emp
 
 export function Employees() {
   const { canReadCosting, canWriteCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   const base = (dictionary?.baseCurrency || 'EUR').toUpperCase();
 
@@ -259,12 +259,15 @@ export function Employees() {
       key,
       label: key === NO_ROLE ? 'no role' : key,
       isNoRole: key === NO_ROLE,
-      employees: map.get(key)!.slice().sort((a, b) => {
-        const la = hasLeft(a.employee) ? 1 : 0;
-        const lb = hasLeft(b.employee) ? 1 : 0;
-        if (la !== lb) return la - lb;
-        return (a.employee?.fullName ?? '').localeCompare(b.employee?.fullName ?? '');
-      }),
+      employees: map
+        .get(key)!
+        .slice()
+        .sort((a, b) => {
+          const la = hasLeft(a.employee) ? 1 : 0;
+          const lb = hasLeft(b.employee) ? 1 : 0;
+          if (la !== lb) return la - lb;
+          return (a.employee?.fullName ?? '').localeCompare(b.employee?.fullName ?? '');
+        }),
     }));
   }, [rows]);
 
@@ -294,24 +297,35 @@ export function Employees() {
   // empArchive v3: "mark as left" = UpsertEmployee with employment_end set. Upsert replaces the row,
   // so every existing field is sent back alongside the new end date.
   const upsertLeave = useUpsertEmployee();
-  const [leaveDate, setLeaveDate] = useState(todayISO());
+  const [leaveDate, setLeaveDateState] = useState(todayISO());
+  // A refused leave date stands in the dialog until the next edit.
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  const setLeaveDate = (v: string) => {
+    setLeaveError(null);
+    setLeaveDateState(v);
+  };
   useEffect(() => {
-    if (leaving) setLeaveDate(day(leaving.employee?.employmentEnd) || todayISO());
+    setLeaveError(null);
+    if (leaving) setLeaveDateState(day(leaving.employee?.employmentEnd) || todayISO());
   }, [leaving]);
   const confirmLeave = () => {
     if (!leaving?.id || !leaving.employee) return;
     const start = day(leaving.employee.employmentStart);
     if (start && leaveDate < start) {
-      showMessage('Leave date is before the employment start', 'error');
+      setLeaveError('before the employment start');
       return;
     }
+    const id = leaving.id;
+    // The card turns to «left»: that is the receipt.
     upsertLeave.mutate(
-      { id: leaving.id, employee: { ...leaving.employee, employmentEnd: leaveDate } },
+      { id, employee: { ...leaving.employee, employmentEnd: leaveDate } },
       {
-        onSuccess: () =>
-          showMessage(`${leaving.employee?.fullName || 'Employee'} marked as left`, 'success'),
-        onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save', 'error'),
-        onSettled: () => setLeaving(undefined),
+        onSuccess: () => setLeaving(undefined),
+        onError: (e) => {
+          if (isRefusal(e)) return setLeaveError(errorSentence(e, 'not saved'));
+          setLeaving(undefined);
+          notifyFailure(`EMPLOYEE ${id}`, 'not marked left', e);
+        },
       },
     );
   };
@@ -319,9 +333,10 @@ export function Employees() {
   const archive = useArchiveEmployee();
   const confirmArchive = () => {
     if (!archiving?.id) return;
-    archive.mutate(archiving.id, {
-      onSuccess: () => showMessage('Employee archived', 'success'),
-      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to archive', 'error'),
+    const id = archiving.id;
+    // The card leaves the list: that is the receipt.
+    archive.mutate(id, {
+      onError: (e) => notifyFailure(`EMPLOYEE ${id}`, 'not archived', e),
       onSettled: () => setArchiving(undefined),
     });
   };
@@ -380,7 +395,10 @@ export function Employees() {
           {isLoading && !rows.length ? (
             <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3'>
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
+                <div
+                  key={i}
+                  className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'
+                >
                   <SkeletonLine width={150} />
                   <SkeletonLine width={90} />
                   <SkeletonLine width={120} />
@@ -481,7 +499,13 @@ export function Employees() {
             rendered as left. Any linked salary template keeps booking until you end it in OPEX.
           </Text>
           <label className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='uppercase'
+            >
               leave date
             </Text>
             <Input
@@ -489,9 +513,17 @@ export function Employees() {
               name='leave-date'
               value={leaveDate}
               min={day(leaving?.employee?.employmentStart) || undefined}
+              aria-invalid={leaveError !== null || undefined}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeaveDate(e.target.value)}
             />
           </label>
+          {leaveError && (
+            <CalloutBox tone='error'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not saved</b> · {leaveError}
+              </Text>
+            </CalloutBox>
+          )}
         </div>
       </ConfirmationModal>
 
@@ -544,11 +576,26 @@ function EmployeeCard({
   const tenure = tenureLabel(e?.employmentStart, e?.employmentEnd);
 
   const chips: React.ReactNode[] = [];
-  if (left && booked) chips.push(<Chip key='sb' tone='error'>still booking</Chip>);
-  if (booked && (salary?.uncosted ?? 0) > 0) chips.push(<Chip key='uc' tone='error'>uncosted</Chip>);
+  if (left && booked)
+    chips.push(
+      <Chip key='sb' tone='error'>
+        still booking
+      </Chip>,
+    );
+  if (booked && (salary?.uncosted ?? 0) > 0)
+    chips.push(
+      <Chip key='uc' tone='error'>
+        uncosted
+      </Chip>,
+    );
   if (!left && !booked) {
     if (linkedInactive) chips.push(<Chip key='si'>salary inactive</Chip>);
-    else chips.push(<Chip key='ns' tone='error'>no salary</Chip>);
+    else
+      chips.push(
+        <Chip key='ns' tone='error'>
+          no salary
+        </Chip>,
+      );
   }
 
   return (
@@ -565,7 +612,7 @@ function EmployeeCard({
       }}
       className={cn(
         'flex flex-col gap-2 border border-borderColor bg-bgColor p-3 text-left',
-        'cursor-pointer transition-colors hover:bg-bgZebra',
+        'cursor-pointer transition-colors hover:bg-pageBg',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
         left && 'opacity-60',
       )}
@@ -587,7 +634,13 @@ function EmployeeCard({
 
       <div className='mt-auto flex items-end justify-between gap-3 border-t border-hairline pt-2'>
         <span className='flex flex-col gap-0.5'>
-          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
             employment
           </Text>
           <Text size='micro' component='span'>
@@ -701,13 +754,16 @@ function EmployeeFormModal({
   onMarkLeft: (r: Employee) => void;
   onArchive: (r: Employee) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertEmployee();
   const salaryMut = useUpsertSalaryTemplate();
   const [d, setD] = useState<Draft>(makeEmptyDraft(base));
+  // What stops the form: a local check or the server's refusal, with the field when it is known.
+  const [formError, setFormError] = useState<{ text: string; field?: keyof Draft } | null>(null);
+  const invalid = (field: keyof Draft) => formError?.field === field || undefined;
 
   useEffect(() => {
     if (!open) return;
+    setFormError(null);
     const e = existing?.employee;
     setD(
       e
@@ -724,7 +780,10 @@ function EmployeeFormModal({
     );
   }, [existing, open, base]);
 
-  const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<Draft>) => {
+    setFormError(null);
+    setD((prev) => ({ ...prev, ...patch }));
+  };
 
   // Salary templates already linked to THIS person (non-archived), split into booking-this-month and
   // linked-but-idle — the same activeThisMonth test the list uses.
@@ -747,32 +806,33 @@ function EmployeeFormModal({
       note: '',
       employeeId: existing.id,
     };
+    // The linked template replaces the button: that is the receipt.
     salaryMut.mutate(
       { id: 0, recurring: recurringInsert },
       {
-        onSuccess: () => showMessage('Salary template created', 'success'),
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to create template', 'error'),
+          isRefusal(e)
+            ? setFormError({ text: errorSentence(e, 'template not created') })
+            : notifyFailure(`EMPLOYEE ${existing.id}`, 'template not created', e, createSalary),
       },
     );
   };
 
   const submit = async () => {
     const name = d.fullName.trim();
-    if (!name) return showMessage('Enter a name', 'error');
-    if (name.length > MAX_NAME) return showMessage(`Name must be at most ${MAX_NAME} characters`, 'error');
-    if (d.role.trim().length > MAX_ROLE)
-      return showMessage(`Role must be at most ${MAX_ROLE} characters`, 'error');
-    if (d.note.trim().length > MAX_NOTE)
-      return showMessage(`Note must be at most ${MAX_NOTE} characters`, 'error');
+    const stop = (text: string, field: keyof Draft) => setFormError({ text, field });
+    if (!name) return stop('enter a name', 'fullName');
+    if (name.length > MAX_NAME) return stop(`name is over ${MAX_NAME} characters`, 'fullName');
+    if (d.role.trim().length > MAX_ROLE) return stop(`role is over ${MAX_ROLE} characters`, 'role');
+    if (d.note.trim().length > MAX_NOTE) return stop(`note is over ${MAX_NOTE} characters`, 'note');
     if (d.defaultMonthlyCost.trim()) {
       const n = parseDecimalNumber(d.defaultMonthlyCost);
       if (!Number.isFinite(n) || n < 0)
-        return showMessage('Default monthly cost must be a non-negative number', 'error');
+        return stop('monthly cost must be 0 or more', 'defaultMonthlyCost');
     }
     // YYYY-MM-DD strings compare lexicographically.
     if (d.employmentEnd && d.employmentStart && d.employmentEnd < d.employmentStart)
-      return showMessage('End date is before the start date', 'error');
+      return stop('end date is before the start', 'employmentEnd');
     try {
       await upsert.mutateAsync({
         id: existing?.id ?? 0,
@@ -788,10 +848,11 @@ function EmployeeFormModal({
           note: d.note.trim(),
         },
       });
-      showMessage(existing ? 'Employee saved' : 'Employee added', 'success');
+      // The dialog closes on the updated card: that is the receipt.
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save employee', 'error');
+      if (isRefusal(e)) return setFormError({ text: errorSentence(e, 'not saved') });
+      notifyFailure(existing?.id ? `EMPLOYEE ${existing.id}` : 'EMPLOYEE', 'not saved', e, submit);
     }
   };
 
@@ -813,6 +874,7 @@ function EmployeeFormModal({
         <Field label='full name *'>
           <Input
             name='fullName'
+            aria-invalid={invalid('fullName')}
             value={d.fullName}
             maxLength={MAX_NAME}
             autoFocus
@@ -822,6 +884,7 @@ function EmployeeFormModal({
         <Field label='role'>
           <Input
             name='role'
+            aria-invalid={invalid('role')}
             value={d.role}
             maxLength={MAX_ROLE}
             list='employee-roles'
@@ -850,6 +913,7 @@ function EmployeeFormModal({
             <Input
               type='date'
               name='employmentEnd'
+              aria-invalid={invalid('employmentEnd')}
               value={d.employmentEnd}
               min={d.employmentStart || undefined}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -863,6 +927,7 @@ function EmployeeFormModal({
             <Input
               type='number'
               name='defaultMonthlyCost'
+              aria-invalid={invalid('defaultMonthlyCost')}
               step='0.01'
               min='0'
               inputMode='decimal'
@@ -887,12 +952,21 @@ function EmployeeFormModal({
         <Field label='note (optional)'>
           <Input
             name='note'
+            aria-invalid={invalid('note')}
             value={d.note}
             maxLength={MAX_NOTE}
             placeholder='e.g. night shift, contractor'
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ note: e.target.value })}
           />
         </Field>
+
+        {formError && (
+          <CalloutBox tone='error'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {formError.text}
+            </Text>
+          </CalloutBox>
+        )}
 
         {isEdit && (
           <div className='flex flex-col gap-1.5 border-t border-hairline pt-2.5'>
@@ -917,7 +991,9 @@ function EmployeeFormModal({
                     {t.recurring?.label} —{' '}
                     {money(Number(decimalToInput(t.recurring?.amount)) || 0, t.recurring?.currency)}{' '}
                     · {monthLabelShort(toMonth(t.recurring?.activeFrom))} →{' '}
-                    {t.recurring?.activeTo ? monthLabelShort(toMonth(t.recurring.activeTo)) : 'open'}
+                    {t.recurring?.activeTo
+                      ? monthLabelShort(toMonth(t.recurring.activeTo))
+                      : 'open'}
                     {activeThisMonth(t) ? '' : ' (inactive)'}
                   </Text>
                 ))}

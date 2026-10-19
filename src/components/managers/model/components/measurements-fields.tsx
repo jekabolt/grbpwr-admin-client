@@ -26,7 +26,7 @@ function MeasurementInput({
         trigger={
           <span
             tabIndex={0}
-            className='w-fit cursor-help underline decoration-textInactiveColor decoration-dotted underline-offset-4 focus:outline-none focus-visible:decoration-textColor'
+            className='w-fit cursor-help underline decoration-borderColor decoration-dotted underline-offset-4 focus:outline-none focus-visible:decoration-textColor'
           >
             <Text size='small' component='span'>
               {label}
@@ -51,7 +51,7 @@ function MeasurementInput({
             field.onChange(digits === '' ? undefined : parseInt(digits, 10));
           }}
           placeholder='—'
-          className='w-20 border border-textInactiveColor bg-bgColor px-2 py-1 text-right text-textBaseSize focus:border-textInactiveColor focus:outline-none'
+          className='w-20 border border-borderColor bg-bgColor px-2 py-1 text-right text-textBaseSize focus:outline-none'
         />
         <Text variant='inactive' size='small'>
           mm

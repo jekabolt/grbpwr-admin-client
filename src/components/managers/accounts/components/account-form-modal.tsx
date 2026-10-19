@@ -1,7 +1,8 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AdminAccount, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
-import { Button, Close, Input, Text, ToggleSwitch } from 'ui';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
+import { Button, CalloutBox, Close, Input, Text, ToggleSwitch } from 'ui';
 import { useCreateAccount, useUpdateAccountPermissions } from '../utils/hooks';
 import { PermissionPicker } from './permission-picker';
 
@@ -71,7 +72,11 @@ export function AccountFormModal({
       return setError('Grant at least one section, or make the account super');
     }
 
-    const done = { onSuccess: () => onOpenChange(false) };
+    // The dialog closes on the listed account: that is the receipt.
+    const done = {
+      onSuccess: () => onOpenChange(false),
+      onError: (e: unknown) => isRefusal(e) && setError(errorSentence(e, 'not saved')),
+    };
     if (isEdit) {
       update.mutate({ username, isSuper, permissions }, done);
     } else {
@@ -83,8 +88,8 @@ export function AccountFormModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[560px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[560px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase break-all'>
               {isEdit ? username : 'new account'}
             </DialogPrimitives.Title>
@@ -129,7 +134,7 @@ export function AccountFormModal({
               </div>
             )}
 
-            <div className='flex items-start justify-between gap-4 border border-textInactiveColor p-3'>
+            <div className='flex items-start justify-between gap-4 border border-borderColor p-3'>
               <div className='min-w-0'>
                 <Text size='small' className='uppercase'>
                   super admin
@@ -151,13 +156,15 @@ export function AccountFormModal({
             )}
 
             {error && (
-              <Text variant='error' size='small'>
-                {error}
-              </Text>
+              <CalloutBox tone='error'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not saved</b> · {error}
+                </Text>
+              </CalloutBox>
             )}
           </div>
 
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Button type='button' onClick={() => onOpenChange(false)} variant='secondary' size='lg'>
               cancel
             </Button>
