@@ -1,6 +1,11 @@
+import { adminService } from 'api/api';
+
 import { DraftEdit } from './workspace';
 
-// LANE F owns this file; becomes adminService.DraftFittingEdits once lane E regenerates proto-http.
-export async function draftFittingEdits(_fittingId: number, _note: string): Promise<DraftEdit[]> {
-  return [];
+export async function draftFittingEdits(fittingId: number, note: string): Promise<DraftEdit[]> {
+  const response = await adminService.DraftFittingEdits({ fittingId, note });
+  return (response.edits ?? []).map((edit) => ({
+    note: edit.note ?? '',
+    target: edit.target ?? '',
+  }));
 }

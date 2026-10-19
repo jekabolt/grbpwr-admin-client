@@ -4949,6 +4949,20 @@ export type DeleteFittingRequest = {
 export type DeleteFittingResponse = {
 };
 
+export type DraftFittingEditsRequest = {
+  fittingId: number | undefined;
+  note: string | undefined;
+};
+
+export type DraftFittingEditsResponse = {
+  edits: DraftFittingEdit[] | undefined;
+};
+
+export type DraftFittingEdit = {
+  note: string | undefined;
+  target: string | undefined;
+};
+
 export type AddSampleRequest = {
   sample: common_SampleInsert | undefined;
 };
@@ -19306,6 +19320,9 @@ export interface AdminService {
   DeleteFittingChangeRequest(request: DeleteFittingChangeRequestRequest): Promise<DeleteFittingChangeRequestResponse>;
   // Declared last (see ListModels ordering note) so the fixed /open path is not shadowed.
   ListOpenFittingChangeRequests(request: ListOpenFittingChangeRequestsRequest): Promise<ListOpenFittingChangeRequestsResponse>;
+  // DraftFittingEdits turns a fitting note into unsaved change-request drafts. The client decides
+  // which drafts to create through AddFittingChangeRequest.
+  DraftFittingEdits(request: DraftFittingEditsRequest): Promise<DraftFittingEditsResponse>;
   // AddTask creates a new kanban task from its content plus placement (target
   // board + optional initial column). Server sets created_by (from JWT) and
   // appends the card to the end of its (board,status) column (position).
@@ -23659,6 +23676,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListOpenFittingChangeRequests",
       }) as Promise<ListOpenFittingChangeRequestsResponse>;
+    },
+    DraftFittingEdits(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.fittingId) {
+        throw new Error("missing required field request.fitting_id");
+      }
+      const path = `api/admin/fittings/${request.fittingId}/draft-edits`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DraftFittingEdits",
+      }) as Promise<DraftFittingEditsResponse>;
     },
     AddTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/add`; // eslint-disable-line quotes
