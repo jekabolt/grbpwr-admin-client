@@ -650,7 +650,9 @@ const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained:
  * Codex r5: the waistband drawn as four separate sides (in a pen of its own and in the tile pen),
  * the small piece over a grey fill with four filled notch triangles or arrowheads, or with its
  * outline drawn twice, and the own-pen waistband with its name only, a grainline only, a wrapped
- * cutting note, or rows lettered A / B of fabric and interfacing.
+ * cutting note, or rows lettered A / B of fabric and interfacing. Codex r6: the four sides with the
+ * fold edge dashed, four filled 1 × 8 mm buttonhole slots, a page-sized «BIAS SQUARE / CUT 1» at
+ * the page's edge where the page's words do not fill it.
  */
 function ink5(
   name: string,
@@ -949,6 +951,30 @@ function ink5(
         r2.unexplained ?? r2.explained,
       );
     }
+    // Codex r6: a grey placket template with four filled 1 × 8 mm buttonhole slots
+    const slots = read([
+      { pts: at, closed: true, style: fill([200, 200, 200]) },
+      { pts: at, closed: true, style: own },
+      ...[-0.3, -0.1, 0.1, 0.3].map((fy) => {
+        const y = cy + fy * h;
+        return {
+          pts: [
+            { x: cx - 4, y: y - 0.5 },
+            { x: cx + 4, y: y - 0.5 },
+            { x: cx + 4, y: y + 0.5 },
+            { x: cx - 4, y: y + 0.5 },
+          ],
+          closed: true,
+          style: fill([0, 0, 0]),
+        };
+      }),
+    ]);
+    check(
+      name,
+      `${tag}: the same small piece over a grey fill with four filled 1 × 8 mm buttonhole slots → not explained`,
+      !slots.explained,
+      slots.unexplained ?? slots.explained,
+    );
     const twice = read([
       { pts: at, closed: true, style: fill([200, 200, 200]) },
       { pts: at, closed: true, style: own },
@@ -1124,6 +1150,20 @@ function ink5(
         !r.explained,
         r.unexplained ?? r.explained,
       );
+      // Codex r6: … its fold edge dashed (one ink, another dash)
+      const r2 = read(
+        sides(rect, own).map((a, k) => (k === 3 ? { ...a, style: { ...own, dash: [3, 1.5] } } : a)),
+        [
+          { text: 'WAISTBAND', at: { x: x0 + 4, y: y0 + h - 10 } },
+          { text: 'CUT 1 ON FOLD', at: { x: x0 + 4, y: y0 + h - 18 } },
+        ],
+      );
+      check(
+        name,
+        `${tag}: the same four sides with the fold edge dashed → not explained`,
+        !r2.explained,
+        r2.unexplained ?? r2.explained,
+      );
     }
     for (const words of [
       ['WAISTBAND', 'CUT 1 ON FOLD'],
@@ -1192,6 +1232,58 @@ function ink5(
         r.unexplained ?? r.explained,
       );
     }
+  }
+  // Codex r6: a page-sized piece at the page's edge (a continuous-bias square) in a pen of its own
+  // with its name and cut — the page's border frames the page, a piece's label still asks; only
+  // where the page's words do not fill it (laid over a page of prose it is that page's border, a
+  // note — a piece is never printed at the trim line over the page's text)
+  // (as the engine reads it: the words anchored inside the square, with the piece's own label —
+  // «BIAS SQUARE», «CUT 1»: 2 mm a letter × 3 mm — over the square's box)
+  const sq = { minX: 0.5, minY: 0.5, maxX: pg.widthMm - 0.5, maxY: pg.heightMm - 0.5 };
+  const prose =
+    pg.texts
+      .filter(
+        (t) =>
+          !t.background &&
+          t.text.trim() &&
+          t.anchor.x > sq.minX &&
+          t.anchor.x < sq.maxX &&
+          t.anchor.y > sq.minY &&
+          t.anchor.y < sq.maxY,
+      )
+      .reduce(
+        (s, t) =>
+          s +
+          Math.max(0, Math.min(t.bbox.maxX, sq.maxX) - Math.max(sq.minX, t.bbox.minX)) *
+            Math.max(0, Math.min(t.bbox.maxY, sq.maxY) - Math.max(sq.minY, t.bbox.minY)),
+        2 * ('BIAS SQUARE'.length + 'CUT 1'.length) * 3,
+      ) /
+    ((sq.maxX - sq.minX) * (sq.maxY - sq.minY));
+  if (prose < PAGE_INK.noteCover) {
+    const r = read(
+      [
+        {
+          pts: [
+            { x: 0.5, y: 0.5 },
+            { x: pg.widthMm - 0.5, y: 0.5 },
+            { x: pg.widthMm - 0.5, y: pg.heightMm - 0.5 },
+            { x: 0.5, y: pg.heightMm - 0.5 },
+          ],
+          closed: true,
+          style: own,
+        },
+      ],
+      [
+        { text: 'BIAS SQUARE', at: { x: 12, y: pg.heightMm - 12 } },
+        { text: 'CUT 1', at: { x: 12, y: pg.heightMm - 18 } },
+      ],
+    );
+    check(
+      name,
+      `${tag}: a page-sized «BIAS SQUARE / CUT 1» at the page's edge in a pen of its own → not explained`,
+      !r.explained,
+      r.unexplained ?? r.explained,
+    );
   }
   // Codex r4: a straight piece edge in a pen of its own running off the page
   {

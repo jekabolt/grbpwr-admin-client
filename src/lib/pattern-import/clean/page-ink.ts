@@ -6,14 +6,14 @@
 //   · rules — a table's grid, a separator, the page's trim line: straight, axis-parallel, open
 //     and on the page (nothing drawn past its edge is explained), or a closed bar ≤ 3 mm thin —
 //     straight lines of one pen closing a cycle (a rectangle drawn as four paths) are one outline;
-//   · frames — a text box, a table's outline, the cells of the tile-assembly map: an axis-parallel
-//     rectangle in a pen the tiles do not use, holding words or lines (a piece-sized one: text
-//     covering it, a few lines or a pieces index's ids — never a name or a grainline alone) — a
-//     piece's label at print size only as a table of pieces (ids + labels) or a note (running
-//     text) that fills it; a rectangle in the pattern's pen may be a waistband, whatever lies in
-//     it — unless what lies in it says what it is in any pen: a size line key, the tile-assembly
-//     map, a code stamp;
-//   · the test square — 2 in / 5 cm / 8×8 см …, where text near it prints its own dimension;
+//   · frames — a text box, a table's outline, the page's border, the tile-assembly map: an
+//     axis-parallel rectangle in a pen the tiles do not use, holding words or lines (a piece-sized
+//     one: text covering it, a few lines or a pieces index's ids — never a name or a grainline
+//     alone) — a piece's label at print size only as a table of pieces (ids + labels) or a note
+//     (running text) that fills it; a rectangle in the pattern's pen may be a waistband, whatever
+//     lies in it — unless what lies in it says what it is in any pen: a size line key, the
+//     tile-assembly map, a code stamp;
+//   · the test square — 2 in / 5 cm / 8×8 см …, where text near it prints its dimension;
 //   · reduced copies — the pieces at 1:5…1:25 (the pieces index, the tile map, the graded nest of a
 //     pieces inventory): outlines at one scale ≤ 0.35 shaped as ≥ 2 different tile pieces;
 //   · drawings — the garment flats and the sewing-step sketches: small (≤ 0.6 of the page's short
@@ -23,7 +23,7 @@
 //     label at print size in it (POCKET, CUT 2, КАРМАН), lying within such a drawing of its pen
 //     (unnamed), or toned underneath with a second cue: a family of unnamed outlines in its pen
 //     and tint (a pieces index; the outline drawn twice is none), or alone with no word and its
-//     line art (strokes and shades ≥ 4 mm, not drill dots, notch triangles or arrowheads).
+//     line art (strokes and shades ≥ 4 mm, not dots, notches, arrowheads or slots).
 // A page where EVERY long or piece-sized line is one of these is the second, geometric evidence
 // that it is not pattern (the first is the classifier's text-led role). A curve at 1:1 drawn with
 // the pattern's pen, a large curve, a curve that is no tile piece reduced — anything else — stays
@@ -102,8 +102,9 @@ export const PAGE_INK = {
   lineArtShare: 0.5,
   /** A line-art fill is a stroke (perimeter² / 4·area at least this — Vixen's folds are 39–146)
    *  or a shade (at least this many mm²); a filled notch triangle or arrowhead is neither (a 5 mm
-   *  triangle is 5.2 and 11 mm² — Codex r5). */
-  lineArtStroke: 10,
+   *  triangle is 5.2 and 11 mm² — Codex r5), nor a buttonhole slot (1 × 8 mm: 10 and 8 mm² —
+   *  Codex r6). */
+  lineArtStroke: 30,
   lineArtShadeMm2: 25,
   /** A toned outline's family: at least this many other closed outlines (each at least this
    *  long) in its pen and tint. */
@@ -261,9 +262,10 @@ const isPatternLike = (c: Chain) =>
 /**
  * A rectangle drawn as separate straight paths (four sides, two L's — chains/ joins ends along the
  * line only, never round a corner) is one closed outline to the page reading (Codex r5: a waistband
- * drawn side by side read as four rules): open axis-parallel lines of one pen whose ends meet in
- * pairs (within `loopGapMm`) around a cycle. The cycle takes the slot of its first line; the
- * others leave the reading (length 0).
+ * drawn side by side read as four rules): open axis-parallel lines of one ink (any dash: a fold
+ * edge — Codex r6) whose ends meet in pairs (within `loopGapMm`) around a cycle. The cycle takes
+ * the slot of its first line and the pen of its longest solid one; the others leave the reading
+ * (length 0).
  */
 function closeLoops(pc: PageChains): PageChains {
   const styles = new Map(pc.page.styles.map((s) => [s.id, s]));
@@ -328,10 +330,16 @@ function closeLoops(pc: PageChains): PageChains {
       order.some(({ k }) => {
         const c = pc.chains[cand[k]];
         const p = penOf(styles.get(c.style), c);
-        return !p || !samePen(p, pen);
+        return !p || !sameInk(p, pen);
       })
     )
       continue;
+    // the outline takes the pen of its longest solid side (a fold edge is dashed — Codex r6)
+    const rep =
+      order
+        .map(({ k }) => pc.chains[cand[k]])
+        .filter((c) => !penOf(styles.get(c.style), c)?.dashed)
+        .sort((a, b) => b.lengthMm - a.lengthMm)[0] ?? first;
     const pts: PtMm[] = [];
     let len = 0;
     for (const { k, rev } of order) {
@@ -346,7 +354,14 @@ function closeLoops(pc: PageChains): PageChains {
       }
     }
     pts.pop();
-    chains[cand[k0]] = { ...first, pts, closed: true, lengthMm: len };
+    chains[cand[k0]] = {
+      ...first,
+      style: rep.style,
+      motif: rep.motif,
+      pts,
+      closed: true,
+      lengthMm: len,
+    };
     box[cand[k0]] = bboxOf(pts);
   }
   return used.size ? { ...pc, chains, box } : pc;
@@ -680,7 +695,7 @@ export function pageInkItems(
     return fills.filter(({ b: q, a: qa, el }) => {
       if (sameBox(q, b)) return false;
       // a stroke of shading or a fold, not a dot (a drill hole, a notch mark — Codex r4), nor a
-      // filled notch triangle or arrowhead (compact and small — Codex r5)
+      // filled notch triangle, arrowhead or buttonhole slot (small, not long enough — Codex r5/r6)
       if (Math.max(q.maxX - q.minX, q.maxY - q.minY) < PAGE_INK.lineArtMm) return false;
       if (el < PAGE_INK.lineArtStroke && qa < PAGE_INK.lineArtShadeMm2) return false;
       const w = Math.min(q.maxX, b.maxX) - Math.max(q.minX, b.minX);
@@ -905,9 +920,6 @@ export function pageInkItems(
     } else {
       const a = areaOf(c.pts);
       if (ax >= PAGE_INK.frameAxis && a >= PAGE_INK.frameFill * w * h) {
-        // the page's border drawn at its edge: the trim line (no piece is the page itself)
-        if (b.minX <= t && b.minY <= t && b.maxX >= page.widthMm - t && b.maxY >= page.heightMm - t)
-          return items.push({ i, kind: 'rule' });
         const side = squareSide(w, h);
         if (side && calibrated(b, (w + h) / 2)) return items.push({ i, kind: 'square' });
         return items.push({
@@ -1032,12 +1044,18 @@ export function pageInkItems(
       x.why = `a rectangle ${Math.round(b.maxX - b.minX)}×${Math.round(b.maxY - b.minY)} mm (${fmtPen(x.frame.pen)}) holding a piece's label «${labels[0].text.trim().slice(0, 30)}» — it may be a piece (${Math.round(c.lengthMm)} mm)`;
       continue;
     }
-    // what a piece-sized rectangle frames: text covering it, a few lines, or a pieces index's ids
-    const holds = x.frame.piece
-      ? cover >= PAGE_INK.frameCover ||
-        detailIn(b, x.i) >= PAGE_INK.frameLines ||
-        (ws.length > 0 && ws.every((t) => PIECE_ID.test(t.text.trim())))
-      : ws.length >= 1 || detailIn(b, x.i) >= 1;
+    // what a piece-sized rectangle frames: text covering it, a few lines, or a pieces index's ids;
+    // the page's border at its edge frames whatever the page holds (a piece's label still asks —
+    // Codex r6: a page-sized bias square)
+    const t = PAGE_INK.offPageMm;
+    const border =
+      b.minX <= t && b.minY <= t && b.maxX >= page.widthMm - t && b.maxY >= page.heightMm - t;
+    const holds =
+      x.frame.piece && !border
+        ? cover >= PAGE_INK.frameCover ||
+          detailIn(b, x.i) >= PAGE_INK.frameLines ||
+          (ws.length > 0 && ws.every((t) => PIECE_ID.test(t.text.trim())))
+        : ws.length >= 1 || detailIn(b, x.i) >= 1;
     if (foreign && holds) x.kind = 'frame';
     else if (sizeKey(b, x.i) || tileMap(b, x.i) || stamp(b, x.i)) x.kind = 'frame';
     else if (
