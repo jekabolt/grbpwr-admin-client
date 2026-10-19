@@ -163,9 +163,7 @@ export function OperationMediaStrip({
         )}
         {(intake.busy || intake.dragging) && (
           <Text size='micro' variant='label' component='span'>
-            {intake.busy
-              ? 'accepting the image from the clipboard…'
-              : 'drop the file — the crop opens'}
+            {intake.busy ? 'accepting the image from the clipboard…' : 'drop the file — the crop opens'}
           </Text>
         )}
       </div>

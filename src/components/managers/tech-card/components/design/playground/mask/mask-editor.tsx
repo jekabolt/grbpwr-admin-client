@@ -525,18 +525,17 @@ export function MaskEditor({
             >
               mask · {label}
             </Text>
-            <Dialog.Close asChild>
-              <Close
-                aria-label='close the mask'
-                disabled={uploading}
-                title={
-                  uploading
-                    ? `the mask is uploading; you can close the editor once it is up, or after ${MASK_UPLOAD_DEADLINE_MS / 1000} s`
-                    : undefined
-                }
-                className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
-              />
-            </Dialog.Close>
+            <Close
+              aria-label='close the mask'
+              disabled={uploading}
+              onClick={() => onOpenChange(false)}
+              title={
+                uploading
+                  ? `the mask is uploading; you can close the editor once it is up, or after ${MASK_UPLOAD_DEADLINE_MS / 1000} s`
+                  : undefined
+              }
+              className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
+            />
           </div>
 
           <div className='flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden'>

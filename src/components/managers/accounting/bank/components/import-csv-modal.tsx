@@ -89,8 +89,7 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
             </label>
 
             <Text variant='inactive' size='small'>
-              Already-imported lines are skipped automatically — re-importing the same export is
-              safe.
+              Already-imported lines are skipped automatically — re-importing the same export is safe.
             </Text>
 
             <div className='flex items-center justify-end gap-2'>

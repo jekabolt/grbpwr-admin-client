@@ -372,30 +372,30 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
 
         {/* ДВЕРЬ ВСТАВКИ ВО ФЛЭТ — см. шапку файла: живая стоит у поля-адресата на шаге FLAT, здесь —
           инертная с причиной, и число строк тем же правилом. */}
-        <div className='flex flex-wrap items-center gap-2' data-c19-paste-lines={pasteLines}>
-          <InertDoor
-            label='from construction ▸'
-            size='sm'
-            reason={`this door stands at the garment description on the FLAT step — it pastes ${pasteLines} line${
-              pasteLines === 1 ? '' : 's'
-            } from here (fit first, then one line per filled aspect)`}
-          />
-          <Text size='micro' variant='label' component='span'>
-            pastes {pasteLines} line{pasteLines === 1 ? '' : 's'} · the door itself stands at the
-            garment description on FLAT
-          </Text>
-        </div>
-        {pasteLines === 0 && (
-          <LockedBar
-            reason='nothing is written in the construction yet · nothing to paste'
-            door={
-              <GoTo onClick={() => scrollToOrgan('[data-c19-general]')} data-c19-to-general=''>
-                general information
-              </GoTo>
-            }
-            data-c19-paste-lock=''
-          />
-        )}
+      <div className='flex flex-wrap items-center gap-2' data-c19-paste-lines={pasteLines}>
+        <InertDoor
+          label='from construction ▸'
+          size='sm'
+          reason={`this door stands at the garment description on the FLAT step — it pastes ${pasteLines} line${
+            pasteLines === 1 ? '' : 's'
+          } from here (fit first, then one line per filled aspect)`}
+        />
+        <Text size='micro' variant='label' component='span'>
+          pastes {pasteLines} line{pasteLines === 1 ? '' : 's'} · the door itself stands at the
+          garment description on FLAT
+        </Text>
+      </div>
+      {pasteLines === 0 && (
+        <LockedBar
+          reason='nothing is written in the construction yet · nothing to paste'
+          door={
+            <GoTo onClick={() => scrollToOrgan('[data-c19-general]')} data-c19-to-general=''>
+              general information
+            </GoTo>
+          }
+          data-c19-paste-lock=''
+        />
+      )}
 
         {/* click-to-enlarge preview of the aspect's reference images */}
         <MediaViewer

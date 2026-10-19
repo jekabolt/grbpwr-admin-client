@@ -634,8 +634,8 @@ export function CreateRunModal({
                 <CalloutBox tone='error'>
                   <Text size='small'>
                     the readiness check failed. this is neither “ready” nor “not ready” — there is
-                    no verdict right now. the run can still be created: the gate is recomputed on
-                    the server at creation, and a refusal will come from there.
+                    no verdict right now. the run can still be created: the gate is recomputed on the
+                    server at creation, and a refusal will come from there.
                   </Text>
                 </CalloutBox>
               ) : !report ? (
@@ -666,7 +666,7 @@ export function CreateRunModal({
                   {/* НЕ ПРОВЕРЕНО — своя группа, своё слово, и она НИКОГДА не сворачивается вместе
                       с пройденными: «не проверяли» и «проверили, всё хорошо» — разные ответы. */}
                   <FindingGroup
-                    title='not checked — the server has no instrument for it'
+                    title="not checked — the server has no instrument for it"
                     findings={uncheckedRows}
                     techCardId={d.techCardId}
                   />

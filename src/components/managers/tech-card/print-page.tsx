@@ -181,17 +181,19 @@ export function TechCardPrint() {
 
       <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
         <div className='flex items-center gap-3'>
-          <BackLink
-            to={id ? `/tech-cards/${id}` : ROUTES.techCards}
-            title='back to the tech card · esc'
-            onClick={(e: React.MouseEvent) => {
-              // Ссылка остаётся ссылкой: щелчок с модификатором или средней кнопкой открывает
-              // карточку по href, как прежде. Простой щелчок — тот же шаг назад, что и Esc.
-              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              goBack();
-            }}
-          />
+          <>
+            <BackLink
+              to={id ? `/tech-cards/${id}` : ROUTES.techCards}
+              title='back to the tech card · esc'
+              onClick={(e: React.MouseEvent) => {
+                // Ссылка остаётся ссылкой: щелчок с модификатором или средней кнопкой открывает
+                // карточку по href, как прежде. Простой щелчок — тот же шаг назад, что и Esc.
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                goBack();
+              }}
+            />
+          </>
           <Text variant='uppercase' size='large'>
             tech pack — pdf
           </Text>

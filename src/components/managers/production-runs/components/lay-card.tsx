@@ -487,8 +487,8 @@ function ClothRows({
           только принято < выкроено), поэтому аномалия называется здесь, рядом со своим числом. */}
       {perUnit.acceptedOverCut ? (
         <Text size='nano' className='text-error'>
-          {perUnit.acceptedTotal} accepted against {perUnit.cutTotal} cut — that doesn't happen: one
-          of the numbers is lying, check the receipt rows
+          {perUnit.acceptedTotal} accepted against {perUnit.cutTotal} cut — that doesn't happen:
+          one of the numbers is lying, check the receipt rows
         </Text>
       ) : null}
       {perUnit.scrapPerGood != null ? (

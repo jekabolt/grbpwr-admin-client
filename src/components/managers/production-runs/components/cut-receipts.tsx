@@ -779,9 +779,7 @@ export function CutReceipts({
                     notes.push({
                       text: `no receipt for sizes: ${perUnit.missingSizes
                         .map(sizeLabel)
-                        .join(
-                          ', ',
-                        )} — “per unit” is overstated and will come down as entries are made`,
+                        .join(', ')} — “per unit” is overstated and will come down as entries are made`,
                       tone: 'warning',
                     });
                   // «Принято больше выкроенного» — невозможное состояние данных, и никакая другая
@@ -805,9 +803,7 @@ export function CutReceipts({
                     notes.push({
                       text: `accepted exactly 0: ${perUnit.acceptedZeroRows
                         .map((z) => `${sizeLabel(z.sizeId)} on “${z.lay}”`)
-                        .join(
-                          ', ',
-                        )} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
+                        .join(', ')} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
                       tone: 'warning',
                     });
                   if (norm) {
@@ -1169,9 +1165,7 @@ function LayClothSummary({ report }: { report?: ClothReport }) {
     return (
       <Text size='micro' component='span' className='block text-labelColor'>
         {clothRefusalText(r)}
-        {r.kind === 'no-fact' && !r.frozen
-          ? ' — “per unit” will be computed after the measurement'
-          : ''}
+        {r.kind === 'no-fact' && !r.frozen ? ' — “per unit” will be computed after the measurement' : ''}
       </Text>
     );
   }
