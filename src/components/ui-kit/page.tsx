@@ -53,15 +53,31 @@ export function UiKitPage() {
   const match = useMemo(() => (s: string) => !q || s.toLowerCase().includes(q), [q]);
 
   // The blocks mount after the lazy route resolves, so the browser's own anchor jump has nothing
-  // to land on yet: replay it once they exist.
+  // to land on yet: replay it once they exist, and again while blocks above it still grow (fonts,
+  // images, editors), until the reader scrolls or 3 s pass.
   useEffect(() => {
     const id = decodeURIComponent(window.location.hash.slice(1));
-    if (id) document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    if (!id) return;
+    const land = () => document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    land();
+    const ro = new ResizeObserver(land);
+    ro.observe(document.body);
+    const stop = () => {
+      ro.disconnect();
+      window.clearTimeout(timer);
+      for (const e of ['wheel', 'touchstart', 'keydown', 'mousedown'])
+        window.removeEventListener(e, stop);
+    };
+    const timer = window.setTimeout(stop, 3000);
+    for (const e of ['wheel', 'touchstart', 'keydown', 'mousedown'])
+      window.addEventListener(e, stop);
+    return stop;
   }, []);
 
-  const tokens = TOKEN_BLOCKS.map((block) => ({ block, names: visibleTokens(block, match) })).filter(
-    (t) => t.names.length > 0,
-  );
+  const tokens = TOKEN_BLOCKS.map((block) => ({
+    block,
+    names: visibleTokens(block, match),
+  })).filter((t) => t.names.length > 0);
   const groups = GROUPS.map((g) => ({
     ...g,
     demos: g.demos.filter((d) => [...d.names, d.title ?? '', ...(d.keywords ?? [])].some(match)),
@@ -107,7 +123,11 @@ export function UiKitPage() {
                 <>
                   <SideRailGroup flush>tokens</SideRailGroup>
                   {tokens.map(({ block }) => (
-                    <SideRailItem key={block.id} label={block.id} onClick={() => jumpTo(block.id)} />
+                    <SideRailItem
+                      key={block.id}
+                      label={block.id}
+                      onClick={() => jumpTo(block.id)}
+                    />
                   ))}
                 </>
               )}
