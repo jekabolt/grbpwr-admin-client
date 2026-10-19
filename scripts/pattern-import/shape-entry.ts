@@ -150,6 +150,7 @@ function analyse(
               size: z.sizeToken,
               at: n.at,
               cutBox: z.bbox,
+              seg: n.seg,
               ranges: n.ranges,
               graded: n.graded,
               chord: n.chord,
