@@ -99,6 +99,10 @@
 }
 
 * {
+  /* FeatureMono ships coding ligatures under `liga` (</ -> <= >> || …) and browsers turn `liga` on by
+     default, so typed text glued pairs into one glyph that overlapped its neighbours. Every character
+     stays its own cell. */
+  font-variant-ligatures: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 
