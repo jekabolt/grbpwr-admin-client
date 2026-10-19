@@ -50,8 +50,15 @@ interface SheetState {
   key: number;
 }
 
-/** Метка места вставки: `insertBlock` расставляет разделители, а края режутся по ней. */
-const SLOT = '\u0000';
+/** Метка места вставки: `insertBlock` расставляет разделители, а края режутся по ней.
+ * Символ, которого в тексте нет (U+0000 и т. п. в заметке бывают), — иначе `indexOf` найдёт чужой. */
+function freeSlot(text: string): string {
+  for (let c = 0xe000; c <= 0xf8ff; c++) {
+    const ch = String.fromCharCode(c);
+    if (!text.includes(ch)) return ch;
+  }
+  throw new Error('no free slot');
+}
 
 function sheetForBlock(text: string, at: number, key: number): SheetState | null {
   const b = splitBlocks(text)[at];
@@ -70,14 +77,15 @@ function sheetForBlock(text: string, at: number, key: number): SheetState | null
 
 /** Новый блок после блока `after` (-1 — в начало). */
 function sheetForInsert(text: string, after: number, key: number): SheetState {
-  const joined = insertBlock(text, splitBlocks(text), after, SLOT);
-  const cut = joined.indexOf(SLOT);
+  const slot = freeSlot(text);
+  const joined = insertBlock(text, splitBlocks(text), after, slot);
+  const cut = joined.indexOf(slot);
   return {
     at: -1,
     insert: true,
     base: text,
     prefix: joined.slice(0, cut),
-    suffix: joined.slice(cut + SLOT.length),
+    suffix: joined.slice(cut + slot.length),
     raw: '',
     label: 'new',
     key,
