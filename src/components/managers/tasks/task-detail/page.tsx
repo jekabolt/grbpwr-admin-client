@@ -45,9 +45,7 @@ import {
   useUpdateTask,
   type InlinePatch,
 } from '../hooks/useTasks';
-import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { AttachmentTiles } from './attachment-tiles';
-import { PhoneTaskDetail } from './phone-detail';
 import { DueField, InlineDescription, InlineTitle, RowDate } from './inline-fields';
 import { AssigneesPicker } from '../components/assignees-picker';
 import { TaskDescriptionView } from '../components/task-description';
@@ -150,8 +148,6 @@ export function TaskDetail() {
   const [pickingParent, setPickingParent] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
-  // Ниже `md` — своя раскладка (tasks-mobile, макет OK 19.10); десктоп как был.
-  const phone = useMediaQuery(PHONE_QUERY);
 
   function editDescriptionOnDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
     // ТОЛЬКО ИЗ СВОЕГО DOM. Просмотрщик вложений, открытый из описания, рисуется порталом, а
@@ -159,11 +155,7 @@ export function TaskDetail() {
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (
-      e.target.closest(
-        ['a', 'button', '[role="button"]', 'img', 'video', 'input', 'textarea', 'select'].join(),
-      )
-    )
+    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select'))
       return;
     // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
     window.getSelection()?.removeAllRanges();
@@ -356,67 +348,6 @@ export function TaskDetail() {
       file
     </AddDoor>
   ) : null;
-
-  const overlays = (
-    <>
-      {attachments.node}
-
-      {initial && (
-        <TaskFormModal
-          open={editing}
-          onOpenChange={setEditing}
-          mode='edit'
-          initial={initial}
-          saving={updateTask.isPending || move.isPending}
-          onSubmit={handleSubmit}
-        />
-      )}
-
-      <ConfirmationModal
-        open={deleting}
-        onOpenChange={setDeleting}
-        onConfirm={confirmDelete}
-        title='delete task'
-        confirmLabel='delete'
-        width='sm'
-      >
-        <Text size='micro' component='span'>
-          Delete “{t.title}”? This can’t be undone.
-        </Text>
-      </ConfirmationModal>
-    </>
-  );
-
-  if (phone) {
-    return (
-      <>
-        <PhoneTaskDetail
-          task={task}
-          canWrite={canWrite}
-          media={media}
-          annotations={annotations}
-          links={links}
-          blockers={blockers}
-          attachmentCount={attachmentCount}
-          patching={inlinePatch.isPending}
-          busy={inlinePatch.isPending || move.isPending || archiveBusy}
-          failed={move.isError}
-          archiveBusy={archiveBusy}
-          editLocked={editLocked}
-          patchInline={patchInline}
-          moveTo={moveTo}
-          onArchiveToggle={() =>
-            isArchived ? unarchiveTask.mutate(task.id) : archiveTask.mutate(task.id)
-          }
-          onDelete={() => setDeleting(true)}
-          openEditor={openEditor}
-          openMedia={attachments.openMedia}
-          openMediaIndex={attachments.openIndex}
-        />
-        {overlays}
-      </>
-    );
-  }
 
   return (
     <div className='mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-5 overflow-x-clip pb-10'>
@@ -836,7 +767,31 @@ export function TaskDetail() {
         </aside>
       </div>
 
-      {overlays}
+      {attachments.node}
+
+      {initial && (
+        <TaskFormModal
+          open={editing}
+          onOpenChange={setEditing}
+          mode='edit'
+          initial={initial}
+          saving={updateTask.isPending || move.isPending}
+          onSubmit={handleSubmit}
+        />
+      )}
+
+      <ConfirmationModal
+        open={deleting}
+        onOpenChange={setDeleting}
+        onConfirm={confirmDelete}
+        title='delete task'
+        confirmLabel='delete'
+        width='sm'
+      >
+        <Text size='micro' component='span'>
+          Delete “{t.title}”? This can’t be undone.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }
