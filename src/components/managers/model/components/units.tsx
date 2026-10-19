@@ -41,7 +41,7 @@ export function MeasurementUnitProvider({ children }: { children: ReactNode }) {
 
 export function useMeasurementUnit() {
   const value = useContext(MeasurementUnitContext);
-  if (!value) throw new Error('useMeasurementUnit must be used within MeasurementUnitProvider');
+  if (!value) throw new Error('no MeasurementUnitProvider');
   return value;
 }
 

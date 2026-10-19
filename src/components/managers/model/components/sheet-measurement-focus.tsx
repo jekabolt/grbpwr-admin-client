@@ -57,7 +57,7 @@ export function SheetMeasurementFocusProvider({ children }: { children: ReactNod
 export function useSheetMeasurementFocus() {
   const value = useContext(SheetMeasurementFocusContext);
   if (!value)
-    throw new Error('useSheetMeasurementFocus must be used within SheetMeasurementFocusProvider');
+    throw new Error('no SheetMeasurementFocusProvider');
   return value;
 }
 
