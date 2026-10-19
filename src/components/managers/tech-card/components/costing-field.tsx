@@ -1824,7 +1824,7 @@ function MarketPicker({
               tabIndex={0}
               onClick={pick}
               onKeyDown={key(pick)}
-              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-bgSecondary ${selected ? 'font-bold' : ''} ${focus}`}
+              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-pageBg ${selected ? 'font-bold' : ''} ${focus}`}
             >
               {i.label}
             </span>
@@ -1893,7 +1893,7 @@ function StepRow({
           </Text>
         )}
       </span>
-      <span className='relative block h-[13px] bg-trackBg'>
+      <span className='relative block h-[13px] bg-pageBg'>
         <span
           className={`absolute top-0 h-[13px] ${fill}`}
           style={{ left: `${left}%`, width: `${Math.max(0, Math.min(100, width))}%` }}

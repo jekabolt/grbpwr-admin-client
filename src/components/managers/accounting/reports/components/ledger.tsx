@@ -14,12 +14,18 @@ import { ReportState } from './report-utils';
 // Net change over the period = closing − opening (a display figure derived from two server-sent
 // balances; the amounts themselves are never recomputed). Per-page debit/credit sums aren't shown
 // as "money in/out" because the ledger is paginated — they'd only cover the visible page.
-function netChangeLabel(opening?: string, closing?: string): { text: string; tone?: 'up' | 'down' } {
+function netChangeLabel(
+  opening?: string,
+  closing?: string,
+): { text: string; tone?: 'up' | 'down' } {
   const o = parseFloat(opening ?? '');
   const c = parseFloat(closing ?? '');
   if (!Number.isFinite(o) || !Number.isFinite(c)) return { text: '—' };
   const d = c - o;
-  const mag = Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const mag = Math.abs(d).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
   return { text: `${d >= 0 ? '+' : '−'}${mag}`, tone: d === 0 ? undefined : d > 0 ? 'up' : 'down' };
 }
 
@@ -132,7 +138,7 @@ export function LedgerTab({ code, from, to }: Props) {
                 {rows.map((r, idx) => {
                   const uuid = orderUuid(r.sourceType, r.sourceKey);
                   return (
-                    <tr key={r.entryId ?? idx} className='border-b border-textInactiveColor'>
+                    <tr key={r.entryId ?? idx} className='border-b border-borderColor'>
                       <td className='whitespace-nowrap px-2 py-1'>
                         {formatAcctDate(r.occurredAt)}
                       </td>
@@ -155,9 +161,7 @@ export function LedgerTab({ code, from, to }: Props) {
                             {sourceTypeLabel(r.sourceType)}
                           </Link>
                         ) : (
-                          <span className='text-textInactiveColor'>
-                            {sourceTypeLabel(r.sourceType)}
-                          </span>
+                          <span className='text-borderColor'>{sourceTypeLabel(r.sourceType)}</span>
                         )}
                       </td>
                       <AmountCell value={r.side === 'debit' ? r.amount : undefined} />

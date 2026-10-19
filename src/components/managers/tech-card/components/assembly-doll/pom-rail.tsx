@@ -67,7 +67,7 @@ export function PomRail({
             onBlur={() => setHoverPom(null)}
             className={cn(
               'cursor-default px-1 py-1.5 outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-              hot && 'bg-bgZebra',
+              hot && 'bg-pageBg',
             )}
           >
             <div className='flex items-baseline gap-2'>

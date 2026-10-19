@@ -86,7 +86,7 @@ function setInset(px: string) {
 /** Мини-кадр строки: расширение, а не превью. Превью живёт в движке и наружу не выдаётся. */
 function RowMini({ row }: { row: QueueRow }) {
   return (
-    <span className='flex size-7 flex-none items-center justify-center overflow-hidden border border-borderColor bg-bgSecondary'>
+    <span className='flex size-7 flex-none items-center justify-center overflow-hidden border border-borderColor bg-pageBg'>
       {row.status === 'prev' ? (
         <SkeletonLine className='h-7' />
       ) : (

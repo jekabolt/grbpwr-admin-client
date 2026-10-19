@@ -27,7 +27,7 @@ export const chartColors = {
   inkSecondary: '#666666', // --color-labelColor (axis labels, secondary text)
   muted: '#898781', // recessive marks / "no data"
   grid: '#e5e5e5', // hairline splitLine (lighter than the frame border)
-  axisLine: '#cccccc', // --color-textInactiveColor
+  axisLine: '#cccccc', // --color-borderColor
   accent: '#311eee', // --color-highlightColor
   compare: '#999999', // overlay / previous-period series
   warning: '#c65d00', // --color-warning (text only — fails 3:1 as a fill)

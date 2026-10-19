@@ -8,7 +8,7 @@ import Text from './text';
 /**
  * The one modal shell in the app. Reference grammar:
  *   panel  white, 1px INK border (not borderColor), --shadow-modal
- *   head   bgSecondary strip, 10px bold uppercase title, ✕ pushed right
+ *   head   pageBg strip, 10px bold uppercase title, ✕ pushed right
  *   body   p-2.5, scrolls, capped at 90vh
  *   foot   ruled top, right-aligned actions
  *
@@ -153,7 +153,7 @@ export function ConfirmationModal({
             Confirmation
           </DialogPrimitives.Description>
           {title ? (
-            <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+            <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
               <DialogPrimitives.Title asChild>
                 <Text
                   size='micro'

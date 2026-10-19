@@ -123,12 +123,12 @@ export function TierAudit() {
 
       {/* Table */}
       <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-9'>
+        <table className='w-full border-collapse border border-borderColor min-w-max'>
+          <thead className='bg-borderColor h-9'>
             <tr>
               {['ID', 'Date', 'From', 'To', 'Trigger', 'Actor', 'Spend @ change', 'Reason'].map(
                 (h) => (
-                  <th key={h} className='border border-textInactiveColor px-2 h-9'>
+                  <th key={h} className='border border-borderColor px-2 h-9'>
                     <Text variant='uppercase' size='small'>
                       {h}
                     </Text>
@@ -148,29 +148,29 @@ export function TierAudit() {
               </tr>
             ) : (
               entries.map((e) => (
-                <tr key={e.id} className='border-b border-textInactiveColor last:border-b-0 h-9'>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                <tr key={e.id} className='border-b border-borderColor last:border-b-0 h-9'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.id}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{formatDateShort(e.createdAt, true)}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.oldTier || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.newTier || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.triggerType || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.actor || <EmptyCell />}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{formatEur(e.spendEurAtChange)}</Text>
                   </td>
-                  <td className='border border-textInactiveColor text-center px-2'>
+                  <td className='border border-borderColor text-center px-2'>
                     <Text size='small'>{e.reason || <EmptyCell />}</Text>
                   </td>
                 </tr>

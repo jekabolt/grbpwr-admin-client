@@ -19,7 +19,7 @@ export function ColourwayDot({ colorway }: { colorway?: common_AdminColorwayRef 
   return (
     <span
       aria-hidden
-      className='inline-block size-[9px] shrink-0 border border-borderColor bg-bgSecondary'
+      className='inline-block size-[9px] shrink-0 border border-borderColor bg-pageBg'
       style={hex ? { background: hex } : undefined}
     />
   );

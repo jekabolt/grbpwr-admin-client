@@ -139,7 +139,7 @@ export function ViewSwitch<T extends string>({
                       'border-borderColor bg-bgColor text-labelColor',
                       !off && 'hover:text-textColor',
                     ),
-              o.disabled && !on && 'text-textInactiveColor',
+              o.disabled && !on && 'text-borderColor',
             )}
           >
             {o.label}

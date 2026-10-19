@@ -12,7 +12,7 @@ import { cn } from 'lib/utility';
  *     bottom rule, or the collapsed border model paints that hairline over the ink (O-48 review)
  *
  * `variant="grid"` is the matrix form (fabric map, size chart): every cell bordered
- * and centred, first column left-aligned on the zebra tint.
+ * and centred, first column left-aligned on the plain ground.
  *
  * The horizontal-scroll wrapper is built in — callers must not add their own, and it is
  * `relative` ON PURPOSE.
@@ -83,7 +83,7 @@ export function DataTable({
           // Right alignment is for digits; a column of words needs the other edge.
           '[&_th[data-align=left]]:text-left [&_td[data-align=left]]:text-left',
           variant === 'grid' &&
-            '[&_th]:border [&_th]:border-hairline [&_td]:border [&_td]:border-hairline [&_th]:text-center [&_td]:text-center [&_th:first-child]:bg-bgZebra [&_td:first-child]:bg-bgZebra',
+            '[&_th]:border [&_th]:border-hairline [&_td]:border [&_td]:border-hairline [&_th]:text-center [&_td]:text-center [&_th:first-child]:bg-bgColor [&_td:first-child]:bg-bgColor',
           className,
         )}
       >

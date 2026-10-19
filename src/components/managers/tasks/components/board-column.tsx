@@ -1,87 +1,78 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { cn } from 'lib/utility';
-import { AddDoor, Text } from 'ui';
+import { AddDoor, BoardColumn as BoardLane, BoardEmpty } from 'ui';
 import { Task, TaskStatus } from '../api/types';
 import { STATUS_LABEL } from '../utils/meta';
-import { SortableTaskCard } from './task-card';
+import { SortableTask } from './task-card';
 
-// tskBoard v1 (KEEP) — the five status columns and their cross-column drag stay put;
-// this file only trades the off-system greys (bg-black/[0.0x], text-[11px]) for the
-// design tokens. A column is a drop target: idle it is a faint zebra fill, hot it
-// tints bgSecondary and rings ink.
+// tskBoard v2 — one status lane on the ui `BoardColumn` shell. The dnd-kit droppable lives on
+// the lane's body (the shell does not forward a ref), and `isOver` drives the shell's own ring.
+// Below sm the lane is the only one on screen and takes the full width.
 export function BoardColumn({
   status,
   tasks,
   onOpen,
   onAdd,
+  onMove,
   canWrite,
   filtered,
+  className,
 }: {
   status: TaskStatus;
   tasks: Task[];
   onOpen: (task: Task) => void;
   onAdd: (status: TaskStatus) => void;
+  onMove: (task: Task, status: TaskStatus) => void;
   canWrite: boolean;
   filtered?: boolean;
+  className?: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
-    <section className='flex w-[85vw] shrink-0 snap-start flex-col sm:w-72'>
-      <header className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor pb-1.5'>
-        <div className='flex items-baseline gap-1.5'>
-          <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
-            {STATUS_LABEL[status]}
-          </Text>
-          <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {tasks.length}
-          </Text>
-        </div>
-        {canWrite && (
-          <button
-            type='button'
+    <BoardLane
+      title={STATUS_LABEL[status]}
+      count={tasks.length}
+      isDropTarget={isOver}
+      className={cn('max-sm:max-w-none', className)}
+      action={
+        canWrite && (
+          <AddDoor
+            shape='inline'
             onClick={() => onAdd(status)}
             aria-label={`add task to ${STATUS_LABEL[status]}`}
-            className='px-1 text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className='min-h-11 sm:min-h-0'
           >
-            +
-          </button>
-        )}
-      </header>
-
-      <div
-        ref={setNodeRef}
-        className={cn(
-          'mt-2 flex min-h-24 flex-1 flex-col gap-2 p-1 transition-colors',
-          isOver ? 'bg-bgSecondary ring-2 ring-inset ring-textColor' : 'bg-bgZebra',
-        )}
-      >
+            task
+          </AddDoor>
+        )
+      }
+    >
+      <div ref={setNodeRef} className='flex min-h-24 flex-1 flex-col gap-1.5'>
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => (
-            <SortableTaskCard key={t.id} task={t} onOpen={onOpen} disabled={!canWrite} />
+            <SortableTask
+              key={t.id}
+              task={t}
+              onOpen={onOpen}
+              onMove={onMove}
+              disabled={!canWrite}
+            />
           ))}
         </SortableContext>
 
         {tasks.length === 0 &&
           (filtered ? (
-            <div className='flex flex-1 items-center justify-center py-6'>
-              <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-                no matches
-              </Text>
-            </div>
+            <BoardEmpty className='flex flex-1 items-center justify-center'>no matches</BoardEmpty>
           ) : canWrite ? (
             <AddDoor className='flex-1 justify-center' onClick={() => onAdd(status)}>
               task
             </AddDoor>
           ) : (
-            <div className='flex flex-1 items-center justify-center py-6'>
-              <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-                empty
-              </Text>
-            </div>
+            <BoardEmpty className='flex flex-1 items-center justify-center'>empty</BoardEmpty>
           ))}
       </div>
-    </section>
+    </BoardLane>
   );
 }

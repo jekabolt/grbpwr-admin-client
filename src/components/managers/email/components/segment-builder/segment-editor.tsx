@@ -150,7 +150,7 @@ export function SegmentEditor() {
   return (
     <div className='flex flex-col'>
       {/* header bar */}
-      <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex items-baseline gap-2'>
           <BackLink onClick={() => navigate(ROUTES.emailSegments)}>segments</BackLink>
           <Text variant='uppercase' size='large'>

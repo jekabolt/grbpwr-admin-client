@@ -111,7 +111,7 @@ export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) =>
     pressed={isSelected}
     onClick={() => onSelect(symbol)}
     media={
-      <div className='bg-bgZebra p-1'>
+      <div className='bg-pageBg p-1'>
         {symbol.img ? (
           <Media src={symbol.img} alt={symbol.name} aspectRatio='1/1' fit='contain' />
         ) : (
@@ -127,7 +127,7 @@ export const CareCard: FC<CareCardProps> = ({ symbol, isSelected, onSelect }) =>
     }
     name={symbol.name}
     sub={symbol.code}
-    className={isSelected ? 'bg-bgZebra' : undefined}
+    className={isSelected ? 'bg-pageBg' : undefined}
   />
 );
 

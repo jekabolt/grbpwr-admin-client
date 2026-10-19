@@ -619,7 +619,7 @@ export function CreateQuiz({
                 key={r.step}
                 type='button'
                 onClick={() => setAt(r.step)}
-                className='block w-full border-b border-hairline text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
+                className='block w-full border-b border-hairline text-left last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
                 aria-label={`change ${r.label}`}
               >
                 <Row

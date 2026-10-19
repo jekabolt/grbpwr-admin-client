@@ -36,7 +36,7 @@ const Stage: FC<{
 
 const Arrow: FC = () => (
   <div
-    className='hidden shrink-0 items-center self-stretch text-textInactiveColor sm:flex'
+    className='hidden shrink-0 items-center self-stretch text-borderColor sm:flex'
     aria-hidden
   >
     →
@@ -74,7 +74,7 @@ export const DeliveryPanel: FC<DeliveryPanelProps> = ({ delivery }) => {
   const notes: ReactNode[] = [];
   if (deliveredN > 0 && deliveredCov > 0 && deliveredCov < SURVIVORSHIP_FLOOR_PCT) {
     notes.push(
-      <div key='survivorship' className='border border-warning bg-bgSecondary p-2'>
+      <div key='survivorship' className='border border-warning bg-pageBg p-2'>
         <Text className='text-warning text-textBaseSize'>
           Only {deliveredCov.toFixed(0)}% of shipped orders have reached delivered — durations are
           biased toward the fast ones.

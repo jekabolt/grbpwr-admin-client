@@ -48,7 +48,7 @@ function FilterRow<T extends string | undefined>({
             'border px-2 py-1 leading-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             active === v
               ? 'border-textColor bg-textColor text-bgColor'
-              : 'border-textInactiveColor hover:bg-textColor hover:text-bgColor',
+              : 'border-borderColor hover:bg-textColor hover:text-bgColor',
           )}
         >
           <Text size='small' variant='uppercase' className={active === v ? '!text-bgColor' : ''}>

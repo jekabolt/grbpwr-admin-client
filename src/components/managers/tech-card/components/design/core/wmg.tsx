@@ -309,7 +309,7 @@ export function WordsAsSent({
           {/* A PANEL FILL, NOT A SECOND BOX: a tint inside the block, never a bordered rectangle
               (a box in a box). Paragraphs long, so it scrolls INSIDE its own frame — wrapped and
               broken, never widening the page. */}
-          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+          <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
             {text}
           </pre>
           {caveat ? (
@@ -368,7 +368,7 @@ export function CopyWords({
       >
         words
       </GroupLabel>
-      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+      <pre className='overflow-x-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
         {words}
       </pre>
       {doors && doors.length > 0 ? (

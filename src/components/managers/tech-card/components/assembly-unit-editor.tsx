@@ -395,7 +395,7 @@ function UnitStepRow({
       title={`${label} — open this step in the editor`}
       className={cn(
         'flex min-w-0 cursor-pointer items-center gap-1.5 border px-1 py-1 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-        selected ? 'border-textColor bg-bgZebra' : 'border-transparent hover:border-borderColor',
+        selected ? 'border-textColor bg-pageBg' : 'border-transparent hover:border-borderColor',
       )}
     >
       <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>

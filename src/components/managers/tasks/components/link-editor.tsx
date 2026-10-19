@@ -69,7 +69,7 @@ function SetLinkChip({
   });
   const name = data?.label ?? `#${value}`;
   return (
-    <Chip onRemove={onRemove} title={`${type.label}: ${name}`}>
+    <Chip onRemove={onRemove} title={`${type.label}: ${name}`} className='min-h-11 sm:min-h-0'>
       <span className='max-w-[18ch] truncate'>
         {type.label}: {name}
       </span>
@@ -113,7 +113,7 @@ export function LinkEditor({
           >
             add link
           </Text>
-          <div className='w-40'>
+          <div className='min-w-0 flex-1 sm:w-40 sm:flex-none'>
             <Select
               name='link-type'
               items={typeItems}
@@ -122,6 +122,7 @@ export function LinkEditor({
                 setType(LINK_TYPES.find((t) => t.field === v) ?? LINK_TYPES[0])
               }
               placeholder='link type'
+              className='min-h-11 sm:min-h-0'
               fullWidth
             />
           </div>

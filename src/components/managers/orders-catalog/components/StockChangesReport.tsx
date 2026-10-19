@@ -79,7 +79,7 @@ export function StockChangesReport() {
       </Text>
       <div className='flex flex-wrap items-center gap-2'>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             From
           </Text>
           <Input
@@ -91,7 +91,7 @@ export function StockChangesReport() {
           />
         </label>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             To
           </Text>
           <Input

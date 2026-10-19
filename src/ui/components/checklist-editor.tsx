@@ -58,7 +58,7 @@ export function ChecklistEditor({
         </Text>
         {total > 0 && (
           <div
-            className='h-1 w-24 shrink-0 bg-textInactiveColor'
+            className='h-1 w-24 shrink-0 bg-borderColor'
             role='progressbar'
             aria-valuenow={pct}
             aria-valuemin={0}
@@ -78,7 +78,7 @@ export function ChecklistEditor({
           {items.map((item) => (
             <li
               key={item.id}
-              className='group flex items-center gap-2 border-b border-textInactiveColor py-1.5 last:border-b-0'
+              className='group flex items-center gap-2 border-b border-borderColor py-1.5 last:border-b-0'
             >
               <button
                 type='button'
@@ -90,7 +90,7 @@ export function ChecklistEditor({
                 disabled={!canWrite}
                 onClick={() => onToggle(item.id, !item.isDone)}
                 className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center border border-textInactiveColor text-micro leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  'flex h-4 w-4 shrink-0 items-center justify-center border border-borderColor text-micro leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   item.isDone ? 'bg-textColor text-bgColor' : 'bg-bgColor text-transparent',
                   !canWrite && 'cursor-default opacity-70',
                 )}

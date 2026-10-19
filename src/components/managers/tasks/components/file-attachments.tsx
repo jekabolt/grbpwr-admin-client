@@ -13,7 +13,7 @@ import { extensionOf } from 'components/managers/files/utils/format';
 // формат русский («500 кб»), и эта строка — собственная подпись ЭКРАНА ЗАДАЧ, английского
 // целиком. Арифметика у обоих одна и та же, различаются только слова.
 import { formatBytes } from 'utils/pattern';
-import { Button, Chip, ChipRow, ConfirmationModal, Input, Text, Tile, Tiles } from 'ui';
+import { Button, Chip, ChipRow, ConfirmationModal, Input, Media, Text, Tile, Tiles } from 'ui';
 
 /**
  * Library files attached to a card.
@@ -60,7 +60,13 @@ export function FileAttachments({
         {/* ЯВНЫЙ `type`. Этот блок живёт ВНУТРИ `<form>` правки задачи, а у кнопки без типа
             браузер подразумевает `submit`: клик открывал пикер И отправлял форму — модалка
             правки закрывалась вместе с пикером, и в ответ прилетало «task saved». */}
-        <Button type='button' size='xs' variant='secondary' onClick={() => setPickerOpen(true)}>
+        <Button
+          type='button'
+          size='xs'
+          variant='secondary'
+          className='min-h-11 sm:min-h-0'
+          onClick={() => setPickerOpen(true)}
+        >
           attach
         </Button>
       </div>
@@ -72,10 +78,13 @@ export function FileAttachments({
       ) : (
         <div className='flex flex-col'>
           {files.map((f) => (
-            <div key={f.id} className='flex items-center gap-2 border-b border-hairline py-1'>
-              <div className='flex h-8 w-8 flex-none items-center justify-center bg-bgSecondary'>
+            <div
+              key={f.id}
+              className='flex flex-wrap items-center gap-2 border-b border-hairline py-1 last:border-b-0'
+            >
+              <div className='flex h-8 w-8 flex-none items-center justify-center bg-pageBg'>
                 {f.previewUrl ? (
-                  <img src={f.previewUrl} alt='' className='h-full w-full object-contain' />
+                  <Media src={f.previewUrl} alt='' aspectRatio='auto' fit='contain' />
                 ) : (
                   <Text size='nano' variant='label' className='uppercase'>
                     {extensionOf(f.fileName ?? '')}
@@ -88,16 +97,24 @@ export function FileAttachments({
               <Text size='micro' variant='label'>
                 {formatBytes(Number(f.sizeBytes ?? 0))}
               </Text>
-              {(f.url || f.downloadUrl) && (
-                <Button asChild size='xs' variant='secondary'>
-                  <a href={f.url || f.downloadUrl} target='_blank' rel='noopener noreferrer'>
-                    open
-                  </a>
+              <div className='flex w-full items-center justify-end gap-2 sm:w-auto'>
+                {(f.url || f.downloadUrl) && (
+                  <Button asChild size='xs' variant='secondary' className='min-h-11 sm:min-h-0'>
+                    <a href={f.url || f.downloadUrl} target='_blank' rel='noopener noreferrer'>
+                      open
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  className='min-h-11 sm:min-h-0'
+                  onClick={() => remove(Number(f.id))}
+                >
+                  remove
                 </Button>
-              )}
-              <Button type='button' size='xs' variant='secondary' onClick={() => remove(Number(f.id))}>
-                remove
-              </Button>
+              </div>
             </div>
           ))}
         </div>
@@ -157,12 +174,18 @@ function FilePicker({
           name='pickerSearch'
           value={search}
           placeholder='file name or topic'
+          className='min-h-11 sm:min-h-0'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
         />
         {/* `pressed` рядом с `selected` — как у чипов задач и файлов: `selected` красит, а
             состояние органа скринридеру объявляет только `aria-pressed`. */}
         <ChipRow>
-          <Chip selected={topicId === 0} pressed={topicId === 0} onClick={() => setTopicId(0)}>
+          <Chip
+            selected={topicId === 0}
+            pressed={topicId === 0}
+            className='min-h-11 sm:min-h-0'
+            onClick={() => setTopicId(0)}
+          >
             all
           </Chip>
           {topics.map((t) => (
@@ -170,6 +193,7 @@ function FilePicker({
               key={t.id}
               selected={topicId === Number(t.id)}
               pressed={topicId === Number(t.id)}
+              className='min-h-11 sm:min-h-0'
               onClick={() => setTopicId(Number(t.id))}
             >
               {t.name}
@@ -199,14 +223,11 @@ function FilePicker({
                   onClick={() => onToggle(Number(f.id))}
                   media={
                     f.previewUrl ? (
-                      <img
-                        src={f.previewUrl}
-                        alt=''
-                        loading='lazy'
-                        className='aspect-square w-full bg-bgSecondary object-contain'
-                      />
+                      <div className='bg-pageBg'>
+                        <Media src={f.previewUrl} alt='' aspectRatio='1/1' fit='contain' />
+                      </div>
                     ) : (
-                      <div className='flex aspect-square w-full items-center justify-center bg-bgSecondary'>
+                      <div className='flex aspect-square w-full items-center justify-center bg-pageBg'>
                         <Text size='micro' variant='label' className='uppercase'>
                           {extensionOf(f.fileName ?? '')}
                         </Text>
@@ -224,6 +245,7 @@ function FilePicker({
             type='button'
             size='sm'
             variant='secondary'
+            className='min-h-11 sm:min-h-0'
             disabled={filesQuery.isFetchingNextPage}
             onClick={() => filesQuery.fetchNextPage()}
           >
@@ -231,7 +253,7 @@ function FilePicker({
           </Button>
         )}
 
-        <Button type='button' size='sm' onClick={onClose}>
+        <Button type='button' size='sm' className='min-h-11 sm:min-h-0' onClick={onClose}>
           done
         </Button>
       </div>

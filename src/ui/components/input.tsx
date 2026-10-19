@@ -24,7 +24,7 @@ function Input({ type = 'text', className, name, ref, ...props }: InputProps) {
         // specificity, so the compound variant is what guarantees red survives on the focused field
         // (which is exactly the one a failed save deep-links to).
         'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
-        'placeholder:text-textInactiveColor disabled:bg-bgZebra disabled:text-labelColor',
+        'placeholder:text-borderColor disabled:bg-pageBg disabled:text-labelColor',
         className,
       )}
       {...props}

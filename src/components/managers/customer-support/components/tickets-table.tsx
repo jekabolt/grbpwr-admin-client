@@ -124,7 +124,7 @@ export function TicketsTable({
                 <th
                   key={col.key}
                   className={cn(
-                    'h-10 min-w-20 border border-r border-borderColor bg-bgSecondary px-2 text-center',
+                    'h-10 min-w-20 border border-r border-borderColor bg-pageBg px-2 text-center',
                     {
                       'sticky left-0 z-10': col.key === 'id',
                     },

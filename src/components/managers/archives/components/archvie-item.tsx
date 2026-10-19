@@ -56,7 +56,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
       onClick={handleArchiveClick}
       className='group relative flex cursor-pointer flex-col overflow-hidden border border-borderColor bg-bgColor hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]'
     >
-      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>
+      <div className='aspect-[4/5] w-full overflow-hidden border-b border-borderColor bg-bgColor'>
         {archive.thumbnail?.media?.fullSize?.mediaUrl && (
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
@@ -71,7 +71,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           {archive.translations?.[0]?.heading}
         </Text>
         {archive.tag && (
-          <span className='mt-1 inline-block w-fit border border-textInactiveColor px-1.5 py-0.5'>
+          <span className='mt-1 inline-block w-fit border border-borderColor px-1.5 py-0.5'>
             <Text size='small' variant='uppercase'>
               {archive.tag}
             </Text>

@@ -16,7 +16,7 @@ export const buttonVariants = cva(
           'text-textColor',
           'bg-bgColor',
           'border',
-          'border-textInactiveColor',
+          'border-borderColor',
           'leading-4',
         ],
         main: [
@@ -29,39 +29,37 @@ export const buttonVariants = cva(
           'hover:text-textColor',
           // Disabled reads as an outline, not a filled grey slab (reference grammar).
           'disabled:bg-bgColor',
-          'disabled:text-textInactiveColor',
-          'disabled:border-textInactiveColor',
+          'disabled:text-borderColor',
+          'disabled:border-borderColor',
           'leading-4',
           'text-center',
         ],
         secondary: [
           'border',
-          'border-textInactiveColor',
+          'border-borderColor',
           'text-textBaseSize',
           'text-textColor',
           'hover:bg-textColor',
           'hover:text-bgColor',
-          'hover:border-textInactiveColor',
           'disabled:bg-bgColor',
-          'disabled:text-textInactiveColor',
-          'disabled:border-textInactiveColor',
+          'disabled:text-borderColor',
           'disabled:hover:bg-bgColor',
-          'disabled:hover:text-textInactiveColor',
+          'disabled:hover:text-borderColor',
           'leading-4',
           'text-center',
         ],
-        underline: ['underline', 'disabled:text-textInactiveColor'],
-        underlineReverse: ['text-bgColor', 'underline', 'disabled:text-textInactiveColor'],
+        underline: ['underline', 'disabled:text-borderColor'],
+        underlineReverse: ['text-bgColor', 'underline', 'disabled:text-borderColor'],
         underlineWithColors: [
           'underline',
           'text-highlightColor',
-          'disabled:text-textInactiveColor',
+          'disabled:text-borderColor',
           'visited:text-visitedLinkColor',
         ],
         strikeThrough: [
           'relative',
           'text-textBaseSize',
-          'text-textInactiveColor',
+          'text-borderColor',
           'before:absolute',
           'before:top-1/2',
           'before:left-0',
@@ -209,7 +207,7 @@ export function Button({
 
 /** The back door's skin: one underlined label word, quiet until hovered. */
 const BACK_LINK =
-  'inline-block w-fit text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+  'inline-block w-fit text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor disabled:cursor-not-allowed disabled:text-borderColor disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
 /**
  * The one way back: `← word`, an underlined word at the top of a screen, a drawer, a wizard step or

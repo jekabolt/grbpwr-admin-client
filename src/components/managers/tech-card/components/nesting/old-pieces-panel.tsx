@@ -110,9 +110,9 @@ function PieceTile({
       onClick={onMove}
       className={cn(
         'w-full border bg-bgColor text-left',
-        'disabled:bg-bgColor disabled:text-textInactiveColor',
+        'disabled:bg-bgColor disabled:text-borderColor',
         decision === 'keep'
-          ? 'border-textColor text-textColor hover:bg-bgZebra'
+          ? 'border-textColor text-textColor hover:bg-pageBg'
           : 'border-hairline text-labelColor hover:border-borderColor',
       )}
     >

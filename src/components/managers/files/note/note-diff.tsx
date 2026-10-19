@@ -152,8 +152,8 @@ export function NoteDiff({
               r.op === 'same'
                 ? 'flex gap-2 px-2 text-labelColor'
                 : r.op === 'theirs'
-                  ? 'flex gap-2 bg-bgZebra px-2 text-error'
-                  : 'flex gap-2 bg-bgZebra px-2 text-textColor'
+                  ? 'flex gap-2 bg-pageBg px-2 text-error'
+                  : 'flex gap-2 bg-pageBg px-2 text-textColor'
             }
           >
             <span aria-hidden className='w-3 shrink-0 select-none text-center'>

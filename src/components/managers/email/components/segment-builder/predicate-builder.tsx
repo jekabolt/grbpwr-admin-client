@@ -48,7 +48,7 @@ function AndOrToggle({
   disabled?: boolean;
 }) {
   return (
-    <div className='flex border border-textInactiveColor'>
+    <div className='flex border border-borderColor'>
       {(['AND', 'OR'] as const).map((op) => (
         <button
           key={op}
@@ -102,7 +102,7 @@ function LeafRow({
       <div
         className={cn(
           'flex flex-col gap-2 border bg-bgColor p-2 lg:flex-row lg:items-start',
-          issue ? 'border-error' : 'border-textInactiveColor',
+          issue ? 'border-error' : 'border-borderColor',
         )}
       >
         <div className='shrink-0 lg:w-[190px]'>
@@ -186,7 +186,7 @@ function GroupNodeCard({
     <div
       className={cn(
         'flex flex-col gap-3 border p-3',
-        isRoot ? 'border-textColor' : 'border-textInactiveColor',
+        isRoot ? 'border-textColor' : 'border-borderColor',
       )}
     >
       <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -219,7 +219,7 @@ function GroupNodeCard({
           no conditions — matches everyone. add a condition to narrow the audience.
         </Text>
       ) : (
-        <div className='flex flex-col gap-2 border-l border-textInactiveColor pl-3'>
+        <div className='flex flex-col gap-2 border-l border-borderColor pl-3'>
           {node.children.map((child) =>
             child.kind === 'leaf' ? (
               <LeafRow

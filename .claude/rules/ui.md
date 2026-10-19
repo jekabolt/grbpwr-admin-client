@@ -30,7 +30,7 @@ them before building a screen; this file only adds the owner's rules on top and 
 - No bold for emphasis. Weight 700 only where DESIGN.md puts it (section titles, stat values).
 - One control size per row: inputs, selects, pickers and picture slots in one row share one footprint
   (a small select next to a big tile reads as broken).
-- Colour only on text and borders, brand tokens only; never `bg-{error,warning,success,red}/NN` washes
+- Colour only on text and borders, brand tokens only; never `bg-{error,warning,success}/NN` washes
   (the owner rejects them as "coral"). State is a word or a glyph, not colour alone.
 - Lists and pickers: scannable cards/tiles with a thumbnail. Tabs inside a tech card: the barest
   matrix, cells = values. Plain tables only for genuinely dense comparison.

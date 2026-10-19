@@ -86,12 +86,9 @@ export default function FilterOptionButtons({
       <Button
         onClick={() => handleClick(factorId)}
         disabled={!isAvailable}
-        className={cn(
-          'block border border-transparent uppercase md:hover:border-textInactiveColor',
-          {
-            'border-textInactiveColor': isSelected,
-          },
-        )}
+        className={cn('block border border-transparent uppercase md:hover:border-borderColor', {
+          'border-borderColor': isSelected,
+        })}
         key={factorId}
       >
         {displayName}

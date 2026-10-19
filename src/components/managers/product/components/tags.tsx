@@ -161,7 +161,7 @@ export function Tags({
         </Button>
       )}
       {(isEditMode || (showAddTagField && isAddingProduct)) && (
-        <div className='flex items-center border-b border-textInactiveColor w-full'>
+        <div className='flex items-center border-b border-borderColor w-full'>
           <div className='flex-1'>
             <Input
               name='product.tags'

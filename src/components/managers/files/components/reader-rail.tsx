@@ -50,7 +50,7 @@ export function ReaderRail({
           onClick={() => onPick(n)}
           className={cn(
             'flex flex-col items-center gap-1 border-b border-hairline p-1.5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor',
-            visible.includes(n) ? 'bg-textColor' : 'hover:bg-bgZebra',
+            visible.includes(n) ? 'bg-textColor' : 'hover:bg-pageBg',
           )}
         >
           <ReaderThumb doc={doc} pageNumber={n} />
@@ -148,7 +148,7 @@ function ReaderThumb({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: n
     //
     // Рамки НЕТ: рельс — уже блок со своей рамкой, а блок в блоке против DESIGN.md. Белый
     // лист миниатюры видно на серой подложке — той самой инверсией, на которой стоит система.
-    <div ref={holderRef} className='min-h-[96px] w-[76px] bg-bgSecondary'>
+    <div ref={holderRef} className='min-h-[96px] w-[76px] bg-pageBg'>
       <canvas ref={canvasRef} className='block w-full' />
     </div>
   );

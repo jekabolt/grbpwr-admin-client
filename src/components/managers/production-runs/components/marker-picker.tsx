@@ -119,7 +119,7 @@ export function MarkerPicker({
       )}
     >
       {/* Список во всю ширину поповера — тот же приём, что у пикера слота в рецепте колорвея:
-          текущий вариант помечается зеброй и галочкой, а не заливкой чернилами (заливка — контракт
+          текущий вариант помечается галочкой, а не заливкой чернилами (заливка — контракт
           Chip, кликабельного токена, а не строки списка). */}
       <div role='listbox' aria-label='section marker' className='-mx-2 -my-1.5'>
         {runMarkers.length === 0 ? (
@@ -145,7 +145,7 @@ export function MarkerPicker({
                 }}
                 className={cn(
                   'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                  current && 'bg-bgZebra',
+                  current && 'bg-pageBg',
                   !fit.eligible && 'cursor-not-allowed',
                 )}
               >

@@ -12,7 +12,7 @@ import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 // here so the wizard is the single editor of composition and the modal only imports the shape.
 export type CompRow = { fiberCode: string; percent: string };
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 type Step = 'fibres' | 'percent' | 'review';
 const STEPS: { key: Step; label: string }[] = [
@@ -161,8 +161,8 @@ export function CompositionWizard({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal container={document.body}>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               composition
             </DialogPrimitives.Title>
@@ -175,7 +175,7 @@ export function CompositionWizard({
           </DialogPrimitives.Description>
 
           {/* step indicator (mirrors the opex wizard chrome) */}
-          <div className='flex items-center gap-1 border-b border-textInactiveColor px-4 py-2'>
+          <div className='flex items-center gap-1 border-b border-borderColor px-4 py-2'>
             {STEPS.map((s, i) => (
               <div key={s.key} className='flex items-center gap-1'>
                 <span
@@ -185,12 +185,12 @@ export function CompositionWizard({
                       ? 'text-textColor'
                       : i < stepIndex
                         ? 'text-textColor/60'
-                        : 'text-textInactiveColor',
+                        : 'text-borderColor',
                   )}
                 >
                   {i + 1}. {s.label}
                 </span>
-                {i < STEPS.length - 1 && <span className='text-textInactiveColor'>›</span>}
+                {i < STEPS.length - 1 && <span className='text-borderColor'>›</span>}
               </div>
             ))}
           </div>
@@ -203,7 +203,7 @@ export function CompositionWizard({
                 </Text>
 
                 {displayFibers.length === 0 ? (
-                  <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+                  <div className='flex flex-col gap-1 border border-borderColor p-3'>
                     <Text size='small'>no fibres in the dictionary yet</Text>
                     <Text size='small' variant='inactive'>
                       create your first fibre below — it is added to the shared dictionary and
@@ -224,7 +224,7 @@ export function CompositionWizard({
                             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
                             selected
                               ? 'border-textColor bg-textColor/5'
-                              : 'border-textInactiveColor hover:border-textColor',
+                              : 'border-borderColor hover:border-textColor',
                           )}
                         >
                           <span className='flex min-w-0 flex-col'>
@@ -241,7 +241,7 @@ export function CompositionWizard({
                           <span
                             className={cn(
                               'shrink-0 text-small uppercase',
-                              selected ? 'text-textColor' : 'text-textInactiveColor',
+                              selected ? 'text-textColor' : 'text-borderColor',
                             )}
                           >
                             {selected ? '✓' : 'add'}
@@ -259,7 +259,7 @@ export function CompositionWizard({
                 )}
 
                 {/* inline create fibre — always available so an empty/short dictionary never blocks. */}
-                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                <div className='flex flex-col gap-2 border border-borderColor p-3'>
                   <Text size='small' variant='uppercase'>
                     create a new fibre
                   </Text>
@@ -338,7 +338,7 @@ export function CompositionWizard({
                     total {Number(total.toFixed(2))}%{valid ? ' ✓' : ' / 100'}
                   </Text>
                 </div>
-                <div className='h-1.5 w-full bg-textInactiveColor/30'>
+                <div className='h-1.5 w-full bg-borderColor/30'>
                   <div
                     className={cn('h-full transition-all', over ? 'bg-error' : 'bg-textColor')}
                     style={{ width: `${Math.min(Math.max(total, 0), 100)}%` }}
@@ -354,11 +354,11 @@ export function CompositionWizard({
                     No fibres selected — composition will be left unset.
                   </Text>
                 ) : (
-                  <div className='border border-textInactiveColor'>
+                  <div className='border border-borderColor'>
                     {rows.map((r) => (
                       <div
                         key={r.fiberCode}
-                        className='flex items-center justify-between gap-3 border-b border-textInactiveColor/40 px-3 py-1.5'
+                        className='flex items-center justify-between gap-3 border-b border-borderColor/40 px-3 py-1.5'
                       >
                         <Text size='small' variant='inactive' className='min-w-0 truncate'>
                           {fiberLabel(r.fiberCode)}
@@ -391,7 +391,7 @@ export function CompositionWizard({
           </div>
 
           {/* footer nav */}
-          <div className='sticky bottom-0 flex items-center justify-between gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex items-center justify-between gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <div>
               {step !== 'fibres' && (
                 <Button

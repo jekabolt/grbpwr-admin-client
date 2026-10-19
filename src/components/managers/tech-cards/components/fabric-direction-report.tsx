@@ -640,7 +640,7 @@ function GapCardTile({
             <Link
               key={line.lineKey || String(line.bomItemId)}
               to={bomHref(id, line.lineKey)}
-              className='block border-b border-hairline py-1 last:border-b-0 hover:bg-bgZebra'
+              className='block border-b border-hairline py-1 last:border-b-0 hover:bg-pageBg'
             >
               <div className='flex items-center gap-1.5'>
                 <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>

@@ -298,9 +298,9 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[760px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[760px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               new journal entry
             </DialogPrimitives.Title>
@@ -394,7 +394,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
                   </Text>
                 </div>
               ) : monthInfo?.isPast ? (
-                <div className='border border-textInactiveColor p-3'>
+                <div className='border border-borderColor p-3'>
                   <Text size='small' variant='inactive'>
                     dated {monthInfo.month} (an open past month) — the list shows the current month
                     by default, so this entry won&apos;t appear there after posting. use the
@@ -404,7 +404,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
               ) : null}
 
               {hasAPLine && (
-                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                <div className='flex flex-col gap-2 border border-borderColor p-3'>
                   <Text variant='inactive' size='small'>
                     supplier — required: a line posts to 2010 accounts payable
                   </Text>
@@ -552,7 +552,7 @@ function LineRow({
   const mode = useWatch({ control, name: `lines.${index}.amountMode` }) as 'base' | 'src';
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+    <div className='flex flex-col gap-2 border border-borderColor p-3'>
       <div className='flex items-center justify-between'>
         <Text size='small' variant='inactive'>
           line {index + 1}

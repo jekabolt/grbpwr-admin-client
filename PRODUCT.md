@@ -56,7 +56,7 @@ one obvious thing. Three words: stark, exact, quick.
 ## Accessibility & Inclusion
 
 Target WCAG AA. Body/label text uses `labelColor` (#666, ~5.7:1), never the
-decorative `textInactiveColor` (#ccc). Every interactive control has a visible
+decorative `borderColor` (#ccc). Every interactive control has a visible
 `focus-visible` outline. Honor `prefers-reduced-motion` for any added motion.
 Monochrome-safe: state is never carried by color alone (unsaved = worded badge,
 incomplete = `!` glyph, not just red).

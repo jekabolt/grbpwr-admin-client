@@ -9,7 +9,7 @@ import { TechCardFormData } from './schema';
 // Same box metrics as <Input>/<Select> so a BOM-line reference is indistinguishable from any
 // other field on the card.
 const cell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 const SECTION_SHORT: Record<string, string> = {
   TECH_CARD_BOM_SECTION_FABRIC: 'fabric',

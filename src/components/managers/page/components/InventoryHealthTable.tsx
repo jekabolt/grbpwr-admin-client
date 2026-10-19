@@ -114,7 +114,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
               const daysOnHand = row.daysOnHand ?? 0;
               const isVeryHigh = daysOnHand > 90 && daysOnHand < DAYS_ON_HAND_NO_SALES_SENTINEL;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

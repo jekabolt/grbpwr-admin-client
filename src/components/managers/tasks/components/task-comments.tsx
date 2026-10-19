@@ -130,17 +130,19 @@ export function TaskComments({
                       {formatDistanceToNow(new Date(c.createdAt), { addSuffix: true })}
                     </Text>
                     {canDeleteComment(c, account?.username, isSuper) && (
-                      <button
+                      <Button
                         type='button'
+                        variant='underline'
+                        size='xs'
                         /* Имя РАЗЛИЧИМОЕ: в ленте таких кнопок столько же, сколько реплик, и
                            «delete» без адреса не находится ни читалкой с экрана, ни стендом. */
                         aria-label={`delete comment ${c.id}`}
                         disabled={del.isPending}
                         onClick={() => setPendingDelete(c)}
-                        className='text-nano uppercase tracking-label text-labelColor underline hover:text-error disabled:opacity-50'
+                        className='min-h-11 text-nano text-labelColor hover:text-error disabled:opacity-50 sm:min-h-0'
                       >
                         delete
-                      </button>
+                      </Button>
                     )}
                   </span>
                 </div>
@@ -164,7 +166,7 @@ export function TaskComments({
           type='button'
           variant='secondary'
           size='sm'
-          className='self-end'
+          className='min-h-11 self-end sm:min-h-0'
           loading={add.isPending}
           disabled={!body.trim()}
           onClick={submit}

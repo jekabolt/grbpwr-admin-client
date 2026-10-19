@@ -106,9 +106,9 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               post transaction
             </DialogPrimitives.Title>
@@ -121,7 +121,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
           <Form {...form}>
             <div className='flex flex-col gap-4 p-4'>
               {/* The line under review — read-only context for the posting decision. */}
-              <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+              <div className='flex flex-col gap-1 border border-borderColor p-3'>
                 <div className='flex items-baseline justify-between gap-2'>
                   <Text size='small' variant='inactive'>
                     amount
@@ -150,7 +150,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
               />
 
               {postsToAP && (
-                <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+                <div className='flex flex-col gap-2 border border-borderColor p-3'>
                   <Text variant='inactive' size='small'>
                     supplier — required: 2010 payables are tracked per supplier
                   </Text>

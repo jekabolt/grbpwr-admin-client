@@ -215,7 +215,7 @@ function SwatchOption({
       title={title}
       onClick={onPick}
       className={`flex min-w-0 flex-col gap-0.5 p-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-        on ? 'bg-textColor' : 'hover:bg-bgZebra'
+        on ? 'bg-textColor' : 'hover:bg-pageBg'
       }`}
     >
       <span
@@ -438,7 +438,7 @@ export function PantonePicker({
           <span
             className={`inline-flex min-h-[22px] items-center gap-1.5 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
               fill ? 'w-full min-w-0' : ''
-            } ${disabled ? 'text-textInactiveColor' : 'hover:border-textColor'}`}
+            } ${disabled ? 'text-borderColor' : 'hover:border-textColor'}`}
           >
             {(current || shownHex) && (
               <span

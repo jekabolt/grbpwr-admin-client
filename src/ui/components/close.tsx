@@ -3,7 +3,7 @@ import { cn } from 'lib/utility';
 import { Button } from './button';
 
 const closeVariants = cva(
-  'inline-flex shrink-0 items-center justify-center rounded-none border-0 bg-transparent leading-4 text-textColor no-underline shadow-none transition-colors underline-offset-2 hover:underline disabled:text-textInactiveColor',
+  'inline-flex shrink-0 items-center justify-center rounded-none border-0 bg-transparent leading-4 text-textColor no-underline shadow-none transition-colors underline-offset-2 hover:underline disabled:text-borderColor',
   {
     variants: {
       size: {

@@ -44,7 +44,7 @@ export function ReleaseBlockersModal({
               key={`${b.tab}-${i}`}
               type='button'
               onClick={() => goTo(b.tab)}
-              className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
+              className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-pageBg'
             >
               <span className='flex min-w-0 flex-1 flex-col'>
                 <Text size='micro' component='span'>

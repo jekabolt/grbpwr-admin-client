@@ -86,7 +86,7 @@ export function AccountsTable({
           <div
             key={i}
             className={cn(
-              'h-24 animate-pulse bg-textInactiveColor/30',
+              'h-24 animate-pulse bg-borderColor/30',
               i > 0 && 'border-t border-hairline',
             )}
           />

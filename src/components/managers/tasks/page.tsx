@@ -8,6 +8,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
   CalloutBox,
+  Chip,
+  ChipRow,
   SectionHeader,
   SideRail,
   SideRailGroup,
@@ -29,6 +31,7 @@ import {
   setFilter,
   TaskFilters,
 } from './components/filters-bar';
+import { TAP } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
 import { useCreateTask, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
@@ -163,7 +166,10 @@ export function Tasks() {
   // Заводя карточку на суженной проектом доске, человек заводит её ПО ЭТОМУ ПРОЕКТУ:
   // преселект ссылки — то же самое, что преселект колонки, из которой нажали «+».
   const initial: TaskFormValues = useMemo(
-    () => ({ ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'), projectTopicId: projectId }),
+    () => ({
+      ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'),
+      projectTopicId: projectId,
+    }),
     [activeBoard, creating, projectId],
   );
 
@@ -214,7 +220,7 @@ export function Tasks() {
 
       <SideRailLayout
         rail={
-          <SideRail>
+          <SideRail className='hidden lg:block'>
             <SideRailGroup flush>boards</SideRailGroup>
             {BOARDS.map((board) => (
               <SideRailItem
@@ -229,6 +235,20 @@ export function Tasks() {
         }
       >
         <div className='flex min-w-0 flex-col gap-3'>
+          {/* Ниже lg рельса нет: доски — одна строка чипов со счётчиками, листается вбок. */}
+          <ChipRow className='gap-1.5 overflow-x-auto max-lg:flex-nowrap lg:hidden'>
+            {BOARDS.map((board) => (
+              <Chip
+                key={board}
+                selected={board === activeBoard}
+                pressed={board === activeBoard}
+                onClick={() => setActiveBoard(board)}
+                className={TAP}
+              >
+                {BOARD_LABEL[board]} {counts.get(board) ?? 0}
+              </Chip>
+            ))}
+          </ChipRow>
           <Toolbar>
             <FiltersBar
               filters={filters}
@@ -258,7 +278,11 @@ export function Tasks() {
             <>
               {(boardTruncated || countsTruncated) && (
                 <CalloutBox tone='warning' className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     not all tasks loaded
                   </Text>
                   <Text size='micro' component='span'>
@@ -272,7 +296,11 @@ export function Tasks() {
               )}
               {active && visible.length === 0 && (
                 <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     no tasks match
                   </Text>
                   <Button variant='underline' size='xs' onClick={clearFilters} className='ml-auto'>

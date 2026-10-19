@@ -34,10 +34,7 @@ export function useRunLays(runId: number, enabled: boolean) {
 //   materialPlan — потребность пары (колорвей, слот) переключилась NORM → LAYS (§7.3), то есть
 //                  таблица «нужные материалы» показывает другие числа, чем секунду назад;
 //   detail       — статус/актуалы прогона читаются рядом на той же странице.
-function invalidateLayWrite(
-  qc: ReturnType<typeof useQueryClient>,
-  runId: number,
-) {
+function invalidateLayWrite(qc: ReturnType<typeof useQueryClient>, runId: number) {
   qc.invalidateQueries({ queryKey: layKeys.list(runId) });
   qc.invalidateQueries({ queryKey: [...productionRunKeys.detail(runId), 'materialPlan'] });
   qc.invalidateQueries({ queryKey: productionRunKeys.detail(runId) });
@@ -188,7 +185,7 @@ export const VERDICT_GLYPH: Record<LayVerdict, string> = {
 };
 
 // Тон текста. `warning` в этой системе СИНИЙ (mid-flight, нужен человек) и его нельзя «поправить»
-// на янтарный; `unknown` — labelColor, единственный читаемый серый, а не textInactiveColor.
+// на янтарный; `unknown` — labelColor, единственный читаемый серый, а не borderColor.
 export const VERDICT_TEXT: Record<LayVerdict, string> = {
   ok: '',
   warning: 'text-warning',

@@ -136,7 +136,7 @@ export function MarkerAreaSplit({
             <span>{(share * 100).toFixed(share < 0.1 ? 1 : 0)}%</span>
             {/* Полоса — монохромная, ink на треке: та же ранжированная полоса, что в разборе по
                 деталям и в BarRow системы. Цветом здесь красить нечего: доля — не состояние. */}
-            <span aria-hidden className='block h-[3px] w-full bg-trackBg'>
+            <span aria-hidden className='block h-[3px] w-full bg-pageBg'>
               <span
                 className='block h-full bg-textColor'
                 style={{ width: `${Math.min(100, Math.max(2, share * 100))}%` }}

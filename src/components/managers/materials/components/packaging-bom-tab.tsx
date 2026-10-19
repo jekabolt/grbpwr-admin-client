@@ -13,10 +13,10 @@ import {
 import { MaterialPicker } from './material-picker';
 import { usePackagingBom, useUpsertPackagingBom } from './useMaterials';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const th =
-  'border border-textInactiveColor bg-textInactiveColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
-const td = 'border border-textInactiveColor px-2 py-1 align-top text-textBaseSize';
+  'border border-borderColor bg-borderColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
+const td = 'border border-borderColor px-2 py-1 align-top text-textBaseSize';
 
 type Row = {
   materialId: number;

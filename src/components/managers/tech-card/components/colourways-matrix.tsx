@@ -88,11 +88,11 @@ const TILE = 140;
 
 // Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>.
 const cell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 // Inside a DataTable cell the BORDER is the cell's, not the input's.
 const gridInput =
-  'block min-h-[22px] w-full appearance-none border-0 bg-transparent text-center text-textBaseSize outline-none focus:bg-bgSecondary disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border-0 bg-transparent text-center text-textBaseSize outline-none focus:bg-pageBg disabled:text-labelColor';
 
 // 10px uppercase grey: ряд-подпись, цвет под плиткой, подпись поля.
 const LABEL = 'text-micro uppercase tracking-label text-labelColor';
@@ -534,7 +534,7 @@ function UsagePerSizeLocal({
             {!perSize ? (
               <td className='p-0'>
                 <input
-                  className={cn(gridInput, 'bg-bgZebra')}
+                  className={gridInput}
                   inputMode='decimal'
                   disabled={!canEdit}
                   placeholder='0.000'
@@ -550,7 +550,7 @@ function UsagePerSizeLocal({
                 <td key={id} className='p-0'>
                   {canEdit ? (
                     <input
-                      className={cn(gridInput, 'bg-bgZebra')}
+                      className={gridInput}
                       inputMode='decimal'
                       placeholder='0.000'
                       aria-label={`consumption ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
@@ -809,7 +809,7 @@ function MaterialCell({
         'group relative block shrink-0 overflow-hidden border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor enabled:cursor-pointer',
         empty
           ? 'flex flex-col items-center justify-center gap-1 border-dashed border-borderColor text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor'
-          : 'border-borderColor bg-bgZebra enabled:hover:border-textColor',
+          : 'border-borderColor bg-pageBg enabled:hover:border-textColor',
       )}
       style={{
         width: TILE,
@@ -1190,7 +1190,7 @@ function ColourwayColumn({
           `<fieldset disabled>` выпущенной карточки его не глушит (удаление не зависит от выпуска). */}
       <div className={cn('group/head flex flex-col gap-1 pb-1.5 pr-3', FB_HEAD)}>
         <div
-          className='relative shrink-0 overflow-hidden border border-borderColor bg-bgZebra'
+          className='relative shrink-0 overflow-hidden border border-borderColor bg-pageBg'
           style={{ width: TILE, height: TILE, backgroundColor: !frontUrl ? swatchHex : undefined }}
         >
           {frontUrl && <img src={frontUrl} alt='' className='size-full object-cover' />}

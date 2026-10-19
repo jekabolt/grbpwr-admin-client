@@ -30,7 +30,7 @@ import {
   useProductionRuns,
 } from './components/useProductionRuns';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 const statusFilterOptions = [
   { value: '', label: 'all' },
@@ -225,7 +225,7 @@ export function ProductionRuns() {
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
           production runs
         </Text>

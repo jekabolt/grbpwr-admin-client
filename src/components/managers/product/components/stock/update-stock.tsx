@@ -86,7 +86,7 @@ export function UpdateStock({
               placeholder={commentPlaceholder}
               showCharCount
               maxLength={1500}
-              className='placeholder:uppercase placeholder:text-textInactiveColor'
+              className='placeholder:uppercase placeholder:text-borderColor'
             />
           </div>
           <Button

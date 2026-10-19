@@ -184,7 +184,7 @@ export function DragDropArea({
 
       {isDragging && (
         // z-10 — локальный стек самой зоны (плёнка поверх её плиток), не слой страницы.
-        <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textInactiveColor bg-bgColor/90'>
+        <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-borderColor bg-bgColor/90'>
           <span className='uppercase text-textColor'>drop files to upload</span>
         </div>
       )}

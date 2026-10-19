@@ -62,12 +62,12 @@ export function TrialBalanceTab({ from, to, onDrill }: Props) {
               {rows.map((r) => (
                 <tr
                   key={r.code}
-                  className='cursor-pointer border-b border-textInactiveColor hover:bg-highlightColor/10'
+                  className='cursor-pointer border-b border-borderColor hover:bg-highlightColor/10'
                   onClick={() => r.code && onDrill(r.code)}
                 >
                   <td className='whitespace-nowrap px-2 py-1'>{r.code}</td>
                   <td className='px-2 py-1'>{r.name}</td>
-                  <td className='px-2 py-1 text-textInactiveColor'>{r.section}</td>
+                  <td className='px-2 py-1 text-borderColor'>{r.section}</td>
                   <AmountCell value={r.debit} />
                   <AmountCell value={r.credit} />
                   <AmountCell value={r.balance} />

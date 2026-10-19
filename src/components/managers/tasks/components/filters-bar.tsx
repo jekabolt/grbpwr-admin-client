@@ -1,4 +1,4 @@
-import { AvatarPicker, Chip, ChipRow } from 'ui';
+import { AvatarPicker, Button, Chip, ChipRow } from 'ui';
 import { Task, TaskPriority } from '../api/types';
 import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
 
@@ -20,6 +20,9 @@ import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
  * здесь, но состояние его снаружи, и снимается он тем же жестом, что и приоритет, — щелчком
  * по зажжённому.
  */
+
+/** Phone tap target: 44px tall below sm, desktop density from sm. */
+export const TAP = 'min-h-11 shrink-0 sm:min-h-0';
 
 export interface TaskFilters {
   priority: TaskPriority | '';
@@ -137,11 +140,18 @@ export function FiltersBar({
   const dirty = filtersActive(filters) || showArchived || !!projectLabel;
 
   return (
-    <ChipRow className='gap-1.5'>
+    // Телефон: ряд в одну строку и листается вбок — перенос растил бы его на полэкрана.
+    <ChipRow className='w-full gap-1.5 max-sm:flex-nowrap max-sm:overflow-x-auto'>
       {/* Сужение проектом стоит ПЕРВЫМ: остальные чипы работают внутри него, и человек,
           пришедший сюда ссылкой, обязан видеть, почему на доске не все карточки. */}
       {projectLabel && (
-        <Chip selected pressed aria-label={`project: ${projectLabel}`} onClick={onClearProject}>
+        <Chip
+          selected
+          pressed
+          aria-label={`project: ${projectLabel}`}
+          onClick={onClearProject}
+          className={TAP}
+        >
           project: {projectLabel}
         </Chip>
       )}
@@ -153,6 +163,7 @@ export function FiltersBar({
             selected={on}
             pressed={on}
             onClick={() => set({ priority: on ? '' : p })}
+            className={TAP}
           >
             {PRIORITY_LABEL[p]}
           </Chip>
@@ -160,12 +171,22 @@ export function FiltersBar({
       })}
 
       {showMine && (
-        <Chip selected={filters.mine} pressed={filters.mine} onClick={() => set({ mine: !filters.mine })}>
+        <Chip
+          selected={filters.mine}
+          pressed={filters.mine}
+          onClick={() => set({ mine: !filters.mine })}
+          className={TAP}
+        >
           my tasks
         </Chip>
       )}
 
-      <Chip selected={showArchived} pressed={showArchived} onClick={onToggleArchived}>
+      <Chip
+        selected={showArchived}
+        pressed={showArchived}
+        onClick={onToggleArchived}
+        className={TAP}
+      >
         archived
       </Chip>
 
@@ -177,18 +198,19 @@ export function FiltersBar({
           people={people}
           selected={filters.assignee}
           onSelect={(name) => set({ assignee: name })}
-          className='ml-1'
+          className='ml-1 shrink-0 max-sm:flex-nowrap'
         />
       )}
 
       {dirty && (
-        <button
-          type='button'
+        <Button
+          variant='underline'
+          size='xs'
           onClick={onClear}
-          className='ml-1 text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+          className={`ml-1 items-center text-labelColor hover:text-textColor max-sm:inline-flex ${TAP}`}
         >
           clear
-        </button>
+        </Button>
       )}
     </ChipRow>
   );

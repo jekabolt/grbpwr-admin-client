@@ -62,7 +62,7 @@ export function WhatModelGetsPlaygroundModal({
           )}
           {group.words !== undefined &&
             (group.words ? (
-              <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-bgSecondary p-2 text-micro'>
+              <pre className='max-h-64 overflow-y-auto whitespace-pre-wrap break-words bg-pageBg p-2 text-micro'>
                 {group.words}
               </pre>
             ) : null)}

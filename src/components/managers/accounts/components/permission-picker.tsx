@@ -25,7 +25,7 @@ function AccessControl({
     <div
       role='group'
       aria-label='access level'
-      className='flex shrink-0 border border-textInactiveColor'
+      className='flex shrink-0 border border-borderColor'
     >
       {LEVELS.map((lvl, i) => {
         const active = value === lvl.value;
@@ -38,10 +38,10 @@ function AccessControl({
             onClick={() => onChange(lvl.value)}
             className={cn(
               'px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed',
-              i > 0 && 'border-l border-textInactiveColor',
+              i > 0 && 'border-l border-borderColor',
               active
                 ? 'bg-textColor text-bgColor'
-                : 'bg-bgColor text-labelColor hover:bg-textInactiveColor hover:text-textColor',
+                : 'bg-bgColor text-labelColor hover:bg-borderColor hover:text-textColor',
             )}
           >
             {lvl.label}
@@ -87,7 +87,7 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
           <div
             key={i}
             className={cn(
-              'h-12 animate-pulse bg-textInactiveColor/40',
+              'h-12 animate-pulse bg-borderColor/40',
               i > 0 && 'border-t border-hairline',
             )}
           />
@@ -142,7 +142,7 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
               className={cn(
                 'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-3',
                 i > 0 && 'border-t border-hairline',
-                granted && 'bg-textInactiveColor/20',
+                granted && 'bg-borderColor/20',
               )}
             >
               <div className='min-w-0 flex-1'>

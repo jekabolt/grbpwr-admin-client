@@ -229,7 +229,7 @@ export function FittingForm({
   return (
     <Form {...form}>
       <form className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6' onSubmit={submit}>
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
                 the sample, not on the flat fittings list. */}
@@ -358,7 +358,7 @@ export function FittingForm({
         </SectionStack>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
         <Text variant='inactive' size='small'>
           {form.formState.isDirty ? 'unsaved changes' : ' '}
         </Text>

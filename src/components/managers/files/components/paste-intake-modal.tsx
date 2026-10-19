@@ -203,7 +203,7 @@ export function PasteIntakeModal({
             {/* В буфере бывает не только картинка: скопированный из проводника pdf или zip
                 приходит сюда тем же ⌘V. Тянуть в `img` то, что браузер нарисовать не может,
                 значит показать сломанный кадр — поэтому у остального плашка с расширением. */}
-            <div className='flex aspect-square w-[180px] flex-none items-center justify-center border border-borderColor bg-bgSecondary'>
+            <div className='flex aspect-square w-[180px] flex-none items-center justify-center border border-borderColor bg-pageBg'>
               {file.type.startsWith('image/') ? (
                 <img
                   src={urls[i]}

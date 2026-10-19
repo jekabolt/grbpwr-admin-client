@@ -69,7 +69,7 @@ export function DollColumn() {
             className='mx-auto block h-auto w-full max-w-[240px] select-none'
           />
         ) : (
-          <div className='flex aspect-[4/5] w-full items-center justify-center bg-bgZebra'>
+          <div className='flex aspect-[4/5] w-full items-center justify-center bg-pageBg'>
             <Text
               size='micro'
               variant='label'

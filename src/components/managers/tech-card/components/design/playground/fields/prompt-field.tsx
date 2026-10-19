@@ -163,7 +163,7 @@ export async function steerText(req: Omit<EnhanceRequest, 'mode'>): Promise<stri
 }
 
 const MENU_ROW =
-  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
+  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
 
 export function PromptField({
   value,
@@ -373,7 +373,7 @@ export function PromptField({
   });
   const doorSkin = (open: boolean) =>
     cn(
-      disabled && 'pointer-events-none border-textInactiveColor text-textInactiveColor',
+      disabled && 'pointer-events-none border-borderColor text-borderColor',
       // `!`: the Button's variant sets `text-textColor` and cva does not merge classes, so a plain
       // `text-bgColor` lost to it and the open door read black on black unless hovered.
       open && 'bg-textColor !text-bgColor',

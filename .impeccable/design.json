@@ -46,13 +46,13 @@
         "canonical": "#ededed",
         "tonalRamp": ["#666666", "#999999", "#cccccc", "#e2e2e2", "#e6e6e6", "#ededed", "#fafafa", "#ffffff"]
       },
-      "red": {
+    "error": {
         "role": "secondary",
         "displayName": "Blocking Red",
         "canonical": "#ff0000",
         "tonalRamp": ["#330000", "#660000", "#990000", "#cc0000", "#ff0000", "#ff4d4d", "#ff9999", "#ffe5e5"]
       },
-      "blue": {
+    "warning": {
         "role": "secondary",
         "displayName": "Mid-Flight Blue",
         "canonical": "#2323ff",
@@ -64,7 +64,7 @@
         "canonical": "#0f7a34",
         "tonalRamp": ["#031a0b", "#062f14", "#09491f", "#0c6129", "#0f7a34", "#3fa763", "#7fc998", "#e0f2e6"]
       },
-      "purple": {
+    "highlightColor": {
         "role": "tertiary",
         "displayName": "Link Purple",
         "canonical": "#311eee",
@@ -210,7 +210,7 @@
       "Don't ship a bordered box without a fill.",
       "Don't round anything. No rounded-* utilities, no pill-shaped buttons, no circular avatars.",
       "Don't put a shadow on anything in the document flow. Modals, popovers and the dragged board card are the entire list.",
-      "Don't use textInactiveColor (#ccc, ~1.6:1) for readable text. Secondary text is labelColor (#666, ~5.7:1). #ccc is for borders, disabled states and placeholders only.",
+      "Don't use borderColor (#ccc, ~1.6:1) for readable text. Secondary text is labelColor (#666, ~5.7:1). #ccc is for borders, disabled states and placeholders only.",
       "Don't introduce a second font family, a font size above 12px in ordinary UI, or a hand-written letter-spacing.",
       "Don't use colour decoratively. No categorical colour coding, no tinted section backgrounds, no accent-per-feature. Red / blue / green mean broken / mid-flight / done, and nothing else.",
       "Don't 'fix' the blue warning tone to amber or orange. Mid-flight states are blue in this system by decision.",

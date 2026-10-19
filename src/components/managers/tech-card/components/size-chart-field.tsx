@@ -465,7 +465,7 @@ export function SizeChartField({
               // фон строки ушёл бы под неё. focus-within держит строку, пока в ней печатают.
               <tr
                 key={m.id}
-                className='[&>td]:transition-colors hover:[&>td]:bg-trackBg focus-within:[&>td]:bg-trackBg'
+                className='[&>td]:transition-colors hover:[&>td]:bg-pageBg focus-within:[&>td]:bg-pageBg'
               >
                 <td className='uppercase'>{m.name}</td>
                 <td className='w-20'>
