@@ -1,7 +1,5 @@
-import { common_FittingChangeRequest } from 'api/proto-http/admin';
-import { FittingFormData } from './schema';
-
-// LANE D owns this file. Contract only — the stub below is replaced by the real join.
+import type { common_FittingChangeRequest } from 'api/proto-http/admin';
+import type { FittingFormData } from './schema';
 
 export type FormCallout = NonNullable<FittingFormData['callouts']>[number];
 
@@ -20,11 +18,109 @@ export type EditRow = {
   mediaId: number;
 };
 
+export type EditCategory = '' | 'pattern' | 'construction' | 'material' | 'grading' | 'other';
+
+const categories = new Set<EditCategory>([
+  '',
+  'pattern',
+  'construction',
+  'material',
+  'grading',
+  'other',
+]);
+
+export function categoryOf(target: string): EditCategory {
+  const normalized = target.trim().toLowerCase();
+  return categories.has(normalized as EditCategory) ? (normalized as EditCategory) : 'other';
+}
+
+function positiveNumber(value?: number): number {
+  return value != null && value > 0 ? value : 0;
+}
+
+function statusOf(cr: common_FittingChangeRequest): EditRow['status'] {
+  if (cr.status === 'open' || cr.status === 'resolved') return cr.status;
+  return cr.resolved ? 'resolved' : 'open';
+}
+
+function rowFromChangeRequest(
+  cr: common_FittingChangeRequest,
+  number: number,
+  callout: EditRow['callout'],
+): EditRow {
+  return {
+    number,
+    crId: cr.id ?? 0,
+    note: cr.note ?? '',
+    target: cr.target ?? '',
+    status: statusOf(cr),
+    carriedFromId: cr.carriedFromId ?? 0,
+    callout,
+    mediaId: callout?.value.mediaId ?? 0,
+  };
+}
+
+function rowFromLegacyCallout(callout: NonNullable<EditRow['callout']>, number: number): EditRow {
+  return {
+    number,
+    crId: 0,
+    note: callout.value.note ?? '',
+    target: '',
+    status: 'open',
+    carriedFromId: 0,
+    callout,
+    mediaId: callout.value.mediaId ?? 0,
+  };
+}
+
 export function buildEditRows(
-  _callouts: FormCallout[],
-  _changeRequests: common_FittingChangeRequest[],
+  callouts: FormCallout[],
+  changeRequests: common_FittingChangeRequest[],
 ): EditRow[] {
-  return [];
+  const firstCalloutByNumber = new Map<number, NonNullable<EditRow['callout']>>();
+  let maxPersistedNumber = 0;
+
+  callouts.forEach((value, index) => {
+    const number = positiveNumber(value.number);
+    maxPersistedNumber = Math.max(maxPersistedNumber, number);
+    if (number && !firstCalloutByNumber.has(number)) {
+      firstCalloutByNumber.set(number, { index, value });
+    }
+  });
+  for (const cr of changeRequests) {
+    maxPersistedNumber = Math.max(maxPersistedNumber, positiveNumber(cr.calloutNumber));
+  }
+
+  const rows: EditRow[] = [];
+  const numberedRequests = changeRequests.filter((cr) => positiveNumber(cr.calloutNumber));
+  const unnumberedRequests = changeRequests
+    .map((cr, index) => ({ cr, index }))
+    .filter(({ cr }) => !positiveNumber(cr.calloutNumber))
+    .sort((a, b) => (a.cr.id ?? 0) - (b.cr.id ?? 0) || a.index - b.index);
+
+  for (const cr of numberedRequests) {
+    const number = positiveNumber(cr.calloutNumber);
+    rows.push(rowFromChangeRequest(cr, number, firstCalloutByNumber.get(number) ?? null));
+  }
+
+  let nextDisplayNumber = maxPersistedNumber + 1;
+  for (const { cr } of unnumberedRequests) {
+    rows.push(rowFromChangeRequest(cr, nextDisplayNumber, null));
+    nextDisplayNumber += 1;
+  }
+
+  const requestNumbers = new Set(numberedRequests.map((cr) => positiveNumber(cr.calloutNumber)));
+  for (const [number, callout] of firstCalloutByNumber) {
+    if (!requestNumbers.has(number)) rows.push(rowFromLegacyCallout(callout, number));
+  }
+
+  callouts.forEach((value, index) => {
+    if (positiveNumber(value.number)) return;
+    rows.push(rowFromLegacyCallout({ index, value }, nextDisplayNumber));
+    nextDisplayNumber += 1;
+  });
+
+  return rows.sort((a, b) => a.number - b.number);
 }
 
 // Next free edit number across callouts and change requests.
@@ -32,8 +128,8 @@ export function nextEditNumber(
   callouts: FormCallout[],
   changeRequests: common_FittingChangeRequest[],
 ): number {
-  let max = 0;
-  for (const c of callouts) max = Math.max(max, c.number ?? 0);
-  for (const cr of changeRequests) max = Math.max(max, cr.calloutNumber ?? 0);
-  return max + 1;
+  return buildEditRows(callouts, changeRequests).reduce(
+    (next, row) => Math.max(next, row.number + 1),
+    1,
+  );
 }
