@@ -129,7 +129,7 @@ export function ModelForm({
                   <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
                     <SheetMeasurementDiagram className='w-full' />
                   </div>
-                  <div className='flex h-full min-w-0 flex-1 flex-col gap-3'>
+                  <div className='flex min-w-0 flex-1 flex-col gap-3'>
                     <div className='grid grid-cols-[minmax(0,1fr)_7.5rem] items-end gap-2'>
                       <InputField name='name' label='name' />
                       <SelectField
