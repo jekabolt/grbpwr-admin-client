@@ -13,6 +13,12 @@
 //   piece-reordered  the same swap on one small piece only (every line within 25 mm of the smallest
 //                    44 line with all six sizes around it): outvoted in any 15 cm cell
 //   label-on-line    a "48" printed on three long 44 lines: ranked by look, but those lines ask
+// LABELFRAME (sizes/label-frame.ts): the boxes around polupalto's size labels are label frames — no
+// size line, no common line — and two mutations must keep a box that is NOT a frame:
+//   frame-nested     the other five sizes' outlines drawn around one 44 box (1.5 mm apart, in their
+//                    looks): the smallest outline of a small graded piece with its label inside
+//   frame-loose      one 44 label printed at a third of its size: the box no longer hugs it
+// Truth for a frame: a closed line ≤ 30 mm in no size pen around exactly one size label.
 // The truth per polupalto chain is its pen (width + dash), read from the sheet's key, never from the
 // engine's rows. Output: one table on stdout, JSON in PATIMPORT_REPORTS (default os tmpdir).
 //   node scripts/pattern-import/sizesep.mjs
@@ -83,7 +89,9 @@ type Mutation =
   | 'looks-shuffled'
   | 'region-reordered'
   | 'piece-reordered'
-  | 'label-on-line';
+  | 'label-on-line'
+  | 'frame-nested'
+  | 'frame-loose';
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -92,6 +100,79 @@ function rng(seed: number) {
 
 /** piece-reordered found no piece to swap on this sheet (the row is then not a test) */
 let pieceFound = true;
+
+function refLines(build: ChainBuild, truth: number[]): number[] {
+  // a reference line per look: the longest reliable line in the look's commonest pen (the longest
+  // line of all can be an odd one — a corner drawn as one stroke — and would make a seventh look)
+  const ref = new Array<number>(6).fill(-1);
+  for (let r = 0; r < 6; r++) {
+    const byPen = new Map<string, number>();
+    const pen = (i: number) => `${build.chains[i].style}|${build.chains[i].motif?.join('/') ?? ''}`;
+    truth.forEach((t, i) => {
+      if (t === r) byPen.set(pen(i), (byPen.get(pen(i)) ?? 0) + build.chains[i].lengthMm);
+    });
+    const top = [...byPen].sort((a, b) => b[1] - a[1])[0]?.[0];
+    truth.forEach((t, i) => {
+      if (t !== r || pen(i) !== top || !build.sigs[i].reliable) return;
+      if (ref[r] < 0 || build.chains[i].lengthMm > build.chains[ref[r]].lengthMm) ref[r] = i;
+    });
+  }
+  return ref;
+}
+
+/** a point inside a closed ring (even-odd) */
+function inRing(p: { x: number; y: number }, ring: readonly { x: number; y: number }[]): boolean {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+const POLU_LABELS = new Set(['44', '46', '48', '50', '52', '54']);
+
+/** polupalto's label boxes, read from the sheet: a closed line ≤ 30 mm drawn in no size pen around
+ *  exactly one size label (chain id → the label's text id). */
+function truthFrames(sheet: Sheet, build: ChainBuild, truth: number[]): Map<number, number> {
+  const out = new Map<number, number>();
+  build.chains.forEach((c, i) => {
+    if (!c.closed || c.lengthMm > 30 || truth[i] >= 0) return;
+    const held = sheet.texts.filter((t) =>
+      inRing({ x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 }, c.pts),
+    );
+    if (held.length === 1 && POLU_LABELS.has(held[0].text.trim())) out.set(i, Number(held[0].id));
+  });
+  return out;
+}
+
+/** the box the frame mutations work on (the first 44 box), its new rings (frame-nested) */
+let frameTarget = -1;
+let frameRings: number[] = [];
+
+/** a convex ring moved `d` mm outward along its vertex bisectors */
+function offsetRing(ring: { x: number; y: number }[], d: number) {
+  let a2 = 0;
+  for (let k = 0; k < ring.length; k++) {
+    const p = ring[k];
+    const q = ring[(k + 1) % ring.length];
+    a2 += p.x * q.y - q.x * p.y;
+  }
+  const out = (k: number) => {
+    const p = ring[k];
+    const q = ring[(k + 1) % ring.length];
+    const L = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    const t = { x: (q.x - p.x) / L, y: (q.y - p.y) / L };
+    return a2 > 0 ? { x: t.y, y: -t.x } : { x: -t.y, y: t.x };
+  };
+  return ring.map((p, k) => {
+    const n1 = out((k - 1 + ring.length) % ring.length);
+    const n2 = out(k);
+    const den = 1 + n1.x * n2.x + n1.y * n2.y || 1;
+    return { x: p.x + (d * (n1.x + n2.x)) / den, y: p.y + (d * (n1.y + n2.y)) / den };
+  });
+}
 
 function mutate(sheet: Sheet, build: ChainBuild, truth: number[], m: Mutation): Sheet {
   if (m === 'labels-swapped') {
@@ -111,21 +192,66 @@ function mutate(sheet: Sheet, build: ChainBuild, truth: number[], m: Mutation): 
     };
   }
   if (m === 'none') return sheet;
-  // a reference line per look: the longest reliable line in the look's commonest pen (the longest
-  // line of all can be an odd one — a corner drawn as one stroke — and would make a seventh look)
-  const ref = new Array<number>(6).fill(-1);
-  for (let r = 0; r < 6; r++) {
-    const byPen = new Map<string, number>();
-    const pen = (i: number) => `${build.chains[i].style}|${build.chains[i].motif?.join('/') ?? ''}`;
-    truth.forEach((t, i) => {
-      if (t === r) byPen.set(pen(i), (byPen.get(pen(i)) ?? 0) + build.chains[i].lengthMm);
-    });
-    const top = [...byPen].sort((a, b) => b[1] - a[1])[0]?.[0];
-    truth.forEach((t, i) => {
-      if (t !== r || pen(i) !== top || !build.sigs[i].reliable) return;
-      if (ref[r] < 0 || build.chains[i].lengthMm > build.chains[ref[r]].lengthMm) ref[r] = i;
-    });
+  if (m === 'frame-nested' || m === 'frame-loose') {
+    const boxes = truthFrames(sheet, build, truth);
+    const tid = [...boxes].find(
+      ([, t]) => sheet.texts.find((x) => Number(x.id) === t)?.text.trim() === '44',
+    );
+    frameTarget = tid?.[0] ?? -1;
+    frameRings = [];
+    if (!tid) return sheet;
+    const [fi, textId] = tid;
+    if (m === 'frame-loose') {
+      // the label at a third of its size, same centre: the box is three times wider than it
+      return {
+        ...sheet,
+        texts: sheet.texts.map((t) => {
+          if (Number(t.id) !== textId) return t;
+          const cx = (t.bbox.minX + t.bbox.maxX) / 2;
+          const cy = (t.bbox.minY + t.bbox.maxY) / 2;
+          const hw = (t.bbox.maxX - t.bbox.minX) / 6;
+          const hh = (t.bbox.maxY - t.bbox.minY) / 6;
+          return {
+            ...t,
+            fontSizeMm: t.fontSizeMm / 3,
+            bbox: { minX: cx - hw, minY: cy - hh, maxX: cx + hw, maxY: cy + hh },
+          };
+        }),
+      };
+    }
+    // frame-nested: sizes 46 … 54 drawn around the box in their own looks, 1.5 mm apart
+    const ref = refLines(build, truth);
+    const f = build.chains[fi];
+    const shut =
+      f.pts.length > 1 &&
+      Math.hypot(f.pts[0].x - f.pts[f.pts.length - 1].x, f.pts[0].y - f.pts[f.pts.length - 1].y) <
+        0.5;
+    const ring = shut ? f.pts.slice(0, -1) : f.pts.slice();
+    for (let r = 1; r < 6; r++) {
+      const j = ref[r];
+      if (j < 0) continue;
+      const o = offsetRing(ring, 1.5 * r);
+      const pts = [...o, o[0]];
+      let L = 0;
+      for (let k = 1; k < pts.length; k++)
+        L += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y);
+      const id = build.chains.length;
+      build.chains.push({
+        ...f,
+        id: id as typeof f.id,
+        pts,
+        lengthMm: L,
+        closed: true,
+        style: build.chains[j].style,
+        motif: build.chains[j].motif,
+      });
+      build.sigs.push(build.sigs[j]);
+      build.work.push(build.work[fi]);
+      frameRings.push(id);
+    }
+    return sheet;
   }
+  const ref = refLines(build, truth);
   const draw = (i: number, r: number) => {
     const j = ref[r];
     if (j < 0 || j === i) return;
@@ -233,6 +359,14 @@ type Row = {
   /** lines whose own label names another size than their look (asked) */
   lookAgainst: number;
   asks: Record<string, number>;
+  /** LABELFRAME: label frames the engine set aside / the sheet's boxes (truth) / boxes left in a
+   *  size or common row / frames that are no box or a size line (truth) */
+  frames: number;
+  boxes: number;
+  boxesKept: number;
+  falseFrames: number;
+  /** frame mutations: the box worked on (or one of its new rings) was set aside as a frame */
+  targetFramed: boolean | null;
 };
 
 function score(
@@ -262,6 +396,11 @@ function score(
     moved: 0,
     lookAgainst: Number(rec.diag.lookAgainstLabel ?? 0),
     asks,
+    frames: 0,
+    boxes: 0,
+    boxesKept: 0,
+    falseFrames: 0,
+    targetFramed: null,
   };
   if (!truth) return row;
   rec.chains.forEach((c, i) => {
@@ -314,10 +453,37 @@ function runOne(
     fileNames: new Map([['0', name]]),
   });
   delete process.env.SIZESEP_OFF;
-  return { row: score(name, fix, m, rec, truth, pathTruth), rec };
+  const row = score(name, fix, m, rec, truth, pathTruth);
+  const framed = new Set(rec.ignore.filter((g) => g.why === 'label frame').map((g) => g.id));
+  row.frames = framed.size;
+  if (truth) {
+    const boxes = truthFrames(sheet, build, truth);
+    row.boxes = boxes.size;
+    const kept = new Set([...rec.rankOf.keys(), ...rec.common]);
+    row.boxesKept = [...boxes.keys()].filter((i) => kept.has(i)).length;
+    row.falseFrames = [...framed].filter(
+      (i) => !boxes.has(i) && !(m === 'frame-nested' && frameRings.includes(i)),
+    ).length;
+    if (m === 'frame-nested' || m === 'frame-loose')
+      row.targetFramed =
+        frameTarget >= 0 && (framed.has(frameTarget) || frameRings.some((i) => framed.has(i)));
+  }
+  return { row, rec };
 }
 
 const f1 = (v: number) => v.toFixed(1);
+
+/** Each line's role in a recovery: its size, common, internal, notch, orphan, or why it is ignored. */
+function roles(rec: RecoverOut): Map<number, string> {
+  const r = new Map<number, string>();
+  for (const [c, k] of rec.rankOf) r.set(c, `size ${k}`);
+  for (const c of rec.common) r.set(c, 'common');
+  for (const c of rec.internal) r.set(c, 'internal');
+  for (const c of rec.notches) r.set(c, 'notch');
+  for (const c of rec.orphans) r.set(c, 'orphan');
+  for (const g of rec.ignore) r.set(g.id, `ignore: ${g.why}`);
+  return r;
+}
 
 export async function main(): Promise<number> {
   const cases: { file: string; sheet: number; truth: boolean }[] = [
@@ -350,6 +516,56 @@ export async function main(): Promise<number> {
       if (on.row.wrong > 0.02 * (on.row.right + on.row.wrong + on.row.none))
         fails.push(`${name}: ${f1(on.row.wrong)} m wrong with the fix`);
       if (on.row.right < off.row.right) fails.push(`${name}: right went down`);
+      // LABELFRAME: every box is a frame, nothing else is
+      if (on.row.boxes < 10) fails.push(`${name}: ${on.row.boxes} label boxes read from the sheet`);
+      if (on.row.boxesKept)
+        fails.push(`${name}: ${on.row.boxesKept} label boxes still in a size or common row`);
+      if (on.row.frames < on.row.boxes)
+        fails.push(`${name}: ${on.row.boxes - on.row.frames} label boxes not set aside as frames`);
+      if (on.row.falseFrames)
+        fails.push(
+          `${name}: ${on.row.falseFrames} lines set aside as frames that are no label box`,
+        );
+      process.env.LABELFRAME_OFF = '1';
+      const lfOff = runOne(name, sheet, base, docTexts, true, 'none', truthOf);
+      delete process.env.LABELFRAME_OFF;
+      lfOff.row.mutation = 'none';
+      (lfOff.row as Row & { note?: string }).note = 'LABELFRAME_OFF';
+      rows.push(lfOff.row);
+      if (lfOff.row.frames) fails.push(`${name}: LABELFRAME_OFF still sets frames aside`);
+      // the frames only leave: no other line changes its role (size, common, internal, notch,
+      // orphan, ignored and why), and no line is added or lost
+      const rOff = roles(lfOff.rec);
+      const rOn = roles(on.rec);
+      let movedLf = 0;
+      const movedEx: string[] = [];
+      const ids = new Set([...rOff.keys(), ...rOn.keys()]);
+      for (const i of ids) {
+        if (rOn.get(i) === 'ignore: label frame' || rOff.get(i) === rOn.get(i)) continue;
+        movedLf += (on.rec.chains[i] ?? lfOff.rec.chains[i])?.lengthMm ?? 0;
+        if (movedEx.length < 5) movedEx.push(`#${i} ${rOff.get(i)} → ${rOn.get(i)}`);
+      }
+      if (movedEx.length || lfOff.rec.chains.length !== on.rec.chains.length)
+        fails.push(
+          `${name}: ${f1(movedLf)} mm of other lines changed role with LABELFRAME ` +
+            `(${movedEx.join('; ')}; lines ${lfOff.rec.chains.length} → ${on.rec.chains.length})`,
+        );
+      for (const m of ['frame-nested', 'frame-loose'] as const) {
+        const mu = runOne(name, sheet, base, docTexts, true, m, truthOf);
+        rows.push(mu.row);
+        if (mu.row.targetFramed === null || frameTarget < 0)
+          fails.push(`${name} ${m}: no 44 box to work on`);
+        else if (mu.row.targetFramed)
+          fails.push(`${name} ${m}: a box that is not a label frame was set aside as one`);
+        else if (m === 'frame-nested' && frameRings.length < 5)
+          fails.push(`${name} ${m}: only ${frameRings.length} rings drawn`);
+        // the detector still works on that sheet: every other box is a frame, nothing else is
+        else if (mu.row.frames !== on.row.boxes - 1 || mu.row.falseFrames)
+          fails.push(
+            `${name} ${m}: ${mu.row.frames} frames (${on.row.boxes - 1} other boxes), ` +
+              `${mu.row.falseFrames} false`,
+          );
+      }
       const muts = [
         'labels-swapped',
         'looks-merged',
@@ -376,11 +592,11 @@ export async function main(): Promise<number> {
     } else if (on.row.moved > 0) fails.push(`${name}: ${f1(on.row.moved)} m changed rank`);
   }
   console.log(
-    'case          fix mutation        right  wrong  none(m)  moved  asks                    look order',
+    'case          fix mutation        right  wrong  none(m)  moved  frames  asks                    look order',
   );
   for (const r of rows)
     console.log(
-      `${r.case.padEnd(13)} ${r.fix ? 'on ' : 'off'} ${(r.mutation + (r.lookAgainst ? `(${r.lookAgainst} asked)` : '')).padEnd(15)} ${f1(r.right).padStart(6)} ${f1(r.wrong).padStart(6)} ${f1(r.none).padStart(6)}  ${f1(r.moved).padStart(6)}  ${JSON.stringify(r.asks).padEnd(24)} ${r.lookOrder}`,
+      `${r.case.padEnd(13)} ${r.fix ? 'on ' : 'off'} ${(r.mutation + (r.lookAgainst ? `(${r.lookAgainst} asked)` : '')).padEnd(15)} ${f1(r.right).padStart(6)} ${f1(r.wrong).padStart(6)} ${f1(r.none).padStart(6)}  ${f1(r.moved).padStart(6)}  ${`${r.frames}/${r.boxes}`.padStart(6)}  ${JSON.stringify(r.asks).padEnd(24)} ${r.lookOrder}`,
     );
   for (const r of rows)
     if (Object.keys(r.perLook).length && r.mutation === 'none')
