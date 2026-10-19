@@ -1,5 +1,6 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { LINE } from 'components/shared/icon-line';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
 import { PLACEHOLDER_SURFACE } from 'ui';
@@ -38,14 +39,11 @@ function PenGlyph({ className }: { className?: string }): JSX.Element {
       width={20}
       height={20}
       viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
       className={cn('shrink-0', className)}
     >
-      <path d='M4.5 19.5 6 14.5 16.5 4l3.5 3.5L9.5 18z' />
-      <path d='M14.5 6l3.5 3.5' />
-      <path d='M6 14.5l3.5 3.5' />
+      <path {...LINE} d='M4.5 19.5 6 14.5 16.5 4l3.5 3.5L9.5 18z' />
+      <path {...LINE} d='M14.5 6l3.5 3.5' />
+      <path {...LINE} d='M6 14.5l3.5 3.5' />
     </svg>
   );
 }

@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { LINE } from 'components/shared/icon-line';
 import { getBase64File } from 'lib/features/getBase64';
 
 import { cn } from 'lib/utility';
@@ -30,17 +31,10 @@ import {
  */
 function ModelGlyph({ className }: { className?: string }): JSX.Element {
   return (
-    <svg
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-      className={cn('h-5 w-5 shrink-0', className)}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-    >
-      <path d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
-      <path d='M3.5 7 12 11.25 20.5 7' />
-      <path d='M12 11.25v10' />
+    <svg viewBox='0 0 24 24' aria-hidden='true' className={cn('h-5 w-5 shrink-0', className)}>
+      <path {...LINE} d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
+      <path {...LINE} d='M3.5 7 12 11.25 20.5 7' />
+      <path {...LINE} d='M12 11.25v10' />
     </svg>
   );
 }

@@ -9,6 +9,7 @@ import { adminService } from 'api/api';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
+import { LINE } from 'components/shared/icon-line';
 import {
   ensurePantoneLibrary,
   pantoneLibraryState,
@@ -2133,12 +2134,9 @@ function SlotCell({
       onDraw={halves ? onGenerateHalf : undefined}
       drawLabel='generate'
       drawGlyph={
-        <span
-          aria-hidden
-          className='flex size-5 items-center justify-center text-[15px] leading-none'
-        >
-          ✦
-        </span>
+        <svg aria-hidden viewBox='0 0 24 24' className='size-5'>
+          <path {...LINE} d='M12 3c0 5 4 9 9 9-5 0-9 4-9 9 0-5-4-9-9-9 5 0 9-4 9-9Z' />
+        </svg>
       }
       drawTitle={`make ${slot.name} with GENERATE below`}
       drawAriaLabel={`generate ${slot.name}`}
@@ -2148,10 +2146,7 @@ function SlotCell({
       // absolute too: a static one would take a track of the frame's two-row grid.
       backdrop={
         halves ? (
-          <span
-            aria-hidden
-            style={{ position: 'absolute', inset: 0, opacity: 0.5, pointerEvents: 'none' }}
-          >
+          <span aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
             <TrimPictogramBackdrop slot={slot} />
           </span>
         ) : (

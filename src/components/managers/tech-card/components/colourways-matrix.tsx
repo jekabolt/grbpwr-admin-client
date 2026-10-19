@@ -819,7 +819,7 @@ function MaterialCell({
     >
       {empty ? (
         <>
-          <TrimPictogram kind={slotPictogram(slot)} className='size-16 text-textColor opacity-20' />
+          <TrimPictogram kind={slotPictogram(slot)} className='size-16 text-textColor opacity-15' />
           <span className='text-micro uppercase tracking-label'>+ material</span>
         </>
       ) : url ? (

@@ -1,4 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
+import { LINE } from 'components/shared/icon-line';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { Button, Media, PLACEHOLDER_SURFACE, Placeholder, placeholderClass, Text } from 'ui';
@@ -121,17 +122,10 @@ export type MediaSlotProps = {
 /** Глиф кадра. Полосатый прямоугольник без него читается как «тут что-то сломалось». */
 function PhotoGlyph({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-      className={cn('h-5 w-5', className)}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-    >
-      <rect x='2.5' y='4.5' width='19' height='15' />
-      <circle cx='8' cy='9.5' r='1.5' />
-      <path d='M2.5 16.5 8.5 11l4.5 4 3-2.5 5.5 4.5' />
+    <svg viewBox='0 0 24 24' aria-hidden='true' className={cn('h-5 w-5', className)}>
+      <rect {...LINE} x='2.5' y='4.5' width='19' height='15' />
+      <circle {...LINE} cx='8' cy='9.5' r='1.5' />
+      <path {...LINE} d='M2.5 16.5 8.5 11l4.5 4 3-2.5 5.5 4.5' />
     </svg>
   );
 }
@@ -246,49 +240,47 @@ export function MediaSlot({
         saveSelectedMedia={onSelect}
         returnFocusWithoutScroll={returnFocusWithoutScroll}
         trigger={
-            <button
-              {...(doorStrip ? {} : intake.regionHandlers)}
-              type='button'
-              aria-label={label}
-              style={
-                doorStrip
-                  ? { ...PLACEHOLDER_SURFACE }
-                  : { ...PLACEHOLDER_SURFACE, ...frameStyle }
-              }
-              className={cn(
-                placeholderClass({ dashed: true }),
-                // Растянут на рамку целиком: коробка триггера и коробка плейсхолдера — одна и та
-                // же, поэтому «дверь внутри плейсхолдера» проверяется измерением, а не верой.
-                doorStrip && 'absolute inset-0 h-full w-full',
-                // Место под полосу дверей внизу. Содержимое кнопки центрируется по её коробке, и
-                // без этого подпись слота лежала бы под кнопкой, а не над ней.
-                doorStrip && 'pb-7',
-                // ПОДПИСЬ СЛОТА — ЧИТАЕМЫЙ ТЕКСТ, а не инертная заглушка: `Placeholder` красит
-                // содержимое в #ccc, годный для рамок и выключенных состояний, но на полосатом
-                // фоне дающий полтора к одному. Здесь это ЕДИНСТВЕННОЕ, что объясняет жест.
-                'cursor-pointer flex-col gap-1 px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                // Строка жестов и глиф прячутся по ШИРИНЕ САМОГО СЛОТА, а не по вкусу вызывающего:
-                // в рамке 96 пикселей та же подсказка ложится в четыре строки и превращает слот в
-                // кашу, а список мест, где слот узкий, никто не будет поддерживать вручную.
-                '@container',
-                intake.dragging && 'border-textColor text-textColor',
-                // ⚠ РАЗМЕР ЖИВЁТ РОВНО НА ОДНОМ ЭЛЕМЕНТЕ. С дверями его несёт рамка, и оставить
-                // `sizeClass` здесь значило бы дать `w-auto` выиграть у `w-full` в `twMerge` —
-                // растянутый триггер схлопнулся бы по содержимому, а «дверь внутри» перестала бы
-                // быть правдой при зелёной сборке.
-                !doorStrip && sizeClass,
-                !doorStrip && className,
-              )}
-            >
-              {!compact && <PhotoGlyph className='hidden @[6rem]:block' />}
-              <span className='leading-tight'>{status ?? label}</span>
-              {!compact && !status && secondLine && (
-                <span className='hidden text-nano normal-case leading-tight tracking-normal @[11rem]:block'>
-                  {secondLine}
-                </span>
-              )}
-            </button>
-          }
+          <button
+            {...(doorStrip ? {} : intake.regionHandlers)}
+            type='button'
+            aria-label={label}
+            style={
+              doorStrip ? { ...PLACEHOLDER_SURFACE } : { ...PLACEHOLDER_SURFACE, ...frameStyle }
+            }
+            className={cn(
+              placeholderClass({ dashed: true }),
+              // Растянут на рамку целиком: коробка триггера и коробка плейсхолдера — одна и та
+              // же, поэтому «дверь внутри плейсхолдера» проверяется измерением, а не верой.
+              doorStrip && 'absolute inset-0 h-full w-full',
+              // Место под полосу дверей внизу. Содержимое кнопки центрируется по её коробке, и
+              // без этого подпись слота лежала бы под кнопкой, а не над ней.
+              doorStrip && 'pb-7',
+              // ПОДПИСЬ СЛОТА — ЧИТАЕМЫЙ ТЕКСТ, а не инертная заглушка: `Placeholder` красит
+              // содержимое в #ccc, годный для рамок и выключенных состояний, но на полосатом
+              // фоне дающий полтора к одному. Здесь это ЕДИНСТВЕННОЕ, что объясняет жест.
+              'cursor-pointer flex-col gap-1 px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              // Строка жестов и глиф прячутся по ШИРИНЕ САМОГО СЛОТА, а не по вкусу вызывающего:
+              // в рамке 96 пикселей та же подсказка ложится в четыре строки и превращает слот в
+              // кашу, а список мест, где слот узкий, никто не будет поддерживать вручную.
+              '@container',
+              intake.dragging && 'border-textColor text-textColor',
+              // ⚠ РАЗМЕР ЖИВЁТ РОВНО НА ОДНОМ ЭЛЕМЕНТЕ. С дверями его несёт рамка, и оставить
+              // `sizeClass` здесь значило бы дать `w-auto` выиграть у `w-full` в `twMerge` —
+              // растянутый триггер схлопнулся бы по содержимому, а «дверь внутри» перестала бы
+              // быть правдой при зелёной сборке.
+              !doorStrip && sizeClass,
+              !doorStrip && className,
+            )}
+          >
+            {!compact && <PhotoGlyph className='hidden @[6rem]:block' />}
+            <span className='leading-tight'>{status ?? label}</span>
+            {!compact && !status && secondLine && (
+              <span className='hidden text-nano normal-case leading-tight tracking-normal @[11rem]:block'>
+                {secondLine}
+              </span>
+            )}
+          </button>
+        }
       />
     );
 

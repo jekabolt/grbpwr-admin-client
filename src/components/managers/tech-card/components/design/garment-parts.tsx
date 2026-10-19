@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react';
 
 import { StitchPictogram } from 'components/managers/tech-card/annotation/stitch-pictogram';
+import {
+  ACCENT_FILL_OPACITY,
+  GHOST_OPACITY,
+  LINE,
+  LINE_EMPHASIS,
+} from 'components/shared/icon-line';
 
 import {
   GARMENT_MANIFEST,
@@ -745,21 +751,19 @@ export function PartPictogram({
         family={family}
         view={known.view}
         viewBox={viewBox}
-        style={{ display: 'block', width: '100%', height: '100%', opacity: 0.35 }}
+        style={{ display: 'block', width: '100%', height: '100%', opacity: GHOST_OPACITY }}
       />
       <svg
         aria-hidden
         viewBox={viewBox}
+        {...LINE}
+        strokeWidth={LINE_EMPHASIS}
         fill='currentColor'
-        fillOpacity={known.zone ? 0.12 : 0.14}
-        stroke='currentColor'
-        strokeWidth={2}
-        strokeLinejoin='round'
-        strokeLinecap='round'
+        fillOpacity={ACCENT_FILL_OPACITY}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       >
         {known.d.map((d, index) => (
-          <path key={`${index}:${d}`} d={d} vectorEffect='non-scaling-stroke' />
+          <path key={`${index}:${d}`} d={d} vectorEffect={LINE.vectorEffect} />
         ))}
       </svg>
     </>,
