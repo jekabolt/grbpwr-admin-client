@@ -54,7 +54,7 @@ export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
       render={({ field }) => (
         <label className='flex flex-col gap-1'>
           <Text variant='uppercase' size='small' component='span'>
-            recorded by (optional)
+            recorded by
           </Text>
           <Select
             name='recordedBy'
