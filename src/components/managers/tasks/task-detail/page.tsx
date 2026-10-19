@@ -5,11 +5,14 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
+  AddDoor,
   BackLink,
   Button,
   CalloutBox,
   ConfirmationModal,
   EmptyCell,
+  FoldCaret,
+  GenericPopover,
   Pill,
   Row,
   Section,
@@ -26,7 +29,6 @@ import {
 } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
-import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
@@ -44,16 +46,10 @@ import {
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
-import {
-  FieldLabel,
-  InlineDate,
-  InlineDescription,
-  InlineField,
-  InlineTitle,
-} from './inline-fields';
+import { DueField, InlineDescription, InlineTitle, RowDate } from './inline-fields';
 import { AssigneesPicker } from '../components/assignees-picker';
 import { TaskDescriptionView } from '../components/task-description';
-import { TaskRelations } from '../components/task-relations';
+import { ParentPicker, TaskRelations } from '../components/task-relations';
 import { openBlockers } from '../utils/relations';
 import { taskLinks } from '../utils/links';
 import {
@@ -68,10 +64,11 @@ import {
 } from '../utils/meta';
 
 /**
- * tskDetail v2 — two columns. The LEFT reads the task (description / checklist /
- * links / media); the RIGHT is the working rail: the facts (placement, priority,
- * assignee, dates) over the activity (tskComments v1). Placement stays inline-editable
- * so a move never needs the full editor. All off-system greys traded for tokens.
+ * tskDetail v3 («what to do first», owner OK 19.10). One order on phone and desktop:
+ * back + «⋯» actions → title → status · priority · due → blocked → description → fields
+ * (assignee / board / planned start; the rest under «more») → checklist → attachments →
+ * subtasks & links → comments. From `lg` up the fields and comments keep the right rail.
+ * Every field stays inline-editable through the same doors as before.
  */
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
@@ -94,6 +91,30 @@ function FactLabel({ children }: { children: React.ReactNode }) {
     </Text>
   );
 }
+
+// One editable fact: label left, the field's own control in a fixed value column, so the
+// values of all lines start on one vertical.
+function FieldLine({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className='flex min-h-11 items-center gap-3 border-b border-hairline sm:min-h-8'>
+      <span className='min-w-0 flex-1'>
+        <FactLabel>{label}</FactLabel>
+      </span>
+      <div className='flex w-3/5 min-w-0 items-center'>{children}</div>
+    </div>
+  );
+}
+
+/** The «⋯» menu's rows: one footprint, a hairline between, the last one bare. */
+const MENU_ITEM =
+  'flex min-h-11 w-full items-center border-b border-hairline px-1 text-left text-control uppercase tracking-label hover:bg-bgSecondary sm:min-h-8';
+/** The chips under the title: status, priority (Selects) share the due field's height. */
+const CHIP = 'min-h-11 w-auto gap-3 px-2.5 sm:min-h-8';
+/** A select that is the value of a field line: no box of its own, the line is the box. */
+const FIELD_SELECT = 'min-h-11 border-0 px-0 sm:min-h-8';
+/** Same for the assignees picker's trigger. */
+const FIELD_CONTROL =
+  'w-full [&_[data-assignees-trigger]]:border-0 [&_[data-assignees-trigger]]:px-0 sm:[&_[data-assignees-trigger]]:min-h-8';
 
 // Centered chrome shared by the loading / not-found states.
 function Centered({ children }: { children: React.ReactNode }) {
@@ -123,6 +144,9 @@ export function TaskDetail() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pickingParent, setPickingParent] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
 
   function editDescriptionOnDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -284,111 +308,193 @@ export function TaskDetail() {
   // не отменяет «сначала то, потом это» (довод — в `utils/relations.ts`).
   const blockers = openBlockers(task.relations);
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
+  const attachmentCount = media.length + task.files.length;
+
+  /**
+   * МОДАЛКА НЕ ОТКРЫВАЕТСЯ ПОВЕРХ ЛЕТЯЩЕЙ ИНЛАЙН-ЗАПИСИ. Она — ВТОРАЯ дверь полной замены
+   * содержимого: форма засеивается при открытии и намеренно не пересеивается, поэтому открытая
+   * до того, как долетел инлайн, она сохранила бы снимок БЕЗ него и молча откатила бы только что
+   * поставленный приоритет. Засов в `useInlineTaskPatch` сюда не достаёт: модалка пишет своим
+   * `useUpdateTask`, а не инлайновой дверью, — значит удержать её может только замок на входе.
+   *
+   * РАБОТАЕТ ЭТО РОВНО ПОТОМУ, ЧТО `isPending` ВЗЯТ ИЗ КЭША ЗАПИСЕЙ, а не у наблюдателя:
+   * наблюдатель после возврата на страницу говорит «свободно», пока запись ещё летит, и дверь
+   * открылась бы ровно в том окне, где модалка опаснее всего.
+   *
+   * ЧЕГО ЭТОТ ЗАМОК НЕ ЗАКРЫВАЕТ: модалку, открытую ДО начала инлайн-записи. Её снимок стареет
+   * по общему правилу формы, и это отдельный разговор — про вторую дверь, а не про гонку двух
+   * инлайнов.
+   *
+   * Дверей к модалке на странице две — «edit all fields» в меню «⋯» и «+ file» у вложений, —
+   * и замок стоит на обеих.
+   */
+  const editLocked = inlinePatch.isPending;
+  const openEditor = () => {
+    if (!editLocked) setEditing(true);
+  };
+
+  const moveTo = (board: TaskBoard, status: TaskStatus) =>
+    canWrite &&
+    (board !== task.board || status !== task.status) &&
+    move.mutate({ id: task.id, board, status, position: 0 });
+
+  const fileDoor = canWrite ? (
+    <AddDoor
+      shape='inline'
+      className='min-h-11 sm:min-h-0'
+      disabled={editLocked}
+      onClick={openEditor}
+    >
+      file
+    </AddDoor>
+  ) : null;
 
   return (
     <div className='mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-5 overflow-x-clip pb-10'>
-      {/* Header */}
-      <div className='flex flex-col gap-3 border-b border-borderColor pb-3'>
-        <BackLink className='inline-flex min-h-11 items-center sm:min-h-0' to={ROUTES.tasks}>
-          board
+      {/* ── 1. Верхняя полоса: дорога назад и меню действий ─────────────────────────────── */}
+      <div className='flex items-center justify-between gap-3 border-b border-borderColor'>
+        <BackLink className='inline-flex min-h-11 items-center sm:min-h-8' to={ROUTES.tasks}>
+          {BOARD_LABEL[task.board]}
         </BackLink>
-        <div className='flex flex-wrap items-start justify-between gap-3'>
-          <div className='flex min-w-0 flex-col gap-1'>
-            <div className='flex flex-wrap items-center gap-2'>
-              <Text
-                size='micro'
-                variant='label'
-                tracking='label'
-                component='span'
-                className='uppercase'
-              >
-                {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
-              </Text>
-              {/* `warn` — В СИСТЕМЕ ЭТО «сломано / мешает / блокирует», а не акцент: тон назван
-                  так прямо в шапке примитива, и заблокированная карточка — ровно этот случай. */}
-              {blockers.length > 0 && (
-                <Pill tone='warn' title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}>
-                  blocked · {blockers.length}
-                </Pill>
-              )}
-              {task.parentTaskId > 0 && (
-                <Link
-                  to={`/tasks/${task.parentTaskId}`}
-                  className='inline-flex min-h-11 items-center text-micro uppercase tracking-label text-labelColor underline hover:text-textColor sm:min-h-0'
-                >
-                  ↑ parent #{task.parentTaskId}
-                </Link>
-              )}
-            </div>
-            <InlineTitle
-              value={t.title}
-              canWrite={canWrite}
-              saving={inlinePatch.isPending}
-              onSave={(title, seenTitle) => patchInline({ title }, { title: seenTitle })}
-            />
-          </div>
-          {canWrite && (
-            <div className='flex shrink-0 flex-wrap justify-end gap-2'>
-              {/* МОДАЛКА НЕ ОТКРЫВАЕТСЯ ПОВЕРХ ЛЕТЯЩЕЙ ИНЛАЙН-ЗАПИСИ. Она — ВТОРАЯ дверь полной
-                  замены содержимого: форма засеивается при открытии и намеренно не пересеивается,
-                  поэтому открытая до того, как долетел инлайн, она сохранила бы снимок БЕЗ него и
-                  молча откатила бы только что поставленный приоритет. Засов в `useInlineTaskPatch`
-                  сюда не достаёт: модалка пишет своим `useUpdateTask`, а не инлайновой дверью, —
-                  значит удержать её может только замок на входе.
-
-                  РАБОТАЕТ ЭТО РОВНО ПОТОМУ, ЧТО `isPending` ВЗЯТ ИЗ КЭША ЗАПИСЕЙ, а не у
-                  наблюдателя: наблюдатель после возврата на страницу говорит «свободно», пока
-                  запись ещё летит, и кнопка открылась бы ровно в том окне, где модалка опаснее
-                  всего.
-
-                  ЧЕГО ЭТОТ ЗАМОК НЕ ЗАКРЫВАЕТ: модалку, открытую ДО начала инлайн-записи. Её
-                  снимок стареет по общему правилу формы, и это отдельный разговор — про вторую
-                  дверь, а не про гонку двух инлайнов. */}
+        {canWrite && (
+          <GenericPopover
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            noTail
+            className='w-56'
+            contentProps={{ align: 'end' }}
+            triggerProps={{
+              'aria-label': 'task actions',
+              className:
+                'flex min-h-11 min-w-11 items-center justify-center text-stat font-bold sm:min-h-8 sm:min-w-8',
+            }}
+            openElement={<span aria-hidden>⋯</span>}
+          >
+            <div role='menu' className='flex flex-col'>
               <Button
                 type='button'
-                variant='secondary'
-                size='sm'
-                className='min-h-11 sm:min-h-0'
-                disabled={inlinePatch.isPending}
-                onClick={() => setEditing(true)}
+                role='menuitem'
+                className={MENU_ITEM}
+                disabled={editLocked}
+                onClick={() => {
+                  setMenuOpen(false);
+                  openEditor();
+                }}
               >
-                edit
+                edit all fields
               </Button>
-              {isArchived ? (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  className='min-h-11 sm:min-h-0'
-                  loading={archiveBusy}
-                  onClick={() => unarchiveTask.mutate(task.id)}
-                >
-                  restore
-                </Button>
-              ) : (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  className='min-h-11 sm:min-h-0'
-                  loading={archiveBusy}
-                  onClick={() => archiveTask.mutate(task.id)}
-                >
-                  archive
-                </Button>
-              )}
               <Button
                 type='button'
-                variant='secondary'
-                size='sm'
-                className='min-h-11 text-error sm:min-h-0'
-                onClick={() => setDeleting(true)}
+                role='menuitem'
+                className={MENU_ITEM}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPickingParent(true);
+                }}
+              >
+                make subtask of…
+              </Button>
+              <Button
+                type='button'
+                role='menuitem'
+                className={cn(MENU_ITEM, 'border-b-textColor')}
+                loading={archiveBusy}
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (isArchived) unarchiveTask.mutate(task.id);
+                  else archiveTask.mutate(task.id);
+                }}
+              >
+                {isArchived ? 'restore' : 'archive'}
+              </Button>
+              <Button
+                type='button'
+                role='menuitem'
+                className={cn(MENU_ITEM, 'border-b-0 text-error')}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDeleting(true);
+                }}
               >
                 delete
               </Button>
             </div>
-          )}
+          </GenericPopover>
+        )}
+      </div>
+
+      {/* ── 2–3. Заголовок, ряд «статус · приоритет · срок», блокер, архив ─────────────── */}
+      <div className='flex flex-col gap-3'>
+        <InlineTitle
+          value={t.title}
+          canWrite={canWrite}
+          saving={inlinePatch.isPending}
+          onSave={(title, seenTitle) => patchInline({ title }, { title: seenTitle })}
+        />
+
+        <div className='flex flex-wrap items-stretch gap-2'>
+          {/* Колонка — через `MoveTask`, которая содержимого не касается вовсе. */}
+          <Select
+            name='detail-status'
+            placeholder='status'
+            items={statusOptions}
+            value={task.status}
+            onValueChange={(v: string) => moveTo(task.board, v as TaskStatus)}
+            readOnly={!canWrite}
+            className={cn(CHIP, 'border-textColor')}
+          />
+          <Select
+            name='detail-priority'
+            placeholder='priority'
+            items={priorityOptions}
+            value={t.priority}
+            onValueChange={(v: string) =>
+              canWrite &&
+              v !== t.priority &&
+              patchInline({ priority: v as TaskPriority }, { priority: t.priority })
+            }
+            readOnly={!canWrite}
+            disabled={inlinePatch.isPending}
+            className={CHIP}
+          />
+          <DueField
+            label='due'
+            value={t.dueDate}
+            overdue={due.state === 'overdue'}
+            canWrite={canWrite}
+            disabled={inlinePatch.isPending}
+            onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
+          />
         </div>
+
+        {canWrite && pickingParent && (
+          <ParentPicker task={task} onDone={() => setPickingParent(false)} />
+        )}
+
+        {/* ОДНА СТРОКА «blocked» — на что карточка ждёт, а не только сколько. Тон и форма — из
+            утверждённого макета; слово `blocked` несёт состояние и без цвета. */}
+        {blockers.length > 0 && (
+          <CalloutBox
+            tone='warning'
+            className='flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 sm:min-h-0'
+          >
+            <Text size='micro' component='span' className='uppercase tracking-label'>
+              blocked
+            </Text>
+            <Link
+              to={`/tasks/${blockers[0].taskId}`}
+              title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}
+              className='min-w-0 truncate text-micro underline decoration-transparent underline-offset-2 hover:decoration-current'
+            >
+              {blockers[0].title || `#${blockers[0].taskId}`}
+            </Link>
+            {blockers.length > 1 && (
+              <Text size='micro' component='span' className='tabular-nums'>
+                +{blockers.length - 1}
+              </Text>
+            )}
+          </CalloutBox>
+        )}
 
         {isArchived && (
           <CalloutBox tone='note' className='flex flex-wrap items-center justify-between gap-2'>
@@ -402,12 +508,15 @@ export function TaskDetail() {
         )}
       </div>
 
-      {/* Body */}
+      {/* Body. На телефоне обе колонки — `contents`, и порядок задают `order-N` блоков:
+          описание → поля → чеклист → вложения → связи → комментарии. С `lg` слева чтение
+          задачи, справа рабочая рейка: поля над обсуждением. */}
       <div className='grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
-        {/* Left — reading the task */}
-        <SectionStack className='order-2 min-w-0 lg:order-1'>
+        <SectionStack className='contents min-w-0 lg:order-1 lg:flex'>
+          {/* ── 4. Описание ─────────────────────────────────────────────────────────────── */}
           <Section
             title='description'
+            className='order-1 min-w-0 lg:order-none'
             action={
               canWrite &&
               !editingDescription && (
@@ -416,9 +525,9 @@ export function TaskDetail() {
                   variant='underline'
                   size='xs'
                   className='min-h-11 sm:min-h-0'
-                  /* Имя РАЗЛИЧИМОЕ: на этой странице есть вторая кнопка «edit» — заголовочная,
-                     открывающая модалку. Два одинаковых имени на одном экране — это загадка
-                     для читалки с экрана и ловушка для стенда. */
+                  /* Имя РАЗЛИЧИМОЕ: на этой странице есть и «edit all fields» в меню, открывающий
+                     модалку. Два одинаковых имени на одном экране — это загадка для читалки с
+                     экрана и ловушка для стенда. */
                   aria-label='edit description'
                   onClick={() => setEditingDescription(true)}
                 >
@@ -466,24 +575,16 @@ export function TaskDetail() {
             )}
           </Section>
 
-          <TaskChecklist taskId={task.id} items={task.checklist} canWrite={canWrite} />
+          {/* ── 6. Чеклист ──────────────────────────────────────────────────────────────── */}
+          <TaskChecklist
+            taskId={task.id}
+            items={task.checklist}
+            canWrite={canWrite}
+            className='order-3 min-w-0 lg:order-none'
+          />
 
-          {/* САБТАСКИ, БЛОКЕРЫ И СВЯЗИ (п.7 волны). Блок стоит СЛЕВА, вместе с чтением задачи, а
-              не в рейке фактов: «что мешает начать» и «что из этого уже сделано» — это
-              содержание работы, а не её метка. */}
-          <TaskRelations task={task} canWrite={canWrite} />
-
-          {links.length > 0 && (
-            <Section title='links'>
-              <div className='flex flex-wrap gap-2'>
-                {links.map((l) => (
-                  <LinkChip key={`${l.kind}-${l.to}`} link={l} />
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {(media.length > 0 || task.files.length > 0) && (
+          {/* ── 7. Вложения ─────────────────────────────────────────────────────────────── */}
+          {attachmentCount > 0 && (
             /* Одна секция на оба источника: для читающего карточку «вложение» — это
                вложение, независимо от того, в каком бакете лежат байты.
 
@@ -497,228 +598,171 @@ export function TaskDetail() {
 
                 Счёт по `media`, а не по `task.media`: нумерация вложений идёт от `mediaIds`
                 самой карточки, и если сервер не разрешил какой-то id, два экрана назвали бы одно
-                вложение разными номерами. */
-            <Section title={`attachments · ${media.length + task.files.length}`}>
+                вложение разными номерами.
+
+                «+ file» открывает модалку правки: вложения правятся только там. */
+            <Section
+              title={`attachments · ${attachmentCount}`}
+              className='order-4 min-w-0 lg:order-none'
+            >
               <AttachmentTiles
                 taskId={task.id}
                 media={media}
                 files={task.files}
                 annotations={annotations}
                 onOpenMedia={attachments.openIndex}
+                onAdd={canWrite && !editLocked ? openEditor : undefined}
               />
+            </Section>
+          )}
+
+          {/* ── 8. Сабтаски, блокеры, связи. Пусто — один ряд дверей «+ …» (туда же встаёт
+              «+ file», пока вложений нет). */}
+          <TaskRelations
+            task={task}
+            canWrite={canWrite}
+            doors={attachmentCount === 0 ? fileDoor : undefined}
+            className='order-5 min-w-0 lg:order-none'
+          />
+
+          {links.length > 0 && (
+            <Section title='links' className='order-5 min-w-0 lg:order-none'>
+              <div className='flex flex-wrap gap-2'>
+                {links.map((l) => (
+                  <LinkChip key={`${l.kind}-${l.to}`} link={l} />
+                ))}
+              </div>
             </Section>
           )}
         </SectionStack>
 
-        {/* Right — facts + activity */}
+        {/* Right — поля + обсуждение */}
         <aside className='contents lg:order-2 lg:block'>
           <SectionStack className='contents lg:flex'>
-            <Section className='order-1 lg:order-none'>
-              <div className='flex flex-col gap-3'>
-                {/* Placement — inline move without opening the editor */}
-                <label className='flex flex-col gap-1'>
-                  <Text
-                    size='micro'
-                    variant='label'
-                    tracking='label'
-                    component='span'
-                    className='uppercase'
-                  >
-                    status
-                  </Text>
-                  <Select
-                    name='detail-status'
-                    items={statusOptions}
-                    value={task.status}
-                    onValueChange={(v: string) =>
-                      canWrite &&
-                      v !== task.status &&
-                      move.mutate({
-                        id: task.id,
-                        board: task.board,
-                        status: v as TaskStatus,
-                        position: 0,
-                      })
-                    }
-                    readOnly={!canWrite}
-                    className='min-h-11 sm:min-h-0'
-                    fullWidth
-                  />
-                </label>
-                <label className='flex flex-col gap-1'>
-                  <Text
-                    size='micro'
-                    variant='label'
-                    tracking='label'
-                    component='span'
-                    className='uppercase'
-                  >
-                    board
-                  </Text>
+            {/* ── 5. Список полей ───────────────────────────────────────────────────────── */}
+            <Section className='order-2 min-w-0 lg:order-none'>
+              <div className='flex flex-col'>
+                <FieldLine label='assignee'>
+                  {canWrite ? (
+                    /* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). Не `<label>`: внутри пикера живут
+                       кнопка-триггер и поле поиска — клик по подписи стал бы вторым нажатием
+                       триггера.
+
+                       `seen` приходит ОТ ПИКЕРА, а не берётся из живого `t.assignees`: пока
+                       пикер открыт, чужая правка доезжает в кэш незаметно, и сверка с живым
+                       сравнивала бы чужую правку саму с собой. */
+                    <div className={FIELD_CONTROL}>
+                      <AssigneesPicker
+                        value={t.assignees}
+                        disabled={inlinePatch.isPending}
+                        onChange={(next, seen) =>
+                          patchInline({ assignees: next }, { assignees: seen })
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <span className='flex items-center justify-end gap-1.5'>
+                      <AvatarStack names={t.assignees} />
+                      <Text
+                        component='span'
+                        className={cn(
+                          !t.assignees.length && 'text-labelColor',
+                          isMine && 'font-bold',
+                        )}
+                      >
+                        {t.assignees.join(', ') || 'unassigned'}
+                      </Text>
+                    </span>
+                  )}
+                </FieldLine>
+                <FieldLine label='board'>
+                  {/* Доска — через `MoveTask`, как и колонка. */}
                   <Select
                     name='detail-board'
+                    placeholder='board'
                     items={boardOptions}
                     value={task.board}
-                    onValueChange={(v: string) =>
-                      canWrite &&
-                      v !== task.board &&
-                      move.mutate({
-                        id: task.id,
-                        board: v as TaskBoard,
-                        status: task.status,
-                        position: 0,
-                      })
-                    }
+                    onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
                     readOnly={!canWrite}
-                    className='min-h-11 sm:min-h-0'
+                    className={FIELD_SELECT}
                     fullWidth
                   />
-                </label>
-              </div>
-
-              {/* ЧЕТЫРЕ ПРАВИМЫХ ФАКТА СТАЛИ КОНТРОЛАМИ — тем же узором «подпись сверху,
-                  контрол снизу», что доска и колонка прямо над ними: рейка говорит на одном
-                  языке, а не на двух. Читателю без права записи по-прежнему показываются
-                  строки-факты: контрол, который нельзя тронуть, — обещание, которого нет. */}
-              {canWrite ? (
-                <div className='flex flex-col gap-3 border-t border-hairline pt-3'>
-                  <InlineField label='priority'>
-                    <Select
-                      name='detail-priority'
-                      items={priorityOptions}
-                      value={t.priority}
-                      className='min-h-11 sm:min-h-0'
-                      onValueChange={(v: string) =>
-                        v !== t.priority &&
-                        patchInline({ priority: v as TaskPriority }, { priority: t.priority })
-                      }
+                </FieldLine>
+                <FieldLine label='planned start'>
+                  {canWrite ? (
+                    <RowDate
+                      value={t.startDate}
                       disabled={inlinePatch.isPending}
-                      fullWidth
-                    />
-                  </InlineField>
-                  {/* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). Не `InlineField`: тот оборачивает
-                      контрол в `<label>`, а внутри пикера живут кнопка-триггер и поле поиска —
-                      клик по слову «assignees» стал бы вторым нажатием триггера.
-
-                      `seen` приходит ОТ ПИКЕРА, а не берётся из живого `t.assignees`: пока
-                      пикер открыт, чужая правка доезжает в кэш незаметно, и сверка с живым
-                      сравнивала бы чужую правку саму с собой. */}
-                  <div className='flex flex-col gap-1'>
-                    <FieldLabel>assignees</FieldLabel>
-                    <AssigneesPicker
-                      value={t.assignees}
-                      disabled={inlinePatch.isPending}
-                      onChange={(next, seen) =>
-                        patchInline({ assignees: next }, { assignees: seen })
+                      onChange={(startDate) =>
+                        patchInline({ startDate }, { startDate: t.startDate })
                       }
                     />
+                  ) : (
+                    <Text component='span' className={cn(!t.startDate && 'text-labelColor')}>
+                      {t.startDate ? format(new Date(t.startDate), 'PP') : <EmptyCell />}
+                    </Text>
+                  )}
+                </FieldLine>
+
+                <Button
+                  type='button'
+                  variant='default'
+                  aria-expanded={moreOpen}
+                  onClick={() => setMoreOpen((v) => !v)}
+                  className='flex min-h-11 w-full items-center text-micro uppercase tracking-label text-labelColor hover:text-textColor sm:min-h-8'
+                >
+                  {moreOpen ? 'less' : 'more'}
+                  <FoldCaret open={moreOpen} />
+                </Button>
+
+                {moreOpen && (
+                  <div className='flex flex-col gap-2 pb-1'>
+                    <div className='flex flex-col'>
+                      <Row
+                        label={<FactLabel>started</FactLabel>}
+                        value={
+                          <Text size='micro' variant='label' component='span'>
+                            {task.startedAt
+                              ? format(new Date(task.startedAt), 'PP')
+                              : 'not started'}
+                          </Text>
+                        }
+                      />
+                      <Row
+                        label={<FactLabel>created</FactLabel>}
+                        value={
+                          <Text size='micro' variant='label' component='span'>
+                            {task.createdBy ? `${task.createdBy} · ` : ''}
+                            {task.createdAt ? (
+                              format(new Date(task.createdAt), 'PP')
+                            ) : (
+                              <EmptyCell />
+                            )}
+                          </Text>
+                        }
+                      />
+                    </div>
+                    {t.labels.length > 0 && (
+                      <div className='flex flex-wrap gap-1'>
+                        {t.labels.map((l) => (
+                          <Pill key={l} tone='mut'>
+                            {l}
+                          </Pill>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <InlineDate
-                    label='planned start'
-                    value={t.startDate}
-                    disabled={inlinePatch.isPending}
-                    onChange={(startDate) => patchInline({ startDate }, { startDate: t.startDate })}
-                  />
-                  <InlineDate
-                    label='due'
-                    value={t.dueDate}
-                    disabled={inlinePatch.isPending}
-                    onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
-                  />
-                </div>
-              ) : (
-                <div className='flex flex-col border-t border-hairline'>
-                  <Row
-                    label={<FactLabel>priority</FactLabel>}
-                    value={
-                      t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
-                        <PriorityTag priority={t.priority} />
-                      ) : (
-                        <Text size='micro' variant='label' component='span'>
-                          none
-                        </Text>
-                      )
-                    }
-                  />
-                  <Row
-                    label={<FactLabel>assignee</FactLabel>}
-                    value={
-                      <span className='flex items-center justify-end gap-1.5'>
-                        <AvatarStack names={t.assignees} />
-                        <Text
-                          size='micro'
-                          component='span'
-                          className={cn(
-                            !t.assignees.length && 'text-labelColor',
-                            isMine && 'font-bold',
-                          )}
-                        >
-                          {t.assignees.join(', ') || 'unassigned'}
-                        </Text>
-                      </span>
-                    }
-                  />
-                  <Row
-                    label={<FactLabel>planned start</FactLabel>}
-                    value={
-                      <Text
-                        size='micro'
-                        component='span'
-                        className={cn(!t.startDate && 'text-labelColor')}
-                      >
-                        {t.startDate ? format(new Date(t.startDate), 'PP') : <EmptyCell />}
-                      </Text>
-                    }
-                  />
-                  <Row
-                    label={<FactLabel>due</FactLabel>}
-                    value={
-                      <Text
-                        size='micro'
-                        component='span'
-                        className={cn(due.state === 'overdue' && 'text-error')}
-                      >
-                        {t.dueDate ? format(new Date(t.dueDate), 'PP') : <EmptyCell />}
-                      </Text>
-                    }
-                  />
-                </div>
-              )}
-
-              <div className='flex flex-col border-t border-hairline'>
-                <Row
-                  label={<FactLabel>started</FactLabel>}
-                  value={
-                    <Text size='micro' variant='label' component='span'>
-                      {task.startedAt ? format(new Date(task.startedAt), 'PP') : 'not started'}
-                    </Text>
-                  }
-                />
-                <Row
-                  label={<FactLabel>created</FactLabel>}
-                  value={
-                    <Text size='micro' variant='label' component='span'>
-                      {task.createdBy ? `${task.createdBy} · ` : ''}
-                      {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
-                    </Text>
-                  }
-                />
+                )}
               </div>
-
-              {t.labels.length > 0 && (
-                <div className='flex flex-wrap gap-1'>
-                  {t.labels.map((l) => (
-                    <Pill key={l} tone='mut'>
-                      {l}
-                    </Pill>
-                  ))}
-                </div>
-              )}
             </Section>
 
-            <div className='order-3 min-w-0 lg:order-none'>
-              <TaskComments taskId={task.id} media={media} onOpenMedia={attachments.openMedia} />
-            </div>
+            {/* ── 9. Комментарии — последними ───────────────────────────────────────────── */}
+            <TaskComments
+              taskId={task.id}
+              media={media}
+              onOpenMedia={attachments.openMedia}
+              className='order-6 min-w-0 lg:order-none'
+            />
           </SectionStack>
         </aside>
       </div>

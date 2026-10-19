@@ -5,7 +5,7 @@ import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef } from 'react';
-import { Button, Media, Pill, Text, Tiles } from 'ui';
+import { AddDoor, Button, Media, Pill, Text, Tiles } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark } from '../components/task-media-viewer';
 import { tasksKeys } from '../hooks/useTasks';
@@ -39,6 +39,7 @@ export function AttachmentTiles({
   files,
   annotations,
   onOpenMedia,
+  onAdd,
 }: {
   taskId: number;
   media: TaskMedia[];
@@ -56,6 +57,8 @@ export function AttachmentTiles({
    * которой считает `useTaskMediaViewer`.
    */
   onOpenMedia: (index: number) => void;
+  /** «+ file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
+  onAdd?: () => void;
 }) {
   const qc = useQueryClient();
   const { canRead } = usePermissions();
@@ -209,6 +212,12 @@ export function AttachmentTiles({
             onPreviewError={onPreviewError}
           />
         ))}
+
+        {onAdd && (
+          <AddDoor shape='tile' className='aspect-square w-full' onClick={onAdd}>
+            file
+          </AddDoor>
+        )}
       </Tiles>
     </div>
   );
