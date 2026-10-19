@@ -45,7 +45,7 @@ function StatusSelect({
 }) {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div className='shrink-0' onPointerDown={stop} onKeyDown={stop} onClick={stop}>
+    <div className='shrink-0 sm:hidden' onPointerDown={stop} onKeyDown={stop} onClick={stop}>
       <Select
         name={`status-${task.id}`}
         placeholder='status'
