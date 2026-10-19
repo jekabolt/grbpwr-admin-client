@@ -574,13 +574,7 @@ export function AttachField({
       />
 
       {filePicker && (
-        <FilePicker
-          selected={fileIds}
-          onClose={() => setFilePicker(false)}
-          onToggle={(id) =>
-            setFileIds(fileIds.includes(id) ? fileIds.filter((x) => x !== id) : [...fileIds, id])
-          }
-        />
+        <FilePicker selected={fileIds} onClose={() => setFilePicker(false)} onDone={setFileIds} />
       )}
     </div>
   );
