@@ -4,13 +4,21 @@ import type { FileRole, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { notePath, ROUTES, SECTION } from 'constants/routes';
-import { Button, Text, Tiles } from 'ui';
+import { Button, Chip, GenericPopover, Text, Tiles } from 'ui';
 import { FilesDropOverlay } from './components/drop-overlay';
 import { FileCardModal } from './components/file-card-modal';
-import { FilesToolbar } from './components/files-toolbar';
+import { FileRow, FileRows, FileRowsHeader } from './components/file-row';
+import { FilesRail } from './components/files-rail';
+import {
+  AddMenu,
+  FilesHeader,
+  PersonFilter,
+  StatusLine,
+  type FilesView,
+} from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
 import { NewNoteModal } from './components/new-note-modal';
 import { PasteIntakeModal } from './components/paste-intake-modal';
@@ -25,6 +33,7 @@ import {
 import { ProjectDescription } from './components/project-description';
 import { ProjectEditModal } from './components/project-edit-modal';
 import { ProjectRolesModal } from './components/project-roles-modal';
+import { ProjectSwitch } from './components/project-switch';
 import { ProjectTasks } from './components/project-tasks';
 import {
   EmptyGroupingState,
@@ -44,11 +53,13 @@ import { AddFilesTile } from './components/add-files-tile';
 import { FilesSelectionBar } from './components/selection-bar';
 import {
   MAX_TOPIC_FILTERS,
-  ProjectChips,
+  TAP_CHIP,
+  TAP_CHIP_ON,
   TopicChips,
   type TopicSelection,
 } from './components/topic-chips';
 import { FilesUploadBar } from './components/upload-bar';
+import { NewProjectModal } from './projects/new-project-modal';
 import { useFileSelection } from './hooks/useFileSelection';
 import {
   fileRoleFromUrl,
@@ -113,16 +124,11 @@ export default function FilesPage() {
 
   const mayRead = !resolved || canRead(SECTION.files);
   const mayWrite = canWrite(SECTION.files);
-  // Тумблер добровольный, право — нет. Без files:write режим всегда «чтение», и оба положения
-  // глушат ОДИН И ТОТ ЖЕ набор контролов: иначе «только чтение» означало бы разное в двух местах.
-  //
-  // ТУМБЛЕР ЖИВЁТ В СТОРЕ, А НЕ ЗДЕСЬ. Писатели раздела шире холста: полоса загрузки стоит и на
-  // экране тем, темы правятся там же. Пока положение было состоянием этого компонента, уход на
-  // соседний экран молча возвращал человека в запись — тумблер переставал действовать ровно
-  // тогда, когда он единственный и защищал.
-  const mode = useFilesModeStore((s) => s.mode);
-  const setMode = useFilesModeStore((s) => s.setMode);
-  const writable = useFilesWritable(mayWrite);
+  // ТУМБЛЕРА «ЗАПИСЬ / ЧТЕНИЕ» НА ХОЛСТЕ БОЛЬШЕ НЕТ: есть право — можно писать. Стор режима
+  // остаётся (его читают полоса загрузки и соседние экраны раздела), но холст его не выставляет,
+  // и без чужого «read» он стоит в «write» — значит здесь `writable` и право совпадают.
+  const writable = mayWrite;
+  const { showMessage } = useSnackBarStore();
 
   // ФИЛЬТР ЖИВЁТ В URL. Ссылку на пересечение кидают в чат («вот всё, что и packaging, и
   // atelier»), и состояние, которого нет в адресе, такой ссылкой не передашь.
@@ -146,6 +152,9 @@ export default function FilesPage() {
     const v = params.get('sort');
     return v === 'name' || v === 'size' ? v : 'new';
   })();
+  // ВИД — ТОЖЕ АДРЕС: «вот эти макеты плиткой» кидают в чат так же, как фильтр. Умолчание —
+  // список: он показывает больше файлов на экран и читается по имени.
+  const view: FilesView = params.get('view') === 'grid' ? 'grid' : 'list';
 
   // ЧЕЛОВЕК — ТОЖЕ АДРЕС. «Вот всё, что ведёт паша» кидают в чат ровно так же, как ссылку на
   // пересечение тем, и фильтр, живущий в состоянии компонента, такой ссылкой не передашь.
@@ -158,9 +167,7 @@ export default function FilesPage() {
   // десятками строк выше: сервер роль без `person_id` игнорирует, и рукописный `?role=own`
   // иначе рисовал бы нажатое положение переключателя, которого в выдаче нет.
   const personId = personIdFromUrl(params.get('person'));
-  const personRole: PersonRoleFilter = personId
-    ? personRoleFromUrl(params.get('role'))
-    : 'any';
+  const personRole: PersonRoleFilter = personId ? personRoleFromUrl(params.get('role')) : 'any';
 
   // ГРУППИРОВКА — ТОЖЕ АДРЕС, и по той же причине: «вот вся съёмка» и «вот её исходники»
   // кидают в чат ссылкой.
@@ -214,9 +221,14 @@ export default function FilesPage() {
         personRole: PersonRoleFilter;
         projectId: number;
         fileRole: FileRoleFilter;
+        view: FilesView;
       }>,
     ) => {
       const p = new URLSearchParams(params);
+      if (next.view !== undefined) {
+        if (next.view === 'grid') p.set('view', 'grid');
+        else p.delete('view');
+      }
       if (next.topicIds !== undefined) {
         p.delete('topic');
         next.topicIds.forEach((t) => p.append('topic', String(t)));
@@ -314,6 +326,12 @@ export default function FilesPage() {
    */
   const [addingFiles, setAddingFiles] = useState(false);
   const [rolesDialog, setRolesDialog] = useState(false);
+  /**
+   * ДИАЛОГ НОВОГО ПРОЕКТА — У СТРАНИЦЫ. Открывают его из листа проектов (телефон) и из рейла
+   * (десктоп); лист закрывается тем же нажатием, и диалог, смонтированный в нём, умер бы вместе
+   * с ним.
+   */
+  const [creatingProject, setCreatingProject] = useState(false);
 
   const topicsQuery = useFileTopics();
   // Тот же общий список людей, что читают пикер в полосе и оба блока карточки: один ключ, один
@@ -506,7 +524,10 @@ export default function FilesPage() {
     });
     return [
       { key: 'pile', title: 'without a role', roleId: 0, withoutRole: true },
-      ...dict.filter((r) => !r.archived).sort(order).map(spec),
+      ...dict
+        .filter((r) => !r.archived)
+        .sort(order)
+        .map(spec),
       ...dict
         .filter((r) => r.archived && Number(r.filesCount ?? 0) > 0)
         .sort(order)
@@ -531,8 +552,7 @@ export default function FilesPage() {
   // зная, что бывают исходники, нечем.
   const sectionsAllFailed =
     sectionMode &&
-    (rolesQuery.isError ||
-      (sectionSpecs.length > 0 && sectionsFailed === sectionSpecs.length));
+    (rolesQuery.isError || (sectionSpecs.length > 0 && sectionsFailed === sectionSpecs.length));
 
   const flatFiles = useMemo(
     () => (filesQuery.data?.pages ?? []).flatMap((p) => p.files ?? []),
@@ -583,6 +603,11 @@ export default function FilesPage() {
 
   const onTopics = (next: TopicSelection) =>
     patch({ topicIds: next.topicIds, untopiced: next.untopiced });
+  // Смена проекта СНИМАЕТ роль: роль осмысленна только на связи с проектом, и перенесённая в
+  // соседнюю съёмку она означала бы уже другой вопрос — тот, который человек не задавал. «Без
+  // роли» уходит вместе с проектом тем же правилом в `patch`.
+  const onProject = (next: number) =>
+    patch({ projectId: next, fileRole: { roleId: 0, withoutRole: false } });
 
   const selection = useFileSelection();
   /**
@@ -631,7 +656,15 @@ export default function FilesPage() {
         return !here && (f.topics ?? []).some((t) => Number(t.id) === projectId);
       return !!here && Number(here.roleId) === fileRole.roleId;
     });
-  }, [viewKey, roleKey, projectId, fileRole.roleId, fileRole.withoutRole, clearSelection, keepSelection]);
+  }, [
+    viewKey,
+    roleKey,
+    projectId,
+    fileRole.roleId,
+    fileRole.withoutRole,
+    clearSelection,
+    keepSelection,
+  ]);
 
   const selectedFresh = useMemo(
     () => selection.selected.map((s) => files.find((f) => Number(f.id) === Number(s.id)) ?? s),
@@ -672,6 +705,31 @@ export default function FilesPage() {
   // `accept: 'any'` — это БИБЛИОТЕКА ФАЙЛОВ, а не медиа: по умолчанию хук берёт из буфера
   // только картинки, и ⌘V по скопированному pdf или zip молчал, ничем не объясняя молчание.
   usePasteFiles({ claims: writable, accept: 'any' }, (list) => setPasted((p) => [...p, ...list]));
+
+  /**
+   * «PASTE» ИЗ МЕНЮ — ТОТ ЖЕ ПРИЁМ, ЧТО ⌘V, только буфер читается по нажатию и уходит в ту же
+   * приёмную модалку (имя, темы, проект). `clipboard.read()` отдаёт не всё (браузеры — в основном
+   * картинки) и может быть запрещён; на отказ человеку остаётся ⌘V, и это сказано коротко.
+   */
+  const pasteFromMenu = async () => {
+    if (!writable) return;
+    try {
+      const items = await navigator.clipboard.read();
+      const list: File[] = [];
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('text/')) continue;
+          const blob = await item.getType(type);
+          const ext = (type.split('/')[1] ?? 'bin').replace(/\+.*$/, '');
+          list.push(new File([blob], `pasted.${ext}`, { type }));
+        }
+      }
+      if (list.length) setPasted((p) => [...p, ...list]);
+      else showMessage('nothing to paste', 'error');
+    } catch {
+      showMessage('no clipboard access · press ⌘V', 'error');
+    }
+  };
 
   // Закрытие ЗАМЕЩАЕТ запись в истории. Иначе стек выглядит как [сетка, карточка, сетка], и
   // «назад» открывает ровно ту карточку, которую человек только что закрыл.
@@ -761,7 +819,22 @@ export default function FilesPage() {
   // аккаунты, поэтому имени может не быть вовсе — тогда пустой экран говорит `#id` и объясняет,
   // почему имени нет, а не притворяется, что фильтра нет.
   const pickedPerson = (adminsData?.admins ?? []).find((a) => Number(a.id ?? 0) === personId);
-  const personLabel = personId ? (pickedPerson?.username ?? `#${personId}`) : '';
+  const personLabel = personId ? pickedPerson?.username ?? `#${personId}` : '';
+
+  // СТРОКА СТАТУСА НАЗЫВАЕТ ВСЁ, ЧЕМ СУЖЕНА ВЫДАЧА, кроме проекта: он — заголовок страницы. Темы
+  // через `&` — это и есть пересечение; тема не из словаря — «#id», как и её чип.
+  const statusParts = [
+    topicIds.map((tid) => topics.find((t) => Number(t.id) === tid)?.name ?? `#${tid}`).join(' & '),
+    personLabel,
+    urlSearch ? `“${urlSearch}”` : '',
+  ].filter(Boolean);
+  // «RESET» СНИМАЕТ РОВНО НАЗВАННОЕ В СТРОКЕ: темы, «unsorted», человека и поиск. Проект — контекст
+  // страницы, и меняется он там же, где назван.
+  const filtered = topicIds.length > 0 || untopiced || personId > 0 || !!urlSearch;
+  const resetFilters = () => {
+    setSearchInput('');
+    patch({ topicIds: [], untopiced: false, personId: 0, q: '' });
+  };
 
   // Роль СЛОВОМ — для тех экранов, которые обязаны назвать, чем сужена выдача. «#id» тут по той
   // же причине, что и у человека: архивную роль в словаре холста не найти, а фильтровать по ней
@@ -769,7 +842,7 @@ export default function FilesPage() {
   const roleLabel = fileRole.withoutRole
     ? 'without a role'
     : fileRole.roleId > 0
-      ? (roles.find((r) => Number(r.id) === fileRole.roleId)?.name ?? `#${fileRole.roleId}`)
+      ? roles.find((r) => Number(r.id) === fileRole.roleId)?.name ?? `#${fileRole.roleId}`
       : '';
   const noRoleTotal = noRoleQuery.data ? Number(noRoleQuery.data.total ?? 0) : undefined;
   const dropRole = () => patch({ fileRole: { roleId: 0, withoutRole: false } });
@@ -780,8 +853,11 @@ export default function FilesPage() {
    * написаны один раз. Копия плитки внутри секции разошлась бы с оригиналом на первой правке —
    * и разошлась бы молча, потому что обе выглядят одинаково.
    */
+  // СТРОКА ИЛИ ПЛИТКА — ОДИН ВЫБОР НА ВСЕ МЕСТА: пропсы у них одинаковые, поэтому всё, что
+  // написано ниже (выбор, карточка, просмотр, перевыдача ссылки), общее для обоих видов.
+  const FileItem = view === 'grid' ? FileTile : FileRow;
   const tile = (f: LibraryFile) => (
-    <FileTile
+    <FileItem
       key={f.id}
       file={f}
       selectable
@@ -820,8 +896,23 @@ export default function FilesPage() {
       {!f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
         <RebuildPreview file={f} writable={writable} />
       )}
-    </FileTile>
+    </FileItem>
   );
+
+  /**
+   * КОНТЕЙНЕР ВЫДАЧИ — ОДИН НА ОБА РЕЖИМА. Плоская выдача и секции проекта получают ровно эту
+   * функцию, поэтому «list / grid» переключает и секции. Шапка колонок — только на десктопе: на
+   * телефоне колонок нет, строка несёт всё сама.
+   */
+  const renderFiles = (list: LibraryFile[]) =>
+    view === 'grid' ? (
+      <Tiles min={190}>{list.map(tile)}</Tiles>
+    ) : (
+      <div className='flex min-w-0 flex-col gap-px bg-hairline'>
+        <FileRowsHeader />
+        <FileRows>{list.map(tile)}</FileRows>
+      </div>
+    );
 
   const sectionViews = sectionSpecs.map((s, i) => ({ spec: s, q: sectionQueries[i] }));
   // ПУСТАЯ СЕКЦИЯ НЕ РИСУЕТСЯ. Сорвавшаяся — рисуется: молча пропасть она не имеет права,
@@ -976,7 +1067,7 @@ export default function FilesPage() {
   };
 
   return (
-    <div className='flex flex-col gap-gutter'>
+    <div className='flex flex-col gap-gutter lg:flex-row lg:items-start'>
       {/* Диалога выбора файлов у раздела больше нет: кнопка открывает системный выбор, а очередь
           показывает полоса снизу. Поле скрытое — свой вид у него нестилизуемый. */}
       <input
@@ -992,294 +1083,338 @@ export default function FilesPage() {
         }}
       />
 
-      {/* Один блок: полоса управления и словарь тем — это ОДНА поверхность, разделённая внутри
-          волосяной линией, а не два бордера подряд. */}
-      <div className='border border-borderColor bg-bgColor'>
-        <FilesToolbar
+      {/* РЕЙЛ ДЕСКТОПА: проект, темы и человек слева, файлы справа. На телефоне его нет —
+          там проект в заголовке, темы одним рядом, человек в хвосте ряда. */}
+      <FilesRail
+        projects={projects}
+        activeProject={activeProject}
+        projectId={projectId}
+        totalFiles={totalFiles}
+        writable={writable}
+        onProject={onProject}
+        onNewProject={() => setCreatingProject(true)}
+        topics={topics}
+        selected={topicIds}
+        untopiced={untopiced}
+        untopicedCount={untopicedCount}
+        onTopics={onTopics}
+        personId={personId}
+        personRole={personRole}
+        onPerson={(pid) => patch({ personId: pid })}
+        onPersonRole={(r) => patch({ personRole: r })}
+      />
+
+      <div className='flex min-w-0 flex-1 flex-col gap-gutter'>
+        {/* ШАПКА — ОДИН БЛОК: заголовок-проект, поиск, «+», ряд тем и строка статуса под
+            волосяной линией. Объяснительных строк больше нет: что выбрано и сколько найдено,
+            говорит строка статуса. */}
+        <FilesHeader
+          title={
+            <ProjectSwitch
+              projects={projects}
+              activeProject={activeProject}
+              projectId={projectId}
+              totalFiles={totalFiles}
+              writable={writable}
+              onPick={onProject}
+              onNew={() => setCreatingProject(true)}
+            />
+          }
           search={searchInput}
           onSearch={setSearchInput}
-          sort={sort}
-          onSort={(v) => patch({ sort: v })}
-          personId={personId}
-          personRole={personRole}
-          onPerson={(id) => patch({ personId: id })}
-          onPersonRole={(r) => patch({ personRole: r })}
-          mode={mayWrite ? mode : 'read'}
-          onMode={setMode}
-          canWrite={mayWrite}
-          onUpload={openPicker}
-          onNewNote={() => setNewNote(true)}
-          className='border-0'
-        />
-        {/* ДВА РЯДА, А НЕ ОДИН, и разделяет их волосяная линия — та же внутренняя структура
-            блока, что и у остальных полос этой поверхности. Ряды разные по смыслу: темы —
-            пересечение ярлыков, проект — один контейнер. Один ряд на всё означал бы, что
-            одинаковые на вид чипы значат разные вещи и переключаются разными правилами.
-
-            ТРЕТЬЕГО РЯДА — РОЛЕЙ — ЗДЕСЬ БОЛЬШЕ НЕТ (0323). Роль принадлежит проекту, и вне
-            проекта ряд предлагал бы слова, которых не существует: словаря на всю библиотеку не
-            стало. ВНУТРИ проекта роли теперь не чипы, а разделы его собственной страницы —
-            орган остался, поменялось место. */}
-        <div className='border-t border-hairline px-2.5 py-2'>
-          <TopicChips
-            topics={topics}
-            selected={topicIds}
+          actions={
+            <>
+              {/* Без права — два слова, а не абзац: кнопки меню выключены, а не спрятаны. */}
+              {!mayWrite && (
+                <Text size='micro' variant='label' className='uppercase'>
+                  read only
+                </Text>
+              )}
+              <AddMenu
+                writable={writable}
+                onUpload={openPicker}
+                onNewNote={() => setNewNote(true)}
+                onPaste={pasteFromMenu}
+              />
+            </>
+          }
+          chips={
+            <TopicChips
+              topics={topics}
+              selected={topicIds}
+              untopiced={untopiced}
+              untopicedCount={untopicedCount}
+              onChange={onTopics}
+              lead={
+                personId > 0 && (
+                  <Chip
+                    selected
+                    pressed
+                    className={TAP_CHIP_ON}
+                    onClick={() => patch({ personId: 0 })}
+                    onRemove={() => patch({ personId: 0 })}
+                  >
+                    {personLabel}
+                  </Chip>
+                )
+              }
+              tail={
+                <GenericPopover
+                  title='person'
+                  noTail
+                  triggerProps={{ asChild: true }}
+                  openElement={<Chip className={TAP_CHIP}>person ▾</Chip>}
+                >
+                  <div className='p-2.5'>
+                    <PersonFilter
+                      personId={personId}
+                      personRole={personRole}
+                      onPerson={(pid) => patch({ personId: pid })}
+                      onPersonRole={(r) => patch({ personRole: r })}
+                    />
+                  </div>
+                </GenericPopover>
+              }
+            />
+          }
+        >
+          <StatusLine
+            matched={matched}
+            parts={statusParts}
             untopiced={untopiced}
-            totalFiles={totalFiles}
-            untopicedCount={untopicedCount}
-            matched={matched}
-            searching={!!urlSearch}
-            onChange={onTopics}
+            filtered={filtered}
+            onReset={resetFilters}
+            sort={sort}
+            onSort={(v) => patch({ sort: v })}
+            view={view}
+            onView={(v) => patch({ view: v })}
           />
-        </div>
-        <div className='border-t border-hairline px-2.5 py-2'>
-          <ProjectChips
-            projects={projects}
-            selected={projectId}
-            matched={matched}
+          {/* ОПИСАНИЕ ОБЫЧНОГО ЯРЛЫКА — у него нет своей страницы, и эта строка единственное
+              место, где его вообще видно. Описание проекта живёт на странице проекта. */}
+          {!!activeTopic?.description && (
+            <div className='border-t border-hairline px-block py-2'>
+              <Text size='micro' variant='label' className='max-w-[80ch]'>
+                {activeTopic.description}
+              </Text>
+            </div>
+          )}
+        </FilesHeader>
+
+        {/* СТРАНИЦА ПРОЕКТА — ЭТО НЕ ВТОРОЙ ЭКРАН, А ДРУГАЯ ОТРИСОВКА ТОГО ЖЕ АДРЕСА.
+            `?project=N` как был режимом холста, так и остался: глубокие ссылки из задач, с
+            карточек вещей и из чата продолжают работать буква в букву. Меняется то, ЧЕМ этот
+            режим нарисован — крошка, имя, даты, вещи, описание и строка задач вместо одного
+            чипа в ряду.
+
+            ШАПКА ЕСТЬ И В СУЖЕННОМ ВИДЕ. Человек, нажавший «show all» в секции, не покинул
+            проект — он смотрит его часть, и терять при этом имя, даты и выход в индекс не за
+            что. Ниже шапки в этом случае встаёт заголовок «проект / роль». */}
+        {projectId > 0 && activeProject && (
+          <ProjectHeader
+            project={activeProject}
+            styles={projectStylesQuery.data?.styles ?? []}
+            stylesFetched={projectStylesQuery.isFetched}
             writable={writable}
-            // Смена проекта СНИМАЕТ роль: роль осмысленна только на связи с проектом, и
-            // перенесённая в соседнюю съёмку она означала бы уже другой вопрос — тот, который
-            // человек не задавал. «Без роли» уходит вместе с проектом тем же правилом в `patch`.
-            onChange={(next) =>
-              patch({ projectId: next, fileRole: { roleId: 0, withoutRole: false } })
+            onIndex={() => navigate(ROUTES.filesProjects)}
+            onEdit={() => setEditingProject(true)}
+          >
+            {/* ОПИСАНИЕ — ПЕРВЫЙ АБЗАЦ СТРАНИЦЫ, и правится оно на месте. У обычного ярлыка
+                страницы нет, и там этот орган не монтируется вовсе. */}
+            <ProjectDescription project={activeProject} writable={writable} />
+            {/* ЗАДАЧИ — ОДНА СТРОКА-СВОДКА ПОД ШАПКОЙ, до секций: страница про ФАЙЛЫ, задачи
+                здесь гость. Компонент сам спрашивает данные, сам молчит без права и до ответа,
+                и от места не зависит ничем. */}
+            <ProjectTasks projectId={projectId} />
+          </ProjectHeader>
+        )}
+
+        {/* СУЖЕННАЯ СЕКЦИЯ: вместо ряда чипов — заголовок «проект / роль · N» и выход обратно.
+            Он же мишень фокуса после «show all» (см. `onShowAll` выше). */}
+        {projectId > 0 && roleNarrowed && activeProject && (
+          <NarrowedSectionHeader
+            projectName={activeProject.name ?? `#${projectId}`}
+            roleName={roleLabel || `#${fileRole.roleId}`}
+            total={matched}
+            archivedRole={
+              !fileRole.withoutRole &&
+              !!roles.find((r) => Number(r.id) === fileRole.roleId)?.archived
             }
+            onBack={() => patch({ fileRole: { roleId: 0, withoutRole: false } })}
           />
-        </div>
-        {/* ТОЛЬКО ЧТЕНИЕ ОБЪЯСНЯЕТСЯ СТРОКОЙ. Кнопки выключены, а не спрятаны: спрятанного не
-            попросишь, а выключенную без объяснения жмут и считают поломкой. Оба положения —
-            и вынужденное, и добровольное — глушат один и тот же набор контролов. */}
-        {!writable && (
-          <div className='border-t border-hairline px-2.5 py-2'>
-            <Text size='micro' variant='label'>
-              {mayWrite
-                ? 'read mode is switched on by you: uploading, editing and deleting are off while it stands.'
-                : "you can look and download but you can't change: there is no files:write right."}
-            </Text>
+        )}
+
+        {/* ПЕРВЫЙ БЛОК ПРОЕКТА — ПРИГЛАШЕНИЕ ПОЛОЖИТЬ ФАЙЛ (просьба владельца). Стоит ДО секций и
+            до пустого состояния, поэтому оно на месте и у проекта, в котором пока ничего нет.
+            Роль берётся из текущего сужения: в разделе «исходники» добавленный файл обязан
+            появиться там же, где его добавляли, а не уехать в кучу без роли. */}
+        {projectId > 0 && writable && !narrowedRoleUnusable && (
+          <AddFilesTile
+            label={
+              fileRole.roleId > 0 && roleLabel
+                ? `to “${activeProject?.name ?? `#${projectId}`}” as “${roleLabel}”`
+                : `to “${activeProject?.name ?? `#${projectId}`}”`
+            }
+            onClick={() => setAddingFiles(true)}
+          />
+        )}
+
+        {/* ЦЕНА ТАБУЛЯЦИИ НА ХОЛСТЕ — ОДИН ОРГАН, А НЕ ПЕРЕДЕЛКА ПЛИТКИ.
+            У плитки теперь ТРИ остановки (чекбокс выделения, кадр, подвал), и при `PAGE_SIZE = 60`
+            до кнопки «show more» за сеткой набирается около 180 нажатий Tab вместо прежних 120.
+            Порядок обхода при этом верный: чекбокс → кадр → подвал, DOM совпадает с картинкой.
+            Дорого не устройство плитки, а её количество.
+
+            ВЫБРАНА ССЫЛКА-ПРОПУСК, А НЕ ROVING ПО СЕТКЕ, и вот почему. Roving требует протащить
+            `tabIndex` в `file-tile.tsx` — файл соседней волны, и он же рисует вложения карточки
+            задачи, где стрелки означали бы совсем другое. Хуже: у плитки три остановки РАЗНОГО
+            рода, и roving пришлось бы учить, что стрелка вправо внутри плитки и стрелка вправо
+            между плитками — разные жесты. Это новый контракт взаимодействия, а не починка.
+            Ссылка-пропуск стоит одну остановку, ничего не отнимает у мыши, невидима до фокуса и
+            приводит ровно туда, куда указывала жалоба, — за сетку.
+
+            ЧИСЛО В ПОДПИСИ НЕСУЩЕЕ: пропуск вслепую человек не нажимает, а «60 tiles» и
+            «6 tiles» — это разные решения.
+
+            СТОИТ ВПЛОТНУЮ ПЕРЕД СЕТКОЙ, А НЕ ВЫШЕ. Сначала она стояла сразу за тулбаром — и в
+            режиме проекта перескакивала заодно КРОШКУ, ПРАВКУ ПРОЕКТА, ОПИСАНИЕ И СТРОКУ ЗАДАЧ,
+            называя при этом одни плитки. Орган, уносящий больше, чем обещает подпись, хуже
+            отсутствующего: его нажимают один раз и перестают доверять. */}
+        {files.length > 0 && (
+          <Button
+            size='xs'
+            variant='secondary'
+            className='sr-only focus:not-sr-only focus:absolute focus:z-10'
+            onClick={() => {
+              const el = document.getElementById(AFTER_GRID_ID);
+              el?.focus();
+              el?.scrollIntoView({ block: 'nearest' });
+            }}
+          >
+            {view === 'grid'
+              ? `skip the grid (${files.length} ${files.length === 1 ? 'tile' : 'tiles'})`
+              : `skip the list (${files.length} ${files.length === 1 ? 'file' : 'files'})`}
+          </Button>
+        )}
+
+        {/* СЕТКА ШИРЕ, ЧЕМ ОБЕЩАЕТ АДРЕС, И ОБ ЭТОМ СКАЗАНО. Старая ссылка `?frole=N` без
+            проекта разрешается индексом ролей; не прочитался индекс — роль гаснет вместе с
+            отсутствующим проектом, и выдача становится всей библиотекой. Промолчать значило бы
+            дать прочесть несужённую выдачу как суженную — то есть поверить, что в роли лежит
+            ВСЁ. Строка, а не плашка: это деградация чтения, а не отказ действия. */}
+        {roleResolveFailed && (
+          <div className='flex items-center gap-2.5'>
+            <Text variant='label'>role link failed · unfiltered</Text>
+            <Button variant='underline' onClick={() => roleIndexQuery.refetch()}>
+              retry
+            </Button>
           </div>
         )}
-        {/* ОПИСАНИЕ ПРОЕКТА ОТСЮДА УЕХАЛО: у проекта есть своя страница, и там оно первый
-            абзац, с правкой на месте. Здесь остаётся описание ОБЫЧНОГО ярлыка — у него
-            страницы нет, и эта строка единственное место, где его вообще видно. */}
-        {!!activeTopic?.description && (
-          <div className='border-t border-hairline px-2.5 py-2'>
-            <Text size='micro' variant='label' className='max-w-[80ch]'>
-              {activeTopic.description}
+
+        {/* РЕЖИМ ПРОЕКТА ЗАНИМАЕТ МЕСТО СЕТКИ, и только его. Всё, что ниже — полоса выделения,
+            приём броска, очередь загрузки, карточка, — общее для обоих режимов и написано один
+            раз. Скелет, отказ и пустые состояния тоже общие: в секциях они отвечают на те же
+            вопросы, просто спрашивают их у пяти запросов вместо одного. */}
+        {sectionMode ? (
+          sectionsPending ? (
+            // ОДИН СКЕЛЕТ НА ВСЕ СЕКЦИИ, а не заголовок с крутилкой вместо числа. Заголовок без
+            // счётчика — это заголовок, который ничего не сообщает, а счётчик и есть смысл секции.
+            // Запросы уходят одновременно, так что ждут ровно самый медленный из них.
+            <GallerySkeleton />
+          ) : sectionsAllFailed ? (
+            <ListFailedState
+              error={rolesQuery.error ?? sectionQueries.find((q) => q.isError)?.error}
+              onRetry={() => {
+                rolesQuery.refetch();
+                sectionQueries.forEach((q) => q.refetch());
+              }}
+            />
+          ) : nothingFound ? (
+            emptyState()
+          ) : (
+            <ProjectSections
+              sections={visibleSections}
+              emptyRoles={emptyRoleNames}
+              pileEmpty={pileEmpty}
+              renderFiles={renderFiles}
+            />
+          )
+        ) : roleResolvePending || filesQuery.isLoading ? (
+          <GallerySkeleton />
+        ) : filesQuery.isError && !files.length ? (
+          <ListFailedState error={filesQuery.error} onRetry={() => filesQuery.refetch()} />
+        ) : files.length === 0 ? (
+          emptyState()
+        ) : (
+          renderFiles(files)
+        )}
+
+        {/* СЛОВАРЬ ПРОЕКТА ДОСТИЖИМ И У ПУСТОГО ПРОЕКТА — ряд стоит на СТРАНИЦЕ, а не внутри
+            секций. Пока он жил в `ProjectSections`, он исчезал вместе с ними, а исчезают они
+            ровно там, где вместо секций рисуется пустое состояние: свежесозданный проект не давал
+            ни увидеть засеянные сервером роли, ни завести, ни переименовать, ни слить — пока в
+            него не упадёт первый файл. Экран тем при этом обещает обратное.
+
+            `isSuccess`, А НЕ «НЕ В ПУТИ»: пока словарь не пришёл или не пришёл вовсе, строка
+            сказала бы «у проекта нет своих слов» — утверждение о факте, которого мы не знаем. */}
+        {sectionMode && rolesQuery.isSuccess && activeProject && (
+          <ProjectRolesRow
+            projectName={activeProject.name ?? `#${projectId}`}
+            roleNames={roles.filter((r) => !r.archived).map((r) => r.name ?? `#${r.id}`)}
+            writable={writable}
+            onAddRole={() => setRolesDialog(true)}
+          />
+        )}
+
+        {/* МИШЕНЬ ПРОПУСКА. `tabIndex={-1}` даёт узлу принимать фокус программно, не влезая в
+            порядок обхода: следующее нажатие Tab уводит отсюда дальше по документу — в полосу
+            выделения и в «show more», то есть ровно туда, ради чего пропуск и нажимали. */}
+        <div id={AFTER_GRID_ID} tabIndex={-1} className='focus:outline-none' />
+
+        {/* ОБРЫВ ПРИ ЛИСТАНИИ — ПОЛОСА ПОД СПИСКОМ, а не вместо него: уже показанные страницы
+            остаются на месте, позиция прокрутки не съезжает. */}
+        {filesQuery.isFetchNextPageError && (
+          <NextPageFailure
+            loaded={files.length}
+            total={total === undefined ? undefined : Number(total)}
+            retrying={filesQuery.isFetchingNextPage}
+            onRetry={() => filesQuery.fetchNextPage()}
+          />
+        )}
+
+        {/* Набор отдаётся СВЕЖИМИ объектами из текущей выдачи, а не снимком на момент клика:
+            у снимка через несколько часов мёртвая presigned-ссылка, а после переименования из
+            карточки — устаревшее имя в списке того, что сейчас удалят. */}
+        {/* СЛОВАРЬ РОЛЕЙ ПОЛОСЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ. Он принадлежит проекту, а проект полоса
+            выбирает У СЕБЯ в диалоге — значит и словарь она обязана спрашивать сама, по своему
+            выбору. Проп `roles` здесь означал бы «словарь холста», то есть словарь ДРУГОГО
+            проекта, чем тот, в который сейчас кладут. */}
+        <FilesSelectionBar
+          selected={selectedFresh}
+          topics={topics}
+          projects={writerProjects}
+          activeProjectId={projectId}
+          writable={writable}
+          onClear={selection.clear}
+          onDropped={selection.drop}
+        />
+
+        {filesQuery.hasNextPage && !filesQuery.isFetchNextPageError && (
+          <div className='flex items-center gap-2.5'>
+            <Button
+              size='sm'
+              variant='secondary'
+              disabled={filesQuery.isFetchingNextPage}
+              onClick={() => filesQuery.fetchNextPage()}
+            >
+              {filesQuery.isFetchingNextPage ? 'loading…' : 'show more'}
+            </Button>
+            <Text size='micro' variant='label'>
+              shown {files.length}
+              {total === undefined ? '' : ` of ${total}`}
             </Text>
           </div>
         )}
       </div>
-
-      {/* СТРАНИЦА ПРОЕКТА — ЭТО НЕ ВТОРОЙ ЭКРАН, А ДРУГАЯ ОТРИСОВКА ТОГО ЖЕ АДРЕСА.
-          `?project=N` как был режимом холста, так и остался: глубокие ссылки из задач, с
-          карточек вещей и из чата продолжают работать буква в букву. Меняется то, ЧЕМ этот
-          режим нарисован — крошка, имя, даты, вещи, описание и строка задач вместо одного
-          чипа в ряду.
-
-          ШАПКА ЕСТЬ И В СУЖЕННОМ ВИДЕ. Человек, нажавший «show all» в секции, не покинул
-          проект — он смотрит его часть, и терять при этом имя, даты и выход в индекс не за
-          что. Ниже шапки в этом случае встаёт заголовок «проект / роль». */}
-      {projectId > 0 && activeProject && (
-        <ProjectHeader
-          project={activeProject}
-          styles={projectStylesQuery.data?.styles ?? []}
-          stylesFetched={projectStylesQuery.isFetched}
-          writable={writable}
-          onIndex={() => navigate(ROUTES.filesProjects)}
-          onEdit={() => setEditingProject(true)}
-        >
-          {/* ОПИСАНИЕ — ПЕРВЫЙ АБЗАЦ СТРАНИЦЫ, и правится оно на месте. У обычного ярлыка
-              страницы нет, и там этот орган не монтируется вовсе. */}
-          <ProjectDescription project={activeProject} writable={writable} />
-          {/* ЗАДАЧИ — ОДНА СТРОКА-СВОДКА ПОД ШАПКОЙ, до секций: страница про ФАЙЛЫ, задачи
-              здесь гость. Компонент сам спрашивает данные, сам молчит без права и до ответа,
-              и от места не зависит ничем. */}
-          <ProjectTasks projectId={projectId} />
-        </ProjectHeader>
-      )}
-
-      {/* СУЖЕННАЯ СЕКЦИЯ: вместо ряда чипов — заголовок «проект / роль · N» и выход обратно.
-          Он же мишень фокуса после «show all» (см. `onShowAll` выше). */}
-      {projectId > 0 && roleNarrowed && activeProject && (
-        <NarrowedSectionHeader
-          projectName={activeProject.name ?? `#${projectId}`}
-          roleName={roleLabel || `#${fileRole.roleId}`}
-          total={matched}
-          archivedRole={
-            !fileRole.withoutRole &&
-            !!roles.find((r) => Number(r.id) === fileRole.roleId)?.archived
-          }
-          onBack={() => patch({ fileRole: { roleId: 0, withoutRole: false } })}
-        />
-      )}
-
-      {/* ПЕРВЫЙ БЛОК ПРОЕКТА — ПРИГЛАШЕНИЕ ПОЛОЖИТЬ ФАЙЛ (просьба владельца). Стоит ДО секций и
-          до пустого состояния, поэтому оно на месте и у проекта, в котором пока ничего нет.
-          Роль берётся из текущего сужения: в разделе «исходники» добавленный файл обязан
-          появиться там же, где его добавляли, а не уехать в кучу без роли. */}
-      {projectId > 0 && writable && !narrowedRoleUnusable && (
-        <AddFilesTile
-          label={
-            fileRole.roleId > 0 && roleLabel
-              ? `to “${activeProject?.name ?? `#${projectId}`}” as “${roleLabel}”`
-              : `to “${activeProject?.name ?? `#${projectId}`}”`
-          }
-          onClick={() => setAddingFiles(true)}
-        />
-      )}
-
-      {/* ЦЕНА ТАБУЛЯЦИИ НА ХОЛСТЕ — ОДИН ОРГАН, А НЕ ПЕРЕДЕЛКА ПЛИТКИ.
-          У плитки теперь ТРИ остановки (чекбокс выделения, кадр, подвал), и при `PAGE_SIZE = 60`
-          до кнопки «show more» за сеткой набирается около 180 нажатий Tab вместо прежних 120.
-          Порядок обхода при этом верный: чекбокс → кадр → подвал, DOM совпадает с картинкой.
-          Дорого не устройство плитки, а её количество.
-
-          ВЫБРАНА ССЫЛКА-ПРОПУСК, А НЕ ROVING ПО СЕТКЕ, и вот почему. Roving требует протащить
-          `tabIndex` в `file-tile.tsx` — файл соседней волны, и он же рисует вложения карточки
-          задачи, где стрелки означали бы совсем другое. Хуже: у плитки три остановки РАЗНОГО
-          рода, и roving пришлось бы учить, что стрелка вправо внутри плитки и стрелка вправо
-          между плитками — разные жесты. Это новый контракт взаимодействия, а не починка.
-          Ссылка-пропуск стоит одну остановку, ничего не отнимает у мыши, невидима до фокуса и
-          приводит ровно туда, куда указывала жалоба, — за сетку.
-
-          ЧИСЛО В ПОДПИСИ НЕСУЩЕЕ: пропуск вслепую человек не нажимает, а «60 tiles» и
-          «6 tiles» — это разные решения.
-
-          СТОИТ ВПЛОТНУЮ ПЕРЕД СЕТКОЙ, А НЕ ВЫШЕ. Сначала она стояла сразу за тулбаром — и в
-          режиме проекта перескакивала заодно КРОШКУ, ПРАВКУ ПРОЕКТА, ОПИСАНИЕ И СТРОКУ ЗАДАЧ,
-          называя при этом одни плитки. Орган, уносящий больше, чем обещает подпись, хуже
-          отсутствующего: его нажимают один раз и перестают доверять. */}
-      {files.length > 0 && (
-        <Button
-          size='xs'
-          variant='secondary'
-          className='sr-only focus:not-sr-only focus:absolute focus:z-10'
-          onClick={() => {
-            const el = document.getElementById(AFTER_GRID_ID);
-            el?.focus();
-            el?.scrollIntoView({ block: 'nearest' });
-          }}
-        >
-          skip the grid ({files.length} {files.length === 1 ? 'tile' : 'tiles'})
-        </Button>
-      )}
-
-      {/* СЕТКА ШИРЕ, ЧЕМ ОБЕЩАЕТ АДРЕС, И ОБ ЭТОМ СКАЗАНО. Старая ссылка `?frole=N` без
-          проекта разрешается индексом ролей; не прочитался индекс — роль гаснет вместе с
-          отсутствующим проектом, и выдача становится всей библиотекой. Промолчать значило бы
-          дать прочесть несужённую выдачу как суженную — то есть поверить, что в роли лежит
-          ВСЁ. Строка, а не плашка: это деградация чтения, а не отказ действия. */}
-      {roleResolveFailed && (
-        <Text size='micro' variant='label'>
-          couldn't work out which project this role link belongs to, so nothing is filtered by it
-          — everything is shown. reload the page to try again.
-        </Text>
-      )}
-
-      {/* РЕЖИМ ПРОЕКТА ЗАНИМАЕТ МЕСТО СЕТКИ, и только его. Всё, что ниже — полоса выделения,
-          приём броска, очередь загрузки, карточка, — общее для обоих режимов и написано один
-          раз. Скелет, отказ и пустые состояния тоже общие: в секциях они отвечают на те же
-          вопросы, просто спрашивают их у пяти запросов вместо одного. */}
-      {sectionMode ? (
-        sectionsPending ? (
-          // ОДИН СКЕЛЕТ НА ВСЕ СЕКЦИИ, а не заголовок с крутилкой вместо числа. Заголовок без
-          // счётчика — это заголовок, который ничего не сообщает, а счётчик и есть смысл секции.
-          // Запросы уходят одновременно, так что ждут ровно самый медленный из них.
-          <GallerySkeleton />
-        ) : sectionsAllFailed ? (
-          <ListFailedState
-            error={rolesQuery.error ?? sectionQueries.find((q) => q.isError)?.error}
-            onRetry={() => {
-              rolesQuery.refetch();
-              sectionQueries.forEach((q) => q.refetch());
-            }}
-          />
-        ) : nothingFound ? (
-          emptyState()
-        ) : (
-          <ProjectSections
-            sections={visibleSections}
-            emptyRoles={emptyRoleNames}
-            pileEmpty={pileEmpty}
-            renderTile={tile}
-          />
-        )
-      ) : roleResolvePending || filesQuery.isLoading ? (
-        <GallerySkeleton />
-      ) : filesQuery.isError && !files.length ? (
-        <ListFailedState error={filesQuery.error} onRetry={() => filesQuery.refetch()} />
-      ) : files.length === 0 ? (
-        emptyState()
-      ) : (
-        <Tiles min={190}>{files.map(tile)}</Tiles>
-      )}
-
-      {/* СЛОВАРЬ ПРОЕКТА ДОСТИЖИМ И У ПУСТОГО ПРОЕКТА — ряд стоит на СТРАНИЦЕ, а не внутри
-          секций. Пока он жил в `ProjectSections`, он исчезал вместе с ними, а исчезают они
-          ровно там, где вместо секций рисуется пустое состояние: свежесозданный проект не давал
-          ни увидеть засеянные сервером роли, ни завести, ни переименовать, ни слить — пока в
-          него не упадёт первый файл. Экран тем при этом обещает обратное.
-
-          `isSuccess`, А НЕ «НЕ В ПУТИ»: пока словарь не пришёл или не пришёл вовсе, строка
-          сказала бы «у проекта нет своих слов» — утверждение о факте, которого мы не знаем. */}
-      {sectionMode && rolesQuery.isSuccess && activeProject && (
-        <ProjectRolesRow
-          projectName={activeProject.name ?? `#${projectId}`}
-          roleNames={roles.filter((r) => !r.archived).map((r) => r.name ?? `#${r.id}`)}
-          writable={writable}
-          onAddRole={() => setRolesDialog(true)}
-        />
-      )}
-
-      {/* МИШЕНЬ ПРОПУСКА. `tabIndex={-1}` даёт узлу принимать фокус программно, не влезая в
-          порядок обхода: следующее нажатие Tab уводит отсюда дальше по документу — в полосу
-          выделения и в «show more», то есть ровно туда, ради чего пропуск и нажимали. */}
-      <div id={AFTER_GRID_ID} tabIndex={-1} className='focus:outline-none' />
-
-      {/* ОБРЫВ ПРИ ЛИСТАНИИ — ПОЛОСА ПОД СПИСКОМ, а не вместо него: уже показанные страницы
-          остаются на месте, позиция прокрутки не съезжает. */}
-      {filesQuery.isFetchNextPageError && (
-        <NextPageFailure
-          loaded={files.length}
-          total={total === undefined ? undefined : Number(total)}
-          retrying={filesQuery.isFetchingNextPage}
-          onRetry={() => filesQuery.fetchNextPage()}
-        />
-      )}
-
-      {/* Набор отдаётся СВЕЖИМИ объектами из текущей выдачи, а не снимком на момент клика:
-          у снимка через несколько часов мёртвая presigned-ссылка, а после переименования из
-          карточки — устаревшее имя в списке того, что сейчас удалят. */}
-      {/* СЛОВАРЬ РОЛЕЙ ПОЛОСЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ. Он принадлежит проекту, а проект полоса
-          выбирает У СЕБЯ в диалоге — значит и словарь она обязана спрашивать сама, по своему
-          выбору. Проп `roles` здесь означал бы «словарь холста», то есть словарь ДРУГОГО
-          проекта, чем тот, в который сейчас кладут. */}
-      <FilesSelectionBar
-        selected={selectedFresh}
-        topics={topics}
-        projects={writerProjects}
-        activeProjectId={projectId}
-        writable={writable}
-        onClear={selection.clear}
-        onDropped={selection.drop}
-      />
-
-      {filesQuery.hasNextPage && !filesQuery.isFetchNextPageError && (
-        <div className='flex items-center gap-2.5'>
-          <Button
-            size='sm'
-            variant='secondary'
-            disabled={filesQuery.isFetchingNextPage}
-            onClick={() => filesQuery.fetchNextPage()}
-          >
-            {filesQuery.isFetchingNextPage ? 'loading…' : 'show more'}
-          </Button>
-          <Text size='micro' variant='label'>
-            shown {files.length}
-            {total === undefined ? '' : ` of ${total}`}
-          </Text>
-        </div>
-      )}
 
       {/* БРОСОК ПРИНИМАЕТ ВСЁ ОКНО — целиться некуда. Приёмник живёт и в режиме чтения: он
           гасит бросок, чтобы браузер не ушёл по ссылке на файл, унеся вкладку с фильтром и
@@ -1294,9 +1429,7 @@ export default function FilesPage() {
         disabledNote={
           id || pasted.length
             ? 'close the window first: the queue stands under it, and the batch would not be visible'
-            : mayWrite
-              ? 'read mode is on — switch it in the bar above'
-              : 'the files:write right is needed — ask a super admin for it'
+            : 'read only · no files:write'
         }
         // Проект называется В ТОМ ЖЕ списке, что и темы: оверлей обещает, куда попадёт пачка,
         // и умолчать о проекте значило бы пообещать «разобрать» там, где файлы уедут в съёмку.
@@ -1376,6 +1509,11 @@ export default function FilesPage() {
           roleName={roleLabel || undefined}
           onClose={() => setAddingFiles(false)}
         />
+      )}
+
+      {/* ЗАВЕДЁННЫЙ ПРОЕКТ СРАЗУ СТАНОВИТСЯ ВЫБРАННЫМ: заводят его, чтобы в него класть. */}
+      {creatingProject && writable && (
+        <NewProjectModal onClose={() => setCreatingProject(false)} onDone={onProject} />
       )}
 
       {editingProject && activeProject && (
