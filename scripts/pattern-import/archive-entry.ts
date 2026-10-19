@@ -61,6 +61,7 @@ import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { leakDiag } from './leak-diag';
 import { famRender, leaks2Diag } from './leaks2-diag';
+import { sizesepDump } from './sizesep-dump';
 import { gfitArchive } from './gfit-archive';
 import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import { provenDarts } from 'lib/pattern-import/pieces/darts';
@@ -845,6 +846,19 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       );
     } catch (e) {
       rec.leaks2Error = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
+  // ARCHIVE_SIZESEP=<dir> (SIZESEP): the sheet's paths, chains, rows and candidates for the
+  // engine-vs-key size pictures (scripts/pattern-import/sizesep-dump.ts)
+  if (process.env.ARCHIVE_SIZESEP && S) {
+    try {
+      rec.sizesep = sizesepDump(
+        rel,
+        { ...S, run: (box.s as unknown as { run: SizeRun | null }).run },
+        process.env.ARCHIVE_SIZESEP,
+      );
+    } catch (e) {
+      rec.sizesepError = String((e as Error)?.stack ?? e).slice(0, 400);
     }
   }
   if (process.env.ARCHIVE_PNG && S) {
