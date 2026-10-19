@@ -40,6 +40,7 @@ import { applyMasks, cleanPages } from 'lib/pattern-import/clean';
 import './e2e-entry';
 import { fixturePageRoleDeps } from './page-roles-fixture';
 import { mountHook, rerender } from './react-hook-shim';
+import { notPatternEvidence } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
 import {
   useImportSession,
   type ImportSessionApi,
@@ -561,10 +562,9 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
       if (!closed || a > closed.size)
         closed = { pts: c.pts, closed: true, style: st, ext, size: a };
     });
-  const cut = (closed ?? open) as Cut | null;
-  check(name, 'MUTATION: the tile sheet has a piece or a piece edge to copy', !!cut, '');
-  if (!cut) return;
-  const p: Cut = cut;
+  // no piece and no curved edge on any one tile (a sheet of straight segments only): the mutations
+  // below still run with the synthetic pocket; only the 1:1 copies of a tile piece are skipped
+  const p = (closed ?? open) as Cut | null;
   for (const d of explained) {
     const pg = doc.pages.find((x) => x.page === d.page)!;
     const inject = (style: Style) => {
@@ -577,8 +577,8 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
           ...pg.paths,
           {
             id: pid,
-            pts: p.pts.map((q) => ({ ...q })),
-            closed: p.closed,
+            pts: p!.pts.map((q) => ({ ...q })),
+            closed: p!.closed,
             style: sid,
             src: { file: pg.file, page: pg.page, op: 990000, sub: 0 },
           },
@@ -586,8 +586,24 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
       };
       return pageInk(pageChains(mut), pens, shapes, mut);
     };
+    const cls = base.classes.find((c) => c.file === d.file && c.page === d.page);
+    if (cls?.cls === 'overview') {
+      // an overview's role IS the lattice the reading explains: the reading never decides it on
+      // its own (policy.ts inkRole — Codex r3), whatever it explains (a full-size template drawn
+      // over the lattice reads as a drawing by the lattice's detail inside it)
+      const ev = notPatternEvidence(
+        { ...d, reducedCopy: undefined, ink: { explained: '13 rules, 1 drawing' } } as never,
+        base.classes as never,
+      );
+      check(
+        name,
+        `MUTATION p${d.page + 1}: an overview whose every line is explained (no reduced copy) → no ink evidence`,
+        !ev || !ev.includes('every line on it is explained'),
+        ev ?? '',
+      );
+    } else ink5(name, d.page, pg, pieces, p, pens, shapes);
+    if (!p) continue;
     const own = inject(p.style);
-    ink5(name, d.page, pg, pieces, p, pens, shapes);
     check(
       name,
       `MUTATION p${d.page + 1}: a tile ${p.closed ? 'piece' : 'piece edge'} at 1:1 in its own pen on it → not explained`,
@@ -612,19 +628,26 @@ const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained:
  * PAGES (night 19.10) — the page reading learnt rules past the edge, bars, tones, the parts of one
  * drawing, the size line key and the tile map; every one of them is checked against a real piece
  * placed on the explained page (each must leave it NOT explained):
- *   · a small tile piece (a drawing's size) in a pen of its own at the page's centre — over the
- *     page's drawings, if any (tones and parts never reach a piece drawn with a pen of its own);
+ *   · a small tile piece (a drawing's size) in a pen of its own at the page's centre, or at its
+ *     clearest spot when the page draws there (tones and parts never reach a piece drawn with a pen
+ *     of its own; a bare outline laid OVER a drawing reads as that drawing — a known limit);
  *   · the same with a WHITE fill under it (a mask, as tile sheets draw it — never a tone);
  *   · the largest piece crossing the page's right edge (straight rules pass the edge, a piece not);
  *   · a waistband: a rectangle in the tile sheet's pen with its name and cut, and with a size key's
  *     words — «Size Line Key», four «SIZE n» labels — but no sample lines.
+ * Codex r3 added: the small piece over a grey fill of its own box, with a diagonal grainline in its
+ * pen, a named waistband holding a complete key (labels and samples), a straight piece edge in the
+ * tile sheet's pen off the page, a coded 44 mm square with four placement marks. An overview page
+ * is checked at the policy instead (its reading never decides it). Then: the small piece with its
+ * grainline, arrowheads, three notches and a print-size «POCKET / CUT 2» (as much detail as a
+ * drawing — the label tells a piece).
  */
 function ink5(
   name: string,
   page: number,
   pg: IRPage,
   pieces: { pts: PtMm[]; style: Style; ext: number; size: number }[],
-  big: { pts: PtMm[]; closed: boolean; style: Style; ext: number },
+  big: { pts: PtMm[]; closed: boolean; style: Style; ext: number } | null,
   pens: ReturnType<typeof tilePensOf>,
   shapes: ReturnType<typeof shapesOf>,
 ) {
@@ -687,18 +710,128 @@ function ink5(
     fill: false,
     clip: null,
   };
-  const small = pieces.filter((x) => x.ext <= drawMax).sort((a, b) => a.size - b.size)[0];
+  // the file's smallest tile piece of a drawing's size, else (no piece closes on one tile — Mood's
+  // pieces run across tiles) a shield-shaped patch pocket 45×55 mm, a real piece all the same
+  const pocket = {
+    pts: [
+      { x: 0, y: 55 },
+      { x: 45, y: 55 },
+      { x: 45, y: 15 },
+      { x: 22.5, y: 0 },
+      { x: 0, y: 15 },
+    ],
+    style: own as Style,
+    ext: 55,
+    size: 2137,
+  };
+  const small = pieces.filter((x) => x.ext <= drawMax).sort((a, b) => a.size - b.size)[0] ?? pocket;
   if (small) {
     const b = box(small.pts);
-    const at = moved(
-      small.pts,
-      pg.widthMm / 2 - (b.minX + b.maxX) / 2,
-      pg.heightMm / 2 - (b.minY + b.maxY) / 2,
-    );
+    // where a real piece is printed: at the page's centre unless the page draws there (its lines
+    // inside the piece's box would read as the inner detail of a drawing — a piece is never printed
+    // over an illustration), else at the clearest spot of a 10 mm grid
+    const pcs = pageChains(pg);
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    const busy = (x0: number, y0: number) =>
+      pcs.box.filter(
+        (o) => o.minX >= x0 - 1 && o.maxX <= x0 + w + 1 && o.minY >= y0 - 1 && o.maxY <= y0 + h + 1,
+      ).length;
+    let spot = { x: (pg.widthMm - w) / 2, y: (pg.heightMm - h) / 2, n: 0, where: 'at the centre' };
+    spot.n = busy(spot.x, spot.y);
+    if (spot.n >= PAGE_INK.drawingDetail)
+      for (let y0 = 10; y0 + h <= pg.heightMm - 10; y0 += 10)
+        for (let x0 = 10; x0 + w <= pg.widthMm - 10; x0 += 10) {
+          const n = busy(x0, y0);
+          if (n < spot.n) spot = { x: x0, y: y0, n, where: `at a clear spot (${x0}, ${y0})` };
+        }
+    const at = moved(small.pts, spot.x - b.minX, spot.y - b.minY);
     const r = read([{ pts: at, closed: true, style: own }]);
+    // Codex r3: a tinted fill of its own box under it (a grey appliqué / pocket template)
+    const grey = read([
+      {
+        pts: at,
+        closed: true,
+        style: { ...own, strokeRgb: [200, 200, 200], widthMm: 0, fill: true },
+      },
+      { pts: at, closed: true, style: own },
+    ]);
     check(
       name,
-      `${tag}: a small tile piece (${Math.round(small.ext)} mm) in a pen of its own at the centre → not explained`,
+      `${tag}: the same small piece over a grey fill of its own box → not explained`,
+      !grey.explained,
+      grey.unexplained ?? grey.explained,
+    );
+    // Codex r3: its grainline — a diagonal 100 mm line in the piece's own pen across it (an open
+    // line of a drawing's size is a "drawing"; it must never make the piece a part of one)
+    const ab = box(at);
+    const cx = (ab.minX + ab.maxX) / 2;
+    const cy = (ab.minY + ab.maxY) / 2;
+    const grain = read([
+      { pts: at, closed: true, style: own },
+      {
+        pts: [
+          { x: cx - 36, y: cy - 36 },
+          { x: cx + 36, y: cy + 36 },
+        ],
+        closed: false,
+        style: own,
+      },
+    ]);
+    check(
+      name,
+      `${tag}: the same small piece with a diagonal grainline in its pen → not explained`,
+      !grain.explained,
+      grain.unexplained ?? grain.explained,
+    );
+    // a real piece carries its marks: a grainline with its arrowheads, notches, its name and cut
+    // at print size — inner detail as rich as a drawing's, told apart by the label
+    const marks: Add[] = [
+      {
+        pts: [
+          { x: cx, y: cy - 0.3 * h },
+          { x: cx, y: cy + 0.3 * h },
+        ],
+        closed: false,
+        style: own,
+      },
+      ...[-1, 1].flatMap((e) =>
+        [-1, 1].map((sx) => ({
+          pts: [
+            { x: cx, y: cy + e * 0.3 * h },
+            { x: cx + sx * 2, y: cy + e * (0.3 * h - 3) },
+          ],
+          closed: false,
+          style: own,
+        })),
+      ),
+      ...at.slice(0, 3).map((v) => {
+        const dx = cx - v.x;
+        const dy = cy - v.y;
+        const l = Math.hypot(dx, dy) || 1;
+        return {
+          pts: [v, { x: v.x + (4 * dx) / l, y: v.y + (4 * dy) / l }],
+          closed: false,
+          style: own,
+        };
+      }),
+    ];
+    const labelled = read(
+      [{ pts: at, closed: true, style: own }, ...marks],
+      [
+        { text: 'POCKET', at: { x: cx - 8, y: cy + 4 } },
+        { text: 'CUT 2', at: { x: cx - 6, y: cy - 4 } },
+      ],
+    );
+    check(
+      name,
+      `${tag}: the same small piece with its grainline, notches and «POCKET / CUT 2» → not explained`,
+      !labelled.explained,
+      labelled.unexplained ?? labelled.explained,
+    );
+    check(
+      name,
+      `${tag}: a small tile piece (${Math.round(small.ext)} mm) in a pen of its own ${spot.where} → not explained`,
       !r.explained,
       r.unexplained ?? r.explained,
     );
@@ -740,7 +873,7 @@ function ink5(
       photo.unexplained ?? photo.explained,
     );
   }
-  if (big.closed) {
+  if (big?.closed) {
     const b = box(big.pts);
     const r = read([
       {
@@ -794,11 +927,59 @@ function ink5(
       !plain.explained,
       plain.unexplained ?? plain.explained,
     );
+    const keyWords = ['Size Line Key', 'SIZE 00', 'SIZE 02', 'SIZE 04', 'SIZE 06', 'SIZE 08'];
     const keyed = read(
       [{ pts: rect, closed: true, style }],
-      ['Size Line Key', 'SIZE 00', 'SIZE 02', 'SIZE 04', 'SIZE 06', 'SIZE 08'].map((t, k) =>
-        label(k, t),
-      ),
+      keyWords.map((t, k) => label(k, t)),
+    );
+    // Codex r3: a named waistband holding a complete legend — labels, each with a sample line of
+    // its own pen beside it
+    const samplePens: Omit<Style, 'id'>[] = [
+      { ...style, dash: [4, 1] },
+      { ...style, dash: [2, 1] },
+      { ...style, dash: [6, 1, 1, 1] },
+      { ...style, dash: [1, 1] },
+      { ...style, dash: null },
+    ];
+    const legend = read(
+      [
+        { pts: rect, closed: true, style },
+        ...keyWords.slice(1).map((_, k) => {
+          const at = label(k + 1, '').at;
+          return {
+            pts: [
+              { x: at.x + 16, y: at.y + 1 },
+              { x: at.x + 30, y: at.y + 1 },
+            ],
+            closed: false,
+            style: samplePens[k],
+          };
+        }),
+      ],
+      [...keyWords.map((t, k) => label(k, t)), label(6, 'WAISTBAND'), label(7, 'CUT 1 ON FOLD')],
+    );
+    check(
+      name,
+      `${tag}: a named waistband holding a complete size key (labels + sample lines) → not explained`,
+      !legend.explained,
+      legend.unexplained ?? legend.explained,
+    );
+    // Codex r3: a straight edge of a piece in the tile sheet's pen running off the page
+    const edge = read([
+      {
+        pts: [
+          { x: pg.widthMm - 60, y: pg.heightMm / 2 },
+          { x: pg.widthMm + 90, y: pg.heightMm / 2 },
+        ],
+        closed: false,
+        style,
+      },
+    ]);
+    check(
+      name,
+      `${tag}: a straight piece edge in the tile sheet's pen running off the page → not explained`,
+      !edge.explained,
+      edge.unexplained ?? edge.explained,
     );
     check(
       name,
@@ -807,8 +988,8 @@ function ink5(
       keyed.unexplained ?? keyed.explained,
     );
     // a small square piece in the tile sheet's pen labelled with the pattern's code: its cut and
-    // its grainline say it is a piece, not a code stamp
-    const sq = 40;
+    // its grainline say it is a piece, not a code stamp (44 mm: no test square's side)
+    const sq = 44;
     const sx = pg.widthMm / 2 - sq / 2;
     const sy = pg.heightMm / 2 - sq / 2;
     const square = [
@@ -833,7 +1014,7 @@ function ink5(
     );
     check(
       name,
-      `${tag}: a 40 mm square piece in the tile sheet's pen with the pattern's code, its cut and a grainline → not explained`,
+      `${tag}: a 44 mm square piece in the tile sheet's pen with the pattern's code, its cut and a grainline → not explained`,
       !coded.explained,
       coded.unexplained ?? coded.explained,
     );
@@ -843,9 +1024,35 @@ function ink5(
     );
     check(
       name,
-      `${tag}: a 40 mm square in the tile sheet's pen with only the pattern's code (no logo) → not explained`,
+      `${tag}: a 44 mm square in the tile sheet's pen with only the pattern's code (no logo) → not explained`,
       !bare.explained,
       bare.unexplained ?? bare.explained,
+    );
+    // Codex r3: the code and four short placement marks (no lettered logo)
+    const marks = read(
+      [
+        { pts: square, closed: true, style },
+        ...[
+          [8, 8],
+          [36, 8],
+          [8, 36],
+          [36, 36],
+        ].map(([x, y]) => ({
+          pts: [
+            { x: sx + x - 2.5, y: sy + y },
+            { x: sx + x + 2.5, y: sy + y },
+          ],
+          closed: false,
+          style,
+        })),
+      ],
+      [{ text: 'MDF000', at: { x: sx + 14, y: sy + 20 } }],
+    );
+    check(
+      name,
+      `${tag}: a 44 mm square in the tile sheet's pen with the pattern's code and four placement marks → not explained`,
+      !marks.explained,
+      marks.unexplained ?? marks.explained,
     );
   }
 }
