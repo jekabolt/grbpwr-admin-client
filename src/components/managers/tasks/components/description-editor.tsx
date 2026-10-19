@@ -1,7 +1,7 @@
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
-import { Text, Textarea } from 'ui';
+import { Button, Text, Textarea } from 'ui';
 import type { TaskMedia } from '../api/types';
 import { MediaRefRow } from './media-ref-row';
 import { TaskDescriptionView } from './task-description';
@@ -87,7 +87,7 @@ export function DescriptionEditor({
 
   return (
     <div className='flex flex-col gap-1.5'>
-      <div className='flex items-center justify-between gap-2'>
+      <div className='flex items-center justify-between gap-2 [&_button]:min-h-11 sm:[&_button]:min-h-0'>
         {preview ? (
           <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
             preview
@@ -95,14 +95,16 @@ export function DescriptionEditor({
         ) : (
           <FormatBar areaRef={areaRef} value={value} onChange={onChange} />
         )}
-        <button
+        <Button
           type='button'
+          variant='underline'
+          size='xs'
           aria-label={preview ? 'back to writing' : 'preview markdown'}
           onClick={() => setPreview((p) => !p)}
-          className='shrink-0 text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+          className='min-h-11 shrink-0 text-labelColor hover:text-textColor sm:min-h-0'
         >
           {preview ? 'write' : 'preview'}
-        </button>
+        </Button>
       </div>
 
       {preview ? (

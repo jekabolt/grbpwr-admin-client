@@ -211,6 +211,7 @@ function ReferenceChip({ token }: { token: string }) {
     <Chip
       dashed={!done}
       title={`copy ${token} — paste it into the description or a comment`}
+      className='min-h-11 sm:min-h-0'
       onClick={() => {
         navigator.clipboard?.writeText(token);
         setDone(true);

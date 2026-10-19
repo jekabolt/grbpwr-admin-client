@@ -155,14 +155,14 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
       confirmDisabled={saving}
       // Неподписанное сочетание — то же, что отсутствующее: о нём узнают только те, кто
       // читал этот файл. Место — у самой кнопки, которую оно заменяет.
-      footerHint={`${SAVE_HOTKEY} ${mode === 'create' ? 'creates' : 'saves'}`}
+      footerHint={`${SAVE_HOTKEY} · ${mode === 'create' ? 'create' : 'save'}`}
       closeOnConfirm={false}
       width='lg'
     >
       <form
         onSubmit={handleSubmit(onSubmit)}
         onKeyDown={onModEnter}
-        className='flex flex-col gap-4'
+        className='flex min-w-0 flex-col gap-4'
       >
         <div className='flex flex-col gap-1'>
           <Controller
@@ -174,7 +174,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 placeholder='task title'
                 aria-label='task title'
                 autoFocus
-                className='text-lg'
+                className='min-h-11 text-lg sm:min-h-0'
                 value={field.value}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   field.onChange(e.target.value)
@@ -221,6 +221,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                     name='priority'
                     items={priorityOptions}
                     value={field.value}
+                    className='min-h-11 sm:min-h-0'
                     onValueChange={field.onChange}
                     placeholder='priority'
                     fullWidth
@@ -228,16 +229,18 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
-            <div className='grid grid-cols-2 gap-3'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
               <Field label='planned start'>
                 <Controller
                   control={control}
                   name='startDate'
                   render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
+                    <div className='[&_button]:min-h-11 sm:[&_button]:min-h-0'>
+                      <DatePicker
+                        value={field.value ? new Date(field.value) : undefined}
+                        onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                      />
+                    </div>
                   )}
                 />
               </Field>
@@ -246,10 +249,12 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   control={control}
                   name='dueDate'
                   render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
+                    <div className='[&_button]:min-h-11 sm:[&_button]:min-h-0'>
+                      <DatePicker
+                        value={field.value ? new Date(field.value) : undefined}
+                        onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                      />
+                    </div>
                   )}
                 />
               </Field>
@@ -258,7 +263,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
 
           {/* Right — the associations */}
           <div className='flex min-w-0 flex-col gap-3'>
-            <div className='grid grid-cols-2 gap-3'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
               <Field label='board'>
                 <Controller
                   control={control}
@@ -268,6 +273,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                       name='board'
                       items={boardOptions}
                       value={field.value}
+                      className='min-h-11 sm:min-h-0'
                       onValueChange={field.onChange}
                       placeholder='board'
                       fullWidth
@@ -275,7 +281,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   )}
                 />
               </Field>
-              <Field label='column'>
+              <Field label='status'>
                 <Controller
                   control={control}
                   name='status'
@@ -284,8 +290,9 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                       name='status'
                       items={statusOptions}
                       value={field.value}
+                      className='min-h-11 sm:min-h-0'
                       onValueChange={field.onChange}
-                      placeholder='column'
+                      placeholder='status'
                       fullWidth
                     />
                   )}
@@ -307,10 +314,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 control={control}
                 name='assignees'
                 render={({ field }) => (
-                  <AssigneesPicker
-                    value={field.value}
-                    onChange={(next) => field.onChange(next)}
-                  />
+                  <AssigneesPicker value={field.value} onChange={(next) => field.onChange(next)} />
                 )}
               />
             </div>
@@ -322,6 +326,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   <Input
                     name='labels'
                     placeholder='fw26, urgent, drop-3'
+                    className='min-h-11 sm:min-h-0'
                     value={field.value.join(', ')}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       field.onChange(

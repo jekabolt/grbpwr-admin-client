@@ -9,14 +9,21 @@ import {
   Button,
   CalloutBox,
   ConfirmationModal,
+  EmptyCell,
   Pill,
   Row,
   Section,
   SectionStack,
   Select,
-  Text, EmptyCell,
+  Text,
 } from 'ui';
-import { TaskBoard, TaskFormValues, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
+import {
+  TaskBoard,
+  TaskFormValues,
+  TaskMediaAnnotations,
+  TaskPriority,
+  TaskStatus,
+} from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
 import { PriorityTag } from '../components/task-card';
@@ -37,7 +44,13 @@ import {
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
-import { FieldLabel, InlineDate, InlineDescription, InlineField, InlineTitle } from './inline-fields';
+import {
+  FieldLabel,
+  InlineDate,
+  InlineDescription,
+  InlineField,
+  InlineTitle,
+} from './inline-fields';
 import { AssigneesPicker } from '../components/assignees-picker';
 import { TaskDescriptionView } from '../components/task-description';
 import { TaskRelations } from '../components/task-relations';
@@ -118,8 +131,7 @@ export function TaskDetail() {
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select'))
-      return;
+    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
     // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
     window.getSelection()?.removeAllRanges();
     setEditingDescription(true);
@@ -191,7 +203,7 @@ export function TaskDetail() {
   const attachments = useTaskMediaViewer({
     media,
     annotations,
-    readOnlyNote: canWrite ? 'press edit on the card to draw on this attachment' : undefined,
+    readOnlyNote: canWrite ? 'edit to draw' : undefined,
   });
 
   /**
@@ -254,7 +266,9 @@ export function TaskDetail() {
         <Text size='micro' variant='label'>
           It may have been deleted, or the link is wrong.
         </Text>
-        <BackLink to={ROUTES.tasks}>board</BackLink>
+        <BackLink className='inline-flex min-h-11 items-center sm:min-h-0' to={ROUTES.tasks}>
+          board
+        </BackLink>
       </Centered>
     );
   }
@@ -271,14 +285,22 @@ export function TaskDetail() {
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
 
   return (
-    <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
+    <div className='mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-5 overflow-x-clip pb-10'>
       {/* Header */}
       <div className='flex flex-col gap-3 border-b border-borderColor pb-3'>
-        <BackLink to={ROUTES.tasks}>board</BackLink>
+        <BackLink className='inline-flex min-h-11 items-center sm:min-h-0' to={ROUTES.tasks}>
+          board
+        </BackLink>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex flex-wrap items-center gap-2'>
-              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
                 {BOARD_LABEL[task.board]} · {STATUS_LABEL[task.status]}
               </Text>
               {/* `warn` — В СИСТЕМЕ ЭТО «сломано / мешает / блокирует», а не акцент: тон назван
@@ -291,7 +313,7 @@ export function TaskDetail() {
               {task.parentTaskId > 0 && (
                 <Link
                   to={`/tasks/${task.parentTaskId}`}
-                  className='text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+                  className='inline-flex min-h-11 items-center text-micro uppercase tracking-label text-labelColor underline hover:text-textColor sm:min-h-0'
                 >
                   ↑ parent #{task.parentTaskId}
                 </Link>
@@ -325,6 +347,7 @@ export function TaskDetail() {
                 type='button'
                 variant='secondary'
                 size='sm'
+                className='min-h-11 sm:min-h-0'
                 disabled={inlinePatch.isPending}
                 onClick={() => setEditing(true)}
               >
@@ -335,6 +358,7 @@ export function TaskDetail() {
                   type='button'
                   variant='secondary'
                   size='sm'
+                  className='min-h-11 sm:min-h-0'
                   loading={archiveBusy}
                   onClick={() => unarchiveTask.mutate(task.id)}
                 >
@@ -345,6 +369,7 @@ export function TaskDetail() {
                   type='button'
                   variant='secondary'
                   size='sm'
+                  className='min-h-11 sm:min-h-0'
                   loading={archiveBusy}
                   onClick={() => archiveTask.mutate(task.id)}
                 >
@@ -355,7 +380,7 @@ export function TaskDetail() {
                 type='button'
                 variant='secondary'
                 size='sm'
-                className='text-error'
+                className='min-h-11 text-error sm:min-h-0'
                 onClick={() => setDeleting(true)}
               >
                 delete
@@ -377,9 +402,9 @@ export function TaskDetail() {
       </div>
 
       {/* Body */}
-      <div className='grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]'>
+      <div className='grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
         {/* Left — reading the task */}
-        <SectionStack className='min-w-0'>
+        <SectionStack className='order-2 min-w-0 lg:order-1'>
           <Section
             title='description'
             action={
@@ -389,6 +414,7 @@ export function TaskDetail() {
                   type='button'
                   variant='underline'
                   size='xs'
+                  className='min-h-11 sm:min-h-0'
                   /* Имя РАЗЛИЧИМОЕ: на этой странице есть вторая кнопка «edit» — заголовочная,
                      открывающая модалку. Два одинаковых имени на одном экране — это загадка
                      для читалки с экрана и ловушка для стенда. */
@@ -484,13 +510,48 @@ export function TaskDetail() {
         </SectionStack>
 
         {/* Right — facts + activity */}
-        <aside>
-          <SectionStack>
-            <Section>
+        <aside className='contents lg:order-2 lg:block'>
+          <SectionStack className='contents lg:flex'>
+            <Section className='order-1 lg:order-none'>
               <div className='flex flex-col gap-3'>
                 {/* Placement — inline move without opening the editor */}
                 <label className='flex flex-col gap-1'>
-                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    tracking='label'
+                    component='span'
+                    className='uppercase'
+                  >
+                    status
+                  </Text>
+                  <Select
+                    name='detail-status'
+                    items={statusOptions}
+                    value={task.status}
+                    onValueChange={(v: string) =>
+                      canWrite &&
+                      v !== task.status &&
+                      move.mutate({
+                        id: task.id,
+                        board: task.board,
+                        status: v as TaskStatus,
+                        position: 0,
+                      })
+                    }
+                    readOnly={!canWrite}
+                    className='min-h-11 sm:min-h-0'
+                    fullWidth
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    tracking='label'
+                    component='span'
+                    className='uppercase'
+                  >
                     board
                   </Text>
                   <Select
@@ -500,26 +561,15 @@ export function TaskDetail() {
                     onValueChange={(v: string) =>
                       canWrite &&
                       v !== task.board &&
-                      move.mutate({ id: task.id, board: v as TaskBoard, status: task.status, position: 0 })
+                      move.mutate({
+                        id: task.id,
+                        board: v as TaskBoard,
+                        status: task.status,
+                        position: 0,
+                      })
                     }
                     readOnly={!canWrite}
-                    fullWidth
-                  />
-                </label>
-                <label className='flex flex-col gap-1'>
-                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-                    column
-                  </Text>
-                  <Select
-                    name='detail-status'
-                    items={statusOptions}
-                    value={task.status}
-                    onValueChange={(v: string) =>
-                      canWrite &&
-                      v !== task.status &&
-                      move.mutate({ id: task.id, board: task.board, status: v as TaskStatus, position: 0 })
-                    }
-                    readOnly={!canWrite}
+                    className='min-h-11 sm:min-h-0'
                     fullWidth
                   />
                 </label>
@@ -536,8 +586,10 @@ export function TaskDetail() {
                       name='detail-priority'
                       items={priorityOptions}
                       value={t.priority}
+                      className='min-h-11 sm:min-h-0'
                       onValueChange={(v: string) =>
-                        v !== t.priority && patchInline({ priority: v as TaskPriority }, { priority: t.priority })
+                        v !== t.priority &&
+                        patchInline({ priority: v as TaskPriority }, { priority: t.priority })
                       }
                       disabled={inlinePatch.isPending}
                       fullWidth
@@ -555,7 +607,9 @@ export function TaskDetail() {
                     <AssigneesPicker
                       value={t.assignees}
                       disabled={inlinePatch.isPending}
-                      onChange={(next, seen) => patchInline({ assignees: next }, { assignees: seen })}
+                      onChange={(next, seen) =>
+                        patchInline({ assignees: next }, { assignees: seen })
+                      }
                     />
                   </div>
                   <InlineDate
@@ -593,7 +647,10 @@ export function TaskDetail() {
                         <Text
                           size='micro'
                           component='span'
-                          className={cn(!t.assignees.length && 'text-labelColor', isMine && 'font-bold')}
+                          className={cn(
+                            !t.assignees.length && 'text-labelColor',
+                            isMine && 'font-bold',
+                          )}
                         >
                           {t.assignees.join(', ') || 'unassigned'}
                         </Text>
@@ -603,7 +660,11 @@ export function TaskDetail() {
                   <Row
                     label={<FactLabel>planned start</FactLabel>}
                     value={
-                      <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
+                      <Text
+                        size='micro'
+                        component='span'
+                        className={cn(!t.startDate && 'text-labelColor')}
+                      >
                         {t.startDate ? format(new Date(t.startDate), 'PP') : <EmptyCell />}
                       </Text>
                     }
@@ -611,7 +672,11 @@ export function TaskDetail() {
                   <Row
                     label={<FactLabel>due</FactLabel>}
                     value={
-                      <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
+                      <Text
+                        size='micro'
+                        component='span'
+                        className={cn(due.state === 'overdue' && 'text-error')}
+                      >
                         {t.dueDate ? format(new Date(t.dueDate), 'PP') : <EmptyCell />}
                       </Text>
                     }
@@ -650,7 +715,9 @@ export function TaskDetail() {
               )}
             </Section>
 
-            <TaskComments taskId={task.id} media={media} onOpenMedia={attachments.openMedia} />
+            <div className='order-3 min-w-0 lg:order-none'>
+              <TaskComments taskId={task.id} media={media} onOpenMedia={attachments.openMedia} />
+            </div>
           </SectionStack>
         </aside>
       </div>
