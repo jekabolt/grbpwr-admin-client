@@ -6,7 +6,7 @@ import {
 } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRunParams } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
 import { clearBenchChoice, unstickPin } from '../generation/bench-store';
@@ -132,12 +132,6 @@ export type StartRunCallbacks = {
    * whose answer then arrives late is a rejected mutation: its `onAccepted` fires, this does not.
    */
   onStarted?: () => void;
-  /**
-   * THE SENTENCE OF THE ACCEPTED PRESS, when the kind's own one names the wrong place (M17): the
-   * moodboard's `remove bg` lands its cut-out ON THE TILE, not in the history. `''` says nothing —
-   * the tile's own «…» already does. Absent = the kind's sentence (`STARTED_BY_KIND`).
-   */
-  startedSay?: string;
 };
 
 export type StartRunState = {
@@ -186,23 +180,6 @@ export type StartRunState = {
 };
 
 /**
- * ═══ WHERE THE ANSWER WILL LAND — SAID PER KIND, BECAUSE THE PLACE IS NOT THE SAME (UX pass, U-7) ═
- *
- * The success toast used to say one sentence for every kind: «the pictures land in the history».
- * On the PATTERN step that is false — the step has no history block (one history there: the LAST
- * FABRICS carousel), and a swatch lands IN ITS SLOT, bound to the pair by the landing itself; an
- * extracted fabric lands in the carousel. A toast that names a place that is not on the screen
- * sends the person looking for it. Kinds without an entry keep their sentence byte for byte.
- * FABRIC RENDER has FLAT's latest generation under its GENERATE since O-63 (D-62), and says FLAT's
- * sentence (`useStartRun`).
- */
-const STARTED_DEFAULT = 'run started — the pictures land in the history when it finishes';
-const STARTED_BY_KIND: Partial<Record<StartRunInput['kind'], string>> = {
-  pattern: 'run started · the fabric lands in its slot — or in LAST FABRICS — when it finishes',
-  render: 'run started — the pictures land under GENERATE when it finishes',
-};
-
-/**
  * `client_request_id` IS THE WHOLE POINT OF THE FIELD, so it is minted the way the contract asks
  * for: ONCE PER HUMAN INTENT, and it survives a retry.
  *
@@ -230,7 +207,6 @@ export function useStartDesignRun(
 ): StartRunState {
   const scope = opts?.scope ?? '';
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   /**
@@ -284,10 +260,6 @@ export function useStartDesignRun(
     // switch above has already cleared it otherwise, and writing it again would be a statement
     // about B made by A.
     if (shownCard.current === input.techCardId) setRefusal(null);
-    // The run comes back PENDING, not done: the picture arrives in the feed when the provider
-    // answers. Saying so is the difference between «nothing happened» and «it was booked».
-    const say = input.startedSay ?? STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT;
-    if (say) showMessage(say, 'success');
     // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
     // left by earlier work stops holding the run it kept. Not a release — an editor opened while
     // this answer travelled keeps its run until it closes. A run put on the bench from the history
@@ -341,7 +313,13 @@ export function useStartDesignRun(
       if (definitive && matched && freed) input.onRefused?.(error);
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
-        showMessage(`someone changed this first — ${message}`, 'error');
+        notify({
+          sev: 'error',
+          subject: 'RUN',
+          text: 'not started',
+          bad: 'changed first',
+          detail: message,
+        });
         qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
         return;
       }
@@ -352,7 +330,11 @@ export function useStartDesignRun(
       if (shownCard.current === input.techCardId) {
         setRefusal(refusalFromError(error, input.clientRequestId));
       }
-      showMessage(message, 'error');
+      notify(
+        { sev: 'error', subject: 'RUN', text: 'not started', detail: message },
+        // The refusal field of this card already says it on screen.
+        { toast: shownCard.current !== input.techCardId },
+      );
     },
   });
 
@@ -390,7 +372,6 @@ export function useStartDesignRun(
         onAccepted: opts?.onAccepted,
         onRefused: opts?.onRefused,
         provesUnbooked: opts?.provesUnbooked,
-        startedSay: opts?.startedSay,
       };
       // `onStarted` is the per-call one, and it fires after `accepted` ran for THIS press — so it
       // reads the gate `accepted` wrote rather than the bare fact that the call resolved. The
@@ -488,8 +469,6 @@ type SentRun = {
   onAccepted?: (clientRequestId: string) => void;
   onRefused?: (error: unknown) => void;
   provesUnbooked?: (error: unknown) => boolean;
-  /** `StartRunCallbacks.startedSay`. */
-  startedSay?: string;
   /**
    * WRITTEN BY `accepted`, READ BY THE PER-CALL `onStarted`: the door's answer to this press came
    * while the ledger still held its key — the answer is this press's own. Never set for a late

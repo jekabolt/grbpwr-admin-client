@@ -8,7 +8,7 @@ import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import {
   Button,
@@ -22,6 +22,7 @@ import {
   Input,
   Section,
   Text,
+  useDoneFlash,
 } from 'ui';
 import {
   ClothReport,
@@ -35,6 +36,7 @@ import {
   normRefusalText,
   pairNormInput,
 } from '../utils/cloth-per-unit';
+import { notifyFailure } from './feedback';
 import { runDate } from './options';
 import {
   cutReceiptErrorMessage,
@@ -155,7 +157,9 @@ export function CutReceipts({
   const runId = run.id ?? 0;
   const techCardId = run.run?.techCardId ?? 0;
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // Receipt on the lay's own save button: which lay flashed, and the flash itself.
+  const saved = useDoneFlash();
+  const [savedLay, setSavedLay] = useState('');
   // isError нужен отдельно от data: «карточка ещё читается» и «запрос карточки упал» — разные
   // состояния, и сравнение с нормой обязано назвать второе словами, а не молчать как при первом.
   const { data: techCard, isError: techCardFailed } = useTechCard(techCardId || undefined);
@@ -566,18 +570,20 @@ export function CutReceipts({
         });
       }
       if (res.failed.length === 0) {
-        showMessage(`receipt saved — lines: ${res.saved.length}`, 'success');
+        setSavedLay(layKey);
+        saved.flash();
       } else {
-        // Частичный успех называется вслух: без «сохранено N» оператор не знает, надо ли повторять
-        // весь настил или только оставшиеся красными строки.
-        const saved = res.saved.length > 0 ? `saved ${res.saved.length}; ` : '';
-        showMessage(
-          `${saved}${res.failed.map((f) => `${sizeLabel(f.sizeId)}: ${f.message}`).join('; ')}`,
-          'error',
-        );
+        // Частичный успех называется вслух: отвергнутые строки остаются «not saved» на экране.
+        notify({
+          sev: res.saved.length > 0 ? 'warn' : 'error',
+          subject: layTitle(lay),
+          text: res.saved.length > 0 ? `${res.saved.length} saved` : 'not saved',
+          bad: `${res.failed.length} failed`,
+          detail: res.failed.map((f) => `${sizeLabel(f.sizeId)}: ${f.message}`).join('; '),
+        });
       }
     } catch (e) {
-      showMessage(cutReceiptErrorMessage(e), 'error');
+      notifyFailure(layTitle(lay), 'not saved', e, cutReceiptErrorMessage(e), () => saveLay(lay));
     } finally {
       setSavingLay('');
     }
@@ -594,9 +600,14 @@ export function CutReceipts({
         delete next[rowKey(layKey, sizeId)];
         return next;
       });
-      showMessage('receipt line deleted', 'success');
+      // The emptied cells are the receipt.
     } catch (e) {
-      showMessage(cutReceiptErrorMessage(e), 'error');
+      notifyFailure(
+        `${layTitle(deleting.lay)} ${sizeLabel(sizeId)}`,
+        'not deleted',
+        e,
+        cutReceiptErrorMessage(e),
+      );
     } finally {
       setDeleting(null);
     }
@@ -779,7 +790,9 @@ export function CutReceipts({
                     notes.push({
                       text: `no receipt for sizes: ${perUnit.missingSizes
                         .map(sizeLabel)
-                        .join(', ')} — “per unit” is overstated and will come down as entries are made`,
+                        .join(
+                          ', ',
+                        )} — “per unit” is overstated and will come down as entries are made`,
                       tone: 'warning',
                     });
                   // «Принято больше выкроенного» — невозможное состояние данных, и никакая другая
@@ -803,7 +816,9 @@ export function CutReceipts({
                     notes.push({
                       text: `accepted exactly 0: ${perUnit.acceptedZeroRows
                         .map((z) => `${sizeLabel(z.sizeId)} on “${z.lay}”`)
-                        .join(', ')} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
+                        .join(
+                          ', ',
+                        )} — if the receipt wasn't filled in there, the good count is understated and the “defect price” is overstated`,
                       tone: 'warning',
                     });
                   if (norm) {
@@ -915,6 +930,7 @@ export function CutReceipts({
                         variant='secondary'
                         size='xs'
                         disabled={dirty.length === 0 || savingLay === layKey}
+                        done={saved.on && savedLay === layKey && 'saved'}
                         onClick={() => saveLay(lay)}
                       >
                         {savingLay === layKey
@@ -1165,7 +1181,9 @@ function LayClothSummary({ report }: { report?: ClothReport }) {
     return (
       <Text size='micro' component='span' className='block text-labelColor'>
         {clothRefusalText(r)}
-        {r.kind === 'no-fact' && !r.frozen ? ' — “per unit” will be computed after the measurement' : ''}
+        {r.kind === 'no-fact' && !r.frozen
+          ? ' — “per unit” will be computed after the measurement'
+          : ''}
       </Text>
     );
   }

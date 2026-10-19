@@ -1,7 +1,7 @@
 import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ConfirmationModal, Button, Input, Text, EmptyCell } from 'ui';
+import { ConfirmationModal, Button, Input, Text, EmptyCell, useDoneFlash } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { AuditFilters, useRunTierBackfill, useTierAuditLog } from '../utils/hooks';
 import { formatEur } from '../utils/tier-utils';
@@ -24,6 +24,9 @@ export function TierAudit() {
   const { data, isLoading, isFetching } = useTierAuditLog(debounced, PAGE_SIZE, offset);
   const backfill = useRunTierBackfill();
   const [backfillOpen, setBackfillOpen] = useState(false);
+  // The count lands on the button that started the run.
+  const backfilled = useDoneFlash(4000);
+  const [upgraded, setUpgraded] = useState(0);
 
   const entries = data?.entries ?? [];
   const total = data?.total ?? 0;
@@ -40,7 +43,12 @@ export function TierAudit() {
           Tier audit log {total > 0 && `(${total})`}
         </Text>
         <div className='flex gap-2'>
-          <Button variant='secondary' size='lg' onClick={() => setBackfillOpen(true)}>
+          <Button
+            variant='secondary'
+            size='lg'
+            done={backfilled.on && `${upgraded} upgraded`}
+            onClick={() => setBackfillOpen(true)}
+          >
             Run legacy backfill
           </Button>
           <Button variant='secondary' size='lg' asChild>
@@ -209,7 +217,17 @@ export function TierAudit() {
       <ConfirmationModal
         open={backfillOpen}
         onOpenChange={setBackfillOpen}
-        onConfirm={() => backfill.mutate({ confirm: true })}
+        onConfirm={() =>
+          backfill.mutate(
+            { confirm: true },
+            {
+              onSuccess: (res) => {
+                setUpgraded(res.accountsUpgraded ?? 0);
+                backfilled.flash();
+              },
+            },
+          )
+        }
       >
         <Text variant='uppercase'>Run legacy tier backfill</Text>
         <Text variant='inactive' className='mt-2'>

@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import type { common_MediaFull } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import {
   useCallback,
   useEffect,
@@ -163,7 +163,6 @@ export function MaskEditor({
   // The card's band, from the query every organ of the studio shares (no second read): the words'
   // Ideas ask the server only where it names the assistant (C-15).
   const { band } = useDesignBand(techCardId);
-  const { showMessage } = useSnackBarStore();
   const mediaId = media.id ?? 0;
   /* The paint kept from an earlier press on this picture (Codex BLOCKER), read once per mount. */
   const [kept] = useState(() => readMaskDraft(maskDraftAt(techCardId, mediaId)));
@@ -396,7 +395,13 @@ export function MaskEditor({
     // From this press on the paint is kept (Codex BLOCKER): a close and a reopen repeat THIS request.
     keep.current = true;
     if (!writeMaskDraft(at, { strokes, words })) {
-      showMessage(NOT_SAVED, 'error');
+      notify({
+        sev: 'error',
+        subject: 'RETOUCH',
+        text: 'not started',
+        bad: 'storage full',
+        detail: NOT_SAVED,
+      });
       return;
     }
     let wire = request;
@@ -416,28 +421,42 @@ export function MaskEditor({
              picture takes the rectangle path from now on and the lines under the brush and beside
              GENERATE say so — the next press is the person's, on what they now read. */
           if (alive.current) setCanDraw(false);
-          showMessage(
-            `nothing was started: ${e.message} — the rectangle path is used now`,
-            'error',
-          );
+          notify({
+            sev: 'error',
+            subject: 'RETOUCH',
+            text: 'not started',
+            detail: `nothing was started: ${e.message} — the rectangle path is used now`,
+          });
           return;
         }
         if (e instanceof MaskUploadStalled) {
           // Codex r2 MAJOR: the upload is given up; the editor closes again and GENERATE retries.
-          showMessage(`nothing was started: ${e.message}; press GENERATE to try again`, 'error');
+          notify({
+            sev: 'error',
+            subject: 'RETOUCH',
+            text: 'not started',
+            bad: 'upload stalled',
+            detail: `nothing was started: ${e.message}; press GENERATE to try again`,
+          });
           return;
         }
-        showMessage(
-          `the mask did not upload, nothing was started: ${e instanceof Error ? e.message : String(e)}`,
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'RETOUCH',
+          text: 'not started',
+          bad: 'mask not uploaded',
+          detail: `the mask did not upload, nothing was started: ${e instanceof Error ? e.message : String(e)}`,
+        });
         return;
       }
       if (!alive.current) {
-        showMessage(
-          'the mask closed before its paint was uploaded; no retouch was started',
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'RETOUCH',
+          text: 'not started',
+          bad: 'editor closed',
+          detail: 'the mask closed before its paint was uploaded; no retouch was started',
+        });
         return;
       }
       setUploading(false);
@@ -451,7 +470,13 @@ export function MaskEditor({
       // sent. This screen does not take the ledger's memory fallback: a reload must find the key.
       beforeSend: (clientRequestId, stored) => {
         if (stored && recordPress(at, { strokes, words, mask, sent: clientRequestId })) return true;
-        showMessage(NOT_SAVED, 'error');
+        notify({
+          sev: 'error',
+          subject: 'RETOUCH',
+          text: 'not started',
+          bad: 'storage full',
+          detail: NOT_SAVED,
+        });
         return false;
       },
       onAccepted: (clientRequestId) => {
@@ -460,10 +485,6 @@ export function MaskEditor({
         // stays (compare-and-delete).
         const spent = forgetMaskDraft(at, { paint, sent: clientRequestId });
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
-        /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
-           (and on the grid) — not under the tile whose picture it started from, where only the
-           live run is shown (`results.tsx`, «pinned»). */
-        showMessage('retouch started — the new picture lands under Retouch a Zone', 'success');
         // Close only the editor that sent it, and only while it still shows the paint it sent.
         if (spent && alive.current) {
           keep.current = false;

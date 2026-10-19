@@ -1,12 +1,13 @@
 import { AcctAccount } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, ConfirmationModal, Loader, Text, ToggleSwitch } from 'ui';
 import { AcctSectionHeader } from '../components/section-header';
 import { Callout, Note, StatGrid, StatTile } from '../components/kit';
 import { ACCT_SECTIONS, AcctSection } from '../utils/constants';
+import { errorText, isTransient, reasonOf } from '../utils/feedback';
 import { useAcctAccounts, useArchiveAccount } from '../utils/hooks';
 import { AccountsTable } from './components/accounts-table';
 import { UpsertAccountModal } from './components/upsert-account-modal';
@@ -27,7 +28,6 @@ const SECTION_SUBLABEL: Record<AcctSection, string> = {
 export function AcctAccountsPage() {
   const { canWrite } = usePermissions();
   const canWriteAcct = canWrite(SECTION.accounting);
-  const { showMessage } = useSnackBarStore();
 
   const [showArchived, setShowArchived] = useState(false);
   const { data, isLoading, isError, refetch } = useAcctAccounts(showArchived);
@@ -39,17 +39,27 @@ export function AcctAccountsPage() {
 
   const archiveAccount = useArchiveAccount();
 
-  const handleArchiveConfirm = () => {
-    if (!archiveTarget?.code) return;
-    const next = !archiveTarget.archived;
+  // No receipt: the row leaving (or joining) the list is the receipt.
+  const setArchived = (code: string, archived: boolean): void =>
     archiveAccount.mutate(
-      { code: archiveTarget.code, archived: next },
+      { code, archived },
       {
-        onSuccess: () => showMessage(next ? 'Account archived' : 'Account unarchived', 'success'),
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to update account', 'error'),
+          notify({
+            sev: 'error',
+            subject: `ACCOUNT ${code}`,
+            text: archived ? 'not archived' : 'not unarchived',
+            bad: reasonOf(e),
+            detail: errorText(e),
+            action: isTransient(e)
+              ? { label: 'retry', onClick: () => setArchived(code, archived) }
+              : undefined,
+          }),
       },
     );
+  const handleArchiveConfirm = () => {
+    if (!archiveTarget?.code) return;
+    setArchived(archiveTarget.code, !archiveTarget.archived);
   };
 
   return (
@@ -105,8 +115,8 @@ export function AcctAccountsPage() {
               <Note>account counts per section — for balances see reports</Note>
             </div>
             <Callout className='text-small'>
-              <span className='font-bold text-textColor'>How the codes read:</span> 1xxx own ·
-              2xxx owe · 3xxx owner&apos;s stake · 4xxx sales · 5–6xxx costs
+              <span className='font-bold text-textColor'>How the codes read:</span> 1xxx own · 2xxx
+              owe · 3xxx owner&apos;s stake · 4xxx sales · 5–6xxx costs
             </Callout>
             <AccountsTable
               accounts={accounts}

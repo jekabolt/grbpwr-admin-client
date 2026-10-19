@@ -1,5 +1,6 @@
 import { common_PromoCodeInsert } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useCallback, useState } from 'react';
 import { type PromoDraftSchema } from './schema';
 import { useAddPromo, useDeletePromo, useDisablePromo, useUpdatePromo } from './usePromoQuery';
@@ -26,7 +27,17 @@ function toPromoInsert(data: PromoDraftSchema): common_PromoCodeInsert {
 }
 
 export function usePromo() {
-  const { showMessage } = useSnackBarStore();
+  // A refusal of the open create/edit row: stands under it until the next attempt.
+  const [draftError, setDraftError] = useState<string | null>(null);
+  // Promo codes steer discounts: errors only change their feedback, and no retry action.
+  const failed = useCallback((code: string, text: string, error: unknown, fallback: string) => {
+    notify({
+      sev: 'error',
+      subject: `PROMO ${code}`.trim(),
+      text,
+      detail: error instanceof Error ? error.message : fallback,
+    });
+  }, []);
   const deletePromoMutation = useDeletePromo();
   const disablePromoMutation = useDisablePromo();
   const addPromoMutation = useAddPromo();
@@ -44,15 +55,12 @@ export function usePromo() {
       setConfirmMessage(`Disable promo code "${code}"?`);
       setConfirmAction(() => () => {
         disablePromoMutation.mutate(code, {
-          onError: (error) => {
-            const message = error instanceof Error ? error.message : 'Promo cannot be disabled';
-            showMessage(message, 'error');
-          },
+          onError: (error) => failed(code, 'not disabled', error, 'Promo cannot be disabled'),
         });
       });
       setConfirmOpen(true);
     },
-    [disablePromoMutation, showMessage],
+    [disablePromoMutation, failed],
   );
 
   // H2: the "Allowed" checkbox used to only ever call disable, even when the code
@@ -67,16 +75,13 @@ export function usePromo() {
         updatePromoMutation.mutate(
           { ...promo, allowed: true },
           {
-            onError: (error) => {
-              const message = error instanceof Error ? error.message : 'Promo cannot be enabled';
-              showMessage(message, 'error');
-            },
+            onError: (error) => failed(code, 'not enabled', error, 'Promo cannot be enabled'),
           },
         );
       });
       setConfirmOpen(true);
     },
-    [updatePromoMutation, showMessage],
+    [updatePromoMutation, failed],
   );
 
   const openDeleteConfirm = useCallback(
@@ -84,15 +89,12 @@ export function usePromo() {
       setConfirmMessage(`Delete promo code "${code}"? This cannot be undone.`);
       setConfirmAction(() => () => {
         deletePromoMutation.mutate(code, {
-          onError: (error) => {
-            const message = error instanceof Error ? error.message : 'Promo cannot be deleted';
-            showMessage(message, 'error');
-          },
+          onError: (error) => failed(code, 'not deleted', error, 'Promo cannot be deleted'),
         });
       });
       setConfirmOpen(true);
     },
-    [deletePromoMutation, showMessage],
+    [deletePromoMutation, failed],
   );
 
   const onConfirm = useCallback(() => {
@@ -109,6 +111,7 @@ export function usePromo() {
   }, []);
 
   const startCreate = useCallback(() => {
+    setDraftError(null);
     setEditingCode(null);
     setIsCreating(true);
   }, []);
@@ -117,21 +120,21 @@ export function usePromo() {
 
   const submitCreate = useCallback(
     (data: PromoDraftSchema) => {
+      setDraftError(null);
       addPromoMutation.mutate(
         { ...toPromoInsert(data), allowed: true },
         {
-          onSuccess: () => {
-            showMessage('Promo created', 'success');
-            setIsCreating(false);
-          },
+          // The new row in the table is the receipt.
+          onSuccess: () => setIsCreating(false),
           onError: (error) => {
             const message = error instanceof Error ? error.message : 'Failed to create promo';
-            showMessage(message, 'error');
+            if (failureClassOfError(error) === 'refused') setDraftError(message);
+            else failed(data.code, 'not created', error, 'Failed to create promo');
           },
         },
       );
     },
-    [addPromoMutation, showMessage],
+    [addPromoMutation, failed],
   );
 
   // H8: there was previously no way to fix a typo'd discount or extend an
@@ -140,6 +143,7 @@ export function usePromo() {
   // wraps the atomic UpdatePromoCode RPC behind an "edit" affordance that
   // pre-fills the current values.
   const startEdit = useCallback((code: string) => {
+    setDraftError(null);
     setIsCreating(false);
     setEditingCode(code);
   }, []);
@@ -148,18 +152,18 @@ export function usePromo() {
 
   const submitEdit = useCallback(
     (data: PromoDraftSchema) => {
+      setDraftError(null);
       updatePromoMutation.mutate(toPromoInsert(data), {
-        onSuccess: () => {
-          showMessage('Promo updated', 'success');
-          setEditingCode(null);
-        },
+        // The row closing with the new values is the receipt.
+        onSuccess: () => setEditingCode(null),
         onError: (error) => {
           const message = error instanceof Error ? error.message : 'Failed to update promo';
-          showMessage(message, 'error');
+          if (failureClassOfError(error) === 'refused') setDraftError(message);
+          else failed(data.code, 'not saved', error, 'Failed to update promo');
         },
       });
     },
-    [updatePromoMutation, showMessage],
+    [updatePromoMutation, failed],
   );
 
   return {
@@ -180,6 +184,7 @@ export function usePromo() {
     startEdit,
     cancelEdit,
     submitEdit,
+    draftError,
     isSaving: addPromoMutation.isPending || updatePromoMutation.isPending,
   };
 }

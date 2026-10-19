@@ -4,7 +4,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -35,7 +35,6 @@ export function ProductItem({
   const isArchived = product.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
   const mediaTreatment = getCatalogStateMediaClass(product.status);
   const description = `[${product.id}] ${product.display?.merchandising?.brand} ${product.display?.translations?.[0]?.name}`;
-  const { showMessage } = useSnackBarStore();
   const [confirmDelete, setConfirmDelete] = useState<number | undefined>(undefined);
   const [restoring, setRestoring] = useState(false);
   const navigate = useNavigate();
@@ -53,11 +52,11 @@ export function ProductItem({
         expectedVersion: product.lockVersion ?? 0,
         target: 'COLORWAY_LIFECYCLE_STATUS_HIDDEN',
       });
-      showMessage('PRODUCT RESTORED — NOW HIDDEN', 'success');
+      // The badge turning «hidden» is the receipt.
       refresh(id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to restore product';
-      showMessage(msg, 'error');
+      notify({ sev: 'error', subject: `PRODUCT ${id}`, text: 'not restored', detail: msg });
     } finally {
       setRestoring(false);
     }
@@ -72,12 +71,17 @@ export function ProductItem({
           colorwayId: id,
           expectedVersion: product.lockVersion ?? 0,
         });
-        showMessage('PRODUCT WAS SUCCESSFULLY ARCHIVED', 'success');
+        // The tile going «archived» is the receipt.
         setConfirmDelete(undefined);
         refresh(id);
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to archive product';
-        showMessage(msg, 'error');
+        notify({
+          sev: 'error',
+          subject: `PRODUCT ${id ?? ''}`.trim(),
+          text: 'not archived',
+          detail: msg,
+        });
       }
     } else {
       setConfirmDelete(id);

@@ -1,7 +1,8 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AdminAccount, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
-import { Button, Close, Input, Text, ToggleSwitch } from 'ui';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
+import { Button, CalloutBox, Close, Input, Text, ToggleSwitch } from 'ui';
 import { useCreateAccount, useUpdateAccountPermissions } from '../utils/hooks';
 import { PermissionPicker } from './permission-picker';
 
@@ -71,7 +72,11 @@ export function AccountFormModal({
       return setError('Grant at least one section, or make the account super');
     }
 
-    const done = { onSuccess: () => onOpenChange(false) };
+    // The dialog closes on the listed account: that is the receipt.
+    const done = {
+      onSuccess: () => onOpenChange(false),
+      onError: (e: unknown) => isRefusal(e) && setError(errorSentence(e, 'not saved')),
+    };
     if (isEdit) {
       update.mutate({ username, isSuper, permissions }, done);
     } else {
@@ -151,9 +156,11 @@ export function AccountFormModal({
             )}
 
             {error && (
-              <Text variant='error' size='small'>
-                {error}
-              </Text>
+              <CalloutBox tone='error'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not saved</b> · {error}
+                </Text>
+              </CalloutBox>
             )}
           </div>
 

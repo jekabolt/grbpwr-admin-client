@@ -3,7 +3,8 @@ import { TierConfigEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useRef, useState } from 'react';
-import { BackLink, Button, Input, Section, SectionStack, Text } from 'ui';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
+import { BackLink, Button, CalloutBox, Input, Section, SectionStack, Text, useDoneFlash } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
 
@@ -13,6 +14,16 @@ export function TierConfig() {
   const [entries, setEntries] = useState<TierConfigEntry[]>([]);
   const { canWrite } = usePermissions();
   const saveBarRef = useRef<HTMLDivElement>(null);
+  const saved = useDoneFlash();
+  // The server's refusal of the config stands on the page until the next save.
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const save = () => {
+    setRefusal(null);
+    update.mutate(entries, {
+      onSuccess: saved.flash,
+      onError: (e) => isRefusal(e) && setRefusal(errorSentence(e, 'not saved')),
+    });
+  };
   useDockBottom(saveBarRef, [entries.length > 0]);
 
   useEffect(() => {
@@ -142,6 +153,14 @@ export function TierConfig() {
         ))}
       </SectionStack>
 
+      {refusal && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {refusal}
+          </Text>
+        </CalloutBox>
+      )}
+
       {canWrite(SECTION.members) && entries.length > 0 && (
         <div
           ref={saveBarRef}
@@ -164,8 +183,9 @@ export function TierConfig() {
               variant='main'
               size='lg'
               className='uppercase cursor-pointer'
-              onClick={() => update.mutate(entries)}
-              disabled={!dirty}
+              onClick={save}
+              done={saved.on}
+              disabled={!dirty && !saved.on}
               loading={update.isPending}
             >
               save

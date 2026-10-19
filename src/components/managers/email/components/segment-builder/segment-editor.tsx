@@ -9,16 +9,17 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useSnackBarStore } from 'lib/stores/store';
 import {
   BackLink,
   Button,
+  CalloutBox,
   ConfirmationModal,
   Input,
   Section,
   SectionStack,
   Textarea,
   Text,
+  useDoneFlash,
 } from 'ui';
 import { useDeleteSegment, useSegment, useUpsertSegment } from '../useCampaign';
 import { PredicateBuilder } from './predicate-builder';
@@ -42,7 +43,7 @@ export function SegmentEditor() {
   const routeId = idParam && /^\d+$/.test(idParam) ? Number(idParam) : 0;
   const navigate = useNavigate();
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
   const canEdit = canWrite(SECTION.marketing);
 
   const { data: segment, isLoading, isError, refetch } = useSegment(routeId);
@@ -81,21 +82,15 @@ export function SegmentEditor() {
   );
 
   const treeComplete = () => {
+    // The rows go red and the callout under the tree counts them.
     setTreeTouched(true);
-    if (leafIssues.length === 0) return true;
-    showMessage(
-      `${leafIssues.length} condition${leafIssues.length === 1 ? ' is' : 's are'} incomplete — see the highlighted row${leafIssues.length === 1 ? '' : 's'}`,
-      'error',
-    );
-    return false;
+    return leafIssues.length === 0;
   };
 
   const handleSave = async () => {
     setNameTouched(true);
-    if (name.trim() === '') {
-      showMessage('segment name is required', 'error');
-      return;
-    }
+    // The name field says it (red, «name is required»).
+    if (name.trim() === '') return;
     if (!treeComplete()) return;
     const seg: common_EmailSegment = {
       id: routeId || undefined,
@@ -107,7 +102,7 @@ export function SegmentEditor() {
     };
     try {
       const res = await upsert.mutateAsync({ id: routeId, segment: seg });
-      showMessage('segment saved', 'success');
+      saved.flash();
       if (routeId === 0 && res?.id) navigate(`${ROUTES.emailSegments}/${res.id}`);
     } catch {
       // error toast surfaced by useUpsertSegment.onError
@@ -117,7 +112,7 @@ export function SegmentEditor() {
   const handleDelete = async () => {
     try {
       await del.mutateAsync(routeId);
-      showMessage('segment deleted', 'success');
+      // No receipt: the list without it is the receipt.
       navigate(ROUTES.emailSegments);
     } catch {
       // error toast surfaced by useDeleteSegment.onError
@@ -177,6 +172,7 @@ export function SegmentEditor() {
             onClick={handleSave}
             disabled={!canEdit || upsert.isPending}
             loading={upsert.isPending}
+            done={saved.on}
           >
             save
           </Button>
@@ -243,6 +239,13 @@ export function SegmentEditor() {
             disabled={!canEdit}
             issues={treeTouched ? issueMap : undefined}
           />
+          {treeTouched && leafIssues.length > 0 && (
+            <CalloutBox tone='error'>
+              {leafIssues.length === 1
+                ? '1 condition incomplete'
+                : `${leafIssues.length} conditions incomplete`}
+            </CalloutBox>
+          )}
         </Section>
 
         {/* audience-count preview seam */}

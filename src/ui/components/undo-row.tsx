@@ -19,6 +19,33 @@ interface UndoRowProps {
 }
 
 /**
+ * A table wider than its scroll box would push `undo` past the right edge: the ghost is pinned
+ * to the left of the scroll box and sized to its visible width.
+ */
+function StickyCell({ className, children }: { className: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number>();
+
+  useEffect(() => {
+    let box = ref.current?.parentElement ?? null;
+    while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowX)) box = box.parentElement;
+    if (!box) return;
+    const scroller = box;
+    const measure = () => setWidth(scroller.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={cn(className, 'sticky left-0')} style={{ width }}>
+      {children}
+    </div>
+  );
+}
+
+/**
  * Ghost row that stands in for a deleted row: struck name + underlined `undo`, a 1px ink rule
  * depleting along the bottom. Undo calls `onUndo`; the timeout calls `onCommit`. Exactly one fires.
  */
@@ -87,7 +114,7 @@ export function UndoRow({
     return (
       <tr>
         <td colSpan={colSpan} className='p-0'>
-          <div className={cn(skin, className)}>{body}</div>
+          <StickyCell className={cn(skin, className)}>{body}</StickyCell>
         </td>
       </tr>
     );

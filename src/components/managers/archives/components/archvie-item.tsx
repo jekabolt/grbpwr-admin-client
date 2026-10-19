@@ -1,6 +1,7 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
 import { Close, ConfirmationModal, Media, Text } from 'ui';
@@ -13,7 +14,7 @@ interface ArchiveItemProps {
 export function ArchiveItem({ archive }: ArchiveItemProps) {
   const navigate = useNavigate();
   const deleteArchiveMutation = useDeleteArchive();
-  const { showMessage } = useSnackBarStore();
+
   // A5: this used to be a generic native window.confirm — no entry name, no undo,
   // and inconsistent with the app's own ConfirmationModal used one screen away
   // (inside the editor).
@@ -40,11 +41,20 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
 
   const handleDeleteArchive = async () => {
     try {
+      // The card leaving the grid is the receipt.
       await deleteArchiveMutation.mutateAsync(archive.id || 0);
-      showMessage('Archive deleted successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to delete archive';
-      showMessage(msg, 'error');
+      notify({
+        sev: 'error',
+        subject: `TIMELINE ${archive.id ?? ''}`.trim(),
+        text: 'not deleted',
+        detail: msg,
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => void handleDeleteArchive() }
+            : undefined,
+      });
     }
   };
   return (

@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { refuseGesture } from './refuse-gesture';
 import {
   forwardRef,
   useCallback,
@@ -296,7 +296,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   },
   handleRef,
 ) {
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const sheetElRef = useRef<HTMLDivElement>(null);
@@ -730,7 +729,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       if (bad && !bad.ok) {
         // Отказ ДО диалога, словами движка: открывать форму, которую нельзя отправить, — предлагать
         // заведомый отказ (R2).
-        showMessage(bad.reason, 'error');
+        refuseGesture('ASSEMBLY', 'not joined', bad.reason);
         return;
       }
       let joined = false;
@@ -747,7 +746,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         intent: absorbInto ? undefined : 'unit',
       });
     },
-    [auto, positions, res, steps, frozen, onMove, onCreate, showMessage],
+    [auto, positions, res, steps, frozen, onMove, onCreate],
   );
 
   // Габарит работы поменялся (родился узел, приехали детали) — лист догоняет. Во время жеста лист
@@ -951,8 +950,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       const r = vp.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) return;
       const eff = layoutRef.current;
-      const n =
-        eff.byKey.get(key) ?? eff.tileByKey.get(key) ?? (key === '' ? eff.tail : undefined);
+      const n = eff.byKey.get(key) ?? eff.tileByKey.get(key) ?? (key === '' ? eff.tail : undefined);
       if (!n) return;
       const d = revealDelta(
         { x: n.x, y: n.y, w: n.w, h: n.h },
@@ -1708,7 +1706,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
           </Text>
         </div>
       ) : (
-        <div ref={worldRef} className='world absolute inset-0 origin-top-left will-change-transform'>
+        <div
+          ref={worldRef}
+          className='world absolute inset-0 origin-top-left will-change-transform'
+        >
           {/* ЛИСТ — ПОДЛОЖКА ПОД РАБОТОЙ, а не фон вьюпорта: у бесконечного полотна должно быть
               видно, где кончается замысел и начинается пустота. Точечная сетка мельче кегля, чтобы
               читалась как бумага, а не как таблица. */}
@@ -2046,7 +2047,8 @@ function boxOfKeys(layout: SchematicLayout, keys: string[]): Rect | null {
   let x1 = -Infinity;
   let y1 = -Infinity;
   for (const k of keys) {
-    const n = layout.byKey.get(k) ?? layout.tileByKey.get(k) ?? (k === '' ? layout.tail : undefined);
+    const n =
+      layout.byKey.get(k) ?? layout.tileByKey.get(k) ?? (k === '' ? layout.tail : undefined);
     if (!n) continue;
     x0 = Math.min(x0, n.x);
     y0 = Math.min(y0, n.y);
@@ -2085,7 +2087,9 @@ function HudButton({
       aria-pressed={pressed}
       className={cn(
         '-ml-px inline-flex h-5 min-w-6 items-center justify-center border border-borderColor px-1.5 text-micro uppercase tracking-label transition-colors first:ml-0',
-        pressed ? 'border-textColor bg-textColor text-bgColor' : 'text-labelColor hover:text-textColor',
+        pressed
+          ? 'border-textColor bg-textColor text-bgColor'
+          : 'text-labelColor hover:text-textColor',
         disabled && 'cursor-not-allowed opacity-40',
         className,
       )}

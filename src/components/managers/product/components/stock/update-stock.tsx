@@ -1,4 +1,13 @@
-import { Button, Text, Form, CheckboxField, InputField, SelectField, TextareaField } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  Text,
+  Form,
+  CheckboxField,
+  InputField,
+  SelectField,
+  TextareaField,
+} from 'ui';
 import { StockModal } from './stock-modal';
 import { UpdateStockData } from './update-stock-schema';
 import { useUpdateStock } from './useUpdateStock';
@@ -27,6 +36,7 @@ export function UpdateStock({
     directionOptions,
     commentPlaceholder,
     onSubmit,
+    submitError,
   } = useUpdateStock({ variants, onStockUpdated });
 
   return (
@@ -88,6 +98,13 @@ export function UpdateStock({
               maxLength={1500}
               className='placeholder:uppercase placeholder:text-borderColor'
             />
+            {submitError && (
+              <CalloutBox tone='error'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not updated</b> · {submitError}
+                </Text>
+              </CalloutBox>
+            )}
           </div>
           <Button
             type='button'
