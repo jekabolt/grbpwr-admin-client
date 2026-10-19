@@ -68,6 +68,30 @@ assert.deepEqual(mirrored, { top: 0, right: 240, bottom: 0, left: 240 });
 const mirroredSnap = dragHandle(zero, 'e', 315, 0, { ...baseOpts, mirror: true });
 assert.deepEqual(mirroredSnap, { top: 0, right: 320, bottom: 0, left: 319 });
 
+// Mirrored snap splits only the correction, so an existing asymmetry survives.
+const asymStart: Margins = { top: 0, right: 630, bottom: 0, left: 0 };
+const asymZero = dragHandle(asymStart, 'e', 0, 0, { ...baseOpts, mirror: true });
+assert.deepEqual(size(asymZero), { width: 1460, height: 821 });
+assert.equal(asymZero.right - asymZero.left >= 629, true, 'asymmetry kept');
+assert.equal(Math.abs(asymZero.right - asymStart.right) <= Math.ceil(9 / 2), true, 'edge stays');
+assert.deepEqual(asymZero, { top: 0, right: 635, bottom: 0, left: 4 });
+const asymWest = dragHandle(asymStart, 'w', 0, 0, { ...baseOpts, mirror: true });
+assert.deepEqual(asymWest, { top: 0, right: 635, bottom: 0, left: 4 });
+const asymTall = dragHandle({ top: 10, right: 0, bottom: 180, left: 0 }, 's', 0, 10, {
+  ...baseOpts,
+  mirror: true,
+});
+// 821 + 20 + 190 = 1031 → 4:5 snaps to 1026; the -5 correction splits -3/-2, difference kept.
+assert.deepEqual(size(asymTall), { width: 821, height: 1026 });
+assert.equal(Math.abs(asymTall.bottom - asymTall.top - 170) <= 1, true, 'vertical asymmetry kept');
+// A correction that would push the short side below 0 is rejected → free drag result.
+// 821 + 640 = 1461 → 16:9 wants 1460; the -1 correction would make left -1, so no snap.
+const asymNeg = dragHandle({ top: 0, right: 640, bottom: 0, left: 0 }, 'e', 0, 0, {
+  ...baseOpts,
+  mirror: true,
+});
+assert.deepEqual(asymNeg, { top: 0, right: 640, bottom: 0, left: 0 });
+
 const wide = dragHandle(zero, 'e', 630, 0, baseOpts);
 assert.deepEqual(size(wide), { width: 1460, height: 821 });
 assert.equal(wide.right, 639);

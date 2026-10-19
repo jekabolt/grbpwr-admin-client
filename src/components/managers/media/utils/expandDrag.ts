@@ -94,8 +94,11 @@ function applyHorizontalSnap(
   const total = targetWidth - srcW;
   if (total < 0) return undefined;
   if (mirror) {
-    const left = Math.floor(total / 2);
-    return { ...margins, left, right: total - left };
+    // Split only the snap correction, so an existing left/right asymmetry survives.
+    const left = margins.left + Math.floor((total - margins.left - margins.right) / 2);
+    const right = total - left;
+    if (left < 0 || right < 0) return undefined;
+    return { ...margins, left, right };
   }
 
   const fixed = dragged === 'left' ? margins.right : margins.left;
@@ -114,8 +117,11 @@ function applyVerticalSnap(
   const total = targetHeight - srcH;
   if (total < 0) return undefined;
   if (mirror) {
-    const top = Math.floor(total / 2);
-    return { ...margins, top, bottom: total - top };
+    // Split only the snap correction, so an existing top/bottom asymmetry survives.
+    const top = margins.top + Math.floor((total - margins.top - margins.bottom) / 2);
+    const bottom = total - top;
+    if (top < 0 || bottom < 0) return undefined;
+    return { ...margins, top, bottom };
   }
 
   const fixed = dragged === 'top' ? margins.bottom : margins.top;

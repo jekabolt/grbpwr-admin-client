@@ -352,13 +352,23 @@ export const MediaExpander: FC<ExpanderProps> = ({
   const total = sum(margins);
   const over = !!pixels && megapixels > MAX_IMAGE_MEGAPIXELS;
 
+  // Grabbed mid-transition: freeze what is on screen, not the final React geometry.
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const beginDrag = useCallback(
     (mode: ExpandDragMode) => {
       window.clearTimeout(settleTimer.current);
+      let at = { k, x: frameX, y: frameY };
+      const el = frameRef.current;
+      const parent = el?.parentElement;
+      if (settling && el && parent && outW > 0) {
+        const fr = el.getBoundingClientRect();
+        const sr = parent.getBoundingClientRect();
+        if (fr.width > 0) at = { k: fr.width / outW, x: fr.left - sr.left, y: fr.top - sr.top };
+      }
       setSettling(false);
-      setFreeze({ k, x: frameX, y: frameY, m: margins, anchor: mode !== 'photo' });
+      setFreeze({ ...at, m: margins, anchor: mode !== 'photo' });
     },
-    [frameX, frameY, k, margins],
+    [frameX, frameY, k, margins, outW, settling],
   );
   const endDrag = useCallback(() => {
     setFreeze(null);
@@ -457,6 +467,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
             {pixels && k > 0 && !loadError ? (
               <div
                 data-probe='result-frame'
+                ref={frameRef}
                 className={cn('absolute outline outline-1 outline-borderColor', settling && SETTLE)}
                 style={{ left: frameX, top: frameY, width: frameW, height: frameH, background }}
               >
@@ -974,6 +985,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
             // бакет, — один кадр. Обводка — граница файла, хрома сцены, в пиксели не попадает.
             <div
               data-probe='result-frame'
+              ref={frameRef}
               className={cn('absolute outline outline-1 outline-borderColor', settling && SETTLE)}
               style={{ left: frameX, top: frameY, width: frameW, height: frameH, background }}
             >
