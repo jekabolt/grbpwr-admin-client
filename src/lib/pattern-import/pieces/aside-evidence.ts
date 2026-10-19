@@ -123,7 +123,7 @@ function gradeStripEvidence(
         sameHost(a, x.aside) &&
         similarStrip(a, x.aside),
     );
-    if (peers.length < sizes.length - 1) continue;
+    if (peers.length !== sizes.length - 1) continue;
     out.push({
       id: a.id,
       verdict: 'not-piece',
