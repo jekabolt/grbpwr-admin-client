@@ -18,6 +18,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   AddDoor,
+  Button,
   Close,
   ConfirmationModal,
   Media,
@@ -204,7 +205,7 @@ function StageImage({ urls, alt, onLoad }: { urls: string[]; alt: string; onLoad
   const src = urls[urlIndex] ?? '';
   if (!src) {
     return (
-      <div className='flex aspect-[3/4] max-h-[min(70vh,660px)] w-[min(100%,495px)] items-center justify-center border border-dashed border-borderColor bg-bgColor'>
+      <div className='flex aspect-[3/4] max-h-[62vh] w-124 max-w-full items-center justify-center border border-dashed border-borderColor bg-bgColor md:max-h-[min(70vh,calc(var(--spacing)*165))]'>
         <Text size='micro' variant='label'>
           photo unavailable
         </Text>
@@ -219,7 +220,7 @@ function StageImage({ urls, alt, onLoad }: { urls: string[]; alt: string; onLoad
       draggable={false}
       onLoad={onLoad}
       onError={() => setUrlIndex((current) => Math.min(current + 1, urls.length))}
-      className='block h-auto max-h-[min(70vh,660px)] max-w-full select-none max-[699px]:max-h-[62vh]'
+      className='block h-auto max-h-[62vh] max-w-full select-none md:max-h-[min(70vh,calc(var(--spacing)*165))]'
     />
   );
 }
@@ -289,8 +290,8 @@ function PhotoThumbnail({
 }) {
   const url = thumbnailUrl(media);
   return (
-    <div className='relative h-20 w-16 shrink-0 max-[699px]:h-[60px] max-[699px]:w-12'>
-      <button
+    <div className='relative h-15 w-12 shrink-0 md:h-20 md:w-16'>
+      <Button
         type='button'
         aria-label={`photo ${index + 1}`}
         aria-current={current ? 'true' : undefined}
@@ -310,7 +311,11 @@ function PhotoThumbnail({
             fit='cover'
           />
         ) : (
-          <span className='flex h-full items-center justify-center text-borderColor'>×</span>
+          <Close
+            asChild
+            aria-hidden='true'
+            className='pointer-events-none flex h-full w-full text-borderColor no-underline hover:no-underline'
+          />
         )}
         <Text
           component='span'
@@ -319,7 +324,7 @@ function PhotoThumbnail({
         >
           {index + 1}
         </Text>
-      </button>
+      </Button>
       {current && onRemove && (
         <Close
           size='sm'
@@ -561,7 +566,7 @@ export function PhotoStage() {
   return (
     <>
       <Section title='Photos' className='min-w-0 lg:flex-[1.5]'>
-        <Toolbar className='max-[699px]:flex-nowrap max-[699px]:overflow-x-auto'>
+        <Toolbar className='flex-nowrap overflow-x-auto md:flex-wrap md:overflow-x-visible'>
           <ViewSwitch
             value={tool}
             options={TOOL_OPTIONS}
@@ -572,7 +577,7 @@ export function PhotoStage() {
           />
         </Toolbar>
 
-        <div className='flex min-h-[420px] items-center justify-center bg-pageBg max-[699px]:-mx-block max-[699px]:min-h-0'>
+        <div className='-mx-block flex min-h-0 items-center justify-center bg-pageBg md:mx-0 md:min-h-105'>
           {currentMediaId ? (
             <div
               ref={frameRef}
@@ -665,10 +670,7 @@ export function PhotoStage() {
               showVideos={false}
               saveSelectedMedia={addMedia}
               trigger={
-                <AddDoor
-                  shape='tile'
-                  className='h-20 w-16 shrink-0 max-[699px]:h-[60px] max-[699px]:w-12'
-                >
+                <AddDoor shape='tile' className='h-15 w-12 shrink-0 md:h-20 md:w-16'>
                   photo
                 </AddDoor>
               }
