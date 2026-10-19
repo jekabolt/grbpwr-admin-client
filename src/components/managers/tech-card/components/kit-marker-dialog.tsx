@@ -39,7 +39,6 @@ import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSet
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { NEST_DEFAULTS, type NestResult } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
 import {
@@ -152,7 +151,6 @@ export default function KitMarkerDialog({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const workshop = useWorkshopSettings();
   const dictTokens = useDictionarySizeTokens();
 
@@ -669,11 +667,8 @@ export default function KitMarkerDialog({
       ...markerNormProvenance([summary], Number(summary.id ?? 0)),
     });
     setAppliedText(`${conv.value} ${conv.unit}`);
+    // The dialog's «applied» state is the receipt.
     setPhase('applied');
-    showMessage(
-      'the norm is applied into the recipe draft — it goes out when the card is saved',
-      'success',
-    );
   };
 
   // ── экран ─────────────────────────────────────────────────────────────────────────────────

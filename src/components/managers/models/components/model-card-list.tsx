@@ -2,7 +2,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { genderOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
@@ -20,7 +20,6 @@ function genderLabel(gender?: string) {
 export function ModelCardList() {
   const navigate = useNavigate();
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const deleteModel = useDeleteModel();
   const canEdit = usePermissions().canWrite(SECTION.models);
 
@@ -59,10 +58,16 @@ export function ModelCardList() {
 
   function confirmDelete() {
     if (!pendingDelete) return;
-    deleteModel.mutate(pendingDelete.id, {
-      onSuccess: () => showMessage('model deleted', 'success'),
+    const id = pendingDelete.id;
+    // The tile leaving the list is the receipt.
+    deleteModel.mutate(id, {
       onError: (e) =>
-        showMessage(e instanceof Error ? e.message : 'Failed to delete model', 'error'),
+        notify({
+          sev: 'error',
+          subject: `MODEL ${id}`,
+          text: 'not deleted',
+          detail: e instanceof Error ? e.message : undefined,
+        }),
     });
     setPendingDelete(null);
   }

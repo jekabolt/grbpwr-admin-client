@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   createContext,
@@ -397,7 +397,6 @@ export function PictureGalleryProvider({
    *     прогона — отдельное решение владельца, а не догадка здесь. Рендер заводится
    *     неатрибутированным, ровно как всякий рендер, загруженный руками.
    */
-  const { showMessage } = useSnackBarStore();
   const writes = useDesignWrites(techCardId);
   const { registerUpload } = writes;
 
@@ -425,17 +424,25 @@ export function PictureGalleryProvider({
       const source = pictureOfMedia(mediaId);
       const kind = source ? source.kind || 'flat' : null;
       if (!kind) {
-        showMessage(
-          'this frame is not a picture of the band, so there is no kind to give the copy. Open it from a bench, reference or output tile.',
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'PICTURE',
+          text: 'not copied',
+          bad: 'no kind',
+          detail:
+            'this frame is not a picture of the band, so there is no kind to give the copy. Open it from a bench, reference or output tile.',
+        });
         return;
       }
       if (kind === 'pattern') {
-        showMessage(
-          'a pattern tile cannot be filed as a new picture: the band takes flat, render and 3d only, and filing a repeating tile as a flat would make it pickable as the front of the garment.',
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'PICTURE',
+          text: 'not copied',
+          bad: 'pattern tile',
+          detail:
+            'a pattern tile cannot be filed as a new picture: the band takes flat, render and 3d only, and filing a repeating tile as a flat would make it pickable as the front of the garment.',
+        });
         return;
       }
       const media = await uploadRaster(dataUrl);
@@ -457,9 +464,8 @@ export function PictureGalleryProvider({
           },
         ],
       });
-      showMessage('the corrected copy is in the band', 'success');
     },
-    [pictureOfMedia, registerUpload, showMessage],
+    [pictureOfMedia, registerUpload],
   );
 
   const api = useMemo<GalleryApi>(() => ({ register, openAt }), [register, openAt]);
@@ -648,7 +654,7 @@ export interface PictureTileProps {
   aspect?: string;
   fit?: 'cover' | 'contain';
   /**
-   * ГРУНТ ПОД КАДРОМ. `neutral` подкладывает под картинку панельный тон (`bgSecondary`) — тот же,
+   * ГРУНТ ПОД КАДРОМ. `neutral` подкладывает под картинку панельный тон (`pageBg`) — тот же,
    * которым в этой плитке уже нарисованы «3d model» и «no image», то есть подложка здесь не
    * новая, а та же самая.
    *
@@ -1278,12 +1284,12 @@ export function PictureTile({
       title={faceBroken ? FILE_MISSING_TITLE : undefined}
       className={cn(
         'group relative border',
-        selected ? 'border-2 border-textColor' : 'border-textInactiveColor',
+        selected ? 'border-2 border-textColor' : 'border-borderColor',
         /* Грунт стоит ПОД кадром, а не на самой картинке: при `contain` кадр не заполнен, и тон
            обязан лежать и в полях над снимком, и за его прозрачными точками — иначе у вырезанного
            предмета остаётся половина фона. `className` идёт следом намеренно: тон, заданный
            вызывающим, обязан перебивать грунт, а не наоборот. */
-        ground === 'neutral' && fit === 'contain' && 'bg-bgSecondary',
+        ground === 'neutral' && fit === 'contain' && 'bg-pageBg',
         clip &&
           'has-[[data-open-large]:focus-visible]:outline has-[[data-open-large]:focus-visible]:outline-2 has-[[data-open-large]:focus-visible]:-outline-offset-2 has-[[data-open-large]:focus-visible]:outline-textColor',
         className,
@@ -1313,7 +1319,7 @@ export function PictureTile({
              модели, где ссылка стоит над сценой и от неё не зависит.
              Слово остаётся обязательным: `.glb` нечем нарисовать, и молчаливый серый прямоугольник
              человек прочёл бы как «сервер не справился», хотя за модель заплачено и она есть. */
-          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 bg-bgSecondary px-1 text-center'>
+          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 bg-pageBg px-1 text-center'>
             <Text size='nano' variant='uppercase' component='span'>
               3d model
             </Text>
@@ -1357,7 +1363,7 @@ export function PictureTile({
         ) : face ? (
           face
         ) : faceBroken ? (
-          <div className='flex h-full w-full items-center justify-center bg-bgSecondary px-1 text-center'>
+          <div className='flex h-full w-full items-center justify-center bg-pageBg px-1 text-center'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
               {FILE_MISSING_WORDS}
             </Text>
@@ -1367,7 +1373,7 @@ export function PictureTile({
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
           // от «картинка не загрузилась».
-          <div className='flex h-full w-full items-center justify-center bg-bgSecondary'>
+          <div className='flex h-full w-full items-center justify-center bg-pageBg'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
               no image
             </Text>

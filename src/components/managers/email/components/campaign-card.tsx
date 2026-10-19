@@ -2,20 +2,20 @@ import { common_EmailCampaignFull, common_EmailCampaignStatus } from 'api/proto-
 import { STATUS_LABELS, TOPIC_LABELS } from 'constants/email-campaign';
 import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Close, ConfirmationModal, Text } from 'ui';
+import { Close, Text, UndoRow } from 'ui';
 import { epochSecondsToRfc3339 } from './map-schema-to-campaign';
 import { useDeleteCampaign } from './useCampaign';
 
 // Brand-token status chips: gray for inert states, warning (amber) for in-flight,
 // red only for cancelled (loss). No coral/pastel washes.
 const STATUS_CHIP: Record<common_EmailCampaignStatus, string> = {
-  EMAIL_CAMPAIGN_STATUS_UNKNOWN: 'border-textInactiveColor text-textInactiveColor',
-  EMAIL_CAMPAIGN_STATUS_DRAFT: 'border-textInactiveColor text-textInactiveColor',
+  EMAIL_CAMPAIGN_STATUS_UNKNOWN: 'border-borderColor text-borderColor',
+  EMAIL_CAMPAIGN_STATUS_DRAFT: 'border-borderColor text-borderColor',
   EMAIL_CAMPAIGN_STATUS_SCHEDULED: 'border-warning text-warning',
   EMAIL_CAMPAIGN_STATUS_SENDING: 'border-warning text-warning',
-  EMAIL_CAMPAIGN_STATUS_PAUSED: 'border-textInactiveColor text-textInactiveColor',
+  EMAIL_CAMPAIGN_STATUS_PAUSED: 'border-borderColor text-borderColor',
   EMAIL_CAMPAIGN_STATUS_SENT: 'border-textColor text-textColor',
   EMAIL_CAMPAIGN_STATUS_CANCELLED: 'border-error text-error',
 };
@@ -38,8 +38,26 @@ function fmtDate(epoch: number | string | undefined): string {
 
 export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull }) {
   const navigate = useNavigate();
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  // DELETE WITH UNDO: nothing is sent while the ghost offers undo; the RPC goes out when it runs
+  // out (or the card leaves). A failed delete brings the card back (the hook says why).
+  const [ghost, setGhost] = useState(false);
+  const [gone, setGone] = useState(false);
   const deleteCampaign = useDeleteCampaign();
+  const commitDelete = () => {
+    setGhost(false);
+    setGone(true);
+    deleteCampaign.mutate(campaign.id ?? 0, { onError: () => setGone(false) });
+  };
+  const pending = useRef(ghost);
+  pending.current = ghost;
+  const commitRef = useRef(commitDelete);
+  commitRef.current = commitDelete;
+  useEffect(
+    () => () => {
+      if (pending.current) commitRef.current();
+    },
+    [],
+  );
   const status = (campaign.status || 'EMAIL_CAMPAIGN_STATUS_UNKNOWN') as common_EmailCampaignStatus;
   // Only drafts are deletable: the store deletes WHERE status='draft' and maps 0 rows to
   // NotFound, so offering delete on a scheduled/paused/sent/cancelled card produced a
@@ -59,6 +77,19 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
         ? `scheduled ${scheduled}`
         : 'not scheduled';
 
+  if (gone) return null;
+  // Wrapped so the ghost keeps the card's grid cell instead of spanning the row.
+  if (ghost)
+    return (
+      <div className='h-full'>
+        <UndoRow
+          name={campaign.name || 'untitled campaign'}
+          onUndo={() => setGhost(false)}
+          onCommit={commitDelete}
+        />
+      </div>
+    );
+
   return (
     <div className='relative h-full'>
       {deletable && (
@@ -67,25 +98,11 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
           aria-label='delete campaign'
           onClick={(e) => {
             e.stopPropagation();
-            setConfirmDelete(true);
+            setGhost(true);
           }}
           className='absolute right-1.5 top-1.5 z-10 bg-bgColor'
         />
       )}
-      <ConfirmationModal
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title='delete campaign'
-        confirmLabel='delete'
-        onConfirm={() => {
-          deleteCampaign.mutate(campaign.id ?? 0);
-          setConfirmDelete(false);
-        }}
-      >
-        <Text size='small'>
-          delete “{campaign.name || 'untitled campaign'}”? this can’t be undone.
-        </Text>
-      </ConfirmationModal>
       <button
         type='button'
         onClick={() => navigate(`${ROUTES.emailCampaigns}/${campaign.id}`)}

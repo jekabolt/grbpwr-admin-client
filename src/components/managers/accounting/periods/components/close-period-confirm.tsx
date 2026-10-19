@@ -3,9 +3,10 @@ import { ROUTES } from 'constants/routes';
 import { addMonths, format, parseISO } from 'date-fns';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSnackBarStore } from 'lib/stores/store';
-import { ConfirmationModal, Text } from 'ui';
+import { notify } from 'lib/stores/store';
+import { CalloutBox, ConfirmationModal, Text } from 'ui';
 import { Callout, CheckRow, GroupHeader } from '../../components/kit';
+import { errorText, isRefused, isTransient, reasonOf } from '../../utils/feedback';
 import { formatBase } from '../../utils/format';
 import { useClosePeriod, useReconciliation } from '../../utils/hooks';
 import { formatPeriodLabel } from './periods-table';
@@ -37,14 +38,16 @@ function SignalRow({ label, value, ok }: { label: string; value: string; ok: boo
 // a `closed=false` result must keep the modal open and render the checklist rather than let
 // ConfirmationModal's default auto-close wipe the failure off the screen.
 export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
-  const { showMessage } = useSnackBarStore();
   const closePeriod = useClosePeriod();
   const [notReady, setNotReady] = useState<string[] | null>(null);
+  // The server's refusal stands in the modal until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   // A fresh target period means a fresh attempt — drop any notReady checklist left over from a
   // previous period's failed close so it can't bleed into this one.
   useEffect(() => {
     setNotReady(null);
+    setRefusal(null);
   }, [period?.period]);
 
   // Pre-close traffic light (08.6): fetch reconciliation for the target month the moment the
@@ -64,12 +67,14 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
 
   const handleConfirm = () => {
     if (!period?.period) return;
+    const month = period.period;
+    setRefusal(null);
     closePeriod.mutate(
-      { month: period.period },
+      { month },
       {
         onSuccess: (res) => {
           if (res.closed) {
-            showMessage('Period closed', 'success');
+            // No receipt: the month turns closed in the list.
             onOpenChange(false);
           } else {
             setNotReady(
@@ -79,8 +84,21 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
             );
           }
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to close period', 'error'),
+        onError: (e) => {
+          const said = errorText(e, 'failed to close period') ?? '';
+          if (isRefused(e)) {
+            setRefusal(said);
+            return;
+          }
+          notify({
+            sev: 'error',
+            subject: `PERIOD ${month}`,
+            text: 'not closed',
+            bad: reasonOf(e),
+            detail: said,
+            action: isTransient(e) ? { label: 'retry', onClick: handleConfirm } : undefined,
+          });
+        },
       },
     );
   };
@@ -132,6 +150,8 @@ export function ClosePeriodConfirm({ period, onOpenChange }: Props) {
             </>
           )}
         </div>
+
+        {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
 
         {notReady && (
           <Callout tone='attention' className='flex flex-col gap-2'>

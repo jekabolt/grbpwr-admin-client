@@ -15,13 +15,13 @@ import {
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, CalloutBox, Close, GroupLabel, Pill, Text } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
 import { runColorwayRows, runGridKey, unpublishedColorwayCount } from './run-composition';
 import {
@@ -51,7 +51,7 @@ import { useRunReadiness, useSaveProductionRun } from './useProductionRuns';
 // значит пересъёмку нормы между открытием модалки и отправкой клиент обнаружить не может в принципе.
 // Поэтому отказ create разбирается здесь как ПЕРВОКЛАССНЫЙ результат, а не как «неожиданная ошибка».
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
 type Draft = {
@@ -86,7 +86,6 @@ export function CreateRunModal({
   /** Seed the tech card from the spine's [plan run] deep link (?techCardId=…&new=1). */
   initialTechCardId?: number;
 }) {
-  const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   const navigate = useNavigate();
   const create = useSaveProductionRun();
@@ -97,6 +96,8 @@ export function CreateRunModal({
   // Отказ гейта на create — со списком нарушений, каждое со стабильным ключом впереди описания.
   // Остаётся на экране до следующей попытки: это факт о запросе, а не тост.
   const [refusal, setRefusal] = useState<{ message: string; rows: string[] } | null>(null);
+  // A failed check or a plain refusal (no violation list): one line above the footer.
+  const [fail, setFail] = useState<string | null>(null);
   const [showPassed, setShowPassed] = useState(false);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export function CreateRunModal({
     setSelected([]);
     setQty({});
     setRefusal(null);
+    setFail(null);
   }, [open, initialTechCardId]);
 
   const { data: tcData } = useQuery({
@@ -311,9 +313,10 @@ export function CreateRunModal({
 
   const submit = () => {
     if (!d.techCardId) {
-      showMessage('select a tech card', 'error');
+      setFail('select a tech card');
       return;
     }
+    setFail(null);
     setRefusal(null);
     // Сетка едет ВМЕСТЕ с прогоном: гейт судил именно её, и создавать пустой прогон, чтобы набрать
     // те же цифры второй раз на детальной странице, значило бы выбросить и работу, и вердикт.
@@ -347,7 +350,7 @@ export function CreateRunModal({
       },
       {
         onSuccess: (res) => {
-          showMessage('run created', 'success');
+          // Navigation to the new run is the receipt.
           onOpenChange(false);
           const id = (res as { id?: number })?.id;
           if (id) navigate(runDetailPath(id));
@@ -364,7 +367,9 @@ export function CreateRunModal({
             });
             return;
           }
-          showMessage(e instanceof Error ? e.message : "couldn't create the run", 'error');
+          const sentence = e instanceof Error ? e.message : "couldn't create the run";
+          if (isRefusal(e)) setFail(sentence);
+          else notifyFailure('RUN', 'not created', e, sentence);
         },
       },
     );
@@ -374,8 +379,8 @@ export function CreateRunModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>new run</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Close />
@@ -399,6 +404,7 @@ export function CreateRunModal({
                     setSelected([]);
                     setQty({});
                     setRefusal(null);
+                    setFail(null);
                   }}
                 >
                   <option value={0}>— select —</option>
@@ -596,7 +602,7 @@ export function CreateRunModal({
                               {sizeIds.map((s) => (
                                 <td key={s} className='border border-hairline px-2 py-1 text-right'>
                                   <input
-                                    className='w-14 border border-textInactiveColor bg-bgColor px-1 text-right text-textBaseSize'
+                                    className='w-14 border border-borderColor bg-bgColor px-1 text-right text-textBaseSize'
                                     inputMode='numeric'
                                     value={qty[runGridKey(cw, s)] ?? ''}
                                     onChange={(e) => setCell(cw, s, e.target.value)}
@@ -634,8 +640,8 @@ export function CreateRunModal({
                 <CalloutBox tone='error'>
                   <Text size='small'>
                     the readiness check failed. this is neither “ready” nor “not ready” — there is
-                    no verdict right now. the run can still be created: the gate is recomputed on the
-                    server at creation, and a refusal will come from there.
+                    no verdict right now. the run can still be created: the gate is recomputed on
+                    the server at creation, and a refusal will come from there.
                   </Text>
                 </CalloutBox>
               ) : !report ? (
@@ -666,7 +672,7 @@ export function CreateRunModal({
                   {/* НЕ ПРОВЕРЕНО — своя группа, своё слово, и она НИКОГДА не сворачивается вместе
                       с пройденными: «не проверяли» и «проверили, всё хорошо» — разные ответы. */}
                   <FindingGroup
-                    title="not checked — the server has no instrument for it"
+                    title='not checked — the server has no instrument for it'
                     findings={uncheckedRows}
                     techCardId={d.techCardId}
                   />
@@ -810,9 +816,10 @@ export function CreateRunModal({
                 </Text>
               </CalloutBox>
             ) : null}
+            <FailNote verb='not created' text={fail} />
           </div>
 
-          <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Text size='micro' variant='label' className='mr-auto'>
               {totalUnits > 0
                 ? `${totalUnits} ${totalUnits === 1 ? 'garment' : 'garments'} in the plan`

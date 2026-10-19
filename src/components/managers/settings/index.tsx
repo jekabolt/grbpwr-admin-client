@@ -1,15 +1,18 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { firstErrorSummary, flattenFieldErrors, revealField } from 'utils/field-errors';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useForm, type FieldErrors } from 'react-hook-form';
 import {
   Button,
+  CalloutBox,
   ConfirmationModal,
   Section,
   Text,
@@ -17,6 +20,7 @@ import {
   Form,
   InputField,
   ToggleField,
+  useDoneFlash,
 } from 'ui';
 import { TranslationField } from 'components/shared/translation/translation-field';
 import { CarrierPrices } from './components/carrier-prices';
@@ -28,12 +32,15 @@ import {
   transformDictionaryToSettings,
 } from './utility/schema';
 
-
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
-  const showMessage = useSnackBarStore((state) => state.showMessage);
+  const saved = useDoneFlash();
+  // A refused save stands in the save bar until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { canWrite, canRead } = usePermissions();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [canWrite(SECTION.settings)]);
 
   const initialValues = useMemo(
     () => (dictionary ? transformDictionaryToSettings(dictionary) : defaultSettings),
@@ -62,14 +69,26 @@ export function Settings() {
   };
 
   const handleSave = async (data: SettingsSchema) => {
+    setFormError(null);
     try {
       setIsLoading(true);
       await adminService.UpdateSettings(data as UpdateSettingsRequest);
-      showMessage('Settings updated successfully', 'success');
+      saved.flash();
       await refetch();
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to update settings';
-      showMessage(msg, 'error');
+      if (failureClassOfError(error) === 'refused') setFormError(msg);
+      else
+        notify({
+          sev: 'error',
+          subject: 'SETTINGS',
+          text: 'not saved',
+          detail: msg,
+          action:
+            failureClassOfError(error) === 'transient'
+              ? { label: 'retry', onClick: () => void handleSave(data) }
+              : undefined,
+        });
     } finally {
       setIsLoading(false);
     }
@@ -82,7 +101,7 @@ export function Settings() {
     const flat = flattenFieldErrors(errors);
     const first = flat[0];
     if (first) revealField(first.path);
-    showMessage(firstErrorSummary(errors) || 'Check the fields with errors', 'error');
+    setFormError(firstErrorSummary(errors) || 'check the fields with errors');
   };
 
   return (
@@ -91,7 +110,7 @@ export function Settings() {
         onSubmit={form.handleSubmit(handleSave, onInvalid)}
         className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
       >
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <Text variant='uppercase' size='large'>
             settings
           </Text>
@@ -99,7 +118,7 @@ export function Settings() {
             <Text variant='inactive' size='small'>
               base currency
             </Text>
-            <span className='border border-textInactiveColor px-1.5 py-0.5'>
+            <span className='border border-borderColor px-1.5 py-0.5'>
               <Text variant='uppercase'>{baseCurrency}</Text>
             </span>
           </div>
@@ -197,10 +216,21 @@ export function Settings() {
       </form>
 
       {canWrite(SECTION.settings) && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
-          <Text variant='inactive' size='small'>
-            {isDirty ? 'unsaved changes' : ' '}
-          </Text>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+        >
+          {formError ? (
+            <CalloutBox tone='error' className='min-w-0'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not saved</b> · {formError}
+              </Text>
+            </CalloutBox>
+          ) : (
+            <Text variant='inactive' size='small'>
+              {isDirty ? 'unsaved changes' : ' '}
+            </Text>
+          )}
           <Button
             type='button'
             size='lg'
@@ -208,6 +238,7 @@ export function Settings() {
             className='uppercase cursor-pointer'
             disabled={isLoading || !isDirty}
             loading={isLoading}
+            done={saved.on}
             onClick={() => form.handleSubmit(handleSave)()}
           >
             save

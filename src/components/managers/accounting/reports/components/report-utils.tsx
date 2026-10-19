@@ -199,7 +199,7 @@ export function ReportState({
 export function CaveatsNote({ caveats }: { caveats: string[] }) {
   if (caveats.length === 0) return null;
   return (
-    <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+    <div className='flex flex-col gap-1 border border-borderColor p-3'>
       {caveats.map((c, i) => (
         <div key={i} className='flex items-start gap-2 text-labelColor'>
           <span aria-hidden className='font-bold leading-none'>

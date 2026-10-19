@@ -1,4 +1,4 @@
-import { AvatarPicker, Chip, ChipRow } from 'ui';
+import { AvatarPicker, Button, Chip, ChipRow, GroupLabel, Text } from 'ui';
 import { Task, TaskPriority } from '../api/types';
 import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
 
@@ -6,9 +6,13 @@ import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
  * tskFilters v2 — the filter row is CHIPS, not selects. Priority is a single-select
  * chip group (click the lit one to clear it), "my tasks" scopes to the signed-in
  * assignee, and — tskArchive v3 — archived is just another chip here rather than a
- * whole-board mode flip. The old search box + column/priority selects are gone: a
- * board already IS its columns, so a status filter only emptied them, and free-text
- * search over six cards a column earned less than the chrome it cost.
+ * whole-board mode flip. The column/priority selects are gone: a board already IS its
+ * columns, so a status filter only emptied them.
+ *
+ * SEARCH IS BACK (2026-10-19), at the right end of this row — but not as the old filter over
+ * the six cards a column of the open board. It spans EVERY board and the archive, which no
+ * board view can answer, and a non-empty query swaps the board for a results list
+ * (`task-search.tsx`). The field is passed in as `search`; its state lives in the address.
  *
  * РЯД ЛИЦ (п.3 волны) — второй ярус того же ряда: «my tasks» отвечает только «по своим», а
  * доска обязана уметь и «по чужим». Сужение клиентское: вся доска и так прочитана целиком, а
@@ -20,6 +24,9 @@ import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
  * здесь, но состояние его снаружи, и снимается он тем же жестом, что и приоритет, — щелчком
  * по зажжённому.
  */
+
+/** Phone tap target: 44px tall below sm, desktop density from sm. */
+export const TAP = 'min-h-11 shrink-0 sm:min-h-0';
 
 export interface TaskFilters {
   priority: TaskPriority | '';
@@ -36,6 +43,20 @@ export const emptyFilters: TaskFilters = { priority: '', mine: false, assignee: 
 
 export function filtersActive(f: TaskFilters): boolean {
   return f.priority !== '' || f.mine || f.assignee !== undefined;
+}
+
+/** Number shown on the phone's compact filters door. `mine` has its own door beside it. */
+export function taskFilterCount(
+  filters: TaskFilters,
+  showArchived: boolean,
+  projectScoped: boolean,
+): number {
+  return (
+    Number(filters.priority !== '') +
+    Number(filters.assignee !== undefined) +
+    Number(showArchived) +
+    Number(projectScoped)
+  );
 }
 
 /**
@@ -120,6 +141,7 @@ export function FiltersBar({
   onClear,
   projectLabel,
   onClearProject,
+  search,
 }: {
   filters: TaskFilters;
   onChange: (f: TaskFilters) => void;
@@ -132,16 +154,25 @@ export function FiltersBar({
   /** Имя проекта из адреса; пусто = доска не сужена проектом. */
   projectLabel?: string;
   onClearProject?: () => void;
+  /** Search field (+ scope chips while searching), pinned to the right end of the row. */
+  search?: React.ReactNode;
 }) {
   const set = (patch: Partial<TaskFilters>) => onChange(setFilter(filters, patch));
   const dirty = filtersActive(filters) || showArchived || !!projectLabel;
 
   return (
-    <ChipRow className='gap-1.5'>
+    // Телефон: ряд в одну строку и листается вбок — перенос растил бы его на полэкрана.
+    <ChipRow className='w-full gap-1.5 max-sm:flex-nowrap max-sm:overflow-x-auto'>
       {/* Сужение проектом стоит ПЕРВЫМ: остальные чипы работают внутри него, и человек,
           пришедший сюда ссылкой, обязан видеть, почему на доске не все карточки. */}
       {projectLabel && (
-        <Chip selected pressed aria-label={`project: ${projectLabel}`} onClick={onClearProject}>
+        <Chip
+          selected
+          pressed
+          aria-label={`project: ${projectLabel}`}
+          onClick={onClearProject}
+          className={TAP}
+        >
           project: {projectLabel}
         </Chip>
       )}
@@ -153,6 +184,7 @@ export function FiltersBar({
             selected={on}
             pressed={on}
             onClick={() => set({ priority: on ? '' : p })}
+            className={TAP}
           >
             {PRIORITY_LABEL[p]}
           </Chip>
@@ -160,12 +192,22 @@ export function FiltersBar({
       })}
 
       {showMine && (
-        <Chip selected={filters.mine} pressed={filters.mine} onClick={() => set({ mine: !filters.mine })}>
+        <Chip
+          selected={filters.mine}
+          pressed={filters.mine}
+          onClick={() => set({ mine: !filters.mine })}
+          className={TAP}
+        >
           my tasks
         </Chip>
       )}
 
-      <Chip selected={showArchived} pressed={showArchived} onClick={onToggleArchived}>
+      <Chip
+        selected={showArchived}
+        pressed={showArchived}
+        onClick={onToggleArchived}
+        className={TAP}
+      >
         archived
       </Chip>
 
@@ -177,19 +219,113 @@ export function FiltersBar({
           people={people}
           selected={filters.assignee}
           onSelect={(name) => set({ assignee: name })}
-          className='ml-1'
+          className='ml-1 shrink-0 max-sm:flex-nowrap'
         />
       )}
 
       {dirty && (
-        <button
-          type='button'
+        <Button
+          variant='underline'
+          size='xs'
           onClick={onClear}
-          className='ml-1 text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+          className={`ml-1 items-center text-labelColor hover:text-textColor max-sm:inline-flex ${TAP}`}
         >
           clear
-        </button>
+        </Button>
       )}
+
+      {search && <div className='ml-auto flex flex-wrap items-center gap-1.5'>{search}</div>}
     </ChipRow>
+  );
+}
+
+/** Phone-only expansion below the compact tasks header. Filter state still flows through setFilter. */
+export function PhoneFilterGroups({
+  filters,
+  onChange,
+  people,
+  showArchived,
+  onToggleArchived,
+  onClear,
+  projectLabel,
+  onClearProject,
+}: {
+  filters: TaskFilters;
+  onChange: (f: TaskFilters) => void;
+  people?: { name: string; count: number }[];
+  showArchived: boolean;
+  onToggleArchived: () => void;
+  onClear: () => void;
+  projectLabel?: string;
+  onClearProject?: () => void;
+}) {
+  const set = (patch: Partial<TaskFilters>) => onChange(setFilter(filters, patch));
+  const dirty = filtersActive(filters) || showArchived || !!projectLabel;
+
+  return (
+    <div className='border-t border-hairline pt-stack'>
+      <GroupLabel flush>priority</GroupLabel>
+      <ChipRow className='gap-1.5'>
+        {PRIORITIES.map((priority) => {
+          const selected = filters.priority === priority;
+          return (
+            <Chip
+              key={priority}
+              selected={selected}
+              pressed={selected}
+              onClick={() => set({ priority: selected ? '' : priority })}
+              className='min-h-9'
+            >
+              {PRIORITY_LABEL[priority]}
+            </Chip>
+          );
+        })}
+      </ChipRow>
+
+      <GroupLabel>people</GroupLabel>
+      {!!people?.length ? (
+        <AvatarPicker
+          people={people}
+          selected={filters.assignee}
+          onSelect={(name) => set({ assignee: name })}
+        />
+      ) : (
+        <Text size='micro' variant='label' component='span'>
+          none
+        </Text>
+      )}
+
+      <GroupLabel>scope</GroupLabel>
+      <div className='flex flex-wrap items-center gap-1.5'>
+        {projectLabel && (
+          <Chip
+            selected
+            pressed
+            aria-label={`project: ${projectLabel}`}
+            onClick={onClearProject}
+            className='min-h-9 min-w-0 max-w-full whitespace-normal break-words text-left'
+          >
+            project: {projectLabel}
+          </Chip>
+        )}
+        <Chip
+          selected={showArchived}
+          pressed={showArchived}
+          onClick={onToggleArchived}
+          className='min-h-9'
+        >
+          archived
+        </Chip>
+        <Button
+          variant='underline'
+          size='xs'
+          onClick={onClear}
+          disabled={!dirty}
+          className='ml-auto min-h-9 items-center text-labelColor hover:text-textColor'
+        >
+          clear
+        </Button>
+      </div>
+    </div>
   );
 }

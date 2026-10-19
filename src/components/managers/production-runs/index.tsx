@@ -3,7 +3,6 @@ import { adminService } from 'api/api';
 import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -19,6 +18,7 @@ import {
   Chip,
 } from 'ui';
 import { CreateRunModal } from './components/create-run-modal';
+import { notifyFailure } from './components/feedback';
 import { isRunLocked, isRunOpen, isRunReceivable, runDetailPath } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
@@ -30,7 +30,7 @@ import {
   useProductionRuns,
 } from './components/useProductionRuns';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 const statusFilterOptions = [
   { value: '', label: 'all' },
@@ -160,14 +160,16 @@ export function ProductionRuns() {
 
   const openCreate = () => setCreateOpen(true);
   const del = useDeleteProductionRun();
-  const { showMessage } = useSnackBarStore();
+  // The row leaving the list is the receipt; a refusal has no place once the dialog closes.
+  const deleteRun = (id: number): void =>
+    del.mutate(id, {
+      onError: (e) =>
+        notifyFailure(`PR-${id}`, 'not deleted', e, deleteRunErrorMessage(e), () => deleteRun(id)),
+    });
   const confirmDelete = () => {
     if (!deleting?.id) return;
-    del.mutate(deleting.id, {
-      onSuccess: () => showMessage('Run deleted', 'success'),
-      onError: (e) => showMessage(deleteRunErrorMessage(e), 'error'),
-      onSettled: () => setDeleting(undefined),
-    });
+    deleteRun(deleting.id);
+    setDeleting(undefined);
   };
 
   // The row's controls, in the order they are reached for: the batch's NEXT STEP first, then the
@@ -225,7 +227,7 @@ export function ProductionRuns() {
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
           production runs
         </Text>

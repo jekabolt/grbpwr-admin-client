@@ -192,7 +192,7 @@ export function useReorder(onMove: (from: number, to: number) => void): ReorderA
 }
 
 const ICON_BUTTON =
-  'flex size-4 shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-textInactiveColor disabled:hover:text-textInactiveColor';
+  'flex size-4 shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-borderColor disabled:hover:text-borderColor';
 
 /**
  * Подвал плитки: ручка, номер, стрелки, форма кадра и удаление.

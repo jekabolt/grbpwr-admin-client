@@ -4,10 +4,11 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { addMonths, format, parseISO } from 'date-fns';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Button, ConfirmationModal, Loader, Text } from 'ui';
 import { Callout, CheckRow, GroupHeader, Note } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
+import { errorText, isTransient, reasonOf } from '../utils/feedback';
 import { formatBase } from '../utils/format';
 import { useAcctPeriods, useReconciliation, useReopenPeriod } from '../utils/hooks';
 import { ClosePeriodConfirm } from './components/close-period-confirm';
@@ -81,7 +82,9 @@ function CloseChecklist({
 
       <div className='flex flex-col'>
         <CheckRow done={past}>
-          {past ? 'the month is over' : 'the month is still running — closable on the 1st of the next month'}
+          {past
+            ? 'the month is over'
+            : 'the month is still running — closable on the 1st of the next month'}
         </CheckRow>
         {reconLoading ? (
           <Text size='small' variant='inactive'>
@@ -153,8 +156,6 @@ function CloseChecklist({
 export function AcctPeriodsPage() {
   const { canWrite } = usePermissions();
   const canWriteAcct = canWrite(SECTION.accounting);
-  const { showMessage } = useSnackBarStore();
-
   const { data, isLoading, isError, refetch } = useAcctPeriods();
   const periods = data?.periods ?? [];
 
@@ -163,25 +164,32 @@ export function AcctPeriodsPage() {
 
   const reopenPeriod = useReopenPeriod();
 
-  const handleReopenConfirm = () => {
-    if (!reopenTarget?.period) return;
+  // No receipt: the month's status flipping in the list is the receipt.
+  const reopen = (month: string): void =>
     reopenPeriod.mutate(
-      { month: reopenTarget.period },
+      { month },
       {
-        onSuccess: () => showMessage('Period reopened', 'success'),
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to reopen period', 'error'),
+          notify({
+            sev: 'error',
+            subject: `PERIOD ${month}`,
+            text: 'not reopened',
+            bad: reasonOf(e),
+            detail: errorText(e),
+            action: isTransient(e) ? { label: 'retry', onClick: () => reopen(month) } : undefined,
+          }),
       },
     );
+  const handleReopenConfirm = () => {
+    if (!reopenTarget?.period) return;
+    reopen(reopenTarget.period);
   };
 
   // The checklist features the earliest open month: the next one the close ritual applies to
   // (a past open month is closable now; the current month shows its list with close gated).
   const openPeriods = periods.filter((p) => p.status === 'open' && p.period);
   const featured =
-    openPeriods.length > 0
-      ? openPeriods.reduce((a, b) => (a.period! <= b.period! ? a : b))
-      : null;
+    openPeriods.length > 0 ? openPeriods.reduce((a, b) => (a.period! <= b.period! ? a : b)) : null;
   // Timeline below: every other month, newest first.
   const rest = periods
     .filter((p) => p !== featured)
@@ -206,13 +214,13 @@ export function AcctPeriodsPage() {
           <div className='flex flex-wrap gap-4'>
             <Link
               to={`${ROUTES.accountingReports}?tab=recon`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               open reconciliation →
             </Link>
             <Link
               to={`${ROUTES.accounting}?new=1`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               add manual entry →
             </Link>

@@ -5,12 +5,15 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useState,
   type RefObject,
 } from 'react';
+import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Button, Input, Pill, Text, Toolbar, ToolbarSpacer } from 'ui';
+import { cn } from 'lib/utility';
+import { Button, ConfirmationModal, Input, Pill, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './ai-panel';
-import { FormatBar } from './format-bar';
+import { FormatBar, type FormatMenuItem } from './format-bar';
 import { MarkdownView } from './markdown-view';
 
 /**
@@ -93,7 +96,12 @@ function measureLines(area: HTMLTextAreaElement): LineMap {
   const cs = getComputedStyle(area);
   const m = document.createElement('div');
   for (const p of MIRRORED) m.style.setProperty(p, cs.getPropertyValue(p));
-  m.style.setProperty('white-space', 'pre-wrap');
+  // Перенос — ПО РЕЖИМУ ПОЛЯ («wrap lines» в меню телефона): с выключенным переносом поле
+  // листается вбок и строка исходника — одна строка на экране; зеркало с `pre-wrap` переносило
+  // бы её и врало бы о высотах.
+  const nowrap = area.wrap === 'off';
+  m.style.setProperty('white-space', nowrap ? 'pre' : 'pre-wrap');
+  if (nowrap) m.style.setProperty('overflow-wrap', 'normal');
   m.style.boxSizing = 'border-box';
   m.style.border = '0';
   // Ширина — ПО `clientWidth`: без рамки и без полосы прокрутки, иначе зеркало переносило бы
@@ -211,6 +219,8 @@ export function NoteEditor({
   onLeaveEdit,
   sizeHint,
   banners,
+  wrapLines: wrapProp,
+  onWrapLinesChange,
 }: {
   handleRef?: RefObject<NoteEditorHandle | null>;
   name: string;
@@ -229,12 +239,31 @@ export function NoteEditor({
   /** Баннеры страницы (черновик, конфликт, различия) — между полосой и полем, а не поверх
    * текста: конфликт обязан стоять там, где на него смотрят, прежде чем нажать «save». */
   banners?: React.ReactNode;
+  /** Перенос строк поля — общий с режимом блоков (`note-page.tsx`). Выключен — `white-space:
+   * pre` и прокрутка вбок; текст не меняется. */
+  wrapLines?: boolean;
+  onWrapLinesChange?: (next: boolean) => void;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const { showMessage } = useSnackBarStore();
   const assistant = useNoteAssistant();
 
   const assistantOpen = assistant.state.kind !== 'idle';
+
+  /* ── ТЕЛЕФОН (<md) ─────────────────────────────────────────────────────────────────────────
+   *
+   * Одна строка шапки «done · имя + состояние · save», поле имени уходит в «•••» → rename,
+   * показ разметки — туда же переключателем (под полем с поднятой клавиатурой ему места нет),
+   * перенос строк — переключателем там же. На ≥md раскладка прежняя.
+   */
+  const phone = useMediaQuery(PHONE_QUERY);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  /** Набираемое имя в окне rename; `null` — окно закрыто. */
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
+  const showPreview = !phone || previewOpen;
+  /** Свой перенос — только когда страница не держит общий (пробы рисуют редактор голым). */
+  const [ownWrap, setOwnWrap] = useState(true);
+  const wrapLines = wrapProp ?? ownWrap;
   useImperativeHandle(
     handleRef,
     () => ({
@@ -409,7 +438,7 @@ export function NoteEditor({
   const paneHeight = useRef(0);
   const wheelAt = useRef(0);
   const fromPane = useRef(0);
-  const mirror = useRef<{ text: string; width: number; map: LineMap } | null>(null);
+  const mirror = useRef<{ text: string; width: number; wrap: string; map: LineMap } | null>(null);
   /** Какой исходник сейчас НАРИСОВАН: показ отстаёт от поля на кадр (`useDeferredValue`), и
    * строки его блоков — строки этого текста, а не того, что уже в поле. */
   const rendered = useRef('');
@@ -426,9 +455,11 @@ export function NoteEditor({
 
   const lines = useCallback((area: HTMLTextAreaElement): LineMap => {
     const c = mirror.current;
-    if (c && c.text === area.value && c.width === area.clientWidth) return c.map;
+    if (c && c.text === area.value && c.width === area.clientWidth && c.wrap === area.wrap) {
+      return c.map;
+    }
     const map = measureLines(area);
-    mirror.current = { text: area.value, width: area.clientWidth, map };
+    mirror.current = { text: area.value, width: area.clientWidth, wrap: area.wrap, map };
     return map;
   }, []);
 
@@ -624,54 +655,94 @@ export function NoteEditor({
     };
   }, [syncPreview]);
 
+  const tidy = () => assistant.run(buildRequest());
+  const savePill = dirty ? (
+    <Pill tone='attention'>not saved</Pill>
+  ) : (
+    <Pill tone='ok'>{savedLabel ? `saved${phone ? '' : ' at'} ${savedLabel}` : 'saved'}</Pill>
+  );
+
+  /** Пункты «•••» телефонной полосы, которыми владеет редактор, а не полоса. */
+  const menuLead: FormatMenuItem[] = [
+    { label: 'rename', run: () => setRenameDraft(name) },
+    { label: 'preview', on: previewOpen, run: () => setPreviewOpen((v) => !v) },
+  ];
+  const menuTail: FormatMenuItem[] = [
+    { label: 'tidy with ai', run: tidy, disabled: working || !value.trim() },
+    {
+      label: 'wrap lines',
+      on: wrapLines,
+      run: () => (onWrapLinesChange ?? setOwnWrap)(!wrapLines),
+    },
+  ];
+
   return (
     <>
-      <Toolbar>
-        <label className='flex items-center gap-2'>
-          <Text size='micro' variant='label' component='span' className='uppercase'>
-            name
-          </Text>
-          <Input
-            name='noteName'
-            value={name}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onNameChange(e.target.value)}
-            className='w-[280px]'
-          />
-        </label>
+      {phone ? (
+        // ОДНА СТРОКА: выход слева, что правится и в каком оно состоянии — по центру, запись
+        // справа. Подсказок про ⌘ на телефоне нет: клавиш там нет.
+        <Toolbar className='gap-2 px-1.5 py-1'>
+          <Button size='sm' variant='underline' className='min-h-11 shrink-0' onClick={onLeaveEdit}>
+            done
+          </Button>
+          <div className='flex min-w-0 flex-1 flex-col items-center gap-0.5'>
+            <Text component='span' className='max-w-full truncate font-bold'>
+              {name || 'note'}
+            </Text>
+            {savePill}
+          </div>
+          <Button
+            size='sm'
+            variant='main'
+            className='min-h-11 shrink-0'
+            onClick={onSave}
+            disabled={!canSave || saving}
+          >
+            {saving ? 'saving…' : 'save'}
+          </Button>
+          {sizeHint && (
+            <Text size='micro' variant='label' className='w-full'>
+              {sizeHint}
+            </Text>
+          )}
+        </Toolbar>
+      ) : (
+        <Toolbar>
+          <label className='flex items-center gap-2'>
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              name
+            </Text>
+            <Input
+              name='noteName'
+              value={name}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onNameChange(e.target.value)}
+              className='w-[280px]'
+            />
+          </label>
 
-        <Button
-          size='sm'
-          variant='secondary'
-          onClick={() => assistant.run(buildRequest())}
-          disabled={working || !value.trim()}
-        >
-          {working ? 'the assistant is reading…' : 'bring to markdown'}
-        </Button>
+          <Button size='sm' variant='secondary' onClick={tidy} disabled={working || !value.trim()}>
+            {working ? 'the assistant is reading…' : 'tidy with ai'}
+          </Button>
 
-        <ToolbarSpacer />
+          <ToolbarSpacer />
 
-        {dirty ? (
-          <Pill tone='attention'>not saved</Pill>
-        ) : (
-          <Pill tone='ok'>{savedLabel ? `saved at ${savedLabel}` : 'saved'}</Pill>
-        )}
-        <Button size='sm' variant='secondary' onClick={onLeaveEdit}>
-          finish editing
-        </Button>
-        <Button size='sm' variant='main' onClick={onSave} disabled={!canSave || saving}>
-          {saving ? 'saving…' : 'save ⌘s'}
-        </Button>
+          {savePill}
+          <Button size='sm' variant='secondary' onClick={onLeaveEdit}>
+            finish editing
+          </Button>
+          <Button size='sm' variant='main' onClick={onSave} disabled={!canSave || saving}>
+            {saving ? 'saving…' : 'save ⌘s'}
+          </Button>
 
-        <div className='w-full'>
-          <Text size='micro' variant='label'>
-            ⌘e or “finish editing” — leave editing, ⌘s — save. the pane beside the text shows the
-            note as it will read — pictures included — and follows the line you are editing. a note
-            is the same kind of library file: topics, owners, access and the discussion live in its
-            card.
-            {sizeHint ? ` ${sizeHint}` : ''}
-          </Text>
-        </div>
-      </Toolbar>
+          {sizeHint && (
+            <div className='w-full'>
+              <Text size='micro' variant='label'>
+                {sizeHint}
+              </Text>
+            </div>
+          )}
+        </Toolbar>
+      )}
 
       {banners}
 
@@ -695,7 +766,12 @@ export function NoteEditor({
           признак фокуса, что у любого поля админки. Во всю ширину вьюпорта, как и чтение:
           вариант md=v3 выбран целиком. */}
       <div className='border border-borderColor bg-bgColor focus-within:border-textColor'>
-        <FormatBar areaRef={areaRef} value={value} onChange={onChange} />
+        <FormatBar
+          areaRef={areaRef}
+          value={value}
+          onChange={onChange}
+          phone={phone ? { lead: menuLead, tail: menuTail } : undefined}
+        />
         {/* ТЕКСТ И ТО, ВО ЧТО ОН ПРЕВРАЩАЕТСЯ, — РЯДОМ, А НЕ ПО ОЧЕРЕДИ.
             Разметка заметки существует ради картинок: снимок ткани, страница договора, чертёж.
             Пока они видны только в чтении, правка идёт вслепую — вставил `![…](/files/12)` и
@@ -710,21 +786,36 @@ export function NoteEditor({
             name='noteContent'
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            spellCheck
-            className='block min-h-[60vh] w-full min-w-0 resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-textBaseSize leading-relaxed focus:outline-none lg:border-r lg:border-hairline'
+            // ТЕЛЕФОН: 16px — мельче iOS приближает страницу на фокусе; автокоррекция и
+            // заглавные молча портят разметку и адреса (`- item` → `- Item`, `.md` → `.MD`).
+            spellCheck={!phone}
+            autoCorrect={phone ? 'off' : undefined}
+            autoCapitalize={phone ? 'off' : undefined}
+            wrap={wrapLines ? 'soft' : 'off'}
+            className={cn(
+              'block h-[calc(100dvh-13.5rem)] w-full md:h-auto md:min-h-[60vh] min-w-0 resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-reading leading-relaxed focus:outline-none md:text-textBaseSize lg:border-r lg:border-hairline',
+              !wrapLines && 'overflow-x-auto whitespace-pre',
+            )}
           />
           {/* ВЫСОТА ПОКАЗА — ОТ ПОЛЯ, А НЕ ОТ СОДЕРЖИМОГО. Поле тянется мышью (`resize-y`), и
               показ, растущий вместе с длиной заметки, растянул бы общий блок на десять экранов.
               На широком экране он абсолютом занимает ровно высоту строки сетки и прокручивается
               сам; на узком у него свой потолок. */}
-          <div className='relative min-w-0 border-t border-hairline lg:border-t-0'>
+          {/* На телефоне показ — по «•••» → preview: узел остаётся в дереве (на нём слушатели
+              колеса и тача, повешенные один раз), прячется только он сам и его разметка. */}
+          <div
+            className={cn(
+              'relative min-w-0 border-t border-hairline lg:border-t-0',
+              !showPreview && 'hidden',
+            )}
+          >
             <div
               ref={previewRef}
               onScroll={followPane}
               onClick={caretFromPane}
               className='max-h-[50vh] cursor-text overflow-y-auto px-3 py-2.5 lg:absolute lg:inset-0 lg:max-h-none'
             >
-              {previewSource.trim() ? (
+              {!showPreview ? null : previewSource.trim() ? (
                 // Граница ⌘A в правке вне поля (`note-page.tsx`): выделяется показ, а не страница.
                 <div data-note-document=''>
                   <MarkdownView source={previewSource} />
@@ -738,6 +829,33 @@ export function NoteEditor({
           </div>
         </div>
       </div>
+
+      {/* Ряд форматирования на телефоне стоит `fixed` у низа экрана — хвост поля не должен
+          оставаться под ним. */}
+      {phone && <div aria-hidden className='h-16' />}
+
+      <ConfirmationModal
+        open={renameDraft !== null}
+        onOpenChange={(open) => {
+          if (!open) setRenameDraft(null);
+        }}
+        onConfirm={() => {
+          if (renameDraft !== null) onNameChange(renameDraft);
+        }}
+        title='rename'
+        confirmLabel='rename'
+        confirmDisabled={!renameDraft?.trim()}
+        width='sm'
+      >
+        <Input
+          name='noteRename'
+          value={renameDraft ?? ''}
+          autoComplete='off'
+          autoCapitalize='off'
+          autoCorrect='off'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRenameDraft(e.target.value)}
+        />
+      </ConfirmationModal>
     </>
   );
 }

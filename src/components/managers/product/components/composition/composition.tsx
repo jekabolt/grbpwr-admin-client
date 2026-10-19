@@ -123,7 +123,7 @@ export function Composition({ editMode }: CompositionProps) {
 
   return (
     <div className='w-full h-full'>
-      <div className='border-b border-textInactiveColor flex items-center w-full'>
+      <div className='border-b border-borderColor flex items-center w-full'>
         <div className='flex-1'>
           <InputField
             name='product.productBodyInsert.composition'

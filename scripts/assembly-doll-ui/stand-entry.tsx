@@ -164,7 +164,7 @@ function Column({ c, card, frozen }: { c: StandCard; card: common_TechCard; froz
         <div className='w-[320px] shrink-0 space-y-2.5' data-map-column>
           <AssemblyMap
             sketch={
-              <div className='flex aspect-[3/4] items-center justify-center border border-borderColor bg-bgZebra text-micro text-labelColor uppercase'>
+              <div className='flex aspect-[3/4] items-center justify-center border border-borderColor bg-pageBg text-micro text-labelColor uppercase'>
                 technical sketch (stand stub)
               </div>
             }

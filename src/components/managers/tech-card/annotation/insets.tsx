@@ -225,13 +225,7 @@ export function SectionInset({
         {text && <span className='truncate text-labelColor'>{text}</span>}
       </span>
       {layers.map((name, i) => (
-        <span
-          key={i}
-          className={cn(
-            'block truncate border-t border-textColor px-1 py-[2px]',
-            i % 2 === 1 && 'bg-bgSecondary',
-          )}
-        >
+        <span key={i} className='block truncate border-t border-textColor px-1 py-[2px]'>
           {name}
         </span>
       ))}

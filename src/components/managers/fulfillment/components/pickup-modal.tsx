@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ConfirmationModal, Input, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, Input, Text } from 'ui';
 import { useSchedulePickup } from '../hooks/useFulfillment';
 
 // Today as YYYY-MM-DD from local wall-clock parts (matches the SchedulePickup date field).
@@ -38,12 +38,22 @@ export function PickupModal({
   // Prefill from today's shipments whenever the modal opens.
   useEffect(() => {
     if (!open) return;
+    schedule.reset();
     setCarrierCode('');
     setDate(todayISO());
     setQuantity(Math.max(1, defaultQuantity));
     setFromTime('');
     setToTime('');
   }, [open, defaultQuantity]);
+
+  // An unconfirmed booking or a failure: stands in the dialog, which stays open.
+  const refusal = schedule.error
+    ? schedule.error instanceof Error
+      ? schedule.error.message
+      : 'Failed to schedule pickup'
+    : schedule.data && !schedule.data.confirmed
+      ? schedule.data.message || 'Pickup could not be confirmed'
+      : null;
 
   const canSubmit = carrierCode.trim().length > 0 && !!date && quantity >= 1 && !schedule.isPending;
 
@@ -126,6 +136,13 @@ export function PickupModal({
             />
           </Field>
         </div>
+        {refusal && (
+          <CalloutBox tone='error'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not scheduled</b> · {refusal}
+            </Text>
+          </CalloutBox>
+        )}
       </div>
     </ConfirmationModal>
   );

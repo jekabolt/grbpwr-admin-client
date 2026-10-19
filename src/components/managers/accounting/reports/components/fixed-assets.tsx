@@ -1,9 +1,19 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FixedAsset, googletype_Decimal } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { Button, ConfirmationModal, Section, Text, Form, DecimalField, InputField } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  Section,
+  Text,
+  Form,
+  DecimalField,
+  InputField,
+} from 'ui';
+import { applyServerFieldErrors } from 'utils/field-errors';
 import { inputToDecimal, normalizeDecimalInput } from 'utils/decimal';
 import { z } from 'zod';
 import {
@@ -13,6 +23,7 @@ import {
   usePostDepreciation,
 } from '../../utils/hooks';
 import { BarRow, Callout, Note, Pill, RowLine, clampPct } from '../../components/kit';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { formatBase } from '../../utils/format';
 import { ReportState, toISODate } from './report-utils';
 
@@ -92,8 +103,8 @@ export function FixedAssetsPanel({ from, to }: Props) {
     >
       <Note className='mt-0'>
         depreciation posts monthly straight-line charges up to {lastDayOfRange(to)}; corporation tax
-        is accrued on the pre-tax profit of the selected range. Both are idempotent — re-running only
-        fills gaps.
+        is accrued on the pre-tax profit of the selected range. Both are idempotent — re-running
+        only fills gaps.
       </Note>
 
       <ReportState
@@ -164,7 +175,7 @@ function FixedAssetCard({ asset, rangeEnd }: { asset: FixedAsset; rangeEnd: stri
         }
         value={monthly != null ? `≈ ${fmtNum(monthly)} / mo over ${life} mo` : '—'}
       />
-      <div className='border-b border-textInactiveColor'>
+      <div className='border-b border-borderColor'>
         <BarRow
           name='Depreciated'
           pct={clampPct(pct)}
@@ -207,17 +218,24 @@ function AddFixedAssetModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const create = useCreateFixedAsset();
+  // A refusal no field took stands over the form until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const defaults = useMemo<AssetSchema>(
     () => ({ name: '', cost: '', acquiredOn: toISODate(new Date()), usefulLifeMonths: 36 }),
     [],
   );
-  const form = useForm<AssetSchema>({ resolver: zodResolver(assetSchema), defaultValues: defaults });
+  const form = useForm<AssetSchema>({
+    resolver: zodResolver(assetSchema),
+    defaultValues: defaults,
+  });
 
   useEffect(() => {
-    if (open) form.reset(defaults);
+    if (open) {
+      form.reset(defaults);
+      setRefusal(null);
+    }
   }, [open, defaults, form]);
 
   const onSubmit: SubmitHandler<AssetSchema> = (d) => {
@@ -226,6 +244,7 @@ function AddFixedAssetModal({
       form.setError('cost', { message: 'cost must be greater than 0' });
       return;
     }
+    setRefusal(null);
     create.mutate(
       {
         name: d.name,
@@ -234,12 +253,25 @@ function AddFixedAssetModal({
         usefulLifeMonths: d.usefulLifeMonths,
       },
       {
-        onSuccess: () => {
-          showMessage('Fixed asset added', 'success');
-          onOpenChange(false);
+        // No receipt: the asset appears in the register.
+        onSuccess: () => onOpenChange(false),
+        onError: (e) => {
+          const said = errorText(e, 'failed to add asset') ?? '';
+          if (isRefused(e)) {
+            const { applied, unmapped } = applyServerFieldErrors(e, form.setError, {
+              allow: (p) => ['name', 'cost', 'acquiredOn', 'usefulLifeMonths'].includes(p),
+            });
+            if (applied.length === 0 || unmapped.length > 0) setRefusal(said);
+            return;
+          }
+          notify({
+            sev: 'error',
+            subject: `ASSET ${d.name}`,
+            text: 'not added',
+            bad: reasonOf(e),
+            detail: said,
+          });
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to add asset', 'error'),
       },
     );
   };
@@ -258,7 +290,12 @@ function AddFixedAssetModal({
         <Form {...form}>
           <div className='flex flex-col gap-4'>
             <InputField name='name' label='name' placeholder='e.g. Sewing machine' autoFocus />
-            <DecimalField name='cost' label='cost (base currency)' placeholder='0.00' maxDecimals={2} />
+            <DecimalField
+              name='cost'
+              label='cost (base currency)'
+              placeholder='0.00'
+              maxDecimals={2}
+            />
             <InputField name='acquiredOn' label='acquired on' type='date' />
             <InputField
               name='usefulLifeMonths'
@@ -268,6 +305,7 @@ function AddFixedAssetModal({
               keyboardRestriction={/[0-9]/}
               placeholder='36'
             />
+            {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
           </div>
         </Form>
       </div>
@@ -298,15 +336,19 @@ function AccrueCorporationTaxModal({
   from: string;
   to: string;
 }) {
-  const { showMessage } = useSnackBarStore();
   const accrue = useAccrueCorporationTax();
+  // The server's refusal stands in the modal until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const form = useForm<CtSchema>({
     resolver: zodResolver(ctSchema),
     defaultValues: { ratePct: DEFAULT_CT_RATE },
   });
   useEffect(() => {
-    if (open) form.reset({ ratePct: DEFAULT_CT_RATE });
+    if (open) {
+      form.reset({ ratePct: DEFAULT_CT_RATE });
+      setRefusal(null);
+    }
   }, [open, form]);
 
   const onSubmit: SubmitHandler<CtSchema> = (d) => {
@@ -315,25 +357,48 @@ function AccrueCorporationTaxModal({
       form.setError('ratePct', { message: 'rate must be greater than 0' });
       return;
     }
+    setRefusal(null);
     accrue.mutate(
       { from, to, ratePct },
       {
         onSuccess: (res) => {
           const amount = formatBase(res.corpTax);
           const posted = Number(res.corpTax?.value ?? '0');
-          let msg: string;
+          // The amount shows nowhere else once the modal closes: one result toast.
           if (res.alreadyPosted) {
-            msg = `Already accrued for this period: ${amount} (reverse the entry to re-accrue)`;
+            notify({
+              sev: 'warn',
+              subject: 'CORPORATION TAX',
+              text: 'not accrued',
+              bad: 'already accrued',
+              detail: `${amount} — reverse the entry to re-accrue`,
+            });
           } else if (posted <= 0) {
-            msg = 'No taxable profit in this period — nothing accrued';
+            notify({
+              sev: 'ok',
+              subject: 'CORPORATION TAX',
+              text: 'nothing accrued',
+              detail: 'no taxable profit',
+            });
           } else {
-            msg = `Accrued corporation tax: ${amount}`;
+            notify({ sev: 'ok', subject: 'CORPORATION TAX', text: `accrued ${amount}` });
           }
-          showMessage(msg, res.alreadyPosted ? 'error' : 'success');
           onOpenChange(false);
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to accrue corporation tax', 'error'),
+        onError: (e) => {
+          const said = errorText(e, 'failed to accrue corporation tax') ?? '';
+          if (isRefused(e)) {
+            setRefusal(said);
+            return;
+          }
+          notify({
+            sev: 'error',
+            subject: 'CORPORATION TAX',
+            text: 'not accrued',
+            bad: reasonOf(e),
+            detail: said,
+          });
+        },
       },
     );
   };
@@ -356,6 +421,7 @@ function AccrueCorporationTaxModal({
         <Form {...form}>
           <DecimalField name='ratePct' label='rate %' placeholder='19' maxDecimals={2} />
         </Form>
+        {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

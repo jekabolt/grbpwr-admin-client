@@ -1,12 +1,11 @@
 import { adminService } from 'api/api';
 import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { FC, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ProductForm } from './components';
 
 export const Product: FC = () => {
-  const { showMessage } = useSnackBarStore();
   const { id } = useParams();
   const [product, setProduct] = useState<common_ColorwayFull | undefined>();
   // cost_info is null when the caller lacks costing:read — the block stays hidden.
@@ -17,7 +16,7 @@ export const Product: FC = () => {
     if (id) {
       const productId = parseInt(id, 10);
       if (isNaN(productId)) {
-        showMessage('Invalid product ID', 'error');
+        notify({ sev: 'error', subject: `PRODUCT ${id}`, text: 'not loaded', bad: 'invalid id' });
         return;
       }
       const response = await adminService.GetColorwayByID({ colorwayId: productId });

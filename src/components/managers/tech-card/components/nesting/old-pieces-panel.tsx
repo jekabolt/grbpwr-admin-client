@@ -74,9 +74,11 @@ function Decision({
 }) {
   return (
     <Button
-      variant='secondary'
+      variant={selected ? 'main' : 'secondary'}
       size='sm'
-      className={cn('h-11 w-full font-normal', selected && 'border-2 !border-textColor')}
+      // The chosen answer stays filled, hover included: an outline alone vanished under the
+      // secondary hover fill, so a click on the already-chosen answer looked like a dead button.
+      className={cn('h-11 w-full font-normal', selected && 'hover:bg-textColor hover:text-bgColor')}
       aria-pressed={selected}
       disabled={disabled}
       onClick={onClick}
@@ -110,9 +112,9 @@ function PieceTile({
       onClick={onMove}
       className={cn(
         'w-full border bg-bgColor text-left',
-        'disabled:bg-bgColor disabled:text-textInactiveColor',
+        'disabled:bg-bgColor disabled:text-borderColor',
         decision === 'keep'
-          ? 'border-textColor text-textColor hover:bg-bgZebra'
+          ? 'border-textColor text-textColor hover:bg-pageBg'
           : 'border-hairline text-labelColor hover:border-borderColor',
       )}
     >

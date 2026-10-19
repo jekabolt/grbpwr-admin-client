@@ -9,7 +9,7 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { usePrintReady } from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
@@ -23,6 +23,7 @@ import {
   Pill,
   Section,
   Text,
+  useDoneFlash,
 } from 'ui';
 import { useCareLabelSource, variantSku } from './adapter';
 import { isBlocking } from './holes';
@@ -268,8 +269,9 @@ export function TechCardCareLabels() {
   // Архив верстается шейпером: пока шрифты едут, кнопка ждёт (упали — блок `fonts-failed`).
   const layoutReady = !!fullPlan;
   const canExport = ready && layoutReady && !!readiness?.canExport;
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const [building, setBuilding] = useState(false);
+  // The saved file is the receipt; the button says it for a moment.
+  const zipped = useDoneFlash();
 
   // ZIP (план §9.6): только колорвеи в архиве (чекбокс + ненулевая строка), настоящие копии с
   // запасом; ячейка 0 файла не даёт. Вёрстка заново — полный план по копии нужен лишь превью.
@@ -307,12 +309,15 @@ export function TechCardCareLabels() {
         ),
       });
       saveBlob(zip.bytes, zip.name);
-      showMessage(
-        `${zip.name}: ${zip.counts.labelsA} A + ${zip.counts.labelsB} B labels`,
-        'success',
-      );
+      zipped.flash();
     } catch (e) {
-      showMessage(`zip failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'CARE LABELS',
+        text: 'zip not built',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void downloadZip() },
+      });
     } finally {
       setBuilding(false);
     }
@@ -357,6 +362,7 @@ export function TechCardCareLabels() {
                     ? `blocked: ${[holeAddress(blocking[0], colorways), blocking[0].message].filter(Boolean).join(' — ')}`
                     : 'build the zip for the ticked colourways'
             }
+            done={zipped.on && 'downloaded'}
             onClick={() => void downloadZip()}
           >
             {building ? 'building…' : 'download zip'}

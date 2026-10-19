@@ -17,8 +17,8 @@ import {
 import { materialPurposeLabel } from './purpose-options';
 import { useMaterialStock } from './useWarehouse';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
-const chip = 'border border-textInactiveColor px-1.5 py-0.5 text-small uppercase';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
+const chip = 'border border-borderColor px-1.5 py-0.5 text-small uppercase';
 const sectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? '—';
 
@@ -55,7 +55,7 @@ function SortTh({
         }`}
       >
         {label}
-        <span className='text-textInactiveColor'>
+        <span className='text-borderColor'>
           {active ? (dir === 'asc' ? '▲' : '▼') : '↕'}
         </span>
       </button>
@@ -244,7 +244,7 @@ export function StockTab() {
       ) : isError ? (
         <Text size='small'>Stock is unavailable — the warehouse backend may not be deployed.</Text>
       ) : rows.length === 0 ? (
-        <div className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+        <div className='flex flex-col gap-1 border border-borderColor p-3'>
           <Text size='small'>No stock yet.</Text>
           <Text variant='inactive' size='small'>
             Existing shelf stock? Use adjust → set count per material — it sets on hand without

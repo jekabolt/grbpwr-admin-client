@@ -63,7 +63,7 @@ declare global {
 
 const probe = {} as Probe;
 window.__c19 = probe;
-probe.alerts = () => useSnackBarStore.getState().alerts.map((a) => a.message);
+probe.alerts = () => useSnackBarStore.getState().toasts.map((a) => a.message);
 probe.diff = (draft, form) => diffProposal(draft as never, form as never);
 probe.parse = (input) => parseConstructionDraft(input);
 
@@ -103,7 +103,7 @@ function Harness({ fixture }: { fixture: Record<string, unknown> }) {
 }
 
 probe.mount = (fixture) => {
-  useSnackBarStore.setState({ alerts: [] });
+  useSnackBarStore.setState({ toasts: [] });
   window.__c19Calls = [];
   const host = document.getElementById('root')!;
   host.innerHTML = '';

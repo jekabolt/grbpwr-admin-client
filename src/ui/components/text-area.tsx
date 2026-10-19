@@ -139,9 +139,9 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           // которую человек только что выставил рукой. Без автовысоты уголок остаётся.
           autoGrow ? 'resize-none overflow-y-auto' : 'resize-y',
           'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
-          'placeholder:text-textInactiveColor disabled:bg-bgZebra disabled:text-labelColor',
+          'placeholder:text-borderColor disabled:bg-pageBg disabled:text-labelColor',
           {
-            'border-textInactiveColor': variant === 'secondary',
+            'border-borderColor': variant === 'secondary',
           },
           className,
         )}

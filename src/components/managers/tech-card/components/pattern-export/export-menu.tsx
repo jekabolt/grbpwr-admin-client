@@ -3,18 +3,23 @@
 import type { PatternDrawing } from 'lib/pattern-export/drawing';
 import { EXPORT_FORMATS, type ExportFormatId } from 'lib/pattern-export/formats';
 import type { PlotDrawing } from 'lib/pattern-export/hpgl';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, GenericPopover } from 'ui';
+import { downloadFile } from 'lib/pattern-export/download';
 import { downloadPatternExport, downloadPlotExport } from './download';
 
 /** The plotter input (pens per role, plotter-sized labels) and the file's name, built on demand. */
 export type PlotSource = () => Promise<{ plot: PlotDrawing; title: string }>;
 
+/** The source file as stored — saved byte for byte, no export. */
+export type OriginalSource = () => Promise<{ blob: Blob; fileName: string }>;
+
 /** Buttons only — for a popover that already exists (the marker's download corner). */
 export function PatternExportItems({
   drawing,
   plot,
+  original,
   disabled,
   title,
   onDone,
@@ -22,12 +27,32 @@ export function PatternExportItems({
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
   /** Given → the «PLT · plotter» item is shown. */
   plot?: PlotSource;
+  /** Given → the «DXF · original» item is shown first. */
+  original?: OriginalSource;
   disabled?: boolean;
   title?: string;
   onDone?: () => void;
 }) {
-  const { showMessage } = useSnackBarStore();
-  const [busy, setBusy] = useState<ExportFormatId | null>(null);
+  const [busy, setBusy] = useState<ExportFormatId | 'dxf' | null>(null);
+  const saveOriginal = async () => {
+    if (!original) return;
+    setBusy('dxf');
+    try {
+      const { blob, fileName } = await original();
+      downloadFile(blob, fileName);
+      onDone?.();
+    } catch (e) {
+      notify({
+        sev: 'error',
+        subject: 'DOWNLOAD DXF',
+        text: 'not downloaded',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void saveOriginal() },
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
   const run = async (id: ExportFormatId) => {
     setBusy(id);
     try {
@@ -37,16 +62,41 @@ export function PatternExportItems({
             ? await downloadPlotExport(plot)
             : []
           : await downloadPatternExport(drawing, id);
-      if (warnings.length > 0) showMessage(warnings.join(' · '), 'error');
+      // The file is saved; what it lost on the way is news.
+      if (warnings.length > 0)
+        notify({
+          sev: 'warn',
+          subject: `EXPORT ${id.toUpperCase()}`,
+          text: 'exported',
+          bad: `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`,
+          detail: warnings.join(' · '),
+        });
       onDone?.();
     } catch (e) {
-      showMessage(`export failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      notify({
+        sev: 'error',
+        subject: `EXPORT ${id.toUpperCase()}`,
+        text: 'not exported',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void run(id) },
+      });
     } finally {
       setBusy(null);
     }
   };
   return (
     <>
+      {original && (
+        <Button
+          type='button'
+          variant='underline'
+          disabled={disabled || busy !== null}
+          title={title || 'the uploaded file as is'}
+          onClick={() => void saveOriginal()}
+        >
+          {busy === 'dxf' ? 'DXF · original…' : 'DXF · original'}
+        </Button>
+      )}
       {EXPORT_FORMATS.filter((f) => f.id !== 'plt' || plot).map((f) => (
         <Button
           key={f.id}
@@ -67,10 +117,12 @@ export function PatternExportItems({
 export function PatternExportMenu({
   drawing,
   plot,
+  original,
   label,
 }: {
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
   plot?: PlotSource;
+  original?: OriginalSource;
   label: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -94,7 +146,12 @@ export function PatternExportMenu({
       }
     >
       <div className='flex flex-col items-start gap-1'>
-        <PatternExportItems drawing={drawing} plot={plot} onDone={() => setOpen(false)} />
+        <PatternExportItems
+          drawing={drawing}
+          plot={plot}
+          original={original}
+          onDone={() => setOpen(false)}
+        />
       </div>
     </GenericPopover>
   );

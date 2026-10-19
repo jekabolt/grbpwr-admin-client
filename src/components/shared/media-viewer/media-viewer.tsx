@@ -1,10 +1,27 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { ChevronLeftIcon, ChevronRightIcon } from '@radix-ui/react-icons';
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  DotsHorizontalIcon,
+  ExternalLinkIcon,
+  Half2Icon,
+  InfoCircledIcon,
+  Pencil1Icon,
+} from '@radix-ui/react-icons';
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Close, EmptyCell } from 'ui';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import { BlurhashImage, Button, Close, Drawer, EmptyCell, FoldCaret } from 'ui';
 import {
   useImageAdjust,
   useImageAnnotate,
@@ -23,6 +40,10 @@ export interface MediaViewerItem {
   type?: 'image' | 'video';
   /** Accessible label / caption. */
   alt?: string;
+  /** Compact placeholder shown while an image rendition loads. */
+  blurhash?: string;
+  /** Short word stamped on the filmstrip thumb (`new`). */
+  badge?: string;
   /**
    * Всё, что бакет знает о файле. Панель сведений в просмотрщике появилась потому, что до неё
    * эти цифры жили в отдельном диалоге `PreviewMedia`, который открывался ВМЕСТО просмотрщика и
@@ -68,7 +89,8 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
     src,
     thumbnail,
     type: isVideo(src) ? 'video' : 'image',
-    alt: media?.blurhash || '',
+    alt: m.id != null ? `media ${m.id}` : 'media',
+    blurhash: media?.blurhash,
     meta: {
       id: m.id,
       createdAt: m.createdAt,
@@ -131,6 +153,110 @@ const NO_MISSING: ReadonlySet<string> = new Set();
 
 export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
   return item.type ?? (isVideo(item.src) ? 'video' : 'image');
+}
+
+/**
+ * Below Tailwind `lg` the viewer wears its phone chrome (MEDIA-MOBILE L3). Most of that is CSS
+ * (`lg:` pairs); JS needs it only where the two layouts differ in behaviour — tap on the stage
+ * (close vs. hide chrome) and where the info panel lives (aside vs. bottom sheet).
+ */
+const MOBILE_QUERY = '(max-width: 1023px)';
+function subscribeMobile(cb: () => void) {
+  const mq = window.matchMedia?.(MOBILE_QUERY);
+  mq?.addEventListener('change', cb);
+  return () => mq?.removeEventListener('change', cb);
+}
+function useIsMobileViewer(): boolean {
+  return useSyncExternalStore(
+    subscribeMobile,
+    () => !!window.matchMedia?.(MOBILE_QUERY).matches,
+    () => false,
+  );
+}
+
+const NAMED_RATIOS: [number, number][] = [
+  [1, 1],
+  [4, 5],
+  [5, 4],
+  [3, 4],
+  [4, 3],
+  [2, 3],
+  [3, 2],
+  [9, 16],
+  [16, 9],
+  [2, 1],
+  [1, 2],
+];
+
+/** `2:1`, `4:5`; a near-named ratio snaps to it; anything else reads `1.34:1`. */
+export function formatRatio(width?: number, height?: number): string | undefined {
+  if (!width || !height) return undefined;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const d = gcd(width, height);
+  const a = width / d;
+  const b = height / d;
+  if (a <= 32 && b <= 32) return `${a}:${b}`;
+  const r = width / height;
+  const named = NAMED_RATIOS.find(([x, y]) => Math.abs(x / y - r) / r < 0.01);
+  if (named) return `${named[0]}:${named[1]}`;
+  return r >= 1 ? `${r.toFixed(2)}:1` : `1:${(1 / r).toFixed(2)}`;
+}
+
+/** One size format everywhere: `W×H · ratio`. */
+export function sizeLine(width?: number, height?: number): string | undefined {
+  if (!width || !height) return undefined;
+  return `${width}×${height} · ${formatRatio(width, height)}`;
+}
+
+/** The original's dimensions as the viewer item knows them (first rendition = the largest). */
+function itemSize(item?: MediaViewerItem): { width?: number; height?: number } {
+  const r = item?.meta?.renditions?.find((x) => x.width && x.height);
+  return { width: r?.width, height: r?.height };
+}
+
+/**
+ * An owner action in a shape both layouts can draw: a word in the top chrome on desktop, an
+ * icon + word column in the bottom tool bar on the phone. `place: 'more'` goes into the phone's
+ * `more` sheet only (desktop does not show it).
+ */
+export interface ViewerTool {
+  key: string;
+  label: string;
+  icon?: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  place?: 'bar' | 'more';
+  tone?: 'danger';
+  /** Ask once more before running (the word the second tap shows). */
+  confirm?: string;
+}
+
+/** Crop: a frame inside the photo. */
+export function CropGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox='0 0 24 24' aria-hidden className={cn('size-5', className)}>
+      <path d='M6 2v16h16M2 6h16v16' fill='none' stroke='currentColor' strokeWidth='1.6' />
+    </svg>
+  );
+}
+
+/** Expand: the photo inside a bigger frame. */
+export function ExpandGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox='0 0 24 24' aria-hidden className={cn('size-5', className)}>
+      <rect
+        x='2'
+        y='2'
+        width='20'
+        height='20'
+        fill='none'
+        stroke='currentColor'
+        strokeWidth='1.6'
+      />
+      <rect x='8' y='7' width='8' height='10' fill='currentColor' opacity='0.45' />
+      <path d='M4 12h3M17 12h3' stroke='currentColor' strokeWidth='1.6' />
+    </svg>
+  );
 }
 
 /**
@@ -218,6 +344,14 @@ interface MediaViewerProps {
    */
   actions?: (item: MediaViewerItem, index: number) => ReactNode;
   /**
+   * Structured owner actions (see `ViewerTool`). Desktop draws the `bar` ones exactly like
+   * `actions`; the phone puts them in the bottom tool bar and the `more` sheet. Free-form
+   * `actions` still render on the phone, in the top chrome.
+   */
+  tools?: (item: MediaViewerItem, index: number) => ViewerTool[];
+  /** A one-line strip above the filmstrip (the library's «saved» bar). */
+  notice?: ReactNode;
+  /**
    * Переход по ссылке из раздела «used in». Отдан наружу, потому что маршрутизатора здесь нет и
    * быть не должно: голый `<a href>` внутри модалки перезагружает документ целиком — уносит
    * подгруженные страницы библиотеки, очередь незалитых файлов и словарь, — а закрыть себя перед
@@ -250,10 +384,23 @@ export function MediaViewer({
   onOpenChange,
   onIndexChange,
   actions,
+  tools,
+  notice,
   onUsageNavigate,
   onSaveAsPicture,
 }: MediaViewerProps) {
   const [showMeta, setShowMeta] = useState(false);
+  const isMobile = useIsMobileViewer();
+  /** Phone: a tap on the stage hides the chrome, so only the picture remains. */
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (open) return;
+    setChromeHidden(false);
+    setMoreOpen(false);
+  }, [open]);
+  useEffect(() => () => clearTimeout(tapTimer.current), []);
   const count = items.length;
   const hasMany = count > 1;
   // Clamp defensively — the list can shrink (a delete) while the viewer is open.
@@ -363,8 +510,17 @@ export function MediaViewer({
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe.
+  // Phone: any tap on the stage toggles the chrome instead (back is in the top row). The toggle
+  // waits a beat so a double tap (zoom) does not flash the chrome off and on.
   const handleStageClick = (e: React.MouseEvent) => {
     if (gestures.consumeJustSwiped()) return;
+    if (isMobile) {
+      if (annotate.drawMode) return;
+      clearTimeout(tapTimer.current);
+      if (e.detail > 1) return;
+      tapTimer.current = setTimeout(() => setChromeHidden((v) => !v), 250);
+      return;
+    }
     if (e.target === e.currentTarget) onOpenChange(false);
   };
 
@@ -387,6 +543,15 @@ export function MediaViewer({
       )
     : [];
 
+  const ownerTools = tools?.(current, safeIndex) ?? [];
+  const barTools = ownerTools.filter((t) => t.place !== 'more');
+  const moreTools = ownerTools.filter((t) => t.place === 'more');
+  const currentDimensions = itemSize(current);
+  const currentSize = sizeLine(currentDimensions.width, currentDimensions.height);
+  const originalUrl = current.meta?.renditions?.[0]?.url || current.src;
+  /** Phone chrome pieces vanish together on a stage tap; desktop never hides them. */
+  const chromeClass = chromeHidden ? 'max-lg:hidden' : undefined;
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -407,7 +572,30 @@ export function MediaViewer({
 
           {/* Top chrome. z-10 — ЛОКАЛЬНЫЙ СТЕК внутри просмотрщика (хром над сценой); слой самого
               просмотрщика задан выше через var(--z-modal). */}
-          <div className='relative z-10 flex shrink-0 flex-wrap items-center gap-2 px-4 py-3'>
+          {/* Phone top row: back · id · the caller's free-form actions. */}
+          <div
+            className={cn(
+              'relative z-10 flex shrink-0 items-center gap-2 px-2 py-1 lg:hidden',
+              chromeClass,
+            )}
+          >
+            <Dialog.Close asChild>
+              <ViewerAction
+                aria-label='Close viewer'
+                className='min-h-11 border-transparent px-2 text-textBaseSize'
+              >
+                ← back
+              </ViewerAction>
+            </Dialog.Close>
+            <span className='min-w-0 flex-1 truncate text-center text-textBaseSize uppercase tabular-nums'>
+              {current.meta?.id ?? (hasMany ? label : '')}
+            </span>
+            <span className='flex min-w-16 shrink-0 items-center justify-end gap-2'>
+              {isMobile && actions?.(current, safeIndex)}
+            </span>
+          </div>
+
+          <div className='relative z-10 hidden shrink-0 flex-wrap items-center gap-2 px-4 py-3 lg:flex'>
             <span className='text-textBaseSize uppercase tabular-nums'>
               {hasMany ? label : ' '}
             </span>
@@ -417,7 +605,13 @@ export function MediaViewer({
               </span>
             )}
             <span className='ml-auto flex flex-wrap items-center gap-2'>
-              {actions?.(current, safeIndex)}
+              {barTools.map((t) => (
+                <ViewerAction key={t.key} disabled={t.disabled} onClick={t.onClick}>
+                  {t.label}
+                </ViewerAction>
+              ))}
+              {/* One copy of the free-form actions: here on desktop, in the phone row above. */}
+              {!isMobile && actions?.(current, safeIndex)}
               {current.meta && (
                 <ViewerAction
                   aria-pressed={showMeta}
@@ -443,7 +637,7 @@ export function MediaViewer({
             <div
               ref={gestures.viewportRef}
               className={cn(
-                'relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16',
+                'relative flex min-h-0 flex-1 items-center justify-center max-lg:overflow-hidden lg:px-16',
                 // `isImage`, не `stageLive`: смахивание по рамке «file missing» — тоже листание, и
                 // отдать жест браузеру значило бы отнять его у ряда.
                 isImage && 'touch-none',
@@ -462,7 +656,10 @@ export function MediaViewer({
                     controls
                     autoPlay
                     playsInline
-                    className='max-h-[calc(100vh-11rem)] max-w-full object-contain'
+                    className={cn(
+                      'max-h-[calc(100dvh-14rem)] max-w-full object-contain lg:max-h-[calc(100vh-11rem)]',
+                      chromeHidden && 'max-lg:max-h-dvh',
+                    )}
                   />
                 ) : stageMissing ? (
                   /* РАМКА КАДРА СО СЛОВОМ (O-55): тот же белый грунт, что под снимком, и подпись
@@ -477,10 +674,13 @@ export function MediaViewer({
                   </div>
                 ) : (
                   <>
-                    <img
+                    <BlurhashImage
                       ref={gestures.imgRef}
                       src={current.src}
+                      blurhash={current.blurhash}
                       alt={current.alt || ''}
+                      width={currentDimensions.width}
+                      height={currentDimensions.height}
                       draggable={false}
                       data-probe='viewer-image'
                       onDoubleClick={gestures.onImageDoubleClick}
@@ -490,7 +690,8 @@ export function MediaViewer({
                       className={cn(
                         // White ground behind the picture: transparent PNGs (background-removed
                         // product shots, sketches) are unreadable on the near-black overlay.
-                        'max-h-[calc(100vh-11rem)] max-w-full select-none bg-bgColor object-contain',
+                        'h-auto w-auto max-h-[calc(100dvh-14rem)] max-w-full select-none bg-bgColor object-contain lg:max-h-[calc(100vh-11rem)]',
+                        chromeHidden && 'max-lg:max-h-dvh',
                         gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
                         !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
                       )}
@@ -582,14 +783,32 @@ export function MediaViewer({
               )}
             </div>
 
-            {showMeta && current.meta && (
+            {showMeta && current.meta && !isMobile && (
               <MetaPanel meta={current.meta} onUsageNavigate={onUsageNavigate} />
             )}
           </div>
 
+          {notice && <div className={cn('shrink-0', chromeClass)}>{notice}</div>}
+
+          {/* Phone: position and size right above the strip. */}
+          <div
+            className={cn(
+              'flex shrink-0 items-baseline justify-between gap-2 px-4 pt-2 text-micro uppercase tracking-label tabular-nums lg:hidden',
+              chromeClass,
+            )}
+          >
+            <span>{hasMany ? label : ''}</span>
+            <span className='text-bgColor/70'>{currentSize}</span>
+          </div>
+
           {/* Filmstrip */}
           {hasMany && (
-            <div className='flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 py-3'>
+            <div
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 py-2 lg:py-3',
+                chromeClass,
+              )}
+            >
               {items.map((item, i) => {
                 const active = i === safeIndex;
                 const itemIsVideo = resolveViewerType(item) === 'video';
@@ -602,9 +821,9 @@ export function MediaViewer({
                     aria-current={active ? 'true' : undefined}
                     onClick={() => onIndexChange(i)}
                     className={cn(
-                      'relative size-12 shrink-0 overflow-hidden border transition-opacity sm:size-14',
+                      'relative size-12 shrink-0 overflow-hidden border transition-opacity lg:size-14',
                       active
-                        ? 'border-bgColor opacity-100'
+                        ? 'border-bgColor opacity-100 max-lg:outline max-lg:outline-2 max-lg:-outline-offset-2 max-lg:outline-bgColor'
                         : 'border-transparent opacity-50 hover:opacity-100',
                     )}
                   >
@@ -637,10 +856,64 @@ export function MediaViewer({
                         vid
                       </span>
                     )}
+                    {item.badge && (
+                      <span className='absolute left-0 top-0 bg-bgColor px-0.5 text-nano uppercase leading-tight text-textColor'>
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+          )}
+
+          {/* Phone tool bar: the owner's tools, then info and more — equal columns. */}
+          <div
+            role='toolbar'
+            aria-label='Media tools'
+            className={cn(
+              'grid shrink-0 auto-cols-fr grid-flow-col border-t border-bgColor/20 pb-[env(safe-area-inset-bottom)] lg:hidden',
+              chromeClass,
+            )}
+          >
+            {barTools.map((t) => (
+              <ToolColumn key={t.key} label={t.label} disabled={t.disabled} onClick={t.onClick}>
+                {t.icon}
+              </ToolColumn>
+            ))}
+            {current.meta && (
+              <ToolColumn label='info' selected={showMeta} onClick={() => setShowMeta((v) => !v)}>
+                <InfoCircledIcon className='size-5' />
+              </ToolColumn>
+            )}
+            <ToolColumn label='more' selected={moreOpen} onClick={() => setMoreOpen(true)}>
+              <DotsHorizontalIcon className='size-5' />
+            </ToolColumn>
+          </div>
+
+          {isMobile && current.meta && (
+            <Drawer
+              side='bottom'
+              open={showMeta}
+              onOpenChange={setShowMeta}
+              title={current.meta.id != null ? String(current.meta.id) : 'info'}
+            >
+              <MetaSheet meta={current.meta} size={currentSize} onUsageNavigate={onUsageNavigate} />
+            </Drawer>
+          )}
+
+          {isMobile && (
+            <MoreSheet
+              open={moreOpen}
+              onOpenChange={setMoreOpen}
+              canEdit={stageLive}
+              adjustOn={adjust.open}
+              drawOn={annotate.drawMode}
+              onAdjust={adjust.toggle}
+              onDraw={annotate.toggleDrawMode}
+              url={originalUrl}
+              tools={moreTools}
+            />
           )}
 
           {/* Off-screen preload of the neighbouring images. */}
@@ -802,7 +1075,7 @@ function ArrowButton({
       onClick={onClick}
       className={cn(
         // z-10 — локальный стек сцены (стрелка над снимком), не слой страницы.
-        'absolute top-1/2 z-10 flex size-9 -translate-y-1/2 items-center justify-center',
+        'absolute top-1/2 z-10 hidden size-9 -translate-y-1/2 items-center justify-center lg:flex',
         'border border-bgColor/40 bg-black/40 text-bgColor backdrop-blur-sm transition-colors',
         'hover:bg-bgColor hover:text-textColor',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
@@ -811,5 +1084,278 @@ function ArrowButton({
     >
       <Icon className='size-5' />
     </button>
+  );
+}
+
+/** One column of the phone tool bar: icon over a word, a 56px tall target. */
+function ToolColumn({
+  label,
+  children,
+  selected,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  children?: ReactNode;
+  selected?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <ViewerAction
+      selected={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className='flex min-h-14 flex-col items-center justify-center gap-1 border-transparent px-1 py-2 disabled:opacity-50'
+    >
+      {children}
+      <span>{label}</span>
+    </ViewerAction>
+  );
+}
+
+/** A row of the phone sheets: icon + word, full width, 44px tall. */
+function SheetRow({
+  icon,
+  children,
+  danger,
+  disabled,
+  onClick,
+}: {
+  icon?: ReactNode;
+  children: ReactNode;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex min-h-11 w-full items-center gap-3 border-b border-hairline px-1 text-left',
+        danger && 'text-error',
+      )}
+    >
+      <span className='flex size-5 shrink-0 items-center justify-center'>{icon}</span>
+      <span className='uppercase tracking-label text-micro'>{children}</span>
+    </Button>
+  );
+}
+
+/** Phone `more`: the rarer tools that do not earn a column. */
+function MoreSheet({
+  open,
+  onOpenChange,
+  canEdit,
+  adjustOn,
+  drawOn,
+  onAdjust,
+  onDraw,
+  url,
+  tools,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  canEdit: boolean;
+  adjustOn: boolean;
+  drawOn: boolean;
+  onAdjust: () => void;
+  onDraw: () => void;
+  url: string;
+  tools: ViewerTool[];
+}) {
+  const [copied, setCopied] = useState(false);
+  const [armed, setArmed] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!open) {
+      setArmed(undefined);
+      setCopied(false);
+    }
+  }, [open]);
+  const close = () => onOpenChange(false);
+
+  return (
+    <Drawer side='bottom' open={open} onOpenChange={onOpenChange} title='more'>
+      <SheetRow
+        icon={<Half2Icon className='size-4' />}
+        disabled={!canEdit}
+        onClick={() => {
+          onAdjust();
+          close();
+        }}
+      >
+        {adjustOn ? 'close adjust' : 'adjust'}
+      </SheetRow>
+      <SheetRow
+        icon={<Pencil1Icon className='size-4' />}
+        disabled={!canEdit}
+        onClick={() => {
+          onDraw();
+          close();
+        }}
+      >
+        {drawOn ? 'stop drawing' : 'draw'}
+      </SheetRow>
+      <SheetRow
+        icon={<CopyIcon className='size-4' />}
+        disabled={!url}
+        onClick={() => {
+          void navigator.clipboard?.writeText(url);
+          setCopied(true);
+        }}
+      >
+        {copied ? 'copied' : 'copy url'}
+      </SheetRow>
+      <SheetRow
+        icon={<ExternalLinkIcon className='size-4' />}
+        disabled={!url}
+        onClick={() => {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          close();
+        }}
+      >
+        open original
+      </SheetRow>
+      {tools.map((t) => (
+        <SheetRow
+          key={t.key}
+          icon={t.icon}
+          danger={t.tone === 'danger'}
+          disabled={t.disabled}
+          onClick={() => {
+            if (t.confirm && armed !== t.key) {
+              setArmed(t.key);
+              return;
+            }
+            t.onClick();
+            close();
+          }}
+        >
+          {armed === t.key && t.confirm ? t.confirm : t.label}
+        </SheetRow>
+      ))}
+    </Drawer>
+  );
+}
+
+/**
+ * Phone info sheet (frame 2a): the few facts you came for — size, date, where it is used — and
+ * the bucket details folded under `technical`. Light, because it is a sheet over the page.
+ */
+function MetaSheet({
+  meta,
+  size,
+  onUsageNavigate,
+}: {
+  meta: NonNullable<MediaViewerItem['meta']>;
+  size?: string;
+  onUsageNavigate?: (href: string) => void;
+}) {
+  const [copied, setCopied] = useState<string | undefined>(undefined);
+  const copy = (url?: string) => {
+    if (!url) return;
+    void navigator.clipboard?.writeText(url);
+    setCopied(url);
+    setTimeout(() => setCopied(undefined), 1200);
+  };
+  const created = meta.createdAt ? new Date(meta.createdAt) : undefined;
+  const uploaded =
+    created && !Number.isNaN(created.getTime())
+      ? created.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : undefined;
+  const label = 'text-micro uppercase tracking-label text-labelColor';
+
+  return (
+    <div className='flex flex-col gap-3 text-micro'>
+      <dl>
+        <div className='flex justify-between gap-2 border-b border-hairline py-2'>
+          <dt className={label}>size</dt>
+          <dd className='tabular-nums'>{size ?? <EmptyCell />}</dd>
+        </div>
+        <div className='flex justify-between gap-2 border-b border-hairline py-2'>
+          <dt className={label}>uploaded</dt>
+          <dd className='tabular-nums'>{uploaded ?? <EmptyCell />}</dd>
+        </div>
+      </dl>
+
+      {meta.usage && (
+        <div>
+          <div className={cn(label, 'border-b border-borderColor pb-1')}>
+            used in · {meta.usage.length}
+          </div>
+          {meta.usage.length === 0 ? (
+            <div className='py-2 text-labelColor'>not used</div>
+          ) : (
+            meta.usage.map((u, i) => {
+              const body = (
+                <>
+                  <span className='min-w-0 flex-1'>
+                    <span className='block truncate'>{u.label || u.kind}</span>
+                    <span className='block truncate text-labelColor'>
+                      {[u.kind?.replace(/_/g, ' '), u.slot].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  {u.href && <span aria-hidden>→</span>}
+                </>
+              );
+              const row = 'flex min-h-11 items-center gap-2 border-b border-hairline py-1';
+              return u.href ? (
+                <a
+                  key={`${u.kind}-${u.href}-${u.slot}-${i}`}
+                  href={u.href}
+                  className={row}
+                  onClick={
+                    onUsageNavigate
+                      ? (e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                          e.preventDefault();
+                          onUsageNavigate(u.href!);
+                        }
+                      : undefined
+                  }
+                >
+                  {body}
+                </a>
+              ) : (
+                <div key={`${u.kind}-${u.slot}-${i}`} className={row}>
+                  {body}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      <details className='group'>
+        <summary className={cn(label, 'flex min-h-11 cursor-pointer list-none items-center gap-1')}>
+          technical
+          <FoldCaret open='details' />
+        </summary>
+        <dl>
+          <div className='flex justify-between gap-2 border-b border-hairline py-2'>
+            <dt className={label}>blurhash</dt>
+            <dd className='truncate'>{meta.blurhash || <EmptyCell />}</dd>
+          </div>
+          {meta.renditions?.map((r) => (
+            <div key={r.label} className='flex items-center gap-2 border-b border-hairline py-1'>
+              <dt className={cn(label, 'w-24 shrink-0')}>{r.label}</dt>
+              <dd className='tabular-nums'>
+                {r.width && r.height ? `${r.width}×${r.height}` : <EmptyCell />}
+              </dd>
+              <Button
+                variant='underline'
+                size='sm'
+                className='ml-auto min-h-11'
+                aria-label={`copy url: ${r.label}`}
+                onClick={() => copy(r.url)}
+              >
+                {copied === r.url ? 'copied' : 'copy url'}
+              </Button>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </div>
   );
 }

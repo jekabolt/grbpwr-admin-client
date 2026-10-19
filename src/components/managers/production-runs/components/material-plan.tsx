@@ -15,10 +15,10 @@ import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, CalloutBox, DataTable, EmptyCell, GroupLabel, Text } from 'ui';
+import { Button, CalloutBox, DataTable, EmptyCell, GroupLabel, Text, useDoneFlash } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 
@@ -72,7 +72,7 @@ export function MaterialPlan({
   locked?: boolean;
 }) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
+  const copied = useDoneFlash();
   const { dictionary } = useDictionary();
   // Issuing stock is a warehouse write — gate on the same section the warehouse module uses,
   // or a production-only account gets a button that 403s at submit.
@@ -168,15 +168,13 @@ export function MaterialPlan({
       .filter(isShort)
       .map((r) => `${r.materialName} — ${num(r.shortage)} ${r.unit ?? ''}`.trim())
       .join('; ');
-    if (!text) {
-      showMessage('No shortage to copy', 'error');
-      return;
-    }
+    // The button only shows with a shortage on screen.
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      showMessage('Shortage copied', 'success');
+      copied.flash();
     } catch {
-      showMessage('Could not copy to clipboard', 'error');
+      notify({ sev: 'error', subject: 'SHORTAGE', text: 'not copied', bad: 'clipboard blocked' });
     }
   };
 
@@ -198,6 +196,7 @@ export function MaterialPlan({
               variant='secondary'
               size='lg'
               className='uppercase'
+              done={copied.on && 'copied'}
               onClick={copyShortage}
             >
               copy shortage
@@ -218,7 +217,13 @@ export function MaterialPlan({
 
       {blockers.length > 0 ? (
         <CalloutBox tone='warning' className='flex flex-col gap-1'>
-          <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='font-bold uppercase'
+          >
             not counted — the plan is incomplete
           </Text>
           {visibleBlockerGroups.map((group) => (

@@ -346,7 +346,7 @@ export function MaterialPicker({
           // Same box as <Input> / <Select> — a picker must read as a field, not as an underline.
           'flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize transition-colors',
           'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-          'disabled:cursor-not-allowed disabled:bg-bgZebra disabled:text-labelColor',
+          'disabled:cursor-not-allowed disabled:bg-pageBg disabled:text-labelColor',
         )}
       >
         {selected ? <MaterialThumb material={selected} size='sm' className='h-5 w-5' /> : null}
@@ -466,7 +466,7 @@ export function MaterialPicker({
                         onClick={() => choose(m)}
                         className={cn(
                           'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                          idx === activeIndex && 'bg-bgZebra',
+                          idx === activeIndex && 'bg-pageBg',
                         )}
                       >
                         <MaterialThumb material={m} size='sm' className='h-6 w-6' />

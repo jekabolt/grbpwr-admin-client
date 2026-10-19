@@ -5,9 +5,9 @@ import { useFormContext } from 'react-hook-form';
 import { useState } from 'react';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { currencySymbols } from 'constants/constants';
-import { Button, Text, InputField, EmptyCell } from 'ui';
+import { Button, Text, InputField, EmptyCell, useDoneFlash } from 'ui';
 import { ProductMarginPanel } from './margin-panel';
 
 // Internal per-unit COGS + its provenance. Field-shaping (🔒 costing): the whole
@@ -32,7 +32,7 @@ export function ProductCostSection({
 }) {
   const { canReadCosting, canWriteCosting } = usePermissions();
   const { setValue } = useFormContext();
-  const { showMessage } = useSnackBarStore();
+  const synced = useDoneFlash();
   const [syncing, setSyncing] = useState(false);
 
   // Absent costing access → hide the block entirely (do not reserve space).
@@ -61,14 +61,18 @@ export function ProductCostSection({
         expectedVersion: lockVersion ?? 0,
       });
       if (res.costPrice?.value) setValue('product.costPrice', res.costPrice.value);
-      showMessage(
-        `Cost synced from TC-${res.techCardId ?? '?'}: ${eur}${res.costPrice?.value ?? '—'}`,
-        'success',
-      );
+      // The cost field and provenance line show the new value.
+      synced.flash();
       onCostSynced?.();
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to sync cost from tech card';
-      showMessage(msg, 'error');
+      // Cost path: feedback only, no retry.
+      notify({
+        sev: 'error',
+        subject: `PRODUCT ${productId}`,
+        text: 'cost not synced',
+        bad: 'refused',
+        detail: error instanceof Error ? error.message : undefined,
+      });
     } finally {
       setSyncing(false);
     }
@@ -101,7 +105,7 @@ export function ProductCostSection({
       )}
 
       {canReadCosting && hasProvenance && (
-        <div className='flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-textInactiveColor pt-3'>
+        <div className='flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-borderColor pt-3'>
           {costInfo?.costPrice?.value && (
             <Text size='small'>
               current cost: {eur}
@@ -146,6 +150,7 @@ export function ProductCostSection({
             size='lg'
             className='uppercase'
             disabled={syncing || !primaryTcId}
+            done={synced.on && 'synced'}
             onClick={syncFromTechCard}
           >
             {syncing ? 'syncing…' : '↻ sync cost from tech card'}

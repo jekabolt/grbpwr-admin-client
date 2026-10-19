@@ -96,7 +96,7 @@ export function SuggestedCallouts({
                     title={(s.description ?? '').trim() || undefined}
                     className={cn(
                       'group flex min-w-0 items-center gap-2 border-b border-dashed border-hairline px-1 -mx-1 py-0.5 last:border-b-0',
-                      hot === id && 'bg-bgSecondary',
+                      hot === id && 'bg-pageBg',
                     )}
                     onPointerEnter={() => onHover(id)}
                     onPointerLeave={() => onHover(null)}

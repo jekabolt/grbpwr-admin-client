@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
@@ -6,7 +7,7 @@ import {
   TierCode,
   TierConfigEntry,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { isRefusal, notifyFailure } from 'components/shared/notify-failure';
 
 export const membershipKeys = {
   all: ['membership'] as const,
@@ -65,7 +66,6 @@ export function useTierHistory(userId: number | null) {
 
 export function useOverrideTier() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { userId: number; newTier: TierCode; reason: string }) =>
       adminService.OverrideTier(vars),
@@ -73,62 +73,57 @@ export function useOverrideTier() {
       queryClient.invalidateQueries({ queryKey: membershipKeys.member(vars.userId) });
       queryClient.invalidateQueries({ queryKey: membershipKeys.tierHistory(vars.userId) });
       queryClient.invalidateQueries({ queryKey: membershipKeys.members() });
-      showMessage('Tier overridden', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to override tier', 'error'),
+    // A refusal of the reason / tier stands in the form (member-actions); a lost request is news.
+    onError: (error, vars) =>
+      !isRefusal(error) && notifyFailure(`MEMBER ${vars.userId}`, 'tier not changed', error),
   });
 }
 
 export function useSetMemberStatus() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
-    mutationFn: (vars: { userId: number; status: string }) =>
-      adminService.SetMemberStatus(vars),
+  // Retry re-sends through the same mutation, so its pending state stays honest.
+  const again = useRef<(vars: { userId: number; status: string }) => void>(() => undefined);
+  const m = useMutation({
+    mutationFn: (vars: { userId: number; status: string }) => adminService.SetMemberStatus(vars),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.member(vars.userId) });
       queryClient.invalidateQueries({ queryKey: membershipKeys.members() });
-      showMessage('Member status updated', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to update status', 'error'),
+    onError: (error, vars) =>
+      notifyFailure(`MEMBER ${vars.userId}`, 'status not changed', error, () =>
+        again.current(vars),
+      ),
   });
+  again.current = m.mutate;
+  return m;
 }
 
 export function useSoftDeleteMember() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { userId: number }) => adminService.SoftDeleteMember(vars),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.member(vars.userId) });
       queryClient.invalidateQueries({ queryKey: membershipKeys.members() });
-      showMessage('Account soft-deleted', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to delete account', 'error'),
+    onError: (error, vars) => notifyFailure(`MEMBER ${vars.userId}`, 'not deleted', error),
   });
 }
 
 export function useHardEraseMember() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
-    mutationFn: (vars: { userId: number; confirm: boolean }) =>
-      adminService.HardEraseMember(vars),
+    mutationFn: (vars: { userId: number; confirm: boolean }) => adminService.HardEraseMember(vars),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.member(vars.userId) });
       queryClient.invalidateQueries({ queryKey: membershipKeys.members() });
-      showMessage('Account erased', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to erase account', 'error'),
+    onError: (error, vars) => notifyFailure(`MEMBER ${vars.userId}`, 'not erased', error),
   });
 }
 
 export function useSendMemberEmail() {
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: {
       userId: number;
@@ -144,9 +139,9 @@ export function useSendMemberEmail() {
         ctaLabel: vars.ctaLabel || undefined,
         ctaUrl: vars.ctaUrl || undefined,
       }),
-    onSuccess: () => showMessage('Email sent', 'success'),
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to send email', 'error'),
+    // A refusal stands in the dialog (send-email-modal); a lost request is news.
+    onError: (error, vars) =>
+      !isRefusal(error) && notifyFailure(`MEMBER ${vars.userId}`, 'email not sent', error),
   });
 }
 
@@ -162,16 +157,13 @@ export function useTierConfig() {
 
 export function useUpdateTierConfig() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
-    mutationFn: (entries: TierConfigEntry[]) =>
-      adminService.UpdateTierConfig({ entries }),
+    mutationFn: (entries: TierConfigEntry[]) => adminService.UpdateTierConfig({ entries }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.tierConfig() });
-      showMessage('Tier configuration saved', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to save config', 'error'),
+    // A refusal stands above the save bar (tier-config page); a lost request is news.
+    onError: (error) => !isRefusal(error) && notifyFailure('TIER CONFIG', 'not saved', error),
   });
 }
 
@@ -195,7 +187,6 @@ export function useHackerAccounts() {
 
 export function useGenerateHackerInvite() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { email?: string; expiresInDays?: number }) =>
       adminService.GenerateHackerInvite({
@@ -204,39 +195,44 @@ export function useGenerateHackerInvite() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.all });
-      showMessage('Invite generated', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to generate invite', 'error'),
+    // A refusal stands under the form (invites); a lost request is news.
+    onError: (error) => !isRefusal(error) && notifyFailure('INVITE', 'not generated', error),
   });
 }
 
 export function useRevokeHackerInvite() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  // Retry re-sends through the same mutation, so its pending state stays honest.
+  const again = useRef<(vars: { inviteId: number }) => void>(() => undefined);
+  const m = useMutation({
     mutationFn: (vars: { inviteId: number }) => adminService.RevokeHackerInvite(vars),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.all });
-      showMessage('Invite revoked', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to revoke invite', 'error'),
+    onError: (error, vars) =>
+      notifyFailure(`INVITE ${vars.inviteId}`, 'not revoked', error, () => again.current(vars)),
   });
+  again.current = m.mutate;
+  return m;
 }
 
 export function useRevokeHackerStatus() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  // Retry re-sends through the same mutation, so its pending state stays honest.
+  const again = useRef<(vars: { userId: number }) => void>(() => undefined);
+  const m = useMutation({
     mutationFn: (vars: { userId: number }) => adminService.RevokeHackerStatus(vars),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: membershipKeys.all });
-      showMessage('Hacker status revoked', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to revoke status', 'error'),
+    onError: (error, vars) =>
+      notifyFailure(`MEMBER ${vars.userId}`, 'hacker not revoked', error, () =>
+        again.current(vars),
+      ),
   });
+  again.current = m.mutate;
+  return m;
 }
 
 // ---- Audit + backfill ----
@@ -262,17 +258,10 @@ export function useTierAuditLog(filters: AuditFilters, limit: number, offset: nu
 
 export function useRunTierBackfill() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { confirm: boolean }) => adminService.RunTierBackfill(vars),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: membershipKeys.all });
-      showMessage(
-        `Backfill done: ${res.accountsUpgraded ?? 0} upgraded / ${res.accountsProcessed ?? 0} processed`,
-        'success',
-      );
-    },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Backfill failed', 'error'),
+    // The counts land on the button that started it (audit page).
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: membershipKeys.all }),
+    onError: (error) => notifyFailure('BACKFILL', 'failed', error),
   });
 }

@@ -88,7 +88,7 @@ function Stand({ c }: { c: StandCard }) {
               sketch={
                 <div
                   data-sketch-stub
-                  className='flex aspect-[3/4] items-center justify-center border border-borderColor bg-bgZebra text-micro text-labelColor uppercase'
+                  className='flex aspect-[3/4] items-center justify-center border border-borderColor bg-pageBg text-micro text-labelColor uppercase'
                 >
                   technical sketch (stand stub)
                 </div>

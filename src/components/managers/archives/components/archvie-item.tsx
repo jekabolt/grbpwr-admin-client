@@ -1,6 +1,7 @@
 import { common_ArchiveList } from 'api/proto-http/frontend';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
 import { Close, ConfirmationModal, Media, Text } from 'ui';
@@ -13,7 +14,7 @@ interface ArchiveItemProps {
 export function ArchiveItem({ archive }: ArchiveItemProps) {
   const navigate = useNavigate();
   const deleteArchiveMutation = useDeleteArchive();
-  const { showMessage } = useSnackBarStore();
+
   // A5: this used to be a generic native window.confirm — no entry name, no undo,
   // and inconsistent with the app's own ConfirmationModal used one screen away
   // (inside the editor).
@@ -40,11 +41,20 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
 
   const handleDeleteArchive = async () => {
     try {
+      // The card leaving the grid is the receipt.
       await deleteArchiveMutation.mutateAsync(archive.id || 0);
-      showMessage('Archive deleted successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to delete archive';
-      showMessage(msg, 'error');
+      notify({
+        sev: 'error',
+        subject: `TIMELINE ${archive.id ?? ''}`.trim(),
+        text: 'not deleted',
+        detail: msg,
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => void handleDeleteArchive() }
+            : undefined,
+      });
     }
   };
   return (
@@ -56,7 +66,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
       onClick={handleArchiveClick}
       className='group relative flex cursor-pointer flex-col overflow-hidden border border-borderColor bg-bgColor hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]'
     >
-      <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>
+      <div className='aspect-[4/5] w-full overflow-hidden border-b border-borderColor bg-bgColor'>
         {archive.thumbnail?.media?.fullSize?.mediaUrl && (
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
@@ -71,7 +81,7 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           {archive.translations?.[0]?.heading}
         </Text>
         {archive.tag && (
-          <span className='mt-1 inline-block w-fit border border-textInactiveColor px-1.5 py-0.5'>
+          <span className='mt-1 inline-block w-fit border border-borderColor px-1.5 py-0.5'>
             <Text size='small' variant='uppercase'>
               {archive.tag}
             </Text>

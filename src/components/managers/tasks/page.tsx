@@ -1,23 +1,29 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { filesService } from 'components/managers/files/api/filesService';
 import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
   CalloutBox,
+  Chip,
+  ChipRow,
+  Section,
   SectionHeader,
+  Select,
   SideRail,
   SideRailGroup,
   SideRailItem,
   SideRailLayout,
+  SkeletonLine,
   Text,
   Toolbar,
 } from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
-import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
+import { emptyFormValues, Task, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
@@ -26,12 +32,18 @@ import {
   emptyFilters,
   filtersActive,
   FiltersBar,
+  PhoneFilterGroups,
   setFilter,
+  taskFilterCount,
   TaskFilters,
 } from './components/filters-bar';
+import { TAP } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
-import { useCreateTask, useTasks } from './hooks/useTasks';
+import { TaskSearchField, TaskSearchResults, TaskSearchScope } from './components/task-search';
+import { useSearchQuery } from './hooks/useSearchQuery';
+import { useCreateTask, useTaskSearch, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
+import { searchTasks } from './utils/search';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 const FILTERS_KEY = 'grbpwr.kanban.filters';
@@ -81,6 +93,8 @@ export function Tasks() {
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [writable]);
 
   // tskTabs v2 — the board is chosen from a left rail, persisted as before.
   const [activeBoard, setActiveBoard] = useState<TaskBoard>(
@@ -121,6 +135,10 @@ export function Tasks() {
     }
     return m;
   }, [countsData]);
+  const boardOptions = BOARDS.map((board) => ({
+    value: board,
+    label: `${BOARD_LABEL[board]} · ${counts.get(board) ?? 0}`,
+  }));
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   //
@@ -141,8 +159,10 @@ export function Tasks() {
     }
   });
   useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const active = filtersActive(filters);
+  const phoneFilterCount = taskFilterCount(filters, showArchived, projectId > 0);
   // The include_archived flag already scopes the read; the chip cards dim themselves.
   const visible = useMemo(
     () => applyFilters(tasks, filters, account?.username),
@@ -156,6 +176,38 @@ export function Tasks() {
    */
   const people = useMemo(() => assigneePiles(tasks, filters.assignee), [tasks, filters.assignee]);
 
+  // SEARCH — `?q=` in the address; a non-empty query swaps the board for the results list.
+  const search = useSearchQuery();
+  const searching = search.query.length > 0;
+  const [allBoards, setAllBoards] = useState(true);
+  const found = useTaskSearch(search.query);
+  const hits = useMemo(() => {
+    const all = searchTasks(found.data?.tasks ?? [], search.query);
+    return allBoards ? all : all.filter((h) => h.task.board === activeBoard);
+  }, [found.data, search.query, allBoards, activeBoard]);
+  // A hit opens the way a card does: search cleared, its board selected, then the task.
+  function openHit(task: Task) {
+    search.clear();
+    setActiveBoard(task.board);
+    navigate(`${ROUTES.tasks}/${task.id}`);
+  }
+  const phoneSearchField = (
+    <TaskSearchField
+      name='task-search-phone'
+      value={search.draft}
+      onChange={search.setDraft}
+      onClear={search.clear}
+    />
+  );
+  const searchScope = searching && (
+    <TaskSearchScope
+      allBoards={allBoards}
+      onScope={setAllBoards}
+      board={activeBoard}
+      count={found.data ? hits.length : undefined}
+    />
+  );
+
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
   const createTask = useCreateTask();
@@ -163,7 +215,10 @@ export function Tasks() {
   // Заводя карточку на суженной проектом доске, человек заводит её ПО ЭТОМУ ПРОЕКТУ:
   // преселект ссылки — то же самое, что преселект колонки, из которой нажали «+».
   const initial: TaskFormValues = useMemo(
-    () => ({ ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'), projectTopicId: projectId }),
+    () => ({
+      ...emptyFormValues(activeBoard, creating ?? 'TASK_STATUS_TODO'),
+      projectTopicId: projectId,
+    }),
     [activeBoard, creating, projectId],
   );
 
@@ -199,8 +254,9 @@ export function Tasks() {
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-10'>
+    <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
       <SectionHeader
+        className='max-sm:hidden'
         title='tasks'
         question='what is each department working on — and what needs a hand?'
         action={
@@ -214,7 +270,7 @@ export function Tasks() {
 
       <SideRailLayout
         rail={
-          <SideRail>
+          <SideRail className='hidden lg:block'>
             <SideRailGroup flush>boards</SideRailGroup>
             {BOARDS.map((board) => (
               <SideRailItem
@@ -228,8 +284,82 @@ export function Tasks() {
           </SideRail>
         }
       >
-        <div className='flex min-w-0 flex-col gap-3'>
-          <Toolbar>
+        <div className='flex min-w-0 flex-col gap-2 sm:gap-3'>
+          <Section
+            title='tasks'
+            className='sm:hidden'
+            action={
+              <>
+                {!!account?.username && (
+                  <Chip
+                    selected={filters.mine}
+                    pressed={filters.mine}
+                    onClick={() =>
+                      setFilters((current) => setFilter(current, { mine: !current.mine }))
+                    }
+                    className='min-h-9'
+                  >
+                    mine
+                  </Chip>
+                )}
+                <Chip
+                  selected={phoneFilterCount > 0}
+                  pressed={filtersOpen}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls='task-phone-filters'
+                  className='min-h-9'
+                >
+                  {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
+                </Chip>
+              </>
+            }
+          >
+            <Select
+              name='task-board-phone'
+              value={activeBoard}
+              items={boardOptions}
+              fullWidth
+              itemClassName='min-h-11'
+              className='min-h-11 uppercase tracking-label'
+              placeholder='board'
+              onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
+            />
+            {phoneSearchField}
+            {searchScope}
+            {filtersOpen && (
+              <div id='task-phone-filters'>
+                <PhoneFilterGroups
+                  filters={filters}
+                  onChange={setFilters}
+                  people={people}
+                  showArchived={showArchived}
+                  onToggleArchived={() => setShowArchived((value) => !value)}
+                  onClear={clearFilters}
+                  projectLabel={projectLabel}
+                  onClearProject={dropProject}
+                />
+              </div>
+            )}
+          </Section>
+
+          {/* Между sm и lg рельса нет: доски остаются строкой чипов из v1. */}
+          <div className='hidden sm:block lg:hidden'>
+            <ChipRow className='gap-1.5 overflow-x-auto flex-nowrap'>
+              {BOARDS.map((board) => (
+                <Chip
+                  key={board}
+                  selected={board === activeBoard}
+                  pressed={board === activeBoard}
+                  onClick={() => setActiveBoard(board)}
+                  className={TAP}
+                >
+                  {BOARD_LABEL[board]} {counts.get(board) ?? 0}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
+          <Toolbar className='hidden sm:flex'>
             <FiltersBar
               filters={filters}
               onChange={setFilters}
@@ -240,10 +370,44 @@ export function Tasks() {
               onClear={clearFilters}
               projectLabel={projectLabel}
               onClearProject={dropProject}
+              search={
+                <>
+                  {/* Phone gets its own copy in the header block above. */}
+                  <TaskSearchField
+                    value={search.draft}
+                    onChange={search.setDraft}
+                    onClear={search.clear}
+                    className='w-60 xl:w-90'
+                  />
+                  {searchScope}
+                </>
+              }
             />
           </Toolbar>
 
-          {isLoading ? (
+          {searching ? (
+            found.isError && !found.data ? (
+              <div className='flex items-center gap-3'>
+                <Text size='micro' variant='error' tracking='label' component='span'>
+                  {found.error instanceof Error ? found.error.message : 'search failed'}
+                </Text>
+                <Button variant='underline' size='xs' onClick={() => found.refetch()}>
+                  retry
+                </Button>
+              </div>
+            ) : !found.data ? (
+              <div
+                aria-busy
+                className='flex flex-col gap-3 border border-borderColor bg-bgColor p-block max-sm:border-x-0'
+              >
+                <SkeletonLine width='60%' />
+                <SkeletonLine width='45%' />
+                <SkeletonLine width='70%' />
+              </div>
+            ) : (
+              <TaskSearchResults hits={hits} query={search.query} onOpen={openHit} />
+            )
+          ) : isLoading ? (
             <BoardSkeleton />
           ) : isError ? (
             <div className='flex items-center gap-3'>
@@ -258,7 +422,11 @@ export function Tasks() {
             <>
               {(boardTruncated || countsTruncated) && (
                 <CalloutBox tone='warning' className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     not all tasks loaded
                   </Text>
                   <Text size='micro' component='span'>
@@ -272,7 +440,11 @@ export function Tasks() {
               )}
               {active && visible.length === 0 && (
                 <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
                     no tasks match
                   </Text>
                   <Button variant='underline' size='xs' onClick={clearFilters} className='ml-auto'>
@@ -294,6 +466,22 @@ export function Tasks() {
         </div>
       </SideRailLayout>
 
+      {writable && (
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'
+        >
+          <Button
+            variant='main'
+            size='lg'
+            className='min-h-12 w-full uppercase tracking-label'
+            onClick={() => setCreating('TASK_STATUS_TODO')}
+          >
+            + new task
+          </Button>
+        </div>
+      )}
+
       <TaskFormModal
         open={creating !== null}
         onOpenChange={(o) => !o && setCreating(null)}
@@ -301,6 +489,7 @@ export function Tasks() {
         initial={initial}
         saving={createTask.isPending}
         onSubmit={handleCreate}
+        draftKey={projectId ? `${activeBoard}.project-${projectId}` : activeBoard}
       />
     </div>
   );

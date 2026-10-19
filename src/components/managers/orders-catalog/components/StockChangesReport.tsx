@@ -6,8 +6,9 @@ import {
   downloadCsv,
   stockChangeRowsToCsv,
 } from 'components/managers/product/components/stock/stock-csv';
-import { Button, Input, Text } from 'ui';
-import { useSnackBarStore } from 'lib/stores/store';
+import { Button, CalloutBox, Input, Text, useDoneFlash } from 'ui';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 
 function toRfc3339DateOnly(dateStr: string, endOfDay: boolean): string {
   if (endOfDay) {
@@ -21,7 +22,9 @@ function formatDateForInput(d: Date): string {
 }
 
 export function StockChangesReport() {
-  const { showMessage } = useSnackBarStore();
+  const exported = useDoneFlash();
+  // A bad date range stands next to the dates until they change.
+  const [rangeError, setRangeError] = useState<string | null>(null);
   const today = new Date();
   const defaultFrom = subDays(today, 6);
   const [dateFrom, setDateFrom] = useState(formatDateForInput(defaultFrom));
@@ -30,11 +33,11 @@ export function StockChangesReport() {
 
   const handleExportCsv = async () => {
     if (!dateFrom || !dateTo) {
-      showMessage('Please select both date from and date to', 'error');
+      setRangeError('pick both dates');
       return;
     }
     if (new Date(dateFrom) > new Date(dateTo)) {
-      showMessage('Date from must be before or equal to date to', 'error');
+      setRangeError('from is after to');
       return;
     }
     setIsExporting(true);
@@ -63,10 +66,19 @@ export function StockChangesReport() {
       const csv = stockChangeRowsToCsv(rows);
       const filename = `stock-changes-${dateFrom}-to-${dateTo}.csv`;
       downloadCsv(csv, filename);
-      showMessage(`Exported ${rows.length} rows`, 'success');
+      exported.flash();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to export stock changes';
-      showMessage(msg, 'error');
+      notify({
+        sev: 'error',
+        subject: 'STOCK CHANGES',
+        text: 'not exported',
+        detail: msg,
+        action:
+          failureClassOfError(err) === 'transient'
+            ? { label: 'retry', onClick: () => void handleExportCsv() }
+            : undefined,
+      });
     } finally {
       setIsExporting(false);
     }
@@ -79,25 +91,33 @@ export function StockChangesReport() {
       </Text>
       <div className='flex flex-wrap items-center gap-2'>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             From
           </Text>
           <Input
             type='date'
             value={dateFrom}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDateFrom(e.target.value)}
+            aria-invalid={!!rangeError || undefined}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              setRangeError(null);
+              setDateFrom(e.target.value);
+            }}
             disabled={isExporting}
             className='w-40'
           />
         </label>
         <label className='flex flex-col gap-1'>
-          <Text variant='uppercase' className='text-textBaseSize text-textInactiveColor'>
+          <Text variant='uppercase' className='text-textBaseSize text-borderColor'>
             To
           </Text>
           <Input
             type='date'
             value={dateTo}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDateTo(e.target.value)}
+            aria-invalid={!!rangeError || undefined}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              setRangeError(null);
+              setDateTo(e.target.value);
+            }}
             disabled={isExporting}
             className='w-40'
           />
@@ -106,11 +126,19 @@ export function StockChangesReport() {
           variant='main'
           onClick={handleExportCsv}
           disabled={isExporting}
+          done={exported.on && 'exported'}
           className='self-end'
         >
           <Text variant='uppercase'>{isExporting ? 'Exporting…' : 'Download CSV'}</Text>
         </Button>
       </div>
+      {rangeError && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not exported</b> · {rangeError}
+          </Text>
+        </CalloutBox>
+      )}
     </div>
   );
 }

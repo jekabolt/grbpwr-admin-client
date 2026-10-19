@@ -77,7 +77,7 @@ declare global {
 
 let root: Root | null = null;
 function render(band: GetDesignBandResponse, body: ReactNode) {
-  useSnackBarStore.setState({ alerts: [] });
+  useSnackBarStore.setState({ toasts: [] });
   root?.unmount();
   root = createRoot(document.getElementById('root')!);
   const qc = new QueryClient({
@@ -122,6 +122,6 @@ window.__pp = {
   },
   remember: (wf, field, text) =>
     rememberRecentText(`plm.playground.recent.v1:${wf}.${field}`, text),
-  alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
+  alerts: () => useSnackBarStore.getState().toasts.map((a) => a.message),
   enhanceModes: () => ENHANCE_MODES.map((m) => m.mode),
 };

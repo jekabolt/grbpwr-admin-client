@@ -104,7 +104,7 @@ const NewReturningSplit: FC<{ split: NewVsReturningSplit | undefined; repeatRate
           {newShare >= 22 ? `New · ${formatCurrency(newRev)} · ${newShare.toFixed(0)}%` : ''}
         </div>
         <div
-          className='flex items-center justify-center overflow-hidden bg-textInactiveColor px-1 text-[10px] whitespace-nowrap'
+          className='flex items-center justify-center overflow-hidden bg-borderColor px-1 text-[10px] whitespace-nowrap'
           style={{ width: `${retShare}%` }}
         >
           {retShare >= 14 ? `Repeat · ${retShare.toFixed(0)}%` : ''}
@@ -258,7 +258,7 @@ export function ThisWeekTab({
       />
 
       {paymentFailures.count > 0 && (
-        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-bgSecondary p-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-2 border-error bg-pageBg p-3'>
           <Text variant='uppercase' className='text-error text-textBaseSize font-semibold'>
             Payment failures this period
           </Text>

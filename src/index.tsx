@@ -306,7 +306,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
       <h2 style={{ fontSize: '18px' }}>
         {stale ? 'This tab is running an old version' : 'Something went wrong'}
       </h2>
-      <pre style={{ color: 'red', marginTop: '1rem' }}>
+      <pre style={{ color: 'var(--color-error)', marginTop: '1rem' }}>
         {stale
           ? 'The app was updated while this tab was open. Reload to get the current version.'
           : error instanceof Error

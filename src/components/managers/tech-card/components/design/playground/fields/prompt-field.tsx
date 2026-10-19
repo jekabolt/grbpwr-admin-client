@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   EnhanceRefusal,
@@ -163,7 +163,7 @@ export async function steerText(req: Omit<EnhanceRequest, 'mode'>): Promise<stri
 }
 
 const MENU_ROW =
-  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
+  'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
 
 export function PromptField({
   value,
@@ -180,7 +180,6 @@ export function PromptField({
   cardRecent = NO_TEXTS,
 }: PromptFieldProps): JSX.Element {
   const box = useRef<HTMLTextAreaElement | null>(null);
-  const { showMessage } = useSnackBarStore();
   const ideas = ideasFor(workflowKey, fieldKey);
   const recent = useRecentText(recentTextKey(workflowKey, fieldKey));
 
@@ -297,7 +296,13 @@ export function PromptField({
     const end = el ? el.selectionEnd ?? start : start;
     const { text, caret } = insertIdea(current, idea, start, end);
     if (text.length > maxLength) {
-      showMessage(`no room for that idea: the text is capped at ${maxLength} characters`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'PROMPT',
+        text: 'not inserted',
+        bad: 'too long',
+        detail: `no room for that idea: the text is capped at ${maxLength} characters`,
+      });
       return;
     }
     onChange(text);
@@ -323,28 +328,27 @@ export function PromptField({
       if (ticket.current !== mine) return;
       const now = latest.current;
       if (now.disabled || now.value !== before) {
-        showMessage(
-          now.disabled ? 'not applied: the field is locked' : 'not applied: the text changed',
-          'success',
-        );
         return;
       }
       if (!after) {
-        showMessage('the model returned nothing, the text is unchanged', 'error');
+        notify({ sev: 'error', subject: 'PROMPT', text: 'not improved', bad: 'empty answer' });
         return;
       }
       replaceWith(after);
     } catch (e) {
       if (ticket.current !== mine) return;
       const reason = e instanceof EnhanceRefusal ? e.reason : 'OTHER';
-      showMessage(
-        reason === 'AI_NOT_CONFIGURED'
-          ? 'AI is off on this server'
-          : reason === 'AI_MODEL_UNAVAILABLE'
-            ? 'the configured model is not served by its provider — check the route in admin → AI providers'
-            : `could not improve: ${e instanceof Error ? e.message : String(e)}`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'PROMPT',
+        text: 'not improved',
+        detail:
+          reason === 'AI_NOT_CONFIGURED'
+            ? 'AI is off on this server'
+            : reason === 'AI_MODEL_UNAVAILABLE'
+              ? 'the configured model is not served by its provider — check the route in admin → AI providers'
+              : `could not improve: ${e instanceof Error ? e.message : String(e)}`,
+      });
     } finally {
       if (ticket.current === mine) setBusy(false);
     }
@@ -373,7 +377,7 @@ export function PromptField({
   });
   const doorSkin = (open: boolean) =>
     cn(
-      disabled && 'pointer-events-none border-textInactiveColor text-textInactiveColor',
+      disabled && 'pointer-events-none border-borderColor text-borderColor',
       // `!`: the Button's variant sets `text-textColor` and cva does not merge classes, so a plain
       // `text-bgColor` lost to it and the open door read black on black unless hovered.
       open && 'bg-textColor !text-bgColor',

@@ -28,7 +28,7 @@ export default function Filter({
       {isOpen && (
         <div className='hidden lg:block'>
           <Overlay cover='screen' onClick={toggleModal} disablePointerEvents={false} />
-          <div className='fixed inset-y-2 right-2 z-30 w-[445px] border border-textInactiveColor bg-bgColor p-2.5 text-textColor'>
+          <div className='fixed inset-y-2 right-2 z-30 w-[445px] border border-borderColor bg-bgColor p-2.5 text-textColor'>
             <div className='flex h-full flex-col'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>

@@ -169,7 +169,7 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
                 <Fragment key={s.section}>
                   <tr>
                     <td colSpan={months.length + 2} className='px-2 pb-1 pt-3'>
-                      <Text variant='uppercase' size='small' className='text-textInactiveColor'>
+                      <Text variant='uppercase' size='small' className='text-borderColor'>
                         {s.section}
                       </Text>
                     </td>
@@ -177,7 +177,7 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
                   {(s.rows ?? []).map((r) => (
                     <tr
                       key={r.code}
-                      className='group cursor-pointer border-b border-textInactiveColor hover:bg-highlightColor/10'
+                      className='group cursor-pointer border-b border-borderColor hover:bg-highlightColor/10'
                       onClick={() => r.code && onDrill(r.code)}
                     >
                       <td className={`${stickyCell} group-hover:bg-highlightColor/10`}>

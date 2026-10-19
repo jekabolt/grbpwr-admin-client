@@ -1,6 +1,7 @@
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal, Input, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, Input, Text } from 'ui';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { useReverseJournalEntry } from '../../utils/hooks';
 
 type Props = {
@@ -14,25 +15,41 @@ type Props = {
 // is false so a backend rejection ("already reversed", "cannot reverse a reversal") keeps the
 // modal open with the typed reason intact; the reason is required (the backend records it).
 export function ReverseConfirm({ entryId, onOpenChange, onReversed }: Props) {
-  const { showMessage } = useSnackBarStore();
   const reverse = useReverseJournalEntry();
   const [reason, setReason] = useState('');
+  // The server's refusal stands in the modal until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   useEffect(() => {
-    if (entryId === null) setReason('');
+    if (entryId === null) {
+      setReason('');
+      setRefusal(null);
+    }
   }, [entryId]);
 
   const handleConfirm = () => {
     if (entryId === null || !reason.trim()) return;
+    setRefusal(null);
     reverse.mutate(
       { entryId, reason: reason.trim() },
       {
-        onSuccess: () => {
-          showMessage('Entry reversed', 'success');
-          onReversed();
+        // No receipt: the reversing entry appears in the journal.
+        onSuccess: () => onReversed(),
+        onError: (e) => {
+          const said = errorText(e, 'failed to reverse entry') ?? '';
+          if (isRefused(e)) {
+            setRefusal(said);
+            return;
+          }
+          // No retry: a lost reply may still have posted the reversal.
+          notify({
+            sev: 'error',
+            subject: `ENTRY ${entryId}`,
+            text: 'not reversed',
+            bad: reasonOf(e),
+            detail: said,
+          });
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to reverse entry', 'error'),
       },
     );
   };
@@ -64,6 +81,7 @@ export function ReverseConfirm({ entryId, onOpenChange, onReversed }: Props) {
             autoFocus
           />
         </label>
+        {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

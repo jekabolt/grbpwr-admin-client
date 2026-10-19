@@ -178,7 +178,7 @@ export function LiveTiles({
           dashed
           media={
             <div
-              className='group relative flex w-full items-center justify-center bg-bgSecondary'
+              className='group relative flex w-full items-center justify-center bg-pageBg'
               style={{ aspectRatio: '4 / 5' }}
               data-live-tile={runId || undefined}
             >

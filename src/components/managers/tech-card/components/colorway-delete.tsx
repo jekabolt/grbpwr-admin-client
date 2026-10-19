@@ -1,11 +1,12 @@
 import { ColorwayDeletionEntry } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState, type ReactNode } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
 import { CalloutBox, ConfirmationModal, GroupLabel, Row, Text, EmptyCell, Close } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { useColorwayDeletionPreview, useDeleteColorway } from './useColorwayRecipe';
+import { failureClassOfError } from './useTechCardAutosave';
 
 /**
  * УДАЛЕНИЕ КОЛОРВЕЯ С ПЛИТКИ ТЕХ-КАРТЫ.
@@ -80,7 +81,6 @@ export function ColorwayDeleteControl({
   /** Классы триггера вместо подчёркнутого по умолчанию; триггер остаётся span role=button. */
   triggerClassName?: string;
 }) {
-  const { showMessage } = useSnackBarStore();
   const preview = useColorwayDeletionPreview();
   const del = useDeleteColorway(techCardId);
   const [open, setOpen] = useState(false);
@@ -106,8 +106,8 @@ export function ColorwayDeleteControl({
       { colorwayId, expectedVersion: lockVersion },
       {
         onSuccess: () => {
+          // The product leaving the card is the receipt.
           setOpen(false);
-          showMessage(`product ${code} deleted`, 'success');
           onDeleted();
         },
         onError: (e) => {
@@ -116,7 +116,17 @@ export function ColorwayDeleteControl({
           // оператора — «почему», и ответ уже приехал.
           const fresh = extractFieldViolations(e).map((v) => v.description);
           if (fresh.length > 0) setLateBlockers(fresh);
-          else showMessage(e instanceof Error ? e.message : "couldn't delete the product", 'error');
+          else
+            notify({
+              sev: 'error',
+              subject: `PRODUCT ${code}`,
+              text: 'not deleted',
+              detail: e instanceof Error ? e.message : undefined,
+              action:
+                failureClassOfError(e) === 'transient'
+                  ? { label: 'retry', onClick: confirmDelete }
+                  : undefined,
+            });
         },
       },
     );

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useDockBottom } from 'hooks/useDockBottom';
+import { useRef, useState } from 'react';
 import { Button, ConfirmationModal, Text } from 'ui';
 
 interface Props {
@@ -24,6 +25,8 @@ export function BatchActionBar({
 }: Props) {
   const [confirmHide, setConfirmHide] = useState(false);
   const [confirmUnhide, setConfirmUnhide] = useState(false);
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [selectedCount === 0]);
 
   if (selectedCount === 0) return null;
 
@@ -31,7 +34,10 @@ export function BatchActionBar({
 
   return (
     <>
-      <div className='fixed inset-x-0 bottom-0 z-[var(--z-sticky)] border-t border-textColor bg-bgColor'>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-[var(--z-sticky)] border-t border-textColor bg-bgColor'
+      >
         <div className='flex flex-wrap items-center justify-between gap-3 px-2.5 py-3'>
           <div className='flex items-center gap-3'>
             <Text variant='uppercase' className='font-bold'>

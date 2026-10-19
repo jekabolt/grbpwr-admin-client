@@ -222,7 +222,11 @@ export function StripCell({
         />
       ) : (
         <div
-          className={cn(placeholderClass({ dashed: true }), FRAME_HEIGHT, 'w-full px-1 text-center')}
+          className={cn(
+            placeholderClass({ dashed: true }),
+            FRAME_HEIGHT,
+            'w-full px-1 text-center',
+          )}
           style={PLACEHOLDER_SURFACE}
         >
           {empty}
@@ -335,7 +339,7 @@ export function EmptyStripCell({
         >
           {/* Имя вида — В ЦЕНТРЕ, а не угловым ярлыком, как на занятой плите: угловой ярлык на
               пустой полосатой коробке читается как забытая подпись, центр говорит «эта коробка
-              целиком и есть слот такой-то». Цвет — `labelColor`: `textInactiveColor` (#ccc) в этой
+              целиком и есть слот такой-то». Цвет — `labelColor`: `borderColor` (#ccc) в этой
               системе для рамок и заглушек, а не для текста, который читают. */}
           <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
             {label}

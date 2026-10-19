@@ -1,9 +1,13 @@
 import { PackagingBomItem } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import {
+  FailNote,
+  isRefusal,
+  notifyFailure,
+} from 'components/managers/production-runs/components/feedback';
 import { useEffect, useState } from 'react';
-import { Button, Text, EmptyCell, Close } from 'ui';
+import { Button, Text, EmptyCell, Close, useDoneFlash } from 'ui';
 import {
   decimalToInput,
   normalizeDecimalInput,
@@ -13,10 +17,10 @@ import {
 import { MaterialPicker } from './material-picker';
 import { usePackagingBom, useUpsertPackagingBom } from './useMaterials';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const th =
-  'border border-textInactiveColor bg-textInactiveColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
-const td = 'border border-textInactiveColor px-2 py-1 align-top text-textBaseSize';
+  'border border-borderColor bg-borderColor/20 px-2 py-1 text-left text-textBaseSize uppercase';
+const td = 'border border-borderColor px-2 py-1 align-top text-textBaseSize';
 
 type Row = {
   materialId: number;
@@ -43,7 +47,8 @@ const rowFrom = (i: PackagingBomItem): Row => ({
 export function PackagingBomTab() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.techCards);
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  const [fail, setFail] = useState<string | null>(null);
   const { data, isLoading, isError, refetch } = usePackagingBom();
   const upsert = useUpsertPackagingBom();
 
@@ -79,27 +84,28 @@ export function PackagingBomTab() {
   };
 
   const save = async () => {
+    setFail(null);
     for (const r of rows) {
       if (!r.materialId) {
-        showMessage('Every row needs a material (or remove it)', 'error');
+        setFail('every row needs a material (or remove it)');
         return;
       }
       for (const q of [r.qtyPerOrder, r.qtyPerItem]) {
         if (q.trim()) {
           const n = parseDecimalNumber(q);
           if (!Number.isFinite(n) || n < 0) {
-            showMessage('Quantities must be zero or more', 'error');
+            setFail('quantities must be zero or more');
             return;
           }
         }
       }
       if (!r.qtyPerOrder.trim() && !r.qtyPerItem.trim()) {
-        showMessage('Each material needs a per-order or per-item quantity', 'error');
+        setFail('each material needs a per-order or per-item quantity');
         return;
       }
     }
     if (new Set(rows.map((r) => r.materialId)).size !== rows.length) {
-      showMessage('A material appears twice — merge the rows', 'error');
+      setFail('a material appears twice — merge the rows');
       return;
     }
     const items: PackagingBomItem[] = rows.map((r) => ({
@@ -115,9 +121,11 @@ export function PackagingBomTab() {
     try {
       await upsert.mutateAsync(items);
       setDirty(false);
-      showMessage('Packaging BOM saved', 'success');
+      saved.flash();
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save packaging BOM', 'error');
+      const sentence = e instanceof Error ? e.message : "couldn't save the packaging BOM";
+      if (isRefusal(e)) setFail(sentence);
+      else notifyFailure('PACKAGING BOM', 'not saved', e, sentence, save);
     }
   };
 
@@ -146,6 +154,7 @@ export function PackagingBomTab() {
               size='lg'
               className='uppercase'
               disabled={upsert.isPending || !dirty}
+              done={saved.on && 'saved'}
               onClick={save}
             >
               {upsert.isPending ? 'saving…' : 'save'}
@@ -153,6 +162,7 @@ export function PackagingBomTab() {
           </div>
         )}
       </div>
+      <FailNote verb='not saved' text={fail} />
 
       {isLoading ? (
         <Text variant='inactive' size='small'>

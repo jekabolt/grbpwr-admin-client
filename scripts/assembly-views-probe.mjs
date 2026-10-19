@@ -81,7 +81,7 @@ await build({
 // `ConfirmationModal` вычисляет контейнер портала (`document.body`) в момент СОЗДАНИЯ JSX, до
 // того как Radix решит, что при open=false рисовать нечего. Заглушка нужна ровно под это обращение
 // и в разметку не попадает ни байтом: закрытый портал не рендерит ничего.
-globalThis.document ??= { body: {} };
+globalThis.document ??= { body: {}, documentElement: { style: {} } };
 let mod;
 try {
   mod = await import(pathToFileURL(outfile).href);
@@ -1083,7 +1083,7 @@ console.log('\nподсветка шага, открытого в доке');
         whole.slice(0, 160),
       );
       ck(
-        !whole.includes('hover:bg-bgZebra'),
+        !whole.includes('hover:bg-pageBg'),
         `${where}: наведение у открытой строки снято — иначе она белела бы под мышью`,
         whole.slice(0, 160),
       );
@@ -1102,9 +1102,9 @@ console.log('\nподсветка шага, открытого в доке');
     // ОСТАЛЬНЫЕ СТРОКИ НЕ ТРОНУТЫ: ровно `places.total` строк потеряли наведение, и ни одной
     // больше — иначе «подсветилась одна» уживалось бы с «остальные погасли».
     ck(
-      count(dark, 'hover:bg-bgZebra') - count(lit, 'hover:bg-bgZebra') === places.total,
+      count(dark, 'hover:bg-pageBg') - count(lit, 'hover:bg-pageBg') === places.total,
       `${where}: наведение снято ровно у подсвеченных`,
-      `было ${count(dark, 'hover:bg-bgZebra')}, стало ${count(lit, 'hover:bg-bgZebra')}, мест ${places.total}`,
+      `было ${count(dark, 'hover:bg-pageBg')}, стало ${count(lit, 'hover:bg-pageBg')}, мест ${places.total}`,
     );
   }
 }

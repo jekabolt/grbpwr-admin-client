@@ -93,7 +93,7 @@ function MediaRefChip({
     <Chip
       title={`open attachment ${index + 1}`}
       onClick={onOpen ? () => onOpen(refr) : undefined}
-      className='cursor-pointer align-baseline'
+      className='min-h-11 cursor-pointer align-baseline sm:min-h-0'
     >
       {label}
     </Chip>

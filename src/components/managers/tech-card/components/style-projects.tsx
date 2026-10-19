@@ -13,7 +13,7 @@ import { ARCHIVED_WORD, projectDates } from 'components/managers/files/component
 import { isProjectTopic, useFileTopics } from 'components/managers/files/hooks/useFiles';
 import { plural } from 'components/managers/files/upload/text';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Link } from 'react-router-dom';
 import { Button, ConfirmationModal, Input, Text } from 'ui';
 
@@ -139,7 +139,6 @@ function LinkProjectDialog({
   linkedIds: Set<number>;
 }) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState(0);
 
@@ -168,10 +167,15 @@ function LinkProjectDialog({
     const name = projects.find((p) => Number(p.id) === picked)?.name ?? `#${picked}`;
     try {
       await linkProject.mutateAsync(picked);
+      // The project in the list is the receipt.
       close();
-      showMessage(`linked to “${name}”`, 'success');
     } catch (e) {
-      showMessage(failureText(e, "couldn't link the project"), 'error');
+      notify({
+        sev: 'error',
+        subject: 'PROJECT',
+        text: 'not linked',
+        detail: `${name}: ${failureText(e, "couldn't link the project")}`,
+      });
     }
   };
 
@@ -243,7 +247,6 @@ function LinkProjectDialog({
 export function StyleProjects({ techCardId }: { techCardId: number }) {
   const { canView, writable } = useStyleProjectsAccess();
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const { data, isError, error, refetch } = useStyleProjects(techCardId, canView);
   const [linking, setLinking] = useState(false);
   const [unlinking, setUnlinking] = useState<FileTopic | undefined>(undefined);
@@ -265,9 +268,13 @@ export function StyleProjects({ techCardId }: { techCardId: number }) {
     try {
       await unlinkProject.mutateAsync(Number(unlinking.id));
       setUnlinking(undefined);
-      showMessage(`unlinked from “${name}”`, 'success');
     } catch (e) {
-      showMessage(failureText(e, "couldn't unlink the project"), 'error');
+      notify({
+        sev: 'error',
+        subject: 'PROJECT',
+        text: 'not unlinked',
+        detail: `${name}: ${failureText(e, "couldn't unlink the project")}`,
+      });
     }
   };
 

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { warehouseKeys } from 'components/managers/materials/components/useWarehouse';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { extractFieldViolations } from 'utils/field-errors';
@@ -92,7 +92,6 @@ function batchesOf(lines: Outstanding[]): Outstanding[][] {
 
 export function useDeleteUnfitted(techCardId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const del = useDeleteSample(techCardId);
   const [deletingId, setDeletingId] = useState(0);
   const staging = useTechCardStaging();
@@ -104,7 +103,12 @@ export function useDeleteUnfitted(techCardId: number) {
   ): Promise<boolean> => {
     if (!sampleId || deletingId) return false;
     if (fittingCount > 0) {
-      showMessage(`sample ${label} has fittings — it stays`, 'error');
+      notify({
+        sev: 'error',
+        subject: `SAMPLE ${label}`,
+        text: 'not deleted',
+        bad: 'has fittings',
+      });
       return false;
     }
     setDeletingId(sampleId);
@@ -115,7 +119,12 @@ export function useDeleteUnfitted(techCardId: number) {
       const dry = await adminService.DeleteSample({ id: sampleId, dryRun: true });
       const other = (dry.blockers ?? []).filter((b) => b.reason !== 'material_outstanding');
       if (other.length) {
-        showMessage(other.map((b) => b.text?.trim() || b.reason).join(' · '), 'error');
+        notify({
+          sev: 'error',
+          subject: `SAMPLE ${label}`,
+          text: 'not deleted',
+          detail: other.map((b) => b.text?.trim() || b.reason).join(' · '),
+        });
         qc.invalidateQueries({ queryKey: sampleKeys.all });
         return false;
       }
@@ -146,19 +155,21 @@ export function useDeleteUnfitted(techCardId: number) {
       await del.mutateAsync(sampleId);
       // A staged edit of a deleted sample would 404 the card's next save.
       staging?.unstage(`${SAMPLE_STAGING_PREFIX}${sampleId}`);
-      showMessage(`sample ${label} deleted`, 'success');
+      // The sample leaving the board is the receipt.
       return true;
     } catch (e) {
       // The server's own words (one violation per blocker) — never a blind retry.
       const blockers = extractFieldViolations(e).map((v) => v.description);
-      showMessage(
-        blockers.length
+      notify({
+        sev: 'error',
+        subject: `SAMPLE ${label}`,
+        text: 'not deleted',
+        detail: blockers.length
           ? blockers.join(' · ')
           : e instanceof Error
             ? e.message
             : "couldn't delete the sample",
-        'error',
-      );
+      });
       qc.invalidateQueries({ queryKey: sampleKeys.all });
       return false;
     } finally {

@@ -19,7 +19,7 @@ import type {
 } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { assetFull, assetThumb } from '../assets/model';
@@ -1334,7 +1334,15 @@ export class PaintSession {
           `${views.join(', ')}: ${views.length === 1 ? 'flat' : 'flats'} changed · ${p}`,
       )
       .join(' · ');
-    useSnackBarStore.getState().showMessage(text, 'success');
+    // A background result, not a receipt: the flats moved under the paint.
+    const redo = told.filter(([, t]) => t.paint === false || t.artLeft > 0).length;
+    notify({
+      sev: redo ? 'warn' : 'ok',
+      subject: 'PAINT',
+      text: 'flats changed',
+      bad: redo ? `${redo} to redo` : undefined,
+      detail: text,
+    });
   }
 
   private told(view: string) {

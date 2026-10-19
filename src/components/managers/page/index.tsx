@@ -4,7 +4,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Section, SectionStack, Text } from 'ui';
+import { Button, Section, SectionStack, Text, useDoneFlash } from 'ui';
 import { BackendAlerts, DateRangePicker, PersistentKpiBar } from './components';
 import { AlertSettingsModal } from './components/alert-settings-modal';
 import { VatRatesModal } from './components/vat-rates-modal';
@@ -69,6 +69,9 @@ export function Analitic() {
   const canConfig = canWrite(SECTION.analytics);
   const [vatOpen, setVatOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Receipts at the doors of the two dialogs.
+  const vatSaved = useDoneFlash();
+  const alertsSaved = useDoneFlash();
 
   const setActiveTab = (tabId: MetricsTabId) => {
     setSearchParams(
@@ -159,6 +162,7 @@ export function Analitic() {
                 variant='secondary'
                 size='lg'
                 className='uppercase'
+                done={vatSaved.on}
                 onClick={() => setVatOpen(true)}
               >
                 VAT rates
@@ -175,6 +179,7 @@ export function Analitic() {
                 variant='secondary'
                 size='lg'
                 className='uppercase'
+                done={alertsSaved.on}
                 onClick={() => setAlertsOpen(true)}
               >
                 Alerts
@@ -182,8 +187,12 @@ export function Analitic() {
             </div>
           )}
         </div>
-        <VatRatesModal open={vatOpen} onOpenChange={setVatOpen} />
-        <AlertSettingsModal open={alertsOpen} onOpenChange={setAlertsOpen} />
+        <VatRatesModal open={vatOpen} onOpenChange={setVatOpen} onSaved={vatSaved.flash} />
+        <AlertSettingsModal
+          open={alertsOpen}
+          onOpenChange={setAlertsOpen}
+          onSaved={alertsSaved.flash}
+        />
         <DateRangePicker
           period={period}
           compareMode={compareMode}
@@ -226,7 +235,7 @@ export function Analitic() {
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className='h-20 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+                className='h-20 animate-pulse border border-borderColor bg-borderColor/10'
               />
             ))}
           </div>
@@ -234,7 +243,7 @@ export function Analitic() {
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
-                className='h-56 animate-pulse border border-textInactiveColor bg-textInactiveColor/10'
+                className='h-56 animate-pulse border border-borderColor bg-borderColor/10'
               />
             ))}
           </div>

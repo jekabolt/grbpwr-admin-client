@@ -13,7 +13,7 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { createPortal } from 'react-dom';
@@ -36,6 +36,7 @@ import {
   DecimalField,
   FoldCaret,
   EmptyCell,
+  useDoneFlash,
 } from 'ui';
 import CurrencySelect from 'components/shared/currency-select';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
@@ -431,7 +432,6 @@ export function CostingField({
         : approvalState === 'TECH_CARD_APPROVAL_STATE_OBSOLETE'
           ? 'obsolete'
           : 'released';
-  const { showMessage } = useSnackBarStore();
   const reprice = useRepriceTechCardBom();
   // The Phase 2 migration report for THIS card — empty for every cleanly-migrated card, so the
   // row below simply never appears in the common case.
@@ -470,10 +470,19 @@ export function CostingField({
     if (workshopPatchEmpty || !canWriteWorkshop || !workshop.loaded || workshop.update.isPending)
       return;
     workshop.update.mutate(workshopPatch, {
-      onSuccess: () => showMessage('saved as workshop default', 'success'),
-      onError: () => showMessage("couldn't save the workshop default", 'error'),
+      onSuccess: () => workshopSaved.flash(),
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: 'WORKSHOP DEFAULT',
+          text: 'not saved',
+          detail: e instanceof Error ? e.message : undefined,
+          action: { label: 'retry', onClick: saveWorkshopDefaults },
+        }),
     });
   };
+  // The link itself reads «saved ✓» for a moment: that is the receipt.
+  const workshopSaved = useDoneFlash();
   const wsTag = (on: boolean) => (on ? 'workshop' : '');
 
   // Read-only cutting-wastage context for the reject rate: the per-line wastage% already grosses
@@ -521,16 +530,27 @@ export function CostingField({
         }
         const changed = lines.filter((l) => l.changed).length;
         const noPrice = lines.filter((l) => !l.newPrice).length;
-        showMessage(
-          `catalog prices: ${changed} of ${lines.length} changed` +
-            (noPrice ? `, no catalog price: ${noPrice}` : '') +
-            ((r.skippedUnlinked ?? 0) > 0
-              ? `, not linked to the catalog: ${r.skippedUnlinked}`
-              : ''),
-          'success',
-        );
+        const unlinked = r.skippedUnlinked ?? 0;
+        // The count is news the rows do not say; lines left on their old price make it a warn.
+        const left = [
+          noPrice ? `${noPrice} no price` : '',
+          unlinked ? `${unlinked} not linked` : '',
+        ].filter(Boolean);
+        notify({
+          sev: left.length ? 'warn' : 'ok',
+          subject: 'CATALOG PRICES',
+          text: `${changed} of ${lines.length} changed`,
+          bad: left.length ? left.join(' · ') : undefined,
+        });
       },
-      onError: () => showMessage("couldn't refresh prices from the catalog", 'error'),
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: 'CATALOG PRICES',
+          text: 'not refreshed',
+          detail: e instanceof Error ? e.message : undefined,
+          action: { label: 'retry', onClick: onReprice },
+        }),
     });
   };
 
@@ -1462,7 +1482,11 @@ export function CostingField({
                 }
                 className='cursor-pointer whitespace-nowrap text-micro uppercase tracking-label text-textColor underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor aria-disabled:cursor-default aria-disabled:text-labelColor aria-disabled:no-underline'
               >
-                {workshop.update.isPending ? 'saving…' : 'save as workshop default'}
+                {workshop.update.isPending
+                  ? 'saving…'
+                  : workshopSaved.on
+                    ? 'saved ✓'
+                    : 'save as workshop default'}
               </button>
             )}
           </div>
@@ -1824,7 +1848,7 @@ function MarketPicker({
               tabIndex={0}
               onClick={pick}
               onKeyDown={key(pick)}
-              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-bgSecondary ${selected ? 'font-bold' : ''} ${focus}`}
+              className={`cursor-pointer truncate px-1 py-0.5 hover:bg-pageBg ${selected ? 'font-bold' : ''} ${focus}`}
             >
               {i.label}
             </span>
@@ -1893,7 +1917,7 @@ function StepRow({
           </Text>
         )}
       </span>
-      <span className='relative block h-[13px] bg-trackBg'>
+      <span className='relative block h-[13px] bg-pageBg'>
         <span
           className={`absolute top-0 h-[13px] ${fill}`}
           style={{ left: `${left}%`, width: `${Math.max(0, Math.min(100, width))}%` }}

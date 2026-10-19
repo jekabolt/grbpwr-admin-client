@@ -10,7 +10,11 @@ import {
 import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import {
+  FailNote,
+  isRefusal,
+  notifyFailure,
+} from 'components/managers/production-runs/components/feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { Button, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell, Close } from 'ui';
 import {
@@ -362,7 +366,8 @@ export function MaterialModal({
   // caller (e.g. the inline BOM-picker) can immediately select the material it just made (Q9a).
   onCreated?: (id: number, material: common_Material) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
+  // A failed check or the server's refusal: one line at the foot of the dialog.
+  const [fail, setFail] = useState<{ text: string; name?: boolean } | null>(null);
   const { dictionary } = useDictionary();
   const save = useSaveMaterial();
   const [d, setD] = useState<Draft>(empty);
@@ -392,6 +397,7 @@ export function MaterialModal({
 
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     const next = material
       ? draftFromMaterial(material)
       : {
@@ -503,32 +509,33 @@ export function MaterialModal({
     });
 
   const submit = () => {
+    setFail(null);
     if (!d.name.trim()) {
-      showMessage('Name is required', 'error');
+      setFail({ text: 'name is required', name: true });
       return;
     }
     if (compFilled.length > 0) {
       if (!compComplete) {
-        showMessage('Every fibre needs a name and a percent greater than 0', 'error');
+        setFail({ text: 'every fibre needs a name and a percent greater than 0' });
         return;
       }
       if (!compUnique) {
-        showMessage('A fibre is listed twice — merge the rows', 'error');
+        setFail({ text: 'a fibre is listed twice — merge the rows' });
         return;
       }
       if (Math.abs(compTotal - 100) > 0.01) {
-        showMessage(`Composition must sum to 100% (now ${Number(compTotal.toFixed(2))}%)`, 'error');
+        setFail({ text: `composition must sum to 100% (now ${Number(compTotal.toFixed(2))}%)` });
         return;
       }
     }
     if (d.materialClass === 'MATERIAL_CLASS_OTHER' && d.otherAttrsMode === 'kv') {
       if (d.otherAttrsRows.some((r) => !r.key.trim() && r.value.trim())) {
-        showMessage('Every attribute needs a name', 'error');
+        setFail({ text: 'every attribute needs a name' });
         return;
       }
       const keys = d.otherAttrsRows.filter((r) => r.key.trim()).map((r) => r.key.trim());
       if (new Set(keys).size !== keys.length) {
-        showMessage('An attribute name is repeated', 'error');
+        setFail({ text: 'an attribute name is repeated' });
         return;
       }
     }
@@ -633,7 +640,7 @@ export function MaterialModal({
     };
     save.mutate(payload, {
       onSuccess: (data) => {
-        showMessage(material ? 'Material updated' : 'Material created', 'success');
+        // The dialog closing onto the updated catalog is the receipt.
         // CreateMaterial returns the new id; hand it (+ the submitted material) to the caller so it
         // can auto-select the just-created material without a round-trip to /materials.
         if (!material?.id) {
@@ -642,7 +649,16 @@ export function MaterialModal({
         }
         onOpenChange(false);
       },
-      onError: (e) => showMessage(saveErrorMessage(e), 'error'),
+      onError: (e) =>
+        isRefusal(e)
+          ? setFail({ text: saveErrorMessage(e) })
+          : notifyFailure(
+              (d.name.trim() || 'MATERIAL').toUpperCase(),
+              'not saved',
+              e,
+              saveErrorMessage(e),
+              material?.id ? submit : undefined,
+            ),
     });
   };
 
@@ -721,6 +737,7 @@ export function MaterialModal({
               <input
                 className={cell}
                 value={d.name}
+                aria-invalid={fail?.name || undefined}
                 onChange={(e) => set({ name: e.target.value })}
               />
             </label>
@@ -1114,7 +1131,7 @@ export function MaterialModal({
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
                     legacy value — read-only
                   </Text>
-                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
+                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-pageBg px-[7px] py-[3px] text-micro text-labelColor'>
                     {d.otherAttrsRaw}
                   </div>
                 </div>
@@ -1364,6 +1381,7 @@ export function MaterialModal({
           </div>
         </div>
       </div>
+      <FailNote verb='not saved' text={fail?.text ?? null} className='mt-3' />
     </ConfirmationModal>
   );
 }

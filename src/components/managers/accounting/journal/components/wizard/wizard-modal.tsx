@@ -1,12 +1,13 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctJournalEntry, AcctJournalLineInput } from 'api/proto-http/admin';
 import { CreateSupplierModal } from 'components/managers/accounting/subledgers/components/create-supplier-modal';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BackLink,
   Button,
+  CalloutBox,
   ConfirmationModal,
   Input,
   Selector,
@@ -16,6 +17,7 @@ import {
 } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { Callout, CheckRow, CheckStrip, GroupHeader, Verdict } from '../../../components/kit';
+import { errorText, isRefused, reasonOf } from '../../../utils/feedback';
 import {
   useAcctPeriods,
   useCreateFixedAsset,
@@ -46,8 +48,9 @@ function fmt(n: number): string {
 
 export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
   const navigate = useNavigate();
-  const { showMessage } = useSnackBarStore();
   const { data: periodsData } = useAcctPeriods();
+  // A refusal of the review step stands over its buttons until the next attempt.
+  const [postError, setPostError] = useState<string | null>(null);
   const { data: suppliersData } = useSuppliers();
   const createEntry = useCreateJournalEntry();
   const createAsset = useCreateFixedAsset();
@@ -245,27 +248,40 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
       {
         onSuccess: (res) => {
           const entry = res.entry;
+          // Kept as a toast: it carries the «view» door back to an entry the list may not show,
+          // and the first follow-up step of the case.
           const suffix = monthInfo?.isPast ? ` in ${monthInfo.month}` : '';
-          showMessage(
-            `Entry #${entry?.id ?? '?'} posted${suffix}`,
-            'success',
-            entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
-          );
-          if (result.checklist.length > 0) {
-            showMessage(`after posting: ${result.checklist[0]}`, 'success');
-          }
+          notify({
+            sev: 'ok',
+            subject: `ENTRY ${entry?.id ?? ''}`.trim(),
+            text: `posted${suffix}`,
+            detail: result.checklist.length > 0 ? `next: ${result.checklist[0]}` : undefined,
+            action:
+              entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
+          });
           onClose();
         },
         onError: (e) => {
-          showMessage(
-            result.fixedAsset && assetCreatedRef.current
-              ? 'asset was registered but the ENTRY failed — retry posting; if you retry from ' +
-                  'scratch, delete the duplicate asset in reports → fixed assets'
-              : e instanceof Error
-                ? e.message
-                : 'Failed to create entry',
-            'error',
-          );
+          const halfDone = !!result.fixedAsset && assetCreatedRef.current;
+          const said = errorText(e, 'failed to create entry') ?? '';
+          if (isRefused(e)) {
+            setPostError(
+              halfDone
+                ? `asset registered, entry refused: ${said}. retry posting; starting over duplicates the asset`
+                : said,
+            );
+            return;
+          }
+          // No retry: a lost reply may still have posted the entry.
+          notify({
+            sev: halfDone ? 'warn' : 'error',
+            subject: 'ENTRY',
+            text: halfDone ? 'asset registered' : 'not posted',
+            bad: halfDone ? 'entry failed' : reasonOf(e),
+            detail: halfDone
+              ? 'retry posting; starting over duplicates the asset (reports → fixed assets)'
+              : said,
+          });
         },
       },
     );
@@ -273,13 +289,14 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
 
   const post = () => {
     if (!result || unbalanced || monthInfo?.closed) return;
+    setPostError(null);
     // The fixed asset goes first (the register drives depreciation); the entry follows only when
     // it succeeds. A retry after an entry-side failure skips straight to the entry.
     if (result.fixedAsset && !assetCreatedRef.current) {
       const fa = result.fixedAsset;
       const costBase = inputToDecimal(fa.cost);
       if (!costBase) {
-        showMessage('asset cost is invalid — go back and re-enter it', 'error');
+        setPostError('asset cost is invalid — go back and re-enter it');
         return;
       }
       createAsset.mutate(
@@ -294,11 +311,20 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
             assetCreatedRef.current = true;
             postEntry();
           },
-          onError: (e) =>
-            showMessage(
-              e instanceof Error ? e.message : 'Failed to register the fixed asset',
-              'error',
-            ),
+          onError: (e) => {
+            const said = errorText(e, 'failed to register the fixed asset') ?? '';
+            if (isRefused(e)) {
+              setPostError(said);
+              return;
+            }
+            notify({
+              sev: 'error',
+              subject: `ASSET ${fa.name}`,
+              text: 'not registered',
+              bad: reasonOf(e),
+              detail: said,
+            });
+          },
         },
       );
       return;
@@ -322,7 +348,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
       </Text>
     </div>
   ) : monthInfo?.isPast ? (
-    <div className='border border-textInactiveColor p-3'>
+    <div className='border border-borderColor p-3'>
       <Text size='small' variant='inactive'>
         dated {monthInfo.month} (an open past month) — the list shows the current month by default,
         so this entry won&apos;t appear there after posting. use the toast&apos;s &quot;view&quot;
@@ -342,9 +368,9 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[680px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[680px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <div className='flex items-baseline gap-3'>
               <DialogPrimitives.Title className='text-lg uppercase'>
                 new journal entry
@@ -425,7 +451,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                             key={s.id}
                             type='button'
                             onClick={() => pickScenario(s)}
-                            className='flex w-full flex-col gap-0.5 border border-textInactiveColor p-2.5 text-left hover:border-textColor'
+                            className='flex w-full flex-col gap-0.5 border border-borderColor p-2.5 text-left hover:border-textColor'
                           >
                             <span className='flex w-full items-center gap-2'>
                               <Text component='span' className='font-bold'>
@@ -517,8 +543,8 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                   </Text>
                 </div>
 
-                <div className='border border-textInactiveColor'>
-                  <div className='grid grid-cols-[56px_1fr_40px_96px] gap-2 border-b border-textInactiveColor bg-bgSecondary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
+                <div className='border border-borderColor'>
+                  <div className='grid grid-cols-[56px_1fr_40px_96px] gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
                     <span>code</span>
                     <span>account</span>
                     <span>side</span>
@@ -527,7 +553,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                   {result.lines.map((l, i) => (
                     <div
                       key={i}
-                      className='grid grid-cols-[56px_1fr_40px_96px] items-baseline gap-2 border-b border-textInactiveColor px-2.5 py-1 last:border-b-0'
+                      className='grid grid-cols-[56px_1fr_40px_96px] items-baseline gap-2 border-b border-borderColor px-2.5 py-1 last:border-b-0'
                     >
                       <span className='tabular-nums'>{l.accountCode}</span>
                       <span>
@@ -564,7 +590,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                 ))}
 
                 {result.checklist.length > 0 && (
-                  <div className='border border-textInactiveColor p-2.5'>
+                  <div className='border border-borderColor p-2.5'>
                     <Text size='small' className='mb-1 font-bold uppercase'>
                       after posting, also do:
                     </Text>
@@ -579,6 +605,8 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                 )}
 
                 {periodWarning}
+
+                {postError && <CalloutBox tone='error'>{postError}</CalloutBox>}
 
                 <div className='flex items-center justify-end gap-2'>
                   <Button type='button' variant='secondary' size='lg' onClick={() => setStep(2)}>

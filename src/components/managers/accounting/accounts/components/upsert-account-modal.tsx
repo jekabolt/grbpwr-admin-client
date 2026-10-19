@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AcctAccount } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo } from 'react';
+import { notify } from 'lib/stores/store';
+import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { ConfirmationModal, Text, Form, InputField, SelectField } from 'ui';
+import { CalloutBox, ConfirmationModal, Text, Form, InputField, SelectField } from 'ui';
 import { applyServerFieldErrors } from 'utils/field-errors';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { ACCT_SECTIONS, ACCT_STATEMENTS, AcctSection, AcctStatement } from '../../utils/constants';
 import { useCreateAccount, useUpdateAccountName } from '../../utils/hooks';
 import { accountSchema, AccountSchema } from './schema';
@@ -23,7 +24,8 @@ const STATEMENT_ITEMS = ACCT_STATEMENTS.map((s) => ({ label: s, value: s }));
 
 export function UpsertAccountModal({ account, open, onOpenChange }: Props) {
   const isRename = !!account;
-  const { showMessage } = useSnackBarStore();
+  // A refusal no field took stands over the form until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const createAccount = useCreateAccount();
   const updateName = useUpdateAccountName();
 
@@ -44,24 +46,36 @@ export function UpsertAccountModal({ account, open, onOpenChange }: Props) {
 
   // Reset when (re)opening or when the rename target changes, mirroring upsert-shipping.tsx.
   useEffect(() => {
-    if (open) form.reset(defaults);
+    if (open) {
+      form.reset(defaults);
+      setRefusal(null);
+    }
   }, [open, defaults, form]);
 
   const pending = createAccount.isPending || updateName.isPending;
 
+  // A refusal of what was typed stays in the modal; a lost request is news.
+  const fail = (e: unknown, subject: string, text: string, allowed: string[]) => {
+    const { applied, unmapped } = applyServerFieldErrors(e, form.setError, {
+      allow: (p) => allowed.includes(p),
+    });
+    const said = errorText(e, `failed: ${text}`) ?? '';
+    if (isRefused(e)) {
+      if (applied.length === 0 || unmapped.length > 0) setRefusal(said);
+      return;
+    }
+    notify({ sev: 'error', subject, text, bad: reasonOf(e), detail: said });
+  };
+
+  // No receipts: the list shows the new name or the new account.
   const onSubmit: SubmitHandler<AccountSchema> = (data) => {
+    setRefusal(null);
     if (isRename) {
       updateName.mutate(
         { code: data.code, name: data.name },
         {
-          onSuccess: () => {
-            showMessage('Account updated', 'success');
-            onOpenChange(false);
-          },
-          onError: (e) => {
-            applyServerFieldErrors(e, form.setError, { allow: (p) => p === 'name' });
-            showMessage(e instanceof Error ? e.message : 'Failed to update account', 'error');
-          },
+          onSuccess: () => onOpenChange(false),
+          onError: (e) => fail(e, `ACCOUNT ${data.code}`, 'not renamed', ['name']),
         },
       );
       return;
@@ -69,16 +83,9 @@ export function UpsertAccountModal({ account, open, onOpenChange }: Props) {
     createAccount.mutate(
       { code: data.code, name: data.name, section: data.section, statement: data.statement },
       {
-        onSuccess: () => {
-          showMessage('Account created', 'success');
-          onOpenChange(false);
-        },
-        onError: (e) => {
-          applyServerFieldErrors(e, form.setError, {
-            allow: (p) => ['code', 'name', 'section', 'statement'].includes(p),
-          });
-          showMessage(e instanceof Error ? e.message : 'Failed to create account', 'error');
-        },
+        onSuccess: () => onOpenChange(false),
+        onError: (e) =>
+          fail(e, `ACCOUNT ${data.code}`, 'not created', ['code', 'name', 'section', 'statement']),
       },
     );
   };
@@ -120,6 +127,7 @@ export function UpsertAccountModal({ account, open, onOpenChange }: Props) {
                 <SelectField name='statement' label='statement' items={STATEMENT_ITEMS} />
               </>
             )}
+            {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
           </div>
         </Form>
       </div>

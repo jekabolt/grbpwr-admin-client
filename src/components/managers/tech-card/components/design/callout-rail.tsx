@@ -286,11 +286,11 @@ export function CalloutRail({
             key={index}
             data-callout-row={index}
             data-callout-hot={hot ? 'true' : undefined}
-            /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`bgSecondary` — «a fill, not a container»),
+            /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`pageBg` — «a fill, not a container»),
                а картинка в тот же миг подсвечивает указание: два конца одного жеста. */
             className={cn(
               'group border-b border-hairline py-1 px-1 -mx-1 last:border-b-0',
-              hot && 'bg-bgSecondary',
+              hot && 'bg-pageBg',
             )}
             onPointerEnter={() => onHover(index)}
             onPointerLeave={() => onHover(null)}

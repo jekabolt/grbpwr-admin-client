@@ -37,7 +37,7 @@ export function MaterialSwatch({ material }: { material?: common_Material }) {
   }
   return (
     <span
-      className='block aspect-square border border-borderColor bg-bgSecondary'
+      className='block aspect-square border border-borderColor bg-pageBg'
       style={{ background: materialSwatchColor(material) }}
     />
   );

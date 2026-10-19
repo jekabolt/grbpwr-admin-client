@@ -3506,7 +3506,7 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      <footer className='mt-6 border-t border-textInactiveColor pt-2 text-nano uppercase tracking-wide text-labelColor'>
+      <footer className='mt-6 border-t border-borderColor pt-2 text-nano uppercase tracking-wide text-labelColor'>
         {tc.brand || 'GRBPWR'} · {tc.styleNumber || ''} · {tc.name || ''} · generated{' '}
         {formatTechCardDate(techCard.updatedAt)}
       </footer>

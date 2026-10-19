@@ -11,9 +11,7 @@ import Text from './text';
  */
 
 export function Board({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn('flex gap-2 overflow-x-auto pb-1', className)}>{children}</div>
-  );
+  return <div className={cn('flex gap-2 overflow-x-auto pb-1', className)}>{children}</div>;
 }
 
 export function BoardColumn({
@@ -44,8 +42,14 @@ export function BoardColumn({
         className,
       )}
     >
-      <div className='flex items-center gap-1.5 border-b border-borderColor bg-bgSecondary px-2 py-1'>
-        <Text size='micro' variant='uppercase' tracking='group' component='span' className='font-bold'>
+      <div className='flex items-center gap-1.5 border-b border-borderColor bg-pageBg px-2 py-1'>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='group'
+          component='span'
+          className='font-bold'
+        >
           {title}
         </Text>
         {count !== undefined && (
@@ -90,7 +94,7 @@ export function BoardCard({
 
 /** The add door's skin: a dashed frame and a quiet label that inks on hover. */
 const ADD_DOOR_SKIN =
-  'border border-dashed border-borderColor text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:hover:border-borderColor';
+  'border border-dashed border-borderColor text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-borderColor disabled:hover:border-borderColor';
 
 const ADD_DOOR_SHAPE = {
   /** Full-width row under a list (or the list's first row when it is empty). */

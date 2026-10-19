@@ -4,7 +4,7 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -228,7 +228,6 @@ export function Bench({
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
   const pick = usePickMode();
-  const { showMessage } = useSnackBarStore();
 
   const [optimistic, setOptimistic] = useState<Record<string, Optimistic>>({});
   /** A detail being minted has no slot to key on yet — it is born by this very write. */
@@ -675,10 +674,14 @@ export function Bench({
                      CLEAR оно не меняется, а пока переименование пишется, вход удержан — GENERATE
                      ждёт, и прогон не снимет наполовину переименованный вход. */
                   if (!rowsWritable(readFlatInput(techCardId))) {
-                    showMessage(
-                      'the flat input is busy — a run is being saved or started, or the prompt is being cleared; the detail was not renamed',
-                      'error',
-                    );
+                    notify({
+                      sev: 'error',
+                      subject: 'DETAIL',
+                      text: 'not renamed',
+                      bad: 'input busy',
+                      detail:
+                        'the flat input is busy — a run is being saved or started, or the prompt is being cleared; the detail was not renamed',
+                    });
                     return;
                   }
                   const release = holdFlatInput(techCardId);

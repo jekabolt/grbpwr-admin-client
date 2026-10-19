@@ -99,7 +99,7 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
       </div>
 
       {/* Bullet bar: interval band (faint) · projected remainder (hatched) · actual (solid) · LY tick. */}
-      <div className='relative mt-4 h-3 w-full bg-bgSecondary/60' role='img' aria-label={ariaLabel}>
+      <div className='relative mt-4 h-3 w-full bg-pageBg/60' role='img' aria-label={ariaLabel}>
         {!isClosed && high > low && (
           <div
             className='absolute inset-y-0 bg-textColor/10'

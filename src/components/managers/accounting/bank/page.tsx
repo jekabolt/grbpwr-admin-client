@@ -268,7 +268,7 @@ export function AcctBankPage() {
                   'border px-3 py-1.5 text-textBaseSize uppercase transition-colors',
                   active
                     ? 'border-textColor text-textColor'
-                    : 'border-textInactiveColor text-textInactiveColor hover:text-textColor',
+                    : 'border-borderColor text-borderColor hover:text-textColor',
                 )}
               >
                 {s.label}
@@ -382,7 +382,7 @@ export function AcctBankPage() {
               why? (saved on the line — an ignored line books nothing, so this is its only trace)
             </Text>
             <input
-              className='w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize'
+              className='w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize'
               value={ignoreReason}
               maxLength={255}
               placeholder='e.g. EXCHANGE leg — EUR side posted as #123'

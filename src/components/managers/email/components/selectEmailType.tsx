@@ -83,7 +83,7 @@ export const SelectEmailType: FC<SelectEmailTypeProps> = ({
         type='button'
         onClick={() => addBlock(value)}
         className={cn(
-          'group flex h-full flex-col items-start gap-1 border border-textInactiveColor p-3 text-left transition-colors',
+          'group flex h-full flex-col items-start gap-1 border border-borderColor p-3 text-left transition-colors',
           'hover:bg-textColor hover:text-bgColor',
           'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
         )}

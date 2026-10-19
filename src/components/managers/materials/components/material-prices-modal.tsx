@@ -1,13 +1,17 @@
 import { common_Material } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
-import { useSnackBarStore } from 'lib/stores/store';
+import {
+  FailNote,
+  isRefusal,
+  notifyFailure,
+} from 'components/managers/production-runs/components/feedback';
 import { useState } from 'react';
 import { ConfirmationModal, Row, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { useAddMaterialPrice, useMaterialPrices } from './useMaterials';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // Price history timeline (🔒 costing) + AddMaterialPrice. New prices are `manual`;
 // `production_run`-sourced entries are written by receiving a production run.
@@ -21,7 +25,7 @@ export function MaterialPricesModal({
   material?: common_Material;
 }) {
   const { canReadCosting, canWriteCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  const [fail, setFail] = useState<string | null>(null);
   const materialId = material?.id ?? 0;
   const { data, isLoading } = useMaterialPrices(
     materialId,
@@ -50,7 +54,7 @@ export function MaterialPricesModal({
     const g = parseFloat(gross.amount.replace(/,/g, '.'));
     const r = parseFloat(gross.ratePct.replace(/,/g, '.'));
     if (!Number.isFinite(g) || g <= 0 || !Number.isFinite(r) || r < 0) {
-      showMessage('Enter the gross amount and a VAT rate', 'error');
+      setFail('enter the gross amount and a VAT rate');
       return;
     }
     const net = g / (1 + r / 100);
@@ -58,12 +62,13 @@ export function MaterialPricesModal({
   };
 
   const submit = () => {
+    setFail(null);
     if (!form.price.trim()) {
-      showMessage('Price is required', 'error');
+      setFail('price is required');
       return;
     }
     if (!form.validFrom) {
-      showMessage('Valid-from date is required', 'error');
+      setFail('valid-from date is required');
       return;
     }
     add.mutate(
@@ -77,11 +82,14 @@ export function MaterialPricesModal({
       },
       {
         onSuccess: () => {
+          // The new row in the history is the receipt.
           setForm({ price: '', currency: 'EUR', validFrom: '', note: '' });
-          showMessage('Price added', 'success');
         },
+        // No retry from the toast: a lost answer may still have added the price.
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to add price', 'error'),
+          isRefusal(e)
+            ? setFail(e instanceof Error ? e.message : 'not accepted')
+            : notifyFailure(`PRICE · ${material?.name ?? ''}`.toUpperCase(), 'not added', e),
       },
     );
   };
@@ -137,7 +145,7 @@ export function MaterialPricesModal({
             </div>
 
             {canWriteCosting && (
-              <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
+              <div className='flex flex-col gap-2 border-t border-borderColor pt-3'>
                 <Text variant='uppercase' size='small'>
                   add price — NET, ex-VAT
                 </Text>
@@ -220,6 +228,7 @@ export function MaterialPricesModal({
             )}
           </>
         )}
+        <FailNote verb='not added' text={fail} />
       </div>
     </ConfirmationModal>
   );

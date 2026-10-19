@@ -1765,7 +1765,7 @@ export function DetailsStep({
             <tr
               key={seed}
               onClick={() => setSel(seed)}
-              className={cn('cursor-pointer', on && 'bg-bgZebra')}
+              className={cn('cursor-pointer', on && 'bg-pageBg')}
             >
               <td>
                 <MarkBox n={mark(seed)} />
@@ -1902,7 +1902,7 @@ export function DetailsStep({
               {/* pinned to the right edge: the answer the footer asks for is always on screen,
                   even when the table scrolls sideways (1024 px) */}
               {withState && (
-                <td data-align='left' className={cn(STICKY_END, on ? 'bg-bgZebra' : 'bg-bgColor')}>
+                <td data-align='left' className={cn(STICKY_END, on ? 'bg-pageBg' : 'bg-bgColor')}>
                   {b ? (
                     <BlockedState
                       reason={b.reason}

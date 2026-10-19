@@ -659,6 +659,22 @@ export type DeleteFromBucketRequest = {
 export type DeleteFromBucketResponse = {
 };
 
+// MonthCount is one calendar month (UTC) and how many items fall in it.
+export type MonthCount = {
+  year: number | undefined;
+  month: number | undefined;
+  count: number | undefined;
+};
+
+// ListMediaMonthsRequest carries no filter on purpose: ListObjectsPaged has none, and the
+// counts must describe exactly the list they index.
+export type ListMediaMonthsRequest = {
+};
+
+export type ListMediaMonthsResponse = {
+  months: MonthCount[] | undefined;
+};
+
 export type GetMediaUsageRequest = {
   mediaIds: number[] | undefined;
 };
@@ -6535,6 +6551,7 @@ export type ListTasksRequest = {
   // project_topic_id выше): это тот же список задач, просто суженный, и он обязан идти под тем же
   // rd(tasks). 0 = no filter.
   parentTaskId: number | undefined;
+  query: string | undefined;
 };
 
 export type ListTasksResponse = {
@@ -18928,6 +18945,14 @@ export interface AdminService {
   // A media id with no references comes back with an empty refs list, never omitted, so the
   // client can render "unused" without guessing whether the id was simply dropped.
   GetMediaUsage(request: GetMediaUsageRequest): Promise<GetMediaUsageResponse>;
+  // ListMediaMonths counts the media library per calendar month of created_at, newest month
+  // first. It is the index behind the date scrubber: ListObjectsPaged pages by offset and has
+  // no total, so the client cannot reach an old month without paging through everything in
+  // front of it. With these counts the offset of a month's first item is the sum of the counts
+  // of every newer month — valid only because ListObjectsPaged orders by created_at (then id)
+  // in the same direction. Months are UTC; the client labels items in UTC to match. Empty
+  // months are omitted.
+  ListMediaMonths(request: ListMediaMonthsRequest): Promise<ListMediaMonthsResponse>;
   // CreateColorway creates a new DRAFT colourway attached to an existing style (R2/R4 write
   // decomposition; replaces the coupled UpsertColorway). It writes only colourway-owned fields — no
   // style facts (UpdateStyle), no variants (CreateVariant), no size chart (UpdateStyleSizeChart). The
@@ -20971,6 +20996,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetMediaUsage",
       }) as Promise<GetMediaUsageResponse>;
+    },
+    ListMediaMonths(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/content/months`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMediaMonths",
+      }) as Promise<ListMediaMonthsResponse>;
     },
     CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways`; // eslint-disable-line quotes
@@ -23797,6 +23839,9 @@ export function createAdminServiceClient(
       }
       if (request.parentTaskId) {
         queryParams.push(`parentTaskId=${encodeURIComponent(request.parentTaskId.toString())}`)
+      }
+      if (request.query) {
+        queryParams.push(`query=${encodeURIComponent(request.query.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

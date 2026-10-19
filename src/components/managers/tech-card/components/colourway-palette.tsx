@@ -66,7 +66,7 @@ export function paletteValueFromRead(read: {
 }
 
 const CELL =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 function Label({ children }: { children: React.ReactNode }): JSX.Element {
   return (

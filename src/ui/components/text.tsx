@@ -8,10 +8,10 @@ const textVariants = cva('', {
       selected: ['text-bgColor', 'bg-textColor', 'uppercase'],
       uppercase: ['text-text', 'uppercase'],
       underlined: ['underline', 'text-text'],
-      underLineWithColor: ['underline', 'text-blue', 'uppercase'],
+      underLineWithColor: ['underline', 'text-warning', 'uppercase'],
       strikethrough: ['line-through', 'text-text'],
       strileTroughInactive: ['line-through', 'text-inactive'],
-      inactive: ['text-textInactiveColor'],
+      inactive: ['text-borderColor'],
       // Readable secondary text for functional field labels/hints (AA on white).
       label: ['text-labelColor'],
       /**

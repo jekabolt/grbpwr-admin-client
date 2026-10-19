@@ -30,7 +30,7 @@ export function ReadOnlyField({
       {children != null ? (
         children
       ) : (
-        <Text size='small' className={hasValue ? undefined : 'text-textInactiveColor'}>
+        <Text size='small' className={hasValue ? undefined : 'text-borderColor'}>
           {hasValue ? value : placeholder}
         </Text>
       )}
@@ -41,7 +41,7 @@ export function ReadOnlyField({
 // A read-only chip — for a single derived value that reads better as a tile than a text row.
 export function ReadOnlyChip({ children }: { children: ReactNode }) {
   return (
-    <span className='inline-flex items-center border border-textInactiveColor px-2 py-0.5'>
+    <span className='inline-flex items-center border border-borderColor px-2 py-0.5'>
       <Text size='small' variant='uppercase' component='span'>
         {children}
       </Text>

@@ -41,13 +41,13 @@ export function Materials() {
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <Text variant='uppercase' size='large'>
           materials
         </Text>
       </div>
 
-      <div className='flex items-center gap-4 border-b border-textInactiveColor'>
+      <div className='flex items-center gap-4 border-b border-borderColor'>
         {TABS.map((t) => (
           <button
             key={t.id}

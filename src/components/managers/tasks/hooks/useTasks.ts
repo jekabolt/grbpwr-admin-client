@@ -1,4 +1,10 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useSnackBarStore } from 'lib/stores/store';
 import {
@@ -44,6 +50,21 @@ export function useTasks(filter: ListTasksFilter, enabled = true) {
     queryFn: () => tasksService.listTasks(filter),
     staleTime: 30_000,
     enabled,
+  });
+}
+
+/**
+ * Search across every board, archive included. The previous answer stays on screen while the
+ * next query loads, so the list does not blink empty on every keystroke.
+ */
+export function useTaskSearch(query: string) {
+  const filter: ListTasksFilter = { includeArchived: true, query };
+  return useQuery({
+    queryKey: tasksKeys.list(filter),
+    queryFn: () => tasksService.listTasks(filter),
+    enabled: query.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 
@@ -431,7 +452,6 @@ export function useAddComment(taskId: number) {
   });
 }
 
-
 // ---- Сабтаски и связи ----
 //
 // ПИШУТСЯ ТОЛЬКО ОТДЕЛЬНЫМИ RPC, НИКОГДА ЧЕРЕЗ `TaskInsert`. Связь принадлежит ДВУМ карточкам
@@ -502,7 +522,11 @@ export function useDeleteComment(taskId: number) {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<TaskComment[]>(key);
-      if (previous) qc.setQueryData<TaskComment[]>(key, previous.filter((c) => c.id !== id));
+      if (previous)
+        qc.setQueryData<TaskComment[]>(
+          key,
+          previous.filter((c) => c.id !== id),
+        );
       return { previous };
     },
     onError: (e, _id, ctx) => {

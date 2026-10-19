@@ -2,22 +2,37 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
+import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button, SideRailLayout, Text } from 'ui';
+import { Button, DateScrubber, SideRailLayout, Text, useMonthIndex, type ScrubMonth } from 'ui';
 import {
+  CropGlyph,
+  ExpandGlyph,
   MediaViewer,
-  ViewerAction,
   mediaFullListToViewerItems,
   mediaFullViewerSrc,
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
+import { TrashIcon } from '@radix-ui/react-icons';
+import { MediaSavedBar } from './components/media-saved-bar';
 import { Filter } from './components/filter';
+import { SkippedFilesNote } from './components/dragdrop-area';
 import { MediaFilterBar } from './components/media-filter-bar';
-import { SlotFit } from './components/media-item';
+import { MediaItem, SlotFit } from './components/media-item';
 import { MediaList } from './components/media-list';
+import { MediaVirtualGrid } from './components/media-virtual-grid';
+import {
+  MediaFiltersSheet,
+  MobileBottomBar,
+  MobileLibraryHead,
+  MobileSelectHead,
+  useCoarsePointer,
+} from './components/media-mobile';
 import { MediaRail } from './components/media-rail';
+import { MediaDeleteSheet } from './components/media-delete-sheet';
 import { MediaExpandDialog } from './components/media-expand-dialog';
 import { MediaRecropDialog } from './components/media-recrop-dialog';
 import { MediaSelectionBar } from './components/media-selection-bar';
@@ -26,11 +41,56 @@ import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
 import { mediaUsageRefs, usageRefHref, usageRefName, usageRefSlot } from './utils/media-usage';
 import { useFilter } from './utils/useFilter';
 import { usePasteFiles } from './utils/usePasteFiles';
-import { useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
+import { useIsMobile } from './utils/useIsMobile';
+import {
+  downloadMediaOriginals,
+  useDeleteMedia,
+  useInfiniteMedia,
+  useMediaMonths,
+  useMediaUsage,
+  useMediaWindow,
+  type MediaRange,
+} from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
 import { useSelection } from './utils/useSelectMedia';
 
 export type VideoSize = { width: number; height: number };
+
+const NO_MONTHS: ScrubMonth[] = [];
+/** Fixed top bar of the shell (`top-2` + `h-12`): the pill and the month at the top sit below it. */
+const SHELL_BAR = 56;
+/**
+ * `MobileBottomBar` before it is measured: a 44px control between 8px paddings and its border.
+ * The real height (safe-area padding included) replaces it once the bar is on screen.
+ */
+const PHONE_BAR = 61;
+
+/** Month (UTC) of the first tile under the top bar, read from the tiles on screen. */
+function monthOfTopTile(root: HTMLElement | null, top: number) {
+  if (!root) return null;
+  const tiles = root.querySelectorAll<HTMLElement>('[data-created]');
+  let lo = 0;
+  let hi = tiles.length - 1;
+  let found = tiles.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (tiles[mid].getBoundingClientRect().bottom > top) {
+      found = mid;
+      hi = mid - 1;
+    } else lo = mid + 1;
+  }
+  const d = new Date(tiles[found]?.dataset.created ?? '');
+  if (Number.isNaN(d.getTime())) return null;
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
+/** Infinite pages first, then the window's pages they do not hold yet (filters and usage). */
+function mergeById(a: common_MediaFull[], b: common_MediaFull[]) {
+  if (!b.length) return a;
+  const ids = new Set(a.map((m) => m.id));
+  const extra = b.filter((m) => !ids.has(m.id));
+  return extra.length ? [...a, ...extra] : a;
+}
 
 interface MediaLayoutProps {
   aspectRatio?: string[];
@@ -39,6 +99,11 @@ interface MediaLayoutProps {
   showVideos?: boolean;
   selectionMode?: boolean;
   showFilters?: boolean;
+  /**
+   * Phone picker's scrolling viewport. When supplied in selection mode, the picker uses the same
+   * sparse, month-indexed grid as the phone library instead of walking every intervening page.
+   */
+  virtualScrollEl?: HTMLElement | null;
   /**
    * Пропорции, которые ждёт слот, числами. Сетка делится на «встанут как есть» и «нужен кроп»,
    * на каждом кадре второй полосы рисуется рамка будущего кадрирования, а сама полоса
@@ -65,12 +130,19 @@ export function MediaManager({
   showVideos,
   selectionMode = false,
   showFilters = true,
+  virtualScrollEl,
   targetRatios,
   onFilesPicked,
   selected,
   onSelectionChange,
 }: MediaLayoutProps) {
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isPending: infinitePending,
+  } = useInfiniteMedia();
   const { ref, inView } = useInView();
   const navigate = useNavigate();
   const prevInViewRef = useRef(false);
@@ -78,7 +150,7 @@ export function MediaManager({
   // Список СОБИРАЕТСЯ ОДИН РАЗ НА ОТВЕТ, а не на каждый рендер: пересобранный массив — новая
   // ссылка, и мемоизация отбора внутри `useFilter` не срабатывала бы ни разу, пересчитывая
   // фасетные счётчики и сортировку на каждое нажатие клавиши в поиске.
-  const media = useMemo(
+  const pagedMedia = useMemo(
     () => data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [],
     [data],
   );
@@ -90,6 +162,51 @@ export function MediaManager({
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
   const canUpload = canWrite(SECTION.media);
+  // The page owns the document scroller; a phone picker explicitly lends us its dialog scroller.
+  // Desktop pickers pass nothing, so they neither count months nor change their existing list.
+  // The sparse grid lives behind the date pill, so it takes the pill's signal (a touch pointer):
+  // a narrow desktop window keeps the phone layout but the plain list with its scrollbar.
+  const isMobile = useIsMobile();
+  const coarse = useCoarsePointer();
+  const mobileLib = isStandalone && isMobile;
+  const pickerScroller = selectionMode ? virtualScrollEl ?? null : null;
+  const sparsePhone = (mobileLib && coarse) || pickerScroller !== null;
+
+  // PHONE MEDIA = A SPARSE GRID OVER THE WHOLE LIBRARY. The month counts give the total, so
+  // every slot exists up front and only the pages on screen are fetched (`useMediaWindow`); the
+  // date pill can then jump anywhere. Waits for the first infinite page, which it seeds.
+  const months = useMediaMonths(sparsePhone).data ?? NO_MONTHS;
+  const monthTotal = useMonthIndex(months).total;
+  const sparse = sparsePhone && monthTotal > 0;
+  const [range, setRange] = useState<MediaRange | null>(null);
+  const win = useMediaWindow(sparse ? monthTotal : 0, range, sparse && !infinitePending);
+  // Everything loaded either way feeds the filters, usage and the viewer.
+  const media = useMemo(
+    () => (sparse ? mergeById(pagedMedia, win.loaded) : pagedMedia),
+    [sparse, pagedMedia, win.loaded],
+  );
+  const pageScroller =
+    typeof document === 'undefined' ? null : (document.scrollingElement as HTMLElement | null);
+  const sparseScroller = mobileLib ? pageScroller : pickerScroller;
+  const looseListRef = useRef<HTMLDivElement>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const sparseTopInset = mobileLib ? SHELL_BAR : 0;
+  const [phoneBar, setPhoneBar] = useState(PHONE_BAR);
+  const sparseBottomInset = mobileLib && (selectMode || canUpload) ? phoneBar : 0;
+  const looseLabelAt = useCallback(
+    () =>
+      monthOfTopTile(
+        looseListRef.current,
+        mobileLib ? SHELL_BAR : pickerScroller?.getBoundingClientRect().top ?? 0,
+      ),
+    [mobileLib, pickerScroller],
+  );
+  const [selectView, setSelectView] = useState<'all' | 'selected'>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const { showMessage } = useSnackBarStore();
+  const selecting = mobileLib && selectMode;
 
   // ЗАНЯТОСТЬ СПРАШИВАЕТСЯ ОДИН РАЗ НА СТРАНИЦУ И ПО ВСЕЙ ЗАГРУЖЕННОЙ БИБЛИОТЕКЕ, а не по
   // отфильтрованному: счётчики полки обязаны относиться к тому же знаменателю, что и остальные
@@ -151,13 +268,7 @@ export function MediaManager({
     setRatio,
     setUsageShelf,
     reset,
-  } = useFilter(
-    media,
-    aspectRatio,
-    videoSizes,
-    showVideos === false ? 'image' : undefined,
-    usage,
-  );
+  } = useFilter(media, aspectRatio, videoSizes, showVideos === false ? 'image' : undefined, usage);
 
   const selection = useSelection({
     allowMultiple,
@@ -165,6 +276,16 @@ export function MediaManager({
     value: selected,
     onSelectionChange,
   });
+
+  // Sparse grid only over the date-ordered list: any client filter, the oldest-first order or the
+  // «selected» view needs the loaded items themselves, so it keeps the list below. Fit bands are
+  // intentionally absent here because grouping them would break the month index; each picker tile
+  // still draws its own fit frame. A picker for stills keeps its videos in their slots (the month
+  // counts include them), dimmed and unselectable, instead of leaving the sparse grid.
+  const hasClientFilter = isFiltered || !!aspectRatio?.length;
+  const virtual =
+    sparse && !hasClientFilter && order === 'desc' && !(selecting && selectView === 'selected');
+  const noVideos = showVideos === false;
 
   useEffect(() => {
     const justEnteredView = inView && !prevInViewRef.current;
@@ -219,25 +340,81 @@ export function MediaManager({
   // кадры без адреса, и индекс, посчитанный по `filteredMedia`, разъезжался с рядом на каждой
   // такой строке: открытым оказывался соседний снимок. Пока это стоило неверной картинки, теперь
   // ценой была бы неверная подпись «ни на что не заведён, можно удалять» — про чужой файл.
-  const viewable = useMemo(
-    () => (filteredMedia || []).filter((m) => !!mediaFullViewerSrc(m)),
-    [filteredMedia],
+  // Copies saved this session wear `new` in the filmstrip (frame 4).
+  const [newIds, setNewIds] = useState<ReadonlySet<number>>(() => new Set());
+  // SPARSE GRID: THE VIEWER WALKS ONE UNBROKEN RUN. The loaded pages can sit far apart (the top
+  // page and the ones around a jump); handed to the viewer as one list, the counter lied and the
+  // arrows leapt across hundreds of items. The run is anchored at the list offset of the frame
+  // that was opened.
+  const [viewAnchor, setViewAnchor] = useState<number | undefined>(undefined);
+  const viewRun = useMemo(
+    () => (virtual && viewAnchor !== undefined ? win.runAround(viewAnchor) : undefined),
+    [virtual, viewAnchor, win],
   );
-  const viewerItems = useMemo(
-    () => mediaFullListToViewerItems(viewable, viewerUsageOf),
-    [viewable, viewerUsageOf],
-  );
+  // A fresh copy stays in the row even when the filters exclude it (a ratio filter, `in use`, an
+  // id search) — otherwise `open` on the saved bar has nothing to jump to.
+  const viewable = useMemo(() => {
+    const shown = viewRun ?? filteredMedia ?? [];
+    const shownIds = new Set(shown.map((m) => m.id));
+    const extra = newIds.size
+      ? media.filter((m) => m.id != null && newIds.has(m.id) && !shownIds.has(m.id))
+      : [];
+    return [...extra, ...shown].filter((m) => !!mediaFullViewerSrc(m));
+  }, [viewRun, filteredMedia, media, newIds]);
+  const viewerItems = useMemo(() => {
+    const items = mediaFullListToViewerItems(viewable, viewerUsageOf);
+    if (!newIds.size) return items;
+    return items.map((it) =>
+      it.meta?.id != null && newIds.has(it.meta.id) ? { ...it, badge: 'new' } : it,
+    );
+  }, [viewable, viewerUsageOf, newIds]);
   const viewer = useMediaViewer();
-  const viewingMedia = viewable[viewer.index];
+  // THE VIEWER FOLLOWS AN ID, NOT A POSITION: a saved copy lands at the top of the list and would
+  // otherwise shift the open frame onto its neighbour. While the id is not (yet) in the list the
+  // last good position holds.
+  const [viewId, setViewId] = useState<number | undefined>(undefined);
+  const lastViewIndex = useRef(0);
+  const foundAt = viewable.findIndex((x) => x.id === viewId);
+  const viewIndex =
+    foundAt >= 0 ? foundAt : Math.min(lastViewIndex.current, Math.max(viewable.length - 1, 0));
+  lastViewIndex.current = viewIndex;
+  const viewingMedia = viewable[viewIndex];
   const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
   // Обратный кроп — ОТДЕЛЬНОЕ состояние, а не флаг на кропе. Это два разных органа с разными
   // рельсами и разным подвалом, и одно поле «что открыто» рано или поздно откроет их вместе.
   const [expanding, setExpanding] = useState<common_MediaFull | undefined>(undefined);
+  const [saved, setSaved] = useState<
+    { original?: common_MediaFull; media: common_MediaFull } | undefined
+  >(undefined);
+  const deleteMedia = useDeleteMedia();
 
   const handleView = (m: common_MediaFull) => {
-    const at = viewable.findIndex((x) => x.id === m.id);
-    if (at >= 0) viewer.openAt(at);
+    const at = virtual ? win.indexOf(m.id) : undefined;
+    if (at !== undefined) {
+      if (!mediaFullViewerSrc(m)) return;
+      setViewAnchor(at);
+      setViewId(m.id);
+      viewer.onOpenChange(true);
+      return;
+    }
+    if (viewable.some((x) => x.id === m.id)) {
+      setViewAnchor(undefined);
+      setViewId(m.id);
+      viewer.onOpenChange(true);
+    }
   };
+
+  // After crop / expand: back to the viewer on the ORIGINAL, with the «saved» line above the strip.
+  const handleSaved = (m: common_MediaFull) => {
+    const original = recropping ?? expanding ?? viewingMedia;
+    setRecropping(undefined);
+    setExpanding(undefined);
+    if (m.id != null) setNewIds((prev) => new Set(prev).add(m.id as number));
+    setSaved({ original, media: m });
+    if (original?.id != null) setViewId(original.id);
+    viewer.onOpenChange(true);
+  };
+  const dismissSaved = useCallback(() => setSaved(undefined), []);
 
   // ПУСТО ПО ОТБОРУ И ПУСТАЯ БИБЛИОТЕКА — РАЗНЫЕ ЭКРАНЫ. Раньше отбор, не давший ничего, рисовал
   // то же приглашение бросить файл, что и чистая библиотека: человек читал это как «снимки
@@ -317,10 +494,77 @@ export function MediaManager({
 
   const usageOf = useCallback((m: common_MediaFull) => mediaUsageRefs(usage, m.id), [usage]);
 
-  const list = (
+  const enterSelect = (m?: common_MediaFull) => {
+    setSelectMode(true);
+    if (m && !selection.isSelected(m.id ?? 0)) selection.selectMedia(m);
+  };
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectView('all');
+    selection.clearSelection();
+  };
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const { saved, opened } = await downloadMediaOriginals(selection.selectedMedia);
+      showMessage(opened ? `saved ${saved} · opened ${opened}` : `saved ${saved}`, 'success');
+    } finally {
+      setDownloading(false);
+    }
+  };
+  const libraryCount = virtual ? monthTotal : shown;
+  // Выбранное показывается ЦЕЛИКОМ, мимо фильтров: набор переживает смену отбора.
+  const gridMedia =
+    selecting && selectView === 'selected' ? selection.selectedMedia : filteredMedia || [];
+  const facets = {
+    type,
+    ratio,
+    usageShelf,
+    typeCounts,
+    ratioCounts,
+    usageCounts,
+    onType: setType,
+    onRatio: setRatio,
+    onUsage: setUsageShelf,
+  };
+
+  const list = virtual ? (
+    <>
+      <SkippedFilesNote pendingFilesHook={pendingFilesHook} />
+      <MediaVirtualGrid
+        scrollEl={sparseScroller}
+        months={months}
+        total={monthTotal}
+        itemAt={win.itemAt}
+        onRangeChange={setRange}
+        columns={mobileLib ? 2 : undefined}
+        insetTop={sparseTopInset}
+        insetBottom={sparseBottomInset}
+        renderItem={(m, load) => (
+          <MediaItem
+            media={m}
+            isSelected={selection.isSelected(m.id || 0)}
+            onToggle={() => selection.toggleMedia(m)}
+            disabled={disabled}
+            videoSizes={videoSizes}
+            onVideoLoad={handleVideoLoad}
+            onView={selectionMode ? undefined : handleView}
+            selectionMode={selectionMode}
+            fit={fitOf?.(m)}
+            usage={usageOf(m)}
+            touch={mobileLib}
+            selecting={selecting}
+            onLongPress={mobileLib && !disabled ? () => enterSelect(m) : undefined}
+            load={load}
+            unavailable={noVideos && isVideo(m.media?.thumbnail?.mediaUrl)}
+          />
+        )}
+      />
+    </>
+  ) : (
     <>
       <MediaList
-        media={filteredMedia || []}
+        media={gridMedia}
         bands={bands}
         fitOf={fitOf}
         usageOf={usageOf}
@@ -335,23 +579,135 @@ export function MediaManager({
         // приёмку слота, на странице библиотеки — в очередь пачки.
         onFilesPicked={onFilesPicked}
         showAddButton={false}
-        showAddTile={isStandalone && canUpload}
-        noMatch={noMatch}
+        showAddTile={isStandalone && canUpload && !mobileLib}
+        noMatch={
+          selecting && selectView === 'selected' ? (
+            <Text variant='label' className='py-10 text-center'>
+              nothing selected
+            </Text>
+          ) : (
+            noMatch
+          )
+        }
+        touch={mobileLib}
+        selecting={selecting}
+        onLongPress={mobileLib && !disabled ? enterSelect : undefined}
       />
-      {isStandalone && !disabled && (
+      {isStandalone && !disabled && !mobileLib && (
         <MediaSelectionBar
           selected={selection.selectedMedia}
           usage={usage}
           onClear={selection.clearSelection}
         />
       )}
+      {/* Filtered / oldest-first phone list: the pill still dates what is on screen, from the
+          loaded tiles; the month sheet stays shut, since the jump offsets index the plain list. */}
+      {sparsePhone && (
+        <DateScrubber
+          scrollEl={sparseScroller}
+          months={months}
+          labelAt={looseLabelAt}
+          offsetToScrollTop={() => 0}
+          disabledJump
+          insetTop={sparseTopInset}
+          insetBottom={sparseBottomInset}
+        />
+      )}
     </>
   );
 
   return (
-    <div className='flex flex-col gap-6 pb-16'>
-      {isStandalone ? (
-        <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+    <div className={cn('flex flex-col gap-6 pb-16', mobileLib && 'gap-2.5 pb-24')}>
+      {mobileLib ? (
+        <>
+          {selecting ? (
+            <MobileSelectHead
+              count={selection.selectedMedia.length}
+              view={selectView}
+              allCount={libraryCount}
+              onView={setSelectView}
+              onExit={exitSelect}
+              onDeselectAll={selection.clearSelection}
+            />
+          ) : (
+            <MobileLibraryHead
+              loaded={virtual ? monthTotal : media.length}
+              shown={libraryCount}
+              search={search}
+              order={order}
+              facets={facets}
+              onSearch={setSearch}
+              onOrder={setOrder}
+              onOpenFilters={() => setFiltersOpen(true)}
+              onSelect={() => enterSelect()}
+            />
+          )}
+          {pendingPlate}
+          <input
+            ref={fileInputRef}
+            type='file'
+            accept='image/*,video/*'
+            multiple
+            className='hidden'
+            onChange={handleFileChange}
+          />
+          <MediaFiltersSheet
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            shown={shown}
+            facets={facets}
+            onReset={reset}
+          />
+          <MediaDeleteSheet
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            selected={selection.selectedMedia}
+            usage={usage}
+            onDeleted={(ids) => {
+              selection.deselectMany(ids);
+              if (ids.length && ids.length === selection.selectedMedia.length) {
+                setSelectMode(false);
+                setSelectView('all');
+              }
+            }}
+          />
+          {selecting ? (
+            <MobileBottomBar dark onHeight={setPhoneBar}>
+              <Button
+                variant='underlineReverse'
+                size='sm'
+                className='min-h-11'
+                disabled={!selection.selectedMedia.length || downloading}
+                onClick={handleDownload}
+              >
+                {downloading ? 'saving…' : 'download'}
+              </Button>
+              <Button
+                size='sm'
+                className='ml-auto min-h-11 border-l border-labelColor pl-4 text-error disabled:text-labelColor'
+                disabled={!selection.selectedMedia.length}
+                onClick={() => setDeleteOpen(true)}
+              >
+                delete
+              </Button>
+            </MobileBottomBar>
+          ) : (
+            canUpload && (
+              <MobileBottomBar onHeight={setPhoneBar}>
+                <Button
+                  variant='main'
+                  size='lg'
+                  className='min-h-11 w-full'
+                  onClick={handleUploadClick}
+                >
+                  + upload
+                </Button>
+              </MobileBottomBar>
+            )
+          )}
+        </>
+      ) : isStandalone ? (
+        <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
             <Text variant='uppercase' size='large'>
               Media
@@ -427,7 +783,7 @@ export function MediaManager({
         )
       )}
 
-      {isStandalone ? (
+      {isStandalone && !mobileLib ? (
         <SideRailLayout
           rail={
             <MediaRail
@@ -450,46 +806,93 @@ export function MediaManager({
         >
           {list}
         </SideRailLayout>
+      ) : sparsePhone && !virtual ? (
+        <div ref={looseListRef}>{list}</div>
       ) : (
         list
       )}
       {isStandalone && (
         <MediaViewer
           items={viewerItems}
-          index={viewer.index}
+          index={viewIndex}
           open={viewer.open}
-          onOpenChange={viewer.onOpenChange}
-          onIndexChange={viewer.onIndexChange}
+          onOpenChange={(next) => {
+            if (!next) setSaved(undefined);
+            viewer.onOpenChange(next);
+          }}
+          onIndexChange={(i) => setViewId(viewable[i]?.id)}
           // Уходим роутером и закрываем просмотрщик за собой: голая ссылка перезагрузила бы
           // приложение и выкинула подгруженные страницы вместе с очередью незалитых файлов.
           onUsageNavigate={(href) => {
             viewer.onOpenChange(false);
             navigate(href);
           }}
-          actions={() =>
-            canUpload && viewingMedia ? (
-              <>
-                <ViewerAction
-                  onClick={() => {
-                    setRecropping(viewingMedia);
-                    viewer.onOpenChange(false);
-                  }}
-                >
-                  crop
-                </ViewerAction>
-                {/* Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя
-                    знаками: кадр не той формы либо режут, либо обрамляют. Разведи их по разным
-                    углам — и второй не найдут, продолжая срезать подол. */}
-                <ViewerAction
-                  onClick={() => {
-                    setExpanding(viewingMedia);
-                    viewer.onOpenChange(false);
-                  }}
-                >
-                  expand
-                </ViewerAction>
-              </>
-            ) : null
+          // Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя знаками: кадр
+          // не той формы либо режут, либо обрамляют. Разведи их по разным углам — и второй не
+          // найдут, продолжая срезать подол.
+          tools={() => {
+            if (!canUpload || !viewingMedia) return [];
+            const refs = mediaUsageRefs(usage, viewingMedia.id);
+            // Unknown usage counts as in use: the server refuses in-use media anyway.
+            const inUse = refs === undefined || refs.length > 0;
+            const id = viewingMedia.id;
+            return [
+              {
+                key: 'crop',
+                label: 'crop',
+                icon: <CropGlyph />,
+                onClick: () => {
+                  setSaved(undefined);
+                  setRecropping(viewingMedia);
+                  viewer.onOpenChange(false);
+                },
+              },
+              {
+                key: 'expand',
+                label: 'expand',
+                icon: <ExpandGlyph />,
+                onClick: () => {
+                  setSaved(undefined);
+                  setExpanding(viewingMedia);
+                  viewer.onOpenChange(false);
+                },
+              },
+              {
+                key: 'delete',
+                label: 'delete',
+                confirm: `delete ${id}`,
+                icon: <TrashIcon className='size-4' />,
+                place: 'more',
+                tone: 'danger',
+                disabled: inUse || id == null || deleteMedia.isPending,
+                onClick: () => {
+                  if (id == null) return;
+                  const next = viewable[viewIndex + 1] ?? viewable[viewIndex - 1];
+                  deleteMedia.mutate(id, {
+                    onSuccess: () => {
+                      showMessage(`${id} deleted`, 'success');
+                      if (next) setViewId(next.id);
+                      else viewer.onOpenChange(false);
+                    },
+                    onError: (e) =>
+                      showMessage(e instanceof Error ? e.message : `${id} kept`, 'error'),
+                  });
+                },
+              },
+            ];
+          }}
+          notice={
+            saved ? (
+              <MediaSavedBar
+                original={saved.original}
+                saved={saved.media}
+                onDismiss={dismissSaved}
+                onOpen={() => {
+                  setViewId(saved.media.id);
+                  setSaved(undefined);
+                }}
+              />
+            ) : undefined
           }
         />
       )}
@@ -498,15 +901,17 @@ export function MediaManager({
         media={recropping}
         open={!!recropping}
         onOpenChange={(next) => !next && setRecropping(undefined)}
+        onSaved={handleSaved}
       />
 
       <MediaExpandDialog
         media={expanding}
         open={!!expanding}
         onOpenChange={(next) => !next && setExpanding(undefined)}
+        onSaved={handleSaved}
       />
 
-      {hasNextPage && (
+      {hasNextPage && !virtual && (
         <div ref={ref} className='flex justify-center p-4'>
           {isFetchingNextPage && (
             <Text variant='label' className='animate-pulse'>
