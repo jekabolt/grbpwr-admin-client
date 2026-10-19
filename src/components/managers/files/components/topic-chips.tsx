@@ -1,32 +1,9 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
-import { ROUTES } from 'constants/routes';
-import { Button, Chip, ChipRow, Text } from 'ui';
-import { NewProjectModal } from '../projects/new-project-modal';
+import { cn } from 'lib/utility';
+import { Chip } from 'ui';
 
 export type TopicSelection = { topicIds: number[]; untopiced: boolean };
-
-/**
- * Подпись ряда чипов.
- *
- * Рядов стало три, и без имени они читаются как один длинный ряд с непонятной сменой смысла
- * посередине: «packaging», «осень 2026» и «исходники» выглядят одинаково, а значат разное —
- * ярлык, контейнер и связь. Подпись здесь дешевле любого объяснения.
- */
-function RowLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Text
-      size='micro'
-      variant='label'
-      tracking='group'
-      component='span'
-      className='w-[62px] shrink-0 font-bold uppercase'
-    >
-      {children}
-    </Text>
-  );
-}
 
 /**
  * Подпись чипа проекта у ПИСАТЕЛЕЙ: даты и, если проект в архиве, слово об этом.
@@ -98,282 +75,133 @@ export function projectDates(t: FileTopic): string {
 export const MAX_TOPIC_FILTERS = 20;
 
 /**
- * Темы холста: строка чипов вместо рейла.
+ * ОДИН ЖЕСТ ВЫБОРА ТЕМЫ на оба места, где её выбирают: ряд чипов телефона и рейл десктопа.
  *
- * СЮДА ПРИЕЗЖАЮТ ТОЛЬКО ОБЫЧНЫЕ ТЕМЫ. Проекты вынесены в свой ряд ниже, и это не украшение:
- * у них другая семантика выбора (один, а не пересечение) и другое продолжение (роль). Смешай
- * их в одном ряду — и один и тот же жест означал бы в нём две разные вещи.
+ * Мультивыбор — ПЕРЕСЕЧЕНИЕ, а не сумма: второй чип нажимают, чтобы сузить сотни файлов до
+ * десятка («бирка из packaging, которая ещё и atelier»). Объяснять это фразой больше не нужно —
+ * строка статуса называет пересечение словами («design & atelier») и числом.
+ */
+export function toggleTopic(selected: number[], id: number): TopicSelection {
+  return {
+    // «unsorted» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
+    // выбранный чип поверх «unsorted» рисовал бы фильтр, которого в выдаче нет.
+    untopiced: false,
+    topicIds: selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
+  };
+}
+
+/** Чип ряда на телефоне: 34px под палец, строчная подпись телом, а не микро-капсом. */
+export const TAP_CHIP = 'h-8.5 shrink-0 gap-1.5 px-3 text-textBaseSize normal-case tracking-normal';
+/** Залитый чип с «×»: крестик у примитива чернильный, на чёрной заливке его не видно. */
+export const TAP_CHIP_ON = `${TAP_CHIP} *:text-bgColor`;
+
+/** Счётчик внутри чипа — на ступень мельче имени. */
+function Count({ n }: { n: number }) {
+  return <span className='text-control tabular-nums opacity-70'>{n}</span>;
+}
+
+/**
+ * Темы холста на телефоне — ОДИН прокручиваемый ряд.
  *
- * Мультивыбор — ПЕРЕСЕЧЕНИЕ, а не сумма. Второй чип в этом разделе нажимают, чтобы сузить
- * сетку из сотен файлов до десятка («бирка из packaging, которая ещё и atelier»); объединение
- * росло бы от каждого нажатия и делало бы фильтр бесполезным ровно там, где он нужен.
+ * ПОРЯДОК И ЕСТЬ ОБЪЯСНЕНИЕ. Выбранные темы впереди и залиты (с ×); дальше темы, в которых есть
+ * файлы, со счётчиком; пустые свёрнуты в «+ N empty»; «unsorted» стоит за чертой красным — это
+ * другое состояние, а не ещё одна тема. Чипа «all» нет: ничего не выбрано — значит все.
  *
  * Счётчик на чипе — число файлов ВО ВСЕЙ теме, а не в текущем пересечении: он приходит одним
- * ответом на весь словарь и пересчитывать его под каждый набор было бы N запросов на строку
- * чипов. Поэтому строка под чипами называет число найденного отдельно.
+ * ответом на весь словарь. Число найденного называет строка статуса.
+ *
+ * ВЫБРАННОЕ, НО НЕ НАЙДЕННОЕ В СЛОВАРЕ (тема в архиве, ссылка из чата, испорченный адрес)
+ * горит как «#id»: сетка отфильтрована, и экран не имеет права спорить сам с собой.
  */
 export function TopicChips({
   topics,
   selected,
   untopiced,
-  totalFiles,
   untopicedCount,
-  matched,
-  searching,
   onChange,
+  lead,
+  tail,
+  className,
 }: {
   topics: FileTopic[];
   selected: number[];
   untopiced: boolean;
-  totalFiles: number;
   untopicedCount: number;
-  /** Сколько файлов отвечает текущему фильтру. `undefined` — ответ ещё не приехал. */
-  matched?: number;
-  /** В строке поиска что-то есть, то есть `matched` — это НЕ размер пересечения тем. */
-  searching?: boolean;
   onChange: (next: TopicSelection) => void;
+  /** Другие действующие фильтры (человек) — залитым чипом сразу за выбранными темами. */
+  lead?: React.ReactNode;
+  /** Переполнение ряда (пикер человека) — перед чертой. */
+  tail?: React.ReactNode;
+  className?: string;
 }) {
-  const names = selected
-    .map((id) => topics.find((t) => Number(t.id) === id)?.name)
-    .filter(Boolean) as string[];
-
-  const toggle = (id: number) =>
-    onChange({
-      // «unsorted» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
-      // выбранный чип поверх «unsorted» рисовал бы фильтр, которого в выдаче нет.
-      untopiced: false,
-      topicIds: selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
-    });
-
+  const [showEmpty, setShowEmpty] = useState(false);
   const atLimit = selected.length >= MAX_TOPIC_FILTERS;
+  const toggle = (id: number) => onChange(toggleTopic(selected, id));
+  const rest = topics.filter((t) => !selected.includes(Number(t.id)));
+  const full = rest.filter((t) => Number(t.filesCount ?? 0) > 0);
+  const empty = rest.filter((t) => Number(t.filesCount ?? 0) === 0);
 
-  // ВЫБРАННОЕ, НО НЕ НАЙДЕННОЕ В СЛОВАРЕ. Три источника сразу: тема в архиве (холст архив не
-  // просит), ссылка из чата, отправленная до того, как тема стала проектом (в ней проект ещё
-  // лежит как `?topic=`), и просто испорченный адрес. Во всех трёх случаях сетка отфильтрована,
-  // а горящего чипа нет — экран спорил бы сам с собой ровно так же, как спорил бы с
-  // незарисованным проектом.
-  const orphans = selected.filter((id) => !topics.some((t) => Number(t.id) === id));
-
-  // `matched` — размер ВСЕЙ текущей выдачи, а сервер применяет поиск в том же предикате, что
-  // и темы. Приписать это число одному пересечению тем при непустом поиске значило бы
-  // поставить рядом чип «packaging 40» и подпись «packaging — 3 pcs» — два разных ответа про
-  // одно и то же в двух сантиметрах друг от друга.
-  const count =
-    matched === undefined ? '' : ` — ${matched} pcs${searching ? ' for the query' : ''}`;
-
-  const caption = () => {
-    if (untopiced) {
-      return 'files that have not a single topic on them. sorting them means putting labels on, not laying them out into folders';
-    }
-    if (orphans.length) {
-      return `${orphans.map((id) => `#${id}`).join(', ')} — these topics are not in the list: they are archived, they became projects, or the link is old. the filter by them still works${count}`;
-    }
-    if (atLimit) {
-      return `${MAX_TOPIC_FILTERS} topics — the limit of one intersection${count}. drop a chip to pick another`;
-    }
-    if (selected.length > 1) {
-      return `intersection: files that have all the selected topics (${names.join(' + ')})${count}`;
-    }
-    if (selected.length === 1) {
-      return `topic “${names[0] ?? ''}”${count}. press a second topic to narrow it down to an intersection`;
-    }
-    return 'several topics at once give an intersection, not a sum: this is how you look for “a hangtag from packaging that is also atelier”';
+  const offChip = (t: FileTopic) => {
+    const id = Number(t.id);
+    return (
+      <Chip
+        key={id}
+        className={TAP_CHIP}
+        pressed={false}
+        disabled={atLimit}
+        title={atLimit ? `max ${MAX_TOPIC_FILTERS} topics` : t.name ?? undefined}
+        onClick={() => toggle(id)}
+      >
+        <ChipName>{t.name}</ChipName>
+        <Count n={Number(t.filesCount ?? 0)} />
+      </Chip>
+    );
   };
 
   return (
-    <div className='flex flex-col gap-1'>
-      <ChipRow>
-        <RowLabel>topics</RowLabel>
-        <Chip
-          selected={!selected.length && !untopiced}
-          pressed={!selected.length && !untopiced}
-          onClick={() => onChange({ topicIds: [], untopiced: false })}
-        >
-          all
-          <span className='tabular-nums opacity-70'>{totalFiles}</span>
-        </Chip>
-        <Chip
-          selected={untopiced}
-          pressed={untopiced}
-          onClick={() => onChange({ topicIds: [], untopiced: !untopiced })}
-        >
-          unsorted
-          <span className='tabular-nums opacity-70'>{untopicedCount}</span>
-        </Chip>
-        {topics.map((t) => {
-          const id = Number(t.id);
-          const on = selected.includes(id);
-          return (
-            <Chip
-              key={id}
-              selected={on}
-              pressed={on}
-              disabled={atLimit && !on}
-              title={
-                atLimit && !on
-                  ? `no more than ${MAX_TOPIC_FILTERS} topics in one intersection`
-                  : t.name ?? undefined
-              }
-              onClick={() => toggle(id)}
-            >
-              <ChipName>{t.name}</ChipName>
-              <span className='tabular-nums opacity-70'>{Number(t.filesCount ?? 0)}</span>
-            </Chip>
-          );
-        })}
-        {orphans.map((id) => (
+    <div
+      role='group'
+      aria-label='topics'
+      className={cn('flex items-stretch gap-1.5 overflow-x-auto', className)}
+    >
+      {selected.map((id) => {
+        const name = topics.find((t) => Number(t.id) === id)?.name ?? `#${id}`;
+        return (
           <Chip
-            key={`orphan-${id}`}
+            key={id}
             selected
             pressed
-            title='the topic is not in the list: it is archived, it became a project, or the link is old — the filter is applied all the same'
+            className={TAP_CHIP_ON}
+            title={name}
             onClick={() => toggle(id)}
+            onRemove={() => toggle(id)}
           >
-            #{id}
+            <ChipName>{name}</ChipName>
+          </Chip>
+        );
+      })}
+      {lead}
+      {full.map(offChip)}
+      {empty.length > 0 &&
+        (showEmpty ? (
+          empty.map(offChip)
+        ) : (
+          <Chip className={TAP_CHIP} onClick={() => setShowEmpty(true)}>
+            + {empty.length} empty
           </Chip>
         ))}
-        {!topics.length && !orphans.length && (
-          <Text size='micro' variant='label' component='span'>
-            no topics yet — they are started right as a file is uploaded
-          </Text>
-        )}
-      </ChipRow>
-      <Text size='micro' variant='label'>
-        {caption()}
-      </Text>
-    </div>
-  );
-}
-
-/**
- * Проекты холста — ряд ОДИНОЧНОГО выбора.
- *
- * Довод одиночного выбора: одно значение в адресе, одна семантика на весь тулбар и картинка
- * «я работаю в одном проекте». Довод НЕ в том, что двух ролей не бывает по построению, — это
- * неверно, и держать решение на ложном доводе нельзя: через полгода кто-нибудь его проверит,
- * увидит ложность и «починит» ряд на мультивыбор.
- *
- * Заархивированные проекты сюда не приезжают вовсе: холст просит словарь без архива. Проекты
- * копятся и не удаляются (у проекта всегда есть файлы), поэтому без архива ряд рос бы
- * монотонно и со временем делал бы холст хуже, чем он был до проектов.
- */
-export function ProjectChips({
-  projects,
-  selected,
-  matched,
-  writable,
-  onChange,
-}: {
-  projects: FileTopic[];
-  /** 0 — проект не выбран. */
-  selected: number;
-  /** Сколько файлов отвечает текущему фильтру целиком. `undefined` — ответ ещё не приехал. */
-  matched?: number;
-  /** Можно ли заводить проект. В режиме чтения кнопка стоит на месте, но не нажимается. */
-  writable?: boolean;
-  onChange: (projectId: number) => void;
-}) {
-  /**
-   * ЗАВЕСТИ ПРОЕКТ МОЖНО ТАМ, ГДЕ ПРОЕКТ ВЫБИРАЮТ.
-   *
-   * Ряд отвечает на вопрос «какой проект», и «ещё никакой, заведи новый» — это тот же вопрос.
-   * Раньше за этим уходили на отдельный экран по ссылке в хвосте ряда: человек, стоящий над
-   * пачкой файлов, терял и холст, и фильтры, и выделение. Диалог тот же самый, что на экране
-   * списка, — второй формы заведения проекта в админке нет.
-   */
-  const [creating, setCreating] = useState(false);
-  const picked = projects.find((p) => Number(p.id) === selected);
-  // ВЫБРАННЫЙ, НО НЕ НАЙДЕННЫЙ В СЛОВАРЕ — это заархивированный проект (холст архив не просит,
-  // а прямая ссылка на него живёт) либо id из испорченной ссылки. Молчать нельзя: сетка
-  // отфильтрована, а ни один чип не горит — экран спорил бы сам с собой, и пустая выдача
-  // читалась бы как поломка. Тот же приём, что у пикера человека с «#id».
-  const orphan = selected > 0 && !picked;
-  const count = matched === undefined ? '' : ` — ${matched} pcs`;
-  const dates = picked ? projectDates(picked) : '';
-
-  const caption = () => {
-    if (orphan) {
-      return `project #${selected} is not in the list: it is archived, or the link is old. the filter works all the same — it asks by number rather than by name`;
-    }
-    if (!projects.length) {
-      return 'no projects yet. a project is a topic that has dates, an archive and roles on the files inside it — start one with “+ new project”, in one press';
-    }
-    if (picked) {
-      // ПОДПИСЬ ЦИТИРОВАЛА ОРГАН, КОТОРОГО БОЛЬШЕ НЕТ: «the role row below» умер вместе с
-      // общим словарём ролей, а сам этот ряд чипов остался в тулбаре — то есть ложь была видна
-      // на КАЖДОЙ странице проекта. Теперь подпись называет то, что действительно ниже.
-      return `project “${picked.name}”${dates ? ` · ${dates}` : ''}${count}. its page is below: the roles of THIS project are its sections, and its own vocabulary is edited there`;
-    }
-    return 'one project at a time: two projects joined by “and” would mean files lying in both shoots at once, and there are almost none of those';
-  };
-
-  return (
-    <div className='flex flex-col gap-1'>
-      <ChipRow>
-        <RowLabel>projects</RowLabel>
-        <Chip selected={!selected} pressed={!selected} onClick={() => onChange(0)}>
-          outside a project
-        </Chip>
-        {projects.map((p) => {
-          const id = Number(p.id);
-          const on = id === selected;
-          const d = projectDates(p);
-          return (
-            <Chip
-              key={id}
-              selected={on}
-              pressed={on}
-              title={d ? `${p.name} · ${d}` : p.name ?? undefined}
-              // Повторное нажатие СНИМАЕТ выбор. Ряд одиночного выбора без этого превращается
-              // в ловушку: поставить проект можно, а вернуться ко всей библиотеке — только
-              // через соседний чип, о котором ещё надо догадаться.
-              onClick={() => onChange(on ? 0 : id)}
-            >
-              <ChipName>{p.name}</ChipName>
-              <span className='tabular-nums opacity-70'>{Number(p.filesCount ?? 0)}</span>
-            </Chip>
-          );
-        })}
-        {orphan && (
-          <Chip
-            selected
-            pressed
-            title='the project is archived or the link is old — the filter is applied all the same'
-            onClick={() => onChange(0)}
-          >
-            #{selected}
-          </Chip>
-        )}
-        {/* ХВОСТ РЯДА — ВЫХОД В СПИСОК. Ряд чипов держится до десятка проектов; дальше нужен
-            список, который сортируется и ищется, и там же заводят новый. Ссылка стоит В РЯДУ, а
-            не отдельной кнопкой сверху: она отвечает на тот же вопрос, что и сам ряд («какой
-            проект»), просто на большем числе проектов. */}
-        {/* ЗАВЕДЕНИЕ — ПЕРЕД ВЫХОДОМ В СПИСОК: сначала то, что делают чаще (выбрать или завести),
-            потом уход на другой экран. Кнопка видна и в режиме чтения, но не нажимается — иначе
-            её отсутствие читалось бы как «проекты заводят где-то ещё». */}
-        <Button
-          size='xs'
-          variant='underline'
-          disabled={!writable}
-          title={writable ? undefined : 'right now it is read-only — projects are not started'}
-          onClick={() => setCreating(true)}
-        >
-          + new project
-        </Button>
-        <Button asChild size='xs' variant='underline'>
-          <Link to={ROUTES.filesProjects}>all projects →</Link>
-        </Button>
-      </ChipRow>
-      <Text size='micro' variant='label'>
-        {caption()}
-      </Text>
-
-      {/* ЗАВЕДЁННЫЙ ПРОЕКТ СРАЗУ СТАНОВИТСЯ ВЫБРАННЫМ — тем же путём, что и нажатие по чипу:
-          заводят его, чтобы в него класть, и оставлять человека на прежнем фильтре значило бы
-          требовать второго нажатия по чипу, которого в ряду ещё нет (словарь приезжает позже). */}
-      {creating && (
-        <NewProjectModal onClose={() => setCreating(false)} onDone={(id) => onChange(id)} />
-      )}
+      {tail}
+      <span aria-hidden className='my-1 shrink-0 border-l border-borderColor' />
+      <Chip
+        className={TAP_CHIP}
+        tone='error'
+        selected={untopiced}
+        pressed={untopiced}
+        onClick={() => onChange({ topicIds: [], untopiced: !untopiced })}
+      >
+        unsorted
+        <Count n={untopicedCount} />
+      </Chip>
     </div>
   );
 }
