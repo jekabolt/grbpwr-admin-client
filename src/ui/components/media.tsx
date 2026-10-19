@@ -1,3 +1,5 @@
+import { BlurhashImage } from './blurhash-image';
+
 type ImageContainerProps = {
   aspectRatio?: string;
   children: React.ReactNode;
@@ -23,21 +25,25 @@ type MediaProps = {
   alt: string;
   src: string;
   aspectRatio?: string;
+  blurhash?: string;
   fit?: 'cover' | 'contain';
   type?: 'image' | 'video';
+  load?: boolean;
   autoPlay?: boolean;
   muted?: boolean;
   loop?: boolean;
   controls?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 };
 
 export default function MediaComponent({
   aspectRatio = '4/5',
   src,
   alt,
+  blurhash,
   fit = 'cover',
   type = 'image',
+  load = true,
   autoPlay = false,
   muted = true,
   loop = true,
@@ -47,14 +53,14 @@ export default function MediaComponent({
   return (
     <ImageContainer aspectRatio={aspectRatio}>
       {type === 'image' ? (
-        <img
+        <BlurhashImage
           src={src}
           alt={alt}
-          className='absolute inset-0 block w-full h-full'
-          style={{
-            objectFit: fit,
-            objectPosition: 'center',
-          }}
+          blurhash={blurhash}
+          load={load}
+          className={`absolute inset-0 block h-full w-full object-center ${
+            fit === 'cover' ? 'object-cover' : 'object-contain'
+          }`}
         />
       ) : (
         <video
