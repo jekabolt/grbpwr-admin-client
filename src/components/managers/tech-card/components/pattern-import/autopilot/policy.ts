@@ -51,6 +51,7 @@ import {
   sizeKindOf,
 } from 'lib/pattern-import/sizes/map';
 import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
+import { explainedKinds } from 'lib/pattern-import/clean/page-ink';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { anisotropyOf, squareSidesOf } from '../formats';
@@ -660,16 +661,21 @@ const INK_LINES_MAX_M = 1;
 
 /**
  * The classifier's roles the page-ink evidence pairs with: text-led instructions, a cover led by
- * pictures or text — never a cover that is only "page 1", never an overview (its role IS the tile
- * lattice the ink reading explains as rules and frames: one geometric fact counted twice — Codex
- * review; an overview passes on its reduced copy above).
+ * pictures or text — never a cover that is only "page 1". An overview only when its reading finds
+ * more than rules and frames (its role IS the tile lattice the reading explains as rules and
+ * frames: one geometric fact counted twice — Codex review): its reduced drawing, small outlines in
+ * pens the tiles do not use, is the second fact (polupalto p5 / p56, palto p2).
  */
-function inkRole(c: ImportSession['pages'][number]): boolean {
+function inkRole(
+  c: ImportSession['pages'][number],
+  d: NonNullable<ImportSession['clean']>['dropped'][number],
+): boolean {
   if (c.cls === 'instructions') return true;
+  if (c.cls === 'overview') return explainedKinds(d.ink?.explained).includes('drawing');
   return c.cls === 'cover' && !!c.ink && (c.ink.raster >= 0.3 || c.ink.texts >= 10);
 }
 
-function notPatternEvidence(
+export function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
 ): string | null {
@@ -696,7 +702,7 @@ function notPatternEvidence(
   // sheet (clean/page-ink.ts) — rules, frames, the test square, tile pieces reduced,
   // small drawings in a pen the tiles do not use. A curve at 1:1 in the pattern's pen is never
   // explained: that page stays the question.
-  if (c && d.ink?.explained && c.confidence >= 0.7 && inkRole(c))
+  if (c && d.ink?.explained && c.confidence >= 0.7 && inkRole(c, d))
     return `${c.cls} ${c.confidence.toFixed(2)} (${c.why}) + every line on it is explained: ${d.ink.explained}`;
   const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
