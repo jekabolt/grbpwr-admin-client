@@ -1080,6 +1080,13 @@ export function cleanSheet(
     out.push({ ...base, applied, pages: [...pages.values()] });
   };
   // 1 · outline lettering
+  // LEAKS-2 (off: LEAKS2_WM_OFF=1): the row takes only the rest of its own lettering — letter-sized
+  // parts within its band, in the pen its regular letters are printed in. Before, every cluster in
+  // the row's (creeping) box joined it: the dashes and beads of the size lines through a 117 mm
+  // watermark were masked with it (Memoir C: 1 515 size lines). And a row is lettering only when its
+  // glyphs are mostly closed outlines (detect.ts `outlined`): pieces of size lines cut at the tile
+  // seams line up like letters but leave their ends open.
+  const wmFix = !(typeof process !== 'undefined' && process.env?.LEAKS2_WM_OFF);
   const rows = !CLEAN.on.watermark
     ? []
     : textLines(
@@ -1092,17 +1099,29 @@ export function cleanSheet(
           maxGap: CLEAN.markMaxGap,
           maxAspect: CLEAN.markMaxAspect,
           endsOnly: true,
+          ...(wmFix ? { growMinFrac: 0.2, closed: (i: number) => chains[i].closed } : {}),
         },
         live,
       );
-  for (const r of rows) for (const i of memberIds(r)) letters.add(i);
+  // a watermark is printed in ONE pen: a member drawn in a pen none of the row's regular letters
+  // uses (a black size line through a grey watermark) is not its lettering
+  const styleById = new Map(sheet.styles.map((st) => [st.id, st]));
+  const penOf = (i: number) => {
+    const st = styleById.get(chains[i].style);
+    return `${(st?.strokeRgb ?? []).join(',')}|${st?.fill ? 'f' : 's'}`;
+  };
+  const rowIds = rows.map((r) => {
+    const corePens = new Set(r.glyphs.flatMap((g) => g.ids.map(penOf)));
+    return memberIds(r).filter((i) => !wmFix || corePens.has(penOf(i)));
+  });
+  for (const ids of rowIds) for (const i of ids) letters.add(i);
   if (rows.length) {
     const grid = new SegGrid(8);
     polys.forEach((p, i) => {
       if (live(i)) grid.addPolyline(i, p);
     });
     rows.forEach((r, n) => {
-      const ids = memberIds(r);
+      const ids = rowIds[n];
       const mine = new Set(ids);
       const crossed = crossedGlyphs(r, polys, (i) => live(i) && !mine.has(i), grid);
       const again = rows.filter(

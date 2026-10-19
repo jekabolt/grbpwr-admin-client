@@ -4,7 +4,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ConfirmationModal, Text } from 'ui';
+import { Close, ConfirmationModal, Text } from 'ui';
 import { epochSecondsToRfc3339 } from './map-schema-to-campaign';
 import { useDeleteCampaign } from './useCampaign';
 
@@ -62,17 +62,15 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
   return (
     <div className='relative h-full'>
       {deletable && (
-        <button
-          type='button'
+        <Close
+          size='sm'
           aria-label='delete campaign'
           onClick={(e) => {
             e.stopPropagation();
             setConfirmDelete(true);
           }}
-          className='absolute right-1.5 top-1.5 z-10 border border-textInactiveColor bg-bgColor px-1.5 leading-none text-textInactiveColor transition-colors hover:border-error hover:text-error'
-        >
-          ✕
-        </button>
+          className='absolute right-1.5 top-1.5 z-10 bg-bgColor'
+        />
       )}
       <ConfirmationModal
         open={confirmDelete}
@@ -93,41 +91,41 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
         onClick={() => navigate(`${ROUTES.emailCampaigns}/${campaign.id}`)}
         className='group flex h-full w-full flex-col gap-3 border border-borderColor bg-bgColor p-4 text-left transition-colors hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
       >
-      <div className='flex items-start justify-between gap-2'>
-        <Text variant='uppercase' className='truncate group-hover:text-bgColor'>
-          {campaign.name || 'untitled campaign'}
-        </Text>
-        <span
-          className={cn(
-            'shrink-0 border px-1.5 py-0.5 leading-none group-hover:border-bgColor group-hover:text-bgColor',
-            STATUS_CHIP[status],
-          )}
-        >
-          <Text size='small' variant='uppercase' className='group-hover:text-bgColor'>
-            {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? 'unknown'}
+        <div className='flex items-start justify-between gap-2'>
+          <Text variant='uppercase' className='truncate group-hover:text-bgColor'>
+            {campaign.name || 'untitled campaign'}
           </Text>
-        </span>
-      </div>
+          <span
+            className={cn(
+              'shrink-0 border px-1.5 py-0.5 leading-none group-hover:border-bgColor group-hover:text-bgColor',
+              STATUS_CHIP[status],
+            )}
+          >
+            <Text size='small' variant='uppercase' className='group-hover:text-bgColor'>
+              {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? 'unknown'}
+            </Text>
+          </span>
+        </div>
 
-      {subject && (
-        <Text size='small' className='line-clamp-2 group-hover:text-bgColor'>
-          {subject}
-        </Text>
-      )}
+        {subject && (
+          <Text size='small' className='line-clamp-2 group-hover:text-bgColor'>
+            {subject}
+          </Text>
+        )}
 
-      <div className='mt-auto flex flex-wrap items-center gap-x-3 gap-y-1'>
-        <Text variant='label' size='small' className='group-hover:text-bgColor'>
-          {campaign.topic
-            ? TOPIC_LABELS[campaign.topic as keyof typeof TOPIC_LABELS] ?? 'topic'
-            : 'topic'}
-        </Text>
-        <Text variant='label' size='small' className='group-hover:text-bgColor'>
-          {campaign.segmentId ? `segment #${campaign.segmentId}` : 'everyone'}
-        </Text>
-        <Text variant='label' size='small' className='group-hover:text-bgColor'>
-          {when}
-        </Text>
-      </div>
+        <div className='mt-auto flex flex-wrap items-center gap-x-3 gap-y-1'>
+          <Text variant='label' size='small' className='group-hover:text-bgColor'>
+            {campaign.topic
+              ? TOPIC_LABELS[campaign.topic as keyof typeof TOPIC_LABELS] ?? 'topic'
+              : 'topic'}
+          </Text>
+          <Text variant='label' size='small' className='group-hover:text-bgColor'>
+            {campaign.segmentId ? `segment #${campaign.segmentId}` : 'everyone'}
+          </Text>
+          <Text variant='label' size='small' className='group-hover:text-bgColor'>
+            {when}
+          </Text>
+        </div>
       </button>
     </div>
   );

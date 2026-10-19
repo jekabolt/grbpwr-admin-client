@@ -1,5 +1,7 @@
 import { Slot } from '@radix-ui/react-slot';
 import { cva, VariantProps } from 'class-variance-authority';
+import { cn } from 'lib/utility';
+import { Link, type To } from 'react-router-dom';
 import { Loader } from './loader';
 
 export const buttonVariants = cva(
@@ -202,5 +204,47 @@ export function Button({
     >
       {renderContent()}
     </Component>
+  );
+}
+
+/** The back door's skin: one underlined label word, quiet until hovered. */
+const BACK_LINK =
+  'inline-block w-fit text-micro uppercase tracking-label text-labelColor underline underline-offset-2 hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+
+/**
+ * The one way back: `← word`, an underlined word at the top of a screen, a drawer, a wizard step or
+ * a dead-end («not found») screen. `to` makes it a router link; without `to` it is a button that
+ * runs `onClick`. `children` names where it leads (`tech cards`, `board`); it defaults to `back`.
+ * The arrow is drawn here — callers never type `←`.
+ */
+export function BackLink({
+  to,
+  children = 'back',
+  className,
+  disabled,
+  ...props
+}: {
+  to?: To;
+  children?: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
+  [k: string]: unknown;
+}) {
+  const content = (
+    <>
+      <span aria-hidden>←</span> {children}
+    </>
+  );
+  if (to !== undefined) {
+    return (
+      <Link {...props} to={to} className={cn(BACK_LINK, className)}>
+        {content}
+      </Link>
+    );
+  }
+  return (
+    <button {...props} type='button' disabled={disabled} className={cn(BACK_LINK, className)}>
+      {content}
+    </button>
   );
 }

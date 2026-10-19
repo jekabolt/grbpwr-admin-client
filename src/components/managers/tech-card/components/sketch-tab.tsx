@@ -17,7 +17,7 @@ import {
   TextareaField,
   GenericPopover,
   Chip,
-  ChipRow,
+  ChipRow, EmptyCell,
 } from 'ui';
 import { moveItem } from 'components/managers/media/components/gallery-order';
 import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
@@ -739,7 +739,7 @@ export function TechCardGallery({
               {c.number || i + 1}
             </Text>
             <Text size='nano' component='span' className='min-w-0 flex-1'>
-              {(c.description ?? '').trim() || calloutParts(c).join(', ') || '—'}
+              {(c.description ?? '').trim() || calloutParts(c).join(', ') || <EmptyCell />}
             </Text>
             {!frozen && (
               <ChipRow>

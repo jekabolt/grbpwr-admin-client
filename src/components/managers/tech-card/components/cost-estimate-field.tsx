@@ -348,7 +348,7 @@ function Breakdown({
                     )}
                   </td>
                   <td>
-                    {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
+                    {decimalToInput(m.unitPrice) || <EmptyCell />} {m.currency || ''}
                   </td>
                   <td>
                     <RightCell>
@@ -419,12 +419,12 @@ function Breakdown({
           ) : (
             articles.map((a, i) => (
               <tr key={`a${i}`}>
-                <td>{a.kind || '—'}</td>
+                <td>{a.kind || <EmptyCell />}</td>
                 <td>
                   <EmptyCell />
                 </td>
                 <td>
-                  {decimalToInput(a.amount) || '—'} {a.currency || ''}
+                  {decimalToInput(a.amount) || <EmptyCell />} {a.currency || ''}
                 </td>
                 {/* У статьи нет лестницы цен — её вписал человек, «откуда» здесь нечему быть. */}
                 <td>
@@ -484,8 +484,8 @@ function Breakdown({
                 {planIsLowerBound && <HelpMark title={TIER_ESTIMATE}>{ESTIMATE_WHY}</HelpMark>}
               </span>
             </td>
-            <td>{unitCost > 0 ? unitCost.toFixed(2) : '—'}</td>
-            <td>{unitCost > 0 ? '100%' : '—'}</td>
+            <td>{unitCost > 0 ? unitCost.toFixed(2) : <EmptyCell />}</td>
+            <td>{unitCost > 0 ? '100%' : <EmptyCell />}</td>
           </TotalRow>
         </tbody>
       </DataTable>
@@ -555,7 +555,7 @@ function SnapshotReconciliation({
       <StatGrid min={130}>
         <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
-          value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : '—'}
+          value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : <EmptyCell />}
           sub={
             snapshotVsPlan != null
               ? // «≤» — тем же знаком, что у маржи на вкладке костинга, и в том же смысле:
@@ -569,7 +569,7 @@ function SnapshotReconciliation({
         {comparison.hasActual && (
           <Stat
             label='Δ actual to snapshot'
-            value={actualVsSnapshot != null ? money(actualVsSnapshot) : '—'}
+            value={actualVsSnapshot != null ? money(actualVsSnapshot) : <EmptyCell />}
             tone={statTone(actualVsSnapshot)}
           />
         )}
@@ -1071,22 +1071,32 @@ export function CostEstimateField({
               </span>
             </td>
             <td>
-              {meanPlan != null ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}` : '—'}
+              {meanPlan != null ? (
+                `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}`
+              ) : (
+                <EmptyCell />
+              )}
             </td>
-            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
+            <td>{meanActual != null ? meanActual.toFixed(2) : <EmptyCell />}</td>
             {/* Цвет — утверждение о знаке, а знак средней Δ от смешанных ступеней недоказуем ровно
                 так же, как у строки: план занижен на неизвестную величину. */}
             <td
               className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
-              {meanDelta != null ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}` : '—'}
+              {meanDelta != null ? (
+                `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}`
+              ) : (
+                <EmptyCell />
+              )}
             </td>
             <td
               className={meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined}
             >
-              {meanDeltaPct != null
-                ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
-                : '—'}
+              {meanDeltaPct != null ? (
+                `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
+              ) : (
+                <EmptyCell />
+              )}
             </td>
             <td colSpan={2} />
           </TotalRow>

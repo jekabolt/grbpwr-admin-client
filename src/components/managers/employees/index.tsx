@@ -572,7 +572,7 @@ function EmployeeCard({
     >
       <div className='flex items-start justify-between gap-2'>
         <Text component='span' className='font-bold'>
-          {e?.fullName || '—'}
+          {e?.fullName || <EmptyCell />}
         </Text>
         {left ? <Pill tone='mut'>left</Pill> : <Pill tone='ink'>active</Pill>}
       </div>
@@ -595,8 +595,8 @@ function EmployeeCard({
               <EmptyCell />
             ) : (
               <>
-                {e?.employmentStart ? fmtDate(e.employmentStart) : '—'} →{' '}
-                {e?.employmentEnd ? fmtDate(e.employmentEnd) : '—'}
+                {e?.employmentStart ? fmtDate(e.employmentStart) : <EmptyCell />} →{' '}
+                {e?.employmentEnd ? fmtDate(e.employmentEnd) : <EmptyCell />}
               </>
             )}
           </Text>

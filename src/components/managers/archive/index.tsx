@@ -1,7 +1,7 @@
 import { useArchiveDetails } from 'components/managers/archives/components/useArchiveQuery';
 import { ROUTES } from 'constants/routes';
-import { Link, useParams } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { useParams } from 'react-router-dom';
+import { BackLink, Button, Text } from 'ui';
 import { ArchiveForm } from './components';
 
 export function Archive() {
@@ -34,9 +34,7 @@ export function Archive() {
           <Button type='button' variant='secondary' size='lg' onClick={() => refetch()}>
             retry
           </Button>
-          <Button asChild variant='main' size='lg'>
-            <Link to={ROUTES.archives}>← timeline</Link>
-          </Button>
+          <BackLink to={ROUTES.archives}>timeline</BackLink>
         </div>
       </div>
     );

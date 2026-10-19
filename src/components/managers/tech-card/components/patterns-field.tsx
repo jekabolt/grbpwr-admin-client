@@ -28,6 +28,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
+  Close,
   Chip,
   ConfirmationModal,
   GroupLabel,
@@ -1470,15 +1471,7 @@ export function PatternsField({
             >
               ✎
             </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              aria-label='remove pattern'
-              onClick={() => remove(index)}
-            >
-              ✕
-            </Button>
+            <Close size='sm' aria-label='remove pattern' onClick={() => remove(index)} />
           </span>
         </div>
         {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в

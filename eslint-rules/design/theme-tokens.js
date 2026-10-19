@@ -77,3 +77,8 @@ export function parseThemeTokens(css) {
     customClasses: [...customClasses].sort(),
   };
 }
+
+/** `--<namespace>-*` declarations of the @theme block, in source order. Used by the /ui-kit page. */
+export function themeDeclarations(css, namespace) {
+  return declarations(atRuleBody(css, 'theme'), namespace);
+}

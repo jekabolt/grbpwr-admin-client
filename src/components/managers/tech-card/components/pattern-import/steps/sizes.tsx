@@ -32,6 +32,7 @@ import {
   Pill,
   GenericPopover,
   Text,
+  EmptyCell,
 } from 'ui';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
 import { drawnUnmapped } from 'lib/pattern-import/sizes/map';
@@ -973,8 +974,14 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           title='lines'
           aside={
             flagged ? (
-              <Chip quiet selected onClick={() => setFlag(null)} title='stop lighting this flag'>
-                {FLAG[flagged.kind] ?? flagged.kind} ✕
+              <Chip
+                quiet
+                selected
+                onClick={() => setFlag(null)}
+                onRemove={() => setFlag(null)}
+                title='stop lighting this flag'
+              >
+                {FLAG[flagged.kind] ?? flagged.kind}
               </Chip>
             ) : undefined
           }
@@ -1687,7 +1694,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                       <tr key={c.id}>
                         <td>{c.id}</td>
                         <td data-align='left'>{ROLE_WORD[c.role] ?? c.role}</td>
-                        <td data-align='left'>{c.sizeLabel ?? '—'}</td>
+                        <td data-align='left'>{c.sizeLabel ?? <EmptyCell />}</td>
                         <td>{fmtPct(c.confidence, 0)}</td>
                         <td data-align='left'>{rowTitle(c)}</td>
                       </tr>
@@ -1696,8 +1703,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 </DataTable>
                 {sizes.map.entries.map((e) => (
                   <Text key={`ev-${e.source.rank}`} size='micro' variant='label' component='p'>
-                    {e.source.label || `rank ${e.source.rank + 1}`} → {e.card?.name ?? '—'} ·{' '}
-                    {e.origin} · {fmtPct(e.confidence ?? null, 0)}
+                    {e.source.label || `rank ${e.source.rank + 1}`} →{' '}
+                    {e.card?.name ?? <EmptyCell />} · {e.origin} · {fmtPct(e.confidence ?? null, 0)}
                     {e.evidence?.length ? ` · ${e.evidence.join(' · ')}` : ''}
                   </Text>
                 ))}
@@ -1982,9 +1989,7 @@ function RowDetail({
               ) : null}
             </>
           ) : (
-            <Text size='micro' variant='label' component='span'>
-              —
-            </Text>
+            <EmptyCell />
           )}
         </dd>
         {row.role === 'size' && (

@@ -2,7 +2,7 @@
 //
 // Порядок строк тот же, что на печатном наряде (run-pack-document.tsx): цех читает шапку по
 // позициям, и переставленная строка «по какой карте кроим» — это не косметика.
-import { Pill, Row, Text } from 'ui';
+import { Pill, Row, Text, EmptyCell } from 'ui';
 import { dayOf, runStatusIsStop, runStatusWord } from './labels';
 import { RpManifest } from './manifest';
 
@@ -28,9 +28,9 @@ export function RunHeader({
       <div className='flex flex-wrap items-start justify-between gap-2.5'>
         <div className='min-w-0'>
           <Text size='large' component='h1' className='uppercase'>
-            PR-{m.run_id ?? '—'}
+            PR-{m.run_id ?? <EmptyCell />}
           </Text>
-          <Text component='p'>
+          <Text size='reading' component='p'>
             {styleNumber || 'style not named'}
             {styleName ? ` · ${styleName}` : ''}
           </Text>
@@ -41,7 +41,7 @@ export function RunHeader({
       </div>
 
       {stop && (
-        <Text component='p'>
+        <Text size='reading' component='p'>
           <b>the run is cancelled</b> — nothing is cut from this run pack. the run pack was left open
           deliberately: a link that went dark together with the cancellation would be
           indistinguishable from a broken one, and on the floor that would read as “the QR doesn't

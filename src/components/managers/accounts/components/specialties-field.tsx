@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Button, Chip, ChipRow, Input, Text } from 'ui';
+import { Button, Chip, ChipRow, Input, Text, EmptyCell } from 'ui';
 import { useSetAccountSpecialties } from '../utils/hooks';
 
 /**
@@ -117,9 +117,7 @@ export function SpecialtiesField({
             ))}
           </ChipRow>
         ) : (
-          <Text size='micro' variant='label' component='span'>
-            —
-          </Text>
+          <EmptyCell />
         )}
         {editable && (
           <Button

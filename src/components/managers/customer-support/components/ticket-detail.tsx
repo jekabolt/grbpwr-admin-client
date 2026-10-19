@@ -6,7 +6,7 @@ import {
 import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, GroupLabel, Row, Section, Selector, Text } from 'ui';
+import { Button, GroupLabel, Row, Section, Selector, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import {
   formatPriorityLabel,
@@ -227,7 +227,7 @@ function InfoRow({
             {value}
           </Link>
         ) : (
-          value || '-'
+          value || <EmptyCell />
         )
       }
     />

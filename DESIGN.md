@@ -29,6 +29,7 @@ typography:
     micro: '10px'
     nano: '9px'
     stat: '16px'
+    reading: '16px'
     statBig: '22px'
     lg: '18px'
     giantSmall: '110px'
@@ -114,108 +115,112 @@ components:
 
 ## Primitives
 
-| Export               | Primitive                          | Source                                      | Variants                                                                                                                                                                                                                                                               | UI kit                               |
-| -------------------- | ---------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| Accordion            | Bordered collapsible block         | `src/ui/components/accordion.tsx`           | tone: default\|error                                                                                                                                                                                                                                                   | [view](/ui-kit#Accordion)            |
-| Arrow                | Chevron arrow icon                 | `src/ui/icons/arrow.tsx`                    | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Arrow)                |
-| Avatar               | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Avatar)               |
-| AvatarPicker         | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#AvatarPicker)         |
-| BarRow               | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | tone: ink\|up\|down                                                                                                                                                                                                                                                    | [view](/ui-kit#BarRow)               |
-| Board                | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Board)                |
-| BoardCard            | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#BoardCard)            |
-| BoardColumn          | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#BoardColumn)          |
-| BoardEmpty           | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#BoardEmpty)           |
-| Button               | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                         | [view](/ui-kit#Button)               |
-| buttonVariants       | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                         | [view](/ui-kit#buttonVariants)       |
-| CalloutBox           | Inline message box                 | `src/ui/components/callout-box.tsx`         | tone: error\|warning\|note                                                                                                                                                                                                                                             | [view](/ui-kit#CalloutBox)           |
-| Canvas               | Drawing with numbered pins         | `src/ui/components/canvas.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Canvas)               |
-| CheckboxCommon       | Checkbox                           | `src/ui/components/checkbox.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#CheckboxCommon)       |
-| CheckboxField        | Form-bound checkbox                | `src/ui/form/fields/checkbox-field.tsx`     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#CheckboxField)        |
-| ChecklistEditor      | Editable checklist with progress   | `src/ui/components/checklist-editor.tsx`    | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ChecklistEditor)      |
-| Chip                 | Interactive filter/toggle chip     | `src/ui/components/chip.tsx`                | selected: true\|false · tone: default\|error\|attention · dashed: true\|false                                                                                                                                                                                          | [view](/ui-kit#Chip)                 |
-| ChipRow              | Interactive filter/toggle chip     | `src/ui/components/chip.tsx`                | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ChipRow)              |
-| Combobox             | Search-to-pick dropdown            | `src/ui/components/combobox.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Combobox)             |
-| ComboField           | Free text + datalist suggestions   | `src/ui/form/fields/combo-field.tsx`        | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ComboField)           |
-| ConfirmationModal    | The one modal shell                | `src/ui/components/confirmation-modal.tsx`  | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ConfirmationModal)    |
-| CopyToClipboard      | Copy value on click                | `src/ui/components/copyToClipboard.tsx`     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#CopyToClipboard)      |
-| DataTable            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | variant: list\|grid                                                                                                                                                                                                                                                    | [view](/ui-kit#DataTable)            |
-| DatePicker           | Portalled date field               | `src/ui/components/date-picker.tsx`         | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#DatePicker)           |
-| DecimalField         | Form-bound decimal input           | `src/ui/form/fields/decimal-field.tsx`      | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#DecimalField)         |
-| Drawer               | Right-docked side panel            | `src/ui/components/drawer.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Drawer)               |
-| EmptyCell            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#EmptyCell)            |
-| FieldsGroupContainer | Legacy collapsible field group     | `src/ui/components/fields-group.tsx`        | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FieldsGroupContainer) |
-| FoldCaret            | Disclosure caret glyph             | `src/ui/components/fold-caret.tsx`          | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FoldCaret)            |
-| Form                 | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Form)                 |
-| FormControl          | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormControl)          |
-| FormDescription      | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormDescription)      |
-| FormField            | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormField)            |
-| FormItem             | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormItem)             |
-| FormLabel            | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormLabel)            |
-| FormMessage          | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#FormMessage)          |
-| GenericPopover       | Anchored popover shell             | `src/ui/components/popover.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#GenericPopover)       |
-| GrbpwrMark           | Brand mark logo                    | `src/ui/icons/grbpwr-mark.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#GrbpwrMark)           |
-| GroupLabel           | Sub-group divider inside block     | `src/ui/components/group-label.tsx`         | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#GroupLabel)           |
-| HATCH                | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#HATCH)                |
-| HEADER_TEXT          | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#HEADER_TEXT)          |
-| HeaderCount          | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#HeaderCount)          |
-| HeaderNext           | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#HeaderNext)           |
-| HeaderNote           | Section title on ink rule          | `src/ui/components/section-header.tsx`      | tone: ink\|attention\|mut\|warn\|ok                                                                                                                                                                                                                                    | [view](/ui-kit#HeaderNote)           |
-| HeaderWarnings       | Block-header warnings door         | `src/ui/components/header-warnings.tsx`     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#HeaderWarnings)       |
-| initials             | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#initials)             |
-| Input                | Single-line text input             | `src/ui/components/input.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Input)                |
-| InputField           | Form-bound text input              | `src/ui/form/fields/input-field.tsx`        | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#InputField)           |
-| Loader               | Indeterminate loading bar          | `src/ui/components/loader.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Loader)               |
-| Media                | Image/video in aspect box          | `src/ui/components/media.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Media)                |
-| Overlay              | Bare scrim layer                   | `src/ui/components/overlay.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Overlay)              |
-| Pill                 | Read-only status marker            | `src/ui/components/pill.tsx`                | tone: ok\|warn\|attention\|mut\|ink\|gap                                                                                                                                                                                                                               | [view](/ui-kit#Pill)                 |
-| Pin                  | Drawing with numbered pins         | `src/ui/components/canvas.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Pin)                  |
-| Placeholder          | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | tone: default\|error                                                                                                                                                                                                                                                   | [view](/ui-kit#Placeholder)          |
-| PLACEHOLDER_SURFACE  | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#PLACEHOLDER_SURFACE)  |
-| placeholderClass     | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | tone: default\|error                                                                                                                                                                                                                                                   | [view](/ui-kit#placeholderClass)     |
-| PopoverContent       | Anchored popover shell             | `src/ui/components/popover.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#PopoverContent)       |
-| Progress             | Determinate 4px progress rail      | `src/ui/components/progress.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Progress)             |
-| RatioGlyph           | Aspect ratio drawn as rect         | `src/ui/components/ratio-glyph.tsx`         | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#RatioGlyph)           |
-| RichTextField        | Rich text field                    | `src/ui/form/fields/rich-text-field.tsx`    | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#RichTextField)        |
-| Row                  | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                            | [view](/ui-kit#Row)                  |
-| RowTotal             | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                            | [view](/ui-kit#RowTotal)             |
-| Section              | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Section)              |
-| SectionHeader        | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SectionHeader)        |
-| SectionStack         | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SectionStack)         |
-| SegmentedField       | Form-bound segmented choice        | `src/ui/form/fields/segmented-field.tsx`    | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SegmentedField)       |
-| Select               | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Select)               |
-| SelectContent        | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SelectContent)        |
-| SelectField          | Form-bound select                  | `src/ui/form/fields/select-field.tsx`       | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SelectField)          |
-| SelectItem           | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SelectItem)           |
-| Selector             | Labelled radix select (legacy)     | `src/ui/components/selector.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Selector)             |
-| SelectTrigger        | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SelectTrigger)        |
-| SideRail             | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SideRail)             |
-| SideRailGroup        | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SideRailGroup)        |
-| SideRailItem         | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SideRailItem)         |
-| SideRailLayout       | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SideRailLayout)       |
-| SkeletonBlocks       | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SkeletonBlocks)       |
-| SkeletonLine         | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SkeletonLine)         |
-| SkeletonRows         | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#SkeletonRows)         |
-| Stat                 | KPI grid of cells                  | `src/ui/components/stat-grid.tsx`           | tone: default\|up\|down                                                                                                                                                                                                                                                | [view](/ui-kit#Stat)                 |
-| StatGrid             | KPI grid of cells                  | `src/ui/components/stat-grid.tsx`           | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#StatGrid)             |
-| Stepper              | Lifecycle as words                 | `src/ui/components/stepper.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Stepper)              |
-| Text                 | Typography: every piece of text    | `src/ui/components/text.tsx`                | variant: default\|error\|selected\|uppercase\|underlined\|underLineWithColor\|strikethrough\|strileTroughInactive\|inactive\|label\|errorLabel · size: default\|giant\|small\|control\|micro\|nano\|stat\|statBig\|large · tracking: none\|pill\|label\|group\|section | [view](/ui-kit#Text)                 |
-| Textarea             | Auto-growing text area             | `src/ui/components/text-area.tsx`           | variant: default\|secondary                                                                                                                                                                                                                                            | [view](/ui-kit#Textarea)             |
-| TextareaField        | Form-bound textarea                | `src/ui/form/fields/textarea-field.tsx`     | variant: default\|secondary                                                                                                                                                                                                                                            | [view](/ui-kit#TextareaField)        |
-| Tile                 | Auto-fill grid of cards            | `src/ui/components/tiles.tsx`               | tone: default\|error                                                                                                                                                                                                                                                   | [view](/ui-kit#Tile)                 |
-| TILE_CORNER          | Tile corner skin tokens            | `src/ui/components/tile-skin.ts`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#TILE_CORNER)          |
-| TILE_QUIET           | Tile corner skin tokens            | `src/ui/components/tile-skin.ts`            | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#TILE_QUIET)           |
-| Tiles                | Auto-fill grid of cards            | `src/ui/components/tiles.tsx`               | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Tiles)                |
-| ToggleField          | Form-bound switch                  | `src/ui/form/fields/toggle-field.tsx`       | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ToggleField)          |
-| ToggleGroupField     | Form-bound multi-switch list       | `src/ui/form/fields/toggle-group-field.tsx` | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ToggleGroupField)     |
-| ToggleSwitch         | On/off switch with label           | `src/ui/components/toggle-switch.tsx`       | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ToggleSwitch)         |
-| Toolbar              | Bordered control strip             | `src/ui/components/toolbar.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Toolbar)              |
-| ToolbarSpacer        | Bordered control strip             | `src/ui/components/toolbar.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ToolbarSpacer)        |
-| Tooltip              | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#Tooltip)              |
-| TooltipProvider      | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#TooltipProvider)      |
-| TotalRow             | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#TotalRow)             |
-| useFormField         | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#useFormField)         |
-| ViewSwitch           | Exclusive view switch              | `src/ui/components/view-switch.tsx`         | —                                                                                                                                                                                                                                                                      | [view](/ui-kit#ViewSwitch)           |
-| WaterfallRow         | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | kind: pos\|neg\|final                                                                                                                                                                                                                                                  | [view](/ui-kit#WaterfallRow)         |
+| Export               | Primitive                          | Source                                      | Variants                                                                                                                                                                                                                                                                        | UI kit                               |
+| -------------------- | ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Accordion            | Bordered collapsible block         | `src/ui/components/accordion.tsx`           | tone: default\|error                                                                                                                                                                                                                                                            | [view](/ui-kit#Accordion)            |
+| AddDoor              | Dashed «+ noun» door after a list  | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#AddDoor)              |
+| addDoorClass         | Dashed «+ noun» door after a list  | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#addDoorClass)         |
+| Arrow                | Chevron arrow icon                 | `src/ui/icons/arrow.tsx`                    | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Arrow)                |
+| Avatar               | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Avatar)               |
+| AvatarPicker         | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#AvatarPicker)         |
+| BackLink             | «← word» way back                  | `src/ui/components/button.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BackLink)             |
+| BarRow               | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | tone: ink\|up\|down                                                                                                                                                                                                                                                             | [view](/ui-kit#BarRow)               |
+| Board                | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Board)                |
+| BoardCard            | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardCard)            |
+| BoardColumn          | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardColumn)          |
+| BoardEmpty           | Kanban columns row                 | `src/ui/components/board.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#BoardEmpty)           |
+| Button               | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                                  | [view](/ui-kit#Button)               |
+| buttonVariants       | Clickable action, all styles       | `src/ui/components/button.tsx`              | variant: default\|simple\|simpleReverse\|simpleReverseWithBorder\|main\|secondary\|underline\|underlineReverse\|underlineWithColors\|strikeThrough · isLoading: true\|false · size: xs\|sm\|default\|lg\|giant                                                                  | [view](/ui-kit#buttonVariants)       |
+| CalloutBox           | Inline message box                 | `src/ui/components/callout-box.tsx`         | tone: error\|warning\|note                                                                                                                                                                                                                                                      | [view](/ui-kit#CalloutBox)           |
+| Canvas               | Drawing with numbered pins         | `src/ui/components/canvas.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Canvas)               |
+| CheckboxCommon       | Checkbox                           | `src/ui/components/checkbox.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#CheckboxCommon)       |
+| CheckboxField        | Form-bound checkbox                | `src/ui/form/fields/checkbox-field.tsx`     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#CheckboxField)        |
+| ChecklistEditor      | Editable checklist with progress   | `src/ui/components/checklist-editor.tsx`    | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ChecklistEditor)      |
+| Chip                 | Interactive filter/toggle chip     | `src/ui/components/chip.tsx`                | selected: true\|false · tone: default\|error\|attention · dashed: true\|false                                                                                                                                                                                                   | [view](/ui-kit#Chip)                 |
+| ChipRow              | Interactive filter/toggle chip     | `src/ui/components/chip.tsx`                | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ChipRow)              |
+| Close                | Close / remove ×                   | `src/ui/components/close.tsx`               | size: sm\|default                                                                                                                                                                                                                                                               | [view](/ui-kit#Close)                |
+| Combobox             | Search-to-pick dropdown            | `src/ui/components/combobox.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Combobox)             |
+| ComboField           | Free text + datalist suggestions   | `src/ui/form/fields/combo-field.tsx`        | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ComboField)           |
+| ConfirmationModal    | The one modal shell                | `src/ui/components/confirmation-modal.tsx`  | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ConfirmationModal)    |
+| CopyToClipboard      | Copy value on click                | `src/ui/components/copyToClipboard.tsx`     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#CopyToClipboard)      |
+| DataTable            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | variant: list\|grid                                                                                                                                                                                                                                                             | [view](/ui-kit#DataTable)            |
+| DatePicker           | Portalled date field               | `src/ui/components/date-picker.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#DatePicker)           |
+| DecimalField         | Form-bound decimal input           | `src/ui/form/fields/decimal-field.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#DecimalField)         |
+| Drawer               | Right-docked side panel            | `src/ui/components/drawer.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Drawer)               |
+| EmptyCell            | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#EmptyCell)            |
+| FieldsGroupContainer | Legacy collapsible field group     | `src/ui/components/fields-group.tsx`        | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FieldsGroupContainer) |
+| FoldCaret            | Disclosure caret glyph             | `src/ui/components/fold-caret.tsx`          | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FoldCaret)            |
+| Form                 | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Form)                 |
+| FormControl          | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormControl)          |
+| FormDescription      | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormDescription)      |
+| FormField            | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormField)            |
+| FormItem             | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormItem)             |
+| FormLabel            | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormLabel)            |
+| FormMessage          | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#FormMessage)          |
+| GenericPopover       | Anchored popover shell             | `src/ui/components/popover.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#GenericPopover)       |
+| GrbpwrMark           | Brand mark logo                    | `src/ui/icons/grbpwr-mark.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#GrbpwrMark)           |
+| GroupLabel           | Sub-group divider inside block     | `src/ui/components/group-label.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#GroupLabel)           |
+| HATCH                | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#HATCH)                |
+| HEADER_TEXT          | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#HEADER_TEXT)          |
+| HeaderCount          | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#HeaderCount)          |
+| HeaderNext           | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#HeaderNext)           |
+| HeaderNote           | Section title on ink rule          | `src/ui/components/section-header.tsx`      | tone: ink\|attention\|mut\|warn\|ok                                                                                                                                                                                                                                             | [view](/ui-kit#HeaderNote)           |
+| HeaderWarnings       | Block-header warnings door         | `src/ui/components/header-warnings.tsx`     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#HeaderWarnings)       |
+| initials             | Person initials circle             | `src/ui/components/avatar.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#initials)             |
+| Input                | Single-line text input             | `src/ui/components/input.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Input)                |
+| InputField           | Form-bound text input              | `src/ui/form/fields/input-field.tsx`        | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#InputField)           |
+| Loader               | Indeterminate loading bar          | `src/ui/components/loader.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Loader)               |
+| Media                | Image/video in aspect box          | `src/ui/components/media.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Media)                |
+| Overlay              | Bare scrim layer                   | `src/ui/components/overlay.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Overlay)              |
+| Pill                 | Read-only status marker            | `src/ui/components/pill.tsx`                | tone: ok\|warn\|attention\|mut\|ink\|gap                                                                                                                                                                                                                                        | [view](/ui-kit#Pill)                 |
+| Pin                  | Drawing with numbered pins         | `src/ui/components/canvas.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Pin)                  |
+| Placeholder          | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | tone: default\|error                                                                                                                                                                                                                                                            | [view](/ui-kit#Placeholder)          |
+| PLACEHOLDER_SURFACE  | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#PLACEHOLDER_SURFACE)  |
+| placeholderClass     | Hatched «empty here» surface       | `src/ui/components/placeholder.tsx`         | tone: default\|error                                                                                                                                                                                                                                                            | [view](/ui-kit#placeholderClass)     |
+| PopoverContent       | Anchored popover shell             | `src/ui/components/popover.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#PopoverContent)       |
+| Progress             | Determinate 4px progress rail      | `src/ui/components/progress.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Progress)             |
+| RatioGlyph           | Aspect ratio drawn as rect         | `src/ui/components/ratio-glyph.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#RatioGlyph)           |
+| RichTextField        | Rich text field                    | `src/ui/form/fields/rich-text-field.tsx`    | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#RichTextField)        |
+| Row                  | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                                     | [view](/ui-kit#Row)                  |
+| RowTotal             | Label–value line with hairline     | `src/ui/components/row.tsx`                 | tone: default\|error\|label                                                                                                                                                                                                                                                     | [view](/ui-kit#RowTotal)             |
+| Section              | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Section)              |
+| SectionHeader        | Section title on ink rule          | `src/ui/components/section-header.tsx`      | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SectionHeader)        |
+| SectionStack         | The block: bordered white panel    | `src/ui/components/section.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SectionStack)         |
+| SegmentedField       | Form-bound segmented choice        | `src/ui/form/fields/segmented-field.tsx`    | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SegmentedField)       |
+| Select               | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Select)               |
+| SelectContent        | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SelectContent)        |
+| SelectField          | Form-bound select                  | `src/ui/form/fields/select-field.tsx`       | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SelectField)          |
+| SelectItem           | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SelectItem)           |
+| Selector             | Labelled radix select (legacy)     | `src/ui/components/selector.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Selector)             |
+| SelectTrigger        | Dropdown pick from list            | `src/ui/components/select.tsx`              | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SelectTrigger)        |
+| SideRail             | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SideRail)             |
+| SideRailGroup        | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SideRailGroup)        |
+| SideRailItem         | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SideRailItem)         |
+| SideRailLayout       | Sticky left nav column             | `src/ui/components/side-rail.tsx`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SideRailLayout)       |
+| SkeletonBlocks       | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SkeletonBlocks)       |
+| SkeletonLine         | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SkeletonLine)         |
+| SkeletonRows         | Shape-keeping loading placeholders | `src/ui/components/skeleton.tsx`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#SkeletonRows)         |
+| Stat                 | KPI grid of cells                  | `src/ui/components/stat-grid.tsx`           | tone: default\|up\|down                                                                                                                                                                                                                                                         | [view](/ui-kit#Stat)                 |
+| StatGrid             | KPI grid of cells                  | `src/ui/components/stat-grid.tsx`           | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#StatGrid)             |
+| Stepper              | Lifecycle as words                 | `src/ui/components/stepper.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Stepper)              |
+| Text                 | Typography: every piece of text    | `src/ui/components/text.tsx`                | variant: default\|error\|selected\|uppercase\|underlined\|underLineWithColor\|strikethrough\|strileTroughInactive\|inactive\|label\|errorLabel · size: default\|giant\|small\|control\|micro\|nano\|stat\|statBig\|large\|reading · tracking: none\|pill\|label\|group\|section | [view](/ui-kit#Text)                 |
+| Textarea             | Auto-growing text area             | `src/ui/components/text-area.tsx`           | variant: default\|secondary                                                                                                                                                                                                                                                     | [view](/ui-kit#Textarea)             |
+| TextareaField        | Form-bound textarea                | `src/ui/form/fields/textarea-field.tsx`     | variant: default\|secondary                                                                                                                                                                                                                                                     | [view](/ui-kit#TextareaField)        |
+| Tile                 | Auto-fill grid of cards            | `src/ui/components/tiles.tsx`               | tone: default\|error                                                                                                                                                                                                                                                            | [view](/ui-kit#Tile)                 |
+| TILE_CORNER          | Tile corner skin tokens            | `src/ui/components/tile-skin.ts`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TILE_CORNER)          |
+| TILE_QUIET           | Tile corner skin tokens            | `src/ui/components/tile-skin.ts`            | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TILE_QUIET)           |
+| Tiles                | Auto-fill grid of cards            | `src/ui/components/tiles.tsx`               | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Tiles)                |
+| ToggleField          | Form-bound switch                  | `src/ui/form/fields/toggle-field.tsx`       | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ToggleField)          |
+| ToggleGroupField     | Form-bound multi-switch list       | `src/ui/form/fields/toggle-group-field.tsx` | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ToggleGroupField)     |
+| ToggleSwitch         | On/off switch with label           | `src/ui/components/toggle-switch.tsx`       | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ToggleSwitch)         |
+| Toolbar              | Bordered control strip             | `src/ui/components/toolbar.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Toolbar)              |
+| ToolbarSpacer        | Bordered control strip             | `src/ui/components/toolbar.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ToolbarSpacer)        |
+| Tooltip              | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#Tooltip)              |
+| TooltipProvider      | Hover hint                         | `src/ui/components/tooltip.tsx`             | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TooltipProvider)      |
+| TotalRow             | Table grammar wrapper              | `src/ui/components/data-table.tsx`          | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#TotalRow)             |
+| useFormField         | react-hook-form field scaffolding  | `src/ui/form/index.tsx`                     | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#useFormField)         |
+| ViewSwitch           | Exclusive view switch              | `src/ui/components/view-switch.tsx`         | —                                                                                                                                                                                                                                                                               | [view](/ui-kit#ViewSwitch)           |
+| WaterfallRow         | Horizontal bar chart row           | `src/ui/components/bar-row.tsx`             | kind: pos\|neg\|final                                                                                                                                                                                                                                                           | [view](/ui-kit#WaterfallRow)         |
 
 <!-- design-sync:end primitives -->
 
@@ -250,6 +255,7 @@ components:
 | font size      | `--text-micro`              | `10px`                                                                | `text-micro`             |
 | font size      | `--text-nano`               | `9px`                                                                 | `text-nano`              |
 | font size      | `--text-stat`               | `16px`                                                                | `text-stat`              |
+| font size      | `--text-reading`            | `16px`                                                                | `text-reading`           |
 | font size      | `--text-statBig`            | `22px`                                                                | `text-statBig`           |
 | font size      | `--text-lg`                 | `18px`                                                                | `text-lg`                |
 | font size      | `--text-giantSmall`         | `110px`                                                               | `text-giantSmall`        |
@@ -268,211 +274,292 @@ components:
 
 ## 1. Overview
 
-**Creative North Star: "The Machine Console"**
+**Creative north star: "The Machine Console"**
 
-This is not an app that decorates data; it is an instrument panel that admits what it knows. Operators run long, focused content-ops sessions and read hundreds of values per screen, so density is a feature and every pixel of ornament is a tax. The surface is black ink on white stock, ruled with hard 1px lines, set in uppercase mono, and controlled with literal glyphs (`[x]`, `+`, `⠿`, `✕`). Nothing is rounded, nothing floats, nothing glows.
+This is a dense operator tool: `textColor` on `bgColor`, hard rules, square controls, and literal
+glyphs. `pageBg` is the page canvas; `bgColor` is the material of a logical block. The 24px
+`gutter` between blocks exposes `pageBg` and acts as the divider.
 
-The system's whole spatial logic is one inversion, and it is the thing to internalise before writing a single new screen: **white is not the background, it is the material.** The page ground is grey (`#f2f2f2`). White is the stock a logical block is cut from, and the grey showing through between blocks IS the divider. You never draw a separator between two blocks; you leave a gap and let the ground do it. Everything else follows from that: a bordered box must be filled or the ground bleeds through its contents, a block never contains another block, and structure inside a block is drawn with ruled lines at four distinct weights rather than with nested containers.
-
-What this explicitly rejects, in PRODUCT.md's own words: _"rounded, pastel, card-heavy consumer SaaS dashboards (Notion/Linear-lite clones)"_, and _"gradient accents, drop shadows, glassmorphism, playful illustration"_. It also rejects wizard-style over-explanation; these are expert users and the path is never padded.
-
-**Key Characteristics:**
-
-- Grey ground, white blocks, zero corner radius, zero inline shadow.
-- The gap between blocks is the divider. Separators are subtractive, not drawn.
-- One border per logical block. Box-in-box is prohibited.
-- Hierarchy inside a block comes from four ruled weights, not from fills or nesting.
-- Monochrome by default; colour only ever carries state, never decoration.
-- Uppercase mono labels at 9–12px; body text tops out at 12px.
+- One `borderColor` outline per logical block. A bordered block also has a `bgColor` fill.
+- A block never contains another block. Use the rule ladder inside it.
+- Colour carries state, not decoration, and every colour signal also has a word or glyph.
+- Ordinary UI uses the named type scale and has no inline shadow or decorative radius.
 
 ## 2. Colors
 
-A monochrome ramp doing structural work, plus four semantic colours that are never allowed to decorate.
+Use the token name in prose and the matching Tailwind class in code.
 
-### Primary
+| Token name          | Value                | Typical class                | Contract                                             |
+| ------------------- | -------------------- | ---------------------------- | ---------------------------------------------------- |
+| `textColor`         | `#000000`            | `text-textColor`             | Body text, headings, selected fills, strongest rules |
+| `pageBg`            | `#f2f2f2`            | `bg-pageBg`                  | Page canvas and the visible gutter between blocks    |
+| `bgColor`           | `#ffffff`            | `bg-bgColor`                 | Blocks, inputs, menus, and other white surfaces      |
+| `borderColor`       | `#cccccc`            | `border-borderColor`         | Outer outlines                                       |
+| `textInactiveColor` | `#cccccc`            | `text-textInactiveColor`     | Disabled text and placeholders, not readable copy    |
+| `hairline`          | `#e6e6e6`            | `border-hairline`            | Inner rules between rows                             |
+| `labelColor`        | `#666666`            | `text-labelColor`            | Readable secondary text                              |
+| `bgSecondary`       | `#ededed`            | `bg-bgSecondary`             | Header strips and secondary fills                    |
+| `bgZebra`           | `#fafafa`            | `bg-bgZebra`                 | Accordion headers, grid lead cells, and sub-rows     |
+| `trackBg`           | `#f0f0f0`            | `bg-trackBg`                 | Bar tracks                                           |
+| `progressBg`        | `#e2e2e2`            | `bg-progressBg`              | Progress rails                                       |
+| `overlay`           | `rgba(0, 0, 0, 0.4)` | `bg-overlay`                 | Modal and drawer scrims                              |
+| `error`             | `#ff0000`            | `text-error`, `border-error` | Broken, missing, blocking, destructive               |
+| `warning`           | `#2323ff`            | `text-warning`, `bg-warning` | Mid-flight, unsaved, stale, or needing a human       |
+| `success`           | `#0f7a34`            | `text-success`, `bg-success` | Done, approved, in stock, or under budget            |
+| `highlightColor`    | `#311eee`            | `text-highlightColor`        | Links and the single highlight accent                |
 
-- **Ink** (`#000000`): All body text, every heading, the fill of a primary button, the fill of a selected chip, and the two heaviest rules in the ladder. There is no "dark grey text" in this system.
+`error`, `warning`, `success`, and `highlightColor` are the semantic names. `red`, `blue`, and
+`purple` are raw aliases, not the names to reach for in feature code. `warning` is deliberately
+blue.
 
-### Neutral
+`Placeholder` and `Skeleton*` use the same `#f4f4f4` / `#ececec` hatch to distinguish empty or
+loading space from an unpainted surface. Technical drawings currently use local `#dedede` fills
+and `#8a8a8a` strokes; these become tokens later.
 
-- **Ground** (`#f2f2f2`): The page canvas, set once on `body`. Content never sits directly on it; only blocks do. The gaps between blocks are ground, and those gaps are the dividers.
-- **Block** (`#ffffff`): The material every logical block is cut from. Also the fill of inputs, selects, chips at rest and tooltips.
-- **Edge** (`#cccccc`): The **outer** 1px outline of every block, input, pill and chip. Doubles as disabled/placeholder ink (`textInactiveColor` is the same value).
-- **Rule** (`#e6e6e6`): The **inner** 1px line between rows inside a block. Under print media it is bumped to `#cccccc` so it survives paper.
-- **Label** (`#666666`): Secondary ink for field labels, hints, group titles, units. ~5.7:1 on white. This is the only permitted grey for text.
-- **Panel** (`#ededed`): A fill, not a container. Used for board column headers and header strips inside a block, where a tint is wanted but a new box is not.
-- **Zebra** (`#fafafa`): Stat cells, accordion headers, sub-rows.
-- **Track** (`#f0f0f0`) / **Progress** (`#e2e2e2`): Bar tracks and their fills.
+Tailwind's default palette still exists, but it is not part of this system. Ordinary UI uses the
+named tokens above.
 
-### Secondary — status only
+### Rules
 
-- **Red** (`#ff0000`): Broken, missing, blocking, over budget, about to be destroyed.
-- **Blue** (`#2323ff`): Mid-flight, needs a human — in review, round 2, unsaved, changed-after-approval, stale. Deliberately blue; do **not** "correct" this to amber.
-- **Green** (`#0f7a34`): Done, approved, in stock, under budget. ~4.6:1 on white.
-- **Purple** (`#311eee`): Links and the single highlight accent.
-
-### Named Rules
-
-**The Ground Rule.** `#f2f2f2` is the canvas and only layout may touch it. No layout container is ever allowed to paint white over it — the moment a wrapper does, every divider on the page disappears at once and the design collapses into a white sheet.
-
-**The Gap-Is-The-Divider Rule.** The separator between two blocks is the gutter, not a line. Never add `border-t` between stacked blocks: both neighbours already carry their own outline, so a drawn line in the gutter renders as a triple rule.
-
-**The Filled-Block Rule.** A bordered block always carries the white fill. `border` without `background` is transparent, the ground shows through the content, and data stops reading as data.
-
-**The Two-Greys Rule.** `#cccccc` is the OUTER outline of a box. `#e6e6e6` is the INNER line between rows. Swapping them is the single most visible way to miss this system, and it is not a matter of taste.
-
-**The Monochrome Rule.** Red, blue, green and purple carry state and nothing else — never a mood, never a category, never a decorative accent. And state is never carried by colour alone: unsaved is a worded badge, incomplete is a `!` glyph, blocked is a labelled chip.
+- Only layout exposes `pageBg`; page wrappers and tab panels do not paint over it.
+- A `borderColor` outline always encloses a `bgColor` surface.
+- `borderColor` is the outer rule and `hairline` is the inner rule. Do not swap them.
+- Semantic colour never acts alone and is not used as decoration or category colour.
 
 ## 3. Typography
 
-**Single Font:** FeatureMono (Thin 100 / Regular 400 / Bold 700), falling back to Inter, Helvetica Neue, Arial. There is no second family and no display face. Contrast comes from weight, case, tracking and size, never from a competing typeface.
+`font-family-sans` is the default FeatureMono-first stack. `font-family-mono` is the
+FeatureMono-first technical stack used by codes and imported data. Neither introduces a display
+face.
 
-**Character:** Machine-cut and even-width. Numbers align in columns without being asked (value columns are `tabular-nums` at the primitive level), which is why long stacks of figures read as a ledger rather than as prose.
+| Role            | Token / utility                      | Use                                            |
+| --------------- | ------------------------------------ | ---------------------------------------------- |
+| Body            | `textBaseSize` / `text-textBaseSize` | 12px values, cells, and running text           |
+| Deprecated body | `small` / `text-small`               | 12px compatibility alias; do not add new uses  |
+| Control         | `control` / `text-control`           | 11px tabs, rails, and option labels            |
+| Label           | `micro` / `text-micro`               | 10px chips, buttons, pills, headers, and hints |
+| Nano            | `nano` / `text-nano`                 | 9px badges, pin numbers, and band labels       |
+| Stat            | `stat` / `text-stat`                 | 16px KPI values                                |
+| Large stat      | `statBig` / `text-statBig`           | 22px emphasis inside stat surfaces             |
+| Headline        | `lg` / `text-lg`                     | 18px page title                                |
+| Compact display | `giantSmall` / `text-giantSmall`     | 110px login or hero display                    |
+| Display         | `giant` / `text-giant`               | 200px login or hero display                    |
 
-### Hierarchy
+Section titles are bold 12px text with `tracking-section`; labels use the appropriate tracking
+token. Type roles such as title and label are compositions, not separate size tokens.
 
-- **Display** (400, 110px mobile / 200px desktop): Login splash and hero only. Never inside the app shell.
-- **Headline** (400, 18px): The one large size. Reserved for page-level titles.
-- **Title** (700, 12px, uppercase, 0.06em): Section titles — the text sitting on the 2px rule that opens a block.
-- **Body** (400, 12px, 1.5): Field values, table cells, all running text. The working size of the entire product.
-- **Control** (400, 11px, uppercase, 0.04em): Chips, buttons, tabs, option labels.
-- **Label** (400, 10px, uppercase, 0.04em): Field labels, pills, table headers, hints, group titles.
-- **Nano** (400, 9px, uppercase): Badges, pin numbers, band labels.
-- **Stat** (700, 16px / 22px, tabular): KPI values inside a stat cell.
+### Rules
 
-### Named Rules
-
-**The Twelve-Pixel Ceiling Rule.** Body text is 12px and the chrome sizes go _down_ from there (11 / 10 / 9), never up. The only sizes above 12 are the 18px page headline and the two stat sizes. A screen that needs a bigger font to establish hierarchy has a layout problem, not a type problem.
-
-The ceiling is enforced by `body { font-size: var(--text-textBaseSize) }` in `global.css`, and that declaration is load-bearing: Tailwind's preflight sets no font-size, so without it every element that does not name a size itself falls back to the browser's 16px. That is how the app ran until 2026-08-14 — table cells and `Row` values a third larger than the 12px section title above them, which is why tables read as big and heavy. If body text ever looks oversized again, check that line before touching a screen.
-
-The ceiling covers the admin, which is read sitting down at a desk. Three surfaces are named exceptions at 16px, and the reason is physical rather than aesthetic: the two public QR pages (`/r/:token`, `/p/:token`) are read at arm's length on a phone on the factory floor **and cannot be pinch-zoomed** — `index.html` asks for `user-scalable=no` so iOS stops zooming on input focus — and the email rich-text canvas holds prose a customer will read in a mail client. Each carries a comment saying so. Do not add a fourth without one.
-
-**The No-Hand-Tracking Rule.** Letter-spacing is baked into the four `tracking` tokens (`pill` 0.03em, `label` 0.04em, `group` 0.05em, `section` 0.06em) and applied through the `Text` primitive. No screen sets `letter-spacing`, `font-size` in px, or `tabular-nums` by hand. Outside `src/ui`, writing `text-[Npx]` is prohibited.
-
-**The Uppercase-Is-A-Label Rule.** Uppercase marks a label, a control or a section title — things of four words or fewer. Sentences and hints stay sentence case at `label` colour.
+- Ordinary UI tops out at 12px except for page headlines and stat/display roles.
+- Three surfaces are 16px, for a physical reason: the public QR pages `/p/:token` and `/r/:token`
+  (read at arm's length on a phone, no pinch-zoom) and the email rich-text canvas (customer prose).
+  Do not add a fourth.
+- Letter spacing comes from `tracking-pill`, `tracking-label`, `tracking-group`, or
+  `tracking-section`. Outside `src/ui` and the print surface, do not write px font sizes or tracking
+  by hand.
+- Uppercase marks short labels and controls. Sentences and hints remain sentence case.
 
 ## 4. Elevation
 
-The system is flat and layers **tonally**, not with shadows. Depth is expressed by a four-step surface ramp — ground `#f2f2f2` → block `#ffffff` → panel `#ededed` → zebra `#fafafa` — plus 1px outlines. Nothing that sits in the document flow is ever allowed a shadow; the only elevated things are the ones that genuinely float above it.
+Document-flow surfaces are flat. The only elevation tokens are:
 
-### Shadow Vocabulary
+- `--shadow-modal`: `ConfirmationModal`, `Drawer`, and modal dialog surfaces.
+- `--shadow-popover`: `GenericPopover`, `DatePicker`, copy feedback, and entity/material picker
+  panels that opt into the popover surface.
 
-- **Modal** (`box-shadow: 0 6px 22px rgba(0,0,0,0.22)`): Dialogs only.
-- **Popover** (`box-shadow: 0 4px 14px rgba(0,0,0,0.18)`): Selects, date pickers, entity pickers, tooltips.
-- **Card lift** (`transform: translateY(-1px); box-shadow: 2px 2px 0 0 #000`): The one signature exception — a draggable board card on hover. A hard offset with **zero blur**, so it reads as a sheet of paper pushed sideways, not as a soft glow.
+`Select`, `Combobox`, and `Tooltip` do not have a shadow. Nothing else gets one.
 
-### Z-Index Scale
+### Floating surfaces
 
-Semantic only, referenced through variables: sticky page chrome (20) < nav (45) < modal (50) < popover-in-modal (60) < toast (70). Arbitrary values like `999` are prohibited.
+| Surface                       | Frame               | Shadow             | Layer         |
+| ----------------------------- | ------------------- | ------------------ | ------------- |
+| `ConfirmationModal`, `Drawer` | `textColor`         | `--shadow-modal`   | `--z-modal`   |
+| `GenericPopover`              | `textColor`         | `--shadow-popover` | `--z-popover` |
+| `DatePicker`                  | `textInactiveColor` | `--shadow-popover` | `--z-popover` |
+| `Select`, `Combobox`          | `textInactiveColor` | none               | `--z-popover` |
+| `Tooltip`                     | `borderColor`       | none               | `--z-popover` |
 
-### Named Rules
+`ConfirmationModal` is the modal shell: `bgColor`, a `textColor` frame, a `bgSecondary` header,
+scrolling body, ruled footer, and `sm` / `md` / `lg` widths. `Drawer` uses the same anatomy at the
+right edge.
 
-**The Flat-By-Default Rule.** If an element is in the document flow, it has no shadow. A shadow is a claim that something is floating above the page, and in this system only three things ever are: a modal, a popover, and a card being dragged.
+### Z-index
 
-**The Zero-Radius Rule.** `border-radius: 0` everywhere, including buttons, inputs, chips, pills, avatars and images. There are no pill-shaped controls. If it looks like a 2014 app, the corners got rounded and a shadow got soft.
+Use semantic variables across page layers:
+
+`--z-sticky` 20 < `--z-dock` 40 < `--z-nav` 45 < `--z-modal` 50 < `--z-popover` 60 <
+`--z-toast` 70.
+
+Values from 0 through 20 may be local to an explicitly isolated stacking context. Do not use an
+arbitrary value to cross page layers.
+
+### Motion
+
+- Navigation menus use a 150ms open / 120ms close drop; drawers use a 180ms open / 140ms close
+  slide.
+- Media viewers and file readers crossfade in 160ms and out in 130ms; the media stage enters in
+  200ms. Composition swaps and annotation spot rings enter in 150ms.
+- `PictureBusy` uses 1.8s scan and 2.4s wipe loops to distinguish read from cut work. Selected
+  annotation callouts use the 1.6s breathing halo.
+- `prefers-reduced-motion` removes the transition or leaves an equivalent static state. The
+  breathing halo is also omitted from print.
+
+All ordinary controls and surfaces are square. A circle is allowed only when the circle is the
+sign: `Avatar`, annotation pins, and equivalent compact marker controls.
 
 ## 5. Components
 
-### The Block — the signature component
+The generated catalog above is the closed primitive list. `/ui-kit#Name` is the live reference for
+each primitive. Outside `src/ui`, import catalog entries only from `ui`. A new primitive needs the
+owner's approval and a `[primitive-ok]` commit marker. Feature components and compositions live
+with their feature, outside `src/ui`.
 
-The unit the entire product is built from. One logical block = one white rectangle on the grey ground.
+### Neighbours
 
-```tsx
-<section className='space-y-2.5 border border-borderColor bg-bgColor p-4'>
-  <SectionHeader title='identification' question='— what this style is' />
-  {children}
-</section>
-```
+How blocks sit next to each other. Live samples: [/ui-kit#neighbours](/ui-kit#neighbours).
 
-- **Corner Style:** square (0px).
-- **Background:** block white (`#ffffff`), always present.
-- **Border:** 1px solid edge (`#cccccc`) on all four sides.
-- **Internal Padding:** 16px. **Internal stack:** 10px between children.
-- **Separation from siblings:** a 24px gutter of ground. No drawn line.
-- **Shadow Strategy:** none. See Elevation.
+1. **Under.** Blocks are siblings in `SectionStack`, 24px `gutter` apart. Nothing is drawn in the gap: no margin, `<hr>` or `border-b`.
+2. **Beside.** `SectionStack row` (`lg:flex-row gap-gutter`). Two outlines never touch. *(rule, not linted)*
+3. **In: never.** Structure inside a block is `GroupLabel` + `Row`, never a nested `Section`. *(rule, not linted)*
+4. **Own surfaces are siblings.** `StatGrid`, `Tiles`, `Board` and preview iframes sit in the stack next to blocks, never inside a `Section`. `DataTable` is not a surface; it lives inside a block. Modals, drawers and popovers float outside the flow.
+5. **Toolbar** is its own strip in the stack, directly above what it controls, the same 24px away.
+6. **Inside a block:** 16px `block` padding, 10px `stack` between children. Header actions are underlined words; one main action per block.
+7. **Page edge:** the shell keeps 10px (`px-2.5`) to the first block. The ground (`pageBg`) shows only in gaps.
+8. **Warnings** live in the block they concern: `! N` in its header (`HeaderWarnings`) plus red text. A free `CalloutBox` between blocks is old debt (3 sites). *(rule, not linted)*
 
-Page chrome is a block too: the tech-card header is a full-bleed white bar with a 1px bottom edge, separated from the content below by the same grey gutter.
+### Blocks and headers
 
-### The Rule Ladder — hierarchy inside a block
+`Section` is one logical block: `bgColor`, a `borderColor` outline, 16px `block` padding, and a
+10px `stack` between children. `SectionStack` separates sibling blocks with the 24px `gutter`.
+`Section` can collapse to one header row; `FoldCaret` is the shared disclosure mark.
 
-Structure inside a block is drawn with exactly four ruled weights. This is what replaces nesting.
+`SectionHeader` owns the 2px `textColor` rule. Its `question` clause is optional.
+`HeaderNote`, `HeaderCount`, and `HeaderNext` provide quiet header metadata; `HeaderWarnings`
+keeps `! N warnings` and its doors in the header rather than the body. A hand-drawn `!` glyph,
+`` `! ${n} blocking` `` or a red problem count fails `design/no-hand-header-warnings`.
 
-| Level         | Rule                           | Component       |
-| ------------- | ------------------------------ | --------------- |
-| Block title   | 2px solid ink, below the title | `SectionHeader` |
-| Sub-group     | 1px solid edge `#cccccc`       | `GroupLabel`    |
-| List row      | 1px solid rule `#e6e6e6`       | `Row`           |
-| Closing total | 1px solid ink, above the total | `RowTotal`      |
+Inside a block, the rule ladder is fixed:
 
-**The Between-Rows Rule.** A list's hairline sits _between_ rows, never under the last one: a run of rows ends in air at the first thing that is not a row — a note, a label, a door, the end. A closing total draws its ink rule _above_ itself and none below, and the row before it drops its hairline. An add door below a list (the dashed `+ …` placeholder row) stands one step away from the last row (`mt-4`, 16px), and only when rows exist; in an empty list it is the first row, with no extra gap. `Row`/`RowTotal`, `DataTable`/`TotalRow`, `FieldRow` and `InventoryLine` do this themselves; a hand-rolled list uses `divide-y divide-hairline`, `last:border-b-0`, or the row's index when something that is not a row follows it.
+| Level         | Rule                        | Primitive       |
+| ------------- | --------------------------- | --------------- |
+| Block title   | 2px `textColor` below       | `SectionHeader` |
+| Sub-group     | 1px `borderColor` below     | `GroupLabel`    |
+| List row      | 1px `hairline` between rows | `Row`           |
+| Closing total | 1px `textColor` above       | `RowTotal`      |
 
-`SectionHeader` also carries an optional grey trailing clause (`question`) that says what the block is FOR — that clause is most of why the product reads as explained rather than merely labelled. Use it.
+**Between rows, never under the last.** A ruled list ends in air: the last row has no bottom rule —
+the block outline or the next non-row closes it. A total draws its ink rule above itself and the row
+before it drops its hairline. `Row`/`RowTotal`, `DataTable`/`TotalRow` do this themselves; a
+hand-rolled list uses `divide-y divide-hairline` or `last:border-b-0`.
+
+The final ordinary row has no bottom rule. `Row` / `RowTotal` and `DataTable` / `TotalRow`
+implement this. Feature-local row helpers follow the same rule but are not primitives.
 
 ### Buttons
 
-- **Shape:** square (0px), `leading-4`, centred.
-- **Main** (page actions only — Save, Release, Create): ink fill, white text, 1px ink border, 10px/16px padding, 12px type. Hover inverts to white-on-ink-border.
-- **Secondary** (everything inside a panel): white fill, 1px edge border, ink text, 10px label type uppercase, 4px/10px padding. Hover inverts to a solid ink fill.
-- **Disabled:** never a filled grey slab. It becomes an outline: white fill, edge-coloured border and text.
-- **Focus:** `outline: 2px solid #000` at 2px offset, on every interactive control without exception.
-- **Sizes:** `xs` in a table row, `sm` in a panel (the default), `lg` for page-level actions only.
+Variant and size are independent.
+
+- `main` uses a `textColor` fill, `bgColor` text, and a `textColor` frame. It inverts on hover.
+- `secondary` is transparent with a `textInactiveColor` frame and `textColor` text. It fills
+  `textColor` on hover.
+- Disabled `main` and `secondary` buttons become `bgColor` outlines with
+  `textInactiveColor` text and frame.
+- `xs` and `sm` are 10px uppercase sizes for dense rows and panels. The default is
+  `size='default'`: 12px with no padding added by the size. `lg` adds 10px / 16px padding at 12px
+  for page actions.
 
 ### Pills and Chips
 
-Same shape, different contract, and mixing them is a bug: **a Pill is read-only, a Chip is clickable.**
+A `Pill` is read-only; a `Chip` is interactive.
 
-- **Pill:** transparent background, 1px border and text sharing one tone colour — ok (green), warn (red), attention (blue), mut (grey), ink (black). 10px uppercase, 0.03em.
-- **Chip:** at rest, white fill with an edge border and label-grey text; hovering darkens the text to ink. **Selected fills solid with ink and flips the text to white.** Supports a dashed variant for "add" affordances and a trailing `✕` for removal.
+- `Pill` has a transparent background and matching border/text tones: `ok` uses `success`, `warn`
+  uses `error`, `attention` uses `warning`, `mut` uses `borderColor` / `labelColor`, and `ink` uses
+  `textColor`. `gap` is the dashed `mut` treatment for something not present yet.
+- `Chip` rests on `bgColor` with a `borderColor` frame and `labelColor` text. Selection fills
+  `textColor`; `error` and `attention` use their semantic tokens. `quiet` removes the frame for
+  block and group headers.
 
 ### Inputs and Selects
 
-- **Style:** 1px edge border, white fill, square, 22px minimum height, 3px/7px padding, 12px body type. Textareas take a 44px minimum and resize vertically only.
-- **Focus:** the border goes from edge grey to solid ink. No ring, no glow, no colour shift.
-- **Error:** `aria-invalid` drives a red border, styled once in `ui/form` — never per screen.
+- `Input`, `Select`, and `Combobox` use a 1px `borderColor` frame, `bgColor` fill, 22px minimum
+  height, 3px / 7px padding, and 12px text. `Textarea` has a 44px minimum and auto-grows by
+  default.
+- Focus changes the frame to `textColor`. `aria-invalid` changes it to `error`; the primitive owns
+  this styling, not the screen or form wrapper.
+- Use the floating-surface table above for dropdown frames and shadows.
 
 ### Stat Grid
 
-An auto-fitting grid of KPI cells (`repeat(auto-fit, minmax(110px, 1fr))`). **It fills white once at the container and rules internally with 1px edge lines** — a table, not a row of nested cards. Each cell is a label / value / sub triple, with `up` green and `down` red as the only tones. A cell with no data renders `—`, never `0`.
+`StatGrid` fills `bgColor` once at the container and divides cells with `borderColor`; cells are not
+`bgZebra` cards. `Stat` is a label / value / sub triple with `success` and `error` as the only
+tones. Missing data renders `—`, never `0`.
 
 ### Board (kanban / fulfilment lanes)
 
-A horizontally scrolling row of bordered white columns. The column header is a panel-tinted strip (`#ededed`) with a 1px bottom edge, carrying a bold uppercase title and a count. The lane body sits on a 2%-black wash so cards read against it; each card is white with a `#e6e6e6` bottom hairline. Empty lanes render a dashed "nothing here / + add" body.
+`Board` is a horizontal row of `BoardColumn` surfaces. A column has a `borderColor` outline and
+`bgColor` fill; its header uses `bgSecondary`. `BoardCard` has a full `borderColor` frame, not only
+a bottom rule. `BoardEmpty` is the dashed empty/add door.
 
 ### Callout Box
 
-Inline message, 1px border, no fill except one case. Error is a red border with black body text and red `<b>`; warning (mid-flight, blue) adds a 5% blue wash; note is an edge border with label-grey text. A callout stays until it is resolved or dismissed — a partial save is not a toast.
+`CalloutBox` uses 10px horizontal and 8px vertical padding. `error` has an `error` frame with
+`textColor` body copy; `warning` has `warning` text, frame, and a 5% `warning` wash; `note` has a
+`borderColor` frame and `labelColor` text. A persistent problem is a callout, not a toast.
 
-### Navigation — the section rail
+### Tables and compact data
 
-The tech card's left rail is the reference pattern: a sticky 150px column of uppercase 11px entries, active carrying bold ink and inactive label grey. A 14px square checkbox glyph per entry doubles as the completion signal (filled ink with `✓` when the section has data), which is why there is no separate progress bar. Below `lg` the rail becomes a horizontal scroll strip with the active state moving to a 2px bottom rule.
+`DataTable` owns scrolling, tabular numbers, right-aligned numeric columns, `borderColor` headers,
+and `hairline` body rows. Put `data-align="left"` on both `th` and `td` for a word column.
+`TotalRow` closes with a `textColor` rule above; `EmptyCell` renders `—`. The `grid` variant frames
+every cell and uses `bgZebra` only on the first column. An absent value in a table cell, `Row`
+value or `Stat` value is `<EmptyCell />`; a literal `'—'`, `'-'` or `'n/a'` there fails
+`design/no-hand-empty-cell` (print documents keep their own dash).
 
-## 6. Do's and Don'ts
+`BarRow` and `WaterfallRow` use `trackBg` with `textColor`, `success`, or `error` fills. `Stepper`
+shows a lifecycle as words and `›`, not as a percentage.
 
-### Do:
+### Repeated and transient surfaces
 
-- **Do** build every screen out of white blocks (`border border-borderColor bg-bgColor p-4`) sitting on the grey ground, separated by a 24px gutter.
-- **Do** reach for `SectionHeader` / `GroupLabel` / `Row` / `RowTotal` to express hierarchy. Four ruled weights, in that order, cover every case.
-- **Do** keep `#cccccc` on the outside of boxes and `#e6e6e6` on the inside between rows.
-- **Do** fill a bordered block with white. Always.
-- **Do** write the `question` clause on section headers, so a block says what it is for and not only what it is called.
-- **Do** use `src/ui` primitives (`Text`, `Button`, `Pill`, `Chip`, `Row`, `StatGrid`, `CalloutBox`) instead of hand-rolling `div` + Tailwind. Type sizes, tracking and tabular numerals are baked in there on purpose.
-- **Do** mark a `DataTable` column that holds words rather than digits with `data-align="left"` on **both** its `th` and its `td`. Right alignment exists to line up decimal places; on a column of badges or prose it leaves the header at one edge of the cell and the content at the other, so the label sits over nothing. A `text-left` class on the cell does not work — the table's own `[&_th]:text-right` outranks it.
-- **Do** render `—` for missing data. An empty strip that reads as zero cost is worse than one that admits it has nothing.
-- **Do** pair every colour signal with a word or a glyph, so the UI survives monochrome and colour-blind reading.
-- **Do** give every interactive control a visible `focus-visible` outline and honour `prefers-reduced-motion`.
+- `Tiles` / `Tile` are the auto-fill visual picker. Tile corner/menu marks come from
+  `TILE_CORNER` and `TILE_QUIET`.
+- `Placeholder` marks empty space with the hatch. `SkeletonLine`, `SkeletonRows`, and
+  `SkeletonBlocks` keep the shape of the result while it loads.
+- `Toolbar` is the bordered control strip; its sticky form uses `bgSecondary`. `ViewSwitch` is the
+  exclusive view selector.
+- `Accordion` is a bordered `bgColor` surface with an `bgZebra` header and `FoldCaret`.
 
-### Don't:
+### Navigation and shell
 
-- **Don't** paint `bg-bgColor` on a layout container, a page wrapper or a tab panel. It swallows the ground and deletes every divider on the screen at once.
-- **Don't** nest a block inside a block. One border per logical block; a sub-section is a `GroupLabel` and a rule, never a second `border` + `bg` pair.
-- **Don't** draw a `border-t` or an `<hr>` between two stacked blocks. The gutter is the divider.
-- **Don't** ship a bordered box without a fill.
-- **Don't** round anything. No `rounded-*`, no pill-shaped buttons, no circular avatars.
-- **Don't** put a shadow on anything in the document flow. Modals, popovers and the dragged board card are the entire list.
-- **Don't** use `textInactiveColor` (`#ccc`, ~1.6:1) for readable text. Secondary text is `labelColor` (`#666`, ~5.7:1). `#ccc` is for borders, disabled states and placeholders only.
-- **Don't** introduce a second font family, a font size above 12px in ordinary UI, or a hand-written `letter-spacing`.
-- **Don't** use colour decoratively. No categorical colour coding, no tinted section backgrounds, no accent-per-feature. Red / blue / green mean broken / mid-flight / done, and nothing else.
-- **Don't** "fix" the blue warning tone to amber or orange. Mid-flight states are blue in this system by decision.
-- **Don't** reproduce the anti-references from PRODUCT.md: _"rounded, pastel, card-heavy consumer SaaS dashboards (Notion/Linear-lite clones)"_, _"gradient accents, drop shadows, glassmorphism, playful illustration"_, or _"wizard-style over-explained flows"_.
-- **Don't** use arbitrary z-index values. The semantic scale (sticky 20 / nav 45 / modal 50 / popover 60 / toast 70) covers every layer that exists.
+`SideRail` is a 150px bordered `bgColor` rail by default. `SideRailItem` supports selected, count,
+badge, and completion states. `HeaderNext` and feature rails use `›` for the next door. The tech
+card's sticky responsive rail and the desktop/mobile top navigation are feature or shell
+compositions outside `src/ui`.
+
+The shell `SnackBar` is also outside the primitive catalog. It is one inverted `textColor` column
+with internal rules, not a stack of separately framed cards.
+
+## 6. Print documents
+
+Print documents are a separate physical surface. The exact scope is the `lint:print` list in
+`package.json`:
+
+- `src/components/managers/print`
+- `src/components/managers/tech-card/components/tech-pack-document.tsx`
+- `src/components/managers/tech-card/print-page.tsx`
+- `src/components/managers/production-runs/components/run-pack-document.tsx`
+- `src/components/managers/production-runs/print-page.tsx`
+
+These paths may use local hex colours and px sizes for paper geometry, callouts, swatches, and
+preview treatment. No other path inherits that exemption. Under print media, the page becomes
+`bgColor` and `hairline` is promoted to `borderColor` so rules survive on paper.
+
+## 7. Enforcement
+
+`yarn lint:design` is a ratchet: existing debt may remain at its baseline, but new design
+violations fail. Fix the feature or change the token, this document, and the live UI kit together
+with the owner's approval.
+
+- Import primitives only from `ui`; do not deep-import their files.
+- Do not add a primitive or a file under `src/ui` without owner approval and `[primitive-ok]`.
+- Do not hand-roll blocks, type sizes, tracking, colour, radius, shadow, or cross-layer z-index.
+- Preserve visible focus behavior and a reduced-motion equivalent when changing an interaction.

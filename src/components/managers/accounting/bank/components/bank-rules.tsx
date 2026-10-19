@@ -1,6 +1,6 @@
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import {
   useAcctAccounts,
   useBankRules,
@@ -162,14 +162,12 @@ export function BankRules({
                       → {r.accountCode}
                     </Text>
                   </div>
-                  <button
-                    type='button'
-                    className='shrink-0 text-textBaseSize underline underline-offset-2 hover:opacity-70 disabled:opacity-40'
+                  <Close
+                    size='sm'
+                    aria-label='delete bank rule'
                     disabled={del.isPending}
                     onClick={() => r.id != null && removeRule(r.id)}
-                  >
-                    [x]
-                  </button>
+                  />
                 </div>
               ))}
             </div>

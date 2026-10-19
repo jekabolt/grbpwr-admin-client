@@ -2,8 +2,7 @@ import { TierConfigEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button, Input, Section, SectionStack, Text } from 'ui';
+import { BackLink, Button, Input, Section, SectionStack, Text } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
 
@@ -31,9 +30,7 @@ export function TierConfig() {
         <Text variant='uppercase' size='large'>
           tier configuration
         </Text>
-        <Button variant='secondary' size='lg' className='uppercase' asChild>
-          <Link to={ROUTES.members}>← members</Link>
-        </Button>
+        <BackLink to={ROUTES.members}>members</BackLink>
       </div>
 
       <Text variant='inactive' size='small'>

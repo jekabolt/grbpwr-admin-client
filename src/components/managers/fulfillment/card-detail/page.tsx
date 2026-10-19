@@ -13,6 +13,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   CalloutBox,
   ConfirmationModal,
@@ -22,7 +23,7 @@ import {
   RowTotal,
   Section,
   SkeletonBlocks,
-  Text,
+  Text, EmptyCell,
 } from 'ui';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
 import { ShipLabelModal } from '../components/ship-label-modal';
@@ -135,9 +136,7 @@ export function FulfillmentCardDetail() {
         <Text size='micro' variant='label' component='span'>
           It may not be in fulfillment, or the link is wrong.
         </Text>
-        <Button asChild variant='main' size='sm'>
-          <Link to={ROUTES.fulfillment}>← back to board</Link>
-        </Button>
+        <BackLink to={ROUTES.fulfillment}>board</BackLink>
       </Centered>
     );
   }
@@ -161,9 +160,7 @@ export function FulfillmentCardDetail() {
     <div className='flex flex-col gap-4 pb-16'>
       {/* Header */}
       <div className='flex flex-col gap-2 border-b-2 border-textColor pb-2'>
-        <Button asChild variant='underline' size='xs'>
-          <Link to={ROUTES.fulfillment}>← board</Link>
-        </Button>
+        <BackLink to={ROUTES.fulfillment}>board</BackLink>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex flex-wrap items-center gap-2'>
@@ -180,7 +177,7 @@ export function FulfillmentCardDetail() {
                 <CopyToClipboard text={o?.uuid || ''} />
               </span>
               <Text size='micro' variant='label' component='span'>
-                placed {formatDateShort(o?.placed, true) || '—'}
+                placed {formatDateShort(o?.placed, true) || <EmptyCell />}
               </Text>
             </div>
           </div>

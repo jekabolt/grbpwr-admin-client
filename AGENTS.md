@@ -30,7 +30,7 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
 - Optional but **set it on every deployed environment**: `VITE_PATTERN_VIEWER_ORIGIN` — the origin
   baked into the tech pack's pattern QR codes (`{origin}/p/{token}`). It defaults to
   `window.location.origin`, i.e. the address of the tab that pressed "save as pdf" — so printing
-  from a Vercel *preview* alias produces paper that points at an ephemeral, SSO-protected host and
+  from a Vercel _preview_ alias produces paper that points at an ephemeral, SSO-protected host and
   dies when the branch is renamed. Set it to the stable admin host of that contour
   (`https://admin.beta.grbpwr.com`, `https://admin.grbpwr.com`). Nothing fails visibly when it is
   wrong; the QR just stops working later, in a workshop.
@@ -42,7 +42,7 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
   guards against is the same silent one: a link copied from a Vercel preview is handed to a
   contractor and dies with the alias — which is why the tab fallback is refused when the tab
   itself is provably ephemeral (`localhost`, a bare IP, `*.vercel.app`). On such a host the
-  address and its copy button are not rendered at all; on a stable host the tab origin *is* the
+  address and its copy button are not rendered at all; on a stable host the tab origin _is_ the
   product origin and the button keeps working. See `src/components/file-share-viewer/link.ts`.
   `.env.example` documents both variables.
 - `.env.example` lists a stale `REACT_APP_SERVER_URL` — the code uses `VITE_SERVER_URL`. Don't propagate the old name.
@@ -69,26 +69,27 @@ Each domain is a folder under `src/components/managers/`: `page` (analytics), `m
 ## Conventions
 
 - **Path aliases** (defined in both `vite.config.ts` and `tsconfig.json`, `baseUrl: src`): `@`, `api`, `components`, `constants`, `context`, `hooks`, `lib`, `types`, `ui`, `utils`, `styles`. Import with these, e.g. `import { adminService } from 'api/api'` — not relative `../../..` paths.
-- **UI components**: reuse the local design system in `src/ui` (`button`, `input`, `select`, `date-picker`, `confirmation-modal`, `snackbar`, form fields, etc.) before reaching for raw Radix or new dependencies.
+- **UI components**: import existing primitives only from `ui`, for example
+  `import { Button, Input } from 'ui'`. Never import implementation paths such as
+  `ui/components/...` or `ui/form/...`.
 - **Styling**: Tailwind CSS 4 utility classes are the default; SCSS exists for some components. Match the surrounding file.
 - **Formatting**: Prettier (single quotes, JSX single quotes, semicolons, width 100, trailing commas). Run `yarn fix` before finishing. Keep ESLint clean.
 - **TypeScript**: `strict` is on. Avoid `any`; prefer the generated proto types from `api/proto-http/*` for backend shapes.
 
-## Visual design — read DESIGN.md before building a screen
+## Visual design: DESIGN.md + /ui-kit are the law
 
-`DESIGN.md` at the repo root is normative. The short version: the page ground is grey
-(`--color-pageBg`), white is the *material* of a block rather than the background, and the 24px
-gap between blocks IS the divider — separators are never drawn.
+`DESIGN.md` defines the tokens and rules; `/ui-kit` shows every primitive live. The design linter
+(`yarn lint:design`) enforces them as a ratchet. Import primitives only `from 'ui'`. The primitive
+list is closed: do not add a file under `src/ui` without the owner's OK and a `[primitive-ok]`
+commit marker.
 
-- Build screens from `Section` / `SectionStack` in `src/ui/components/section.tsx`. Do not write a
-  local section/panel wrapper; eleven of those existed before the primitive did, six of them
-  rendering a bordered box with **no fill**, so the grey ground showed through the content.
-- A block never contains another block. Sub-structure is `GroupLabel` + `Row`, i.e. the four
-  ruled weights (2px ink > 1px `borderColor` > 1px `hairline` > 1px ink).
-- `borderColor` (#ccc) is the OUTER outline of a box; `hairline` (#e6e6e6) is the INNER rule
-  between rows. Swapping them is the most visible way to miss the system.
-- Modals, boards, tiles, `StatGrid` and the storefront/email preview iframes are already their
-  own surfaces — do not wrap them in a `Section`.
+- The page ground is grey (`pageBg`); white (`bgColor`) is the material of a block, not the page
+  background.
+- The 24px gap between blocks is the divider. Do not draw a separator in it.
+- A block never contains another block. Use `GroupLabel` and `Row` for internal structure.
+- `borderColor` is the outer outline; `hairline` is the inner rule between rows.
+- Modals, boards, tiles, `StatGrid`, and storefront/email preview iframes are already surfaces. Do
+  not wrap them in a `Section`.
 
 ## Generated code — do not hand-edit
 

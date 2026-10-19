@@ -15,7 +15,18 @@ import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import
 import type { DraftScope } from 'lib/pattern-import/types';
 import { useContext, useState } from 'react';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { Button, CalloutBox, Chip, ChipRow, DataTable, GroupLabel, Pill, Row, Text } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  DataTable,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+} from 'ui';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';
@@ -132,7 +143,7 @@ export function ApplyStep({
         label='pieces'
         value={`${created.length} new${reused.length ? ` · ${reused.length} existing` : ''}`}
       />
-      <Row label='sizes' value={sizes.length ? sizes.join(' ') : '—'} />
+      <Row label='sizes' value={sizes.length ? sizes.join(' ') : <EmptyCell />} />
       {draft.scopes.map((s) => (
         <Row
           key={s.target.scopeKey}
@@ -290,7 +301,7 @@ export function ApplyStep({
                   {CUT_SYMMETRY_WORD[p.cutSymmetry] ?? 'identical'}
                 </td>
                 <td data-align='left'>{p.grainline}</td>
-                <td data-align='left'>{p.fused ? 'yes' : '—'}</td>
+                <td data-align='left'>{p.fused ? 'yes' : <EmptyCell />}</td>
                 <td data-align='left'>
                   {p.existingLineKey ? (
                     <Pill

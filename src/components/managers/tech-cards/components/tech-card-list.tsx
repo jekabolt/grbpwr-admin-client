@@ -21,6 +21,7 @@ import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
 import {
   Button,
+  Close,
   Chip,
   ChipRow,
   ConfirmationModal,
@@ -438,10 +439,8 @@ export function TechCardList() {
                   <div className='flex items-center gap-1'>
                     <ColorwayBadge card={tc} />
                     {canEdit ? (
-                      <Button
-                        type='button'
-                        size='xs'
-                        variant='secondary'
+                      <Close
+                        size='sm'
                         aria-label='delete tech card'
                         className='bg-bgColor'
                         onClick={(e: React.MouseEvent) => {
@@ -451,9 +450,7 @@ export function TechCardList() {
                             label: tc.styleNumber || tc.name || '',
                           });
                         }}
-                      >
-                        ✕
-                      </Button>
+                      />
                     ) : null}
                   </div>
                 }

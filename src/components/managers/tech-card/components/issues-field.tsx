@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
+  Close,
   Placeholder,
   DataTable,
   EmptyCell,
@@ -131,7 +132,7 @@ function IssueEditor({
           />
           {opInfo && (
             <Text size='micro' variant='label' className='truncate'>
-              {opInfo.label || '—'}
+              {opInfo.label || <EmptyCell />}
             </Text>
           )}
         </div>
@@ -144,7 +145,7 @@ function IssueEditor({
           />
           {calloutInfo && (
             <Text size='micro' variant='label' className='truncate'>
-              {calloutInfo.part || '—'}
+              {calloutInfo.part || <EmptyCell />}
             </Text>
           )}
         </div>
@@ -481,18 +482,14 @@ export function IssuesField() {
                           >
                             <FoldCaret open={isOpen} className='ml-0' />
                           </Button>
-                          <Button
-                            type='button'
-                            variant='secondary'
-                            size='xs'
+                          <Close
+                            size='sm'
                             aria-label='remove issue'
                             onClick={(e: React.MouseEvent) => {
                               e.stopPropagation();
                               removeAt(index, key);
                             }}
-                          >
-                            ✕
-                          </Button>
+                          />
                         </span>
                       </td>
                     </tr>

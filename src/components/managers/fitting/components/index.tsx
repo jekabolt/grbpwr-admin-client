@@ -16,8 +16,9 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   Section,
   SectionStack,
@@ -232,9 +233,7 @@ export function FittingForm({
           <div className='flex flex-wrap items-center gap-3'>
             {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
                 the sample, not on the flat fittings list. */}
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={returnTo || ROUTES.fittings}>← back</Link>
-            </Button>
+            <BackLink to={returnTo || ROUTES.fittings} />
             <Text variant='uppercase' size='large'>
               {isEditMode ? 'edit fitting' : 'new fitting'}
             </Text>

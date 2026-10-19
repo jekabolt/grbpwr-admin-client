@@ -11,6 +11,7 @@ import { cn } from 'lib/utility';
 import {
   Button,
   CalloutBox,
+  Close,
   DataTable,
   EmptyCell,
   GroupLabel,
@@ -124,7 +125,7 @@ export function FilesStep({
         title='files'
         aside={
           <Text size='micro' variant='label' component='span'>
-            {staged.length || '—'}
+            {staged.length || <EmptyCell />}
           </Text>
         }
       >
@@ -229,10 +230,8 @@ export function FilesStep({
                       </td>
                       <td>{f.size ? fmtBytes(f.size) : <EmptyCell />}</td>
                       <td>
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          className='text-labelColor hover:text-textColor'
+                        <Close
+                          size='sm'
                           onClick={() => setStaged((p) => p.filter((x) => x !== f))}
                           aria-label={`remove ${f.name}`}
                           {...(ext === 'rul' && rulAlone
@@ -242,9 +241,7 @@ export function FilesStep({
                                 ext === 'eps',
                                 'remove it, export the pattern as pdf',
                               ))}
-                        >
-                          ✕
-                        </Button>
+                        />
                       </td>
                     </tr>
                   );
@@ -378,7 +375,7 @@ export function FilesStep({
                               {p.why}
                             </td>
                             <td className='tabular-nums'>
-                              {masks.get(`${p.file}:${p.page}`) || '—'}
+                              {masks.get(`${p.file}:${p.page}`) || <EmptyCell />}
                             </td>
                           </tr>
                         ))}

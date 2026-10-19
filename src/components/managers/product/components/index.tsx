@@ -8,8 +8,8 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
-import { generatePath, Link, useNavigate } from 'react-router-dom';
-import { Button, CalloutBox, Section, SectionStack, Text, Form } from 'ui';
+import { generatePath, useNavigate } from 'react-router-dom';
+import { BackLink, Button, CalloutBox, Section, SectionStack, Text, Form } from 'ui';
 import { SkuToken } from 'components/managers/tech-card/components/colourway-palette';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
 import { BodyFields } from './body-fields';
@@ -234,9 +234,7 @@ export function ProductForm({
         {/* Header — identity + status */}
         <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Button asChild variant='secondary' size='lg'>
-              <Link to={ROUTES.product}>← products</Link>
-            </Button>
+            <BackLink to={ROUTES.product}>products</BackLink>
             <Text variant='uppercase' size='large'>
               {headerTitle || 'product'}
             </Text>

@@ -1,6 +1,6 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { GroupLabel, Text } from 'ui';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -93,7 +93,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
                           {formatNumber(row.unitsSold ?? 0)}/{formatNumber(bought)}
                         </Text>
                       ) : (
-                        <Text variant='label'>—</Text>
+                        <EmptyCell />
                       )}
                     </td>
                   )}

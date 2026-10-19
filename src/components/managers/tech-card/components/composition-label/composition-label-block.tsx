@@ -13,7 +13,6 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { SECTION } from 'constants/routes';
-import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -22,12 +21,12 @@ import {
   Chip,
   ChipRow,
   GroupLabel,
-  Pill,
+  HeaderWarnings,
   Section,
   Select,
   Text,
   Tooltip,
-  FoldCaret,
+  EmptyCell,
 } from 'ui';
 import { colorwayFullKey } from '../../care-labels/adapter';
 import { overrideRowsOf } from '../../care-labels/composition-override';
@@ -239,8 +238,6 @@ export function CompositionLabelBlock({
   }, [readiness, cw]);
   const blockedCw = (id: number) =>
     !!readiness?.colorways.find((r) => r.colorwayId === id)?.blocked;
-  const nBlock = holes.filter(isBlocking).length;
-  const nWarn = holes.length - nBlock;
 
   // ── ленты выбранного варианта ────────────────────────────────────────────────────────────
   const sku = cw ? labelSku(cw, size) : '';
@@ -623,7 +620,7 @@ export function CompositionLabelBlock({
                   onClose={close}
                 />
               </div>
-              <span className='text-labelColor'>/ [{size?.label ?? '—'}]</span>
+              <span className='text-labelColor'>/ [{size?.label ?? <EmptyCell />}]</span>
             </div>
           </EditorStrip>
         );
@@ -794,8 +791,6 @@ export function CompositionLabelBlock({
   };
 
   // ── список дыр (за счётчиком) ─────────────────────────────────────────────────────────────
-  const [holesOpen, setHolesOpen] = useState(false);
-  useEffect(() => setHolesOpen(false), [cw?.id]);
   const goToHole = (h: Hole) => {
     const line = holeLine(h);
     if (!line) return;
@@ -968,59 +963,22 @@ export function CompositionLabelBlock({
                     no holes · prints as shown
                   </Text>
                 ) : (
-                  <button
-                    type='button'
-                    data-hole-count=''
-                    aria-expanded={holesOpen}
-                    onClick={() => setHolesOpen((v) => !v)}
-                    className={cn(
-                      'cursor-pointer text-micro uppercase tracking-label underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                      nBlock ? 'text-error' : 'text-warning',
-                    )}
-                  >
-                    {[
-                      nBlock ? `! ${nBlock} blocking` : '',
-                      nWarn ? `${nWarn} ${nWarn === 1 ? 'warning' : 'warnings'}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    <FoldCaret open={holesOpen} />
-                  </button>
+                  // Дыры — дверь `! N` (HeaderWarnings): блокирующие красным и первыми, клик по
+                  // дыре с адресом ведёт к её строке на ленте.
+                  <span data-hole-count=''>
+                    <HeaderWarnings
+                      items={holes.map((h) => ({
+                        text: h.message,
+                        error: isBlocking(h),
+                        action: holeLine(h)
+                          ? { label: 'go to the line', onClick: () => goToHole(h) }
+                          : undefined,
+                      }))}
+                    />
+                  </span>
                 )}
               </div>
             </div>
-            {holesOpen && holes.length > 0 ? (
-              <ul className='flex flex-col gap-1.5' data-composition-holes=''>
-                {holes.map((h) => {
-                  const line = holeLine(h);
-                  const body = (
-                    <>
-                      <Pill tone={isBlocking(h) ? 'warn' : 'attention'}>
-                        {isBlocking(h) ? 'blocks' : 'warn'}
-                      </Pill>
-                      <Text size='micro' component='span' className='min-w-0'>
-                        {h.message}
-                      </Text>
-                    </>
-                  );
-                  return (
-                    <li key={`${h.code}|${h.message}`} data-hole={h.code}>
-                      {line ? (
-                        <button
-                          type='button'
-                          onClick={() => goToHole(h)}
-                          className='flex cursor-pointer items-start gap-2 text-left hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
-                        >
-                          {body}
-                        </button>
-                      ) : (
-                        <span className='flex items-start gap-2'>{body}</span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
           </div>
         )}
 

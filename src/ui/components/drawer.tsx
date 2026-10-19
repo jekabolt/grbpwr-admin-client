@@ -1,4 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
+import { Close } from './close';
 import Text from './text';
 
 /**
@@ -45,9 +46,7 @@ export function Drawer({
               </Text>
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <button type='button' aria-label='close' className='ml-auto text-labelColor'>
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>{title}</DialogPrimitives.Description>

@@ -69,3 +69,7 @@ Thumbs.db
 .claude/worktrees/
 scripts/.annotation-shape-*
 scripts/.draft-shape-*
+
+# Playwright (yarn test:ui-kit)
+/test-results/
+/playwright-report/

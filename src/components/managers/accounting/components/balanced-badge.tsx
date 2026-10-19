@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { EmptyCell } from 'ui';
 
 type Props = {
   balanced?: boolean;
@@ -14,7 +15,9 @@ type Props = {
 export function BalancedBadge({ balanced, className }: Props) {
   if (balanced === undefined) {
     return (
-      <span className={cn('text-textBaseSize uppercase text-textInactiveColor', className)}>—</span>
+      <span className={cn('text-textBaseSize uppercase', className)}>
+        <EmptyCell />
+      </span>
     );
   }
   return (

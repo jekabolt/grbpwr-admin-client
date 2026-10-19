@@ -15,7 +15,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Chip, Section, HEADER_TEXT } from 'ui';
+import { Button, Chip, HeaderWarnings, Section } from 'ui';
 import { readColorwayVersion } from './colorway-version';
 import { colorwayTitle, colourwayName, colourwaySwatchHex } from './colourways-matrix';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
@@ -670,20 +670,13 @@ export function LabDipTab({
   };
 
   // Ждут человека только строки со свотчем на руках и без решения (по сохранённому состоянию).
-  const waiting = colorways.filter((c) => c.labDipStatus === SUBMITTED).length;
+  const waiting = colorways
+    .filter((c) => c.labDipStatus === SUBMITTED)
+    .map((c) => `${colourwayName(c)} · waiting for you`);
 
   if (colorways.length === 0) return null;
   return (
-    <Section
-      title='lab dip'
-      action={
-        waiting > 0 ? (
-          <span className={cn(HEADER_TEXT, 'text-textColor')}>
-            <span className='text-warning'>!</span> {waiting} waiting for you
-          </span>
-        ) : undefined
-      }
-    >
+    <Section title='lab dip' action={<HeaderWarnings items={waiting} />}>
       <div className='flex flex-col'>
         {colorways.map((cw) => {
           const id = cw.colorwayId ?? 0;

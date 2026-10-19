@@ -2,7 +2,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { Text } from 'ui';
+import { Close, Text } from 'ui';
 import { ModelFormData } from './schema';
 import { SizePickerModal } from './size-picker-modal';
 
@@ -52,14 +52,7 @@ export function DefaultSizesField() {
               className='flex items-center gap-1 border border-textInactiveColor px-2 py-0.5 uppercase'
             >
               <Text size='small'>{formatSizeName(sizeById.get(id) ?? `#${id}`)}</Text>
-              <button
-                type='button'
-                aria-label='remove size'
-                onClick={() => remove(id)}
-                className='leading-none'
-              >
-                ✕
-              </button>
+              <Close size='sm' aria-label='remove size' onClick={() => remove(id)} />
             </span>
           ))}
         </div>

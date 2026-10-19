@@ -51,6 +51,8 @@ const textVariants = cva('', {
       stat: ['text-stat', 'font-bold', 'tabular-nums'],
       statBig: ['text-statBig', 'font-bold', 'tabular-nums'],
       large: ['text-lg'],
+      // 16px — only the surfaces DESIGN.md names: public QR pages (/p/, /r/) and the email canvas.
+      reading: ['text-reading'],
     },
     // Pairs with variant='uppercase'. Never set letter-spacing by hand in a screen.
     tracking: {

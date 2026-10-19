@@ -5,7 +5,7 @@ import {
 } from 'constants/garment-composition';
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text, FormLabel } from 'ui';
+import { Button, Text, FormLabel, EmptyCell } from 'ui';
 import { CompositionModal } from './composition-modal/composition-modal';
 import { compositionToValue } from './composition-modal/utils';
 
@@ -106,7 +106,7 @@ export function CompositionPicker({
             input that merely refuses keystrokes. */}
         <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-bgZebra px-[7px] py-[3px]'>
           <Text className={display ? 'truncate' : 'truncate text-textInactiveColor'}>
-            {display || '—'}
+            {display || <EmptyCell />}
           </Text>
         </div>
         {editMode && (

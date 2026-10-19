@@ -20,7 +20,7 @@ import {
   Stat,
   StatGrid,
   Text,
-  Select,
+  Select, EmptyCell,
 } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -410,7 +410,7 @@ export function LayEditor({
             />
           ) : (
             <Text size='small'>
-              {existing?.bomItemName || bomLineKey || '—'}
+              {existing?.bomItemName || bomLineKey || <EmptyCell />}
               {existing?.materialName ? ` · ${existing.materialName}` : ''}
             </Text>
           )}
@@ -482,15 +482,15 @@ export function LayEditor({
 
         <GroupLabel>how much fabric this will eat</GroupLabel>
         <StatGrid>
-          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : '—'} />
-          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : '—'} />
+          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : <EmptyCell />} />
+          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : <EmptyCell />} />
           <Stat
             label='end losses'
-            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : '—'}
+            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : <EmptyCell />}
           />
           <Stat
             label='lay plan'
-            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} m` : '—'}
+            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} m` : <EmptyCell />}
           />
           {/* Высота стопки НЕ СЧИТАЕТСЯ на клиенте, и это не лень: толщина ткани живёт на артикуле
               и по проводу сюда не едет. Показать «0 см» значило бы сказать «влезает», а это

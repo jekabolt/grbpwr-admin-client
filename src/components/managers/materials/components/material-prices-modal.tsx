@@ -3,7 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { ConfirmationModal, Row, Text } from 'ui';
+import { ConfirmationModal, Row, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { useAddMaterialPrice, useMaterialPrices } from './useMaterials';
 
@@ -126,7 +126,8 @@ export function MaterialPricesModal({
                     }
                     value={
                       <Text variant='inactive' size='small'>
-                        {p.validFrom ? p.validFrom.slice(0, 10) : '—'} · {p.source || 'manual'}
+                        {p.validFrom ? p.validFrom.slice(0, 10) : <EmptyCell />} ·{' '}
+                        {p.source || 'manual'}
                         {p.note ? ` · ${p.note}` : ''}
                       </Text>
                     }

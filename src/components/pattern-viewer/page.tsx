@@ -110,7 +110,7 @@ export function PatternViewerPage() {
       <Shell>
         <Section>
           <CalloutBox tone='error'>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               <b>the link is not valid</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
@@ -130,7 +130,7 @@ export function PatternViewerPage() {
       <Shell>
         <Section>
           <CalloutBox tone='error'>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               <b>the viewer is configured wrong</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
@@ -148,7 +148,7 @@ export function PatternViewerPage() {
       <Shell>
         <Section>
           <div className='space-y-2.5'>
-            <Text component='p'>couldn't load — looks like there is no connection</Text>
+            <Text size='reading' component='p'>couldn't load — looks like there is no connection</Text>
             <Button
               type='button'
               variant='main'
@@ -179,7 +179,7 @@ export function PatternViewerPage() {
             <Text size='large' component='p' className='uppercase'>
               <b>the patterns changed after printing</b>
             </Text>
-            <Text component='p'>
+            <Text size='reading' component='p'>
               {paperGroup
                 ? `the paper in your hands was printed for sheets at version ${stamp?.v} (${stamp?.n} sheets), and now they are at version ${currentV} (${currentN} sheets). the contours on the paper are out of date — cut from the sheets on THIS screen and reprint the tech pack.`
                 : 'the paper in your hands points at a group of sheets that is no longer on the card — the patterns were regrouped after printing. cut from the sheets on THIS screen and reprint the tech pack.'}
@@ -193,7 +193,7 @@ export function PatternViewerPage() {
                 {styleNumber || 'tech card'}
               </Text>
               {styleName && (
-                <Text variant='label' component='p'>
+                <Text size='reading' variant='label' component='p'>
                   {styleName}
                 </Text>
               )}
@@ -229,6 +229,6 @@ export function PatternViewerPage() {
 // немногие — например строка отказа парсера DXF, и именно её в цеху и надо прочитать.
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className='mx-auto w-full max-w-3xl px-2.5 py-4 text-base lg:px-4 lg:py-6'>{children}</div>
+    <div className='mx-auto w-full max-w-3xl px-2.5 py-4 text-reading lg:px-4 lg:py-6'>{children}</div>
   );
 }

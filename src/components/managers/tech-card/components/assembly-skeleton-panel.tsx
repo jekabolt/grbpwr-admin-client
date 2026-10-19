@@ -49,6 +49,7 @@ import {
   CheckboxCommon,
   Chip,
   ChipRow,
+  Close,
   GroupLabel,
   Pill,
   FoldCaret,
@@ -56,6 +57,7 @@ import {
   type HeaderWarning,
   HeaderNote,
   Text,
+  EmptyCell,
 } from 'ui';
 import { useSearchParams } from 'react-router-dom';
 import { revealField } from 'utils/field-errors';
@@ -1078,13 +1080,7 @@ function AssemblySkeletonPanel({
             )}
             {proposal && <HeaderWarnings items={headWarnings} />}
             <Dialog.Close asChild>
-              <button
-                type='button'
-                aria-label='close'
-                className='ml-auto text-labelColor hover:text-textColor'
-              >
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </Dialog.Close>
           </div>
           <Dialog.Description className='sr-only'>
@@ -1749,7 +1745,7 @@ function SkeletonLine({
         data-skeleton-check={index}
       />
       <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
-        {pick.applied ? '✓' : number ?? '—'}
+        {pick.applied ? '✓' : number ?? <EmptyCell />}
       </Text>
 
       <span className='flex shrink-0 items-center gap-1'>

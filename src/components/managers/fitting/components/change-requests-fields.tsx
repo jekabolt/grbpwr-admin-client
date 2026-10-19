@@ -9,7 +9,7 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button, Chip, ChipRow, GroupLabel, Text } from 'ui';
+import { Button, Chip, ChipRow, Close, GroupLabel, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
 import { crPieceIds, FittingFormData } from './schema';
@@ -265,14 +265,7 @@ function CreateModeList({
             <GroupLabel
               flush={index === 0}
               action={
-                <Button
-                  type='button'
-                  variant='secondary'
-                  aria-label='remove change request'
-                  onClick={() => remove(index)}
-                >
-                  ✕
-                </Button>
+                <Close size='sm' aria-label='remove change request' onClick={() => remove(index)} />
               }
             >
               {`change #${index + 1}`}

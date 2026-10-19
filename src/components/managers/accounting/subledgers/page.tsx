@@ -3,7 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { Button, Text, EmptyCell } from 'ui';
 import { AmountCell } from '../components/amount-cell';
 import { InfoHint } from '../components/info-hint';
 import { Note, Pill } from '../components/kit';
@@ -218,7 +218,7 @@ function OwedOwingSection() {
                               {ref}
                             </Link>
                           ) : (
-                            <Text size='small'>{ref || '—'}</Text>
+                            <Text size='small'>{ref || <EmptyCell />}</Text>
                           )}
                         </td>
                         <AmountCell value={r.invoiced} className='px-2 py-1.5' />

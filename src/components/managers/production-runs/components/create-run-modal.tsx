@@ -8,14 +8,17 @@ import {
   common_ProductionRunLine,
   common_ProductionRunStatus,
 } from 'api/proto-http/admin';
-import { techCardKeys, useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  techCardKeys,
+  useTechCard,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button, CalloutBox, GroupLabel, Pill, Text } from 'ui';
+import { Button, CalloutBox, Close, GroupLabel, Pill, Text } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -373,13 +376,9 @@ export function CreateRunModal({
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[860px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>
-              new run
-            </DialogPrimitives.Title>
+            <DialogPrimitives.Title className='text-lg uppercase'>new run</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
@@ -438,9 +437,7 @@ export function CreateRunModal({
                     СНАРУЖИ <label>, а не внутри: у строки есть ссылка «починить», а клик по ссылке
                     внутри label браузер вдобавок переадресует контролу — то есть открыл бы список
                     релизов за только что открытой вкладкой. */}
-                {releaseRow ? (
-                  <FindingRow finding={releaseRow} techCardId={d.techCardId} />
-                ) : null}
+                {releaseRow ? <FindingRow finding={releaseRow} techCardId={d.techCardId} /> : null}
               </div>
             </div>
 
@@ -597,10 +594,7 @@ export function CreateRunModal({
                                 {colorwayLabel(cw)}
                               </td>
                               {sizeIds.map((s) => (
-                                <td
-                                  key={s}
-                                  className='border border-hairline px-2 py-1 text-right'
-                                >
+                                <td key={s} className='border border-hairline px-2 py-1 text-right'>
                                   <input
                                     className='w-14 border border-textInactiveColor bg-bgColor px-1 text-right text-textBaseSize'
                                     inputMode='numeric'
