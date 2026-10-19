@@ -1,3 +1,4 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { UpdateSettingsRequest } from 'api/proto-http/admin';
@@ -6,7 +7,7 @@ import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { firstErrorSummary, flattenFieldErrors, revealField } from 'utils/field-errors';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useForm, type FieldErrors } from 'react-hook-form';
 import {
   Button,
@@ -28,12 +29,13 @@ import {
   transformDictionaryToSettings,
 } from './utility/schema';
 
-
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
   const showMessage = useSnackBarStore((state) => state.showMessage);
   const [isLoading, setIsLoading] = useState(false);
   const { canWrite, canRead } = usePermissions();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [canWrite(SECTION.settings)]);
 
   const initialValues = useMemo(
     () => (dictionary ? transformDictionaryToSettings(dictionary) : defaultSettings),
@@ -197,7 +199,10 @@ export function Settings() {
       </form>
 
       {canWrite(SECTION.settings) && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+        >
           <Text variant='inactive' size='small'>
             {isDirty ? 'unsaved changes' : ' '}
           </Text>

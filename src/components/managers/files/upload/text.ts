@@ -7,9 +7,13 @@
  * а красную точку в углу — нет.
  */
 import { formatBytes } from '../utils/format';
+import type { NotifyInput } from 'lib/stores/store-types';
 import {
+  canRetry,
   DEFAULT_MAX_UPLOAD_BYTES,
   hopelessReason,
+  isFailed,
+  isLive,
   type BatchTopics,
   type QueueAction,
   type QueueRow,
@@ -192,6 +196,67 @@ export function batchSummary(state: QueueState, topicLabels: readonly string[]):
       : 'without topics — went to “unsorted”',
   );
   return parts.join(' · ');
+}
+
+/** Topics of a settled batch, short: the job's detail line. */
+export function topicsLine(topicLabels: readonly string[]): string {
+  return topicLabels.length ? `topics: ${topicLabels.join(', ')}` : 'unsorted';
+}
+
+/**
+ * A batch as ONE job notification: progress while it runs, then done / partly / not uploaded.
+ * `rows` are the batch's rows only; the queue keeps older rows too. No `action` here: the store
+ * adds RETRY when `retryable` is non-empty.
+ */
+export function uploadJob(
+  rows: readonly QueueRow[],
+  topicLabels: readonly string[],
+): { input: Omit<NotifyInput, 'key'>; retryable: string[] } {
+  const subject = 'FILES';
+  const total = rows.length;
+  const live = rows.filter((r) => isLive(r.status));
+  if (live.length) {
+    const settled = total - live.length;
+    const running = live.reduce((sum, r) => sum + (r.status === 'run' ? r.progress : 0), 0);
+    return {
+      input: {
+        sev: 'job',
+        subject,
+        text: `uploading ${Math.min(settled + 1, total)} of ${total}`,
+        progress: total ? Math.min(1, (settled + running) / total) : undefined,
+      },
+      retryable: [],
+    };
+  }
+  // A duplicate is saved as a second copy: landed, not failed. Too big never left: failed.
+  const bad = rows.filter((r) => isFailed(r.status) || r.status === 'big');
+  const landed = total - bad.length;
+  const retryable = rows.filter(canRetry).map((r) => r.id);
+  const detail = topicsLine(topicLabels);
+  if (!bad.length)
+    return { input: { sev: 'ok', subject, text: `uploaded ${landed}`, detail }, retryable };
+  const reason = statusLabel(bad[0]);
+  if (!landed)
+    return {
+      input: {
+        sev: 'error',
+        subject,
+        text: 'not uploaded',
+        bad: total > 1 ? `${bad.length} failed · ${reason}` : reason,
+        detail,
+      },
+      retryable,
+    };
+  return {
+    input: {
+      sev: 'warn',
+      subject,
+      text: `uploaded ${landed} of ${total}`,
+      bad: `${bad.length} failed · ${reason}`,
+      detail,
+    },
+    retryable,
+  };
 }
 
 /**

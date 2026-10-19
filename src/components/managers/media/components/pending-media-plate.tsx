@@ -1,6 +1,7 @@
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useDockBottom } from 'hooks/useDockBottom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Close, Media, Pill, RatioGlyph, Text } from 'ui';
 import { calculateAspectRatio, isKnownAspectRatio } from '../utils/calculate-aspect';
@@ -25,22 +26,6 @@ import { MediaCropper } from './cropper';
  * строки — слово («не отправлен / в очереди / отправляется / готово / отказ»), а индикатор
  * неопределённый.
  */
-
-/**
- * Занятый полосой низ экрана, объявленный всей странице. Пустая строка снимает объявление.
- * Живёт в модуле, а не в компоненте: состояния тут нет, а функция в теле компонента стала бы
- * недостающей зависимостью эффекта.
- */
-function setInset(px: string) {
-  document.body.style.paddingBottom = px;
-  if (px) {
-    document.body.style.setProperty('--dock-bottom-h', px);
-    document.body.dataset.dockBottom = '';
-  } else {
-    document.body.style.removeProperty('--dock-bottom-h');
-    delete document.body.dataset.dockBottom;
-  }
-}
 
 interface PendingMediaPlateProps {
   previews: PreviewItem[];
@@ -259,23 +244,7 @@ export function PendingMediaPlate({
   // прилипает к низу ВЬЮПОРТА (`sticky bottom-0`) и об отступе не знает — она уходила под док, и
   // её кнопки становились достижимы только в самом низу прокрутки. Правило в `global.css` поднимает
   // прилипшее ровно на эту высоту.
-  useLayoutEffect(() => {
-    const node = dockRef.current;
-    // Очередь опустела — отступ надо снять здесь же: без этого страница осталась бы с дырой в
-    // полполосы под сеткой, и убрать её было бы уже некому.
-    if (!node) {
-      setInset('');
-      return;
-    }
-    const apply = () => setInset(`${node.offsetHeight}px`);
-    apply();
-    const observer = new ResizeObserver(apply);
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      setInset('');
-    };
-  }, [open, cropping?.id, previews.length]);
+  useDockBottom(dockRef, [open, cropping?.id, previews.length], { lift: true });
 
   const tally = useMemo(() => {
     const count = (status: PreviewItem['status']) =>

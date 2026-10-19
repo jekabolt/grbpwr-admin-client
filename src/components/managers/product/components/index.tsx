@@ -1,3 +1,4 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
 import { common_ColorwayFull, ColorwayCostInfo } from 'api/proto-http/admin';
@@ -47,6 +48,8 @@ export function ProductForm({
   onEditModeChange,
   onStockUpdated,
 }: Props) {
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, []);
   const { showMessage } = useSnackBarStore();
   const [isFormChanged, setIsFormChanged] = useState(false);
   const [mediaClearKey, setMediaClearKey] = useState(0);
@@ -314,11 +317,7 @@ export function ProductForm({
                 isAddingProduct={isAddingProduct}
                 styleId={product?.colorway?.styleId}
               />
-              <Tags
-                isAddingProduct={isAddingProduct}
-                isEditMode={isEditMode}
-                editMode={editMode}
-              />
+              <Tags isAddingProduct={isAddingProduct} isEditMode={isEditMode} editMode={editMode} />
             </Section>
           </SectionStack>
 
@@ -385,7 +384,10 @@ export function ProductForm({
       </form>
 
       {/* Sticky action bar */}
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2 print:hidden'>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2 print:hidden'
+      >
         <Text variant='inactive' size='small'>
           {editMode && isFormChanged ? 'unsaved changes' : ' '}
         </Text>
