@@ -36,6 +36,7 @@ import { closeCorners, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
+import { labelFrames } from './label-frame';
 import { textLabelLookOrder } from './look-order';
 import { ladderMarkMoves, ocgLookMoves, type OcgLookMove } from './ocg-ladder';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
@@ -1682,6 +1683,31 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     diag.ocgDuplicates = dup.length;
   }
 
+  // ── LABELFRAME (sizes/label-frame.ts): a small closed line around one size label, hugging it,
+  // with no other line around it on every side, is that label's frame — no line of any size. Its
+  // label's votes stay as they were (the ranks of the lines do not move); only the frame leaves.
+  const frames = new Set<number>();
+  // the rank each frame had: the other lines keep reading it where they read a neighbour's rank
+  // (the outline pen, a lane beside a graded line, a notch on a size line) — only the frame leaves
+  const frameRank = new Map<number, number>();
+  if (!debugFlag('LABELFRAME_OFF')) {
+    const done = new Set([...ocgCommon, ...ocgDropped.map((d) => d.id)]);
+    for (const f of labelFrames(
+      chains,
+      N0,
+      chains.map((_, i) => i < N0 && cand[i]),
+      allTexts,
+      new Set(labels.filter((l): l is string => !!l)),
+    ))
+      if (!done.has(f.chain)) frames.add(f.chain);
+    for (const c of frames) {
+      const r = rankOf.get(c);
+      if (r !== undefined) frameRank.set(c, r);
+      rankOf.delete(c);
+    }
+    if (frames.size) diag.labelFrames = frames.size;
+  }
+
   // ── shared stretches of size lines → common ─────────────────────────────────────────────────
   const sharedFrom = new Map<number, number>();
   const joined = bridgeSameRank(chains, rankOf);
@@ -1719,7 +1745,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     x.lanes.forEach((ln, k) => {
       for (const c of ln) widest.set(c, Math.max(widest.get(c) ?? 0, x.lanes.length));
       const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean).flat();
-      if (nb.some((c) => rankOf.has(c))) for (const c of ln) besideRanked.add(c);
+      if (nb.some((c) => rankOf.has(c) || frameRank.has(c)))
+        for (const c of ln) besideRanked.add(c);
     });
   }
   splitShared(chains, rankOf, sharedFrom, landings, sectioned, sepMm);
@@ -1736,10 +1763,20 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const ignore: { id: number; why: string }[] = [
     ...ocgDropped,
     ...[...joined].map(([id, host]) => ({ id, why: `joined into chain ${host}` })),
+    ...[...frames].map((id) => ({ id, why: 'label frame' })),
   ];
   const orphans: number[] = [];
-  const decided = new Set([...ocgCommon, ...ocgDropped.map((d) => d.id), ...joined.keys()]);
-  const contourWidth = medianWidth(chains, rankOf, styles);
+  const decided = new Set([
+    ...ocgCommon,
+    ...ocgDropped.map((d) => d.id),
+    ...joined.keys(),
+    ...frames,
+  ]);
+  const contourWidth = medianWidth(
+    chains,
+    frameRank.size ? new Map([...rankOf, ...frameRank]) : rankOf,
+    styles,
+  );
   const touchGrid = new SegGrid(6);
   chains.forEach((c, i) => {
     if (!(i < N0 && furniture[i])) touchGrid.addPolyline(i, c.pts);
@@ -1761,7 +1798,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
     for (const p of probes) {
       touchGrid.near(p, 1, (j, si) => {
-        if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j))) return;
+        if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j) || frameRank.has(j))) return;
         const q0 = chains[j].pts[si];
         const q1 = chains[j].pts[si + 1];
         if (!q0 || !q1 || segNearest(p, q0, q1).d > 1) return;
