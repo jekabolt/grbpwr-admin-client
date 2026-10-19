@@ -86,8 +86,9 @@ const NO_ANNOTATIONS: TaskMediaAnnotations[] = [];
 /** The «⋯» menu's rows: one footprint, a hairline between, the last one bare. */
 const MENU_ITEM =
   'flex min-h-11 w-full items-center border-b border-hairline px-1 text-left text-control uppercase tracking-label hover:bg-bgSecondary sm:min-h-8';
-/** The chips under the title: status, priority (Selects) share the due field's height. */
-const CHIP = 'min-h-11 w-auto gap-3 px-2.5 sm:min-h-8';
+/** The chips under the title: every property, one size and one type (11px caps), Select or not. */
+const CHIP =
+  'min-h-11 w-auto gap-3 px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8';
 /** A chip that is not a Select (assignee, more): the same box, drawn by hand. */
 const CHIP_BOX =
   'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2.5 text-control uppercase leading-none tracking-label sm:min-h-8';
