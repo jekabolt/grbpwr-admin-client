@@ -60,7 +60,7 @@ export const ReorderList: FC<{ metricsResponse: GetMetricsResponse }> = ({ metri
                 </div>
                 <Buy>Reorder</Buy>
                 <div className='col-span-2 grid grid-cols-[1fr_auto] items-center gap-2'>
-                  <span className='h-2 bg-bgSecondary'>
+                  <span className='h-2 bg-pageBg'>
                     <span
                       className='block h-2 bg-error'
                       style={{ width: `${g.maxLost > 0 ? (r.lost / g.maxLost) * 100 : 0}%` }}

@@ -65,7 +65,7 @@ export default function FieldsGroupContainer({
             <Text
               variant='uppercase'
               className={cn('w-8 text-textColor', {
-                'text-textInactiveColor': disabled,
+                'text-borderColor': disabled,
               })}
             >
               {stage}
@@ -75,7 +75,7 @@ export default function FieldsGroupContainer({
           <div
             className={cn(
               'flex flex-1 items-center justify-between',
-              { 'text-textInactiveColor': disabled },
+              { 'text-borderColor': disabled },
               titleWrapperClassName,
             )}
           >
@@ -83,7 +83,7 @@ export default function FieldsGroupContainer({
               <Text
                 variant='uppercase'
                 className={cn('text-textColor', {
-                  'text-textInactiveColor': disabled,
+                  'text-borderColor': disabled,
                 })}
               >
                 {title}
@@ -118,7 +118,7 @@ function CollapsibleSign({ isOpen, disabled }: { isOpen: boolean; disabled?: boo
       >
         <Arrow
           className={cn('text-textColor', {
-            'text-textInactiveColor': disabled,
+            'text-borderColor': disabled,
           })}
         />
       </div>

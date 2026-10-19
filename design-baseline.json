@@ -767,60 +767,29 @@
   "src/components/managers/settings/components/payment-fees-editor.tsx": {
     "design/no-raw-control": 2
   },
-  "src/components/managers/tasks/components/assignees-picker.tsx": {
-    "design/no-arbitrary-px": 9,
-    "design/no-raw-control": 4
-  },
   "src/components/managers/tasks/components/avatar-stack.tsx": {
     "design/no-radius-shadow": 1
   },
-  "src/components/managers/tasks/components/board-column.tsx": {
-    "design/no-raw-control": 1
-  },
   "src/components/managers/tasks/components/description-editor.tsx": {
-    "design/no-arbitrary-px": 2,
-    "design/no-raw-control": 1
+    "design/no-arbitrary-px": 2
   },
   "src/components/managers/tasks/components/entity-picker.tsx": {
-    "design/no-radius-shadow": 1,
-    "design/no-raw-control": 1
-  },
-  "src/components/managers/tasks/components/filters-bar.tsx": {
-    "design/no-raw-control": 1
+    "design/no-radius-shadow": 1
   },
   "src/components/managers/tasks/components/link-chip.tsx": {
-    "design/no-arbitrary-px": 1,
     "design/no-local-primitive": 1
   },
   "src/components/managers/tasks/components/link-editor.tsx": {
     "design/no-local-primitive": 1
   },
-  "src/components/managers/tasks/components/media-attachments.tsx": {
-    "design/no-raw-control": 1
-  },
-  "src/components/managers/tasks/components/media-ref-row.tsx": {
-    "design/no-raw-control": 1
-  },
   "src/components/managers/tasks/components/related-tasks.tsx": {
     "design/no-arbitrary-px": 1
-  },
-  "src/components/managers/tasks/components/task-card.tsx": {
-    "design/no-local-primitive": 1
-  },
-  "src/components/managers/tasks/components/task-comments.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/tasks/components/task-media-viewer.tsx": {
     "design/no-local-primitive": 1
   },
   "src/components/managers/tasks/components/task-text.tsx": {
     "design/no-local-primitive": 1
-  },
-  "src/components/managers/tasks/task-detail/attachment-tiles.tsx": {
-    "design/no-raw-control": 1
-  },
-  "src/components/managers/tasks/task-detail/inline-fields.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/ai-enhance/ai-enhance.tsx": {
     "design/no-arbitrary-px": 1,

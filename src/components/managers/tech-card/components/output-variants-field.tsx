@@ -38,7 +38,7 @@ import { decimalToInput } from 'utils/decimal';
 // The field-level metrics used by the locally-managed controls in this panel — identical to <Input>,
 // so a control here is indistinguishable from an RHF-bound one elsewhere (see colorway-recipe).
 const cell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 // A pale dye vanishes into the page without the outline, so the swatch keeps its 1px ink box.
 function Swatch({ hex, title }: { hex?: string; title?: string }) {

@@ -33,7 +33,7 @@ export function WorkflowCard({
       <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
         Select a workflow
       </Text>
-      <div className='flex items-center gap-4 bg-bgSecondary p-3'>
+      <div className='flex items-center gap-4 bg-pageBg p-3'>
         <span className='flex h-14 w-14 shrink-0 items-center justify-center bg-bgColor'>
           <WorkflowGlyph workflow={def.key} size={40} />
         </span>
@@ -58,7 +58,7 @@ export function WorkflowCard({
           disabled={backDisabled}
           aria-label={backWords}
           title={backWords}
-          className='flex h-8 w-8 shrink-0 items-center justify-center border border-textInactiveColor bg-bgColor text-textColor hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:hover:bg-bgColor disabled:hover:text-textInactiveColor'
+          className='flex h-8 w-8 shrink-0 items-center justify-center border border-borderColor bg-bgColor text-textColor hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-borderColor disabled:hover:bg-bgColor disabled:hover:text-borderColor'
           data-workflow-back=''
         >
           <svg

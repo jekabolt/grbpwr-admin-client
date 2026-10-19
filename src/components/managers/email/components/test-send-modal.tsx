@@ -55,7 +55,7 @@ export function TestSendModal({ open, onOpenChange, buildDraft, campaignId }: Te
           <Text component='label' size='small' variant='label'>
             recipient email(s)
           </Text>
-          <div className='border-b border-textInactiveColor'>
+          <div className='border-b border-borderColor'>
             <Input
               value={emails}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmails(e.target.value)}

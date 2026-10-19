@@ -191,7 +191,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         pressed={on}
         disabled={!!blocked}
         onClick={() => toggle(id)}
-        className='disabled:border-dashed disabled:text-textInactiveColor disabled:hover:text-textInactiveColor'
+        className='disabled:border-dashed disabled:text-borderColor disabled:hover:text-borderColor'
         title={
           blocked ??
           (attached

@@ -52,7 +52,7 @@ export function SewnStrip({
             title={t.title}
             data-sewn-tile={t.kind}
             data-sewn-std={t.std ? '1' : undefined}
-            className='relative flex min-w-[56px] max-w-[96px] flex-col items-center bg-bgZebra px-1 pt-1 pb-0.5'
+            className='relative flex min-w-[56px] max-w-[96px] flex-col items-center bg-pageBg px-1 pt-1 pb-0.5'
           >
             <span className={cn(GLYPH_H, 'flex items-center justify-center text-textColor')}>
               <SewnGlyph tile={t} />

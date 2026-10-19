@@ -1,4 +1,4 @@
-import { ChecklistEditor } from 'ui';
+import { ChecklistEditor, Section } from 'ui';
 import { TaskChecklistItem } from '../api/types';
 import {
   useAddChecklistItem,
@@ -23,7 +23,7 @@ export function TaskChecklist({
   const remove = useDeleteChecklistItem(taskId);
 
   return (
-    <div className='border border-borderColor bg-bgColor p-3'>
+    <Section className='[&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 sm:[&_button]:min-h-0 sm:[&_button]:min-w-0 sm:[&_input]:min-h-0'>
       <ChecklistEditor
         label='checklist'
         items={items}
@@ -40,6 +40,6 @@ export function TaskChecklist({
         onToggle={(id, isDone) => toggle.mutate({ id, isDone })}
         onDelete={(id) => remove.mutate(id)}
       />
-    </div>
+    </Section>
   );
 }

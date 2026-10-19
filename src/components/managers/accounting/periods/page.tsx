@@ -206,13 +206,13 @@ export function AcctPeriodsPage() {
           <div className='flex flex-wrap gap-4'>
             <Link
               to={`${ROUTES.accountingReports}?tab=recon`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               open reconciliation →
             </Link>
             <Link
               to={`${ROUTES.accounting}?new=1`}
-              className='w-fit text-textBaseSize text-textInactiveColor underline underline-offset-2 hover:text-textColor'
+              className='w-fit text-textBaseSize text-borderColor underline underline-offset-2 hover:text-textColor'
             >
               add manual entry →
             </Link>

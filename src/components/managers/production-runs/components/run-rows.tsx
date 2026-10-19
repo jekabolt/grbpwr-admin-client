@@ -61,7 +61,7 @@ export function QtyBar({
   const planMark = planned > 0 && received + defect > planned ? (planned / scale) * 100 : null;
   return (
     <span className='flex items-center gap-2'>
-      <span className='relative block h-3 w-[86px] shrink-0 bg-trackBg' aria-hidden>
+      <span className='relative block h-3 w-[86px] shrink-0 bg-pageBg' aria-hidden>
         <span className='absolute top-0 left-0 h-3 bg-textColor' style={{ width: `${good}%` }} />
         {bad > 0 && (
           <span

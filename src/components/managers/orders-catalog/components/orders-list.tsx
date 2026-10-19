@@ -95,7 +95,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                 open(order);
               }
             }}
-            className='cursor-pointer border-b border-hairline transition-colors last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='cursor-pointer border-b border-hairline transition-colors last:border-b-0 hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             {/* The wrapper is the list item, so it carries the rule between rows and drops it
                 on the last one; the `Row` alone inside it has no sibling row to rule against. */}

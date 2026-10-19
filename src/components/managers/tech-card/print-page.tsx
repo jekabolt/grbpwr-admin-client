@@ -179,7 +179,7 @@ export function TechCardPrint() {
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
 
-      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
           <>
             <BackLink
@@ -231,7 +231,7 @@ export function TechCardPrint() {
           <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
-        <div className='techpack-doc border border-textInactiveColor shadow-sm'>
+        <div className='techpack-doc border border-borderColor shadow-sm'>
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
               плашка без неё напечаталась бы текстом впритык к рамке. */}
           <div className='px-8 pt-6'>

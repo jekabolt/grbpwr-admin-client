@@ -5,8 +5,21 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, CalloutBox, Placeholder, Section, HeaderCount, Text, Tiles, FoldCaret, EmptyCell } from 'ui';
-import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
+import {
+  Button,
+  CalloutBox,
+  Placeholder,
+  Section,
+  HeaderCount,
+  Text,
+  Tiles,
+  FoldCaret,
+  EmptyCell,
+} from 'ui';
+import {
+  mediaFullToViewerItem,
+  mediaFullViewerSrc,
+} from 'components/shared/media-viewer/media-viewer';
 
 import { serverSpeaksDesign } from '../capability';
 import { ReplacingEditor } from '../generation/propagating-editor';
@@ -65,10 +78,8 @@ import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
  * несущая в этой системе, а 4px на неё не стоят ничего: по горизонтали грунт и так виден в
  * междурядьях, а под подписями и дверьми — во всю ширину группы.
  *
- * ⚠ ТОН — `bgSecondary` (#ededed), И ЭТО ЕДИНСТВЕННАЯ СВОБОДНАЯ КЛЕТКА СЛОВАРЯ. DESIGN.md: panel
- * «a fill, not a container… where a tint is wanted but a new box is not» — дословно этот случай.
- * Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка внутри — это box-in-box, прямой
- * запрет системы. `bgZebra` (#fafafa) на белом не читается вовсе: 5 единиц яркости против 18.
+ * ⚠ ТОН — `pageBg` (#f2f2f2). Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка
+ * внутри — это box-in-box, прямой запрет системы.
  */
 function Bay({
   groupOf,
@@ -87,7 +98,7 @@ function Bay({
   return (
     <div
       data-deck-group={groupOf || undefined}
-      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
+      className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-pageBg' : '')}
       style={spanTwo ? { gridColumn: 'span 2' } : undefined}
     >
       {children}

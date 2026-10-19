@@ -351,7 +351,7 @@ function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean
               items={items}
               value={value}
               disabled={locked}
-              className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+              className={locked ? 'bg-pageBg text-labelColor' : undefined}
               onValueChange={(v: string) => field.onChange(v)}
               onBlur={field.onBlur}
             />
@@ -813,7 +813,7 @@ export function CardDetails({
               label='target gender'
               items={techCardGenderOptions}
               disabled={seededLocked}
-              className={seededLocked ? 'bg-bgZebra text-labelColor' : undefined}
+              className={seededLocked ? 'bg-pageBg text-labelColor' : undefined}
             />
             <StyleLockNote locked={seededLocked} />
           </div>

@@ -159,7 +159,7 @@ export function ProductCustomsSection({
           <Text variant='label' size='small' component='span'>
             country of origin (ISO-2) · required
           </Text>
-          <Text size='small' className={countryOfOrigin ? undefined : 'text-textInactiveColor'}>
+          <Text size='small' className={countryOfOrigin ? undefined : 'text-borderColor'}>
             {countryOfOrigin || 'set it in Details → country of origin'}
           </Text>
           <Text variant='label' size='small' component='span'>
@@ -178,7 +178,7 @@ export function ProductCustomsSection({
           maxLength={2000}
           disabled={!canWrite}
           placeholder='e.g. Men’s knitted cotton t-shirt'
-          className='w-full resize-y rounded-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:opacity-60'
+          className='w-full resize-y rounded-none border border-borderColor bg-bgColor p-2 text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:opacity-60'
           value={form.customsDescription}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
             set('customsDescription', e.target.value)

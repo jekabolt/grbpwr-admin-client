@@ -1,10 +1,10 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
-import { Chip, Pill, Text } from 'ui';
-import { Task, TaskPriority } from '../api/types';
+import { Chip, Media, Pill, Select, Text } from 'ui';
+import { Task, TaskPriority, TaskStatus } from '../api/types';
 import { taskLinkCount } from '../utils/links';
-import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
+import { dueMeta, PRIORITY_LABEL, STATUS_LABEL, STATUSES, toOptions } from '../utils/meta';
 import { openBlockers } from '../utils/relations';
 import { AvatarStack } from './avatar-stack';
 
@@ -28,8 +28,47 @@ export function PriorityTag({ priority }: { priority: TaskPriority }) {
   return <Pill tone='mut'>{label}</Pill>;
 }
 
+const STATUS_OPTIONS = toOptions(STATUSES, STATUS_LABEL);
+
+/**
+ * СТАТУС С КАРТОЧКИ — путь переезда без драга (на телефоне драга нет вовсе). Обёртка глушит
+ * pointerdown/keydown/click: иначе нажатие на select поднимало бы карточку (PointerSensor /
+ * KeyboardSensor слушают узел карточки) и открывало бы задачу. Список Radix порталится, но
+ * React-события из портала всплывают по дереву компонентов — через эту же обёртку.
+ */
+function StatusSelect({
+  task,
+  onMove,
+}: {
+  task: Task;
+  onMove: (task: Task, status: TaskStatus) => void;
+}) {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <div className='shrink-0' onPointerDown={stop} onKeyDown={stop} onClick={stop}>
+      <Select
+        name={`status-${task.id}`}
+        placeholder='status'
+        value={task.status}
+        items={STATUS_OPTIONS}
+        onValueChange={(v: string) => onMove(task, v as TaskStatus)}
+        className='min-h-11 w-auto sm:min-h-5.5'
+      />
+    </div>
+  );
+}
+
 // Presentational card body — reused by the sortable card and the drag overlay.
-export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
+export function TaskCardBody({
+  task,
+  dragging,
+  onMove,
+}: {
+  task: Task;
+  dragging?: boolean;
+  /** Set = the card carries a status select in its footer. */
+  onMove?: (task: Task, status: TaskStatus) => void;
+}) {
   const t = task.task;
   // Решённая карточка не краснеет: done и архив показывают срок нейтральной датой.
   const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
@@ -61,11 +100,9 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
       )}
     >
       {coverUrl && (
-        <img
-          src={coverUrl}
-          alt=''
-          className='block aspect-[16/10] w-full border-b border-borderColor object-cover'
-        />
+        <div className='border-b border-borderColor'>
+          <Media src={coverUrl} alt='' aspectRatio='16/10' />
+        </div>
       )}
 
       <div className='flex flex-col gap-1.5 p-2'>
@@ -89,7 +126,7 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
 
         <Text className='leading-snug'>{t.title}</Text>
 
-        <div className='flex items-center justify-between gap-2'>
+        {(t.priority !== 'TASK_PRIORITY_UNKNOWN' || due.state !== 'none') && (
           <div className='flex min-w-0 items-center gap-1.5'>
             <PriorityTag priority={t.priority} />
             {due.state !== 'none' && (
@@ -109,27 +146,34 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
               </Text>
             )}
           </div>
-          <AvatarStack names={t.assignees} />
-        </div>
+        )}
 
         {meta.length > 0 && (
           <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
             {meta.join(' · ')}
           </Text>
         )}
+
+        <div className='flex items-center justify-between gap-2'>
+          <AvatarStack names={t.assignees} />
+          {onMove && <StatusSelect task={task} onMove={onMove} />}
+        </div>
       </div>
     </div>
   );
 }
 
-// Draggable + clickable card inside a column.
-export function SortableTaskCard({
+// Draggable (mouse / keyboard) + clickable card inside a column. Touch never drags, so the
+// card carries no `touch-none`: a finger that lands on it scrolls the page.
+export function SortableTask({
   task,
   onOpen,
+  onMove,
   disabled,
 }: {
   task: Task;
   onOpen: (task: Task) => void;
+  onMove: (task: Task, status: TaskStatus) => void;
   disabled?: boolean;
 }) {
   const { setNodeRef, transform, transition, isDragging, attributes, listeners } = useSortable({
@@ -146,11 +190,11 @@ export function SortableTaskCard({
       aria-label={`Open task: ${task.task.title}`}
       className={cn(
         'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-        disabled ? 'cursor-pointer' : 'cursor-grab touch-none active:cursor-grabbing',
+        disabled ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
         isDragging && 'opacity-40',
       )}
     >
-      <TaskCardBody task={task} />
+      <TaskCardBody task={task} onMove={disabled ? undefined : onMove} />
     </div>
   );
 }

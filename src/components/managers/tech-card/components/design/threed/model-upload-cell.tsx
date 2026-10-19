@@ -383,7 +383,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
           style={{ ...PLACEHOLDER_SURFACE, aspectRatio: STRIP_FRAME_ASPECT }}
           className={cn(
             placeholderClass({ dashed: true }),
-            // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `textInactiveColor`
+            // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `borderColor`
             // (#ccc), годный для рамок и выключенного, но на полосатом фоне дающий полтора к одному.
             // Здесь это единственное, что объясняет жест.
             'relative w-full cursor-pointer flex-col gap-1 overflow-hidden px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',

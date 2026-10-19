@@ -8,7 +8,7 @@ import {
   useDeleteBankRule,
 } from '../../utils/hooks';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 // Import-time matching rules (4.1): a case-insensitive substring of a statement line's description
 // → the counter-account to pre-suggest when that line imports. Purely advisory — a rule only
@@ -152,7 +152,7 @@ export function BankRules({
               {rules.map((r) => (
                 <div
                   key={r.id}
-                  className='flex items-center justify-between gap-2 border-b border-textInactiveColor py-1.5'
+                  className='flex items-center justify-between gap-2 border-b border-borderColor py-1.5'
                 >
                   <div className='flex min-w-0 flex-wrap items-center gap-x-2'>
                     <Text size='small' className='break-words'>

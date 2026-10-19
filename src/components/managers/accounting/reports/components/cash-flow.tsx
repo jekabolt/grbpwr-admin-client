@@ -72,7 +72,7 @@ function SectionBreakdown({
         return (
           <div
             key={label}
-            className='flex items-center justify-between gap-3 border-b border-textInactiveColor py-1.5'
+            className='flex items-center justify-between gap-3 border-b border-borderColor py-1.5'
           >
             <span className='flex min-w-0 flex-wrap items-center gap-2'>
               <Text size='small' className='min-w-0'>
@@ -95,7 +95,7 @@ function SectionBreakdown({
                       type='button'
                       onClick={() => onDrill(code)}
                       title={`open the ${code} ledger for this range`}
-                      className='border border-textInactiveColor px-1 text-[10px] uppercase tabular-nums tracking-wide text-labelColor hover:border-textColor hover:text-textColor'
+                      className='border border-borderColor px-1 text-[10px] uppercase tabular-nums tracking-wide text-labelColor hover:border-textColor hover:text-textColor'
                     >
                       {code}
                     </button>

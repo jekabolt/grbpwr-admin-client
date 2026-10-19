@@ -544,11 +544,26 @@ function EmployeeCard({
   const tenure = tenureLabel(e?.employmentStart, e?.employmentEnd);
 
   const chips: React.ReactNode[] = [];
-  if (left && booked) chips.push(<Chip key='sb' tone='error'>still booking</Chip>);
-  if (booked && (salary?.uncosted ?? 0) > 0) chips.push(<Chip key='uc' tone='error'>uncosted</Chip>);
+  if (left && booked)
+    chips.push(
+      <Chip key='sb' tone='error'>
+        still booking
+      </Chip>,
+    );
+  if (booked && (salary?.uncosted ?? 0) > 0)
+    chips.push(
+      <Chip key='uc' tone='error'>
+        uncosted
+      </Chip>,
+    );
   if (!left && !booked) {
     if (linkedInactive) chips.push(<Chip key='si'>salary inactive</Chip>);
-    else chips.push(<Chip key='ns' tone='error'>no salary</Chip>);
+    else
+      chips.push(
+        <Chip key='ns' tone='error'>
+          no salary
+        </Chip>,
+      );
   }
 
   return (
@@ -565,7 +580,7 @@ function EmployeeCard({
       }}
       className={cn(
         'flex flex-col gap-2 border border-borderColor bg-bgColor p-3 text-left',
-        'cursor-pointer transition-colors hover:bg-bgZebra',
+        'cursor-pointer transition-colors hover:bg-pageBg',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
         left && 'opacity-60',
       )}

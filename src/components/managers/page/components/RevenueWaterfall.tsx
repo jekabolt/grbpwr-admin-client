@@ -30,7 +30,7 @@ export const RevenueWaterfall: FC<{ steps: WaterfallStep[] }> = ({ steps }) => {
             <Text size='small' className={strong ? 'font-bold' : 'text-labelColor'}>
               {s.label}
             </Text>
-            <div className='h-3 w-full bg-bgSecondary/60'>
+            <div className='h-3 w-full bg-pageBg/60'>
               <div className={`h-3 ${bar}`} style={{ width: `${w}%` }} />
             </div>
             <Text

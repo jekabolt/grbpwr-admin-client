@@ -79,7 +79,7 @@ function ToolbarButton({ active, disabled, onClick, label, title }: ToolbarButto
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       className={cn(
-        'h-7 min-w-7 px-1.5 leading-none border border-textInactiveColor transition-colors',
+        'h-7 min-w-7 px-1.5 leading-none border border-borderColor transition-colors',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
         active ? 'bg-textColor text-bgColor' : 'bg-bgColor hover:bg-textColor hover:text-bgColor',
         disabled && 'cursor-not-allowed opacity-40',
@@ -145,12 +145,12 @@ function EmailRichTextEditor({
     <div
       className={cn(
         'border',
-        hasError ? 'border-error' : 'border-textInactiveColor',
+        hasError ? 'border-error' : 'border-borderColor',
         disabled && 'opacity-60',
       )}
     >
       {!disabled && (
-        <div className='flex flex-wrap items-center gap-1 border-b border-textInactiveColor p-1'>
+        <div className='flex flex-wrap items-center gap-1 border-b border-borderColor p-1'>
           <ToolbarButton
             title='bold'
             label='B'
@@ -169,7 +169,7 @@ function EmailRichTextEditor({
             active={editor.isActive('underline')}
             onClick={() => editor.chain().focus().toggleUnderline().run()}
           />
-          <span className='mx-0.5 h-5 w-px bg-textInactiveColor' aria-hidden />
+          <span className='mx-0.5 h-5 w-px bg-borderColor' aria-hidden />
           <ToolbarButton
             title='bullet list'
             label='• list'
@@ -182,7 +182,7 @@ function EmailRichTextEditor({
             active={editor.isActive('orderedList')}
             onClick={() => editor.chain().focus().toggleOrderedList().run()}
           />
-          <span className='mx-0.5 h-5 w-px bg-textInactiveColor' aria-hidden />
+          <span className='mx-0.5 h-5 w-px bg-borderColor' aria-hidden />
           <ToolbarButton
             title='add / edit link'
             label='link'

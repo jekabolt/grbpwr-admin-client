@@ -183,7 +183,7 @@ function FactRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 const menuItem =
-  'block w-full py-1 text-left text-micro uppercase tracking-label hover:underline disabled:text-textInactiveColor';
+  'block w-full py-1 text-left text-micro uppercase tracking-label hover:underline disabled:text-borderColor';
 
 export function SampleScreen({
   sample,
@@ -460,7 +460,7 @@ export function SampleScreen({
     set({ mediaIds: [m.id] });
   };
   const photoFace = shownPhoto ? (
-    <span className='relative block aspect-[3/4] overflow-hidden border border-borderColor bg-bgSecondary'>
+    <span className='relative block aspect-[3/4] overflow-hidden border border-borderColor bg-pageBg'>
       <img
         src={shownPhoto}
         alt={`sample #${sample.number ?? '?'}`}

@@ -101,7 +101,7 @@ export function ProductCostSection({
       )}
 
       {canReadCosting && hasProvenance && (
-        <div className='flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-textInactiveColor pt-3'>
+        <div className='flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-borderColor pt-3'>
           {costInfo?.costPrice?.value && (
             <Text size='small'>
               current cost: {eur}

@@ -335,7 +335,7 @@ export function SplitStage({
  * The column that holds a row's required answer (confirm, draw, fold?) stays pinned to the right
  * edge of a `DataTable` that scrolls sideways: at 1024 px the footer asks for an answer, and the
  * answer must be on screen. Put it on the `th` and every `td` of that column, with the row's own
- * background (`bg-bgColor`, or the zebra of a selected row) so the scrolled cells pass under it.
+ * background (`bg-bgColor`) so the scrolled cells pass under it.
  * The left rule is a pseudo-element: in `border-collapse` a sticky cell does not carry its border.
  */
 export const STICKY_END =

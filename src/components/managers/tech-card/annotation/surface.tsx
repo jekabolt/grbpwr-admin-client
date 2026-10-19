@@ -2149,7 +2149,7 @@ export function AnnotationSurface({
              Кадр один на четыре экрана, поэтому и признак один. */
           data-annot-frame=''
           className={cn(
-            'relative select-none border border-borderColor bg-bgZebra',
+            'relative select-none border border-borderColor bg-pageBg',
             // КАДР НИКОГДА НЕ ТЯНЕТСЯ ПОД СОСЕДЕЙ СНИЗУ.
             //
             // Поверхность — flex-колонка: кадр, под ним легенда и редактор. У колонки

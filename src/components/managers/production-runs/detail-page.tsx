@@ -541,7 +541,7 @@ export function ProductionRunDetail() {
                         <Text size='small'>#{rc.id}</Text>
                         <Text size='small'>{runDate(rc.receivedAt) || <EmptyCell />}</Text>
                         {isReversalRow ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversal of receipt #{rc.reversalOf}
                           </span>
                         ) : (
@@ -557,14 +557,14 @@ export function ProductionRunDetail() {
                                 final
                               </span>
                             ) : (
-                              <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                              <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                                 partial
                               </span>
                             )}
                           </>
                         )}
                         {isReversed ? (
-                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          <span className='inline-block border border-borderColor px-1.5 py-0.5 text-textBaseSize uppercase text-borderColor'>
                             reversed · #{rc.reversedBy}
                           </span>
                         ) : null}
@@ -1334,7 +1334,7 @@ function CostLedger({
 // Per-colourway material cost (gap-07 v2 C): stock issues grouped by the product_id they were cut
 // for. Only materials-from-stock is split — manual cost articles stay run-level — and issues booked
 // without a colourway fall into "unattributed". Read-only; costing-gated by the caller.
-const cwCell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cwCell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 // Colourway identity for the label lookup below (R1: a colourway is a product) — sourced from the
 // run's tech card (techCard?.colorways) by the caller, the same as lines-grid.tsx.
 type ColorwayLabelRef = { productId?: number; code?: string; name?: string };

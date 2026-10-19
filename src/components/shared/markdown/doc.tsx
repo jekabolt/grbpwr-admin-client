@@ -2,11 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { cn } from 'lib/utility';
 import { autolinkNodes } from './autolink';
 import { isTableRow, isTableRule, parseTable, type TableAlign } from './table';
-import {
-  fileRefId,
-  InlinePlate,
-  useMarkdownRefs,
-} from './refs';
+import { fileRefId, InlinePlate, useMarkdownRefs } from './refs';
 
 /**
  * РАЗМЕТЧИК ЗАМЕТКИ — ровно те конструкции, которые в заметках действительно пишут.
@@ -368,9 +364,8 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
 
     if (token.startsWith('`')) {
       out.push(
-        // Зебра, а не `trackBg`: тот токен — дорожка полосы прогресса, и тинт текста ею
-        // означал бы, что два разных смысла делят один цвет.
-        <code key={key} className='bg-bgZebra px-[3px]'>
+        // Тинт кода — `pageBg`, единственный светлый фон палитры.
+        <code key={key} className='bg-pageBg px-[3px]'>
           {token.slice(1, -1)}
         </code>,
       );
@@ -436,7 +431,12 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
   // о себе сам адрес (`isPictureHref`). Второе и есть починка синих ссылок в принесённых
   // заметках; страховка — в реализации: не открылось, значит на месте снимка снова ссылка.
   if (external && (image || isPictureHref(href))) {
-    return refs.externalImage({ src: href, label, pictureKey: pictureKeyOf(href), fallback: asLink });
+    return refs.externalImage({
+      src: href,
+      label,
+      pictureKey: pictureKeyOf(href),
+      fallback: asLink,
+    });
   }
 
   if (image) {
@@ -495,7 +495,9 @@ export function MarkdownDoc({ blocks, className }: { blocks: Block[]; className?
           case 'gap':
             return <div key={key} data-md-line={b.line} className='h-2' />;
           case 'rule':
-            return <div key={key} data-md-line={b.line} className='my-2 border-t border-hairline' />;
+            return (
+              <div key={key} data-md-line={b.line} className='my-2 border-t border-hairline' />
+            );
           case 'h1':
             // 12px, а не 18: восемнадцать в этой системе — размер заголовка СТРАНИЦЫ, и
             // заметка, начинающаяся с `# ...`, рисовала бы второй такой же прямо под первым.
@@ -631,7 +633,7 @@ export function MarkdownDoc({ blocks, className }: { blocks: Block[]; className?
                 // Своего шрифта у блока кода нет и не нужно: весь админ и так набран
                 // моноширинным FeatureMono, второе семейство система прямо запрещает. Заливка
                 // без рамки — тинт, а не вторая коробка внутри блока.
-                className='my-1.5 overflow-x-auto bg-bgZebra px-2 py-1.5'
+                className='my-1.5 overflow-x-auto bg-pageBg px-2 py-1.5'
               >
                 {b.lines.join('\n')}
               </pre>

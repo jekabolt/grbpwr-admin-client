@@ -3880,7 +3880,7 @@ function SlotTile({
         />
       ) : (
         <div
-          className='flex w-auto max-w-[85vw] items-center justify-center border border-dashed border-borderColor bg-bgZebra'
+          className='flex w-auto max-w-[85vw] items-center justify-center border border-dashed border-borderColor bg-pageBg'
           style={{ height: PLATE_FRAME_HEIGHT, aspectRatio: '4/5' }}
           title={`no ${noun} stands in ${label}; this card is read-only for you`}
         >
@@ -3967,7 +3967,7 @@ function ModelPlateTile({
         type='button'
         onClick={() => onView3d(plate)}
         title={`open ${plate.name} in 3D — orbit it and take a snapshot from any angle to get a picture of it`}
-        className='flex w-auto max-w-[85vw] cursor-pointer flex-col items-center justify-center gap-2 border border-borderColor bg-bgZebra text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className='flex w-auto max-w-[85vw] cursor-pointer flex-col items-center justify-center gap-2 border border-borderColor bg-pageBg text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         style={{ height: PLATE_FRAME_HEIGHT, aspectRatio: '4/5' }}
       >
         <ModelGlyph />
@@ -4041,7 +4041,7 @@ function PlateCorner({
         TILE_CORNER,
         TILE_QUIET,
         'py-px leading-none',
-        dead ? 'cursor-not-allowed text-textInactiveColor' : 'cursor-pointer',
+        dead ? 'cursor-not-allowed text-borderColor' : 'cursor-pointer',
       )}
     >
       {children}
@@ -4077,10 +4077,7 @@ function PlateClose({
         e.preventDefault();
         if (!dead) onPress?.();
       }}
-      className={cn(
-        TILE_QUIET,
-        dead ? 'cursor-not-allowed text-textInactiveColor' : 'cursor-pointer',
-      )}
+      className={cn(TILE_QUIET, dead ? 'cursor-not-allowed text-borderColor' : 'cursor-pointer')}
     />
   );
 }

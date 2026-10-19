@@ -2407,7 +2407,7 @@ function NewArtworkTile({ gate, onAdd }: { gate: Gate; onAdd: () => void }): JSX
           style={{ aspectRatio: BENCH_FRAME_ASPECT }}
           className={cn(
             'flex w-full items-center justify-center',
-            off ? 'text-textInactiveColor' : 'text-labelColor group-hover:text-textColor',
+            off ? 'text-borderColor' : 'text-labelColor group-hover:text-textColor',
           )}
         >
           <Text component='span' size='control' className='font-bold'>

@@ -233,7 +233,7 @@ export function TechCardImport() {
                 accept(e.dataTransfer.files);
               }}
               className={`flex flex-col items-center justify-center gap-2.5 border border-dashed p-10 ${
-                dragging ? 'border-textColor bg-bgZebra' : 'border-borderColor'
+                dragging ? 'border-textColor bg-pageBg' : 'border-borderColor'
               }`}
             >
               <Text variant='uppercase'>

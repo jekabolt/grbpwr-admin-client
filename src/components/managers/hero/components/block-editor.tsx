@@ -747,7 +747,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
   return (
     <div>
       {variant}
-      <div className='space-y-3 border-t border-textInactiveColor p-3 lg:p-4'>
+      <div className='space-y-3 border-t border-borderColor p-3 lg:p-4'>
         <TargetingFields index={index} />
       </div>
     </div>

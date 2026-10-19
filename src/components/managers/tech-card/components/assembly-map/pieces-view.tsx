@@ -74,7 +74,7 @@ export function PiecesView({
               data-map-family={f.leader}
               data-map-family-hot={hot ? '1' : undefined}
               className={cn(
-                'relative flex flex-col items-center bg-bgZebra',
+                'relative flex flex-col items-center bg-pageBg',
                 hot && 'outline outline-2 -outline-offset-2 outline-textColor',
               )}
               title={`${name}${f.tag ? ` ${f.tag}` : ''} · ${f.members.map(model.pieceName).join(', ')}`}
@@ -120,7 +120,7 @@ export function PiecesView({
                   setLegendHot(null);
                   onHoverMany(null);
                 }}
-                className='flex items-center gap-1.5 border-b border-hairline py-0.5 last:border-b-0 hover:bg-bgZebra'
+                className='flex items-center gap-1.5 border-b border-hairline py-0.5 last:border-b-0 hover:bg-pageBg'
               >
                 <span className='flex h-5 w-8 shrink-0 items-center justify-center'>
                   {sec ? <SewnGlyph tile={sec} size={30} /> : null}

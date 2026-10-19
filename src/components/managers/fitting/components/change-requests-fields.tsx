@@ -15,7 +15,7 @@ import { FittingCarryOver } from './carry-over';
 import { crPieceIds, FittingFormData } from './schema';
 import { fittingZoneOptions, normalizeFittingZone } from './zone-options';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 const statusOptions = [
   { value: 'open', label: 'open' },
   { value: 'resolved', label: 'resolved' },
@@ -461,7 +461,7 @@ function EditModeList({
         ))
       )}
 
-      <div className='border-t border-textInactiveColor pt-3'>
+      <div className='border-t border-borderColor pt-3'>
         <Text variant='uppercase' size='small'>
           add change request
         </Text>

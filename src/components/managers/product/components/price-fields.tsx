@@ -147,7 +147,7 @@ export function PriceFields({ editMode }: { editMode: boolean }) {
                 return (
                   <Text
                     size='small'
-                    className={sp.fractional ? 'text-warning' : 'text-textInactiveColor'}
+                    className={sp.fractional ? 'text-warning' : 'text-borderColor'}
                   >
                     −{sale}% → {symbol}
                     {formatSale(sp.value, sp.isInt)}

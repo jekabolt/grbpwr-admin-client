@@ -96,7 +96,7 @@ export function BlockEditor({ prefix, block, featuredProducts }: BlockEditorProp
                 { name: 'subheading', label: 'subheading', required: false },
               ]}
             />
-            <div className='border border-dashed border-textInactiveColor p-2'>
+            <div className='border border-dashed border-borderColor p-2'>
               <Text variant='label' size='small'>
                 per-language header nav links (EmailBlockTranslation.links[]) — deferred to a later
                 pass.

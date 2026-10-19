@@ -296,7 +296,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
 
       <div className='grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_224px] lg:items-start'>
         <div className='min-w-0'>
-          <div className='relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-bgSecondary p-3'>
+          <div className='relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-3'>
             <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
               {pixels && disp && !loadError ? (
                 // РАМКА РЕЗУЛЬТАТА, залитая выбранным цветом. Это не подложка сцены, а сам файл,

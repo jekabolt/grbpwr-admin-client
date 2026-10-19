@@ -14,7 +14,7 @@ import { FoldCaret } from './fold-caret';
  *
  *  1. The FILL is load-bearing. A bordered box without `bg-bgColor` lets the grey ground show
  *     straight through its contents, and data stops reading as data. Six managers shipped that
- *     bug (`border border-textInactiveColor p-4` with no background) before this primitive
+ *     bug (`border border-borderColor p-4` with no background) before this primitive
  *     existed.
  *  2. The GUTTER is the divider. Blocks are separated by 24px of ground, never by a drawn line
  *     — both neighbours already carry their own outline, so a rule in the gutter renders as a

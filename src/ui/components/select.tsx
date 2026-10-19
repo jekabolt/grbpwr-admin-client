@@ -279,7 +279,7 @@ export function SelectContent({
   return (
     <Select.Portal>
       <Select.Content
-        className='z-[var(--z-popover)] w-full overflow-auto border border-textInactiveColor bg-bgColor'
+        className='z-[var(--z-popover)] w-full overflow-auto border border-borderColor bg-bgColor'
         position='popper'
         style={{
           width: getWidth(),

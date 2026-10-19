@@ -59,7 +59,7 @@ export function SizePickerModal({
           className={cn(
             'inline-flex items-center gap-1 border border-borderColor bg-bgColor px-2.5 py-1',
             'text-micro uppercase tracking-label',
-            disabled ? 'text-textInactiveColor' : 'text-textColor hover:border-textColor',
+            disabled ? 'text-borderColor' : 'text-textColor hover:border-textColor',
             triggerClassName,
           )}
         >

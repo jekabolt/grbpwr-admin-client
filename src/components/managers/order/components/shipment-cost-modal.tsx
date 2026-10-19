@@ -2,7 +2,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useState } from 'react';
 import { ConfirmationModal, Text } from 'ui';
 
-const inputClass = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const inputClass = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // Record the real carrier invoice so contribution margin uses actual logistics instead
 // of the quoted rate. Prefilled from the order's current actualCost/returnShippingCost
