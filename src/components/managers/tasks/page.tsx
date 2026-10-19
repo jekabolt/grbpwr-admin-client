@@ -10,7 +10,9 @@ import {
   CalloutBox,
   Chip,
   ChipRow,
+  Section,
   SectionHeader,
+  Select,
   SideRail,
   SideRailGroup,
   SideRailItem,
@@ -28,49 +30,19 @@ import {
   emptyFilters,
   filtersActive,
   FiltersBar,
+  PhoneFilterGroups,
   setFilter,
   taskFilterCount,
   TaskFilters,
 } from './components/filters-bar';
 import { TAP } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
-import {
-  BoardSwitch,
-  FiltersSheet,
-  matchQuery,
-  NothingFound,
-  PhoneStatus,
-  PhoneTaskList,
-  phoneVisible,
-  QuickAdd,
-  readPhoneStatus,
-  SearchField,
-  StatusSwitch,
-  useListPhone,
-} from './components/task-list-phone';
 import { useCreateTask, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 const FILTERS_KEY = 'grbpwr.kanban.filters';
 const ARCHIVED_KEY = 'grbpwr.kanban.archived';
-const PHONE_STATUS_KEY = 'grbpwr.tasks.phoneListStatus';
-const PHONE_QUERY_KEY = 'grbpwr.tasks.phoneQuery';
-
-function readSession(key: string): string | null {
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function writeSession(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    /* storage blocked */
-  }
-}
 
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
@@ -123,20 +95,13 @@ export function Tasks() {
   );
   useEffect(() => localStorage.setItem(ACTIVE_BOARD_KEY, activeBoard), [activeBoard]);
 
-  // Телефон — список вместо доски (`task-list-phone.tsx`); статус и поиск живут только там.
-  const isPhone = useListPhone();
-  const [phoneStatus, setPhoneStatus] = useState<PhoneStatus>(() =>
-    readPhoneStatus(readSession(PHONE_STATUS_KEY)),
-  );
-  useEffect(() => writeSession(PHONE_STATUS_KEY, phoneStatus), [phoneStatus]);
-  const [query, setQuery] = useState(() => readSession(PHONE_QUERY_KEY) ?? '');
-  useEffect(() => writeSession(PHONE_QUERY_KEY, query), [query]);
-  const [freshId, setFreshId] = useState<number | undefined>();
+  const [atTop, setAtTop] = useState(true);
   useEffect(() => {
-    if (freshId === undefined) return;
-    const timer = window.setTimeout(() => setFreshId(undefined), 1200);
-    return () => window.clearTimeout(timer);
-  }, [freshId]);
+    const onScroll = () => setAtTop(window.scrollY < 40);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // tskArchive v3 — archived is a filter, not a mode. On = include_archived so the
   // board shows active + archived (the cards dim themselves); off = active only.
@@ -195,6 +160,7 @@ export function Tasks() {
     }
   });
   useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const active = filtersActive(filters);
   const phoneFilterCount = taskFilterCount(filters, showArchived, projectId > 0);
@@ -210,18 +176,6 @@ export function Tasks() {
    * ровно тогда, когда зажжён чип archived, — потому что именно тогда они и лежат в `tasks`.
    */
   const people = useMemo(() => assigneePiles(tasks, filters.assignee), [tasks, filters.assignee]);
-
-  const phoneRows = useMemo(
-    () => phoneVisible(tasks, filters, account?.username, phoneStatus, query),
-    [tasks, filters, account?.username, phoneStatus, query],
-  );
-  // The status sheet counts what every other narrowing leaves.
-  const phoneStatusPool = useMemo(
-    () => visible.filter((t) => matchQuery(t, query)),
-    [visible, query],
-  );
-  const phoneNarrowed =
-    active || showArchived || projectId > 0 || phoneStatus !== 'open' || !!query.trim();
 
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
@@ -247,30 +201,9 @@ export function Tasks() {
     }
   }
 
-  /**
-   * БЫСТРОЕ ДОБАВЛЕНИЕ С ТЕЛЕФОНА: только название, в «to do» текущей доски (и проекта, если доска
-   * им сужена). Если сужения спрятали бы новую строку, они снимаются — иначе «add» выглядел бы
-   * как ничего не сделавший.
-   */
-  async function quickAdd(title: string) {
-    const { board, status, ...content } = {
-      ...emptyFormValues(activeBoard, 'TASK_STATUS_TODO'),
-      title,
-      projectTopicId: projectId,
-    };
-    const { id } = await createTask.mutateAsync({ content, board, status });
-    if (phoneStatus !== 'open' && phoneStatus !== 'all' && phoneStatus !== status)
-      setPhoneStatus('open');
-    if (active) setFilters(emptyFilters);
-    setQuery('');
-    setFreshId(id);
-  }
-
   function clearFilters() {
     setFilters(emptyFilters);
     setShowArchived(false);
-    setPhoneStatus('open');
-    setQuery('');
     // «Clear» значит одно и то же для всех сужений экрана: оставить проект зажжённым после
     // него означало бы, что слово на кнопке врёт про часть ряда.
     if (projectId) dropProject();
@@ -321,23 +254,11 @@ export function Tasks() {
         }
       >
         <div className='flex min-w-0 flex-col gap-2 sm:gap-3'>
-          {isPhone && (
-            <div className='sticky top-14 z-[var(--z-sticky)] -mx-2.5 flex flex-col gap-2 border-b border-borderColor bg-bgColor px-3 pb-2.5'>
-              <div className='flex items-center gap-2'>
-                <BoardSwitch board={activeBoard} counts={counts} onChange={setActiveBoard} />
-                {writable && (
-                  <Button
-                    variant='main'
-                    aria-label='new task'
-                    className='min-h-11 w-11 shrink-0 px-0 text-lg'
-                    onClick={() => setCreating('TASK_STATUS_TODO')}
-                  >
-                    +
-                  </Button>
-                )}
-              </div>
-              <SearchField value={query} onChange={setQuery} />
-              <div className='flex items-center gap-2'>
+          <Section
+            title='tasks'
+            className='sm:hidden'
+            action={
+              <>
                 {!!account?.username && (
                   <Chip
                     selected={filters.mine}
@@ -345,36 +266,49 @@ export function Tasks() {
                     onClick={() =>
                       setFilters((current) => setFilter(current, { mine: !current.mine }))
                     }
-                    className='min-h-11'
+                    className='min-h-9'
                   >
                     mine
                   </Chip>
                 )}
-                <StatusSwitch
-                  value={phoneStatus}
-                  tasks={phoneStatusPool}
-                  onChange={setPhoneStatus}
+                <Chip
+                  selected={phoneFilterCount > 0}
+                  pressed={filtersOpen}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls='task-phone-filters'
+                  className='min-h-9'
+                >
+                  {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
+                </Chip>
+              </>
+            }
+          >
+            <Select
+              name='task-board-phone'
+              value={activeBoard}
+              items={boardOptions}
+              fullWidth
+              itemClassName='min-h-11'
+              className='min-h-11 uppercase tracking-label'
+              placeholder='board'
+              onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
+            />
+            {filtersOpen && (
+              <div id='task-phone-filters'>
+                <PhoneFilterGroups
+                  filters={filters}
+                  onChange={setFilters}
+                  people={people}
+                  showArchived={showArchived}
+                  onToggleArchived={() => setShowArchived((value) => !value)}
+                  onClear={clearFilters}
+                  projectLabel={projectLabel}
+                  onClearProject={dropProject}
                 />
-                <span className='ml-auto'>
-                  <FiltersSheet
-                    filters={filters}
-                    showArchived={showArchived}
-                    projectLabel={projectLabel}
-                    people={people}
-                    count={phoneFilterCount}
-                    preview={(draft) =>
-                      phoneVisible(tasks, draft, account?.username, phoneStatus, query).length
-                    }
-                    onApply={({ filters: next, archived, keepProject }) => {
-                      setFilters(next);
-                      setShowArchived(archived);
-                      if (!keepProject && projectId) dropProject();
-                    }}
-                  />
-                </span>
               </div>
-            </div>
-          )}
+            )}
+          </Section>
 
           {/* Между sm и lg рельса нет: доски остаются строкой чипов из v1. */}
           <div className='hidden sm:block lg:hidden'>
@@ -437,55 +371,47 @@ export function Tasks() {
                   </Text>
                 </CalloutBox>
               )}
-              {isPhone ? (
-                phoneNarrowed && phoneRows.length === 0 ? (
-                  <NothingFound onClear={clearFilters} />
-                ) : (
-                  <PhoneTaskList
-                    tasks={phoneRows}
-                    status={phoneStatus}
-                    freshId={freshId}
-                    onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
-                  />
-                )
-              ) : (
-                <>
-                  {active && visible.length === 0 && (
-                    <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
-                      <Text
-                        size='micro'
-                        component='span'
-                        className='font-bold uppercase tracking-label'
-                      >
-                        no tasks match
-                      </Text>
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        onClick={clearFilters}
-                        className='ml-auto'
-                      >
-                        clear filters
-                      </Button>
-                    </CalloutBox>
-                  )}
-                  <Board
-                    tasks={visible}
-                    allTasks={tasks}
-                    filter={filter}
-                    filtered={active}
-                    canWrite={writable}
-                    onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
-                    onAdd={(status) => setCreating(status)}
-                  />
-                </>
+              {active && visible.length === 0 && (
+                <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='font-bold uppercase tracking-label'
+                  >
+                    no tasks match
+                  </Text>
+                  <Button variant='underline' size='xs' onClick={clearFilters} className='ml-auto'>
+                    clear filters
+                  </Button>
+                </CalloutBox>
               )}
+              <Board
+                tasks={visible}
+                allTasks={tasks}
+                filter={filter}
+                filtered={active}
+                canWrite={writable}
+                onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
+                onAdd={(status) => setCreating(status)}
+              />
             </>
           )}
         </div>
       </SideRailLayout>
 
-      {isPhone && writable && <QuickAdd saving={createTask.isPending} onAdd={quickAdd} />}
+      {writable && (
+        <Button
+          variant='main'
+          size='lg'
+          aria-label='new task'
+          className={`fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-4 z-[var(--z-dock)] min-h-12 uppercase tracking-label sm:hidden ${
+            atTop ? 'px-4' : 'w-12 px-0 text-lg'
+          }`}
+          onClick={() => setCreating('TASK_STATUS_TODO')}
+        >
+          {atTop ? '+ new task' : '+'}
+        </Button>
+      )}
 
       <TaskFormModal
         open={creating !== null}
