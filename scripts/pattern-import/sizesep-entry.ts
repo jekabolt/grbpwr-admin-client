@@ -10,6 +10,8 @@
 //   looks-shuffled   every size line drawn in a random size look: no order dominates
 //   region-reordered on the right 40 % of the sheet 44 is drawn in 48's look and 48 in 44's: one
 //                    part of the sheet reads the looks in another order
+//   piece-reordered  the same swap on one small piece only (every line within 25 mm of the smallest
+//                    44 line with all six sizes around it): outvoted in any 15 cm cell
 //   label-on-line    a "48" printed on three long 44 lines: ranked by look, but those lines ask
 // The truth per polupalto chain is its pen (width + dash), read from the sheet's key, never from the
 // engine's rows. Output: one table on stdout, JSON in PATIMPORT_REPORTS (default os tmpdir).
@@ -80,12 +82,16 @@ type Mutation =
   | 'looks-merged'
   | 'looks-shuffled'
   | 'region-reordered'
+  | 'piece-reordered'
   | 'label-on-line';
 
 function rng(seed: number) {
   let s = seed >>> 0;
   return () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 }
+
+/** piece-reordered found no piece to swap on this sheet (the row is then not a test) */
+let pieceFound = true;
 
 function mutate(sheet: Sheet, build: ChainBuild, truth: number[], m: Mutation): Sheet {
   if (m === 'labels-swapped') {
@@ -152,6 +158,47 @@ function mutate(sheet: Sheet, build: ChainBuild, truth: number[], m: Mutation): 
       };
     });
     return { ...sheet, texts: [...sheet.texts, ...added] };
+  }
+  if (m === 'piece-reordered') {
+    // the smallest piece drawn in all six looks (a 44 line with every other size's line within
+    // 25 mm of its box) swaps 44 and 48: the sheet around it outvotes it in any 15 cm cell (sheet 0:
+    // a 65 mm piece, ranked by look without the per-piece check)
+    const box = (i: number) => {
+      const ps = build.chains[i].pts;
+      const xs = ps.map((q) => q.x);
+      const ys = ps.map((q) => q.y);
+      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+    };
+    const boxes = build.chains.map((_, i) => box(i));
+    let best: { inside: number[]; diag: number } | null = null;
+    truth.forEach((r, i) => {
+      if (r !== 0) return;
+      const b = boxes[i];
+      const diag = Math.hypot(b.x1 - b.x0, b.y1 - b.y0);
+      if (diag < 60) return;
+      const W = { x0: b.x0 - 25, y0: b.y0 - 25, x1: b.x1 + 25, y1: b.y1 + 25 };
+      const inside = truth
+        .map((t, j) => ({ t, j }))
+        .filter(
+          ({ t, j }) =>
+            t >= 0 &&
+            boxes[j].x0 >= W.x0 &&
+            boxes[j].y0 >= W.y0 &&
+            boxes[j].x1 <= W.x1 &&
+            boxes[j].y1 <= W.y1,
+        );
+      if (new Set(inside.map((e) => e.t)).size < 6) return;
+      if (!best || diag < best.diag) best = { inside: inside.map((e) => e.j), diag };
+    });
+    const pick = best as { inside: number[]; diag: number } | null;
+    pieceFound = !!pick;
+    if (pick) {
+      console.log(
+        `  piece-reordered: a piece ${pick.diag.toFixed(0)} mm across, ${pick.inside.length} lines`,
+      );
+      for (const i of pick.inside) if (truth[i] === 0 || truth[i] === 2) draw(i, 2 - truth[i]);
+    }
+    return sheet;
   }
   const rnd = rng(19);
   const xs = sheet.paths.flatMap((p) => p.pts.map((q) => q.x));
@@ -308,11 +355,16 @@ export async function main(): Promise<number> {
         'looks-merged',
         'looks-shuffled',
         'region-reordered',
+        'piece-reordered',
         'label-on-line',
       ] as const;
       for (const m of muts) {
         const mu = runOne(name, sheet, base, docTexts, true, m, truthOf);
         rows.push(mu.row);
+        if (m === 'piece-reordered' && !pieceFound) {
+          console.log(`  ${name} ${m}: no piece with all six looks, not a test`);
+          continue;
+        }
         if (m === 'label-on-line') {
           if (mu.row.rankedByLook && !mu.row.lookAgainst)
             fails.push(`${name} ${m}: a line labelled against its look is not asked`);

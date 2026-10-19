@@ -9,9 +9,9 @@
 //
 // The looks are ranked as a whole only when three independent things agree:
 //   1. order — one order of the n looks dominates the full cross-sections (n distinct looks side
-//      by side), holds in every part of the sheet (no 15 cm cell reads the looks in another
-//      order) and no look of it fills two lanes of one section (two sizes drawn alike); it gives
-//      the order up to its direction;
+//      by side), holds in every part of the sheet (no 15 cm cell and no piece reads the looks in
+//      another order) and no look of it fills two lanes of one section (two sizes drawn alike); it
+//      gives the order up to its direction;
 //   2. direction by nesting — the sheet-wide inside vote (large closures weigh most) puts one end
 //      of that order inside (small sizes inside);
 //   3. direction by labels — the size labels nearest to the look lines (only size-look chains are
@@ -49,6 +49,11 @@ const MAX_TWICE = 0.2;
 const CELL_MM = 150;
 const MIN_CELL = 8;
 const MIN_CELL_ORDERED = 0.6;
+/** Every line the sections were cast from (one size line of one piece) with this many sections of
+ *  ≥ 3 order looks must read them in the order in this share of them (polupalto: ≥ 0.7; one 65 mm
+ *  piece with two looks swapped: ≤ 0.15). A small piece in another key is outvoted in any cell. */
+const MIN_LINE = 5;
+const MIN_LINE_ORDERED = 0.5;
 /** |inside vote| / total weight below this = the nesting does not say which end is inside. */
 const MIN_INSIDE = 0.2;
 /** A label names a look line within this distance (mm, from the label's box centre). */
@@ -119,16 +124,23 @@ export function textLabelLookOrder(
   // 1c. the order holds everywhere: a part of the sheet whose sections read the looks in another
   // order (another garment, another key) is not outvoted by the rest
   const cells = new Map<string, { ordered: number; all: number }>();
+  const lines = new Map<number, { ordered: number; all: number; at: { x: number; y: number } }>();
   for (const g of groups) {
     const ps = g.units.map((u) => (u >= 0 ? pos[u] : -1)).filter((p) => p >= 0);
     if (ps.length < 3 || new Set(ps).size !== ps.length) continue;
     const key = `${Math.floor(g.at.x / CELL_MM)},${Math.floor(g.at.y / CELL_MM)}`;
     let c = cells.get(key);
     if (!c) cells.set(key, (c = { ordered: 0, all: 0 }));
+    let l = lines.get(g.from);
+    if (!l) lines.set(g.from, (l = { ordered: 0, all: 0, at: g.at }));
     c.all++;
+    l.all++;
     const up = ps.every((p, k) => !k || p > ps[k - 1]);
     const down = ps.every((p, k) => !k || p < ps[k - 1]);
-    if (up || down) c.ordered++;
+    if (up || down) {
+      c.ordered++;
+      l.ordered++;
+    }
   }
   const off = [...cells].find(([, c]) => c.all >= MIN_CELL && c.ordered < MIN_CELL_ORDERED * c.all);
   if (off) {
@@ -138,6 +150,14 @@ export function textLabelLookOrder(
       why: `${orderWhy}; the sections near (${cx * CELL_MM + CELL_MM / 2}, ${cy * CELL_MM + CELL_MM / 2}) mm read the looks in another order (${off[1].ordered} of ${off[1].all} in it)`,
     };
   }
+  const offLine = [...lines.values()].find(
+    (l) => l.all >= MIN_LINE && l.ordered < MIN_LINE_ORDERED * l.all,
+  );
+  if (offLine)
+    return {
+      rank: null,
+      why: `${orderWhy}; the piece at (${Math.round(offLine.at.x)}, ${Math.round(offLine.at.y)}) mm reads the looks in another order (${offLine.ordered} of ${offLine.all} of its sections)`,
+    };
 
   // 2. direction by nesting: lanes run −normal → +normal; A > 0 puts the interior at +normal
   let iv = 0;
