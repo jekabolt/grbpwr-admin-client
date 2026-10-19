@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Chip, ChipRow, CopyToClipboard, ViewSwitch } from 'ui';
 import { addDoorDemo } from './add-door';
 import { backLinkDemo } from './back-link';
+import { closeDemo } from './close';
 import { KitDemo, KitLines, KitMatrix } from './kit-entry';
 
 const SIZES = ['xs', 'sm', 'default', 'lg'] as const;
@@ -160,6 +161,7 @@ export const actionDemos: KitDemo[] = [
   { names: ['Button'], Demo: ButtonDemo },
   backLinkDemo,
   addDoorDemo,
+  closeDemo,
   { names: ['Chip', 'ChipRow'], Demo: ChipDemo },
   { names: ['ViewSwitch'], Demo: ViewSwitchDemo },
   { names: ['CopyToClipboard'], Demo: CopyDemo },
