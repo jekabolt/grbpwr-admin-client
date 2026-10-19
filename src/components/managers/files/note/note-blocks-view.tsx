@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -6,7 +6,7 @@ import { Button, ConfirmationModal, GenericPopover, Input, Text } from 'ui';
 import { AiPanel, useNoteAssistant, type AiSuggestion } from './ai-panel';
 import { BlockSheet } from './block-sheet';
 import { MarkdownView } from './markdown-view';
-import { insertBlock, replaceBlock, splitBlocks, type NoteBlock } from './note-blocks';
+import { insertBlock, replaceBlock, splitBlocks } from './note-blocks';
 
 /**
  * ПРАВКА ЗАМЕТКИ ПО БЛОКАМ — телефон (<md), вариант «Blocks» (выбор владельца 2026-10-19).
@@ -24,19 +24,79 @@ import { insertBlock, replaceBlock, splitBlocks, type NoteBlock } from './note-b
  * ── ПРАВКА МЕНЯЕТ ТОЛЬКО СВОЙ ДИАПАЗОН ──────────────────────────────────────────────────────
  *
  * Буфер — та же строка `value` страницы: сохранение, конфликт по отпечатку и черновик работают
- * от неё и ничего про блоки не знают. Блок не тронут — буфер не трогается вовсе (поле `textarea`
- * отдаёт `\n` вместо `\r\n`, и «открыл и закрыл» иначе переписало бы концы строк).
+ * от неё и ничего про блоки не знают. Лист пишет в буфер НА КАЖДЫЙ СИМВОЛ (см. `written`):
+ * открытая правка не живёт отдельно, и перезагрузка, ⌘S, save/discard видят её как обычную.
+ * Блок не тронут — буфер не трогается вовсе (поле `textarea` отдаёт `\n` вместо `\r\n`, и
+ * «открыл и закрыл» иначе переписало бы концы строк).
+ *
+ * Края (`prefix`/`suffix`) снимаются один раз при открытии, и запись — чистая функция черновика:
+ * никаких поисков блока по номеру или тексту потом. Если буфер поменялся НЕ листом (discard,
+ * перечитка при конфликте, помощник), края устарели — лист закрывается, а не пишет поверх.
  */
 
 interface SheetState {
-  /** Номер блока; для нового — после какого вставлять (-1 — в начало). */
+  /** Номер блока в `base`; у нового не нужен. */
   at: number;
   insert: boolean;
-  /** Исходные байты блока в момент открытия (пусто для нового). */
+  /** Буфер в момент открытия. */
+  base: string;
+  /** Всё до и после правимого места в `base`; у нового разделители уже внутри. */
+  prefix: string;
+  suffix: string;
+  /** Исходные байты блока (пусто для нового). */
   raw: string;
   label: string;
   /** Смена ключа — новый лист с чистым черновиком. */
   key: number;
+}
+
+/** Метка места вставки: `insertBlock` расставляет разделители, а края режутся по ней. */
+const SLOT = '\u0000';
+
+function sheetForBlock(text: string, at: number, key: number): SheetState | null {
+  const b = splitBlocks(text)[at];
+  if (!b) return null;
+  return {
+    at,
+    insert: false,
+    base: text,
+    prefix: text.slice(0, b.start),
+    suffix: text.slice(b.end),
+    raw: text.slice(b.start, b.end),
+    label: b.kind,
+    key,
+  };
+}
+
+/** Новый блок после блока `after` (-1 — в начало). */
+function sheetForInsert(text: string, after: number, key: number): SheetState {
+  const joined = insertBlock(text, splitBlocks(text), after, SLOT);
+  const cut = joined.indexOf(SLOT);
+  return {
+    at: -1,
+    insert: true,
+    base: text,
+    prefix: joined.slice(0, cut),
+    suffix: joined.slice(cut + SLOT.length),
+    raw: '',
+    label: 'new',
+    key,
+  };
+}
+
+/** Буфер при данном черновике листа. Пустой черновик — блока нет (у нового — буфер как был). */
+function written(s: SheetState, draft: string): string {
+  if (!s.insert && draft === asField(s.raw)) return s.base;
+  const body = toSource(draft, s.raw);
+  if (body) return s.prefix + body + s.suffix;
+  return s.insert ? s.base : replaceBlock(s.base, splitBlocks(s.base), s.at, '');
+}
+
+/** Где кончается то, что лист сейчас держит в буфере: под ним встаёт «add below». */
+function sheetEnd(s: SheetState, draft: string): number {
+  const body = toSource(draft, s.raw);
+  if (!s.insert && draft === asField(s.raw)) return s.prefix.length + s.raw.length;
+  return body ? s.prefix.length + body.length : s.prefix.length;
 }
 
 /** Как браузерное поле видит исходник: только `\n`. */
@@ -104,70 +164,46 @@ export function NoteBlocksView({
     };
   }, []);
 
-  const openBlock = (i: number, b: NoteBlock) => {
-    const raw = value.slice(b.start, b.end);
+  /** Буфер, который лист ждёт увидеть: всё прочее — правка не листом. */
+  const expected = useRef(value);
+  const open = (next: SheetState | null) => {
+    expected.current = next?.base ?? value;
+    setSheet(next);
+  };
+  useEffect(() => {
+    if (sheet && value !== expected.current) setSheet(null);
+  }, [sheet, value]);
+
+  const write = (s: SheetState, draft: string): string => {
+    const next = written(s, draft);
+    expected.current = next;
+    if (next !== value) onChange(next);
+    return next;
+  };
+
+  const openBlock = (i: number) => {
     setSelected(i);
-    setSheet((s) => ({ at: i, insert: false, raw, label: b.kind, key: (s?.key ?? 0) + 1 }));
+    open(sheetForBlock(value, i, (sheet?.key ?? 0) + 1));
   };
 
-  /**
-   * Новый текст буфера после листа, или `null` — менять нечего.
-   *
-   * Блок ищется ЗАНОВО по текущему буферу и сверяется с тем, что открывали: пока лист был
-   * открыт, буфер мог перечитаться с сервера (чистый буфер подхватывает чужую версию), и правка
-   * по старым границам разрезала бы чужой текст.
-   */
-  const commit = useCallback(
-    (s: SheetState, draft: string): string | null => {
-      const list = splitBlocks(value);
-      if (s.insert) {
-        const body = toSource(draft, '');
-        return body ? insertBlock(value, list, Math.min(s.at, list.length - 1), body) : null;
-      }
-      if (draft === asField(s.raw)) return null;
-      const b = list[s.at];
-      if (!b || value.slice(b.start, b.end) !== s.raw) {
-        showMessage('the note changed while the block was open — open it again', 'error');
-        return null;
-      }
-      return replaceBlock(value, list, s.at, toSource(draft, s.raw));
-    },
-    [showMessage, value],
-  );
-
-  const apply = (s: SheetState, draft: string): string => {
-    const next = commit(s, draft);
-    if (next !== null && next !== value) onChange(next);
-    return next ?? value;
-  };
-
-  const sheetMenu = (s: SheetState) => (draft: string, close: () => void) => [
+  const sheetMenu = (s: SheetState) => (draft: string) => [
     {
       label: 'add below',
       run: () => {
-        close();
-        const before = splitBlocks(value).length;
-        const next = apply(s, draft);
-        const grew = splitBlocks(next).length - before;
-        // Куда встаёт новый: под последним блоком того, что набрано (набранное могло стать
-        // двумя блоками); если блок опустел и ушёл — под предыдущим.
-        const after = s.at + grew;
-        setSheet({ at: after, insert: true, raw: '', label: 'new', key: s.key + 1 });
+        const text = write(s, draft);
+        const end = sheetEnd(s, draft);
+        // Под последним блоком того, что набрано (набранное могло стать двумя блоками); если
+        // блок опустел и ушёл — под предыдущим.
+        const after = splitBlocks(text).findLastIndex((b) => b.end <= end);
+        open(sheetForInsert(text, after, s.key + 1));
       },
     },
     {
       label: 'delete block',
       run: () => {
-        close();
-        if (!s.insert) {
-          const list = splitBlocks(value);
-          const b = list[s.at];
-          if (b && value.slice(b.start, b.end) === s.raw)
-            onChange(replaceBlock(value, list, s.at, ''));
-          else showMessage('the note changed while the block was open — open it again', 'error');
-        }
+        write(s, '');
         setSelected(null);
-        setSheet(null);
+        open(null);
       },
     },
     { label: 'wrap lines', on: wrapLines, run: () => onWrapLinesChange(!wrapLines) },
@@ -314,12 +350,12 @@ export function NoteBlocksView({
                       onClickCapture={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        openBlock(i, b);
+                        openBlock(i);
                       }}
                       onKeyDown={(e) => {
                         if (e.key !== 'Enter' && e.key !== ' ') return;
                         e.preventDefault();
-                        openBlock(i, b);
+                        openBlock(i);
                       }}
                       className={cn(
                         'cursor-pointer border-l-2 px-3 py-1.5 [&_pre]:text-micro',
@@ -338,15 +374,7 @@ export function NoteBlocksView({
             size='sm'
             variant='main'
             className='absolute right-3 bottom-3 min-h-11'
-            onClick={() =>
-              setSheet((s) => ({
-                at: blocks.length - 1,
-                insert: true,
-                raw: '',
-                label: 'new',
-                key: (s?.key ?? 0) + 1,
-              }))
-            }
+            onClick={() => open(sheetForInsert(value, blocks.length - 1, (sheet?.key ?? 0) + 1))}
           >
             + add
           </Button>
@@ -361,13 +389,8 @@ export function NoteBlocksView({
           seed={asField(sheet.raw)}
           wrapLines={wrapLines}
           menu={sheetMenu(sheet)}
-          onDone={(draft) => {
-            apply(sheet, draft);
-            setSheet(null);
-          }}
-          onLost={(draft) => {
-            apply(sheet, draft);
-          }}
+          onDraft={(draft) => write(sheet, draft)}
+          onDone={() => open(null)}
         />
       )}
 

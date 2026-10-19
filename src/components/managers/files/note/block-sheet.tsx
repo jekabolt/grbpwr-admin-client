@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from 'lib/utility';
 import { Button, Text, Textarea } from 'ui';
@@ -15,19 +15,19 @@ import { FormatBar, type FormatMenuItem } from './format-bar';
  * вёрсточный, и лист сжимается вместе с ним — шапка сверху, ряд под ней, поле до клавиатуры.
  * Пишется прямо в узел, а не состоянием: `scroll` видимого вьюпорта идёт на каждый кадр.
  *
- * ── ЗАКРЫТЬ = ПРИМЕНИТЬ ──────────────────────────────────────────────────────────────────────
+ * ── ПРАВКА ЖИВАЯ ─────────────────────────────────────────────────────────────────────────────
  *
- * Кнопки «cancel» нет (решение владельца): «done» кладёт правку в буфер, откат — общий discard
- * при выходе из правки. Лист, исчезнувший не через свои кнопки (поворот экрана сменил режим,
- * ушли со страницы), отдаёт набранное через `onLost` — набранное молча не теряется.
+ * Каждый символ сразу уходит наверх через `onDraft`, и буфер страницы уже содержит набранное:
+ * черновик, ⌘S, save/discard при выходе видят правку без отдельной передачи. Поэтому «done»
+ * только закрывает лист, а кнопки «cancel» нет (решение владельца) — откат это общий discard.
  */
 export function BlockSheet({
   label,
   seed,
   wrapLines,
   menu,
+  onDraft,
   onDone,
-  onLost,
 }: {
   /** Что правится: вид блока или «new». */
   label: string;
@@ -35,28 +35,18 @@ export function BlockSheet({
   seed: string;
   wrapLines: boolean;
   /** Хвост «•••» ряда: пункты листа (add below, delete block, wrap lines). Получают черновик. */
-  menu: (draft: string, close: () => void) => FormatMenuItem[];
-  onDone: (draft: string) => void;
-  onLost: (draft: string) => void;
+  menu: (draft: string) => FormatMenuItem[];
+  /** Каждое изменение черновика — сразу в буфер страницы. */
+  onDraft: (draft: string) => void;
+  onDone: () => void;
 }) {
   const [draft, setDraft] = useState(seed);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  /** Лист закрыт своими кнопками — уборка при размонтировании ничего не отдаёт. */
-  const closed = useRef(false);
-  const latest = useRef({ draft, onLost });
-  useLayoutEffect(() => {
-    latest.current = { draft, onLost };
-  });
-  useEffect(
-    () => () => {
-      if (!closed.current) latest.current.onLost(latest.current.draft);
-    },
-    [],
-  );
-  const close = () => {
-    closed.current = true;
+  const edit = (next: string) => {
+    setDraft(next);
+    onDraft(next);
   };
 
   useLayoutEffect(() => {
@@ -102,10 +92,7 @@ export function BlockSheet({
           size='sm'
           variant='underline'
           className='ml-auto min-h-11 shrink-0'
-          onClick={() => {
-            close();
-            onDone(areaRef.current?.value ?? draft);
-          }}
+          onClick={onDone}
         >
           done
         </Button>
@@ -113,15 +100,15 @@ export function BlockSheet({
       <FormatBar
         areaRef={areaRef}
         value={draft}
-        onChange={setDraft}
-        phone={{ lead: [], tail: menu(draft, close), inFlow: true }}
+        onChange={edit}
+        phone={{ lead: [], tail: menu(draft), inFlow: true }}
       />
       <Textarea
         ref={areaRef}
         name='noteBlock'
         autoGrow={false}
         value={draft}
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => edit(e.target.value)}
         // 16px — мельче iOS приближает страницу на фокусе; автокоррекция и заглавные молча
         // портят разметку и адреса. `!` — `cn` примитива не знает `text-reading` размером и
         // оставляет рядом базовый `text-textBaseSize`, который иначе побеждает порядком правил.
