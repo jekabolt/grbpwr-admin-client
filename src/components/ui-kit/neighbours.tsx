@@ -11,7 +11,7 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from 'ui';
-import { KitDemo, KitMatrix } from './kit-entry';
+import { Crossed, KitDemo, KitMatrix } from './kit-entry';
 
 /**
  * How blocks sit next to each other — DESIGN.md «Neighbours». Every sample is the real primitive
@@ -21,22 +21,6 @@ import { KitDemo, KitMatrix } from './kit-entry';
 
 function Ground({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={`w-full bg-pageBg p-2.5 ${className ?? ''}`}>{children}</div>;
-}
-
-function Crossed({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='relative w-full' data-kit-dont=''>
-      {children}
-      <svg
-        aria-hidden
-        className='pointer-events-none absolute inset-0 h-full w-full text-error'
-        preserveAspectRatio='none'
-        viewBox='0 0 100 100'
-      >
-        <line x1='0' y1='100' x2='100' y2='0' stroke='currentColor' vectorEffect='non-scaling-stroke' />
-      </svg>
-    </div>
-  );
 }
 
 function Mini({ title }: { title: string }) {
@@ -181,7 +165,10 @@ function NeighboursDemo() {
           label: 'warnings',
           cells: [
             <Ground>
-              <Section title='trims' action={<HeaderWarnings items={[{ text: 'missing', error: true }]} />}>
+              <Section
+                title='trims'
+                action={<HeaderWarnings items={[{ text: 'missing', error: true }]} />}
+              >
                 <Row label='label' value='missing' tone='error' />
               </Section>
             </Ground>,

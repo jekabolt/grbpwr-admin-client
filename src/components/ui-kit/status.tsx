@@ -1,6 +1,5 @@
 import {
   CalloutBox,
-  HeaderWarnings,
   Pill,
   Placeholder,
   Progress,
@@ -8,6 +7,7 @@ import {
   SkeletonLine,
   SkeletonRows,
 } from 'ui';
+import { headerWarningsDemo } from './header-warnings';
 import { KitDemo, KitLines, KitMatrix } from './kit-entry';
 
 function PillDemo() {
@@ -27,22 +27,6 @@ function CalloutDemo() {
         { label: 'note', content: <CalloutBox>3 sizes open</CalloutBox> },
         { label: 'warning', content: <CalloutBox tone='warning'>round 2</CalloutBox> },
         { label: 'error', content: <CalloutBox tone='error'>trims missing</CalloutBox> },
-      ]}
-    />
-  );
-}
-
-function HeaderWarningsDemo() {
-  return (
-    <KitLines
-      lines={[
-        { label: 'warnings', content: <HeaderWarnings items={['no lining', 'no care label']} /> },
-        {
-          label: 'errors',
-          content: (
-            <HeaderWarnings items={[{ text: 'trims missing', error: true }, 'no lining']} />
-          ),
-        },
       ]}
     />
   );
@@ -117,7 +101,7 @@ function PlaceholderDemo() {
 export const statusDemos: KitDemo[] = [
   { names: ['Pill'], Demo: PillDemo },
   { names: ['CalloutBox'], Demo: CalloutDemo },
-  { names: ['HeaderWarnings'], Demo: HeaderWarningsDemo },
+  headerWarningsDemo,
   { names: ['Progress'], Demo: ProgressDemo },
   { names: ['SkeletonLine', 'SkeletonRows', 'SkeletonBlocks'], Demo: SkeletonDemo },
   { names: ['Placeholder'], Demo: PlaceholderDemo },

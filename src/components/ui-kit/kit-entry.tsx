@@ -38,7 +38,11 @@ export function KitEntry({
 }) {
   const [id, ...rest] = names;
   let node = (
-    <Section id={id} title={title ?? id} question={question ?? `import { ${names.join(', ')} } from 'ui'`}>
+    <Section
+      id={id}
+      title={title ?? id}
+      question={question ?? `import { ${names.join(', ')} } from 'ui'`}
+    >
       {children}
     </Section>
   );
@@ -99,5 +103,35 @@ export function KitLines({
   lines: { label: string; content: React.ReactNode }[];
   labelWidth?: number;
 }) {
-  return <KitMatrix cols={['']} rows={lines.map((l) => ({ label: l.label, cells: [l.content] }))} labelWidth={labelWidth} />;
+  return (
+    <KitMatrix
+      cols={['']}
+      rows={lines.map((l) => ({ label: l.label, cells: [l.content] }))}
+      labelWidth={labelWidth}
+    />
+  );
+}
+
+/** Crossed sample: a shape that must not ship. `data-kit-dont` keeps it out of the golden checks. */
+export function Crossed({ children }: { children: React.ReactNode }) {
+  return (
+    <div className='relative w-full' data-kit-dont=''>
+      {children}
+      <svg
+        aria-hidden
+        className='pointer-events-none absolute inset-0 h-full w-full text-error'
+        preserveAspectRatio='none'
+        viewBox='0 0 100 100'
+      >
+        <line
+          x1='0'
+          y1='100'
+          x2='100'
+          y2='0'
+          stroke='currentColor'
+          vectorEffect='non-scaling-stroke'
+        />
+      </svg>
+    </div>
+  );
 }

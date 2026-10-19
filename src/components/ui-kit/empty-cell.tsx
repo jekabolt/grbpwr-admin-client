@@ -1,31 +1,5 @@
-// Kit block for /ui-kit (lane T8-B). Merge: add `emptyCellDemo` to a group in
-// src/components/ui-kit, and drop 'EmptyCell' from the DataTable demo's `names` in data.tsx
-// (that anchor would now point at the table instead of this block).
 import { DataTable, EmptyCell, Row, Stat, StatGrid, Text } from 'ui';
-import { KitMatrix, type KitDemo } from './kit-entry';
-
-function Crossed({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='relative w-full' data-kit-dont=''>
-      {children}
-      <svg
-        aria-hidden
-        className='pointer-events-none absolute inset-0 h-full w-full text-error'
-        preserveAspectRatio='none'
-        viewBox='0 0 100 100'
-      >
-        <line
-          x1='0'
-          y1='100'
-          x2='100'
-          y2='0'
-          stroke='currentColor'
-          vectorEffect='non-scaling-stroke'
-        />
-      </svg>
-    </div>
-  );
-}
+import { Crossed, KitMatrix, type KitDemo } from './kit-entry';
 
 // Through a const so the design lint (no-hand-empty-cell) does not count the crossed sample.
 const HAND_NA = 'n/a';

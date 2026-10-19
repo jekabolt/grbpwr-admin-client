@@ -1,13 +1,5 @@
-import {
-  BarRow,
-  DataTable,
-  EmptyCell,
-  Stat,
-  StatGrid,
-  Stepper,
-  TotalRow,
-  WaterfallRow,
-} from 'ui';
+import { BarRow, DataTable, EmptyCell, Stat, StatGrid, Stepper, TotalRow, WaterfallRow } from 'ui';
+import { emptyCellDemo } from './empty-cell';
 import { KitDemo, KitLabel, KitLines } from './kit-entry';
 
 function DataTableDemo() {
@@ -136,7 +128,8 @@ function StepperDemo() {
 }
 
 export const dataDemos: KitDemo[] = [
-  { names: ['DataTable', 'TotalRow', 'EmptyCell'], Demo: DataTableDemo },
+  { names: ['DataTable', 'TotalRow'], Demo: DataTableDemo },
+  emptyCellDemo,
   { names: ['StatGrid', 'Stat'], Demo: StatGridDemo },
   { names: ['BarRow', 'WaterfallRow'], Demo: BarRowDemo },
   { names: ['Stepper'], Demo: StepperDemo },

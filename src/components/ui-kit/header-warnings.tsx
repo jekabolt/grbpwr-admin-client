@@ -1,30 +1,5 @@
-// Kit block for /ui-kit (lane T8-B). Merge: replace the HeaderWarnings demo in
-// src/components/ui-kit/status.tsx with `headerWarningsDemo` (same id).
 import { HeaderWarnings, Row, Section, Text } from 'ui';
-import { KitMatrix, type KitDemo } from './kit-entry';
-
-function Crossed({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='relative w-full' data-kit-dont=''>
-      {children}
-      <svg
-        aria-hidden
-        className='pointer-events-none absolute inset-0 h-full w-full text-error'
-        preserveAspectRatio='none'
-        viewBox='0 0 100 100'
-      >
-        <line
-          x1='0'
-          y1='100'
-          x2='100'
-          y2='0'
-          stroke='currentColor'
-          vectorEffect='non-scaling-stroke'
-        />
-      </svg>
-    </div>
-  );
-}
+import { Crossed, KitMatrix, type KitDemo } from './kit-entry';
 
 const noop = () => {};
 
