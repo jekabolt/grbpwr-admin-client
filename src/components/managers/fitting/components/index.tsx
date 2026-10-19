@@ -16,6 +16,7 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
+import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -324,8 +325,8 @@ function FittingWorkspaceScreen({
     return i >= 0 ? i + 1 : 0;
   }, [siblings, fittingId]);
   const title = garment
-    ? [garment, sizeName, ordinal ? `fitting ${ordinal}` : ''].filter(Boolean).join(' · ')
-    : `fitting ${fittingId}`;
+    ? [garment, sizeName, ordinal ? `fitting\u00a0${ordinal}` : ''].filter(Boolean).join('\u00a0· ')
+    : `fitting\u00a0${fittingId}`;
 
   const statusWord =
     status === 'FITTING_STATUS_DONE'
@@ -339,29 +340,29 @@ function FittingWorkspaceScreen({
       <FittingWorkspaceContext.Provider value={workspace}>
         <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
           <div className='flex flex-col gap-2'>
-            <div className='flex flex-wrap items-baseline gap-3'>
-              <BackLink to={returnTo || ROUTES.fittings} />
+            <div className='flex items-baseline gap-3'>
+              <BackLink to={returnTo || ROUTES.fittings} className='shrink-0' />
               <Text
                 component='h1'
                 variant='uppercase'
                 tracking='label'
                 className='min-w-0 font-bold'
               >
-                {title}
-              </Text>
-              <Text
-                component='span'
-                variant='uppercase'
-                tracking='label'
-                className={status === 'FITTING_STATUS_DONE' ? 'text-success' : 'text-labelColor'}
-              >
-                {statusWord}
+                {title}{' '}
+                <span
+                  className={cn(
+                    'ml-1 whitespace-nowrap font-normal',
+                    status === 'FITTING_STATUS_DONE' ? 'text-success' : 'text-labelColor',
+                  )}
+                >
+                  {statusWord}
+                </span>
               </Text>
               <span className='flex-1' />
               <Button
                 type='button'
-                variant='secondary'
-                size='sm'
+                variant='underline'
+                className='shrink-0 uppercase tracking-label'
                 aria-expanded={detailsOpen}
                 onClick={() => setDetailsOpen(true)}
               >
