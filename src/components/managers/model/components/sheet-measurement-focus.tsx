@@ -115,7 +115,7 @@ export function SheetMeasurementMobileStrip() {
     <div
       ref={strip}
       style={{ height: MOBILE_STRIP_PX }}
-      className='fixed inset-x-0 top-0 z-[var(--z-sticky)] flex items-center gap-3 border-b border-borderColor bg-bgColor px-4 md:hidden'
+      className='fixed inset-x-0 top-0 z-[calc(var(--z-nav)+1)] flex items-center gap-3 border-b border-borderColor bg-bgColor px-4 md:hidden'
     >
       <MeasurementPictogram measurementName={focused} className='h-16 w-11 shrink-0' />
       <div className='min-w-0'>
