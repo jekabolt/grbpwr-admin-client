@@ -514,7 +514,7 @@ export function FormatBar({
               <Button
                 type='button'
                 variant='default'
-                title='insert a link to a library file'
+                title='file link'
                 onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
                 onClick={() => setPicker('link')}
                 className={MORE_CELL}
@@ -531,7 +531,7 @@ export function FormatBar({
                   <Button
                     type='button'
                     variant='default'
-                    title='insert pictures from the media library'
+                    title='media gallery'
                     onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
                     className={MORE_CELL}
                   >
@@ -576,7 +576,7 @@ export function FormatBar({
             type='button'
             size='xs'
             variant='secondary'
-            title='insert a link to a library file; a picture will stand shown inside the text'
+            title='file link'
             onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
             onClick={() => setPicker('link')}
           >
@@ -587,7 +587,7 @@ export function FormatBar({
             type='button'
             size='xs'
             variant='secondary'
-            title='insert a library file as a preview: a picture as itself, a pdf and a drawing as their rendered thumbnail'
+            title='file preview'
             onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
             onClick={() => setPicker('preview')}
           >
@@ -615,7 +615,7 @@ export function FormatBar({
                 type='button'
                 size='xs'
                 variant='secondary'
-                title='insert pictures from the media library: pick several, they will stand as a gallery'
+                title='media gallery'
                 onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
               >
                 media
@@ -775,7 +775,7 @@ function TableSizePicker({
             type='button'
             size='xs'
             variant='secondary'
-            title='insert a table: pick the size, then rows and columns are added by the strip that appears when the caret is inside it'
+            title='table'
             asChild
           >
             <span>table</span>
