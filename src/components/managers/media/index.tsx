@@ -95,6 +95,11 @@ interface MediaLayoutProps {
   selectionMode?: boolean;
   showFilters?: boolean;
   /**
+   * Phone picker's scrolling viewport. When supplied in selection mode, the picker uses the same
+   * sparse, month-indexed grid as the phone library instead of walking every intervening page.
+   */
+  virtualScrollEl?: HTMLElement | null;
+  /**
    * Пропорции, которые ждёт слот, числами. Сетка делится на «встанут как есть» и «нужен кроп»,
    * на каждом кадре второй полосы рисуется рамка будущего кадрирования, а сама полоса
    * сортируется по тому, сколько площади уйдёт под нож.
@@ -120,6 +125,7 @@ export function MediaManager({
   showVideos,
   selectionMode = false,
   showFilters = true,
+  virtualScrollEl,
   targetRatios,
   onFilesPicked,
   selected,
@@ -151,16 +157,19 @@ export function MediaManager({
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
   const canUpload = canWrite(SECTION.media);
-  // ТЕЛЕФОН — только у самостоятельной страницы: встроенный выбор под слот остаётся как был.
+  // The page owns the document scroller; a phone picker explicitly lends us its dialog scroller.
+  // Desktop pickers pass nothing, so they neither count months nor change their existing list.
   const isMobile = useIsMobile();
   const mobileLib = isStandalone && isMobile;
+  const pickerScroller = selectionMode ? virtualScrollEl ?? null : null;
+  const sparsePhone = mobileLib || pickerScroller !== null;
 
-  // PHONE LIBRARY = A SPARSE GRID OVER THE WHOLE LIBRARY. The month counts give the total, so
+  // PHONE MEDIA = A SPARSE GRID OVER THE WHOLE LIBRARY. The month counts give the total, so
   // every slot exists up front and only the pages on screen are fetched (`useMediaWindow`); the
   // date pill can then jump anywhere. Waits for the first infinite page, which it seeds.
-  const months = useMediaMonths(mobileLib).data ?? NO_MONTHS;
+  const months = useMediaMonths(sparsePhone).data ?? NO_MONTHS;
   const monthTotal = useMonthIndex(months).total;
-  const sparse = mobileLib && monthTotal > 0;
+  const sparse = sparsePhone && monthTotal > 0;
   const [range, setRange] = useState<MediaRange | null>(null);
   const win = useMediaWindow(sparse ? monthTotal : 0, range, sparse && !infinitePending);
   // Everything loaded either way feeds the filters, usage and the viewer.
@@ -170,9 +179,19 @@ export function MediaManager({
   );
   const pageScroller =
     typeof document === 'undefined' ? null : (document.scrollingElement as HTMLElement | null);
+  const sparseScroller = mobileLib ? pageScroller : pickerScroller;
   const looseListRef = useRef<HTMLDivElement>(null);
-  const looseLabelAt = useCallback(() => monthOfTopTile(looseListRef.current, SHELL_BAR), []);
   const [selectMode, setSelectMode] = useState(false);
+  const sparseTopInset = mobileLib ? SHELL_BAR : 0;
+  const sparseBottomInset = mobileLib && (selectMode || canUpload) ? PHONE_BAR : 0;
+  const looseLabelAt = useCallback(
+    () =>
+      monthOfTopTile(
+        looseListRef.current,
+        mobileLib ? SHELL_BAR : pickerScroller?.getBoundingClientRect().top ?? 0,
+      ),
+    [mobileLib, pickerScroller],
+  );
   const [selectView, setSelectView] = useState<'all' | 'selected'>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -456,16 +475,14 @@ export function MediaManager({
       setDownloading(false);
     }
   };
-  // Sparse grid only over the plain list: any client filter, the oldest-first order, the
-  // «selected» view or slot bands need the loaded items themselves, so they keep the list below.
+  // Sparse grid only over the date-ordered list: any client filter, the oldest-first order or the
+  // «selected» view needs the loaded items themselves, so it keeps the list below. Fit bands are
+  // intentionally absent here because grouping them would break the month index; each picker tile
+  // still draws its own fit frame.
+  const hasClientFilter = isFiltered || showVideos === false || !!aspectRatio?.length;
   const virtual =
-    sparse &&
-    !isFiltered &&
-    order === 'desc' &&
-    !(selecting && selectView === 'selected') &&
-    !bands;
+    sparse && !hasClientFilter && order === 'desc' && !(selecting && selectView === 'selected');
   const libraryCount = virtual ? monthTotal : shown;
-  const phoneBarInset = selecting || canUpload ? PHONE_BAR : 0;
   // Выбранное показывается ЦЕЛИКОМ, мимо фильтров: набор переживает смену отбора.
   const gridMedia =
     selecting && selectView === 'selected' ? selection.selectedMedia : filteredMedia || [];
@@ -483,14 +500,14 @@ export function MediaManager({
 
   const list = virtual ? (
     <MediaVirtualGrid
-      scrollEl={pageScroller}
+      scrollEl={sparseScroller}
       months={months}
       total={monthTotal}
       itemAt={win.itemAt}
       onRangeChange={setRange}
-      columns={2}
-      insetTop={SHELL_BAR}
-      insetBottom={phoneBarInset}
+      columns={mobileLib ? 2 : undefined}
+      insetTop={sparseTopInset}
+      insetBottom={sparseBottomInset}
       renderItem={(m, load) => (
         <MediaItem
           media={m}
@@ -499,11 +516,13 @@ export function MediaManager({
           disabled={disabled}
           videoSizes={videoSizes}
           onVideoLoad={handleVideoLoad}
-          onView={handleView}
+          onView={selectionMode ? undefined : handleView}
+          selectionMode={selectionMode}
+          fit={fitOf?.(m)}
           usage={usageOf(m)}
-          touch
+          touch={mobileLib}
           selecting={selecting}
-          onLongPress={!disabled ? () => enterSelect(m) : undefined}
+          onLongPress={mobileLib && !disabled ? () => enterSelect(m) : undefined}
           load={load}
         />
       )}
@@ -549,15 +568,15 @@ export function MediaManager({
       )}
       {/* Filtered / oldest-first phone list: the pill still dates what is on screen, from the
           loaded tiles; the month sheet stays shut, since the jump offsets index the plain list. */}
-      {mobileLib && (
+      {sparsePhone && (
         <DateScrubber
-          scrollEl={pageScroller}
+          scrollEl={sparseScroller}
           months={months}
           labelAt={looseLabelAt}
           offsetToScrollTop={() => 0}
           disabledJump
-          insetTop={SHELL_BAR}
-          insetBottom={phoneBarInset}
+          insetTop={sparseTopInset}
+          insetBottom={sparseBottomInset}
         />
       )}
     </>
@@ -753,7 +772,7 @@ export function MediaManager({
         >
           {list}
         </SideRailLayout>
-      ) : mobileLib && !virtual ? (
+      ) : sparsePhone && !virtual ? (
         <div ref={looseListRef}>{list}</div>
       ) : (
         list

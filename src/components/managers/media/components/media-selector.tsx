@@ -7,6 +7,7 @@ import { Button, Close, Pill, RatioGlyph, Text } from 'ui';
 import { MediaManager } from '..';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
 import { mergeQueue } from '../utils/intake-queue';
+import { useIsMobile } from '../utils/useIsMobile';
 import { acceptOf, filesOfKind, refusalOf, usePasteFiles } from '../utils/usePasteFiles';
 import { isSvgMedia, isSvgUrl, useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
@@ -58,6 +59,8 @@ export function MediaSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [dialogKey, setDialogKey] = useState(0);
+  const isMobile = useIsMobile();
+  const [virtualScrollEl, setVirtualScrollEl] = useState<HTMLDivElement | null>(null);
 
   // Crop-on-select state (slots with a fixed ratio).
   const [cropMedia, setCropMedia] = useState<common_MediaFull | null>(null);
@@ -450,7 +453,7 @@ export function MediaSelector({
                 </Text>
               </DialogPrimitive.Description>
 
-              <div className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
+              <div ref={setVirtualScrollEl} className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
                 <MediaManager
                   key={dialogKey}
                   aspectRatio={undefined}
@@ -466,6 +469,7 @@ export function MediaSelector({
                   disabled={false}
                   showVideos={showVideos}
                   showFilters
+                  virtualScrollEl={isMobile ? virtualScrollEl : undefined}
                   onSelectionChange={handleSelectionChange}
                   selectionMode={true}
                 />
