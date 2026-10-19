@@ -349,15 +349,17 @@ export function CalloutShape({
       return (
         <g>
           {pts.map((p, i) => (
+            // ОДИН ДОТ, БЕЗ СТРЕЛКИ, ПОВЕРХ ЛИНИИ. Точка под линией с наконечником поверх неё и
+            // белым ореолом, перекрывающим обе, читалась кривой стрелкой (владелец, примерка).
             <g key={i}>
-              <Dot p={p} color={color} r={3} />
               <Stroke
                 d={`M${label.x},${label.y} L${p.x},${p.y}`}
                 color={color}
                 width={w}
                 halo={halo}
-                markerEnd={arrow}
               />
+              {halo && <circle cx={p.x} cy={p.y} r={4.5} fill='#fff' opacity={0.9} />}
+              <Dot p={p} color={color} r={3} />
             </g>
           ))}
         </g>

@@ -60,7 +60,7 @@ export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
             name='recordedBy'
             items={items}
             value={field.value ? String(field.value) : UNSET}
-            onValueChange={(val?: string) => field.onChange(val === UNSET ? '' : (val ?? ''))}
+            onValueChange={(val?: string) => field.onChange(val === UNSET ? '' : val ?? '')}
             fullWidth
           />
         </label>
