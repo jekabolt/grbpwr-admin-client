@@ -15,7 +15,6 @@ import {
 
 import {
   DEFAULT_BACKGROUND,
-  FILL_SWATCHES,
   loadSourcePixels,
   marginsForRatio,
   normaliseHex,
@@ -24,8 +23,8 @@ import {
   type SourcePixels,
 } from '../utils/getExpanded';
 import { MAX_IMAGE_MEGAPIXELS } from '../utils/useUploadMedia';
-import { EditorTopBar, RATIO_CHIPS, RatioChips } from './editor-mobile';
-import { ExpandHandles } from './expand-handles';
+import { FREE_CHIP, RatioChips, type RatioOption } from './editor-mobile';
+import { ExpandHandles, type ExpandDragMode } from './expand-handles';
 
 /**
  * ОБРАТНЫЙ КРОП — «расширить рамку и залить поля цветом».
@@ -90,17 +89,6 @@ type StageFreeze = { k: number; x: number; y: number; m: Margins; anchor: boolea
 
 /** Потолок равномерного поля — половина короткой стороны. Дальше поле шире самого снимка. */
 const UNIFORM_MAX_FRACTION = 0.5;
-
-const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-
-/** «2400×1350» → «16:9». Когда стороны не сокращаются во что-то читаемое — «1.78:1». */
-function ratioLabel(w: number, h: number): string {
-  if (!w || !h) return '—';
-  const d = gcd(w, h) || 1;
-  const a = w / d;
-  const b = h / d;
-  return Math.max(a, b) > 30 ? `${(w / h).toFixed(2)}:1` : `${a}:${b}`;
-}
 
 const sum = (m: Margins) => m.top + m.right + m.bottom + m.left;
 
@@ -197,20 +185,6 @@ export const MediaExpander: FC<ExpanderProps> = ({
   const srcH = pixels?.height ?? 0;
   const outW = srcW ? srcW + margins.left + margins.right : 0;
   const outH = srcH ? srcH + margins.top + margins.bottom : 0;
-
-  /**
-   * Кадр результата на экране, В ПИКСЕЛЯХ. Считается замером сцены, а не CSS-пропорцией: доли
-   * внутри кадра адресуют МЕСТА на снимке, и кадр, чья форма разошлась с формой результата хотя
-   * бы на процент, показывает пипетке не ту точку, по которой щёлкнули.
-   */
-  const disp = useMemo(() => {
-    if (!outW || !outH || !stage.w || !stage.h) return null;
-    const r = outW / outH;
-    const w = Math.min(stage.w, stage.h * r);
-    return { w, h: w / r };
-  }, [outW, outH, stage.w, stage.h]);
-
-  const scale = disp && outW ? disp.w / outW : 0;
 
   const uniformMax = srcW && srcH ? Math.round(Math.min(srcW, srcH) * UNIFORM_MAX_FRACTION) : 0;
   /** Равномерное поле показывается числом только когда все четыре стороны равны. */
@@ -375,148 +349,492 @@ export const MediaExpander: FC<ExpanderProps> = ({
     sum(margins) > 0 && outH > 0
       ? RATIO_TILES.find((r) => Math.abs(outW / outH - r.value) < RATIO_EPSILON)
       : undefined;
+  const total = sum(margins);
+  const over = !!pixels && megapixels > MAX_IMAGE_MEGAPIXELS;
+
+  const beginDrag = useCallback(
+    (mode: ExpandDragMode) => {
+      window.clearTimeout(settleTimer.current);
+      setSettling(false);
+      setFreeze({ k, x: frameX, y: frameY, m: margins, anchor: mode !== 'photo' });
+    },
+    [frameX, frameY, k, margins],
+  );
+  const endDrag = useCallback(() => {
+    setFreeze(null);
+    settle();
+  }, [settle]);
 
   if (layout === 'mobile') {
-    const noChange = !!pixels && sum(margins) === 0;
-    const over = !!pixels && megapixels > MAX_IMAGE_MEGAPIXELS;
-    const selectedChip =
-      outH > 0
-        ? RATIO_CHIPS.find(
-            (o) => o.value !== undefined && Math.abs(outW / outH - o.value) < RATIO_EPSILON,
-          )?.key
-        : undefined;
-    const custom = !(FILL_SWATCHES as readonly string[]).includes(background);
-    return (
-      <div className='flex h-full min-h-0 w-full flex-col'>
-        <EditorTopBar
-          title={title}
-          onCancel={onCancel}
-          onSave={handleSave}
-          saveDisabled={blocked}
-          busy={busy}
-          saveLabel={saveLabel}
+    const off = !pixels || busy;
+    const maxSide = Math.max(margins.top, margins.right, margins.bottom, margins.left);
+    const ratioNow = !pixels
+      ? undefined
+      : total === 0
+        ? 'as is'
+        : matched
+          ? matched.label
+          : `${(outW / outH).toFixed(3)} · free`;
+    const marginNow =
+      total === 0
+        ? '0 px'
+        : uniform !== null
+          ? `${uniform} px`
+          : `${margins.top} ${margins.right} ${margins.bottom} ${margins.left}`;
+    const ratioOptions: RatioOption[] = [
+      {
+        key: 'as-is',
+        label: 'as is',
+        value: srcW && srcH ? srcW / srcH : 1,
+      },
+      FREE_CHIP,
+      ...RATIO_TILES.map((r) => ({ key: r.label, label: r.label, value: r.value })),
+    ];
+    const selectedChip = !pixels || total === 0 ? 'as-is' : matched?.label ?? FREE_CHIP.key;
+
+    const mobileSideField = (side: keyof Margins, letter: string) => (
+      <label className='flex items-center gap-1'>
+        <Input
+          type='number'
+          min={0}
+          step={1}
+          value={String(margins[side])}
+          disabled={off}
+          aria-label={`${side} margin`}
+          data-probe={`margin-${side}`}
+          className='h-11 text-right tabular-nums'
+          onChange={(e: { target: { value: string } }) => setSide(side, e.target.value)}
         />
-        <div className='relative min-h-0 flex-1 touch-none overflow-hidden p-6'>
-          <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
-            {pixels && disp && !loadError ? (
+        <Text size='micro' variant='label' component='span' className='w-2 shrink-0'>
+          {letter}
+        </Text>
+      </label>
+    );
+
+    const mobileSwatch = (
+      label: string,
+      hex: string,
+      pressed: boolean,
+      onClick: () => void,
+      glyph = '',
+    ) => (
+      <Button
+        type='button'
+        variant={null}
+        aria-label={label}
+        aria-pressed={pressed}
+        disabled={off}
+        className='flex size-11 shrink-0 cursor-pointer items-center justify-center disabled:cursor-not-allowed'
+        onClick={onClick}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'flex size-7 items-center justify-center border border-borderColor text-control',
+            pressed && 'outline outline-1 outline-offset-2 outline-textColor',
+          )}
+          style={hex ? { background: hex } : undefined}
+        >
+          {glyph}
+        </span>
+      </Button>
+    );
+
+    return (
+      <div className='flex h-full min-h-0 w-full flex-col bg-bgColor text-textColor'>
+        <div className='flex min-h-11 shrink-0 items-center border-b border-hairline px-block'>
+          <Text component='h2' variant='uppercase' tracking='section' className='font-bold'>
+            {title}
+          </Text>
+        </div>
+
+        <div className='grid min-h-0 flex-1 grid-rows-[minmax(0,46fr)_minmax(0,54fr)]'>
+          <div
+            ref={stageRef}
+            data-probe='stage'
+            className='relative min-h-0 touch-none overflow-hidden bg-pageBg'
+          >
+            {pixels && k > 0 && !loadError ? (
               <div
                 data-probe='result-frame'
-                className='relative outline outline-1 outline-bgColor/40'
-                style={{ width: disp.w, height: disp.h, background }}
+                className={cn('absolute outline outline-1 outline-borderColor', settling && SETTLE)}
+                style={{ left: frameX, top: frameY, width: frameW, height: frameH, background }}
               >
                 <img
                   src={selectedFile}
                   alt=''
                   draggable={false}
                   data-probe='source-frame'
-                  className='absolute select-none'
+                  className={cn(
+                    'absolute select-none',
+                    picking && 'cursor-crosshair',
+                    settling && SETTLE,
+                  )}
                   style={{
-                    left: margins.left * scale,
-                    top: margins.top * scale,
-                    width: srcW * scale,
-                    height: srcH * scale,
+                    left: margins.left * k,
+                    top: margins.top * k,
+                    width: srcW * k,
+                    height: srcH * k,
                     maxWidth: 'none',
                     maxHeight: 'none',
                   }}
-                />
-                {/* Край исходного фото: белый пунктир в режиме «разница» виден на любой заливке. */}
-                <span
-                  aria-hidden
-                  className='pointer-events-none absolute border border-dashed border-bgColor mix-blend-difference'
-                  style={{
-                    left: margins.left * scale,
-                    top: margins.top * scale,
-                    width: srcW * scale,
-                    height: srcH * scale,
+                  onPointerMove={(e) => {
+                    if (!picking) return;
+                    const p = pointToSource(e);
+                    if (p) setHoverHex(pixels.sampleAt(p.x, p.y));
+                  }}
+                  onPointerLeave={() => picking && setHoverHex(null)}
+                  onClick={(e) => {
+                    if (!picking) return;
+                    const p = pointToSource(e);
+                    if (!p) return;
+                    commit(pixels.sampleAt(p.x, p.y));
+                    setPicking(false);
+                    setHoverHex(null);
                   }}
                 />
-              </div>
-            ) : loadError ? null : (
-              <span className='text-micro uppercase text-bgColor'>loading the image</span>
-            )}
-          </div>
-        </div>
-        {(loadError || saveError) && (
-          <div className='shrink-0 px-2.5 pb-2'>
-            <CalloutBox tone='error'>
-              <Text size='micro' component='span'>
-                {loadError ? 'the source will not load' : saveError}
-              </Text>
-              {loadError && (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  className='ml-2 inline-block cursor-pointer align-middle'
-                  onClick={() => setReloadKey((k) => k + 1)}
-                >
-                  load again
-                </Button>
-              )}
-            </CalloutBox>
-          </div>
-        )}
-        <div className='flex shrink-0 flex-col gap-2.5 border-t border-bgColor/20 pt-2.5 pb-3'>
-          <RatioChips
-            options={RATIO_CHIPS}
-            selected={selectedChip}
-            disabled={!pixels || busy}
-            onSelect={(o) => o.value && applyRatio(o.value)}
-          />
-          <div className='flex items-center gap-0.5 px-2.5'>
-            <span className='mr-1 text-control text-bgColor/70'>fill</span>
-            {FILL_SWATCHES.map((hex) => (
-              <Button
-                key={hex}
-                type='button'
-                variant={null}
-                aria-label={`fill ${hex}`}
-                aria-pressed={background === hex}
-                disabled={!pixels || busy}
-                className='flex size-11 cursor-pointer items-center justify-center'
-                onClick={() => commit(hex)}
-              >
                 <span
                   aria-hidden
                   className={cn(
-                    'size-6 border border-bgColor/40',
-                    background === hex && 'outline outline-2 outline-offset-2 outline-bgColor',
+                    'pointer-events-none absolute border border-dashed border-textColor/60',
+                    settling && SETTLE,
                   )}
-                  style={{ background: hex }}
+                  style={{
+                    left: margins.left * k,
+                    top: margins.top * k,
+                    width: srcW * k,
+                    height: srcH * k,
+                  }}
                 />
-              </Button>
-            ))}
-            {colourWell(
-              'size-11 items-center justify-center focus-within:outline-bgColor',
-              <span
-                aria-hidden
-                className={cn(
-                  'flex size-6 items-center justify-center border border-bgColor/40 text-control text-bgColor',
-                  custom && 'outline outline-2 outline-offset-2 outline-bgColor',
-                )}
-                style={custom ? { background } : undefined}
-              >
-                {custom ? '' : '+'}
-              </span>,
+                <ExpandHandles
+                  touch
+                  margins={margins}
+                  srcW={srcW}
+                  srcH={srcH}
+                  scale={k}
+                  mirror={mirror}
+                  presets={SNAP_PRESETS}
+                  maxMegapixels={MAX_IMAGE_MEGAPIXELS}
+                  pickMode={picking}
+                  disabled={busy}
+                  settling={settling}
+                  onChange={setMargins}
+                  onDragStart={beginDrag}
+                  onDragEnd={endDrag}
+                  onNudge={settle}
+                />
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  data-probe='readout'
+                  className='absolute left-1/2 top-full mt-2.5 -translate-x-1/2 whitespace-nowrap tabular-nums'
+                >
+                  {picking ? (
+                    <>
+                      <span
+                        aria-hidden
+                        className='mr-1 inline-block size-2.5 translate-y-px border border-borderColor'
+                        style={{ background: hoverHex ?? background }}
+                      />
+                      <span className='uppercase'>{hoverHex ?? background}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className={cn(freeze ? 'text-textColor' : 'text-textColor/80')}>
+                        {outW} × {outH}
+                      </span>
+                      {matched && ` · ${matched.label}`}
+                    </>
+                  )}
+                </Text>
+              </div>
+            ) : loadError ? (
+              <div className='absolute inset-0 flex items-center justify-center p-block'>
+                <CalloutBox tone='error'>
+                  <Text size='micro' component='span'>
+                    load failed
+                  </Text>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    className='ml-2 inline-block cursor-pointer align-middle'
+                    onClick={() => setReloadKey((n) => n + 1)}
+                  >
+                    retry
+                  </Button>
+                </CalloutBox>
+              </div>
+            ) : (
+              <div className='absolute inset-0 flex items-center justify-center'>
+                <Text size='micro' variant='label' className='uppercase'>
+                  loading image
+                </Text>
+              </div>
             )}
-            <span className='ml-auto text-control tabular-nums text-bgColor'>
-              {!pixels ? (
-                <EmptyCell />
-              ) : noChange ? (
-                'no change'
-              ) : over ? (
-                `${megapixels.toFixed(0)} MP · too big`
-              ) : (
-                `${outW}×${outH} · ${selectedChip ?? ratioLabel(outW, outH)}`
+          </div>
+
+          <div className='flex min-h-0 flex-col border-t border-hairline bg-bgColor'>
+            <div className='flex min-h-0 flex-1 flex-col gap-gutter overflow-y-auto px-block py-block'>
+              <section className='flex flex-col'>
+                <SideRailGroup
+                  flush
+                  action={
+                    <Text size='micro' variant='label' component='span' data-probe='ratio-now'>
+                      {ratioNow ?? <EmptyCell />}
+                    </Text>
+                  }
+                >
+                  ratio
+                </SideRailGroup>
+                <div className='-mx-block mt-1.5'>
+                  <RatioChips
+                    tone='light'
+                    options={ratioOptions}
+                    selected={selectedChip}
+                    disabled={off}
+                    onSelect={(o) => {
+                      if (o.key === 'as-is') {
+                        setMargins(NO_MARGINS);
+                        settle();
+                      } else if (o.value !== undefined && o.key !== FREE_CHIP.key) {
+                        applyRatio(o.value);
+                        settle();
+                      }
+                    }}
+                  />
+                </div>
+              </section>
+
+              <section className='flex flex-col gap-2.5'>
+                <SideRailGroup
+                  flush
+                  action={
+                    <Text
+                      size='micro'
+                      variant='label'
+                      component='span'
+                      className='tabular-nums'
+                      data-probe='margin-now'
+                    >
+                      {marginNow}
+                    </Text>
+                  }
+                >
+                  margins
+                </SideRailGroup>
+                <div className='flex items-center justify-between'>
+                  <ViewSwitch
+                    quiet
+                    label='margin mode'
+                    value={marginView}
+                    disabled={off}
+                    options={MARGIN_VIEWS}
+                    className='min-h-11'
+                    onChange={setMarginView}
+                  />
+                  <Button
+                    type='button'
+                    variant={null}
+                    aria-pressed={mirror}
+                    data-probe='mirror'
+                    disabled={off}
+                    className={cn(
+                      'min-h-11 cursor-pointer border-b px-1 py-0.5 text-control uppercase tracking-label',
+                      mirror
+                        ? 'border-textColor text-textColor'
+                        : 'border-transparent text-labelColor hover:text-textColor',
+                    )}
+                    onClick={() => setMirror((v) => !v)}
+                  >
+                    mirror
+                  </Button>
+                </div>
+
+                {marginView === 'equal' ? (
+                  <div className='flex justify-end'>
+                    <label className='flex w-28 items-center gap-1'>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={1}
+                        value={String(uniform ?? maxSide)}
+                        disabled={off}
+                        aria-label='all sides'
+                        data-probe='margin-all'
+                        className='h-11 text-right tabular-nums'
+                        onChange={(e: { target: { value: string } }) =>
+                          applyUniform(Number(e.target.value) || 0)
+                        }
+                      />
+                      <Text size='micro' variant='label' component='span'>
+                        px
+                      </Text>
+                    </label>
+                  </div>
+                ) : (
+                  <div className='grid grid-cols-3 items-center gap-1.5'>
+                    <div />
+                    {mobileSideField('top', 'T')}
+                    <div />
+                    {mobileSideField('left', 'L')}
+                    <div aria-hidden className='h-10 border border-dashed border-borderColor' />
+                    {mobileSideField('right', 'R')}
+                    <div />
+                    {mobileSideField('bottom', 'B')}
+                    <div />
+                  </div>
+                )}
+
+                {total > 0 && (
+                  <div className='flex gap-4'>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      className='min-h-11 cursor-pointer text-control uppercase tracking-label text-labelColor'
+                      disabled={off}
+                      onClick={() => {
+                        centre();
+                        settle();
+                      }}
+                    >
+                      centre
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      className='min-h-11 cursor-pointer text-control uppercase tracking-label text-labelColor'
+                      disabled={off}
+                      onClick={() => {
+                        setMargins(NO_MARGINS);
+                        settle();
+                      }}
+                    >
+                      reset
+                    </Button>
+                  </div>
+                )}
+              </section>
+
+              <section className='flex flex-col gap-2.5'>
+                <SideRailGroup
+                  flush
+                  action={
+                    <Text size='micro' variant='label' component='span' className='uppercase'>
+                      {background}
+                    </Text>
+                  }
+                >
+                  background
+                </SideRailGroup>
+                <div className='flex items-center gap-1.5'>
+                  {mobileSwatch(
+                    'white',
+                    DEFAULT_BACKGROUND,
+                    !picking && background === DEFAULT_BACKGROUND,
+                    () => commit(DEFAULT_BACKGROUND),
+                  )}
+                  {mobileSwatch(
+                    'edge colour',
+                    edgeHex,
+                    !picking && background === edgeHex && edgeHex !== DEFAULT_BACKGROUND,
+                    () => commit(edgeHex),
+                  )}
+                  {mobileSwatch(
+                    'pick colour',
+                    '',
+                    picking,
+                    () => {
+                      setPicking((p) => !p);
+                      setHoverHex(null);
+                    },
+                    '⌖',
+                  )}
+                  <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+                    {colourWell(
+                      'size-11 items-center justify-center focus-within:outline-textColor',
+                      <span
+                        aria-hidden
+                        className='size-7 border border-borderColor'
+                        style={{ background }}
+                      />,
+                    )}
+                    <Input
+                      type='text'
+                      value={hexDraft}
+                      disabled={off}
+                      spellCheck={false}
+                      aria-label='hex colour'
+                      data-probe='hex-input'
+                      aria-invalid={normaliseHex(hexDraft) === undefined}
+                      className='h-11 min-w-0 tabular-nums uppercase'
+                      onChange={(e: { target: { value: string } }) => {
+                        setHexDraft(e.target.value);
+                        const hex = normaliseHex(e.target.value);
+                        if (hex) setBackground(hex);
+                      }}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              {saveError && !loadError && (
+                <CalloutBox tone='error'>
+                  <Text size='micro' component='span'>
+                    {saveError}
+                  </Text>
+                </CalloutBox>
               )}
-            </span>
+            </div>
+
+            <div className='flex shrink-0 flex-col gap-2.5 border-t border-hairline bg-bgColor px-block pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
+              <div className='flex items-baseline justify-between gap-2 tabular-nums'>
+                <Text variant='label' component='span'>
+                  {pixels ? `${srcW}×${srcH} →` : <EmptyCell />}
+                </Text>
+                <Text component='span' data-probe='result'>
+                  {pixels ? (
+                    `${outW}×${outH}${matched ? ` · ${matched.label}` : ''}`
+                  ) : (
+                    <EmptyCell />
+                  )}
+                </Text>
+              </div>
+              {over && blockedReason && (
+                <Text size='micro' variant='errorLabel' component='span' data-probe='blocked'>
+                  {blockedReason}
+                </Text>
+              )}
+              <div className='grid grid-cols-[auto_1fr] items-center gap-3'>
+                <Button
+                  type='button'
+                  variant={null}
+                  className='min-h-11 cursor-pointer px-1 text-control uppercase tracking-label text-labelColor'
+                  onClick={onCancel}
+                  disabled={busy}
+                >
+                  cancel
+                </Button>
+                <Button
+                  type='button'
+                  size='lg'
+                  variant='main'
+                  className='min-h-11 cursor-pointer uppercase'
+                  data-probe='save'
+                  onClick={handleSave}
+                  disabled={blocked || busy}
+                  loading={busy}
+                >
+                  {saveLabel}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     );
   }
-  const total = sum(margins);
-  const over = !!pixels && megapixels > MAX_IMAGE_MEGAPIXELS;
   const ratioNow = !pixels
     ? undefined
     : total === 0
@@ -718,15 +1036,8 @@ export const MediaExpander: FC<ExpanderProps> = ({
                 disabled={busy}
                 settling={settling}
                 onChange={setMargins}
-                onDragStart={(mode) => {
-                  window.clearTimeout(settleTimer.current);
-                  setSettling(false);
-                  setFreeze({ k, x: frameX, y: frameY, m: margins, anchor: mode !== 'photo' });
-                }}
-                onDragEnd={() => {
-                  setFreeze(null);
-                  settle();
-                }}
+                onDragStart={beginDrag}
+                onDragEnd={endDrag}
                 onNudge={settle}
               />
               <Text
