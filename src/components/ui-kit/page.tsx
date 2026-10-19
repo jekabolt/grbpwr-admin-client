@@ -11,6 +11,7 @@ import {
 import { actionDemos } from './actions';
 import { dataDemos } from './data';
 import { formDemos, SampleForm } from './form-fields';
+import { iconDemos } from './icons';
 import { inputDemos } from './inputs';
 import { KitEntry, KitGroup } from './kit-entry';
 import { layoutDemos } from './layout';
@@ -35,6 +36,7 @@ const GROUPS: KitGroup[] = [
   { label: 'status', demos: statusDemos },
   { label: 'overlays', demos: overlayDemos },
   { label: 'media', demos: mediaDemos },
+  { label: 'icons', demos: iconDemos },
 ];
 
 const PRIMITIVE_COUNT = GROUPS.reduce(

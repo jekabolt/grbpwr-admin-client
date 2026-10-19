@@ -1,12 +1,6 @@
 import type { CSSProperties, JSX, ReactNode } from 'react';
 
-import {
-  ACCENT_FILL_OPACITY,
-  LINE,
-  LINE_EMPHASIS,
-  LINE_HAIRLINE,
-} from 'components/shared/icon-line';
-import { Text } from 'ui';
+import { ACCENT_FILL_OPACITY, LINE, LINE_EMPHASIS, LINE_HAIRLINE, Text } from 'ui';
 
 // The svg sets `text-textColor`, so ink strokes are `currentColor` (LINE) and the host owns the colour.
 const INK = 'currentColor';

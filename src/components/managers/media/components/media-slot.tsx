@@ -1,8 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { LINE } from 'components/shared/icon-line';
+import { Button, Media, PLACEHOLDER_SURFACE, Placeholder, placeholderClass, Text, Glyph } from 'ui';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { Button, Media, PLACEHOLDER_SURFACE, Placeholder, placeholderClass, Text } from 'ui';
 import { readSlotAspect } from '../utils/calculate-aspect';
 import { useMediaIntake } from '../utils/useMediaIntake';
 import { acceptOf, refusalOf } from '../utils/usePasteFiles';
@@ -118,17 +117,6 @@ export type MediaSlotProps = {
    */
   returnFocusWithoutScroll?: boolean;
 };
-
-/** Глиф кадра. Полосатый прямоугольник без него читается как «тут что-то сломалось». */
-function PhotoGlyph({ className }: { className?: string }) {
-  return (
-    <svg viewBox='0 0 24 24' aria-hidden='true' className={cn('h-5 w-5', className)}>
-      <rect {...LINE} x='2.5' y='4.5' width='19' height='15' />
-      <circle {...LINE} cx='8' cy='9.5' r='1.5' />
-      <path {...LINE} d='M2.5 16.5 8.5 11l4.5 4 3-2.5 5.5 4.5' />
-    </svg>
-  );
-}
 
 export function MediaSlot({
   mediaUrl,
@@ -272,7 +260,7 @@ export function MediaSlot({
               !doorStrip && className,
             )}
           >
-            {!compact && <PhotoGlyph className='hidden @[6rem]:block' />}
+            {!compact && <Glyph name='photo' className='hidden @[6rem]:block' />}
             <span className='leading-tight'>{status ?? label}</span>
             {!compact && !status && secondLine && (
               <span className='hidden text-nano normal-case leading-tight tracking-normal @[11rem]:block'>

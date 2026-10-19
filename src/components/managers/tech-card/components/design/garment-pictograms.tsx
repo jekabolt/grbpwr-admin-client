@@ -1,5 +1,5 @@
 import type { common_Category } from 'api/proto-http/admin';
-import { BACKDROP_OPACITY, LINE } from 'components/shared/icon-line';
+import { BACKDROP_OPACITY, LINE } from 'ui';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, type CSSProperties } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';

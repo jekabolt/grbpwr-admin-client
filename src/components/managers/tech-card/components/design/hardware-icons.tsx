@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { ACCENT_FILL_OPACITY, DASH, LINE, LINE_HAIRLINE } from 'components/shared/icon-line';
+import { ACCENT_FILL_OPACITY, DASH, LINE, LINE_HAIRLINE } from 'ui';
 
 /** Hardware part keys shared with the design-quiz resolver (40-HARDWARE). */
 export const HARDWARE_KINDS = [

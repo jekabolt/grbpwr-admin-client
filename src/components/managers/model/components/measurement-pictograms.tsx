@@ -1,4 +1,4 @@
-import { DASH, GHOST_OPACITY, LINE, LINE_BOLD, LINE_EMPHASIS } from 'components/shared/icon-line';
+import { DASH, GHOST_OPACITY, LINE, LINE_BOLD, LINE_EMPHASIS } from 'ui';
 import { cn } from 'lib/utility';
 
 // Hover/focus pictograms for the body-measurement labels in the model editor (admin #63) — a

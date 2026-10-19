@@ -9,7 +9,7 @@ import { adminService } from 'api/api';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
-import { LINE } from 'components/shared/icon-line';
+import { Button, GroupLabel, Section, HeaderCount, Text, Select, Textarea, Glyph } from 'ui';
 import {
   ensurePantoneLibrary,
   pantoneLibraryState,
@@ -21,7 +21,6 @@ import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button, GroupLabel, Section, HeaderCount, Text, Select, Textarea } from 'ui';
 
 import { kindLabel } from '../../bom-kind';
 import { bornBomLine, patchBomLine } from '../../form-writers';
@@ -2133,11 +2132,7 @@ function SlotCell({
       onSelect={halves ? onPlaceMedia : undefined}
       onDraw={halves ? onGenerateHalf : undefined}
       drawLabel='generate'
-      drawGlyph={
-        <svg aria-hidden viewBox='0 0 24 24' className='size-5'>
-          <path {...LINE} d='M12 3c0 5 4 9 9 9-5 0-9 4-9 9 0-5-4-9-9-9 5 0 9-4 9-9Z' />
-        </svg>
-      }
+      drawGlyph={<Glyph name='sparkle' className='size-5' />}
       drawTitle={`make ${slot.name} with GENERATE below`}
       drawAriaLabel={`generate ${slot.name}`}
       instead={halves ? undefined : <span />}

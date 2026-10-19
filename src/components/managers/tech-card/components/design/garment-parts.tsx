@@ -1,12 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { StitchPictogram } from 'components/managers/tech-card/annotation/stitch-pictogram';
-import {
-  ACCENT_FILL_OPACITY,
-  GHOST_OPACITY,
-  LINE,
-  LINE_EMPHASIS,
-} from 'components/shared/icon-line';
+import { ACCENT_FILL_OPACITY, GHOST_OPACITY, LINE, LINE_EMPHASIS } from 'ui';
 
 import {
   GARMENT_MANIFEST,

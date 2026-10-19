@@ -1,4 +1,4 @@
-import { BACKDROP_OPACITY, DASH, LINE } from 'components/shared/icon-line';
+import { BACKDROP_OPACITY, DASH, LINE } from 'ui';
 import type { JSX } from 'react';
 
 type PictogramSlot = {

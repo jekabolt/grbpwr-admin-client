@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import type { common_TechCardSeamClass } from 'api/proto-http/admin';
 import { findPantone } from 'components/managers/tech-card/components/pantone-swatches';
-import { ACCENT_FILL_OPACITY, LINE, LINE_EMPHASIS } from 'components/shared/icon-line';
+import { ACCENT_FILL_OPACITY, LINE, LINE_EMPHASIS } from 'ui';
 
 /** Open-edge finish keys added by 90-EDGES; their decision lines use `edge:` instead of `seam:`. */
 export const EDGE_KINDS = [
