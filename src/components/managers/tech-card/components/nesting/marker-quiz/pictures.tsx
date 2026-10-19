@@ -487,8 +487,10 @@ export function LayersPicture(p: {
   const x = 30;
   const stackX = x + 20;
   const length = clamp(scaledLength(p.layCm, p.tableLengthCm), 28, TABLE_LENGTH * 1.3);
-  const height = stackHeight(p.stackCm, p.plies);
-  const drawnPlies = Math.max(MIN_STACK_LINES, Math.round(nonNegative(p.plies)));
+  // One layer is one line: there is no stack height to measure, so the label sits above it.
+  const single = Math.round(nonNegative(p.plies)) <= 1;
+  const height = single ? 0 : stackHeight(p.stackCm, p.plies);
+  const drawnPlies = Math.max(1, Math.round(nonNegative(p.plies)));
   const stackTop = TABLE_Y - 1 - height;
   const dimensionX = stackX + length + 10;
   const dimensionTone: Tone = p.stackOk ? 'ink' : 'error';
@@ -499,19 +501,31 @@ export function LayersPicture(p: {
     Number.isFinite(p.stackCm) && p.stackCm > 0 ? ` · ${formatNumber(p.stackCm)} cm` : '';
   const right = Math.max(x + TABLE_LENGTH + 20, labelX + 155);
   const viewBox = withMargin({ left: x - 20, top: sizeY - 10, right, bottom: GROUND_Y });
-  const overlays: LabelOverlay[] = [
-    {
-      key: 'layers',
-      x: labelX,
-      y: (stackTop + TABLE_Y - 1) / 2,
-      content: `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'}${thicknessLabel}`,
-      tone: dimensionTone,
-      anchor: 'left',
-      backed: true,
-    },
-  ];
+  const layersLabel = `${formatNumber(p.plies)} ${p.plies === 1 ? 'layer' : 'layers'}${thicknessLabel}`;
+  const overlays: LabelOverlay[] = single
+    ? [
+        {
+          key: 'layers',
+          x: stackX + length / 2,
+          y: sizeY,
+          content: sizes ? `${layersLabel} · ${sizes}` : layersLabel,
+          tone: dimensionTone,
+          backed: true,
+        },
+      ]
+    : [
+        {
+          key: 'layers',
+          x: labelX,
+          y: (stackTop + TABLE_Y - 1) / 2,
+          content: layersLabel,
+          tone: dimensionTone,
+          anchor: 'left',
+          backed: true,
+        },
+      ];
 
-  if (sizes) {
+  if (sizes && !single) {
     overlays.push({
       key: 'sizes',
       x: stackX + length / 2,
@@ -533,13 +547,15 @@ export function LayersPicture(p: {
         height={height}
         faceToFace={p.faceToFace}
       />
-      <VerticalDimension
-        x={dimensionX}
-        y1={stackTop}
-        y2={TABLE_Y - 1}
-        extensionX={stackX + length}
-        tone={dimensionTone}
-      />
+      {!single && (
+        <VerticalDimension
+          x={dimensionX}
+          y1={stackTop}
+          y2={TABLE_Y - 1}
+          extensionX={stackX + length}
+          tone={dimensionTone}
+        />
+      )}
     </SketchFrame>
   );
 }

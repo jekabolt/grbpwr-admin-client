@@ -162,6 +162,7 @@
     "patimport:sizesocg": "node scripts/pattern-import/sizesocg.mjs",
     "patimport:gradep1": "node scripts/pattern-import/gradep1.mjs",
     "patimport:gradep2": "node scripts/pattern-import/gradep2.mjs",
+    "patimport:leaks2": "node scripts/pattern-import/leaks2.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
     "doll:shape": "node scripts/doll/shape.mjs"
   },
