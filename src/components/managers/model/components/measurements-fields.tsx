@@ -6,6 +6,7 @@ import { BODY_MEASUREMENT_GROUPS } from './measurements';
 import { ModelFormData } from './schema';
 import {
   measurementLabel,
+  MOBILE_STRIP_PX,
   MODEL_MEASUREMENTS,
   shortMeasurementGroup,
   useSheetMeasurementFocus,
@@ -87,6 +88,7 @@ function MeasurementInput({ name }: { name: string }) {
         setFocused(name);
         setDraft(display);
         event.currentTarget.select();
+        keepClearOfMobileStrip(event.currentTarget);
       }}
       onBlur={() => {
         setDraft(null);
@@ -229,4 +231,16 @@ export function MeasurementsFields() {
       ))}
     </div>
   );
+}
+
+// On a phone the hint strip covers the top of the visible viewport; once the keyboard has settled,
+// move a field that ended up under it down into view.
+function keepClearOfMobileStrip(input: HTMLInputElement) {
+  const vv = window.visualViewport;
+  if (!vv || window.matchMedia('(min-width: 768px)').matches) return;
+  window.setTimeout(() => {
+    const top = input.getBoundingClientRect().top - vv.offsetTop;
+    const clear = MOBILE_STRIP_PX + 12;
+    if (top < clear) window.scrollBy({ top: top - clear });
+  }, 300);
 }
