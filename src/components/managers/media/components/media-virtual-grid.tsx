@@ -94,7 +94,9 @@ function useGridLayout({
 }: MediaVirtualGridProps & { scrollEl: HTMLElement }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [measuredRow, setMeasuredRow] = useState(0);
+  // Row height read off a real tile, per grid width. The first non-zero reading is kept: a tile
+  // that grows (a delete prompt) or a blank one must never re-lay hundreds of rows mid-scroll.
+  const [measured, setMeasured] = useState<{ width: number; height: number } | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
 
   useLayoutEffect(() => {
@@ -118,7 +120,15 @@ function useGridLayout({
 
   const cols = columns ?? Math.max(1, Math.floor((width + GAP) / (MIN_TILE + GAP)));
   const tileW = width > 0 ? (width - GAP * (cols - 1)) / cols : MIN_TILE;
+  const measuredRow = measured && measured.width === width ? measured.height : 0;
   const rowH = measuredRow || Math.round(tileW * 1.25 + FOOTER_EST);
+  const takeRowHeight = useCallback(
+    (height: number) =>
+      setMeasured((prev) =>
+        prev && prev.width === width && prev.height > 0 ? prev : { width, height },
+      ),
+    [width],
+  );
   const rows = Math.ceil(total / cols);
 
   return {
@@ -128,7 +138,7 @@ function useGridLayout({
     rows,
     rowH,
     scrollMargin,
-    setMeasuredRow,
+    takeRowHeight,
     options: {
       count: rows,
       estimateSize: () => rowH,
@@ -156,7 +166,7 @@ function GridBody({
   layout: Layout;
   virtualizer: GridVirtualizer;
 }) {
-  const { cols, rows, rowH, scrollMargin, setMeasuredRow } = layout;
+  const { cols, rows, rowH, scrollMargin, takeRowHeight } = layout;
   const index = useMonthIndex(months);
   const [dragging, setDragging] = useState(false);
   const load = !dragging && !virtualizer.isScrolling;
@@ -165,10 +175,13 @@ function GridBody({
   useEffect(() => {
     virtualizer.measure();
   }, [rowH, cols, virtualizer]);
+  // Measured off a real tile (never a blank one, never a whole row) and only while the list holds
+  // still: a re-lay during a drag moves the window away from the rows on screen.
   useLayoutEffect(() => {
-    const first = layout.el?.firstElementChild;
-    const h = first instanceof HTMLElement ? first.offsetHeight : 0;
-    if (h > 0) setMeasuredRow((prev) => (prev === h ? prev : h));
+    if (!load) return;
+    const tile = layout.el?.querySelector<HTMLElement>('[data-media-tile]');
+    const h = tile ? tile.getBoundingClientRect().height : 0;
+    if (h > 0) takeRowHeight(h);
   });
 
   // Pages are asked for only once the list holds still: a drag or a fling across forty pages
@@ -270,13 +283,16 @@ function GridBody({
   );
 }
 
-/** A slot whose page is still on its way: the tile's frame and footprint, nothing inside. */
+/**
+ * A slot whose page is still on its way: the tile's frame and footprint, nothing inside. The
+ * footer is `MediaItem`'s footer line for line; the no-break space holds its line height.
+ */
 function BlankTile() {
   return (
     <div aria-hidden className='flex flex-col border border-borderColor bg-bgColor'>
       <div className='aspect-[4/5] w-full bg-pageBg' />
-      <div className='flex items-center border-t border-hairline px-1.5 py-0.5'>
-        <Text size='micro' component='span'>
+      <div className='flex items-center gap-1.5 border-t border-hairline px-1.5 py-0.5'>
+        <Text size='micro' component='span' className='flex-none tabular-nums'>
           {' '}
         </Text>
       </div>

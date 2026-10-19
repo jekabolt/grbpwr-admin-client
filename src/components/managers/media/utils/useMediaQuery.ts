@@ -91,6 +91,13 @@ export type MediaWindow = {
   itemAt: (index: number) => common_MediaFull | undefined;
   /** Every page fetched so far, newest first and deduplicated; pages may have gaps between them. */
   loaded: common_MediaFull[];
+  /** List offset of a loaded item. */
+  indexOf: (id: number | undefined) => number | undefined;
+  /**
+   * The unbroken run of loaded pages that holds this list offset, in list order. The viewer walks
+   * this run only: stepping across a gap would skip hundreds of items without saying so.
+   */
+  runAround: (index: number) => common_MediaFull[];
 };
 
 /** Declared outside the hook: `useQueries` keeps the combined result only for a stable function. */
@@ -140,22 +147,40 @@ export function useMediaWindow(
         const data = pages[i];
         if (data) byPage.set(Number(p), data);
       });
-    // A delete shifts every later page by one; a page not yet refetched can repeat an item.
-    const ids = new Set<number>();
+    // A delete or an upload shifts every later page by one, and a page not yet refetched can
+    // repeat an item of its neighbour: every id holds one slot, the first one (newest page wins).
+    const slots = new Map<number, common_MediaFull>();
+    const indexById = new Map<number, number>();
     const loaded: common_MediaFull[] = [];
     for (const p of [...byPage.keys()].sort((a, b) => a - b)) {
-      for (const m of byPage.get(p) ?? []) {
-        if (m.id == null || ids.has(m.id)) continue;
-        ids.add(m.id);
+      (byPage.get(p) ?? []).forEach((m, i) => {
+        if (m.id == null || indexById.has(m.id)) return;
+        const at = p * size + i;
+        slots.set(at, m);
+        indexById.set(m.id, at);
         loaded.push(m);
-      }
+      });
     }
+    const runAround = (index: number) => {
+      const p0 = Math.floor(index / size);
+      if (!byPage.has(p0)) return [];
+      let lo = p0;
+      while (byPage.has(lo - 1)) lo--;
+      let hi = p0;
+      // A short page is the last one: nothing after it belongs to the same run.
+      while (byPage.has(hi + 1) && (byPage.get(hi)?.length ?? 0) === size) hi++;
+      const run: common_MediaFull[] = [];
+      for (let at = lo * size; at < (hi + 1) * size; at++) {
+        const m = slots.get(at);
+        if (m) run.push(m);
+      }
+      return run;
+    };
     return {
-      itemAt: (index: number) => {
-        const p = Math.floor(index / size);
-        return byPage.get(p)?.[index - p * size];
-      },
+      itemAt: (index: number) => slots.get(index),
       loaded,
+      indexOf: (id: number | undefined) => (id == null ? undefined : indexById.get(id)),
+      runAround,
     };
   }, [pagesKey, pages, size]);
 }

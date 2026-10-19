@@ -57,6 +57,11 @@ interface MediaItemProps {
    * flung; the blurhash shows meanwhile. Once loaded, a tile keeps its image.
    */
   load?: boolean;
+  /**
+   * The slot cannot take this item (a video in a picker for stills). The tile keeps its place, so
+   * the date pill's counts stay right, but it is dimmed and does not select.
+   */
+  unavailable?: boolean;
 }
 
 const LONG_PRESS_MS = 450;
@@ -107,6 +112,7 @@ export function MediaItem({
   selecting = false,
   onLongPress,
   load = true,
+  unavailable = false,
 }: MediaItemProps) {
   const [loadedOnce, setLoadedOnce] = useState(load);
   if (load && !loadedOnce) setLoadedOnce(true);
@@ -130,7 +136,7 @@ export function MediaItem({
     videoSizes[media.id || 0]?.height;
   const aspectRatio = mediaAspectRatio(media, videoSizes);
   const video = isVideo(mediaUrl);
-  const selectable = !disabled;
+  const selectable = !disabled && !unavailable;
   // Unknown usage counts as in use: delete is offered only for a file known to be free.
   const inUse = (usage?.length ?? 0) > 0;
   const deletable = usage !== undefined && usage.length === 0;
@@ -221,9 +227,12 @@ export function MediaItem({
 
   return (
     <div
+      data-media-tile
       data-created={media.createdAt}
+      aria-disabled={unavailable || undefined}
       className={cn(
         'group relative flex flex-col border border-borderColor bg-bgColor',
+        unavailable && 'opacity-40',
         // Выбор виден ВЕСОМ, а не цветом (правило системы: цвет носит состояние здоровья, вес —
         // выделение). Обводка, а не второй пиксель рамки: `border-2` менял бы ширину плитки, а
         // высота кадра считается от неё, и ряды дёргались бы на каждом щелчке по чекбоксу.
@@ -281,6 +290,7 @@ export function MediaItem({
         className={cn(
           'relative block w-full cursor-pointer bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
           touch && 'select-none',
+          unavailable && 'cursor-default',
         )}
       >
         <Media
