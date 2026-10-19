@@ -42,6 +42,15 @@ type Gesture = {
   points: ShapePoint[];
 };
 
+type SwipeGesture = {
+  pointerId: number;
+  mediaId: number;
+  startedAt: number;
+  startClientX: number;
+  startClientY: number;
+  pinPoint?: ShapePoint;
+};
+
 type FrameSize = { width: number; height: number };
 
 const TOOL_OPTIONS: readonly ViewSwitchOption<DrawingTool>[] = [
@@ -55,6 +64,8 @@ const TOOL_OPTIONS: readonly ViewSwitchOption<DrawingTool>[] = [
 
 const SAMPLE_DISTANCE = 0.008;
 const MIN_DRAG_DISTANCE = 0.02;
+const SWIPE_DISTANCE = 48;
+const SWIPE_MAX_DURATION = 600;
 
 const numberFromDecimal = (value?: string): number => {
   const parsed = Number((value ?? '').replace(',', '.'));
@@ -279,18 +290,20 @@ function PhotoThumbnail({
   media,
   index,
   current,
+  activeRef,
   onSelect,
   onRemove,
 }: {
   media?: common_MediaFull;
   index: number;
   current: boolean;
+  activeRef?: React.Ref<HTMLDivElement>;
   onSelect: () => void;
   onRemove?: () => void;
 }) {
   const url = thumbnailUrl(media);
   return (
-    <div className='relative h-15 w-12 shrink-0 md:h-20 md:w-16'>
+    <div ref={activeRef} className='relative h-15 w-12 shrink-0 md:h-20 md:w-16'>
       <Button
         type='button'
         aria-label={`photo ${index + 1}`}
@@ -357,7 +370,9 @@ export function PhotoStage() {
   const [tool, setTool] = useState<DrawingTool>('pin');
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
+  const swipeRef = useRef<SwipeGesture | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  const activeThumbnailRef = useRef<HTMLDivElement>(null);
   const [frameSize, setFrameSize] = useState<FrameSize>({ width: 0, height: 0 });
   const [removeId, setRemoveId] = useState<number | null>(null);
 
@@ -368,10 +383,22 @@ export function PhotoStage() {
 
   const selectPhoto = useCallback(
     (mediaId: number) => {
+      setLiveGesture(null);
       setCurrentMediaId(mediaId);
       setHotNumber(null);
     },
-    [setCurrentMediaId, setHotNumber],
+    [setCurrentMediaId, setHotNumber, setLiveGesture],
+  );
+
+  const navigatePhoto = useCallback(
+    (direction: -1 | 1) => {
+      if (mediaIds.length < 2) return;
+      const currentIndex = mediaIds.indexOf(currentMediaId);
+      const nextIndex =
+        currentIndex < 0 ? 0 : (currentIndex + direction + mediaIds.length) % mediaIds.length;
+      selectPhoto(mediaIds[nextIndex]);
+    },
+    [currentMediaId, mediaIds, selectPhoto],
   );
 
   useEffect(() => {
@@ -396,6 +423,10 @@ export function PhotoStage() {
     observer.observe(frame);
     return () => observer.disconnect();
   }, [currentMediaId, measureFrame]);
+
+  useLayoutEffect(() => {
+    activeThumbnailRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [currentMediaId]);
 
   const addMedia = useCallback(
     (items: common_MediaFull[]) => {
@@ -433,15 +464,12 @@ export function PhotoStage() {
       }
       if (event.defaultPrevented || isTextEntry(event.target) || mediaIds.length < 2) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      const currentIndex = Math.max(0, mediaIds.indexOf(currentMediaId));
-      const direction = event.key === 'ArrowLeft' ? -1 : 1;
-      const nextIndex = (currentIndex + direction + mediaIds.length) % mediaIds.length;
       event.preventDefault();
-      selectPhoto(mediaIds[nextIndex]);
+      navigatePhoto(event.key === 'ArrowLeft' ? -1 : 1);
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [currentMediaId, mediaIds, selectPhoto, setLiveGesture, setPendingMark]);
+  }, [mediaIds.length, navigatePhoto, setLiveGesture, setPendingMark]);
 
   const currentMedia = mediaById.get(currentMediaId);
   const currentUrls = useMemo(() => mediaUrls(currentMedia), [currentMedia]);
@@ -465,7 +493,6 @@ export function PhotoStage() {
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (
-      readOnly ||
       !currentMediaId ||
       (event.pointerType === 'mouse' && event.button !== 0) ||
       (event.target as HTMLElement).closest('button')
@@ -474,6 +501,22 @@ export function PhotoStage() {
     }
     const point = pointFromPointer(event);
     if (!point) return;
+
+    if (event.pointerType === 'touch' && mediaIds.length > 1 && (readOnly || tool === 'pin')) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      swipeRef.current = {
+        pointerId: event.pointerId,
+        mediaId: currentMediaId,
+        startedAt: event.timeStamp,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        pinPoint: readOnly ? undefined : point,
+      };
+      return;
+    }
+
+    if (readOnly) return;
     event.preventDefault();
     if (tool === 'pin') {
       setPendingMark(pinMark(currentMediaId, point));
@@ -485,6 +528,10 @@ export function PhotoStage() {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (swipeRef.current?.pointerId === event.pointerId) {
+      event.preventDefault();
+      return;
+    }
     const active = gestureRef.current;
     if (!active) return;
     const point = pointFromPointer(event);
@@ -494,6 +541,28 @@ export function PhotoStage() {
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const swipe = swipeRef.current;
+    if (swipe?.pointerId === event.pointerId) {
+      swipeRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+
+      const dx = event.clientX - swipe.startClientX;
+      const dy = event.clientY - swipe.startClientY;
+      const isSwipe =
+        event.timeStamp - swipe.startedAt <= SWIPE_MAX_DURATION &&
+        Math.abs(dx) >= SWIPE_DISTANCE &&
+        Math.abs(dx) > Math.abs(dy) * 2;
+      if (isSwipe) {
+        navigatePhoto(dx < 0 ? 1 : -1);
+      } else if (swipe.pinPoint) {
+        setPendingMark(pinMark(swipe.mediaId, swipe.pinPoint));
+        focusComposer();
+      }
+      return;
+    }
+
     const active = gestureRef.current;
     if (!active) return;
     const point = pointFromPointer(event);
@@ -506,6 +575,11 @@ export function PhotoStage() {
     if (!mark) return;
     setPendingMark(mark);
     focusComposer();
+  };
+
+  const handlePointerCancel = () => {
+    swipeRef.current = null;
+    setLiveGesture(null);
   };
 
   const removePhoto = useCallback(
@@ -584,7 +658,7 @@ export function PhotoStage() {
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              onPointerCancel={() => setLiveGesture(null)}
+              onPointerCancel={handlePointerCancel}
               className={cn(
                 'relative inline-block max-w-full touch-none select-none leading-none',
                 readOnly ? 'cursor-default' : 'cursor-crosshair',
@@ -657,6 +731,7 @@ export function PhotoStage() {
               media={mediaById.get(mediaId)}
               index={index}
               current={mediaId === currentMediaId}
+              activeRef={mediaId === currentMediaId ? activeThumbnailRef : undefined}
               onSelect={() => selectPhoto(mediaId)}
               onRemove={readOnly ? undefined : () => requestRemove(mediaId)}
             />
