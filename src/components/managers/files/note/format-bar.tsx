@@ -5,7 +5,8 @@ import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFile
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { Button, GenericPopover, Text } from 'ui';
+import { createPortal } from 'react-dom';
+import { Button, buttonVariants, GenericPopover, Text } from 'ui';
 import { NoteFilePicker, type NoteFileInsert } from './file-picker';
 import {
   codeEdit,
@@ -25,6 +26,30 @@ import {
   type TableOp,
 } from './format-edits';
 import type { TableAlign } from 'components/shared/markdown/table';
+
+/** Пункт меню «•••» телефонной полосы, который приносит редактор (rename, preview, tidy, wrap). */
+export interface FormatMenuItem {
+  label: string;
+  run: () => void;
+  /** Переключатель: пункт показывает своё состояние галочкой. */
+  on?: boolean;
+  disabled?: boolean;
+}
+
+/**
+ * ФОКУС НЕ УХОДИТ ИЗ ПОЛЯ — и на тач-экране тоже. `mousedown` на телефоне приходит
+ * совместимым событием после касания, и гасить его одного мало: глушим и `pointerdown`,
+ * иначе клавиатура iOS прячется на каждое нажатие «B», а выделение схлопывается.
+ */
+const KEEP_FOCUS = {
+  onPointerDown: (e: React.PointerEvent) => e.preventDefault(),
+  onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+};
+
+/** Ряд телефонной полосы и строки её меню. */
+const PHONE_TOOL = 'min-h-11 min-w-11 shrink-0';
+const MENU_ITEM =
+  'flex min-h-11 w-full items-center justify-between border-b border-hairline px-1 text-left text-control uppercase tracking-label last:border-b-0 hover:bg-bgSecondary disabled:opacity-50';
 
 /** Мак: отмена — ⌘Z; Ctrl+Z там в поле не значит ничего, и отнимать его незачем. */
 const IS_MAC =
@@ -77,10 +102,17 @@ export function FormatBar({
   onChange,
   compact,
   onTogglePreview,
+  phone,
 }: {
   areaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (next: string) => void;
+  /**
+   * ТЕЛЕФОН (<md): ОДИН прокручиваемый вбок ряд над клавиатурой — B, I, H, list, link, code,
+   * file и «•••». Остальное уходит в меню: сначала пункты редактора `lead`, потом свои
+   * (numbering, quote, table, media), потом `tail`. Логика правок та же — меняется раскладка.
+   */
+  phone?: { lead: FormatMenuItem[]; tail: FormatMenuItem[] };
   /**
    * КОМПАКТНАЯ ПОЛОСА ПОД ПОЛЕМ (форма заведения задачи): пять частых инструментов и «⋯»,
    * который раскрывает остальные. Логика правок та же — меняется только раскладка.
@@ -98,6 +130,39 @@ export function FormatBar({
   const [picker, setPicker] = useState<NoteFileInsert | null>(null);
   const pending = useRef<{ value: string; sel: [number, number] } | null>(null);
   const { showMessage } = useSnackBarStore();
+  const [phoneMenu, setPhoneMenu] = useState(false);
+  /** Скрытый триггер медиатеки для меню «•••»: `MediaSelector` держит своё окно сам и открывается
+   * только своей кнопкой, а кнопка внутри меню умерла бы вместе с закрытым меню — и окно с ней. */
+  const mediaHost = useRef<HTMLSpanElement>(null);
+
+  /* ── РЯД НАД КЛАВИАТУРОЙ ─────────────────────────────────────────────────────────────────────
+   *
+   * `fixed; bottom: 0` на iOS стоит у низа ВЁРСТОЧНОГО вьюпорта, то есть ЗА клавиатурой: она
+   * сжимает только видимый (`visualViewport`). Поэтому низ ряда ставится по видимому —
+   * `offsetTop + height` в координатах вёрстки — и переставляется на его `resize`/`scroll`.
+   * Без клавиатуры видимый совпадает с вёрсточным, и ряд стоит внизу экрана правки.
+   * Пишется прямо в узел, а не состоянием: `scroll` видимого вьюпорта идёт на каждый кадр
+   * прокрутки, и перерисовывать на него полосу незачем.
+   */
+  const phoneBar = useRef<HTMLDivElement>(null);
+  const isPhone = !!phone;
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const bar = phoneBar.current;
+    if (!isPhone || !vv || !bar) return;
+    const place = () => {
+      bar.style.top = `${vv.offsetTop + vv.height}px`;
+      bar.style.bottom = 'auto';
+      bar.style.transform = 'translateY(-100%)';
+    };
+    place();
+    vv.addEventListener('resize', place);
+    vv.addEventListener('scroll', place);
+    return () => {
+      vv.removeEventListener('resize', place);
+      vv.removeEventListener('scroll', place);
+    };
+  }, [isPhone]);
 
   /**
    * РЕЖИМ ТАБЛИЦЫ: каретка стоит в таблице — значит стоит и полоса её правки.
@@ -453,9 +518,63 @@ export function FormatBar({
     },
   ];
 
+  /* ── ПОЛОСА РЕЖИМА ТАБЛИЦЫ ──────────────────────────────────────────────────────────────
+   * Стоит ОТДЕЛЬНОЙ строкой и только пока каретка в таблице. Постоянно висящие «+ row» и
+   * «align» на панели заметки, где таблиц обычно нет вовсе, — это шесть кнопок, которые
+   * девять раз из десяти означают «неприменимо»; кнопка, которая почти всегда отказывает,
+   * хуже отсутствующей.
+   *
+   * Полоса — вторая строка ОДНОГО блока, а не своя коробка: коробка внутри коробки в этой
+   * системе запрещена, и волосяная линейка сверху выражает ту же вложенность. На телефоне она
+   * едет над клавиатурой вместе с рядом форматирования и листается вбок, как и он. */
+  const tableBar = tableSpot && (
+    <div
+      className={cn(
+        'flex items-center gap-1 border-b border-hairline px-1.5 py-1.5',
+        phone ? 'overflow-x-auto bg-bgColor' : 'flex-wrap',
+      )}
+    >
+      <Text size='micro' variant='label' component='span' className='mr-1 uppercase'>
+        table
+      </Text>
+      {TABLE_ACTIONS.map((a) => (
+        <Button
+          key={a.op}
+          type='button'
+          size='xs'
+          variant='secondary'
+          title={a.title}
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={() => runTableOp(a.op)}
+        >
+          {a.label}
+        </Button>
+      ))}
+      <Text size='micro' variant='label' component='span' className='mx-1 uppercase'>
+        align
+      </Text>
+      {TABLE_ALIGNS.map((a) => (
+        <Button
+          key={a.op}
+          type='button'
+          size='xs'
+          // Выравнивание столбца — СОСТОЯНИЕ, а не действие: нажатая кнопка показывает, как
+          // столбец выровнен сейчас. Иначе три кнопки подряд выглядят как три одинаковых
+          // действия, и «а как сейчас» приходится читать в тексте разделителя.
+          variant={tableSpot.align === a.op ? 'main' : 'secondary'}
+          title={a.title}
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={() => runTableOp(a.op)}
+        >
+          {a.label}
+        </Button>
+      ))}
+    </div>
+  );
+
   return (
     <>
-      {compact ? (
+      {phone ? null : compact ? (
         <>
           <div className='flex border-t border-hairline'>
             {PRIMARY_TOOLS.map((t) => {
@@ -625,52 +744,128 @@ export function FormatBar({
         </div>
       )}
 
-      {/* ── ПОЛОСА РЕЖИМА ТАБЛИЦЫ ──────────────────────────────────────────────────────────
-          Стоит ОТДЕЛЬНОЙ строкой и только пока каретка в таблице. Постоянно висящие «+ row» и
-          «align» на панели заметки, где таблиц обычно нет вовсе, — это шесть кнопок, которые
-          девять раз из десяти означают «неприменимо»; кнопка, которая почти всегда отказывает,
-          хуже отсутствующей.
+      {!phone && tableBar}
 
-          Полоса — вторая строка ОДНОГО блока, а не своя коробка: коробка внутри коробки в этой
-          системе запрещена, и волосяная линейка сверху выражает ту же вложенность. */}
-      {tableSpot && (
-        <div className='flex flex-wrap items-center gap-1 border-b border-hairline px-1.5 py-1.5'>
-          <Text size='micro' variant='label' component='span' className='mr-1 uppercase'>
-            table
-          </Text>
-          {TABLE_ACTIONS.map((a) => (
-            <Button
-              key={a.op}
-              type='button'
-              size='xs'
-              variant='secondary'
-              title={a.title}
-              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-              onClick={() => runTableOp(a.op)}
-            >
-              {a.label}
-            </Button>
-          ))}
-          <Text size='micro' variant='label' component='span' className='mx-1 uppercase'>
-            align
-          </Text>
-          {TABLE_ALIGNS.map((a) => (
-            <Button
-              key={a.op}
-              type='button'
-              size='xs'
-              // Выравнивание столбца — СОСТОЯНИЕ, а не действие: нажатая кнопка показывает, как
-              // столбец выровнен сейчас. Иначе три кнопки подряд выглядят как три одинаковых
-              // действия, и «а как сейчас» приходится читать в тексте разделителя.
-              variant={tableSpot.align === a.op ? 'main' : 'secondary'}
-              title={a.title}
-              onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-              onClick={() => runTableOp(a.op)}
-            >
-              {a.label}
-            </Button>
-          ))}
-        </div>
+      {/* ── ТЕЛЕФОН: ОДИН РЯД НАД КЛАВИАТУРОЙ ───────────────────────────────────────────────
+          Порталом в `body`: `fixed` внутри предка с `transform` встал бы не к экрану, а к
+          предку. Слой `--z-dock` — над страницей, под навигацией и модалками. */}
+      {phone &&
+        createPortal(
+          <div
+            ref={phoneBar}
+            className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg md:hidden'
+          >
+            {tableBar}
+            <div className='flex items-center gap-1.5 overflow-x-auto px-2 py-1.5'>
+              {PHONE_TOOLS.map((t) => {
+                const a = actions.find((x) => x.label === t.label);
+                if (!a) return null;
+                return (
+                  <Button
+                    key={t.label}
+                    type='button'
+                    size='sm'
+                    variant='secondary'
+                    aria-label={t.label}
+                    {...KEEP_FOCUS}
+                    onClick={a.run}
+                    className={PHONE_TOOL}
+                  >
+                    <span className={t.className}>{t.glyph}</span>
+                  </Button>
+                );
+              })}
+              <Button
+                type='button'
+                size='sm'
+                variant='secondary'
+                {...KEEP_FOCUS}
+                onClick={() => setPicker('link')}
+                className={PHONE_TOOL}
+              >
+                file
+              </Button>
+              <GenericPopover
+                open={phoneMenu}
+                onOpenChange={setPhoneMenu}
+                noTail
+                className='w-56'
+                // Меню не забирает фокус у поля: клавиатура остаётся, каретка — на месте.
+                contentProps={{
+                  side: 'top',
+                  align: 'end',
+                  onOpenAutoFocus: (e: Event) => e.preventDefault(),
+                  onCloseAutoFocus: (e: Event) => e.preventDefault(),
+                }}
+                triggerProps={{
+                  'aria-label': 'more formatting',
+                  ...KEEP_FOCUS,
+                  className: cn(
+                    buttonVariants({ variant: 'secondary', size: 'sm' }),
+                    PHONE_TOOL,
+                    'flex items-center justify-center',
+                  ),
+                }}
+                openElement={<span aria-hidden>•••</span>}
+              >
+                <div role='menu' className='flex flex-col'>
+                  {[
+                    ...phone.lead,
+                    ...PHONE_MORE.map((label) => ({
+                      label,
+                      run: actions.find((x) => x.label === label)?.run ?? (() => {}),
+                    })),
+                    {
+                      label: 'table',
+                      // Сетка выбора размера живёт на наведении и на телефоне не работает:
+                      // здесь вставляется шапка и две строки на три столбца, дальше — полоса
+                      // режима таблицы.
+                      run: () => apply((t, s2, e) => tableInsertEdit(t, s2, e, 2, 3)),
+                    },
+                    {
+                      label: 'media',
+                      run: () => mediaHost.current?.querySelector('button')?.click(),
+                    },
+                    ...phone.tail,
+                  ].map((item: FormatMenuItem) => (
+                    <Button
+                      key={item.label}
+                      type='button'
+                      role={item.on === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                      aria-checked={item.on}
+                      disabled={item.disabled}
+                      {...KEEP_FOCUS}
+                      onClick={() => {
+                        setPhoneMenu(false);
+                        item.run();
+                      }}
+                      className={MENU_ITEM}
+                    >
+                      <span>{item.label}</span>
+                      {item.on && <span aria-hidden>✓</span>}
+                    </Button>
+                  ))}
+                </div>
+              </GenericPopover>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {phone && (
+        <span ref={mediaHost} className='hidden'>
+          <MediaSelector
+            label='media'
+            purpose='a picture in the text'
+            allowMultiple
+            showVideos={false}
+            saveSelectedMedia={insertMedia}
+            trigger={
+              <Button type='button' size='xs' variant='secondary'>
+                media
+              </Button>
+            }
+          />
+        </span>
       )}
 
       {picker && (
@@ -696,6 +891,16 @@ const PRIMARY_TOOLS: { label: string; glyph: string; className?: string }[] = [
   { label: 'link', glyph: 'link' },
 ];
 const MORE_TOOLS = ['heading', 'quote', 'code'];
+/** Телефонный ряд над клавиатурой; остальное — в «•••» (`PHONE_MORE` и пункты редактора). */
+const PHONE_TOOLS: { label: string; glyph: string; className?: string }[] = [
+  { label: 'bold', glyph: 'B', className: 'font-bold' },
+  { label: 'italic', glyph: 'I', className: 'italic' },
+  { label: 'heading', glyph: 'H' },
+  { label: 'list', glyph: 'list' },
+  { label: 'link', glyph: 'link' },
+  { label: 'code', glyph: 'code' },
+];
+const PHONE_MORE = ['numbering', 'quote'];
 const TOOL_CELL = 'min-h-11 flex-1 border-r border-hairline text-micro last:border-r-0 md:min-h-8';
 const MORE_CELL =
   'flex min-h-11 w-full items-center justify-center border-r border-b border-hairline text-micro uppercase tracking-label md:min-h-8';
@@ -771,13 +976,7 @@ function TableSizePicker({
         cellClassName ? (
           <span>table</span>
         ) : (
-          <Button
-            type='button'
-            size='xs'
-            variant='secondary'
-            title='table'
-            asChild
-          >
+          <Button type='button' size='xs' variant='secondary' title='table' asChild>
             <span>table</span>
           </Button>
         )

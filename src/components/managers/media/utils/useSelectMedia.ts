@@ -60,11 +60,19 @@ export function useSelection({
 
   const clearSelection = () => commit([]);
 
+  /** Several at once (after a bulk delete): one commit, not a loop over a stale snapshot. */
+  const deselectMany = (ids: number[]) => {
+    if (!ids.length) return;
+    const drop = new Set(ids);
+    commit(selectedMedia.filter((item) => !drop.has(item.id ?? -1)));
+  };
+
   return {
     selectedMedia,
     selectMedia,
     toggleMedia,
     isSelected,
     clearSelection,
+    deselectMany,
   };
 }
