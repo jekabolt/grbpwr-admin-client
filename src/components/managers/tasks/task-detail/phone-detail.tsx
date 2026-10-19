@@ -530,7 +530,12 @@ function PhoneDescription({
     // Только из своего DOM: просмотрщик вложений рисуется порталом, а React ведёт всплытие по
     // дереву компонентов.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
+    if (
+      e.target.closest(
+        ['a', 'button', '[role="button"]', 'img', 'video', 'input', 'textarea', 'select'].join(),
+      )
+    )
+      return;
     if (window.getSelection()?.toString()) return;
     setEditing(true);
   }
