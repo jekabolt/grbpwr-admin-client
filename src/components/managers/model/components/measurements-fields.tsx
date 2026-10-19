@@ -114,7 +114,7 @@ function MeasurementInput({ name }: { name: string }) {
         writeEditedValue(clean);
       }}
       className={cn(
-        'h-6 w-full max-w-28 py-0 text-right text-stat tabular-nums',
+        'h-8 w-full py-0 text-right text-stat tabular-nums',
         empty && 'border-dashed border-highlightColor bg-bgColor',
       )}
     />
@@ -139,7 +139,7 @@ function MeasurementCell({ name }: { name: string }) {
     <div
       onMouseEnter={() => setHover(name)}
       onMouseLeave={() => setHover(null)}
-      className='flex min-w-0 flex-col gap-0.5'
+      className='flex min-w-0 flex-col gap-1'
     >
       <MeasurementLabel name={name} />
       <MeasurementInput name={name} />
@@ -176,7 +176,7 @@ function MeasurementGroup({
       >
         <span className='text-textColor'>{shortMeasurementGroup(title)}</span>
       </GroupLabel>
-      <div className='flex flex-col gap-0.5 pt-0.5'>
+      <div className='flex flex-col gap-3 pt-3'>
         {measurements.map((measurement) => (
           <MeasurementCell key={measurement.name} name={measurement.name} />
         ))}
@@ -185,39 +185,9 @@ function MeasurementGroup({
   );
 }
 
-function MeasurementCounter() {
-  const values = useMeasurements();
-  const names = MODEL_MEASUREMENTS.map((measurement) => measurement.name as string);
-  const filled = filledCount(values, names);
-  const firstEmpty = names.find((name) => !(Number(values[name]) > 0));
-
-  const focusFirstEmpty = () => {
-    if (!firstEmpty) return;
-    const input = document.getElementById(
-      measurementInputId(firstEmpty),
-    ) as HTMLInputElement | null;
-    input?.scrollIntoView({ block: 'center' });
-    input?.focus({ preventScroll: true });
-  };
-
-  return (
-    <Button
-      type='button'
-      variant='underline'
-      size='xs'
-      aria-label='first empty'
-      onClick={focusFirstEmpty}
-      className={cn('tabular-nums', firstEmpty && 'text-highlightColor')}
-    >
-      {filled}/{names.length}
-    </Button>
-  );
-}
-
 export function MeasurementsHeaderActions() {
   return (
     <div className='flex items-center gap-2'>
-      <MeasurementCounter />
       <MeasurementUnitSwitch />
     </div>
   );
