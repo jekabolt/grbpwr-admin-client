@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -312,6 +312,8 @@ export function FileCardModal({
   const [confirmClose, setConfirmClose] = useState(false);
   const [phoneSheet, setPhoneSheet] = useState<PhoneSheet>(null);
   const [topicSearch, setTopicSearch] = useState('');
+  const deleteAfterMoreCloses = useRef(false);
+  const deleteConfirmFrame = useRef<number | undefined>(undefined);
   // Отказ хранится ОШИБКОЙ, а не строкой: разбор (`rpc-error`) один на раздел и живёт на
   // отрисовке, а запасная фраза у сохранения и у удаления разная — поэтому она едет рядом.
   const [failure, setFailure] = useState<{ e: unknown; fallback: string } | undefined>(undefined);
@@ -420,6 +422,28 @@ export function FileCardModal({
     setTopicSearch('');
   };
 
+  // ЗАКРЫТИЕ ЛИСТА — ТОТ ЖЕ ENTER. На телефоне слово могло остаться только в поле, и крестик,
+  // свайп или done стирали его молча. Сначала превращаем слово в новый чип, потом чистим поле:
+  // форма становится грязной и в подвале появляется save, как на компьютере.
+  const closeTopicsSheet = () => {
+    if (canCreateTopic) addSearchedTopic();
+    setTopicSearch('');
+    setPhoneSheet(null);
+  };
+
+  // ДВА МОДАЛЬНЫХ СЛОЯ НЕ МЕНЯЮТСЯ В ОДНОМ ТАКТЕ. На iOS Radix успевал открыть вопрос раньше,
+  // чем лист ••• снимал свою ловушку указателя, и оставлял body с pointer-events:none. Вопрос
+  // открывается только из close-autofocus закрытого листа и ещё через кадр — после его cleanup.
+  const openDeleteAfterMoreCloses = (event: Event) => {
+    if (!deleteAfterMoreCloses.current) return;
+    event.preventDefault();
+    deleteAfterMoreCloses.current = false;
+    deleteConfirmFrame.current = window.requestAnimationFrame(() => {
+      deleteConfirmFrame.current = undefined;
+      setConfirmDelete(true);
+    });
+  };
+
   // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
   // рядом — тупик: человек видит заполненное поле и не понимает, чего от него ещё хотят.
   const pendingTopics = useMemo(() => {
@@ -443,6 +467,25 @@ export function FileCardModal({
     setPhoneSheet(null);
     setTopicSearch('');
   }, [id, phone]);
+
+  useEffect(() => {
+    return () => {
+      if (deleteConfirmFrame.current !== undefined) {
+        window.cancelAnimationFrame(deleteConfirmFrame.current);
+      }
+      if (!phone) return;
+      // Страховка ПОСЛЕ размонтирования телефонной карточки. Пока жив хоть один диалог,
+      // `none` законен и принадлежит Radix; без диалогов это уже утечка, замораживающая страницу.
+      window.requestAnimationFrame(() => {
+        if (
+          document.body.style.pointerEvents === 'none' &&
+          !document.querySelector('[role="dialog"]')
+        ) {
+          document.body.style.removeProperty('pointer-events');
+        }
+      });
+    };
+  }, [phone]);
 
   const dirty = useMemo(() => {
     if (!file) return false;
@@ -1108,6 +1151,13 @@ export function FileCardModal({
                   );
                 })}
               </ChipRow>
+              {inProjects.some(
+                (project) => !!project.role?.roleId && !selected.includes(project.id),
+              ) && (
+                <Text size='micro' variant='error' component='span' className='self-start'>
+                  role drops
+                </Text>
+              )}
               {inProjects.some((project) => selected.includes(project.id)) && (
                 <div>
                   <GroupLabel flush>roles</GroupLabel>
@@ -1135,19 +1185,11 @@ export function FileCardModal({
             open={phoneSheet === 'topics'}
             onOpenChange={(open) => {
               if (open) return;
-              setPhoneSheet(null);
-              setTopicSearch('');
+              closeTopicsSheet();
             }}
             title='topics'
             footer={
-              <Button
-                variant='main'
-                className='min-h-11 flex-1'
-                onClick={() => {
-                  setPhoneSheet(null);
-                  setTopicSearch('');
-                }}
-              >
+              <Button variant='main' className='min-h-11 flex-1' onClick={closeTopicsSheet}>
                 done
               </Button>
             }
@@ -1217,6 +1259,7 @@ export function FileCardModal({
             side='bottom'
             open={phoneSheet === 'more'}
             onOpenChange={(open) => !open && setPhoneSheet(null)}
+            onCloseAutoFocus={openDeleteAfterMoreCloses}
             title='more'
           >
             <div className='flex flex-col divide-y divide-hairline'>
@@ -1238,8 +1281,8 @@ export function FileCardModal({
                 disabled={!writable || deleteFile.isPending || heldByTasks > 0}
                 title={heldByTasks > 0 ? 'tasks hold this file' : undefined}
                 onClick={() => {
+                  deleteAfterMoreCloses.current = true;
                   setPhoneSheet(null);
-                  setConfirmDelete(true);
                 }}
               >
                 delete

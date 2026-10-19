@@ -18,6 +18,7 @@ export function Drawer({
   footer,
   width = 280,
   side = 'right',
+  onCloseAutoFocus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -26,6 +27,7 @@ export function Drawer({
   footer?: React.ReactNode;
   width?: number;
   side?: 'right' | 'bottom';
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const bottom = side === 'bottom';
   return (
@@ -33,6 +35,7 @@ export function Drawer({
       <DialogPrimitives.Portal container={document.body}>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
+          onCloseAutoFocus={onCloseAutoFocus}
           style={bottom ? undefined : { width }}
           className={
             bottom
