@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { createContext, ReactNode, useContext, useMemo, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Text } from 'ui';
 import { MeasurementPictogram } from './measurement-pictograms';
@@ -56,8 +56,7 @@ export function SheetMeasurementFocusProvider({ children }: { children: ReactNod
 
 export function useSheetMeasurementFocus() {
   const value = useContext(SheetMeasurementFocusContext);
-  if (!value)
-    throw new Error('no SheetMeasurementFocusProvider');
+  if (!value) throw new Error('no SheetMeasurementFocusProvider');
   return value;
 }
 
@@ -83,12 +82,41 @@ export function SheetMeasurementDiagram({ className }: { className?: string }) {
   );
 }
 
+// Phone hint while a measurement is typed. iOS opens the keyboard by shrinking only the VISIBLE
+// viewport and scrolling it inside the layout one, so a `sticky`/`fixed; top` strip drifts off the
+// top of the screen. The strip is pinned to `visualViewport.offsetTop` instead, written straight to
+// the node on every resize/scroll (as the note format bar does), and the focused field is scrolled
+// clear of it.
+export const MOBILE_STRIP_PX = 80;
+
 export function SheetMeasurementMobileStrip() {
   const { focused } = useSheetMeasurementFocus();
+  const strip = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const node = strip.current;
+    if (!focused || !vv || !node) return;
+    const place = () => {
+      node.style.top = `${vv.offsetTop}px`;
+    };
+    place();
+    vv.addEventListener('resize', place);
+    vv.addEventListener('scroll', place);
+    return () => {
+      vv.removeEventListener('resize', place);
+      vv.removeEventListener('scroll', place);
+    };
+  }, [focused]);
+
   if (!focused) return null;
 
   return (
-    <div className='sticky top-14 z-[var(--z-sticky)] flex items-center gap-3 border border-borderColor bg-bgColor px-3 py-1 md:hidden'>
+    <div
+      ref={strip}
+      style={{ height: MOBILE_STRIP_PX }}
+      className='fixed inset-x-0 top-0 z-[var(--z-sticky)] flex items-center gap-3 border-b border-borderColor bg-bgColor px-4 md:hidden'
+    >
       <MeasurementPictogram measurementName={focused} className='h-16 w-11 shrink-0' />
       <div className='min-w-0'>
         <Text className='truncate text-textColor'>{measurementLabel(focused)}</Text>
