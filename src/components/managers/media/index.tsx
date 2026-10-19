@@ -7,12 +7,16 @@ import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Button, SideRailLayout, Text } from 'ui';
 import {
+  CropGlyph,
+  ExpandGlyph,
   MediaViewer,
-  ViewerAction,
   mediaFullListToViewerItems,
   mediaFullViewerSrc,
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
+import { TrashIcon } from '@radix-ui/react-icons';
+import { useSnackBarStore } from 'lib/stores/store';
+import { MediaSavedBar } from './components/media-saved-bar';
 import { Filter } from './components/filter';
 import { MediaFilterBar } from './components/media-filter-bar';
 import { SlotFit } from './components/media-item';
@@ -26,7 +30,7 @@ import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
 import { mediaUsageRefs, usageRefHref, usageRefName, usageRefSlot } from './utils/media-usage';
 import { useFilter } from './utils/useFilter';
 import { usePasteFiles } from './utils/usePasteFiles';
-import { useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
+import { useDeleteMedia, useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
 import { useSelection } from './utils/useSelectMedia';
 
@@ -217,21 +221,54 @@ export function MediaManager({
     () => (filteredMedia || []).filter((m) => !!mediaFullViewerSrc(m)),
     [filteredMedia],
   );
-  const viewerItems = useMemo(
-    () => mediaFullListToViewerItems(viewable, viewerUsageOf),
-    [viewable, viewerUsageOf],
-  );
+  // Copies saved this session wear `new` in the filmstrip (frame 4).
+  const [newIds, setNewIds] = useState<ReadonlySet<number>>(() => new Set());
+  const viewerItems = useMemo(() => {
+    const items = mediaFullListToViewerItems(viewable, viewerUsageOf);
+    if (!newIds.size) return items;
+    return items.map((it) =>
+      it.meta?.id != null && newIds.has(it.meta.id) ? { ...it, badge: 'new' } : it,
+    );
+  }, [viewable, viewerUsageOf, newIds]);
   const viewer = useMediaViewer();
-  const viewingMedia = viewable[viewer.index];
+  // THE VIEWER FOLLOWS AN ID, NOT A POSITION: a saved copy lands at the top of the list and would
+  // otherwise shift the open frame onto its neighbour. While the id is not (yet) in the list the
+  // last good position holds.
+  const [viewId, setViewId] = useState<number | undefined>(undefined);
+  const lastViewIndex = useRef(0);
+  const foundAt = viewable.findIndex((x) => x.id === viewId);
+  const viewIndex =
+    foundAt >= 0 ? foundAt : Math.min(lastViewIndex.current, Math.max(viewable.length - 1, 0));
+  lastViewIndex.current = viewIndex;
+  const viewingMedia = viewable[viewIndex];
   const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
   // Обратный кроп — ОТДЕЛЬНОЕ состояние, а не флаг на кропе. Это два разных органа с разными
   // рельсами и разным подвалом, и одно поле «что открыто» рано или поздно откроет их вместе.
   const [expanding, setExpanding] = useState<common_MediaFull | undefined>(undefined);
+  const [saved, setSaved] = useState<
+    { original?: common_MediaFull; media: common_MediaFull } | undefined
+  >(undefined);
+  const deleteMedia = useDeleteMedia();
+  const { showMessage } = useSnackBarStore();
 
   const handleView = (m: common_MediaFull) => {
-    const at = viewable.findIndex((x) => x.id === m.id);
-    if (at >= 0) viewer.openAt(at);
+    if (viewable.some((x) => x.id === m.id)) {
+      setViewId(m.id);
+      viewer.onOpenChange(true);
+    }
   };
+
+  // After crop / expand: back to the viewer on the ORIGINAL, with the «saved» line above the strip.
+  const handleSaved = (m: common_MediaFull) => {
+    const original = recropping ?? expanding ?? viewingMedia;
+    setRecropping(undefined);
+    setExpanding(undefined);
+    if (m.id != null) setNewIds((prev) => new Set(prev).add(m.id as number));
+    setSaved({ original, media: m });
+    if (original?.id != null) setViewId(original.id);
+    viewer.onOpenChange(true);
+  };
+  const dismissSaved = useCallback(() => setSaved(undefined), []);
 
   // ПУСТО ПО ОТБОРУ И ПУСТАЯ БИБЛИОТЕКА — РАЗНЫЕ ЭКРАНЫ. Раньше отбор, не давший ничего, рисовал
   // то же приглашение бросить файл, что и чистая библиотека: человек читал это как «снимки
@@ -450,40 +487,85 @@ export function MediaManager({
       {isStandalone && (
         <MediaViewer
           items={viewerItems}
-          index={viewer.index}
+          index={viewIndex}
           open={viewer.open}
-          onOpenChange={viewer.onOpenChange}
-          onIndexChange={viewer.onIndexChange}
+          onOpenChange={(next) => {
+            if (!next) setSaved(undefined);
+            viewer.onOpenChange(next);
+          }}
+          onIndexChange={(i) => setViewId(viewable[i]?.id)}
           // Уходим роутером и закрываем просмотрщик за собой: голая ссылка перезагрузила бы
           // приложение и выкинула подгруженные страницы вместе с очередью незалитых файлов.
           onUsageNavigate={(href) => {
             viewer.onOpenChange(false);
             navigate(href);
           }}
-          actions={() =>
-            canUpload && viewingMedia ? (
-              <>
-                <ViewerAction
-                  onClick={() => {
-                    setRecropping(viewingMedia);
-                    viewer.onOpenChange(false);
-                  }}
-                >
-                  crop
-                </ViewerAction>
-                {/* Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя
-                    знаками: кадр не той формы либо режут, либо обрамляют. Разведи их по разным
-                    углам — и второй не найдут, продолжая срезать подол. */}
-                <ViewerAction
-                  onClick={() => {
-                    setExpanding(viewingMedia);
-                    viewer.onOpenChange(false);
-                  }}
-                >
-                  expand
-                </ViewerAction>
-              </>
-            ) : null
+          // Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя знаками: кадр
+          // не той формы либо режут, либо обрамляют. Разведи их по разным углам — и второй не
+          // найдут, продолжая срезать подол.
+          tools={() => {
+            if (!canUpload || !viewingMedia) return [];
+            const refs = mediaUsageRefs(usage, viewingMedia.id);
+            // Unknown usage counts as in use: the server refuses in-use media anyway.
+            const inUse = refs === undefined || refs.length > 0;
+            const id = viewingMedia.id;
+            return [
+              {
+                key: 'crop',
+                label: 'crop',
+                icon: <CropGlyph />,
+                onClick: () => {
+                  setSaved(undefined);
+                  setRecropping(viewingMedia);
+                  viewer.onOpenChange(false);
+                },
+              },
+              {
+                key: 'expand',
+                label: 'expand',
+                icon: <ExpandGlyph />,
+                onClick: () => {
+                  setSaved(undefined);
+                  setExpanding(viewingMedia);
+                  viewer.onOpenChange(false);
+                },
+              },
+              {
+                key: 'delete',
+                label: 'delete',
+                confirm: `delete ${id}`,
+                icon: <TrashIcon className='size-4' />,
+                place: 'more',
+                tone: 'danger',
+                disabled: inUse || id == null || deleteMedia.isPending,
+                onClick: () => {
+                  if (id == null) return;
+                  const next = viewable[viewIndex + 1] ?? viewable[viewIndex - 1];
+                  deleteMedia.mutate(id, {
+                    onSuccess: () => {
+                      showMessage(`${id} deleted`, 'success');
+                      if (next) setViewId(next.id);
+                      else viewer.onOpenChange(false);
+                    },
+                    onError: (e) =>
+                      showMessage(e instanceof Error ? e.message : `${id} kept`, 'error'),
+                  });
+                },
+              },
+            ];
+          }}
+          notice={
+            saved ? (
+              <MediaSavedBar
+                original={saved.original}
+                saved={saved.media}
+                onDismiss={dismissSaved}
+                onOpen={() => {
+                  setViewId(saved.media.id);
+                  setSaved(undefined);
+                }}
+              />
+            ) : undefined
           }
         />
       )}
@@ -492,12 +574,14 @@ export function MediaManager({
         media={recropping}
         open={!!recropping}
         onOpenChange={(next) => !next && setRecropping(undefined)}
+        onSaved={handleSaved}
       />
 
       <MediaExpandDialog
         media={expanding}
         open={!!expanding}
         onOpenChange={(next) => !next && setExpanding(undefined)}
+        onSaved={handleSaved}
       />
 
       {hasNextPage && (

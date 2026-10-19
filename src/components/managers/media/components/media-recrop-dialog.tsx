@@ -34,6 +34,7 @@ export function MediaRecropDialog({
    * побайтово прежнее. `frame` — где прошёл рез в исходнике (доли), для указаний, приколотых к нему.
    */
   onCropped?: (media: common_MediaFull, frame?: CropFrame) => void;
+  onSaved?: (media: common_MediaFull) => void;
 }) {
   const [source, setSource] = useState<string | undefined>(undefined);
   const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined);

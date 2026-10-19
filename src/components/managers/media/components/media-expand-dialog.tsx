@@ -24,6 +24,7 @@ export function MediaExpandDialog({
   media: common_MediaFull | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSaved?: (media: common_MediaFull) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const uploadMedia = useUploadMedia();
