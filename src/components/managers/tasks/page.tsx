@@ -95,6 +95,14 @@ export function Tasks() {
   );
   useEffect(() => localStorage.setItem(ACTIVE_BOARD_KEY, activeBoard), [activeBoard]);
 
+  const [atTop, setAtTop] = useState(true);
+  useEffect(() => {
+    const onScroll = () => setAtTop(window.scrollY < 40);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   // tskArchive v3 — archived is a filter, not a mode. On = include_archived so the
   // board shows active + archived (the cards dim themselves); off = active only.
   const [showArchived, setShowArchived] = useState(
@@ -215,7 +223,7 @@ export function Tasks() {
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
+    <div className='flex w-full flex-col gap-4 pb-20 sm:pb-10'>
       <SectionHeader
         className='max-sm:hidden'
         title='tasks'
@@ -392,16 +400,17 @@ export function Tasks() {
       </SideRailLayout>
 
       {writable && (
-        <div className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'>
-          <Button
-            variant='main'
-            size='lg'
-            className='min-h-12 w-full uppercase tracking-label'
-            onClick={() => setCreating('TASK_STATUS_TODO')}
-          >
-            + new task
-          </Button>
-        </div>
+        <Button
+          variant='main'
+          size='lg'
+          aria-label='new task'
+          className={`fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-4 z-[var(--z-dock)] min-h-12 uppercase tracking-label sm:hidden ${
+            atTop ? 'px-4' : 'w-12 px-0 text-lg'
+          }`}
+          onClick={() => setCreating('TASK_STATUS_TODO')}
+        >
+          {atTop ? '+ new task' : '+'}
+        </Button>
       )}
 
       <TaskFormModal
