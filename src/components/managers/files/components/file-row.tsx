@@ -1,5 +1,6 @@
 import { cn } from 'lib/utility';
 import { Avatar, Button, CheckboxCommon, Text } from 'ui';
+import { isProjectTopic } from '../hooks/useFiles';
 import { extensionOf, formatBytes, formatDay, stemOf } from '../utils/format';
 import { hasViewPath, type FileTile } from './file-tile';
 
@@ -81,6 +82,7 @@ export function FileRow({
   const uploader = file.uploadedBy ?? '';
   const typeWord = extensionOf(name);
   const topics = (file.topics ?? [])
+    .filter((topic) => !isProjectTopic(topic))
     .map((topic) => topic.name?.trim())
     .filter((topic): topic is string => !!topic);
   const date = formatDay(file.createdAt ?? undefined);
@@ -165,9 +167,9 @@ export function FileRow({
                   {typeWord}
                 </span>
               </Text>
-              <div className='mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-control leading-tight md:hidden'>
+              <div className='mt-0.5 flex min-w-0 flex-col text-control leading-tight md:hidden'>
                 <span className='text-labelColor tabular-nums'>{metadata}</span>
-                <span className={topics.length ? 'text-textColor' : 'text-error'}>
+                <span className={cn('truncate', topics.length ? 'text-textColor' : 'text-error')}>
                   {topics.length ? topics.join(' · ') : 'no topic'}
                 </span>
               </div>
