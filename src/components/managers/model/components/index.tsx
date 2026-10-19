@@ -57,6 +57,8 @@ export function ModelForm({
   model?: common_Model;
 }) {
   const saveBarRef = useRef<HTMLDivElement>(null);
+  // A white-bg press is out on the photo: saving now would store the photo it is about to replace.
+  const [photoBusy, setPhotoBusy] = useState(false);
   useDockBottom(saveBarRef, []);
   const typingOnPhone = useTypingOnPhone();
   const saved = useDoneFlash();
@@ -74,6 +76,7 @@ export function ModelForm({
   });
 
   async function handleSubmit(data: ModelFormData) {
+    if (photoBusy) return;
     const modelInsert = mapFormToModelInsert(data);
     setFormError(null);
     try {
@@ -124,7 +127,7 @@ export function ModelForm({
               <Section>
                 <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
                   <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
-                    <ModelMedia model={model} />
+                    <ModelMedia model={model} onBusyChange={setPhotoBusy} />
                   </div>
                   <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
                     <SheetMeasurementDiagram className='w-full' />
@@ -199,7 +202,11 @@ export function ModelForm({
                   variant='main'
                   size='lg'
                   className='cursor-pointer uppercase'
-                  disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
+                  disabled={
+                    (isEditMode && !form.formState.isDirty) ||
+                    form.formState.isSubmitting ||
+                    photoBusy
+                  }
                   loading={form.formState.isSubmitting}
                   done={saved.on}
                   onClick={() => form.handleSubmit(handleSubmit)()}
