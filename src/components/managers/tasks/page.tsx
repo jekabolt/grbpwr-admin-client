@@ -10,7 +10,9 @@ import {
   CalloutBox,
   Chip,
   ChipRow,
+  Section,
   SectionHeader,
+  Select,
   SideRail,
   SideRailGroup,
   SideRailItem,
@@ -28,7 +30,9 @@ import {
   emptyFilters,
   filtersActive,
   FiltersBar,
+  PhoneFilterGroups,
   setFilter,
+  taskFilterCount,
   TaskFilters,
 } from './components/filters-bar';
 import { TAP } from './components/filters-bar';
@@ -124,6 +128,10 @@ export function Tasks() {
     }
     return m;
   }, [countsData]);
+  const boardOptions = BOARDS.map((board) => ({
+    value: board,
+    label: `${BOARD_LABEL[board]} · ${counts.get(board) ?? 0}`,
+  }));
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   //
@@ -144,8 +152,10 @@ export function Tasks() {
     }
   });
   useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const active = filtersActive(filters);
+  const phoneFilterCount = taskFilterCount(filters, showArchived, projectId > 0);
   // The include_archived flag already scopes the read; the chip cards dim themselves.
   const visible = useMemo(
     () => applyFilters(tasks, filters, account?.username),
@@ -205,18 +215,20 @@ export function Tasks() {
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 pb-10'>
-      <SectionHeader
-        title='tasks'
-        question='what is each department working on — and what needs a hand?'
-        action={
-          writable && (
-            <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
-              + new task
-            </Button>
-          )
-        }
-      />
+    <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
+      <div className='hidden sm:block'>
+        <SectionHeader
+          title='tasks'
+          question='what is each department working on — and what needs a hand?'
+          action={
+            writable && (
+              <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
+                + new task
+              </Button>
+            )
+          }
+        />
+      </div>
 
       <SideRailLayout
         rail={
@@ -234,22 +246,80 @@ export function Tasks() {
           </SideRail>
         }
       >
-        <div className='flex min-w-0 flex-col gap-3'>
-          {/* Ниже lg рельса нет: доски — одна строка чипов со счётчиками, листается вбок. */}
-          <ChipRow className='gap-1.5 overflow-x-auto max-lg:flex-nowrap lg:hidden'>
-            {BOARDS.map((board) => (
-              <Chip
-                key={board}
-                selected={board === activeBoard}
-                pressed={board === activeBoard}
-                onClick={() => setActiveBoard(board)}
-                className={TAP}
-              >
-                {BOARD_LABEL[board]} {counts.get(board) ?? 0}
-              </Chip>
-            ))}
-          </ChipRow>
-          <Toolbar>
+        <div className='flex min-w-0 flex-col gap-2 sm:gap-3'>
+          <Section
+            title='tasks'
+            className='sm:hidden'
+            action={
+              <>
+                {!!account?.username && (
+                  <Chip
+                    selected={filters.mine}
+                    pressed={filters.mine}
+                    onClick={() =>
+                      setFilters((current) => setFilter(current, { mine: !current.mine }))
+                    }
+                    className='min-h-9'
+                  >
+                    mine
+                  </Chip>
+                )}
+                <Chip
+                  selected={phoneFilterCount > 0}
+                  pressed={filtersOpen}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls='task-phone-filters'
+                  className='min-h-9'
+                >
+                  {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
+                </Chip>
+              </>
+            }
+          >
+            <Select
+              name='task-board-phone'
+              value={activeBoard}
+              items={boardOptions}
+              fullWidth
+              itemClassName='min-h-11'
+              className='min-h-11 uppercase tracking-label'
+              placeholder='board'
+              onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
+            />
+            {filtersOpen && (
+              <div id='task-phone-filters'>
+                <PhoneFilterGroups
+                  filters={filters}
+                  onChange={setFilters}
+                  people={people}
+                  showArchived={showArchived}
+                  onToggleArchived={() => setShowArchived((value) => !value)}
+                  onClear={clearFilters}
+                  projectLabel={projectLabel}
+                  onClearProject={dropProject}
+                />
+              </div>
+            )}
+          </Section>
+
+          {/* Между sm и lg рельса нет: доски остаются строкой чипов из v1. */}
+          <div className='hidden sm:block lg:hidden'>
+            <ChipRow className='gap-1.5 overflow-x-auto flex-nowrap'>
+              {BOARDS.map((board) => (
+                <Chip
+                  key={board}
+                  selected={board === activeBoard}
+                  pressed={board === activeBoard}
+                  onClick={() => setActiveBoard(board)}
+                  className={TAP}
+                >
+                  {BOARD_LABEL[board]} {counts.get(board) ?? 0}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
+          <Toolbar className='hidden sm:flex'>
             <FiltersBar
               filters={filters}
               onChange={setFilters}
@@ -321,6 +391,19 @@ export function Tasks() {
           )}
         </div>
       </SideRailLayout>
+
+      {writable && (
+        <div className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'>
+          <Button
+            variant='main'
+            size='lg'
+            className='min-h-12 w-full uppercase tracking-label'
+            onClick={() => setCreating('TASK_STATUS_TODO')}
+          >
+            + new task
+          </Button>
+        </div>
+      )}
 
       <TaskFormModal
         open={creating !== null}

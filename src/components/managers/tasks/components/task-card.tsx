@@ -9,13 +9,13 @@ import { openBlockers } from '../utils/relations';
 import { AvatarStack } from './avatar-stack';
 
 /**
- * tskCard v3 — a card leads with its PICTURE. The first attached media (resolved by
- * the list read) becomes a cover band; a card with no media shows no band rather
- * than a forced placeholder, so a wall of cards reads as "these three have refs".
+ * tskCard v4 — the title leads. The first attached media (resolved by the list read)
+ * becomes one compact square beside it; a card with no media keeps the text column full width.
  *
  * Priority stops being a bespoke hue map: urgent fills ink (Chip), high is an ink
  * outline, everything lower is a quiet grey Pill — weight carries urgency, no health
- * colours borrowed. Assignees are an overlapping `AvatarStack`; labels are read-only Pills.
+ * colours borrowed. Assignees are an overlapping `AvatarStack`; labels are read-only Pills on
+ * desktop and yield to operational metadata on a phone.
  */
 
 // tskPriority — weight over hue. Urgent is the only filled tag; nothing here spends a
@@ -51,8 +51,10 @@ function StatusSelect({
         placeholder='status'
         value={task.status}
         items={STATUS_OPTIONS}
+        fullWidth
+        itemClassName='min-h-11 sm:min-h-6 data-[state=checked]:bg-bgSecondary data-[state=checked]:font-bold'
         onValueChange={(v: string) => onMove(task, v as TaskStatus)}
-        className='min-h-11 w-auto sm:min-h-5.5'
+        className='min-h-11 min-w-32 sm:min-h-5.5 sm:min-w-0'
       />
     </div>
   );
@@ -99,65 +101,74 @@ export function TaskCardBody({
         isArchived && 'opacity-60',
       )}
     >
-      {coverUrl && (
-        <div className='border-b border-borderColor'>
-          <Media src={coverUrl} alt='' aspectRatio='16/10' />
-        </div>
-      )}
+      <div className='flex min-w-0 items-start gap-2.5 p-2.5'>
+        <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+          <Text className='break-words font-bold leading-snug'>{t.title}</Text>
 
-      <div className='flex flex-col gap-1.5 p-2'>
-        {(isArchived || blockers.length > 0 || t.labels.length > 0) && (
-          <div className='flex flex-wrap gap-1'>
-            {isArchived && <Pill tone='ink'>archived</Pill>}
-            {/* `warn` = «сломано / мешает / блокирует» по словарю тонов самого примитива.
+          {(isArchived ||
+            blockers.length > 0 ||
+            t.labels.length > 0 ||
+            t.priority !== 'TASK_PRIORITY_UNKNOWN' ||
+            due.state !== 'none' ||
+            meta.length > 0) && (
+            <div className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1'>
+              <PriorityTag priority={t.priority} />
+              {due.state !== 'none' && (
+                <Text
+                  size='micro'
+                  component='span'
+                  className={cn(
+                    'shrink-0 uppercase tracking-label',
+                    due.state === 'overdue'
+                      ? 'text-error'
+                      : due.state === 'today' || due.state === 'soon'
+                        ? 'text-textColor'
+                        : 'text-labelColor',
+                  )}
+                >
+                  {due.label}
+                </Text>
+              )}
+              {isArchived && <Pill tone='ink'>archived</Pill>}
+              {/* `warn` = «сломано / мешает / блокирует» по словарю тонов самого примитива.
                 Число, а не голое слово: «blocked · 2» говорит, сколько ещё ждать. */}
-            {blockers.length > 0 && (
-              <Pill tone='warn' title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}>
-                blocked · {blockers.length}
-              </Pill>
-            )}
-            {t.labels.map((l) => (
-              <Pill key={l} tone='mut'>
-                {l}
-              </Pill>
-            ))}
-          </div>
-        )}
-
-        <Text className='leading-snug'>{t.title}</Text>
-
-        {(t.priority !== 'TASK_PRIORITY_UNKNOWN' || due.state !== 'none') && (
-          <div className='flex min-w-0 items-center gap-1.5'>
-            <PriorityTag priority={t.priority} />
-            {due.state !== 'none' && (
-              <Text
-                size='micro'
-                component='span'
-                className={cn(
-                  'shrink-0 uppercase tracking-label',
-                  due.state === 'overdue'
-                    ? 'text-error'
-                    : due.state === 'today' || due.state === 'soon'
-                      ? 'text-textColor'
-                      : 'text-labelColor',
-                )}
-              >
-                {due.label}
-              </Text>
-            )}
-          </div>
-        )}
-
-        {meta.length > 0 && (
-          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-            {meta.join(' · ')}
-          </Text>
-        )}
-
-        <div className='flex items-center justify-between gap-2'>
-          <AvatarStack names={t.assignees} />
-          {onMove && <StatusSelect task={task} onMove={onMove} />}
+              {blockers.length > 0 && (
+                <Pill tone='warn' title={blockers.map((b) => b.title || `#${b.taskId}`).join(', ')}>
+                  blocked · {blockers.length}
+                </Pill>
+              )}
+              {meta.length > 0 && (
+                <Text
+                  size='nano'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='uppercase'
+                >
+                  {meta.join(' · ')}
+                </Text>
+              )}
+              <span className='hidden flex-wrap items-center gap-1 sm:flex'>
+                {t.labels.map((label) => (
+                  <Pill key={label} tone='mut'>
+                    {label}
+                  </Pill>
+                ))}
+              </span>
+            </div>
+          )}
         </div>
+
+        {coverUrl && (
+          <div className='h-13 w-13 shrink-0 overflow-hidden border border-borderColor'>
+            <Media src={coverUrl} alt='' aspectRatio='1/1' fit='cover' />
+          </div>
+        )}
+      </div>
+
+      <div className='flex min-h-11 items-center justify-between gap-2 border-t border-hairline pl-2.5 sm:min-h-0 sm:px-2.5 sm:py-1.5'>
+        <AvatarStack names={t.assignees} />
+        {onMove && <StatusSelect task={task} onMove={onMove} />}
       </div>
     </div>
   );

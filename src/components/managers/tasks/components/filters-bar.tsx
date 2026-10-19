@@ -1,4 +1,4 @@
-import { AvatarPicker, Button, Chip, ChipRow } from 'ui';
+import { AvatarPicker, Button, Chip, ChipRow, GroupLabel, Text } from 'ui';
 import { Task, TaskPriority } from '../api/types';
 import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
 
@@ -39,6 +39,20 @@ export const emptyFilters: TaskFilters = { priority: '', mine: false, assignee: 
 
 export function filtersActive(f: TaskFilters): boolean {
   return f.priority !== '' || f.mine || f.assignee !== undefined;
+}
+
+/** Number shown on the phone's compact filters door. `mine` has its own door beside it. */
+export function taskFilterCount(
+  filters: TaskFilters,
+  showArchived: boolean,
+  projectScoped: boolean,
+): number {
+  return (
+    Number(filters.priority !== '') +
+    Number(filters.assignee !== undefined) +
+    Number(showArchived) +
+    Number(projectScoped)
+  );
 }
 
 /**
@@ -213,5 +227,96 @@ export function FiltersBar({
         </Button>
       )}
     </ChipRow>
+  );
+}
+
+/** Phone-only expansion below the compact tasks header. Filter state still flows through setFilter. */
+export function PhoneFilterGroups({
+  filters,
+  onChange,
+  people,
+  showArchived,
+  onToggleArchived,
+  onClear,
+  projectLabel,
+  onClearProject,
+}: {
+  filters: TaskFilters;
+  onChange: (f: TaskFilters) => void;
+  people?: { name: string; count: number }[];
+  showArchived: boolean;
+  onToggleArchived: () => void;
+  onClear: () => void;
+  projectLabel?: string;
+  onClearProject?: () => void;
+}) {
+  const set = (patch: Partial<TaskFilters>) => onChange(setFilter(filters, patch));
+  const dirty = filtersActive(filters) || showArchived || !!projectLabel;
+
+  return (
+    <div className='border-t border-hairline pt-stack'>
+      <GroupLabel flush>priority</GroupLabel>
+      <ChipRow className='gap-1.5'>
+        {PRIORITIES.map((priority) => {
+          const selected = filters.priority === priority;
+          return (
+            <Chip
+              key={priority}
+              selected={selected}
+              pressed={selected}
+              onClick={() => set({ priority: selected ? '' : priority })}
+              className='min-h-9'
+            >
+              {PRIORITY_LABEL[priority]}
+            </Chip>
+          );
+        })}
+      </ChipRow>
+
+      <GroupLabel>people</GroupLabel>
+      {!!people?.length ? (
+        <AvatarPicker
+          people={people}
+          selected={filters.assignee}
+          onSelect={(name) => set({ assignee: name })}
+        />
+      ) : (
+        <Text size='micro' variant='label' component='span'>
+          none
+        </Text>
+      )}
+
+      <GroupLabel>scope</GroupLabel>
+      <div className='flex flex-wrap items-center gap-1.5'>
+        {projectLabel && (
+          <Chip
+            selected
+            pressed
+            aria-label={`project: ${projectLabel}`}
+            onClick={onClearProject}
+            className='min-h-9 min-w-0 max-w-full whitespace-normal break-words text-left'
+          >
+            project: {projectLabel}
+          </Chip>
+        )}
+        <Chip
+          selected={showArchived}
+          pressed={showArchived}
+          onClick={onToggleArchived}
+          className='min-h-9'
+        >
+          archived
+        </Chip>
+        <Button
+          variant='underline'
+          size='xs'
+          onClick={onClear}
+          disabled={!dirty}
+          className='ml-auto min-h-9 items-center text-labelColor hover:text-textColor'
+        >
+          clear
+        </Button>
+      </div>
+    </div>
   );
 }

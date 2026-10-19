@@ -35,14 +35,17 @@ export function BoardColumn({
       title={STATUS_LABEL[status]}
       count={tasks.length}
       isDropTarget={isOver}
-      className={cn('max-sm:max-w-none', className)}
+      className={cn(
+        'max-sm:w-full max-sm:max-w-none max-sm:border-0 max-sm:bg-transparent max-sm:[&>div:first-child]:hidden max-sm:[&>div:last-child]:bg-transparent max-sm:[&>div:last-child]:p-0',
+        className,
+      )}
       action={
         canWrite && (
           <AddDoor
             shape='inline'
             onClick={() => onAdd(status)}
             aria-label={`add task to ${STATUS_LABEL[status]}`}
-            className='min-h-11 sm:min-h-0'
+            className='hidden sm:flex'
           >
             task
           </AddDoor>
@@ -66,9 +69,17 @@ export function BoardColumn({
           (filtered ? (
             <BoardEmpty className='flex flex-1 items-center justify-center'>no matches</BoardEmpty>
           ) : canWrite ? (
-            <AddDoor className='flex-1 justify-center' onClick={() => onAdd(status)}>
-              task
-            </AddDoor>
+            <>
+              <BoardEmpty className='flex flex-1 items-center justify-center sm:hidden'>
+                empty
+              </BoardEmpty>
+              <AddDoor
+                className='hidden flex-1 justify-center sm:flex'
+                onClick={() => onAdd(status)}
+              >
+                task
+              </AddDoor>
+            </>
           ) : (
             <BoardEmpty className='flex flex-1 items-center justify-center'>empty</BoardEmpty>
           ))}
