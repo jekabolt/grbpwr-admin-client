@@ -88,7 +88,7 @@ export function SheetMeasurementMobileStrip() {
   if (!focused) return null;
 
   return (
-    <div className='sticky top-0 z-20 flex items-center gap-3 border border-borderColor bg-bgColor px-3 py-1 md:hidden'>
+    <div className='sticky top-14 z-[var(--z-sticky)] flex items-center gap-3 border border-borderColor bg-bgColor px-3 py-1 md:hidden'>
       <MeasurementPictogram measurementName={focused} className='h-16 w-11 shrink-0' />
       <div className='min-w-0'>
         <Text className='truncate text-textColor'>{measurementLabel(focused)}</Text>
