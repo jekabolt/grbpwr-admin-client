@@ -479,8 +479,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   const loadFailedBox = loadFailed && (
     <CalloutBox tone='error'>
       <Text size='micro' component='span'>
-        <b>the source will not load.</b> There is nothing for the browser to cut: the image never
-        opened — the bucket may not have sent a CORS header, or the url is dead.
+        source not loading
       </Text>
       <Button
         type='button'
