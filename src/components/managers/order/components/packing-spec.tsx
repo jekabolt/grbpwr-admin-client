@@ -5,8 +5,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
 import { Button, GroupLabel, Pill, Section, Text, EmptyCell } from 'ui';
 
-const TH =
-  'border border-borderColor bg-bgZebra px-2 py-1 text-left text-micro uppercase tracking-label';
+const TH = 'border border-borderColor px-2 py-1 text-left text-micro uppercase tracking-label';
 const TD = 'border border-hairline px-2 py-1 align-top text-micro';
 
 // An empty tick box the packer marks off by hand once the line is picked/verified. Printed

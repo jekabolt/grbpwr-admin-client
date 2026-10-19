@@ -99,7 +99,7 @@ export const CareInstructions: FC<CareInstructionsProps> = ({
               {/* The thing being assembled. Without it the dialog never shows its own output: you
                   pick across five tabs and can only verify the result by closing and reading the
                   field. */}
-              <div className='flex items-center gap-2 border border-borderColor bg-bgZebra px-2 py-1'>
+              <div className='flex items-center gap-2 border border-borderColor px-2 py-1'>
                 <Text
                   component='span'
                   size='nano'

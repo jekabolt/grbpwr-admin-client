@@ -328,13 +328,13 @@ function SourceRow({
       className={cn(
         'flex w-full items-baseline gap-3 px-2.5 py-2 text-left',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-        none ? 'cursor-not-allowed' : 'hover:bg-bgSecondary',
+        none ? 'cursor-not-allowed' : 'hover:bg-pageBg',
       )}
     >
       <span
         className={cn(
           'text-micro uppercase tracking-label',
-          none ? 'text-textInactiveColor' : 'text-textColor',
+          none ? 'text-borderColor' : 'text-textColor',
         )}
       >
         {SOURCE_WORD[source]}
@@ -529,7 +529,7 @@ export function ReuseDoor({
               size='sm'
               className={cn(
                 skin,
-                locked && 'pointer-events-none border-textInactiveColor text-textInactiveColor',
+                locked && 'pointer-events-none border-borderColor text-borderColor',
                 menuOpen && 'bg-textColor text-bgColor',
               )}
             >

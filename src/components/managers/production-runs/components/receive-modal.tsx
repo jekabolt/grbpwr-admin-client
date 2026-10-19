@@ -15,7 +15,7 @@ import { ulid } from 'utils/ulid';
 import { isVariantRun, materialLabel } from './aux-run-plan';
 import { receiptErrorMessage, usePostRunReceipt } from './useProductionRuns';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 type Row = {
   lineKey: string;
@@ -303,8 +303,8 @@ export function ReceiveModal({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               receive PR-{run?.id}
             </DialogPrimitives.Title>
@@ -511,7 +511,7 @@ export function ReceiveModal({
                 (ErrProductionRunAuxPartial), so the question has exactly one legal answer and
                 asking it could only produce a refusal after the counting was done. */}
             {!isAux ? (
-              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+              <label className='flex items-center gap-2 border-t border-borderColor pt-3'>
                 <input
                   type='checkbox'
                   checked={finalReceipt}
@@ -533,7 +533,7 @@ export function ReceiveModal({
             ) : null}
 
             {!isAux && canWriteCosting && (
-              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+              <label className='flex items-center gap-2 border-t border-borderColor pt-3'>
                 <input
                   type='checkbox'
                   checked={updateCostPrice}
@@ -549,7 +549,7 @@ export function ReceiveModal({
             )}
 
             {!isAux && (
-              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+              <label className='flex items-center gap-2 border-t border-borderColor pt-3'>
                 <input
                   type='checkbox'
                   checked={notifyWaitlist}
@@ -579,7 +579,7 @@ export function ReceiveModal({
             </Text>
           </div>
 
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>
@@ -645,8 +645,8 @@ function RowInputs({
           />
         ) : null}
         {label}
-        {retired ? <span className='text-textInactiveColor'> · retired</span> : null}{' '}
-        <span className='text-textInactiveColor'>
+        {retired ? <span className='text-borderColor'> · retired</span> : null}{' '}
+        <span className='text-borderColor'>
           {sub ? `· ${sub} ` : ''}· plan {planned}
           {alreadyGood > 0 || alreadyDefect > 0
             ? ` · already received ${alreadyGood}${alreadyDefect > 0 ? ` (+${alreadyDefect} defect)` : ''} · left ${Math.max(0, planned - alreadyGood)}`

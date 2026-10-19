@@ -79,7 +79,7 @@ export const runStatusTone = (s?: common_ProductionRunStatus | string): string =
     case 'PRODUCTION_RUN_STATUS_DRAFT':
     case 'PRODUCTION_RUN_STATUS_PLANNED':
     default:
-      // labelColor (#666, ~5.7:1), NOT textInactiveColor (#ccc, ~1.6:1): DESIGN.md reserves #ccc for
+      // labelColor (#666, ~5.7:1), NOT borderColor (#ccc, ~1.6:1): DESIGN.md reserves #ccc for
       // borders, placeholders and disabled states, and «planned» is the most common state in a run
       // list — the one badge that must not be the least readable thing on the page.
       return 'border-borderColor text-labelColor';

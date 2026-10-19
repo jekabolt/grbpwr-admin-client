@@ -21,7 +21,7 @@ interface StockHistoryFiltersProps {
 }
 
 const inputClassName =
-  'border border-textInactiveColor bg-bgColor px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-textColor';
+  'border border-borderColor bg-bgColor px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-textColor';
 
 export function StockHistoryFilters({ sizes = [] }: StockHistoryFiltersProps) {
   const sizeItems = useMemo(() => getSizeItems(sizes), [sizes]);

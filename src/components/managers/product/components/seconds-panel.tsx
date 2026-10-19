@@ -103,7 +103,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
   if (rows.length === 0) return null;
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-2 border-t border-borderColor pt-3'>
       <Text variant='uppercase' size='small'>
         seconds (b-grade)
       </Text>
@@ -121,7 +121,7 @@ export function SecondsPanel({ colorwayId }: { colorwayId: number }) {
           const busy = busyId === variantId;
 
           return (
-            <div key={variantId} className='space-y-2 border border-textInactiveColor p-2'>
+            <div key={variantId} className='space-y-2 border border-borderColor p-2'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex flex-wrap items-center gap-2'>
                   <Text size='small' variant='uppercase'>

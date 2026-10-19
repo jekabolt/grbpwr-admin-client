@@ -987,7 +987,7 @@ export function BomField({
           'relative block shrink-0 overflow-hidden border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor enabled:cursor-pointer',
           empty
             ? 'flex flex-col items-center justify-center gap-1 border-dashed text-labelColor enabled:hover:border-textColor enabled:hover:text-textColor'
-            : 'border-borderColor bg-bgZebra enabled:hover:border-textColor',
+            : 'border-borderColor bg-pageBg enabled:hover:border-textColor',
           empty && (error ? 'border-error' : 'border-borderColor'),
         )}
         style={{

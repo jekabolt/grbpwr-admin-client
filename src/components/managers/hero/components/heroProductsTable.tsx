@@ -119,7 +119,7 @@ export const HeroProductTable: FC<
         <td className='border border-text p-2'>
           <button
             type='button'
-            className='flex w-full cursor-grab items-center justify-center touch-none select-none leading-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className='flex w-full cursor-grab items-center justify-center touch-none select-none leading-none text-borderColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
             aria-label='drag to reorder product'
             {...(dragHandleProps || {})}
           >
@@ -130,7 +130,7 @@ export const HeroProductTable: FC<
       <td className='border border-text p-2'>
         <button
           onClick={() => navigate(`/products/${product.id}`)}
-          className='text-blue underline hover:text-blue cursor-pointer'
+          className='text-warning underline hover:text-warning cursor-pointer'
         >
           {product.id}
         </button>

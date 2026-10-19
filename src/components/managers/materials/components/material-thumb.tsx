@@ -28,7 +28,7 @@ export function MaterialThumb({
     <div
       className={cn(
         dim,
-        'shrink-0 overflow-hidden border border-textInactiveColor bg-bgColor',
+        'shrink-0 overflow-hidden border border-borderColor bg-bgColor',
         className,
       )}
     >

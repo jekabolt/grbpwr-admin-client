@@ -12,9 +12,9 @@ const STATUS_LABEL: Record<HealthStatus, string> = {
 
 // Status pill: colored border + text on a gray surface (no coral/opacity-red wash).
 const STATUS_SHELL: Record<HealthStatus, string> = {
-  needs_attention: 'border-error text-error bg-bgSecondary',
-  mixed: 'border-warning text-warning bg-bgSecondary',
-  on_track: 'border-textInactiveColor text-textColor bg-bgSecondary',
+  needs_attention: 'border-error text-error bg-pageBg',
+  mixed: 'border-warning text-warning bg-pageBg',
+  on_track: 'border-borderColor text-textColor bg-pageBg',
 };
 
 // Alert title: high = red, warning = blue (the design's warning token), matching the stub a-t.crit / a-t.warn.

@@ -105,7 +105,7 @@ function ReconRow({
 
   return (
     <>
-      <tr className='border-b border-textInactiveColor align-top last:border-b-0'>
+      <tr className='border-b border-borderColor align-top last:border-b-0'>
         <td className='px-2.5 py-2'>
           <div className='flex flex-col gap-1'>
             <span className='whitespace-nowrap font-medium uppercase'>{block?.name || label}</span>
@@ -145,7 +145,7 @@ function ReconRow({
         </td>
       </tr>
       {open && items.length > 0 && (
-        <tr className='border-b border-textInactiveColor bg-bgSecondary/40 last:border-b-0'>
+        <tr className='border-b border-borderColor bg-pageBg/40 last:border-b-0'>
           <td colSpan={5} className='px-2.5 py-2'>
             <div className='flex flex-col gap-1.5'>
               {items.map((it, i) => (
@@ -195,9 +195,9 @@ export function ReconciliationTab({ from, to }: Props) {
         emptyHint='no reconciliation data for this period — check the date range'
       >
         <div className='overflow-x-auto'>
-          <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+          <table className='w-full min-w-max border-collapse border border-borderColor'>
             <thead>
-              <tr className='border-b border-textInactiveColor bg-bgSecondary'>
+              <tr className='border-b border-borderColor bg-pageBg'>
                 <th className={cn(TH, 'text-left')}>area</th>
                 <th className={cn(TH, 'text-right')}>in the books (ledger)</th>
                 <th className={cn(TH, 'text-right')}>in real life (operational)</th>

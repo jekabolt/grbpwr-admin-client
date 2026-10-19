@@ -245,7 +245,7 @@ export function FileTile({
         // `min-w-0 max-w-full` — ЛОВУШКА ПРИМИТИВА, а не украшение: `button` меряется по
         // содержимому, вылезает за колонку грида и ложится поверх соседней плитки, а `truncate`
         // внутри неё при этом молчит — обрезать нечего, разъехалась сама коробка.
-        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        className='group/frame relative block w-full min-w-0 max-w-full cursor-pointer overflow-hidden bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (
           <img

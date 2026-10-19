@@ -26,11 +26,11 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         className={cn(
           'fixed inset-x-2.5 top-2 z-[var(--z-nav)] h-12 py-2 lg:gap-0 lg:px-5 lg:py-3 print:hidden',
           'flex items-center gap-1',
-          'border border-textInactiveColor bg-bgColor text-textColor lg:border-transparent',
+          'border border-borderColor bg-bgColor text-textColor lg:border-transparent',
           'transform-gpu transition-transform duration-150 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]',
           'lg:transform-none lg:transition-[top] lg:duration-150 lg:ease-[cubic-bezier(0.25,0.46,0.45,0.94)]',
           {
-            '!border-b-transparent lg:border-textInactiveColor lg:bg-bgColor lg:text-textColor lg:mix-blend-normal':
+            '!border-b-transparent lg:border-borderColor lg:bg-bgColor lg:text-textColor lg:mix-blend-normal':
               isNavOpen,
           },
         )}

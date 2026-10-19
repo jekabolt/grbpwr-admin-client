@@ -82,7 +82,7 @@ export function FileAttachments({
               key={f.id}
               className='flex flex-wrap items-center gap-2 border-b border-hairline py-1 last:border-b-0'
             >
-              <div className='flex h-8 w-8 flex-none items-center justify-center bg-bgSecondary'>
+              <div className='flex h-8 w-8 flex-none items-center justify-center bg-pageBg'>
                 {f.previewUrl ? (
                   <Media src={f.previewUrl} alt='' aspectRatio='auto' fit='contain' />
                 ) : (
@@ -223,11 +223,11 @@ function FilePicker({
                   onClick={() => onToggle(Number(f.id))}
                   media={
                     f.previewUrl ? (
-                      <div className='bg-bgSecondary'>
+                      <div className='bg-pageBg'>
                         <Media src={f.previewUrl} alt='' aspectRatio='1/1' fit='contain' />
                       </div>
                     ) : (
-                      <div className='flex aspect-square w-full items-center justify-center bg-bgSecondary'>
+                      <div className='flex aspect-square w-full items-center justify-center bg-pageBg'>
                         <Text size='micro' variant='label' className='uppercase'>
                           {extensionOf(f.fileName ?? '')}
                         </Text>

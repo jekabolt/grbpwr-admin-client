@@ -88,5 +88,5 @@ src/components/managers/accounting/
 ```
 
 `section-header.tsx` рендерится на всех 4 страницах — единая шапка раздела в стиле
-существующих (`-mx-2.5 flex ... border-b border-textInactiveColor`, `Text variant='uppercase'
+существующих (`-mx-2.5 flex ... border-b border-borderColor`, `Text variant='uppercase'
 size='large'` c 'accounting'), внутренние вкладки — ссылки на 4 роута с активным подчёркиванием.

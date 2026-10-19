@@ -511,7 +511,7 @@ function PdfStage({
           />
           {/* СЦЕНА — ЗЕМЛЯ, А НЕ БЛОК: рамки у неё нет, потому что рамка есть у страницы, а
               блок в блоке против DESIGN.md. Серая заливка и держит белый лист видимым. */}
-          <div className='min-h-0 flex-1 overflow-auto bg-bgSecondary p-3.5'>
+          <div className='min-h-0 flex-1 overflow-auto bg-pageBg p-3.5'>
             {/* w-max + mx-auto, а не justify-center: центрирование флексом обрезает ЛЕВЫЙ край
                 страницы, когда она шире окна, и на 200% до него уже не доскроллить. */}
             <div className='mx-auto flex w-max gap-3'>

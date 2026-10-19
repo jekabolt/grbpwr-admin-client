@@ -465,7 +465,7 @@ export function TechCardAssemblyPrint() {
     <div className='flex min-h-screen flex-col'>
       <style>{SCREEN_CSS}</style>
 
-      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+      <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-borderColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
           <BackLink to={id ? `/tech-cards/${id}` : ROUTES.techCards} />
           <Text variant='uppercase' size='large'>

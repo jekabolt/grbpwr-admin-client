@@ -191,7 +191,7 @@ export function MediaItem({
         // ЕДИНАЯ РАМКА НА ВСЮ СЕТКУ, кадр внутри неё целиком. Плитка в собственных пропорциях
         // рвёт ряды (портрет вдвое выше панорамы), а `cover` показывает не тот кадр, который
         // человек ищет глазами. Серый мат по краям и есть сообщение о форме снимка.
-        className='relative block w-full cursor-pointer bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+        className='relative block w-full cursor-pointer bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         <Media
           src={mediaUrl || ''}
@@ -312,7 +312,7 @@ export function MediaItem({
               type='button'
               onClick={handleDelete}
               disabled={deleteMediaMutation.isPending}
-              className='border border-error px-1.5 py-px text-micro uppercase leading-4 tracking-label text-error hover:bg-error hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:border-borderColor disabled:text-textInactiveColor'
+              className='border border-error px-1.5 py-px text-micro uppercase leading-4 tracking-label text-error hover:bg-error hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:border-borderColor disabled:text-borderColor'
             >
               {deleteMediaMutation.isPending ? 'deleting…' : 'delete'}
             </button>

@@ -2333,7 +2333,7 @@ function MapRow({
       {...(zone ? { 'data-ask-zone': '', 'data-ask-label': q?.askOn ? q.text : undefined } : {})}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={cn('transition-colors', hot && 'bg-bgZebra', onPick && 'cursor-pointer')}
+      className={cn('transition-colors', hot && 'bg-pageBg', onPick && 'cursor-pointer')}
       onClick={(ev) => {
         // the row's own controls answer; a click elsewhere on it pins its lines and opens its detail
         if (!onPick || (ev.target as HTMLElement).closest('button,select,input,a')) return;
@@ -2402,7 +2402,7 @@ const boxCls = (filled: boolean, invalid: boolean, guess = false) =>
       : guess
         ? 'border-dashed border-warning text-warning hover:border-solid'
         : filled
-          ? 'border-textColor hover:bg-bgZebra'
+          ? 'border-textColor hover:bg-pageBg'
           : 'border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
   );
 
@@ -2430,7 +2430,7 @@ function MenuItem({
       aria-checked={!!checked}
       onClick={onSelect}
       className={cn(
-        'flex h-8 w-full items-center gap-2 px-1.5 text-left hover:bg-bgZebra',
+        'flex h-8 w-full items-center gap-2 px-1.5 text-left hover:bg-pageBg',
         FOCUS,
         'focus-visible:outline-offset-[-2px]',
       )}

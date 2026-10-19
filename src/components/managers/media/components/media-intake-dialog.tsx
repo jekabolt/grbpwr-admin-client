@@ -417,14 +417,14 @@ export function MediaIntakeDialog({
             диалог выбора медиа держит свою ловушку фокуса, и до кнопок этой модалки Tab бы не
             дошёл. */}
         <DialogPrimitive.Content
-          className='fixed left-1/2 top-1/2 z-[60] flex max-h-[90vh] w-full max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden border border-textInactiveColor bg-bgColor p-2.5'
+          className='fixed left-1/2 top-1/2 z-[60] flex max-h-[90vh] w-full max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden border border-borderColor bg-bgColor p-2.5'
           // ПРОМАХ МИМО ОКНА НЕ ВЫБРАСЫВАЕТ НАБРАННОЕ. Пока очередь жила один жест, случайный
           // клик по подложке стоил одного кадра; теперь в ней копится восемь из четырёх вставок,
           // и отдавать их клику мимо — слишком дорого. Уйти по-прежнему можно тремя явными
           // способами: [x], Esc, «cancel».
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <div className='flex flex-shrink-0 items-center justify-between border-b border-textInactiveColor pb-2'>
+          <div className='flex flex-shrink-0 items-center justify-between border-b border-borderColor pb-2'>
             <DialogPrimitive.Title className='text-lg uppercase'>
               add {purpose || 'media'}
               {previews.length > 1 ? ` · ${previews.length} frames` : ''}

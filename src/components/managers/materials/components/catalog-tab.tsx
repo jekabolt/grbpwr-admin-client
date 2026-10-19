@@ -38,7 +38,7 @@ const sectionLabel = (v?: string) =>
 const classLabel = (c?: common_MaterialClass) =>
   c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // A decimal as a clean string, treating undefined / 0 as absent (so "0 g/m²" never shows) — the
 // same rule the shared materialSpec uses, kept local so the spec tab can render one row per field.

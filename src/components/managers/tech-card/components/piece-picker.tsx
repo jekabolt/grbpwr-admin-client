@@ -39,7 +39,7 @@ export function useFormPieces(): PieceRef[] {
 // Phase-02 field metrics — the picker's search box and its trigger must be indistinguishable from
 // any other control on the card (1px box, 3px/7px padding, 22px min height).
 const searchCls =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:border-textColor focus:outline-none';
+  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-borderColor focus:border-textColor focus:outline-none';
 
 // The picker body: search + the card's pieces as a selectable list. Shared by the single and multi
 // variants so выбор детали ведёт себя одинаково везде. Width and chrome belong to the popover
@@ -130,7 +130,7 @@ export function PieceList({
                 aria-pressed={on}
                 onClick={() => onToggle(p.lineKey)}
                 className={cn(
-                  'flex items-center gap-2 border-b border-hairline py-1 text-left text-textBaseSize last:border-b-0 hover:bg-bgZebra',
+                  'flex items-center gap-2 border-b border-hairline py-1 text-left text-textBaseSize last:border-b-0 hover:bg-pageBg',
                   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                   on ? 'text-textColor' : 'text-labelColor',
                 )}
@@ -348,7 +348,7 @@ export function PieceSinglePicker({
         className: cn(
           'flex min-h-[22px] w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize uppercase transition-colors focus:border-textColor focus:outline-none',
           current ? 'text-textColor' : 'text-labelColor',
-          disabled && 'bg-bgZebra text-labelColor',
+          disabled && 'bg-pageBg text-labelColor',
           !current && !!value && 'border-error text-error',
         ),
       }}

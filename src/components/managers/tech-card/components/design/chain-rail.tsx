@@ -172,7 +172,7 @@ function StepCell({
       data-locked={state === 'blocked' || later ? note : undefined}
       aria-label={`${step.label} · ${state}`}
       onClick={onOpen}
-      className={cn(CELL, 'hover:bg-bgSecondary', className)}
+      className={cn(CELL, 'hover:bg-pageBg', className)}
     >
       {body}
     </button>

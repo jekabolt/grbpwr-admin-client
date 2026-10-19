@@ -6,7 +6,7 @@ import { opexCategorySelectOptions, opexCurrencyOptions } from '../utils/options
 // creation/edit paths can never drift (same category set, same currency list, same styling).
 
 // Square control on the page canvas — same box grammar as ui/Input (1px borderColor, focus goes
-// ink). Tokens only: no textInactiveColor.
+// ink). Tokens only: no borderColor.
 export const fieldCls =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize text-textColor transition-colors focus:border-textColor focus:outline-none';
 

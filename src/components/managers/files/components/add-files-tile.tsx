@@ -26,7 +26,7 @@ export function AddFilesTile({ label, onClick }: { label: string; onClick: () =>
         title='pick files that are already in the library'
         onClick={onClick}
         media={
-          <div className='flex aspect-square w-full items-center justify-center bg-bgSecondary text-2xl leading-none text-labelColor'>
+          <div className='flex aspect-square w-full items-center justify-center bg-pageBg text-2xl leading-none text-labelColor'>
             +
           </div>
         }

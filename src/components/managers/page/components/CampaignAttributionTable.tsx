@@ -113,7 +113,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
               const conversionRate = row.sessions > 0 ? (row.conversions / row.sessions) * 100 : 0;
               const roas = row.spend > 0 ? row.revenue / row.spend : null;
               return (
-                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-pageBg'>
                   <td className='p-2'>
                     <Text>{row.utmSource || <EmptyCell />}</Text>
                   </td>

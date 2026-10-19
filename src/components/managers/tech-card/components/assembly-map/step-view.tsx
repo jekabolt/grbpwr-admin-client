@@ -135,7 +135,7 @@ export function StepView({
       )}
 
       <div
-        className='flex items-center justify-center bg-bgZebra'
+        className='flex items-center justify-center bg-pageBg'
         style={{ height: picture ? PIC_H : undefined, minHeight: picture ? undefined : 120 }}
       >
         {picture ? (

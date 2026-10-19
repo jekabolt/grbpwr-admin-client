@@ -23,7 +23,7 @@ export function SelectionToolbar({
 }: Props) {
   if (!selectionMode) {
     return (
-      <div className='flex items-center justify-end border-b border-textInactiveColor pb-3'>
+      <div className='flex items-center justify-end border-b border-borderColor pb-3'>
         <Button variant='secondary' size='lg' className='uppercase' onClick={onEnter}>
           select
         </Button>

@@ -497,7 +497,7 @@ export function MarkersSection({
         title={rowTooltip(m, colorway)}
         onClick={() => openingId == null && openMarker(id)}
         className={cn(
-          'grid cursor-pointer grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-bgZebra',
+          'grid cursor-pointer grid-cols-[minmax(0,1fr)_140px_80px_110px_80px_160px] items-baseline gap-x-4 py-1.5 tabular-nums hover:bg-pageBg',
           !last && 'border-b border-hairline',
         )}
       >

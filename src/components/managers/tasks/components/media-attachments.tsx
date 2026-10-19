@@ -8,7 +8,7 @@ import { annotationsOf, NotesMark, useTaskMediaViewer } from './task-media-viewe
 
 /** Та же кнопка-глиф, что в подвале плитки галереи: 16 пикселей, серая, чёрная под курсором. */
 const ARROW =
-  'flex min-h-11 w-full shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-textInactiveColor disabled:hover:text-textInactiveColor sm:size-4 sm:min-h-0 sm:w-4';
+  'flex min-h-11 w-full shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-borderColor disabled:hover:text-borderColor sm:size-4 sm:min-h-0 sm:w-4';
 
 // Attach reference images/files from the existing media bucket. Stores media ids
 // on the task; the MediaSelector (same one tech cards use) handles the gallery.

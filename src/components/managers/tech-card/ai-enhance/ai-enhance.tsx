@@ -554,7 +554,7 @@ export function AiEnhance({
                 key={m.mode}
                 type='button'
                 onClick={() => run(m.mode)}
-                className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-bgSecondary'
+                className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-pageBg'
               >
                 <span className='text-micro uppercase tracking-label text-textColor'>
                   {m.label}

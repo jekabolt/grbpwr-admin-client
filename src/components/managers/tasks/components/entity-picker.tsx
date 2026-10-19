@@ -165,8 +165,8 @@ export function EntityPicker({
                   variant='default'
                   onClick={() => choose(o)}
                   className={cn(
-                    'flex min-h-11 w-full items-center gap-2 border-b border-borderColor p-1.5 text-left last:border-b-0 hover:bg-bgZebra sm:min-h-0',
-                    o.value === value && 'bg-bgSecondary',
+                    'flex min-h-11 w-full items-center gap-2 border-b border-borderColor p-1.5 text-left last:border-b-0 hover:bg-pageBg sm:min-h-0',
+                    o.value === value && 'bg-pageBg',
                   )}
                 >
                   {o.thumbnail && (

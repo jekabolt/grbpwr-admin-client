@@ -32,7 +32,7 @@ export function DatePicker({
           type='button'
           disabled={disabled}
           className={cn(
-            'flex w-full items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
+            'flex w-full items-center justify-between gap-2 border-b border-borderColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
           )}
         >
           <span className={cn(!value && 'text-labelColor')}>
@@ -60,7 +60,7 @@ export function DatePicker({
         <Popover.Content
           align='start'
           sideOffset={4}
-          className='z-[var(--z-popover)] border border-textInactiveColor bg-bgColor p-2 text-textColor shadow-[var(--shadow-popover)]'
+          className='z-[var(--z-popover)] border border-borderColor bg-bgColor p-2 text-textColor shadow-[var(--shadow-popover)]'
         >
           <DayPicker
             mode='single'

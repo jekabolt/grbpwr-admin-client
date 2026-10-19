@@ -284,7 +284,7 @@ function Breakdown({
           </tr>
         </thead>
         <tbody>
-          <tr className='bg-bgZebra'>
+          <tr>
             <td colSpan={BREAKDOWN_LEAD}>
               <Text
                 size='micro'
@@ -393,7 +393,7 @@ function Breakdown({
             })
           )}
 
-          <tr className='bg-bgZebra'>
+          <tr>
             <td colSpan={BREAKDOWN_LEAD}>
               <Text
                 size='micro'
@@ -456,7 +456,7 @@ function Breakdown({
               остаётся (иначе столбец «amount» перестанет складываться в unit cost), но называет
               себя тем, что она есть: неразнесённой разницей. */}
           {defectAmount >= 0.005 && (
-            <tr className='bg-bgZebra'>
+            <tr>
               <td colSpan={BREAKDOWN_LEAD}>
                 <Text
                   size='micro'

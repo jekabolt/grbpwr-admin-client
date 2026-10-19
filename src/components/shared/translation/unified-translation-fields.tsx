@@ -233,7 +233,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
   };
 
   return (
-    <div className='space-y-3 border border-textInactiveColor p-3'>
+    <div className='space-y-3 border border-borderColor p-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
           <Text variant='uppercase'>translations</Text>
@@ -318,7 +318,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
                   placeholder={placeholder}
                   className={cn(
                     'w-full border leading-4 bg-transparent resize-none min-h-[100px] focus:outline-none p-2',
-                    errorMessage || over ? 'border-error' : 'border-textInactiveColor',
+                    errorMessage || over ? 'border-error' : 'border-borderColor',
                   )}
                   rows={field.rows || 4}
                   readOnly={!editMode}
@@ -334,7 +334,7 @@ export function UnifiedTranslationFields({ fieldPrefix, fields, editMode = true 
               <div
                 className={cn(
                   'border-b',
-                  errorMessage || over ? 'border-error' : 'border-textInactiveColor',
+                  errorMessage || over ? 'border-error' : 'border-borderColor',
                 )}
               >
                 <Input

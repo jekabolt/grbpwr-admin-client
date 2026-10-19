@@ -8,7 +8,7 @@ import { useImportBankCsv } from '../../utils/hooks';
 // live today; kept as a select so a second bank slots in without a layout change.
 const SOURCES = [{ value: 'revolut', label: 'Revolut' }];
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 // Import bank statement (4.1): paste a raw Revolut CSV export, the backend parses it into inbox
 // lines and dedupes against already-imported ones. The response counts (parsed / imported /
@@ -50,8 +50,8 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
     <DialogPrimitives.Root open onOpenChange={(o) => !o && onClose()}>
       <DialogPrimitives.Portal container={document.body}>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[620px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[620px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               import bank statement
             </DialogPrimitives.Title>

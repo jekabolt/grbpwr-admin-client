@@ -64,7 +64,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
         </div>
         <div className='w-full flex flex-col gap-4'>
           <InputField name={`navFeatured.${gender}.featuredTag`} label='tag' />
-          <div className='flex items-center w-full border border-textInactiveColor justify-between px-2 py-1'>
+          <div className='flex items-center w-full border border-borderColor justify-between px-2 py-1'>
             <Text variant='uppercase'>
               {selectedArchiveId ? `archive id: ${selectedArchiveId}` : 'no archive selected'}
             </Text>

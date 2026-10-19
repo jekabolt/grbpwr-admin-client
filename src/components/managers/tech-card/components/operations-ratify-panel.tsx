@@ -458,7 +458,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
             // «панель Escape не перехватывает» было записано в коде, а не в чьей-то памяти.
           }}
         >
-          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+          <div className='flex shrink-0 items-center gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1.5'>
             <Dialog.Title asChild>
               <Text
                 size='micro'

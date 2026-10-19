@@ -648,7 +648,7 @@ export interface PictureTileProps {
   aspect?: string;
   fit?: 'cover' | 'contain';
   /**
-   * ГРУНТ ПОД КАДРОМ. `neutral` подкладывает под картинку панельный тон (`bgSecondary`) — тот же,
+   * ГРУНТ ПОД КАДРОМ. `neutral` подкладывает под картинку панельный тон (`pageBg`) — тот же,
    * которым в этой плитке уже нарисованы «3d model» и «no image», то есть подложка здесь не
    * новая, а та же самая.
    *
@@ -1278,12 +1278,12 @@ export function PictureTile({
       title={faceBroken ? FILE_MISSING_TITLE : undefined}
       className={cn(
         'group relative border',
-        selected ? 'border-2 border-textColor' : 'border-textInactiveColor',
+        selected ? 'border-2 border-textColor' : 'border-borderColor',
         /* Грунт стоит ПОД кадром, а не на самой картинке: при `contain` кадр не заполнен, и тон
            обязан лежать и в полях над снимком, и за его прозрачными точками — иначе у вырезанного
            предмета остаётся половина фона. `className` идёт следом намеренно: тон, заданный
            вызывающим, обязан перебивать грунт, а не наоборот. */
-        ground === 'neutral' && fit === 'contain' && 'bg-bgSecondary',
+        ground === 'neutral' && fit === 'contain' && 'bg-pageBg',
         clip &&
           'has-[[data-open-large]:focus-visible]:outline has-[[data-open-large]:focus-visible]:outline-2 has-[[data-open-large]:focus-visible]:-outline-offset-2 has-[[data-open-large]:focus-visible]:outline-textColor',
         className,
@@ -1313,7 +1313,7 @@ export function PictureTile({
              модели, где ссылка стоит над сценой и от неё не зависит.
              Слово остаётся обязательным: `.glb` нечем нарисовать, и молчаливый серый прямоугольник
              человек прочёл бы как «сервер не справился», хотя за модель заплачено и она есть. */
-          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 bg-bgSecondary px-1 text-center'>
+          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 bg-pageBg px-1 text-center'>
             <Text size='nano' variant='uppercase' component='span'>
               3d model
             </Text>
@@ -1357,7 +1357,7 @@ export function PictureTile({
         ) : face ? (
           face
         ) : faceBroken ? (
-          <div className='flex h-full w-full items-center justify-center bg-bgSecondary px-1 text-center'>
+          <div className='flex h-full w-full items-center justify-center bg-pageBg px-1 text-center'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
               {FILE_MISSING_WORDS}
             </Text>
@@ -1367,7 +1367,7 @@ export function PictureTile({
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
           // от «картинка не загрузилась».
-          <div className='flex h-full w-full items-center justify-center bg-bgSecondary'>
+          <div className='flex h-full w-full items-center justify-center bg-pageBg'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
               no image
             </Text>

@@ -262,7 +262,7 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
                           title={c.evidence?.text ? `“${c.evidence.text}”` : undefined}
                           className={cn(
                             'flex w-full items-start gap-2 px-1 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                            on ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                            on ? 'bg-pageBg' : 'hover:bg-pageBg',
                           )}
                         >
                           <span

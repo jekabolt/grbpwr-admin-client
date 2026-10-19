@@ -48,9 +48,7 @@ export function CampaignPreviewPanel({
   useEffect(() => {
     if (!values) return;
     const t = setTimeout(() => {
-      const liveBody = (values.body || []).filter(
-        (b: any) => !deletedUids?.has(b?._uid),
-      );
+      const liveBody = (values.body || []).filter((b: any) => !deletedUids?.has(b?._uid));
       const draft = mapFormToCampaignInsert({ ...values, body: liveBody });
       render.mutate(
         { draft, languageId, variantId: 0, device },
@@ -126,13 +124,13 @@ export function CampaignPreviewPanel({
         </div>
       )}
 
-      <div className='flex justify-center overflow-x-auto border border-textInactiveColor bg-textInactiveColor/10 p-4'>
+      <div className='flex justify-center overflow-x-auto border border-borderColor bg-borderColor/10 p-4'>
         {html ? (
           <iframe
             title='email preview'
             srcDoc={html}
             sandbox='allow-same-origin'
-            className='h-[70vh] shrink-0 border border-textInactiveColor bg-white'
+            className='h-[70vh] shrink-0 border border-borderColor bg-white'
             style={{ width: DEVICE_WIDTH[device] }}
           />
         ) : (

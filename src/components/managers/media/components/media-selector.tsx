@@ -363,7 +363,7 @@ export function MediaSelector({
                 }
               : undefined
           }
-          className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'
+          className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-borderColor bg-bgColor p-2.5'
         >
           <div className='flex flex-shrink-0 flex-wrap items-center gap-2'>
             {/* ХЛЕБНЫЕ КРОШКИ ВМЕСТО ПОДМЕНЫ ЗАГОЛОВКА. Кроп не отдельный экран, а второй шаг
@@ -488,7 +488,7 @@ export function MediaSelector({
                       <img
                         src={m.media?.thumbnail?.mediaUrl}
                         alt=''
-                        className='size-10 border border-borderColor bg-bgZebra object-cover'
+                        className='size-10 border border-borderColor bg-pageBg object-cover'
                       />
                       <Close
                         size='sm'

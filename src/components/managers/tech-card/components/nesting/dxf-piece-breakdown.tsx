@@ -171,7 +171,10 @@ export function BreakdownSizeChips({
               tabIndex={0}
               className={
                 quiet
-                  ? cn(sizeQuiet, on ? 'text-textColor' : 'text-labelColor underline hover:text-textColor')
+                  ? cn(
+                      sizeQuiet,
+                      on ? 'text-textColor' : 'text-labelColor underline hover:text-textColor',
+                    )
                   : cn(sizeChip, on ? sizeChipOn : sizeChipOff)
               }
               onClick={() => onChange(id)}
@@ -386,11 +389,11 @@ export function DxfPieceBreakdown({
                   {/* Доля — числом И полосой. Полоса отвечает на «какая деталь тут главная» без
                       чтения цифр; она монохромна, потому что цвет в этой системе носит состояние,
                       а доля — не состояние. Трек и заливка — те же, что у ранжированной полосы
-                      системы (BarRow): трек `trackBg`, заливка ИНК. Заливка светло-серым
-                      (`progressBg`) на светло-сером треке не читалась вовсе — проверено на экране. */}
+                      системы (BarRow): трек `pageBg`, заливка ИНК. Заливка светло-серым
+                      (`hairline`) на светло-сером треке не читалась вовсе — проверено на экране. */}
                   <span className='flex flex-col items-end gap-0.5'>
                     <span>{(share * 100).toFixed(share < 0.1 ? 1 : 0)}%</span>
-                    <span aria-hidden className='block h-[3px] w-full bg-trackBg'>
+                    <span aria-hidden className='block h-[3px] w-full bg-pageBg'>
                       <span
                         className='block h-full bg-textColor'
                         style={{ width: `${Math.min(100, Math.max(2, share * 100))}%` }}

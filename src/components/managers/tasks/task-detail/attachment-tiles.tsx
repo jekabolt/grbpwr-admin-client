@@ -140,7 +140,7 @@ export function AttachmentTiles({
                     : `media ${i + 1} of ${media.length} · public`
                 }
                 onClick={() => openable && onOpenMedia(i)}
-                className='relative block w-full cursor-zoom-in bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
+                className='relative block w-full cursor-zoom-in bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
               >
                 {thumb ? (
                   <Media src={thumb} alt='' aspectRatio='1/1' fit='contain' />

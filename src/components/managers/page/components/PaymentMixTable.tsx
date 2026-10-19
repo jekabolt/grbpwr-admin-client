@@ -42,7 +42,7 @@ export const PaymentMixTable: FC<PaymentMixTableProps> = ({ methods }) => {
                 </span>
               </Text>
             </div>
-            <div className='h-2 w-full bg-bgSecondary/40'>
+            <div className='h-2 w-full bg-pageBg/40'>
               <div className='h-2 bg-textColor/70' style={{ width: `${pct}%` }} />
             </div>
           </div>

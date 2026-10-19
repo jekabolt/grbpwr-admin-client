@@ -467,9 +467,7 @@ export function FileAccessSection({
                   }}
                   className={`flex items-start gap-2 px-1 py-1.5 text-left ${
                     i > 0 ? 'border-t border-hairline' : ''
-                  } ${
-                    frozen ? 'cursor-not-allowed' : 'hover:bg-bgZebra'
-                  } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor`}
+                  } ${frozen ? 'cursor-not-allowed' : 'hover:bg-pageBg'} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor`}
                 >
                   <span
                     aria-hidden
@@ -965,7 +963,7 @@ export function FileAccessSection({
                       prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
                     )
                   }
-                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
+                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 enabled:hover:bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
                 >
                   <span
                     aria-hidden

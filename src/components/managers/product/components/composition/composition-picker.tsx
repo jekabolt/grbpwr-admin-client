@@ -104,8 +104,8 @@ export function CompositionPicker({
       <div className='flex items-center gap-1.5'>
         {/* The value is composed in the dialog, never typed — so it is a read-only PLATE, not an
             input that merely refuses keystrokes. */}
-        <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-bgZebra px-[7px] py-[3px]'>
-          <Text className={display ? 'truncate' : 'truncate text-textInactiveColor'}>
+        <div className='min-h-[22px] min-w-0 flex-1 border border-borderColor bg-pageBg px-[7px] py-[3px]'>
+          <Text className={display ? 'truncate' : 'truncate text-borderColor'}>
             {display || <EmptyCell />}
           </Text>
         </div>

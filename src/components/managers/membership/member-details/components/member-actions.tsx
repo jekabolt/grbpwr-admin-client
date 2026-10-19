@@ -58,7 +58,7 @@ export function MemberActions({ member }: { member: Member }) {
           Manual tier change
         </Text>
         <div className='flex flex-wrap gap-2 items-center'>
-          <span className='inline-block px-2 py-0.5 bg-textInactiveColor/30'>
+          <span className='inline-block px-2 py-0.5 bg-borderColor/30'>
             <Text>{formatTierLabel(member.currentTier, member.currentTierDisplay)}</Text>
           </span>
           <Text variant='inactive'>&rarr;</Text>

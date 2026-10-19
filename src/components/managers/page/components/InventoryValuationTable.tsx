@@ -24,7 +24,7 @@ const RowTable: FC<{ title: string; rows: InventoryValuationRow[] }> = ({ title,
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.productId} className='border-b border-hairline hover:bg-bgSecondary'>
+            <tr key={r.productId} className='border-b border-hairline hover:bg-pageBg'>
               <td className='p-2'>
                 <ProductNameLink
                   productId={r.productId}

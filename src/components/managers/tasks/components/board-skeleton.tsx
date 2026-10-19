@@ -17,7 +17,7 @@ export function BoardSkeleton() {
             <SkeletonLine width={72} />
             <SkeletonLine width={16} />
           </div>
-          <div className='bg-transparent p-0 sm:mt-2 sm:bg-bgZebra sm:p-1'>
+          <div className='bg-transparent p-0 sm:mt-2 sm:bg-pageBg sm:p-1'>
             <SkeletonBlocks count={(i % 3) + 1} height={80} />
           </div>
         </div>

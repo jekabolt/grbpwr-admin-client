@@ -45,7 +45,7 @@ export function sampleRoundLabel(n?: number): string {
 // --- Card-board chip styling (owner decision: cards/chips read faster than a dense table or a
 // plain dropdown; colour on the status chip reads state at a glance, scannable across a grid). ---
 const chipBase = 'inline-block border px-1.5 py-0.5 text-textBaseSize uppercase';
-const neutralTone = 'border-textInactiveColor text-textColor';
+const neutralTone = 'border-borderColor text-textColor';
 
 const statusTone: Record<string, string> = {
   planned: neutralTone,

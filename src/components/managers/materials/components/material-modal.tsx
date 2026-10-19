@@ -1114,7 +1114,7 @@ export function MaterialModal({
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
                     legacy value — read-only
                   </Text>
-                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
+                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-pageBg px-[7px] py-[3px] text-micro text-labelColor'>
                     {d.otherAttrsRaw}
                   </div>
                 </div>

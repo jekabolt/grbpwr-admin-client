@@ -45,7 +45,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'countries', label: 'countries' },
 ];
 
-const th = 'border border-borderColor bg-bgSecondary px-2 py-1 text-left uppercase';
+const th = 'border border-borderColor bg-pageBg px-2 py-1 text-left uppercase';
 const td = 'border border-borderColor px-2 py-1';
 const inputCls =
   'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';

@@ -81,7 +81,7 @@ export function SamplePicker({
       openElement={
         <span
           className={`flex min-h-[22px] w-full items-center gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
-            isDisabled ? 'bg-bgZebra text-labelColor' : 'hover:border-textColor'
+            isDisabled ? 'bg-pageBg text-labelColor' : 'hover:border-textColor'
           }`}
         >
           <SampleThumb url={picked ? sampleThumbUrl(picked) : undefined} className='size-5' />
