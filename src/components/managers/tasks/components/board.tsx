@@ -6,17 +6,48 @@ import {
   DragStartEvent,
   KeyboardSensor,
   PointerSensor,
-  TouchSensor,
+  PointerSensorOptions,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { useMemo, useState } from 'react';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useEffect, useMemo, useState } from 'react';
+import { Board as BoardRow, ViewSwitch } from 'ui';
 import { ListTasksFilter, Task, TaskStatus } from '../api/types';
 import { useMoveTask } from '../hooks/useTasks';
-import { STATUSES } from '../utils/meta';
+import { STATUS_LABEL, STATUSES } from '../utils/meta';
 import { BoardColumn } from './board-column';
 import { TaskCardBody } from './task-card';
+
+const PHONE_STATUS_KEY = 'grbpwr.kanban.phoneStatus';
+
+/**
+ * ДРАГ — ТОЛЬКО МЫШЬЮ/ПЕРОМ. На телефоне палец, начавший жест на карточке, обязан листать
+ * страницу, а не поднимать карточку: TouchSensor снят, а PointerSensor (он ловит и касания —
+ * pointer events общие) отсекает `pointerType === 'touch'`. Переезд на телефоне — через select
+ * статуса на самой карточке.
+ */
+class MousePointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      handler: (event: React.PointerEvent, options: PointerSensorOptions) =>
+        event.nativeEvent.pointerType !== 'touch' &&
+        PointerSensor.activators[0].handler(event, options),
+    },
+  ];
+}
+
+function readPhoneStatus(): TaskStatus {
+  try {
+    const v = sessionStorage.getItem(PHONE_STATUS_KEY) as TaskStatus | null;
+    if (v && STATUSES.includes(v)) return v;
+  } catch {
+    /* storage blocked — default tab */
+  }
+  return 'TASK_STATUS_TODO';
+}
 
 function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   const map: Record<TaskStatus, Task[]> = {
@@ -59,11 +90,20 @@ export function Board({
   filtered?: boolean;
 }) {
   const move = useMoveTask(filter);
+  const { showMessage } = useSnackBarStore();
   const [activeId, setActiveId] = useState<number | null>(null);
+  // Телефон (< sm) показывает ОДНУ колонку; какая — помнит вкладка.
+  const [phoneStatus, setPhoneStatus] = useState<TaskStatus>(readPhoneStatus);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PHONE_STATUS_KEY, phoneStatus);
+    } catch {
+      /* storage blocked */
+    }
+  }, [phoneStatus]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -120,6 +160,38 @@ export function Board({
     });
   }
 
+  /**
+   * ПЕРЕЕЗД ИЗ SELECT'А НА КАРТОЧКЕ. Та же мутация, что у драга, и позиция — КОНЕЦ целевой
+   * колонки, посчитанный по ПОЛНОЙ колонке (довод — в handleDragEnd). Undo возвращает карточку
+   * в её прежний слот: индекс снят с полной исходной колонки ДО переезда, а после переезда в
+   * ней ровно на одну карточку меньше — вставка по тому же индексу ставит её на место.
+   */
+  function moveTo(task: Task, status: TaskStatus) {
+    if (task.status === status) return;
+    const prevStatus = task.status;
+    const prevIndex = Math.max(
+      0,
+      fullByStatus[prevStatus].findIndex((t) => t.id === task.id),
+    );
+    const position = fullByStatus[status].filter((t) => t.id !== task.id).length;
+    move.mutate(
+      { id: task.id, board: task.board, status, position },
+      {
+        onSuccess: () =>
+          showMessage(`moved to ${STATUS_LABEL[status]}`, 'success', {
+            label: 'undo',
+            onClick: () =>
+              move.mutate({
+                id: task.id,
+                board: task.board,
+                status: prevStatus,
+                position: prevIndex,
+              }),
+          }),
+      },
+    );
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -128,10 +200,22 @@ export function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div
-        aria-label='task board columns'
-        className='flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 sm:snap-none'
-      >
+      {/* Телефон: полоса статусов липнет под шапкой (h-12 + top-2 = top-14), колонка под ней
+          одна и во всю ширину. С sm — пять колонок, как были. */}
+      <div className='sticky top-14 z-[var(--z-sticky)] -mx-2.5 overflow-x-auto bg-pageBg px-2.5 pb-2 sm:hidden'>
+        <ViewSwitch
+          label='status'
+          value={phoneStatus}
+          onChange={setPhoneStatus}
+          options={STATUSES.map((s) => ({
+            value: s,
+            label: `${STATUS_LABEL[s]} ${byStatus[s].length}`,
+          }))}
+          className='h-11 whitespace-nowrap'
+        />
+      </div>
+
+      <BoardRow className='block gap-4 pb-4 sm:flex'>
         {STATUSES.map((status) => (
           <BoardColumn
             key={status}
@@ -139,11 +223,13 @@ export function Board({
             tasks={byStatus[status]}
             onOpen={onOpen}
             onAdd={onAdd}
+            onMove={moveTo}
             canWrite={canWrite}
             filtered={filtered}
+            className={status === phoneStatus ? undefined : 'max-sm:hidden'}
           />
         ))}
-      </div>
+      </BoardRow>
 
       <DragOverlay>
         {activeTask ? (
