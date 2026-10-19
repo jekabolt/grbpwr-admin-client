@@ -631,7 +631,8 @@ const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained:
  * placed on the explained page (each must leave it NOT explained):
  *   · a small tile piece (a drawing's size) in a pen of its own at the page's centre, or at its
  *     clearest spot when the page draws there (tones and parts never reach a piece drawn with a pen
- *     of its own; a bare outline laid OVER a drawing reads as that drawing — a known limit);
+ *     of its own), and over the page's busiest spot (Codex r5: an illustration's lines under it
+ *     are not its own detail);
  *   · the same with a WHITE fill under it (a mask, as tile sheets draw it — never a tone);
  *   · the largest piece crossing the page's right edge (straight rules pass the edge, a piece not);
  *   · a waistband: a rectangle in the tile sheet's pen with its name and cut, and with a size key's
@@ -646,6 +647,10 @@ const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained:
  * or a label in Russian, a labelled pocket inside a closed drawing in that drawing's pen, a straight
  * edge in a pen of its own off the page, coded button templates (round holes / slots + drill dots),
  * a waistband in a pen of its own with its name and cut (a frame only as a table of pieces).
+ * Codex r5: the waistband drawn as four separate sides (in a pen of its own and in the tile pen),
+ * the small piece over a grey fill with four filled notch triangles or arrowheads, or with its
+ * outline drawn twice, and the own-pen waistband with its name only, a grainline only, a wrapped
+ * cutting note, or rows lettered A / B of fabric and interfacing.
  */
 function ink5(
   name: string,
@@ -909,6 +914,86 @@ function ink5(
       !drill.explained,
       drill.unexplained ?? drill.explained,
     );
+    // Codex r5: four filled notch triangles (5 × 4 mm) or arrowheads (2 × 5 mm) — compact and
+    // small, no strokes of shading — and the outline drawn twice (no family of its own)
+    for (const [what, tw, th] of [
+      ['notch triangles', 5, 4],
+      ['arrowheads', 2, 5],
+    ] as const) {
+      const r2 = read([
+        { pts: at, closed: true, style: fill([200, 200, 200]) },
+        { pts: at, closed: true, style: own },
+        ...[
+          [-0.2, -0.2],
+          [0.2, -0.2],
+          [-0.2, 0.2],
+          [0.2, 0.2],
+        ].map(([fx, fy]) => {
+          const x = cx + fx * w;
+          const y = cy + fy * h;
+          return {
+            pts: [
+              { x: x - tw / 2, y },
+              { x: x + tw / 2, y },
+              { x, y: y + th },
+            ],
+            closed: true,
+            style: fill([0, 0, 0]),
+          };
+        }),
+      ]);
+      check(
+        name,
+        `${tag}: the same small piece over a grey fill with four filled ${what} → not explained`,
+        !r2.explained,
+        r2.unexplained ?? r2.explained,
+      );
+    }
+    const twice = read([
+      { pts: at, closed: true, style: fill([200, 200, 200]) },
+      { pts: at, closed: true, style: own },
+      { pts: [...at].reverse(), closed: true, style: own },
+    ]);
+    check(
+      name,
+      `${tag}: the same small piece over a grey fill with its outline drawn twice → not explained`,
+      !twice.explained,
+      twice.unexplained ?? twice.explained,
+    );
+    // Codex r5: the same piece laid over the busiest spot of the page where none of the page's
+    // lines ends on its outline (an illustration's lines in another ink: not the drawing's own
+    // detail; lines ending on it by chance read as seams — a known limit over dense line work)
+    const seg = (v: PtMm, p: PtMm, q: PtMm) => {
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      const l2 = dx * dx + dy * dy;
+      const u = l2 ? Math.max(0, Math.min(1, ((v.x - p.x) * dx + (v.y - p.y) * dy) / l2)) : 0;
+      return Math.hypot(v.x - p.x - u * dx, v.y - p.y - u * dy);
+    };
+    const onRing = (v: PtMm, q: PtMm[]) =>
+      q.some((p, k) => seg(v, p, q[(k + 1) % q.length]) <= PAGE_INK.ownedEndMm + 0.5);
+    let top = { x: 0, y: 0, n: 0 };
+    for (let y0 = 10; y0 + h <= pg.heightMm - 10; y0 += 10)
+      for (let x0 = 10; x0 + w <= pg.widthMm - 10; x0 += 10) {
+        const n = busy(x0, y0);
+        if (n <= top.n) continue;
+        const q = moved(small.pts, x0 - b.minX, y0 - b.minY);
+        const ends = pcs.chains.some(
+          (c) => !c.closed && (onRing(c.pts[0], q) || onRing(c.pts[c.pts.length - 1], q)),
+        );
+        if (!ends) top = { x: x0, y: y0, n };
+      }
+    if (top.n >= PAGE_INK.drawingDetail) {
+      const r2 = read([
+        { pts: moved(small.pts, top.x - b.minX, top.y - b.minY), closed: true, style: own },
+      ]);
+      check(
+        name,
+        `${tag}: the same small piece over the busiest spot of the page where no line ends on it (${top.n} lines in its box) → not explained`,
+        !r2.explained,
+        r2.unexplained ?? r2.explained,
+      );
+    }
     // Codex r4: two grey pocket templates of one pen and tint, each with its grainline and its
     // name (a family of toned outlines, but a silhouette carries no name; with neither name nor
     // cut it is a known limit — an unlabelled template reads as a pieces index)
@@ -1024,6 +1109,22 @@ function ink5(
       { x: x0 + w, y: y0 + h },
       { x: x0, y: y0 + h },
     ];
+    // Codex r5: the same waistband drawn as four separate sides (chains/ never joins round a
+    // corner) — one rectangle all the same, not four rules
+    const sides = (q: PtMm[], style: Omit<Style, 'id'>): Add[] =>
+      q.map((v, k) => ({ pts: [v, q[(k + 1) % q.length]], closed: false, style }));
+    {
+      const r = read(sides(rect, own), [
+        { text: 'WAISTBAND', at: { x: x0 + 4, y: y0 + h - 10 } },
+        { text: 'CUT 1 ON FOLD', at: { x: x0 + 4, y: y0 + h - 18 } },
+      ]);
+      check(
+        name,
+        `${tag}: a ${Math.round(h)} mm waistband in a pen of its own drawn as four separate sides with «WAISTBAND / CUT 1 ON FOLD» → not explained`,
+        !r.explained,
+        r.unexplained ?? r.explained,
+      );
+    }
     for (const words of [
       ['WAISTBAND', 'CUT 1 ON FOLD'],
       ['WAISTBAND', 'FABRIC: CUT 1', 'INTERFACING: CUT 1'],
@@ -1049,6 +1150,44 @@ function ink5(
       check(
         name,
         `${tag}: a ${Math.round(h)} mm waistband in a pen of its own ${at ? 'where the page is clear' : 'at the centre (no clear band)'} with «${words.join(' / ')}»${words.length > 2 ? ' and a grainline' : ''} → not explained`,
+        !r.explained,
+        r.unexplained ?? r.explained,
+      );
+    }
+    // Codex r5: the same waistband with its name only, a grainline only (it frames no text, no
+    // drawing, no ids), a cutting note wrapped in it, or two rows lettered A / B (neither a note
+    // nor a table of pieces at the coverage of a real one)
+    const grain: Add = {
+      pts: [
+        { x: x0 + w / 2, y: y0 + 10 },
+        { x: x0 + w / 2, y: y0 + h - 10 },
+      ],
+      closed: false,
+      style: own,
+    };
+    // (only where the page is clear: a rectangle laid over the page's text frames that text)
+    const bare = [
+      ['only «WAISTBAND»', [], ['WAISTBAND']],
+      ['only a grainline', [grain], []],
+      [
+        'a cutting note',
+        [],
+        ['Cut 1 on fold of', 'the fabric and 1', 'of the interfacing', 'for the waistband'],
+      ],
+      [
+        '«A / B / FABRIC: CUT 1 / INTERFACING: CUT 1»',
+        [],
+        ['A', 'B', 'FABRIC: CUT 1', 'INTERFACING: CUT 1'],
+      ],
+    ] as const;
+    for (const [what, lines, words] of at ? bare : []) {
+      const r = read(
+        [{ pts: rect, closed: true, style: own }, ...lines],
+        words.map((text, k) => ({ text, at: { x: x0 + 2, y: y0 + h - 10 - 6 * k } })),
+      );
+      check(
+        name,
+        `${tag}: a ${Math.round(h)} mm waistband in a pen of its own with ${what} → not explained`,
         !r.explained,
         r.unexplained ?? r.explained,
       );
@@ -1126,6 +1265,17 @@ function ink5(
       `${tag}: a waistband in the tile sheet's pen with its name and cut → not explained`,
       !plain.explained,
       plain.unexplained ?? plain.explained,
+    );
+    // Codex r5: drawn as four separate sides
+    const plain4 = read(
+      rect.map((v, k) => ({ pts: [v, rect[(k + 1) % 4]], closed: false, style })),
+      [label(0, 'WAISTBAND'), label(1, 'CUT 1 ON FOLD')],
+    );
+    check(
+      name,
+      `${tag}: a waistband in the tile sheet's pen drawn as four separate sides with its name and cut → not explained`,
+      !plain4.explained,
+      plain4.unexplained ?? plain4.explained,
     );
     const keyWords = ['Size Line Key', 'SIZE 00', 'SIZE 02', 'SIZE 04', 'SIZE 06', 'SIZE 08'];
     const keyed = read(
