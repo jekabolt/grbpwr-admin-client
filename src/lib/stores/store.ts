@@ -18,6 +18,8 @@ let nextKey = 0;
 /** Four still reads as a list at a glance; past it the column becomes a page. */
 const TOAST_CAP = 4;
 const HISTORY_CAP = 50;
+/** A read entry re-reported sooner than this stays read: a poll must not re-light the badge. */
+const RENOTIFY_MS = 60_000;
 
 /**
  * The row under the operator's pointer, set by `SnackBar` on real pointer moves only. Eviction
@@ -69,6 +71,8 @@ function withHistory(history: NotifyEntry[]): Pick<State, 'history' | 'unread' |
   return { history, unread: unread.length, unreadError: unread.some((h) => isBad(h.sev)) };
 }
 
+const stale = (h: NotifyEntry) => Date.now() - h.at >= RENOTIFY_MS;
+
 /** Writes `next` under `key`. `prev` is what the key held before; undefined = new. */
 function put(
   state: State,
@@ -107,7 +111,9 @@ function put(
   const at = state.history.findIndex((h) => h.key === key);
   if (at === -1 && !isLogged(next.sev)) return out;
   const was = at === -1 ? undefined : state.history[at];
-  const unread = isBad(next.sev) && (!was || !isBad(was.sev) || !sameNews(was, next) || was.unread);
+  const unread =
+    isBad(next.sev) &&
+    (!was || !isBad(was.sev) || !sameNews(was, next) || was.unread || stale(was));
   const entry: NotifyEntry = {
     ...next,
     key,
@@ -124,14 +130,13 @@ function put(
   return { ...out, ...withHistory(history) };
 }
 
-/** An identical report while the first is still up: ×N in place, timer restarted. */
+/** An identical report while the first is still up: ×N in place, timer NOT restarted. */
 function repeat(state: State, twin: Toast, action: NotifyAction | undefined): Partial<State> {
   const toasts = state.toasts.map((t) =>
     t === twin
       ? {
           ...t,
           count: t.count + 1,
-          nonce: t.nonce + 1,
           seq: (nextSeq += 1),
           action: t.action ?? action,
         }
@@ -144,7 +149,7 @@ function repeat(state: State, twin: Toast, action: NotifyAction | undefined): Pa
     ...was,
     count: was.count + 1,
     at: Date.now(),
-    unread: was.unread || isBad(was.sev),
+    unread: was.unread || (isBad(was.sev) && stale(was)),
   };
   return { toasts, ...withHistory([entry, ...state.history.filter((_, i) => i !== at)]) };
 }
@@ -186,6 +191,11 @@ export const useSnackBarStore = create<SnackBarStore>((set, get) => ({
 
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   dismissAllToasts: () => set({ toasts: [] }),
+  removeNotify: (key) =>
+    set((s) => ({
+      toasts: s.toasts.filter((t) => t.key !== key),
+      ...withHistory(s.history.filter((h) => h.key !== key)),
+    })),
   markAllRead: () =>
     set((s) => withHistory(s.history.map((h) => (h.unread ? { ...h, unread: false } : h)))),
   clearHistory: () => set(withHistory([])),
@@ -207,3 +217,5 @@ export const notify = (input: NotifyInput, opts?: NotifyOptions) =>
 
 export const updateNotify = (key: string, patch: NotifyPatch, opts?: NotifyOptions) =>
   useSnackBarStore.getState().updateNotify(key, patch, opts);
+
+export const removeNotify = (key: string) => useSnackBarStore.getState().removeNotify(key);

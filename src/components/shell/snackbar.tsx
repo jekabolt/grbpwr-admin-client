@@ -147,7 +147,7 @@ function ToastRow({
     if (ms === null || held) return;
     const timer = window.setTimeout(() => (reading() ? hold() : dismiss(id)), ms);
     return () => window.clearTimeout(timer);
-    /* `nonce`: a repeat or an update restarts the clock. */
+    /* `nonce`: an update restarts the clock; a repeat keeps the first arrival's. */
   }, [dismiss, id, nonce, sev, hasAction, held, reading, hold]);
 
   /* Swipe: touch and pen only; a mouse drag is a text selection. */

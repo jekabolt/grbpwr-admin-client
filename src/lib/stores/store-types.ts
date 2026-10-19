@@ -41,7 +41,7 @@ export interface Toast extends NotifyInput {
   id: number;
   /** Identical repeats while this toast is up, shown as ×N. */
   count: number;
-  /** Bumped on every repeat or update; restarts the timer. */
+  /** Bumped on every update (not on a repeat); restarts the timer. */
   nonce: number;
   /** Activity stamp, bumped on repeats too: eviction order is "least recently reported". */
   seq: number;
@@ -71,6 +71,8 @@ export interface SnackBarStore {
   updateNotify: (key: string, patch: NotifyPatch, opts?: NotifyOptions) => void;
   dismissToast: (id: number) => void;
   dismissAllToasts: () => void;
+  /** Drops the key's toast and inbox entry. */
+  removeNotify: (key: string) => void;
   markAllRead: () => void;
   clearHistory: () => void;
   /** Adapter for the pre-`notify` call sites; signature frozen. */

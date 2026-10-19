@@ -29,7 +29,7 @@ import {
 } from 'components/managers/files/upload/queue';
 import { uploadJob } from 'components/managers/files/upload/text';
 import { browserUploadTransport } from 'components/managers/files/upload/transport';
-import { notify, updateNotify } from './store';
+import { notify, removeNotify, updateNotify } from './store';
 
 export interface UploadQueueStore {
   queue: QueueState;
@@ -154,7 +154,11 @@ function trackJob(queue: QueueState): void {
   }
 
   batch = null;
-  if (!rows.length) return;
+  // Nothing settled (all cancelled, dismissed, reset): drop the job, or it spins forever.
+  if (!rows.length) {
+    removeNotify(b.key);
+    return;
+  }
   const union = inheritTopics(
     rows.flatMap((r) => r.topicIds),
     rows.flatMap((r) => r.newTopics),
@@ -172,6 +176,8 @@ function trackJob(queue: QueueState): void {
               // A running batch takes the rows in; only an idle queue reuses this key.
               if (!batch) retryKey = b.key;
               retryable.forEach((id) => engine.retry(id));
+              // No row went live: the key must not leak into the next batch.
+              if (!hasLiveUploads(engine.state())) retryKey = null;
             },
           }
         : undefined,
@@ -223,6 +229,7 @@ export const useUploadQueueStore = create<UploadQueueStore>((set) => ({
   clearSettled: () => engine.clearSettled(),
   reset: () => {
     counted.clear();
+    retryKey = null;
     engine.reset();
   },
   setCollapsed: (collapsed) => set({ collapsed }),
