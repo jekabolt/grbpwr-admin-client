@@ -1,4 +1,6 @@
+import { cn } from 'lib/utility';
 import { useDockBottom } from 'hooks/useDockBottom';
+import { useTypingOnPhone } from './use-typing-on-phone';
 import { useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Model } from 'api/proto-http/admin';
@@ -56,6 +58,7 @@ export function ModelForm({
 }) {
   const saveBarRef = useRef<HTMLDivElement>(null);
   useDockBottom(saveBarRef, []);
+  const typingOnPhone = useTypingOnPhone();
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
   const [formError, setFormError] = useState<string | null>(null);
@@ -164,7 +167,10 @@ export function ModelForm({
 
           <div
             ref={saveBarRef}
-            className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+            className={cn(
+              'fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
+              typingOnPhone && 'hidden',
+            )}
           >
             {formError ? (
               <CalloutBox tone='error' className='min-w-0'>
