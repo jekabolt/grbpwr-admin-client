@@ -690,7 +690,7 @@ export function MediaViewer({
                       className={cn(
                         // White ground behind the picture: transparent PNGs (background-removed
                         // product shots, sketches) are unreadable on the near-black overlay.
-                        'max-h-[calc(100dvh-14rem)] max-w-full select-none bg-bgColor object-contain lg:max-h-[calc(100vh-11rem)]',
+                        'h-auto w-auto max-h-[calc(100dvh-14rem)] max-w-full select-none bg-bgColor object-contain lg:max-h-[calc(100vh-11rem)]',
                         chromeHidden && 'max-lg:max-h-dvh',
                         gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
                         !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
@@ -844,9 +844,8 @@ export function MediaViewer({
                         {FILE_MISSING_WORDS}
                       </span>
                     ) : (
-                      <BlurhashImage
+                      <img
                         src={item.thumbnail || item.src}
-                        blurhash={item.blurhash}
                         alt=''
                         className='size-full bg-bgColor object-cover'
                         onError={(e) => markMissing(e.currentTarget.getAttribute('src'))}

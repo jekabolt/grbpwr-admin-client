@@ -4,7 +4,6 @@ import {
   forwardRef,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ImgHTMLAttributes,
@@ -13,7 +12,7 @@ import {
 } from 'react';
 
 const PLACEHOLDER_SIZE = 32;
-const PLACEHOLDER_CACHE_LIMIT = 500;
+const PLACEHOLDER_CACHE_LIMIT = 2000;
 const FADE_DURATION_MS = 300;
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -86,12 +85,19 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
     { src, blurhash, alt, className, load = true, onLoad, onError, onTransitionEnd, ...imageProps },
     forwardedRef,
   ) {
-    const placeholder = useMemo(() => decodePlaceholder(blurhash), [blurhash]);
+    const hash = blurhash?.trim() ?? '';
+    const [placeholderState, setPlaceholderState] = useState<{
+      hash: string;
+      value: string | null;
+    }>({ hash: '', value: null });
     const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
     const [settledSrc, setSettledSrc] = useState<string | null>(null);
+    const [failedSrc, setFailedSrc] = useState<string | null>(null);
     const instantSrc = useRef<string | null>(null);
     const loaded = load && loadedSrc === src;
-    const showPlaceholder = !load || settledSrc !== src;
+    const failed = load && failedSrc === src;
+    const showPlaceholder = !failed && (!load || settledSrc !== src);
+    const placeholder = placeholderState.hash === hash ? placeholderState.value : null;
 
     const setImageRef = useCallback(
       (node: HTMLImageElement | null) => {
@@ -110,11 +116,18 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
 
     const handleLoad = (event: SyntheticEvent<HTMLImageElement>) => {
       const requestedSrc = event.currentTarget.getAttribute('src') ?? src;
+      setFailedSrc(null);
       setLoadedSrc(requestedSrc);
       if (instantSrc.current === requestedSrc || prefersReducedMotion()) {
         setSettledSrc(requestedSrc);
       }
       onLoad?.(event);
+    };
+
+    const handleError = (event: SyntheticEvent<HTMLImageElement>) => {
+      const requestedSrc = event.currentTarget.getAttribute('src') ?? src;
+      setFailedSrc(requestedSrc);
+      onError?.(event);
     };
 
     const handleTransitionEnd = (event: TransitionEvent<HTMLImageElement>) => {
@@ -129,6 +142,28 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
       const timeout = window.setTimeout(() => setSettledSrc(src), FADE_DURATION_MS);
       return () => window.clearTimeout(timeout);
     }, [loaded, settledSrc, src]);
+
+    useEffect(() => {
+      if (!hash || !showPlaceholder || typeof document === 'undefined') return;
+
+      const cached = cachedPlaceholder(hash);
+      if (cached !== undefined) {
+        setPlaceholderState({ hash, value: cached });
+        return;
+      }
+
+      const decodeHash = () => {
+        setPlaceholderState({ hash, value: decodePlaceholder(hash) });
+      };
+
+      if (typeof window.requestIdleCallback === 'function') {
+        const idle = window.requestIdleCallback(decodeHash, { timeout: 1000 });
+        return () => window.cancelIdleCallback(idle);
+      }
+
+      const timeout = window.setTimeout(decodeHash, 0);
+      return () => window.clearTimeout(timeout);
+    }, [hash, showPlaceholder]);
 
     return (
       <span
@@ -161,12 +196,12 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
             src={src}
             alt={alt}
             onLoad={handleLoad}
-            onError={onError}
+            onError={handleError}
             onTransitionEnd={handleTransitionEnd}
             className={cn(
               'block transition-opacity duration-300 ease-out motion-reduce:transition-none',
               className,
-              loaded ? 'opacity-100' : 'opacity-0',
+              loaded || failed ? 'opacity-100' : 'opacity-0',
             )}
           />
         )}
