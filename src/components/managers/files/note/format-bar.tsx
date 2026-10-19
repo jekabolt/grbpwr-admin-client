@@ -772,97 +772,103 @@ export function FormatBar({
             )}
           >
             {tableBar}
-            <div className='flex items-center gap-1.5 overflow-x-auto px-2 py-1.5'>
-              {PHONE_TOOLS.map((t) => {
-                const a = actions.find((x) => x.label === t.label);
-                if (!a) return null;
-                return (
-                  <Button
-                    key={t.label}
-                    type='button'
-                    size='sm'
-                    variant='secondary'
-                    aria-label={t.label}
-                    {...KEEP_FOCUS}
-                    onClick={a.run}
-                    className={PHONE_TOOL}
-                  >
-                    <span className={t.className}>{t.glyph}</span>
-                  </Button>
-                );
-              })}
-              <Button
-                type='button'
-                size='sm'
-                variant='secondary'
-                {...KEEP_FOCUS}
-                onClick={() => setPicker('link')}
-                className={PHONE_TOOL}
-              >
-                file
-              </Button>
-              <GenericPopover
-                open={phoneMenu}
-                onOpenChange={setPhoneMenu}
-                noTail
-                className='w-56'
-                // Меню не забирает фокус у поля: клавиатура остаётся, каретка — на месте.
-                contentProps={{
-                  side: inFlow ? 'bottom' : 'top',
-                  align: 'end',
-                  onOpenAutoFocus: (e: Event) => e.preventDefault(),
-                  onCloseAutoFocus: (e: Event) => e.preventDefault(),
-                }}
-                triggerProps={{
-                  'aria-label': 'more formatting',
-                  ...KEEP_FOCUS,
-                  className: cn(
-                    buttonVariants({ variant: 'secondary', size: 'sm' }),
-                    PHONE_TOOL,
-                    'flex items-center justify-center',
-                  ),
-                }}
-                openElement={<span aria-hidden>•••</span>}
-              >
-                <div role='menu' className='flex flex-col'>
-                  {[
-                    ...phone.lead,
-                    ...PHONE_MORE.map((label) => ({
-                      label,
-                      run: actions.find((x) => x.label === label)?.run ?? (() => {}),
-                    })),
-                    {
-                      label: 'table',
-                      // Сетка выбора размера живёт на наведении и на телефоне не работает:
-                      // здесь вставляется шапка и две строки на три столбца, дальше — полоса
-                      // режима таблицы.
-                      run: () => apply((t, s2, e) => tableInsertEdit(t, s2, e, 2, 3)),
-                    },
-                    {
-                      label: 'media',
-                      run: () => mediaHost.current?.querySelector('button')?.click(),
-                    },
-                    ...phone.tail,
-                  ].map((item: FormatMenuItem) => (
+            {/* «•••» ПРИБИТ СПРАВА, вне прокрутки: в нём rename, wrap lines, add below, delete —
+                уехав за край ряда, он пропадал из виду (жалоба владельца по скриншоту 375px). */}
+            <div className='flex items-center'>
+              <div className='flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1.5 pl-2 pr-1.5'>
+                {PHONE_TOOLS.map((t) => {
+                  const a = actions.find((x) => x.label === t.label);
+                  if (!a) return null;
+                  return (
                     <Button
-                      key={item.label}
+                      key={t.label}
                       type='button'
-                      role={item.on === undefined ? 'menuitem' : 'menuitemcheckbox'}
-                      aria-checked={item.on}
-                      disabled={item.disabled}
+                      size='sm'
+                      variant='secondary'
+                      aria-label={t.label}
                       {...KEEP_FOCUS}
-                      onClick={() => {
-                        setPhoneMenu(false);
-                        item.run();
-                      }}
-                      className={MENU_ITEM}
+                      onClick={a.run}
+                      className={PHONE_TOOL}
                     >
-                      <span>{item.label}</span>
-                      {item.on && <span aria-hidden>✓</span>}
+                      <span className={t.className}>{t.glyph}</span>
                     </Button>
-                  ))}
-                </div>
-              </GenericPopover>
+                  );
+                })}
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='secondary'
+                  {...KEEP_FOCUS}
+                  onClick={() => setPicker('link')}
+                  className={PHONE_TOOL}
+                >
+                  file
+                </Button>
+              </div>
+              <div className='flex-none border-l border-borderColor py-1.5 pl-1.5 pr-2'>
+                <GenericPopover
+                  open={phoneMenu}
+                  onOpenChange={setPhoneMenu}
+                  noTail
+                  className='w-56'
+                  // Меню не забирает фокус у поля: клавиатура остаётся, каретка — на месте.
+                  contentProps={{
+                    side: inFlow ? 'bottom' : 'top',
+                    align: 'end',
+                    onOpenAutoFocus: (e: Event) => e.preventDefault(),
+                    onCloseAutoFocus: (e: Event) => e.preventDefault(),
+                  }}
+                  triggerProps={{
+                    'aria-label': 'more formatting',
+                    ...KEEP_FOCUS,
+                    className: cn(
+                      buttonVariants({ variant: 'secondary', size: 'sm' }),
+                      PHONE_TOOL,
+                      'flex items-center justify-center',
+                    ),
+                  }}
+                  openElement={<span aria-hidden>•••</span>}
+                >
+                  <div role='menu' className='flex flex-col'>
+                    {[
+                      ...phone.lead,
+                      ...PHONE_MORE.map((label) => ({
+                        label,
+                        run: actions.find((x) => x.label === label)?.run ?? (() => {}),
+                      })),
+                      {
+                        label: 'table',
+                        // Сетка выбора размера живёт на наведении и на телефоне не работает:
+                        // здесь вставляется шапка и две строки на три столбца, дальше — полоса
+                        // режима таблицы.
+                        run: () => apply((t, s2, e) => tableInsertEdit(t, s2, e, 2, 3)),
+                      },
+                      {
+                        label: 'media',
+                        run: () => mediaHost.current?.querySelector('button')?.click(),
+                      },
+                      ...phone.tail,
+                    ].map((item: FormatMenuItem) => (
+                      <Button
+                        key={item.label}
+                        type='button'
+                        role={item.on === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                        aria-checked={item.on}
+                        disabled={item.disabled}
+                        {...KEEP_FOCUS}
+                        onClick={() => {
+                          setPhoneMenu(false);
+                          item.run();
+                        }}
+                        className={MENU_ITEM}
+                      >
+                        <span>{item.label}</span>
+                        {item.on && <span aria-hidden>✓</span>}
+                      </Button>
+                    ))}
+                  </div>
+                </GenericPopover>
+              </div>
             </div>
           </div>,
         )}
