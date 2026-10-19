@@ -1,7 +1,8 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { TierConfigEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackLink, Button, Input, Section, SectionStack, Text } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
@@ -11,6 +12,8 @@ export function TierConfig() {
   const update = useUpdateTierConfig();
   const [entries, setEntries] = useState<TierConfigEntry[]>([]);
   const { canWrite } = usePermissions();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [entries.length > 0]);
 
   useEffect(() => {
     if (data?.entries) setEntries(data.entries.map((e) => ({ ...e })));
@@ -140,7 +143,10 @@ export function TierConfig() {
       </SectionStack>
 
       {canWrite(SECTION.members) && entries.length > 0 && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+        >
           <Text variant='inactive' size='small'>
             {dirty ? 'unsaved changes' : ' '}
           </Text>

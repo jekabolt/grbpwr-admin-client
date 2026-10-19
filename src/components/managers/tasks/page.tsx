@@ -1,9 +1,10 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { filesService } from 'components/managers/files/api/filesService';
 import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -88,6 +89,8 @@ export function Tasks() {
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [writable]);
 
   // tskTabs v2 — the board is chosen from a left rail, persisted as before.
   const [activeBoard, setActiveBoard] = useState<TaskBoard>(
@@ -392,7 +395,10 @@ export function Tasks() {
       </SideRailLayout>
 
       {writable && (
-        <div className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'
+        >
           <Button
             variant='main'
             size='lg'

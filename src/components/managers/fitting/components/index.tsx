@@ -1,3 +1,4 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -69,6 +70,8 @@ export function FittingForm({
   id?: string;
   fitting?: common_Fitting;
 }) {
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, []);
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
   const createFitting = useCreateFitting();
@@ -358,7 +361,10 @@ export function FittingForm({
         </SectionStack>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+      >
         <Text variant='inactive' size='small'>
           {form.formState.isDirty ? 'unsaved changes' : ' '}
         </Text>
