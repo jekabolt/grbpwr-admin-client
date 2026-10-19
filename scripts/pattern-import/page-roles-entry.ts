@@ -9,8 +9,10 @@
 //   · MUTATION "the AI was wrong": a real tile answered `instructions` 0.99 stays a tile.
 //   node scripts/pattern-import/page-roles.mjs              (yarn patimport:page-roles)
 //   node scripts/pattern-import/page-roles.mjs dump a.pdf…  the per-page stats (fixture authoring)
+//   node scripts/pattern-import/page-roles.mjs ink a.pdf /abs/b.pdf…  the page reading's truth and
+//     mutations only (clean/page-ink.ts), on corpus or absolute paths
 import { readFileSync, readdirSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 import { Session } from 'lib/pattern-import/worker/session';
 import {
   classifyFilePages,
@@ -529,6 +531,8 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
   type Cut = { pts: PtMm[]; closed: boolean; style: Style; ext: number; size: number };
   let closed: Cut | null = null;
   let open: Cut | null = null;
+  /** Every closed non-rectangular piece on one tile (the small-piece mutations). */
+  const pieces: Cut[] = [];
   for (const pc of tilePcs)
     pc.chains.forEach((c, i) => {
       const b = pc.box[i];
@@ -553,6 +557,7 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
       a = Math.abs(a) / 2;
       if (a < PATIMPORT.minPieceAreaMm2 || a >= 0.93 * (b.maxX - b.minX) * (b.maxY - b.minY))
         return;
+      pieces.push({ pts: c.pts, closed: true, style: st, ext, size: a });
       if (!closed || a > closed.size)
         closed = { pts: c.pts, closed: true, style: st, ext, size: a };
     });
@@ -582,6 +587,7 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
       return pageInk(pageChains(mut), pens, shapes, mut);
     };
     const own = inject(p.style);
+    ink5(name, d.page, pg, pieces, p, pens, shapes);
     check(
       name,
       `MUTATION p${d.page + 1}: a tile ${p.closed ? 'piece' : 'piece edge'} at 1:1 in its own pen on it → not explained`,
@@ -601,6 +607,248 @@ function inkChecks(name: string, s: Session, base: StageIO['clean']['out']) {
   }
 }
 const INK_ROWS: { file: string; asked: number; explained: string[]; unexplained: string[] }[] = [];
+
+/**
+ * PAGES (night 19.10) — the page reading learnt rules past the edge, bars, tones, the parts of one
+ * drawing, the size line key and the tile map; every one of them is checked against a real piece
+ * placed on the explained page (each must leave it NOT explained):
+ *   · a small tile piece (a drawing's size) in a pen of its own at the page's centre — over the
+ *     page's drawings, if any (tones and parts never reach a piece drawn with a pen of its own);
+ *   · the same with a WHITE fill under it (a mask, as tile sheets draw it — never a tone);
+ *   · the largest piece crossing the page's right edge (straight rules pass the edge, a piece not);
+ *   · a waistband: a rectangle in the tile sheet's pen with its name and cut, and with a size key's
+ *     words — «Size Line Key», four «SIZE n» labels — but no sample lines.
+ */
+function ink5(
+  name: string,
+  page: number,
+  pg: IRPage,
+  pieces: { pts: PtMm[]; style: Style; ext: number; size: number }[],
+  big: { pts: PtMm[]; closed: boolean; style: Style; ext: number },
+  pens: ReturnType<typeof tilePensOf>,
+  shapes: ReturnType<typeof shapesOf>,
+) {
+  const tag = `MUTATION p${page + 1}`;
+  const drawMax = PAGE_INK.drawingMaxShare * Math.min(pg.widthMm, pg.heightMm);
+  const box = (q: PtMm[]) => ({
+    minX: Math.min(...q.map((v) => v.x)),
+    minY: Math.min(...q.map((v) => v.y)),
+    maxX: Math.max(...q.map((v) => v.x)),
+    maxY: Math.max(...q.map((v) => v.y)),
+  });
+  const moved = (q: PtMm[], dx: number, dy: number) => q.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+  type Add = { pts: PtMm[]; closed: boolean; style: Omit<Style, 'id'> };
+  const read = (
+    adds: Add[],
+    texts: { text: string; at: PtMm }[] = [],
+    rasters: IRPage['rasters'] = [],
+  ) => {
+    let sid = Math.max(0, ...pg.styles.map((x) => x.id));
+    let pid = Math.max(0, ...pg.paths.map((x) => x.id));
+    let tid = Math.max(0, ...pg.texts.map((x) => x.id));
+    const styles = [...pg.styles];
+    const paths = [...pg.paths];
+    for (const a of adds) {
+      styles.push({ ...a.style, id: ++sid } as Style);
+      paths.push({
+        id: ++pid,
+        pts: a.pts,
+        closed: a.closed,
+        style: sid,
+        src: { file: pg.file, page: pg.page, op: 990000 + pid, sub: 0 },
+      });
+    }
+    const mut: IRPage = {
+      ...pg,
+      styles,
+      paths,
+      rasters: [...pg.rasters, ...rasters],
+      texts: [
+        ...pg.texts,
+        ...texts.map((t) => ({
+          id: ++tid,
+          text: t.text,
+          anchor: t.at,
+          bbox: { minX: t.at.x, minY: t.at.y, maxX: t.at.x + 2 * t.text.length, maxY: t.at.y + 3 },
+          fontSizeMm: 3,
+          rotationDeg: 0,
+          layer: null,
+          src: { file: pg.file, page: pg.page, op: 990000 + tid, sub: 0 },
+        })),
+      ] as IRPage['texts'],
+    };
+    return pageInk(pageChains(mut), pens, shapes, mut);
+  };
+  const own: Omit<Style, 'id'> = {
+    strokeRgb: [200, 30, 30],
+    widthMm: 0.18,
+    dash: null,
+    layer: null,
+    fill: false,
+    clip: null,
+  };
+  const small = pieces.filter((x) => x.ext <= drawMax).sort((a, b) => a.size - b.size)[0];
+  if (small) {
+    const b = box(small.pts);
+    const at = moved(
+      small.pts,
+      pg.widthMm / 2 - (b.minX + b.maxX) / 2,
+      pg.heightMm / 2 - (b.minY + b.maxY) / 2,
+    );
+    const r = read([{ pts: at, closed: true, style: own }]);
+    check(
+      name,
+      `${tag}: a small tile piece (${Math.round(small.ext)} mm) in a pen of its own at the centre → not explained`,
+      !r.explained,
+      r.unexplained ?? r.explained,
+    );
+    const masked = read([
+      {
+        pts: at,
+        closed: true,
+        style: { ...own, strokeRgb: [255, 255, 255], widthMm: 0, fill: true },
+      },
+      { pts: at, closed: true, style: own },
+    ]);
+    check(
+      name,
+      `${tag}: the same small piece over a white mask → not explained`,
+      !masked.explained,
+      masked.unexplained ?? masked.explained,
+    );
+    // a photo behind it (a raster over the whole page): no tone of its own
+    const photo = read(
+      [{ pts: at, closed: true, style: own }],
+      [],
+      [
+        {
+          id: 990001,
+          page: pg.page,
+          file: pg.file,
+          bbox: { minX: 0, minY: 0, maxX: pg.widthMm, maxY: pg.heightMm },
+          widthPx: 1000,
+          heightPx: 1000,
+          dpi: 100,
+          pageCover: 1,
+        } as IRPage['rasters'][number],
+      ],
+    );
+    check(
+      name,
+      `${tag}: the same small piece over a page-wide photo → not explained`,
+      !photo.explained,
+      photo.unexplained ?? photo.explained,
+    );
+  }
+  if (big.closed) {
+    const b = box(big.pts);
+    const r = read([
+      {
+        pts: moved(
+          big.pts,
+          pg.widthMm - (b.minX + b.maxX) / 2,
+          pg.heightMm / 2 - (b.minY + b.maxY) / 2,
+        ),
+        closed: true,
+        style: big.style,
+      },
+    ]);
+    check(
+      name,
+      `${tag}: the largest piece across the page's right edge → not explained`,
+      !r.explained,
+      r.unexplained ?? r.explained,
+    );
+  }
+  const pen = pens[0];
+  if (pen) {
+    const w = 36;
+    const h = Math.min(200, 0.7 * pg.heightMm);
+    const x0 = pg.widthMm / 2 - w / 2;
+    const y0 = pg.heightMm / 2 - h / 2;
+    const rect = [
+      { x: x0, y: y0 },
+      { x: x0 + w, y: y0 },
+      { x: x0 + w, y: y0 + h },
+      { x: x0, y: y0 + h },
+    ];
+    const style: Omit<Style, 'id'> = {
+      strokeRgb: pen.rgb,
+      widthMm: pen.w,
+      dash: pen.dashed ? pen.motif ?? [2, 1] : null,
+      layer: null,
+      fill: false,
+      clip: null,
+    };
+    const label = (k: number, text: string) => ({
+      text,
+      at: { x: x0 + 4, y: y0 + h - 10 - 8 * k },
+    });
+    const plain = read(
+      [{ pts: rect, closed: true, style }],
+      [label(0, 'WAISTBAND'), label(1, 'CUT 1 ON FOLD')],
+    );
+    check(
+      name,
+      `${tag}: a waistband in the tile sheet's pen with its name and cut → not explained`,
+      !plain.explained,
+      plain.unexplained ?? plain.explained,
+    );
+    const keyed = read(
+      [{ pts: rect, closed: true, style }],
+      ['Size Line Key', 'SIZE 00', 'SIZE 02', 'SIZE 04', 'SIZE 06', 'SIZE 08'].map((t, k) =>
+        label(k, t),
+      ),
+    );
+    check(
+      name,
+      `${tag}: a waistband holding a size key's words but no sample lines → not explained`,
+      !keyed.explained,
+      keyed.unexplained ?? keyed.explained,
+    );
+    // a small square piece in the tile sheet's pen labelled with the pattern's code: its cut and
+    // its grainline say it is a piece, not a code stamp
+    const sq = 40;
+    const sx = pg.widthMm / 2 - sq / 2;
+    const sy = pg.heightMm / 2 - sq / 2;
+    const square = [
+      { x: sx, y: sy },
+      { x: sx + sq, y: sy },
+      { x: sx + sq, y: sy + sq },
+      { x: sx, y: sy + sq },
+    ];
+    const grain = [
+      { x: sx + sq / 2, y: sy + 4 },
+      { x: sx + sq / 2, y: sy + sq - 4 },
+    ];
+    const coded = read(
+      [
+        { pts: square, closed: true, style },
+        { pts: grain, closed: false, style },
+      ],
+      [
+        { text: 'MDF000', at: { x: sx + 4, y: sy + 30 } },
+        { text: 'CUT 2', at: { x: sx + 4, y: sy + 22 } },
+      ],
+    );
+    check(
+      name,
+      `${tag}: a 40 mm square piece in the tile sheet's pen with the pattern's code, its cut and a grainline → not explained`,
+      !coded.explained,
+      coded.unexplained ?? coded.explained,
+    );
+    const bare = read(
+      [{ pts: square, closed: true, style }],
+      [{ text: 'MDF000', at: { x: sx + 4, y: sy + 30 } }],
+    );
+    check(
+      name,
+      `${tag}: a 40 mm square in the tile sheet's pen with only the pattern's code (no logo) → not explained`,
+      !bare.explained,
+      bare.unexplained ?? bare.explained,
+    );
+  }
+}
 
 // ── Codex #6: independent page truth (fixtures/page-truth.json) ──────────────────────────────
 
@@ -916,6 +1164,26 @@ export async function main(args: string[]): Promise<number> {
   }
   if (args[0] === 'stale') {
     await staleSection(args[1] ?? 'robe.pdf');
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
+    return checks.every((c) => c.ok) ? 0 : 1;
+  }
+  if (args[0] === 'ink') {
+    // the page reading's truth + mutations on any PDFs (absolute paths: the golden Mood files)
+    for (const f of args.slice(1)) {
+      const s = open(isAbsolute(f) ? f : `pdf/${f}`);
+      try {
+        await s.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx);
+        inkChecks(basename(f), s, await s.runStage('clean', { edits: [] }, ctx));
+      } catch (e) {
+        check(f, 'runs', false, String((e as Error)?.stack ?? e).slice(0, 300));
+      }
+      s.close();
+    }
+    for (const r of INK_ROWS)
+      console.log(
+        `ink ${r.file.slice(0, 40).padEnd(40)} asked ${r.asked} · explained ${r.explained.join(',') || '—'}${r.unexplained.length ? ` · still a question: ${r.unexplained.map((u) => u.slice(0, 140)).join(' | ')}` : ''}`,
+      );
     for (const c of checks)
       console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
     return checks.every((c) => c.ok) ? 0 : 1;
