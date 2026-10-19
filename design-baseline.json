@@ -8,7 +8,7 @@
   },
   "src/components/managers/accounting/bank/components/bank-rules.tsx": {
     "design/no-arbitrary-px": 2,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/accounting/bank/components/import-csv-modal.tsx": {
     "design/no-arbitrary-px": 2,
@@ -55,11 +55,11 @@
   },
   "src/components/managers/accounting/journal/components/manual-entry-modal.tsx": {
     "design/no-arbitrary-px": 1,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 2
   },
   "src/components/managers/accounting/journal/components/wizard/wizard-modal.tsx": {
     "design/no-arbitrary-px": 4,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/accounting/journal/page.tsx": {
     "design/no-raw-control": 1
@@ -143,7 +143,7 @@
     "design/no-arbitrary-px": 1
   },
   "src/components/managers/archive/components/block-rail.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/archive/components/index.tsx": {
     "design/no-arbitrary-px": 1
@@ -175,14 +175,14 @@
   },
   "src/components/managers/email/components/block-list-field.tsx": {
     "design/no-arbitrary-px": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/email/components/block-rail.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/email/components/campaign-card.tsx": {
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/email/components/campaign-metrics.tsx": {
     "design/no-arbitrary-px": 1
@@ -205,13 +205,13 @@
   "src/components/managers/email/components/segment-builder/predicate-builder.tsx": {
     "design/no-arbitrary-px": 2,
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/email/components/segment-builder/segment-editor.tsx": {
     "design/no-arbitrary-px": 1
   },
   "src/components/managers/email/components/segment-builder/value-inputs.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/email/components/selectEmailType.tsx": {
     "design/no-raw-control": 1
@@ -359,7 +359,7 @@
     "design/no-arbitrary-px": 1
   },
   "src/components/managers/hero/components/block-rail.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/hero/components/hero-modal.tsx": {
     "design/no-arbitrary-px": 1
@@ -371,7 +371,7 @@
     "design/no-style-design": 1
   },
   "src/components/managers/hero/components/hero-product-picker.tsx": {
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/hero/components/hero-section-modal.tsx": {
     "design/no-arbitrary-px": 1
@@ -399,10 +399,10 @@
     "design/no-raw-control": 1
   },
   "src/components/managers/hero/components/slide-list-field.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/hero/components/tag-picker.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/materials/components/catalog-tab.tsx": {
     "design/no-raw-control": 6
@@ -419,7 +419,7 @@
     "design/no-arbitrary-px": 6,
     "design/no-local-primitive": 1,
     "design/no-radius-shadow": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/materials/components/material-prices-modal.tsx": {
     "design/no-raw-control": 7
@@ -429,7 +429,7 @@
     "design/no-raw-control": 24
   },
   "src/components/managers/materials/components/movements-tab.tsx": {
-    "design/no-raw-control": 5
+    "design/no-raw-control": 3
   },
   "src/components/managers/materials/components/packaging-bom-tab.tsx": {
     "design/no-raw-control": 4
@@ -464,9 +464,6 @@
   "src/components/managers/media/components/media-list.tsx": {
     "design/no-arbitrary-px": 1
   },
-  "src/components/managers/media/components/media-selector.tsx": {
-    "design/no-raw-control": 1
-  },
   "src/components/managers/media/components/media-slot.tsx": {
     "design/no-raw-control": 2
   },
@@ -498,9 +495,6 @@
   "src/components/managers/membership/tier-config/page.tsx": {
     "design/no-non-token-class": 3
   },
-  "src/components/managers/model/components/default-sizes-field.tsx": {
-    "design/no-raw-control": 1
-  },
   "src/components/managers/model/components/measurements-fields.tsx": {
     "design/no-raw-control": 1
   },
@@ -513,14 +507,11 @@
   "src/components/managers/opex/components/line-form.tsx": {
     "design/no-raw-control": 8
   },
-  "src/components/managers/opex/components/monthly-tab.tsx": {
-    "design/no-raw-control": 1
-  },
   "src/components/managers/opex/components/opex-wizard.tsx": {
     "design/no-arbitrary-px": 1,
     "design/no-local-primitive": 1,
     "design/no-radius-shadow": 1,
-    "design/no-raw-control": 5
+    "design/no-raw-control": 4
   },
   "src/components/managers/opex/components/recurring-tab.tsx": {
     "design/no-raw-control": 3
@@ -626,7 +617,7 @@
     "design/no-arbitrary-px": 1
   },
   "src/components/managers/page/components/vat-rates-modal.tsx": {
-    "design/no-raw-control": 5
+    "design/no-raw-control": 3
   },
   "src/components/managers/page/components/VerdictList.tsx": {
     "design/no-local-primitive": 2
@@ -747,10 +738,10 @@
     "design/no-raw-control": 1
   },
   "src/components/managers/production-runs/index.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 2
   },
   "src/components/managers/products-catalog/components/active-filters.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/products-catalog/components/batch-action-bar.tsx": {
     "design/no-raw-control": 1
@@ -784,7 +775,7 @@
     "design/no-radius-shadow": 1
   },
   "src/components/managers/tasks/components/board-column.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tasks/components/description-editor.tsx": {
     "design/no-arbitrary-px": 2,
@@ -792,7 +783,7 @@
   },
   "src/components/managers/tasks/components/entity-picker.tsx": {
     "design/no-radius-shadow": 1,
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tasks/components/filters-bar.tsx": {
     "design/no-raw-control": 1
@@ -805,7 +796,7 @@
     "design/no-local-primitive": 1
   },
   "src/components/managers/tasks/components/media-attachments.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tasks/components/media-ref-row.tsx": {
     "design/no-raw-control": 1
@@ -821,9 +812,6 @@
   },
   "src/components/managers/tasks/components/task-media-viewer.tsx": {
     "design/no-local-primitive": 1
-  },
-  "src/components/managers/tasks/components/task-relations.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/tasks/components/task-text.tsx": {
     "design/no-local-primitive": 1
@@ -843,8 +831,8 @@
   },
   "src/components/managers/tech-card/annotation/focused-annotator.tsx": {
     "design/no-arbitrary-px": 3,
-    "design/no-local-primitive": 2,
-    "design/no-raw-control": 5
+    "design/no-local-primitive": 1,
+    "design/no-raw-control": 4
   },
   "src/components/managers/tech-card/annotation/insets.tsx": {
     "design/no-arbitrary-px": 4
@@ -910,7 +898,7 @@
   "src/components/managers/tech-card/components/assembly-fullscreen.tsx": {
     "design/no-arbitrary-px": 5,
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 5
+    "design/no-raw-control": 3
   },
   "src/components/managers/tech-card/components/assembly-map/pair-shape.tsx": {
     "design/no-hex-color": 7,
@@ -939,7 +927,7 @@
   "src/components/managers/tech-card/components/assembly-skeleton-panel.tsx": {
     "design/no-local-primitive": 1,
     "design/no-radius-shadow": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/assembly-unit-editor.tsx": {
     "design/no-arbitrary-px": 2,
@@ -952,8 +940,8 @@
     "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/bom-field.tsx": {
-    "design/no-arbitrary-px": 3,
-    "design/no-raw-control": 4
+    "design/no-arbitrary-px": 1,
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/bom-line-picker.tsx": {
     "design/no-raw-control": 1
@@ -965,17 +953,17 @@
     "design/no-arbitrary-px": 1
   },
   "src/components/managers/tech-card/components/colourway-palette.tsx": {
-    "design/no-raw-control": 4
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/colourways-matrix.tsx": {
-    "design/no-arbitrary-px": 3,
-    "design/no-raw-control": 6
+    "design/no-arbitrary-px": 2,
+    "design/no-raw-control": 5
   },
   "src/components/managers/tech-card/components/composition-label/composition-label-block.tsx": {
     "design/no-arbitrary-px": 7,
     "design/no-hex-color": 2,
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/composition-label/doors.tsx": {
     "design/no-arbitrary-px": 1,
@@ -990,7 +978,7 @@
   },
   "src/components/managers/tech-card/components/composition-label/fibre-editor.tsx": {
     "design/no-arbitrary-px": 2,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/composition-label/made-in-value.tsx": {
     "design/no-arbitrary-px": 1,
@@ -1031,13 +1019,10 @@
   },
   "src/components/managers/tech-card/components/design/bench-slot.tsx": {
     "design/no-arbitrary-px": 1,
-    "design/no-raw-control": 12
+    "design/no-raw-control": 11
   },
   "src/components/managers/tech-card/components/design/callout-purpose-fields.tsx": {
     "design/no-arbitrary-px": 3
-  },
-  "src/components/managers/tech-card/components/design/callout-rail.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/design/callouts-panel.tsx": {
     "design/no-arbitrary-px": 1,
@@ -1119,7 +1104,7 @@
   },
   "src/components/managers/tech-card/components/design/material-slots.tsx": {
     "design/no-arbitrary-px": 18,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/design/modals/transform-frame-overlay.tsx": {
     "design/no-hex-color": 6
@@ -1127,7 +1112,7 @@
   "src/components/managers/tech-card/components/design/modals/vector-brush-rail.tsx": {
     "design/no-arbitrary-px": 2,
     "design/no-hex-color": 5,
-    "design/no-raw-control": 7
+    "design/no-raw-control": 6
   },
   "src/components/managers/tech-card/components/design/modals/vector-modal.tsx": {
     "design/no-hex-color": 20,
@@ -1150,7 +1135,7 @@
   },
   "src/components/managers/tech-card/components/design/paint/parts-canvas.tsx": {
     "design/no-hex-color": 10,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/tech-card/components/design/paint/pieces-row.tsx": {
     "design/no-arbitrary-px": 1,
@@ -1241,7 +1226,7 @@
   },
   "src/components/managers/tech-card/components/design/render/side-row.tsx": {
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/design/render/threed-studio.tsx": {
     "design/no-arbitrary-px": 2
@@ -1250,17 +1235,17 @@
     "design/no-hex-color": 15
   },
   "src/components/managers/tech-card/components/design/split-modal.tsx": {
-    "design/no-raw-control": 5,
+    "design/no-raw-control": 3,
     "design/no-style-design": 1
   },
   "src/components/managers/tech-card/components/design/studio-tab.tsx": {
     "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/design/suggested-callouts.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/design/threed/model-upload-cell.tsx": {
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/design/threed/model-viewer.tsx": {
     "design/no-hex-color": 1
@@ -1270,11 +1255,10 @@
   },
   "src/components/managers/tech-card/components/details-editor.tsx": {
     "design/no-arbitrary-px": 5,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 2
   },
   "src/components/managers/tech-card/components/dev-expenses-field.tsx": {
-    "design/no-arbitrary-px": 1,
-    "design/no-raw-control": 1
+    "design/no-arbitrary-px": 1
   },
   "src/components/managers/tech-card/components/equipment-park.tsx": {
     "design/no-arbitrary-px": 1,
@@ -1290,7 +1274,7 @@
   },
   "src/components/managers/tech-card/components/kind-picker.tsx": {
     "design/no-arbitrary-px": 3,
-    "design/no-raw-control": 2
+    "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/lab-dip-tab.tsx": {
     "design/no-arbitrary-px": 3,
@@ -1299,7 +1283,7 @@
   "src/components/managers/tech-card/components/label-card.tsx": {
     "design/no-arbitrary-px": 4,
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/tech-card/components/labels-blocks.tsx": {
     "design/no-local-primitive": 2
@@ -1349,19 +1333,17 @@
     "design/no-style-design": 2
   },
   "src/components/managers/tech-card/components/operation-media-strip.tsx": {
-    "design/no-local-primitive": 1,
     "design/no-raw-control": 1
   },
   "src/components/managers/tech-card/components/operations-field.tsx": {
-    "design/no-arbitrary-px": 4,
+    "design/no-arbitrary-px": 2,
     "design/no-local-primitive": 4,
-    "design/no-raw-control": 9
+    "design/no-raw-control": 5
   },
   "src/components/managers/tech-card/components/operations-ratify-panel.tsx": {
     "design/no-arbitrary-px": 1,
     "design/no-local-primitive": 1,
-    "design/no-radius-shadow": 1,
-    "design/no-raw-control": 1
+    "design/no-radius-shadow": 1
   },
   "src/components/managers/tech-card/components/output-variants-field.tsx": {
     "design/no-local-primitive": 2,
@@ -1449,7 +1431,7 @@
     "design/no-arbitrary-px": 3,
     "design/no-hex-color": 2,
     "design/no-local-primitive": 1,
-    "design/no-raw-control": 4
+    "design/no-raw-control": 3
   },
   "src/components/managers/tech-card/components/patterns-field.tsx": {
     "design/no-arbitrary-px": 7,
@@ -1499,7 +1481,7 @@
   "src/components/managers/tech-card/components/sample-screen.tsx": {
     "design/no-arbitrary-px": 11,
     "design/no-local-primitive": 3,
-    "design/no-raw-control": 18
+    "design/no-raw-control": 14
   },
   "src/components/managers/tech-card/components/samples-tab.tsx": {
     "design/no-arbitrary-px": 1,
@@ -1582,12 +1564,6 @@
   "src/components/pattern-viewer/components/sheet-list.tsx": {
     "design/no-raw-control": 1
   },
-  "src/components/pattern-viewer/page.tsx": {
-    "design/no-non-token-class": 1
-  },
-  "src/components/run-pack-viewer/page.tsx": {
-    "design/no-non-token-class": 1
-  },
   "src/components/shared/markdown/doc.tsx": {
     "design/no-arbitrary-px": 1
   },
@@ -1617,7 +1593,7 @@
     "design/no-arbitrary-px": 1
   },
   "src/components/shell/snackbar.tsx": {
-    "design/no-raw-control": 3
+    "design/no-raw-control": 2
   },
   "src/index.tsx": {
     "design/no-raw-control": 1,

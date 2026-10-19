@@ -358,6 +358,20 @@ export function textLines(
     endsOnly?: boolean;
     /** No glyph wider than this many heights (letters; a row of pieces has long ones). */
     maxAspect?: number;
+    /**
+     * LEAKS-2 · outline lettering: the line takes only the rest of ITS lettering — clusters at
+     * least this share of its height (a letter, a bowl, a crossbar; never a dash or a bead of a
+     * size line) inside the band and reach of its regular core (the band does not creep with what
+     * it took).
+     */
+    growMinFrac?: number;
+    /**
+     * LEAKS-2 · outline lettering is drawn as CLOSED outlines: with this (which chains are closed)
+     * a row is lettering only when at least `OUTLINED_MIN` of its glyphs are closed (every stroke
+     * end meets another end of the same glyph). A row of open pieces is line work cut at the tile
+     * seams (Mood: 0 of 4–6 glyphs closed), not lettering (PAPAVERO: 8–12 of 13).
+     */
+    closed?: (i: number) => boolean;
   },
   keep: (i: number) => boolean = () => true,
 ): GlyphRun[] {
@@ -382,7 +396,178 @@ export function textLines(
       return strokes >= o.minStrokes;
     },
   });
-  return growLines(runs, clusters);
+  const f = o.growMinFrac;
+  const part = f
+    ? (c: GlyphCluster, h: number) => letterPart(c, h, f, o.maxAspect ?? 1.3, polys)
+    : undefined;
+  if (!part) return growLines(runs, clusters);
+  // what the line would take unfiltered: the filtered line never takes more (masking is the risky
+  // direction — a smaller band could otherwise accept a cluster the creeping one refused)
+  const wide = growLines(
+    runs.map((r) => ({ ...r, members: [...r.members], box: { ...r.box } })),
+    clusters,
+  );
+  // the letters of a word stand side by side: a "row" whose glyphs overlap along it is a bundle of
+  // nested lines cut at the tile seams (a fan of size lines 10 mm apart), not lettering — unless
+  // its glyphs are mostly closed outlines (tightly kerned display lettering overlaps too)
+  const isClosed = o.closed;
+  const lettering = runs.map((r) => {
+    if (!isClosed) return !bundled(r);
+    const sh = outlined(r, polys, isClosed);
+    return sh >= OUTLINED_MIN && (sh >= OUTLINED_BUNDLE || !bundled(r));
+  });
+  // and of a lettering row only the outline-like clusters are masked: an open piece of line work
+  // lined up with the letters (a size line cut at a seam) stays (a letter drawn with a small gap
+  // between its strokes is still taken)
+  const letterLike = (c: GlyphCluster, h: number) =>
+    !isClosed || endGap(c.ids, polys, isClosed) <= Math.max(GLYPH_END_MM, MEMBER_END_FRAC * h);
+  const rows = runs.filter((_, k) => lettering[k]);
+  for (const r of rows) {
+    const core = new Set(r.glyphs);
+    r.members = r.members.filter(
+      (c) => (core.has(c) || part(c, r.heightMm)) && letterLike(c, r.heightMm),
+    );
+  }
+  const grown = growLines(rows, clusters, part);
+  const allowed = wide.filter((_, k) => lettering[k]).map((r) => new Set(r.members));
+  grown.forEach((r, k) => {
+    r.members = r.members.filter((c) => allowed[k].has(c) && letterLike(c, r.heightMm));
+    r.box = {
+      minX: Math.min(...r.members.map((c) => c.minX)),
+      minY: Math.min(...r.members.map((c) => c.minY)),
+      maxX: Math.max(...r.members.map((c) => c.maxX)),
+      maxY: Math.max(...r.members.map((c) => c.maxY)),
+    };
+  });
+  return grown;
+}
+
+/**
+ * LEAKS-2 · the row's glyphs overlap along it — the median neighbour overlap ≥ 8 % of the row's
+ * height: nested lines side by side (Mood: 10–20 mm on 100 mm pieces), not the letters of a word
+ * (kerning tucks a pair a few per cent of the height at most; most pairs of a word do not overlap).
+ */
+function bundled(r: GlyphRun): boolean {
+  const ax = r.along === 'x';
+  const g = r.glyphs
+    .map((c) => (ax ? [c.minX, c.maxX] : [c.minY, c.maxY]))
+    .sort((a, b) => a[0] - b[0]);
+  const ov: number[] = [];
+  for (let i = 1; i < g.length; i++)
+    ov.push(Math.max(0, Math.min(g[i - 1][1], g[i][1]) - g[i][0]) / r.heightMm);
+  ov.sort((a, b) => a - b);
+  return ov.length > 0 && ov[Math.floor(ov.length / 2)] >= 0.08;
+}
+
+/** LEAKS-2 · the share of a row's glyphs that must be closed outlines (see `textLines` closed). */
+export const OUTLINED_MIN = 0.4;
+/** With this share closed a row is lettering even when its glyphs overlap along it (kerning). */
+export const OUTLINED_BUNDLE = 0.6;
+/** Two stroke ends of a glyph meet within this, mm (an outline drawn in pieces end to end). */
+const GLYPH_END_MM = 1.0;
+/** A cluster of a lettering row is masked when its ends meet within this share of the height. */
+const MEMBER_END_FRAC = 0.1;
+
+/**
+ * The widest gap at a stroke end of a cluster: per open end the distance to the nearest other end
+ * of the same cluster, the largest of them (0: closed — a closed chain has no ends).
+ */
+function endGap(
+  ids: readonly number[],
+  polys: readonly (readonly PtMm[])[],
+  closed: (i: number) => boolean,
+): number {
+  const ends: PtMm[] = [];
+  for (const i of ids) {
+    const p = polys[i];
+    if (closed(i) || p.length < 2) continue;
+    ends.push(p[0], p[p.length - 1]);
+  }
+  let worst = 0;
+  ends.forEach((e, k) => {
+    let best = Infinity;
+    ends.forEach((x, j) => {
+      if (j !== k) best = Math.min(best, dist(x, e));
+    });
+    worst = Math.max(worst, best);
+  });
+  return worst;
+}
+
+/**
+ * LEAKS-2 · the share of the row's glyphs that are closed outlines: every end of an open stroke
+ * meets another end of the same glyph (a closed chain has none). An outline letter, even drawn in
+ * several pieces, is closed; a piece of a size line cut at a tile seam leaves its ends open.
+ */
+export function outlined(
+  r: GlyphRun,
+  polys: readonly (readonly PtMm[])[],
+  closed: (i: number) => boolean,
+): number {
+  if (!r.glyphs.length) return 0;
+  let n = 0;
+  for (const g of r.glyphs) if (endGap(g.ids, polys, closed) <= GLYPH_END_MM) n++;
+  return n / r.glyphs.length;
+}
+
+/**
+ * LEAKS-2 · a cluster that can be part of an outline letter of height h: as big as a bowl or a
+ * crossbar (≥ frac·h across its longer side), two-dimensional (≥ 4 % of h across its thinnest
+ * direction, whatever its slope: an outline letter is closed — a dash, a bead or a straight stretch
+ * of a size line is not), no wider than a letter.
+ */
+function letterPart(
+  c: GlyphCluster,
+  h: number,
+  frac: number,
+  maxAspect: number,
+  polys: readonly (readonly PtMm[])[],
+): boolean {
+  const w = c.maxX - c.minX;
+  const t = c.maxY - c.minY;
+  if (Math.max(w, t) < frac * h || Math.max(w, t) > Math.max(maxAspect, 1.3) * h) return false;
+  if (Math.min(w, t) < 0.04 * h) return false;
+  return thinnest(c, polys) >= 0.04 * h;
+}
+
+/** The cluster's extent across its principal axis (a sloped straight line: ~0), mm. */
+function thinnest(c: GlyphCluster, polys: readonly (readonly PtMm[])[]): number {
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  for (const i of c.ids)
+    for (const q of polys[i]) {
+      n++;
+      sx += q.x;
+      sy += q.y;
+    }
+  if (n < 2) return 0;
+  const mx = sx / n;
+  const my = sy / n;
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  for (const i of c.ids)
+    for (const q of polys[i]) {
+      const dx = q.x - mx;
+      const dy = q.y - my;
+      xx += dx * dx;
+      xy += dx * dy;
+      yy += dy * dy;
+    }
+  // the minor axis: the eigenvector of the smaller eigenvalue of the covariance
+  const a = 0.5 * Math.atan2(2 * xy, xx - yy) + Math.PI / 2;
+  const ux = Math.cos(a);
+  const uy = Math.sin(a);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const i of c.ids)
+    for (const q of polys[i]) {
+      const v = (q.x - mx) * ux + (q.y - my) * uy;
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
+  return hi - lo;
 }
 
 /**
@@ -390,16 +575,24 @@ export function textLines(
  * overlap the band across by ≥ 60 %), no taller than 1.3 heights, within 2.5 heights of its ends —
  * "WI ERSZ 2" split by a wide space, a digit, a colon.
  */
-function growLines(runs: GlyphRun[], clusters: readonly GlyphCluster[]): GlyphRun[] {
+function growLines(
+  runs: GlyphRun[],
+  clusters: readonly GlyphCluster[],
+  /** Outline lettering: what may join the line (its band and reach then do not creep). */
+  part?: (c: GlyphCluster, h: number) => boolean,
+): GlyphRun[] {
   const owner = new Map<GlyphCluster, GlyphRun>();
   for (const r of runs) for (const c of r.members) owner.set(c, r);
   for (const r of runs) {
     const ax = r.along === 'x';
+    // outline lettering: the band across stays the regular core's (it never creeps with what the
+    // line took); along, the line reaches on from its last letter
+    const core = part ? { ...r.box } : null;
     for (let grown = true; grown; ) {
       grown = false;
       const b = r.box;
-      const v0 = ax ? b.minY : b.minX;
-      const v1 = ax ? b.maxY : b.maxX;
+      const v0 = ax ? (core ?? b).minY : (core ?? b).minX;
+      const v1 = ax ? (core ?? b).maxY : (core ?? b).maxX;
       const u0 = ax ? b.minX : b.minY;
       const u1 = ax ? b.maxX : b.maxY;
       const h = r.heightMm;
@@ -410,6 +603,7 @@ function growLines(runs: GlyphRun[], clusters: readonly GlyphCluster[]): GlyphRu
         const cu0 = ax ? c.minX : c.minY;
         const cu1 = ax ? c.maxX : c.maxY;
         if (cv1 - cv0 > 1.3 * h) continue;
+        if (part && !part(c, h)) continue;
         const over = Math.min(v1, cv1) - Math.max(v0, cv0);
         if (over < 0.6 * Math.max(0.5, Math.min(v1 - v0, cv1 - cv0))) continue;
         const gap = Math.max(cu0 - u1, u0 - cu1);
@@ -417,10 +611,10 @@ function growLines(runs: GlyphRun[], clusters: readonly GlyphCluster[]): GlyphRu
         owner.set(c, r);
         r.members.push(c);
         r.box = {
-          minX: Math.min(b.minX, c.minX),
-          minY: Math.min(b.minY, c.minY),
-          maxX: Math.max(b.maxX, c.maxX),
-          maxY: Math.max(b.maxY, c.maxY),
+          minX: Math.min(r.box.minX, c.minX),
+          minY: Math.min(r.box.minY, c.minY),
+          maxX: Math.max(r.box.maxX, c.maxX),
+          maxY: Math.max(r.box.maxY, c.maxY),
         };
         grown = true;
         break;

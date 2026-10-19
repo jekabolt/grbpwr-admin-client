@@ -25,8 +25,11 @@ import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  BackLink,
+  addDoorClass,
   Chip,
   ChipRow,
+  Close,
   HeaderWarnings,
   type HeaderWarning,
   GenericPopover,
@@ -39,6 +42,7 @@ import {
   Text,
   Tile,
   Tiles,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { colorwayLabel } from './design/colorway-picker';
@@ -49,7 +53,6 @@ import { SAMPLE_STAGING_PREFIX, samplePurposeLabel, sampleStatusLabel } from './
 import {
   fittingsNewestFirst,
   lineMaterialId,
-  openChangeRequests,
   SampleReturns,
   specQuantity,
   stockOnHand,
@@ -477,13 +480,7 @@ export function SampleScreen({
     <SectionStack>
       <Section>
         <div className='mb-2.5 flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1'>
-          <button
-            type='button'
-            onClick={onClose}
-            className={cn(HEADER_TEXT, 'text-labelColor underline hover:text-textColor')}
-          >
-            ← samples
-          </button>
+          <BackLink onClick={onClose}>samples</BackLink>
           <Text
             component='h3'
             variant='uppercase'
@@ -491,7 +488,7 @@ export function SampleScreen({
             className='font-bold'
             title={titleTip || undefined}
           >
-            #{sample.number ?? '?'} · round {sample.sample?.roundNumber || '—'}
+            #{sample.number ?? '?'} · round {sample.sample?.roundNumber || <EmptyCell />}
           </Text>
           <div className='ml-auto flex flex-wrap items-baseline gap-2.5'>
             {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
@@ -577,14 +574,12 @@ export function SampleScreen({
               photoFace
             )}
             {canEdit && ownPhoto && (
-              <button
-                type='button'
+              <Close
+                size='sm'
                 aria-label='remove the photo'
                 onClick={() => set({ mediaIds: [] })}
-                className='absolute right-0 top-0 hidden border border-borderColor bg-bgColor px-1 text-micro leading-none hover:text-error group-hover:block'
-              >
-                ✕
-              </button>
+                className='absolute right-0 top-0 bg-bgColor opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+              />
             )}
           </div>
 
@@ -684,10 +679,18 @@ function FittingsBlock({
 }) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
-  const open = openChangeRequests(fittings);
-  const firstOpen = fittings.find((f) =>
-    (f.fitting?.changeRequests ?? []).some((c) => !c.resolved),
-  );
+  // Каждая примерка с открытыми правками — пункт двери `! N` в шапке; клик ведёт в примерку.
+  const openRequests: HeaderWarning[] = fittings.flatMap((f) => {
+    const n = (f.fitting?.changeRequests ?? []).filter((c) => !c.resolved).length;
+    if (n === 0) return [];
+    return [
+      {
+        text: `${ddmm(f.fitting?.fittingDate) || `fitting ${f.id}`} · ${n} open ${n === 1 ? 'request' : 'requests'}`,
+        error: true,
+        action: { label: 'open the fitting', onClick: () => navigate(`/fittings/${f.id}`) },
+      },
+    ];
+  });
   const addHref = `${ROUTES.addFitting}?techCardId=${techCardId}&sampleId=${sampleId}&returnTo=${encodeURIComponent(
     pathname + search,
   )}`;
@@ -698,15 +701,7 @@ function FittingsBlock({
       action={
         <>
           <HeaderNote>{fittings.length}</HeaderNote>
-          {open > 0 && firstOpen && (
-            <button
-              type='button'
-              onClick={() => navigate(`/fittings/${firstOpen.id}`)}
-              className={cn(HEADER_TEXT, 'text-error underline')}
-            >
-              {open} open {open === 1 ? 'request' : 'requests'}
-            </button>
-          )}
+          <HeaderWarnings items={openRequests} />
         </>
       }
     >
@@ -1189,12 +1184,11 @@ function RndBlock({
             <Text size='micro' component='span' className='text-right tabular-nums'>
               {decimalToInput(e.amount)} {e.currency}
             </Text>
-            {canWriteCosting ? (
+            {canWriteCosting && confirmId === e.id ? (
               <button
                 type='button'
-                aria-label={confirmId === e.id ? 'confirm delete' : 'delete'}
+                aria-label='confirm delete'
                 onClick={() => {
-                  if (confirmId !== e.id) return setConfirmId(e.id ?? 0);
                   setConfirmId(0);
                   del.mutate(e.id ?? 0, {
                     onError: (err) =>
@@ -1202,13 +1196,17 @@ function RndBlock({
                   });
                 }}
                 onBlur={() => setConfirmId(0)}
-                className={cn(
-                  'text-micro uppercase',
-                  confirmId === e.id ? 'text-error' : 'text-labelColor hover:text-error',
-                )}
+                className='text-micro uppercase text-error'
               >
-                {confirmId === e.id ? 'delete' : '✕'}
+                delete
               </button>
+            ) : canWriteCosting ? (
+              <Close
+                size='sm'
+                aria-label='delete'
+                onClick={() => setConfirmId(e.id ?? 0)}
+                onBlur={() => setConfirmId(0)}
+              />
             ) : (
               <span />
             )}
@@ -1305,14 +1303,7 @@ function RndBlock({
                 ))}
               </select>
             )}
-            <button
-              type='button'
-              aria-label='cancel'
-              onClick={() => setDraft(null)}
-              className='text-micro uppercase text-labelColor hover:text-textColor'
-            >
-              ✕
-            </button>
+            <Close size='sm' aria-label='cancel' onClick={() => setDraft(null)} />
           </div>
         )}
         {canWriteCosting && !draft && (
@@ -1323,7 +1314,7 @@ function RndBlock({
               const p = EXPENSE_PRESETS.find((x) => x.label === e.target.value);
               if (p) start(p.label, p.kind);
             }}
-            className='mt-2 block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className={cn(addDoorClass(), 'mt-2 block cursor-pointer appearance-none')}
           >
             <option value=''>+ add an expense ▾</option>
             {EXPENSE_PRESETS.map((p) => (

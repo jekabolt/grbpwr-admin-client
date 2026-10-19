@@ -2,7 +2,7 @@ import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
-import { Button, CalloutBox, CopyToClipboard, Input, Section, Text } from 'ui';
+import { Button, CalloutBox, CopyToClipboard, Input, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
   useGenerateHackerInvite,
@@ -139,10 +139,10 @@ export function HackerInvites() {
                       <Text size='small'>{inv.id}</Text>
                     </td>
                     <td className='border border-textInactiveColor text-center px-2'>
-                      <Text size='small'>{inv.email || '-'}</Text>
+                      <Text size='small'>{inv.email || <EmptyCell />}</Text>
                     </td>
                     <td className='border border-textInactiveColor text-center px-2'>
-                      <Text size='small'>{inv.createdBy || '-'}</Text>
+                      <Text size='small'>{inv.createdBy || <EmptyCell />}</Text>
                     </td>
                     <td className='border border-textInactiveColor text-center px-2'>
                       <Text size='small'>{formatDateShort(inv.createdAt)}</Text>

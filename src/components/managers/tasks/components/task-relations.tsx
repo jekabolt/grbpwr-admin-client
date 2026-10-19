@@ -1,7 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import { Button, Combobox, type ComboboxGroup, Input, Pill, Section, Select, Text } from 'ui';
+import {
+  Button,
+  Close,
+  Combobox,
+  type ComboboxGroup,
+  Input,
+  Pill,
+  Section,
+  Select,
+  Text,
+} from 'ui';
 import type { Task, TaskRelation, TaskRelationKind } from '../api/types';
 import {
   useAddTaskRelation,
@@ -93,15 +103,7 @@ function TaskRow({
         {board ? ` · ${board}` : ''}
       </Text>
       {onRemove && (
-        <button
-          type='button'
-          aria-label={removeLabel}
-          disabled={removing}
-          onClick={onRemove}
-          className='shrink-0 px-1 text-labelColor hover:text-textColor disabled:opacity-50'
-        >
-          ✕
-        </button>
+        <Close size='sm' aria-label={removeLabel} disabled={removing} onClick={onRemove} />
       )}
     </div>
   );

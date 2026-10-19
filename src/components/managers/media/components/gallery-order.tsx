@@ -1,6 +1,6 @@
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, CalloutBox, Pill, RatioGlyph, Text } from 'ui';
+import { Button, CalloutBox, Close, Pill, RatioGlyph, Text } from 'ui';
 import {
   calculateAspectRatio,
   cropLoss,
@@ -273,15 +273,12 @@ export function TileFooter({
         )}
       </span>
       {onRemove && (
-        <Button
-          type='button'
+        <Close
+          size='sm'
           aria-label={`remove ${unit} ${index + 1}`}
           title={removeTitle}
           onClick={onRemove}
-          className={ICON_BUTTON}
-        >
-          ×
-        </Button>
+        />
       )}
     </div>
   );
@@ -385,7 +382,10 @@ export function RemovedNotice({
   className?: string;
 }) {
   return (
-    <CalloutBox tone='note' className={cn('flex flex-wrap items-center gap-x-2 gap-y-1', className)}>
+    <CalloutBox
+      tone='note'
+      className={cn('flex flex-wrap items-center gap-x-2 gap-y-1', className)}
+    >
       <Text size='micro' variant='label' component='span'>
         <b>removed:</b> {what}, position {place}.
       </Text>

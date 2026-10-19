@@ -3,7 +3,7 @@ import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
   monthToApi,
@@ -277,14 +277,18 @@ export function OpexWizard({
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
             <DialogPrimitives.Title asChild>
-              <Text size='micro' variant='uppercase' tracking='group' component='span' className='font-bold'>
+              <Text
+                size='micro'
+                variant='uppercase'
+                tracking='group'
+                component='span'
+                className='font-bold'
+              >
                 add opex
               </Text>
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <button type='button' aria-label='close' className='ml-auto text-labelColor'>
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>

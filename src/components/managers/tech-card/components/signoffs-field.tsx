@@ -8,6 +8,7 @@ import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import {
   Button,
+  Close,
   FoldCaret,
   GroupLabel,
   Input,
@@ -534,15 +535,7 @@ export function SignoffsField() {
                   <div className='flex-1'>
                     <InputField name={`signoffs.${index}.note`} label='note' />
                   </div>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    aria-label='remove sign-off'
-                    onClick={() => remove(index)}
-                  >
-                    ✕
-                  </Button>
+                  <Close size='sm' aria-label='remove sign-off' onClick={() => remove(index)} />
                 </div>
               </div>
             ))}

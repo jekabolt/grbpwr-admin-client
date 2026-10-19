@@ -5,14 +5,20 @@
 
 /** @primitive Bordered collapsible block */
 export { Accordion } from './components/accordion';
+/** @primitive Dashed «+ noun» door after a list */
+export { AddDoor, addDoorClass, type AddDoorShape } from './components/board';
 /** @primitive Person initials circle */
 export { Avatar, AvatarPicker, initials } from './components/avatar';
+/** @primitive «← word» way back */
+export { BackLink } from './components/button';
 /** @primitive Horizontal bar chart row */
 export { BarRow, WaterfallRow } from './components/bar-row';
 /** @primitive Kanban columns row */
 export { Board, BoardCard, BoardColumn, BoardEmpty } from './components/board';
 /** @primitive Clickable action, all styles */
 export { Button, buttonVariants } from './components/button';
+/** @primitive Close / remove ×  */
+export { Close } from './components/close';
 /** @primitive Inline message box */
 export { CalloutBox } from './components/callout-box';
 /** @primitive Drawing with numbered pins */

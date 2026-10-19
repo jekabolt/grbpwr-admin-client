@@ -487,7 +487,7 @@ function SnapshotOperations({
                     if (!parts && !out) return null;
                     return (
                       <Text size='nano' variant='label' component='span' className='block'>
-                        {parts || '—'}
+                        {parts || <EmptyCell />}
                         {out ? ` → ${out}` : ''}
                       </Text>
                     );
@@ -584,8 +584,8 @@ function ReleaseSnapshot({
   return (
     <div className='border border-borderColor p-2'>
       <GroupLabel className='mt-0'>
-        Rev.{head?.releaseNumber ?? '—'} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
-        {head?.releasedBy || '—'}
+        Rev.{head?.releaseNumber ?? <EmptyCell />} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
+        {head?.releasedBy || <EmptyCell />}
       </GroupLabel>
 
       {isLoading ? (
@@ -771,7 +771,7 @@ export function ReleasesField({
                   )}
                 >
                   <Text size='micro' component='span' className='font-bold uppercase'>
-                    Rev.{r.releaseNumber ?? '—'}
+                    Rev.{r.releaseNumber ?? <EmptyCell />}
                   </Text>
                   <Text
                     size='nano'

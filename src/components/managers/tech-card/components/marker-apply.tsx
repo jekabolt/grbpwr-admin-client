@@ -57,6 +57,7 @@ import {
   Row,
   Selector,
   Text,
+  EmptyCell,
 } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { sizeTokensOf } from './nesting/block-code';
@@ -630,7 +631,8 @@ export function MarkerApplyHint({
     <div className='flex flex-wrap items-center gap-1.5'>
       {!compact && (
         <Text size='nano' variant='label' component='span'>
-          from a marker: {chosenRefusal ? '—' : preview} · “{chosen.name}” ({compLabel(chosen)})
+          from a marker: {chosenRefusal ? <EmptyCell /> : preview} · “{chosen.name}” (
+          {compLabel(chosen)})
         </Text>
       )}
       {/* «Норма» — ПОДПИСЬ, а не порядок. Раньше назначенную раскладку можно было опознать только
@@ -782,7 +784,10 @@ export function MarkerApplyHint({
           </ChipRow>
 
           {mode === 'scalar' && !chosenRefusal && (
-            <Row label='per unit' value={conv && !convZero ? `${conv.value} ${conv.unit}` : '—'} />
+            <Row
+              label='per unit'
+              value={conv && !convZero ? `${conv.value} ${conv.unit}` : <EmptyCell />}
+            />
           )}
 
           {mode === 'perSize' && (

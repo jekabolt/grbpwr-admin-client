@@ -4,6 +4,7 @@ import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   Chip,
   ConfirmationModal,
@@ -12,6 +13,7 @@ import {
   Text,
   Toolbar,
   ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 
 // Refunding is only meaningful once money has been taken and before the order is fully
@@ -80,14 +82,10 @@ export function OrderHeader({
   return (
     <div className='print:hidden'>
       <Toolbar>
-        <Button asChild variant='secondary' size='sm'>
-          <Link to={ROUTES.orders} aria-label='back to orders'>
-            ←
-          </Link>
-        </Button>
+        <BackLink to={ROUTES.orders}>orders</BackLink>
         <div className='min-w-0'>
           <Text variant='uppercase' tracking='label' className='font-bold'>
-            order #{order?.id ?? '—'}
+            order #{order?.id ?? <EmptyCell />}
           </Text>
           {identity && (
             <Text size='micro' variant='label' className='truncate'>

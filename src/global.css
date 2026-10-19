@@ -107,6 +107,7 @@
   --text-micro: 10px; /* labels, pills, table headers, hints */
   --text-nano: 9px; /* badges, pin numbers, band labels */
   --text-stat: 16px; /* stat value */
+  --text-reading: 16px; /* public QR pages + email canvas — read on a phone */
   --text-statBig: 22px; /* hero stat value */
   --text-lg: 18px; /* heading */
   --text-giantSmall: 110px; /* display (login/hero only) */

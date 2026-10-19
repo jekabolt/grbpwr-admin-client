@@ -18,7 +18,17 @@ import type {
   VariantMark,
 } from 'lib/pattern-import/types';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
-import { Button, CalloutBox, Chip, ChipRow, FoldCaret, HeaderWarnings, Row, Text } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  FoldCaret,
+  HeaderWarnings,
+  Row,
+  Text,
+  EmptyCell,
+} from 'ui';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
@@ -3806,21 +3816,23 @@ export function PiecesStep({
               />
               <Row
                 label='area, this size'
-                value={refusedSel ? '—' : `${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`}
+                value={
+                  refusedSel ? <EmptyCell /> : `${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`
+                }
               />
               <Row
                 label='walls covered'
-                value={refusedSel ? '—' : fmtPct(cand(selected).sourceCoverage)}
+                value={refusedSel ? <EmptyCell /> : fmtPct(cand(selected).sourceCoverage)}
               />
               <Row
                 label='p95 to the walls'
-                value={refusedSel ? '—' : fmtMm(cand(selected).p95Mm)}
+                value={refusedSel ? <EmptyCell /> : fmtMm(cand(selected).p95Mm)}
               />
               <Row
                 label='grows with size'
                 value={
                   selected.candidates.some((c) => c.outcome === 'refused') ? (
-                    '—'
+                    <EmptyCell />
                   ) : selected.monotone ? (
                     'yes'
                   ) : (

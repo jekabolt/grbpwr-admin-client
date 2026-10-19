@@ -24,10 +24,10 @@ import {
   Button,
   Chip,
   ChipRow,
+  Close,
   Pill,
   PLACEHOLDER_SURFACE,
   Text,
-  TILE_CORNER,
   TILE_QUIET,
   Toolbar,
   ToolbarSpacer,
@@ -1129,12 +1129,10 @@ export function FocusedAnnotator({
                     onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}
                     cornerSlot={
                       !readOnly ? (
-                        <FrameButton
+                        <FrameClose
                           ariaLabel={removeLabel?.(v, i) ?? `remove image ${i + 1}`}
                           onPress={() => handleRemoveMedia(v)}
-                        >
-                          ✕
-                        </FrameButton>
+                        />
                       ) : undefined
                     }
                     // НИЖНИЙ РЯД — место назначает поверхность; обе стороны передаются всегда
@@ -1374,14 +1372,12 @@ export function FocusedAnnotator({
                     </span>
                   )}
                   {!readOnly && (
-                    <button
-                      type='button'
+                    <Close
+                      size='sm'
                       aria-label={`remove image ${i + 1}`}
                       onClick={() => handleRemoveMedia(v)}
-                      className='absolute right-0 top-0 cursor-pointer border border-borderColor bg-bgColor px-1 py-px text-nano leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                    >
-                      ✕
-                    </button>
+                      className='absolute right-0 top-0 bg-bgColor focus-visible:outline-offset-1'
+                    />
                   )}
                 </div>
               );
@@ -1478,15 +1474,7 @@ function EditorPanel({ focusToken, children }: { focusToken: number; children: R
 // gestures, or the press underneath reaches the Stage's add-callout / pan handler.
 // ---------------------------------------------------------------------------
 
-function FrameButton({
-  ariaLabel,
-  onPress,
-  children,
-}: {
-  ariaLabel: string;
-  onPress: () => void;
-  children: ReactNode;
-}) {
+function FrameClose({ ariaLabel, onPress }: { ariaLabel: string; onPress: () => void }) {
   // НЕ `<Button>`, а span с ролью. Эта кнопка живёт внутри общего `<fieldset disabled>` выпущенной
   // карточки, а у нативной кнопки под таким предком не стреляет `click` (замерено в Chromium:
   // гасятся ровно `click` и `focus`). Единственный жест, которым мерку на плитке 300px вообще
@@ -1494,8 +1482,9 @@ function FrameButton({
   // чтение там, где только чтение и осталось. Соседи по этой же роли — `annotation-canvas`
   // и `operation-media-strip` — сделаны спанами по той же причине.
   return (
-    <span
-      role='button'
+    <Close
+      asChild
+      size='sm'
       tabIndex={0}
       aria-label={ariaLabel}
       title={ariaLabel}
@@ -1511,9 +1500,7 @@ function FrameButton({
       }}
       // Кожа и правило появления — общие для всех плиток (`tile-skin.ts`): ✕ тихий, как у
       // `PictureTile`, а не вечно видимый с инверсией на наведении.
-      className={cn(TILE_CORNER, TILE_QUIET, 'cursor-pointer py-0.5 leading-none')}
-    >
-      {children}
-    </span>
+      className={cn(TILE_QUIET, 'cursor-pointer')}
+    />
   );
 }

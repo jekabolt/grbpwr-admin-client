@@ -1,6 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { FC } from 'react';
-import { Text } from 'ui';
+import { Text, EmptyCell } from 'ui';
 import { formatCurrency, parseDecimal } from '../utils';
 
 interface PromoTableProps {
@@ -29,7 +29,7 @@ export const PromoTable: FC<PromoTableProps> = ({ metrics }) => {
           <tbody>
             {promos.map((p, i) => (
               <tr key={i} className='border-b border-textInactiveColor last:border-0'>
-                <td className='p-2 font-mono'>{p.promoCode ?? '-'}</td>
+                <td className='p-2 font-mono'>{p.promoCode ?? <EmptyCell />}</td>
                 <td className='p-2 text-right'>{p.ordersCount ?? 0}</td>
                 <td className='p-2 text-right'>{formatCurrency(parseDecimal(p.revenue))}</td>
                 <td className='p-2 text-right'>{formatCurrency(parseDecimal(p.avgDiscount))}</td>

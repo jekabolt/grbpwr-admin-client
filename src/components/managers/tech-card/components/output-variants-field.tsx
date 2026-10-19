@@ -8,7 +8,18 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CalloutBox, ConfirmationModal, GroupLabel, Pill, Row, Text } from 'ui';
+import {
+  AddDoor,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
@@ -408,7 +419,7 @@ export function OutputVariantsPanel({
             label={
               <span className='flex min-w-0 items-center gap-2'>
                 <Swatch hex={hexByCode.get(v.colorCode ?? '')} title={v.colorName ?? undefined} />
-                <span className='uppercase'>{v.colorCode || '—'}</span>
+                <span className='uppercase'>{v.colorCode || <EmptyCell />}</span>
                 <Text size='micro' variant='label' component='span' className='truncate'>
                   {v.colorName || ''}
                   {v.materialName ? ` · ${v.materialName}` : ''}
@@ -419,7 +430,7 @@ export function OutputVariantsPanel({
             value={
               <span className='flex items-center gap-2'>
                 <span>
-                  {onHand || '—'}
+                  {onHand || <EmptyCell />}
                   {v.unit ? ` ${v.unit}` : ''}
                 </span>
                 {canEdit && (
@@ -433,16 +444,12 @@ export function OutputVariantsPanel({
                     >
                       {v.active ? 'retire' : 'reactivate'}
                     </Button>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
+                    <Close
+                      size='sm'
                       aria-label={`delete colour ${v.colorCode ?? ''}`}
                       disabled={busy}
                       onClick={() => setPendingDelete(v)}
-                    >
-                      ✕
-                    </Button>
+                    />
                   </>
                 )}
               </span>
@@ -454,18 +461,9 @@ export function OutputVariantsPanel({
       {/* The door stands a step below the last colour (O-48): the column's 8px gap plus 8px — the
           last row ends in air, and a door right under it would read as one more row. */}
       {canEdit && (
-        <div className={variants.length > 0 ? 'mt-2' : undefined}>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            disabled={busy}
-            onClick={() => setAddOpen(true)}
-          >
-            + add colour
-          </Button>
-        </div>
+        <AddDoor afterRows={variants.length > 0} disabled={busy} onClick={() => setAddOpen(true)}>
+          colour
+        </AddDoor>
       )}
 
       <AddColourDialog
@@ -490,9 +488,9 @@ export function OutputVariantsPanel({
           closeOnConfirm={false}
           onConfirm={confirmDelete}
         >
-          <Row label='colour' value={pendingDelete.colorCode || '—'} />
-          <Row label='bucket' value={pendingDelete.materialName || '—'} />
-          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || '—'} />
+          <Row label='colour' value={pendingDelete.colorCode || <EmptyCell />} />
+          <Row label='bucket' value={pendingDelete.materialName || <EmptyCell />} />
+          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || <EmptyCell />} />
           {variants.length === 1 && (
             <Row label='last colour' value='card goes back to one output' />
           )}

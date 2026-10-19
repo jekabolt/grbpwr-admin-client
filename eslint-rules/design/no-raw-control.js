@@ -1,5 +1,6 @@
 const CONTROL_MESSAGES = {
   button: "Use Button from 'ui' instead of raw <button>.",
+  close: "Use Close from 'ui' instead of a raw close glyph.",
   input: "Use Input from 'ui' instead of raw <input>.",
   checkbox: "Use CheckboxCommon from 'ui' instead of raw checkbox input.",
   switch: "Use ToggleSwitch from 'ui' instead of raw checkbox switch.",
@@ -27,6 +28,22 @@ function staticAttribute(node, name) {
   return null;
 }
 
+function isCloseGlyph(node) {
+  return /^[×✕✖]$/u.test(node.value.trim());
+}
+
+function insideButton(node) {
+  let current = node.parent;
+  while (current) {
+    if (current.type === 'JSXElement') {
+      const name = elementName(current.openingElement);
+      if (name === 'button' || name === 'Button') return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
 export default {
   meta: {
     type: 'suggestion',
@@ -35,6 +52,11 @@ export default {
   },
   create(context) {
     return {
+      JSXText(node) {
+        if (isCloseGlyph(node) && insideButton(node)) {
+          context.report({ node, message: CONTROL_MESSAGES.close });
+        }
+      },
       JSXOpeningElement(node) {
         const name = elementName(node);
         if (!['button', 'input', 'select', 'textarea'].includes(name)) return;

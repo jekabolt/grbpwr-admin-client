@@ -4,7 +4,7 @@ import { SECTION } from 'constants/routes';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, GenericPopover, Text } from 'ui';
+import { Button, GenericPopover, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialModal } from './material-modal';
 import { MaterialThumb } from './material-thumb';
@@ -328,7 +328,7 @@ export function StockTab() {
                     <td className={cell}>
                       <MaterialThumb material={m} size='sm' />
                     </td>
-                    <td className={cell}>{m?.code || '—'}</td>
+                    <td className={cell}>{m?.code || <EmptyCell />}</td>
                     <td className={cell}>
                       <div className='flex flex-wrap items-center gap-2'>
                         <span>{m?.name}</span>
@@ -341,17 +341,23 @@ export function StockTab() {
                     </td>
                     <td className={`${cell} text-right`}>
                       {below ? '! ' : ''}
-                      {decimalToInput(r.minStock) || '—'}
+                      {decimalToInput(r.minStock) || <EmptyCell />}
                     </td>
                     {canReadCosting ? (
                       <>
                         <td className={`${cell} text-right`}>
-                          {r.avgUnitCostBase?.value
-                            ? `${decimalToInput(r.avgUnitCostBase)} ${r.baseCurrency || ''}`
-                            : '—'}
+                          {r.avgUnitCostBase?.value ? (
+                            `${decimalToInput(r.avgUnitCostBase)} ${r.baseCurrency || ''}`
+                          ) : (
+                            <EmptyCell />
+                          )}
                         </td>
                         <td className={`${cell} text-right`}>
-                          {r.stockValueBase?.value ? decimalToInput(r.stockValueBase) : '—'}
+                          {r.stockValueBase?.value ? (
+                            decimalToInput(r.stockValueBase)
+                          ) : (
+                            <EmptyCell />
+                          )}
                         </td>
                       </>
                     ) : null}

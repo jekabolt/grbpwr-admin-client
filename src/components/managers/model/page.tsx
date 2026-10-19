@@ -1,7 +1,7 @@
 import { useModel } from 'components/managers/models/components/useModelQuery';
 import { ROUTES } from 'constants/routes';
-import { Link, useParams } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { useParams } from 'react-router-dom';
+import { BackLink, Text } from 'ui';
 import { ModelForm } from './components';
 
 export function Model() {
@@ -26,9 +26,7 @@ export function Model() {
         <Text variant='inactive' className='uppercase'>
           model not found
         </Text>
-        <Button asChild variant='main' size='lg' className='uppercase'>
-          <Link to={ROUTES.models}>← back to models</Link>
-        </Button>
+        <BackLink to={ROUTES.models}>models</BackLink>
       </div>
     );
   }

@@ -4,8 +4,9 @@ import { ROUTES } from 'constants/routes';
 import { useQuery } from '@tanstack/react-query';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
+  BackLink,
   Button,
   CalloutBox,
   Chip,
@@ -98,9 +99,7 @@ export function OrderInvoicePrint() {
             <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
               order not found
             </Text>
-            <Button asChild variant='main' size='sm'>
-              <Link to={ROUTES.orders}>← back to orders</Link>
-            </Button>
+            <BackLink to={ROUTES.orders}>orders</BackLink>
           </CalloutBox>
         ) : (
           <div className='invoice-doc mx-auto w-full max-w-[210mm] border border-borderColor bg-white shadow-[var(--shadow-modal)]'>
@@ -132,9 +131,7 @@ export function OrderInvoicePrint() {
             <Text size='micro' variant='label' component='span'>
               choose “save as PDF” as the destination
             </Text>
-            <Button asChild variant='underline' size='xs'>
-              <Link to={backTo}>← back to order</Link>
-            </Button>
+            <BackLink to={backTo}>order</BackLink>
           </Section>
 
           <Section title='document options' question='a filled chip prints on the sheet'>

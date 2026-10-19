@@ -582,9 +582,10 @@ export function AssemblyCreateDialog({
               <Chip
                 key={k}
                 onClick={() => setInputs((cur) => cur.filter((x) => x !== k))}
+                onRemove={() => setInputs((cur) => cur.filter((x) => x !== k))}
                 title='remove the input'
               >
-                {labelOf(k)} ✕
+                {labelOf(k)}
               </Chip>
             ))}
           </ChipRow>

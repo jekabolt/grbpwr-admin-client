@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { PantonePicker } from '../../../pantone-picker';
 import { findPantone } from '../../../pantone-swatches';
 import { Swatch } from '../../render/field-row';
+import { EmptyCell } from 'ui';
 
 /**
  * ═══ THE COLOUR OF A PLAYGROUND RUN, PICKED FROM PANTONE (C-02, tile 4) ══════════════════════════
@@ -65,7 +66,7 @@ export function PantoneField({
 
 /** Swatch + code for a fold header; `—` when nothing is picked. */
 export function PantoneValue({ value }: { value: PantoneColour }): JSX.Element {
-  if (!value.code) return <span>—</span>;
+  if (!value.code) return <EmptyCell />;
   return (
     <span className='inline-flex items-center gap-1.5'>
       <Swatch

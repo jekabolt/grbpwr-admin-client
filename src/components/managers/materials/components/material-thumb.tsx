@@ -1,6 +1,6 @@
 import { common_Material, common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Media, Text } from 'ui';
+import { Media, Text, EmptyCell } from 'ui';
 
 // Catalog image (#39): resolves the display URL for a single MediaFull the same way everywhere —
 // thumbnail first (cropped/optimized), full-size as a fallback for an item that has none.
@@ -37,7 +37,7 @@ export function MaterialThumb({
       ) : (
         <div className='flex h-full w-full items-center justify-center'>
           <Text variant='inactive' size='small'>
-            —
+            <EmptyCell />
           </Text>
         </div>
       )}

@@ -1,9 +1,8 @@
-import { Cross2Icon } from '@radix-ui/react-icons';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button, Input, Text } from 'ui';
+import { Button, Close, Input, Text } from 'ui';
 import { ProductFormData } from '../utility/schema';
 
 export function Tags({
@@ -218,15 +217,14 @@ export function Tags({
           >
             <Text>{tag}</Text>
             {(isEditMode || isAddingProduct) && (
-              <Button
-                type='button'
+              <Close
+                size='sm'
+                aria-label={`remove tag ${tag || ''}`}
                 className='lg:hidden lg:group-hover:block'
                 onClick={(e: React.MouseEvent) => {
                   handleDeleteTag(tag || '', e);
                 }}
-              >
-                <Cross2Icon />
-              </Button>
+              />
             )}
           </div>
         ))}

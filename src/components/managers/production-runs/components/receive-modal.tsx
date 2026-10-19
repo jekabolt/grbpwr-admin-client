@@ -9,7 +9,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { isVariantRun, materialLabel } from './aux-run-plan';
@@ -309,9 +309,7 @@ export function ReceiveModal({
               receive PR-{run?.id}
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>

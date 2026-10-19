@@ -5,7 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, CalloutBox, Placeholder, Section, HeaderCount, Text, Tiles, FoldCaret } from 'ui';
+import { Button, CalloutBox, Placeholder, Section, HeaderCount, Text, Tiles, FoldCaret, EmptyCell } from 'ui';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'components/shared/media-viewer/media-viewer';
 
 import { serverSpeaksDesign } from '../capability';
@@ -129,7 +129,7 @@ export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
           в полосе выше или ниже своих соседей и подписи перестают лежать на одной линии. */}
       <Placeholder dashed className='w-full' style={{ aspectRatio: STRIP_FRAME_ASPECT }} />
       <Text size='nano' component='span' className='min-w-0 break-words text-warning'>
-        <b>run {run.id ?? '—'}</b> · {elapsed || '0:00'}
+        <b>run {run.id ?? <EmptyCell />}</b> · {elapsed || '0:00'}
       </Text>
       {/* СЛОВО СОСТОЯНИЯ — С ПРОВОДА (`pending` = в очереди, `running` = у провайдера), а не
           выдуманное. Оно же различает две вещи, которые дыра сама по себе не различает, и ничего

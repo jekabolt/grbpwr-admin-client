@@ -12,7 +12,7 @@ import {
   STATUS_LABELS,
 } from 'constants/email-campaign';
 import { useMemo, useState } from 'react';
-import { Button, ConfirmationModal, GroupLabel, Section, Select, Text } from 'ui';
+import { Button, ConfirmationModal, GroupLabel, Section, Select, Text, EmptyCell } from 'ui';
 import { fmtInt, StatTile, StatTone } from './stat-tile';
 import {
   useCancelCampaign,
@@ -411,19 +411,19 @@ function RecipientsTable({ id }: { id: number }) {
                   <tr key={r.id} className='border-b border-textInactiveColor/40 align-top'>
                     <td className='py-2 pr-3'>
                       <Text size='small' className='break-all'>
-                        {r.email || '—'}
+                        {r.email || <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant={failed ? 'error' : 'default'} className='uppercase'>
-                        {RECIPIENT_STATUS_LABELS[r.status || ''] ?? r.status ?? '—'}
+                        {RECIPIENT_STATUS_LABELS[r.status || ''] ?? r.status ?? <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
-                      <Text size='small'>{r.variantId ? `#${r.variantId}` : '—'}</Text>
+                      <Text size='small'>{r.variantId ? `#${r.variantId}` : <EmptyCell />}</Text>
                     </td>
                     <td className='py-2 pr-3'>
-                      <Text size='small'>{COHORT_LABELS[r.cohort || ''] ?? '—'}</Text>
+                      <Text size='small'>{COHORT_LABELS[r.cohort || ''] ?? <EmptyCell />}</Text>
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' className='tabular-nums'>
@@ -432,7 +432,7 @@ function RecipientsTable({ id }: { id: number }) {
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant='inactive' className='break-all'>
-                        {r.resendEmailId || '—'}
+                        {r.resendEmailId || <EmptyCell />}
                       </Text>
                     </td>
                     <td className='py-2 pr-3'>
@@ -442,7 +442,7 @@ function RecipientsTable({ id }: { id: number }) {
                     </td>
                     <td className='py-2 pr-3'>
                       <Text size='small' variant={r.lastError ? 'error' : 'inactive'}>
-                        {r.lastError || r.errorCode || '—'}
+                        {r.lastError || r.errorCode || <EmptyCell />}
                       </Text>
                     </td>
                   </tr>

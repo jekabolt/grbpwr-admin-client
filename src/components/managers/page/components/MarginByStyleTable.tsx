@@ -2,7 +2,7 @@ import type { MarginByStyleRow } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { FC, useState } from 'react';
 import { generatePath, Link } from 'react-router-dom';
-import { GroupLabel, Text } from 'ui';
+import { GroupLabel, Text, EmptyCell } from 'ui';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { StyleEconomicsModal } from './StyleEconomicsModal';
 
@@ -56,7 +56,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
                     </Link>
                   ) : (
                     <Text title='No tech card linked to this style'>
-                      {r.styleNumber || r.name || '—'}
+                      {r.styleNumber || r.name || <EmptyCell />}
                     </Text>
                   )}
                 </td>
@@ -64,16 +64,16 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
                 <td className='p-2 text-right'>{formatNumber(r.unitsSold ?? 0)}</td>
                 <td className='p-2 text-right'>{formatNumber(r.colorwayCount ?? 0)}</td>
                 <td className='p-2 text-right'>
-                  {r.hasCost ? formatCurrency(parseDecimal(r.unitCost)) : '—'}
+                  {r.hasCost ? formatCurrency(parseDecimal(r.unitCost)) : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasCost ? formatCurrency(parseDecimal(r.revenueCost)) : '—'}
+                  {r.hasCost ? formatCurrency(parseDecimal(r.revenueCost)) : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasCost ? formatCurrency(parseDecimal(r.grossMargin)) : '—'}
+                  {r.hasCost ? formatCurrency(parseDecimal(r.grossMargin)) : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
-                  {r.hasCost ? `${(r.grossMarginPct ?? 0).toFixed(0)}%` : '—'}
+                  {r.hasCost ? `${(r.grossMarginPct ?? 0).toFixed(0)}%` : <EmptyCell />}
                 </td>
                 <td className='p-2 text-right'>
                   {r.techCardId ? (
