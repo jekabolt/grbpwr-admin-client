@@ -1,3 +1,4 @@
+import { kindDef } from 'components/managers/tech-card/annotation/kinds';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Chip, ChipRow, Textarea } from 'ui';
 import { useAddEdit } from './use-add-edit';
@@ -44,7 +45,7 @@ export function EditComposer({ nextNumber }: { nextNumber: number }) {
       {pendingMark && (
         <ChipRow>
           <Chip tone='attention' onRemove={() => setPendingMark(null)}>
-            {nextNumber} · {pendingMark.kind}
+            {nextNumber} · {kindDef(pendingMark.kind).label}
           </Chip>
         </ChipRow>
       )}

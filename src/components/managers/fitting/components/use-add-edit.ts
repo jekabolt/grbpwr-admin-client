@@ -175,6 +175,16 @@ export function useAddEdit(): (input: AddEditInput) => Promise<number> {
             s,
             s.pending.filter((p) => p.calloutNumber !== n),
           );
+          // The mark went into the form before the RPC; without its edit it would be an orphan.
+          if (input.mark) {
+            const now = (getValues('callouts') ?? []) as FormCallout[];
+            setValue(
+              'callouts',
+              now.filter((c) => c.number !== n),
+              { shouldDirty: true },
+            );
+            latest.current.saveNow();
+          }
           notify({
             sev: 'error',
             subject: 'EDIT',
