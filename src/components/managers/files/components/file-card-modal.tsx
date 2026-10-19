@@ -103,11 +103,7 @@ function ProjectRoleRow({
             Пока словарь в пути, чипа НЕТ: иначе живая роль на полсекунды объявлялась бы
             архивной — утверждение, которого никто не проверял. */}
         {!!row.role?.roleId && rolesQuery.isFetched && !known && (
-          <Chip
-            selected
-            pressed
-            title='the role is archived: it can be taken off, but not put on again'
-          >
+          <Chip selected pressed title='archived role'>
             {row.role?.roleName || `#${row.role?.roleId}`}
           </Chip>
         )}
@@ -881,9 +877,7 @@ export function FileCardModal({
                     selected={on}
                     pressed={on}
                     disabled={!writable}
-                    title={
-                      writable ? d || undefined : "read-only — the projects can't be moved around"
-                    }
+                    title={writable ? d || undefined : 'read-only'}
                     onClick={() =>
                       setSelected((p) =>
                         p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid],
@@ -901,15 +895,6 @@ export function FileCardModal({
                 </Text>
               )}
             </ChipRow>
-            {/* ФРАЗА, КОТОРУЮ ИНАЧЕ УЗНАЮТ ОПЫТОМ. Снятие чипа проекта удаляет строку связи —
-                вместе с ролью, которая на ней стоит. Это правильное поведение (роль без
-                проекта не существует), но человек обязан узнать о нём отсюда, а не обнаружив
-                пропажу. */}
-            <Text size='micro' variant='label'>
-              take the project chip off and the file's role in it goes too: the role sits on the
-              link itself and is deleted along with it. it comes back by putting the project on
-              again and picking a role below.
-            </Text>
             {/* ПРЕДУПРЕЖДЕНИЕ ИМЕНЕМ, а не общей фразой: оно печатается ровно тогда, когда
                 снятый проект действительно нёс роль, и называет, какую именно. */}
             {(() => {
@@ -919,8 +904,7 @@ export function FileCardModal({
               if (!losing.length) return null;
               return (
                 <Text size='micro'>
-                  not saved: {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} —
-                  this role will go along with the link the moment you press “save”
+                  role drops: {losing.map((p) => `${p.name} — ${p.role?.roleName}`).join(', ')}
                 </Text>
               );
             })()}

@@ -223,10 +223,7 @@ export function NoteBlocksView({
   const accept = (s: AiSuggestion) => {
     // Пока помощник работал, буфер могли поправить: предложение построено по прошлой версии.
     if (value !== s.before) {
-      showMessage(
-        'the text changed while the assistant was working — the suggestion is built on the previous version, ask again',
-        'error',
-      );
+      showMessage('text changed — ask again', 'error');
       return;
     }
     onChange(s.after);
@@ -234,10 +231,7 @@ export function NoteBlocksView({
   };
   const revert = (previous: string, next: string) => {
     if (value !== next) {
-      showMessage(
-        'the text has already been edited since accepting — the revert would erase those edits, so it refuses',
-        'error',
-      );
+      showMessage('edited since — no revert', 'error');
       return;
     }
     onChange(previous);
