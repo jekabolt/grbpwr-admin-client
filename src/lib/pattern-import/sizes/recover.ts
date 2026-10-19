@@ -983,11 +983,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     // SIZESEP (sizes/look-order.ts): every size in a look of its own — the looks are ranked as a
     // whole where their order across the sheet, the inside vote and the labels beside the look
     // lines agree; then each look's chains vote its rank in every section they cross (the inside
-    // guess of one section no longer decides alone)
+    // guess of one section no longer decides alone). A line whose own label names another size
+    // than its look takes no look vote, and the sizes step asks about it.
     if (!debugFlag('SIZESEP_OFF') && labels.length === n) {
       const lo = textLabelLookOrder(
         chains,
-        groups.map((g) => ({ units: g.group.units, from: g.x.from })),
+        groups.map((g) => ({ units: g.group.units, from: g.x.from, at: g.x.at })),
         unit,
         nUnits,
         n,
@@ -997,17 +998,35 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       diag.lookOrder = lo.why;
       const lr = lo.rank;
       if (lr) {
+        const lookRank = (c: number) => (unit[c] >= 0 ? lr[unit[c]] : -1);
+        const against = new Map<number, string>();
+        for (const h of hits) {
+          const r = lookRank(h.chain);
+          if (r >= 0 && rankOfLabel.get(h.label) !== r) against.set(h.chain, h.label);
+        }
+        const lookVote = (c: number, w: number) => {
+          const r = lookRank(c);
+          if (r >= 0 && !against.has(c)) vote(c, r, w);
+        };
         for (const g of groups)
-          for (const k of g.lanes)
-            for (const c of g.x.lanes[k])
-              if (unit[c] >= 0 && lr[unit[c]] >= 0) vote(c, lr[unit[c]], 1);
-        for (const c of [...votes.keys()])
-          if (unit[c] >= 0 && lr[unit[c]] >= 0) vote(c, lr[unit[c]], 4);
+          for (const k of g.lanes) for (const c of g.x.lanes[k]) lookVote(c, 1);
+        for (const c of [...votes.keys()]) lookVote(c, 4);
         lr.forEach((r, u) => {
           if (r < 0) return;
           unitRank[u] = r;
           unitPurity[u] = 1;
         });
+        if (against.size) {
+          const [c0, l0] = [...against][0];
+          ambiguities.push({
+            kind: 'class-split',
+            message: `${against.size} line(s) drawn in the look of ${labels[lookRank(c0)]} carry the label of another size (${l0}): check the legend`,
+            classes: [],
+            chains: [...against.keys()].slice(0, 200),
+            at: hits.find((h) => h.chain === c0)?.text.anchor ?? null,
+          });
+          diag.lookAgainstLabel = against.size;
+        }
       }
     }
     for (const [c, ls] of hitByChain) for (const l of ls) vote(c, rankOfLabel.get(l)!, 3);

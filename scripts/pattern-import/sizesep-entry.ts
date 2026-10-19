@@ -2,12 +2,15 @@
 // a look each (polupalto: 44 crosses … 54 thick, key on the sheet) is ranked look by look only where
 // the look order, the inside vote and the labels on the look lines agree (sizes/look-order.ts).
 // The probe runs the real chains + sizes steps on both polupalto sheets and r4454 (text-label too,
-// must not move), with the fix off and on, then on three mutated inputs that must NOT be ranked by
-// look (the step goes back to asking):
+// must not move), with the fix off and on, then on mutated inputs that must NOT be ranked by look
+// (the step goes back to asking) or, for one contradicting label, must ask about that line:
 //   labels-swapped   the boxed labels 44↔54, 46↔52, 48↔50 (the run text stays): labels contradict
 //                    the nesting
 //   looks-merged     every 50 line drawn in the 48 look: no section shows six looks
 //   looks-shuffled   every size line drawn in a random size look: no order dominates
+//   region-reordered on the right 40 % of the sheet 44 is drawn in 48's look and 48 in 44's: one
+//                    part of the sheet reads the looks in another order
+//   label-on-line    a "48" printed on three long 44 lines: ranked by look, but those lines ask
 // The truth per polupalto chain is its pen (width + dash), read from the sheet's key, never from the
 // engine's rows. Output: one table on stdout, JSON in PATIMPORT_REPORTS (default os tmpdir).
 //   node scripts/pattern-import/sizesep.mjs
@@ -71,7 +74,13 @@ function poluTruth(c: Chain, styles: Map<number, Style>): number {
   return -1;
 }
 
-type Mutation = 'none' | 'labels-swapped' | 'looks-merged' | 'looks-shuffled';
+type Mutation =
+  | 'none'
+  | 'labels-swapped'
+  | 'looks-merged'
+  | 'looks-shuffled'
+  | 'region-reordered'
+  | 'label-on-line';
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -121,11 +130,40 @@ function mutate(sheet: Sheet, build: ChainBuild, truth: number[], m: Mutation): 
       motif: build.chains[j].motif,
     };
   };
+  if (m === 'label-on-line') {
+    const long = truth
+      .map((r, i) => ({ r, i, L: build.chains[i].lengthMm }))
+      .filter((e) => e.r === 0)
+      .sort((a, b) => b.L - a.L)
+      .slice(0, 3);
+    const t0 = sheet.texts[0];
+    const added = long.map(({ i }, k) => {
+      const pts = build.chains[i].pts;
+      const p = pts[pts.length >> 1];
+      return {
+        ...t0,
+        id: (Math.max(...sheet.texts.map((t) => Number(t.id))) + 1 + k) as typeof t0.id,
+        text: '48',
+        anchor: { x: p.x - 1.5, y: p.y + 1 },
+        bbox: { minX: p.x - 1.5, minY: p.y - 1, maxX: p.x + 1.5, maxY: p.y + 1 },
+        fontSizeMm: 2.5,
+        rotationDeg: 0,
+        background: undefined,
+      };
+    });
+    return { ...sheet, texts: [...sheet.texts, ...added] };
+  }
   const rnd = rng(19);
+  const xs = sheet.paths.flatMap((p) => p.pts.map((q) => q.x));
+  const x60 = Math.min(...xs) + 0.6 * (Math.max(...xs) - Math.min(...xs));
   truth.forEach((r, i) => {
     if (r < 0) return;
     if (m === 'looks-merged' && r === 3) draw(i, 2);
     if (m === 'looks-shuffled') draw(i, Math.floor(rnd() * 6));
+    if (m === 'region-reordered' && (r === 0 || r === 2)) {
+      const pts = build.chains[i].pts;
+      if (pts[pts.length >> 1].x > x60) draw(i, 2 - r);
+    }
   });
   return sheet;
 }
@@ -145,6 +183,8 @@ type Row = {
   perLook: Record<number, Record<number, number>>;
   /** chains moved vs the fix off (r4454), length m */
   moved: number;
+  /** lines whose own label names another size than their look (asked) */
+  lookAgainst: number;
   asks: Record<string, number>;
 };
 
@@ -173,6 +213,7 @@ function score(
     none: 0,
     perLook: {},
     moved: 0,
+    lookAgainst: Number(rec.diag.lookAgainstLabel ?? 0),
     asks,
   };
   if (!truth) return row;
@@ -262,10 +303,21 @@ export async function main(): Promise<number> {
       if (on.row.wrong > 0.02 * (on.row.right + on.row.wrong + on.row.none))
         fails.push(`${name}: ${f1(on.row.wrong)} m wrong with the fix`);
       if (on.row.right < off.row.right) fails.push(`${name}: right went down`);
-      for (const m of ['labels-swapped', 'looks-merged', 'looks-shuffled'] as const) {
+      const muts = [
+        'labels-swapped',
+        'looks-merged',
+        'looks-shuffled',
+        'region-reordered',
+        'label-on-line',
+      ] as const;
+      for (const m of muts) {
         const mu = runOne(name, sheet, base, docTexts, true, m, truthOf);
         rows.push(mu.row);
-        if (mu.row.rankedByLook) fails.push(`${name} ${m}: ranked by look on a mutated sheet`);
+        if (m === 'label-on-line') {
+          if (mu.row.rankedByLook && !mu.row.lookAgainst)
+            fails.push(`${name} ${m}: a line labelled against its look is not asked`);
+        } else if (mu.row.rankedByLook)
+          fails.push(`${name} ${m}: ranked by look on a mutated sheet`);
         const offAsks = Object.values(mu.row.asks).reduce((a, b) => a + b, 0);
         if (!offAsks) fails.push(`${name} ${m}: no question left`);
       }
@@ -276,7 +328,7 @@ export async function main(): Promise<number> {
   );
   for (const r of rows)
     console.log(
-      `${r.case.padEnd(13)} ${r.fix ? 'on ' : 'off'} ${r.mutation.padEnd(15)} ${f1(r.right).padStart(6)} ${f1(r.wrong).padStart(6)} ${f1(r.none).padStart(6)}  ${f1(r.moved).padStart(6)}  ${JSON.stringify(r.asks).padEnd(24)} ${r.lookOrder}`,
+      `${r.case.padEnd(13)} ${r.fix ? 'on ' : 'off'} ${(r.mutation + (r.lookAgainst ? `(${r.lookAgainst} asked)` : '')).padEnd(15)} ${f1(r.right).padStart(6)} ${f1(r.wrong).padStart(6)} ${f1(r.none).padStart(6)}  ${f1(r.moved).padStart(6)}  ${JSON.stringify(r.asks).padEnd(24)} ${r.lookOrder}`,
     );
   for (const r of rows)
     if (Object.keys(r.perLook).length && r.mutation === 'none')
