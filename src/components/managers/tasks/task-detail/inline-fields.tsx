@@ -1,3 +1,5 @@
+import { format } from 'date-fns';
+import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 import { Button, DatePicker, Input, Text } from 'ui';
 import { DescriptionEditor } from '../components/description-editor';
@@ -90,12 +92,12 @@ export function InlineTitle({
         variant='default'
         onClick={() => setEditing(true)}
         aria-label='edit title'
-        className='min-h-11 w-fit max-w-full text-left text-lg leading-tight underline decoration-transparent underline-offset-4 outline-none hover:decoration-borderColor sm:min-h-0'
+        className='min-h-11 w-fit max-w-full text-left text-lg font-bold leading-tight underline decoration-transparent underline-offset-4 outline-none hover:decoration-borderColor sm:min-h-0 sm:text-statBig'
       >
         {value}
       </Button>
     ) : (
-      <h1 className='text-lg leading-tight'>{value}</h1>
+      <h1 className='text-lg font-bold leading-tight sm:text-statBig'>{value}</h1>
     );
   }
 
@@ -116,7 +118,7 @@ export function InlineTitle({
         ref={inputRef}
         name='inline-title'
         aria-label='task title'
-        className='min-h-11 min-w-0 flex-1 text-lg sm:min-h-0'
+        className='min-h-11 min-w-0 flex-1 text-lg font-bold sm:min-h-0 sm:text-statBig'
         value={draft}
         disabled={saving}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
@@ -288,5 +290,82 @@ export function InlineDate({
         />
       </div>
     </InlineField>
+  );
+}
+
+/**
+ * ДАТА В РЯДУ ПОД ЗАГОЛОВКОМ (detail v2): «due · дата», просрочка — красной рамкой И словом
+ * `overdue` (цвет не несёт состояние в одиночку). Тот же `DatePicker`; выбор пишет сразу.
+ * Без права записи — та же рамка с текстом, без контрола.
+ */
+export function DueField({
+  label,
+  value,
+  overdue,
+  canWrite,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  overdue?: boolean;
+  canWrite: boolean;
+  disabled?: boolean;
+  onChange: (next: string | undefined) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-11 items-center gap-2 border border-borderColor bg-bgColor px-2 sm:min-h-8',
+        overdue && 'border-error text-error',
+      )}
+    >
+      <Text size='micro' component='span' className='shrink-0 uppercase tracking-label'>
+        {label}
+      </Text>
+      {canWrite ? (
+        <div className='min-w-0 [&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-0'>
+          <DatePicker
+            value={value ? new Date(value) : undefined}
+            disabled={disabled}
+            placeholder='none'
+            onChange={(d) => onChange(d ? d.toISOString() : undefined)}
+          />
+        </div>
+      ) : (
+        <Text component='span' className={cn(!value && 'text-labelColor')}>
+          {value ? format(new Date(value), 'PP') : 'none'}
+        </Text>
+      )}
+      {overdue && (
+        <Text size='micro' component='span' className='shrink-0 uppercase tracking-label'>
+          overdue
+        </Text>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Дата строкой списка полей: только сам `DatePicker`, без подписи — подпись держит строка.
+ */
+export function RowDate({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string | undefined;
+  disabled?: boolean;
+  onChange: (next: string | undefined) => void;
+}) {
+  return (
+    <div className='[&>button]:min-h-11 [&>button]:border-b-0 [&>button]:py-0 sm:[&>button]:min-h-8'>
+      <DatePicker
+        value={value ? new Date(value) : undefined}
+        disabled={disabled}
+        placeholder='none'
+        onChange={(d) => onChange(d ? d.toISOString() : undefined)}
+      />
+    </div>
   );
 }
