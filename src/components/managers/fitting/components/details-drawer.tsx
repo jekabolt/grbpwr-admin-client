@@ -58,7 +58,10 @@ export function DetailsDrawer({
       title='details'
       width={phone ? window.innerWidth : 440}
     >
-      <fieldset disabled={readOnly} className='m-0 grid min-w-0 gap-stack border-0 p-0'>
+      <fieldset
+        disabled={readOnly}
+        className='m-0 grid min-w-0 gap-stack overflow-x-clip border-0 p-0'
+      >
         <GroupLabel flush>session</GroupLabel>
         <div className='grid gap-1'>
           <FieldLabel>tech card</FieldLabel>
