@@ -4,14 +4,13 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Close } from 'ui';
+import { Close, EmptyCell } from 'ui';
 import {
   useImageAdjust,
   useImageAnnotate,
   useMediaStageGestures,
   ZoomDrawToolbar,
 } from './media-viewer-zoom';
-import { EmptyCell } from 'ui';
 
 // One normalized shape the viewer understands. Every call site maps its own data
 // (proto MediaFull, a bare url, a { thumbnail, fullSize } row) down to this.
