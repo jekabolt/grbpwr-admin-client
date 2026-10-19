@@ -1,8 +1,9 @@
+import { openInbox } from 'lib/stores/inbox-open';
 import { markToastBeingRead, useSnackBarStore } from 'lib/stores/store';
 import { NotifySev, Toast } from 'lib/stores/store-types';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Close } from 'ui';
+import { Button, Close } from 'ui';
 
 const TOAST_MS: Record<NotifySev, number | null> = { ok: 3000, warn: 8000, error: 8000, job: null };
 const TOAST_MS_WITH_ACTION = 12000;
@@ -256,9 +257,19 @@ function ToastRow({
           )}
           {count > 1 ? <span className='tabular-nums text-bgColor/65'>{` ×${count}`}</span> : null}
           {more > 0 ? (
-            <span className='ml-2 border border-bgColor/40 px-1 text-micro font-bold tabular-nums md:hidden'>
+            <Button
+              variant='simpleReverse'
+              size='xs'
+              data-toast-more=''
+              aria-label={`inbox, ${more} more`}
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                openInbox();
+              }}
+              className='ml-2 inline-block px-1 font-bold tabular-nums focus-visible:!outline-bgColor md:hidden'
+            >
               {`+${more}`}
-            </span>
+            </Button>
           ) : null}
         </div>
         {twoLines ? <div className='break-words leading-4'>{second}</div> : null}
