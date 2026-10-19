@@ -6551,6 +6551,7 @@ export type ListTasksRequest = {
   // project_topic_id выше): это тот же список задач, просто суженный, и он обязан идти под тем же
   // rd(tasks). 0 = no filter.
   parentTaskId: number | undefined;
+  query: string | undefined;
 };
 
 export type ListTasksResponse = {
@@ -23838,6 +23839,9 @@ export function createAdminServiceClient(
       }
       if (request.parentTaskId) {
         queryParams.push(`parentTaskId=${encodeURIComponent(request.parentTaskId.toString())}`)
+      }
+      if (request.query) {
+        queryParams.push(`query=${encodeURIComponent(request.query.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

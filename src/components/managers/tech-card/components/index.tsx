@@ -40,7 +40,8 @@ import {
   revealField,
   transportRefusal,
 } from 'utils/field-errors';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify, updateNotify } from 'lib/stores/store';
+import type { NotifyInput, NotifySev } from 'lib/stores/store-types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
@@ -60,6 +61,7 @@ import {
   ConfirmationModal,
   Text,
   Form,
+  useDoneFlash,
 } from 'ui';
 import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
@@ -133,6 +135,7 @@ import {
   bodyWorkOf,
   deepEqual,
   failureClassOf,
+  failureClassOfError,
   failureFields,
   failureFieldsOf,
   failureStatus,
@@ -515,7 +518,6 @@ export function TechCardForm({
    */
   onCreated?: (id: number) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
   const exitGuide = useExitTechCardGuide(id ? parseInt(id, 10) : undefined);
@@ -554,6 +556,9 @@ export function TechCardForm({
   // A partial failure is a fact about a save that already half-happened, so it stays on screen
   // until the next save rather than passing through a toast.
   const [stagingError, setStagingError] = useState<string | null>(null);
+  // A save refused on the form itself (validation, a server 4xx) of a card with no autosave line:
+  // one callout over the form, the fields go red. Stays until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   // РАСХОЖДЕНИЕ ВЕРСИЙ (Ф5): сервер не узнал того, что видно на экране. Это не ошибка поля и не
   // ошибка человека, поэтому живёт баннером, а не краснотой у контрола.
   const [versionSkew, setVersionSkew] = useState<VersionSkew | null>(null);
@@ -562,6 +567,17 @@ export function TechCardForm({
   const [presenceLoss, setPresenceLoss] = useState<PresenceAudit | null>(null);
 
   const numId = id ? parseInt(id, 10) : undefined;
+  // The card's name in a toast and the inbox: its style number, else its id.
+  const cardSubject = () => {
+    const code = String(form.getValues('styleNumber') ?? '').trim();
+    return `TECH CARD ${code || numId || ''}`.trim();
+  };
+  // A failure of this card: always into the inbox; a toast only when nothing on the page says it
+  // (the conflict modal, a banner, the autosave chip and its failure line).
+  const reportFailure = (
+    n: Omit<NotifyInput, 'subject' | 'sev'> & { sev?: NotifySev },
+    onPage: boolean,
+  ) => notify({ sev: 'error', subject: cardSubject(), ...n }, { toast: !onPage });
 
   // URL-driven state. ?stage=… seeds a freshly-created card's stage ([new idea] → IDEA); ?tab=…
   // and ?sample=/?fits= make the open section / sample / fittings-filter deep-linkable (R-1).
@@ -746,6 +762,7 @@ export function TechCardForm({
   // Экспорт архива: держим только «идёт запрос», чтобы не выпустить второй по двойному клику.
   // Ссылку НЕ храним — она presigned и живёт 10 минут, а хранимая ссылка молча протухает в руках.
   const [exportingArchive, setExportingArchive] = useState(false);
+  const exported = useDoneFlash();
   // Drawer state lives in the URL so it survives a refresh and can be linked to.
   const tasksOpen = params.get('tasks') === '1';
   // The field a failed save should walk the user to. `nonce` re-arms the effect when the SAME field
@@ -1573,7 +1590,7 @@ export function TechCardForm({
           const message = 'another editor saved this card meanwhile';
           leaveFullscreen();
           openConflict();
-          if (opts.mode !== 'silent') showMessage(message, 'error');
+          if (opts.mode !== 'silent') reportFailure({ text: 'conflict', detail: message }, true);
           return { bodySaved: false, ok: false, outcome: 'conflict', message };
         }
         // Rebased onto another editor's card: `data` is the form from before it — the next pass
@@ -1617,6 +1634,7 @@ export function TechCardForm({
   ): Promise<WriteResult> {
     const silent = opts.mode === 'silent';
     setStagingError(null);
+    setFormError(null);
     // Оба баннера — факты о ПРЕДЫДУЩЕЙ попытке. Новая попытка начинается с чистого экрана,
     // иначе «карточка не сохранена» продолжало бы стоять над уже сохранённой карточкой.
     setVersionSkew(null);
@@ -1660,7 +1678,7 @@ export function TechCardForm({
         if (carriesApproval && staging.peek().length > 0) {
           const message =
             'a panel changed while the approval was being saved; nothing was released, try again';
-          if (!silent) showMessage(message, 'error');
+          if (!silent) reportFailure({ text: 'not released', detail: message }, autosaveEnabled);
           return { bodySaved: false, ok: false, outcome: 'error', message };
         }
 
@@ -1785,7 +1803,7 @@ export function TechCardForm({
           const message = 'another editor saved this card while it was being saved';
           leaveFullscreen();
           openConflict();
-          if (!silent) showMessage(message, 'error');
+          if (!silent) reportFailure({ text: 'conflict', detail: message }, true);
           return { bodySaved, ok: false, outcome: 'conflict', message };
         }
         if (outcome.failed) {
@@ -1798,7 +1816,7 @@ export function TechCardForm({
             const message = `«${change.label}» was changed by someone else meanwhile`;
             leaveFullscreen();
             openConflict();
-            if (!silent) showMessage(message, 'error');
+            if (!silent) reportFailure({ text: 'conflict', detail: message }, true);
             return { bodySaved, ok: false, outcome: 'conflict', message };
           }
           const done = (bodyDirty ? 1 : 0) + outcome.committed.length;
@@ -1806,7 +1824,17 @@ export function TechCardForm({
           setStagingError(
             `saved ${done} of ${planned} — «${change.label}» failed: ${why}. Everything not yet saved is still staged.`,
           );
-          if (!silent) showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
+          // The «saved 2 of 4» banner says it on the page.
+          if (!silent)
+            reportFailure(
+              {
+                sev: 'warn',
+                text: `saved ${done} of ${planned}`,
+                bad: `«${change.label}» failed`,
+                detail: why,
+              },
+              true,
+            );
           // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
           leaveFullscreen();
           return {
@@ -1826,11 +1854,7 @@ export function TechCardForm({
             message: 'saved — but the card could not be re-read; the next save reads it first',
           };
         }
-        // No success toast for an autosave: the chip says «saved 18:42», and a toast every two
-        // seconds of typing would be noise the operator learns to ignore — errors included.
-        if (!silent) {
-          showMessage(planned > 1 ? `saved ${planned} changes` : 'tech card updated', 'success');
-        }
+        // No success toast, explicit or not: the header chip turning «saved 18:42» is the receipt.
         // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
         // ones staged (see commitAll); a panel staged for the first time meanwhile is queued too. With
         // the autosave on, the next cycle carries both without a word from anyone; the banner that
@@ -1901,12 +1925,17 @@ export function TechCardForm({
           // it back.
           const queued = staging.peek();
           const missing = queued.length > 0 ? queued : [outcome.failed.change];
-          showMessage(
-            missing.every((c) => c.key === 'styleFacts')
-              ? 'created without its style facts — open the card to retry'
-              : `created without «${missing.map((c) => c.label).join('», «')}» — open the card to retry`,
-            'error',
-          );
+          const opened = newId;
+          notify({
+            sev: 'warn',
+            subject: cardSubject(),
+            text: 'created',
+            bad: missing.every((c) => c.key === 'styleFacts')
+              ? 'style facts missing'
+              : `«${missing.map((c) => c.label).join('», «')}» missing`,
+            detail: 'open the card to retry',
+            action: { label: 'open', onClick: () => navigate(`${ROUTES.techCards}/${opened}`) },
+          });
           return { bodySaved: true, ok: false, outcome: 'partial' };
         }
         if (outcome.failed) {
@@ -1914,15 +1943,20 @@ export function TechCardForm({
           setStagingError(
             `the card is created, saved ${1 + outcome.committed.length} of ${planned}. «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Press add again to retry the rest.`,
           );
-          showMessage(
-            `«${change.label}» failed. The card is created, the rest is still staged`,
-            'error',
+          reportFailure(
+            {
+              sev: 'warn',
+              text: 'created',
+              bad: `«${change.label}» failed`,
+              detail: techCardErrorMessage(error, 'unknown error'),
+            },
+            true,
           );
           leaveFullscreen();
           return { bodySaved: true, ok: false, outcome: 'partial' };
         }
       }
-      showMessage('tech card created', 'success');
+      // No receipt toast: the card opening (or the list showing it) is the receipt.
       // R-13: landed after the operator left — they are somewhere else now, and stay there.
       if (!pageMounted.current) return { bodySaved: true, ok: true, outcome: 'complete' };
       // If they were working on labels & pkg, land on the saved card's labels tab so the
@@ -2022,7 +2056,31 @@ export function TechCardForm({
       const message = unmapped.length
         ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
         : base;
-      if (!silent) showMessage(message, 'error');
+      if (!silent) {
+        const cls = failureClassOfError(error);
+        const banner = !!transport || contradictions.length > 0;
+        // Refused on the form itself: on a card without the autosave's failure line, the callout
+        // over the form says it (the pinned fields are red on their own).
+        const onForm = status !== 409 && !banner && (applied.length > 0 || cls === 'refused');
+        if (onForm && !autosaveEnabled) setFormError(message);
+        reportFailure(
+          {
+            text: status === 409 ? 'conflict' : 'not saved',
+            bad:
+              status === 409 || onForm || banner
+                ? undefined
+                : status
+                  ? `server ${status}`
+                  : 'no connection',
+            detail: message,
+            action:
+              cls === 'transient' && !autosaveEnabled
+                ? { label: 'retry', onClick: () => void save() }
+                : undefined,
+          },
+          status === 409 || banner || onForm || autosaveEnabled,
+        );
+      }
       console.error('Failed to submit tech card', error);
       const outcome: SaveOutcome =
         status === 409 ? 'conflict' : applied.length > 0 ? 'invalid' : 'error';
@@ -2229,7 +2287,7 @@ export function TechCardForm({
       if (verdict.keep) setConvertRefusal(verdict.say ?? null);
       else if (verdict.say) {
         setConvert(null);
-        showMessage(verdict.say, 'error');
+        notify({ sev: 'error', subject: cardSubject(), text: 'not switched', detail: verdict.say });
       }
       return;
     }
@@ -2279,7 +2337,7 @@ export function TechCardForm({
         // Тот же неуспех и тот же довод: отчёт о наполовину состоявшемся переводе — баннер на
         // странице, и под оверлеем его никто не прочтёт.
         leaveFullscreen();
-        showMessage('convert stopped — the card is still sellable', 'error');
+        reportFailure({ text: 'convert stopped', detail: 'the card is still sellable' }, true);
         return;
       }
       // The card's colourway list drives the lock warning and the release gate; it is stale the
@@ -2302,7 +2360,12 @@ export function TechCardForm({
         // still seed what the earlier attempt archived.
         const codes = [...seedCodes.current];
         if (seedColours && codes.length > 0 && numId) {
-          showMessage(`registering ${codes.length} colour(s)…`, 'success');
+          // Background work after the switch: one job, settled in place.
+          const job = notify({
+            sev: 'job',
+            subject: cardSubject(),
+            text: `registering ${codes.length} colours`,
+          });
           const { created, failed } = await seedColourVariants(numId, codes);
           // Drain only what landed. A colour that failed stays banked so the next attempt retries
           // exactly it, and one already created is never re-sent (that would refuse as a duplicate).
@@ -2324,12 +2387,17 @@ export function TechCardForm({
             // цветов, и путь к повтору («output material» на вкладке шапки) стоят под оверлеем:
             // правило «любой неуспех закрывает» покрывает и хвост управляемого перевода.
             leaveFullscreen();
-            showMessage('switched to auxiliary — some colours were not registered', 'error');
+            updateNotify(job, {
+              sev: 'warn',
+              text: `registered ${created.length} of ${codes.length}`,
+              bad: `${failed.length} failed`,
+              detail: failed.map((f) => `${f.code} — ${f.message}`).join('; '),
+            });
           } else {
-            showMessage(
-              `switched to auxiliary · ${created.length} colour variant(s) registered`,
-              'success',
-            );
+            updateNotify(job, {
+              sev: 'ok',
+              text: `auxiliary · ${created.length} colours`,
+            });
           }
         }
         return;
@@ -2365,7 +2433,8 @@ export function TechCardForm({
       // рамки, которые тост просит проверить, стоят под оверлеем — совет смотреть на то, чего
       // не видно, хуже, чем просто показать страницу.
       leaveFullscreen();
-      showMessage('check the fields with errors', 'error');
+      // The autosave's failure line says it on a saved card; a new card gets the callout.
+      if (!autosaveEnabled) setFormError('check the fields with errors');
       return;
     }
     const first = flat[0];
@@ -2382,7 +2451,8 @@ export function TechCardForm({
     // diagnosable instead of a dead end where Save silently does nothing.
     const tabLabel = TABS.find((t) => t.id === tab)?.label ?? tab;
     const more = flat.length > 1 ? ` (+${flat.length - 1})` : '';
-    showMessage(`${tabLabel} → ${first.path} — ${first.message || 'invalid'}${more}`, 'error');
+    if (!autosaveEnabled)
+      setFormError(`${tabLabel} → ${first.path} — ${first.message || 'invalid'}${more}`);
   };
   // THE EXPLICIT SAVE as one promise with a verdict: validation with the walk to the first error,
   // the convert dialog for a sellable→auxiliary flip, the success toast. On a saved card it runs
@@ -2432,7 +2502,16 @@ export function TechCardForm({
   const createGuided = (land: 'card' | 'mood', loud: boolean): Promise<number | undefined> => {
     if (createFlight.current) return createFlight.current;
     const flight = runGuidedCreate(land, loud).catch((error) => {
-      showMessage(techCardErrorMessage(error, 'the card could not be created'), 'error');
+      notify({
+        sev: 'error',
+        subject: cardSubject(),
+        text: 'not created',
+        detail: techCardErrorMessage(error, 'the card could not be created'),
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => void createGuided(land, true) }
+            : undefined,
+      });
       return undefined;
     });
     createFlight.current = flight;
@@ -2511,8 +2590,22 @@ export function TechCardForm({
           }
         }
         applyServerFieldErrors(error, form.setError, { stripPrefixes: ['tech_card'] });
-        if (loud)
-          showMessage(techCardErrorMessage(error, 'the card could not be created'), 'error');
+        if (loud) {
+          const said = techCardErrorMessage(error, 'the card could not be created');
+          // A refusal of what was typed stands over the form; a lost request is news.
+          if (failureClassOfError(error) === 'refused') setFormError(said);
+          else
+            notify({
+              sev: 'error',
+              subject: cardSubject(),
+              text: 'not created',
+              detail: said,
+              action:
+                failureClassOfError(error) === 'transient'
+                  ? { label: 'retry', onClick: () => void createGuided(land, true) }
+                  : undefined,
+            });
+        }
         return undefined;
       }
     }
@@ -2716,14 +2809,17 @@ export function TechCardForm({
       // wrapper as the card.
       queryClient.setQueryData(techCardKeys.detail(numId), res.techCard);
     } catch (error) {
-      showMessage(
-        techCardErrorMessage(
+      notify({
+        sev: 'error',
+        subject: cardSubject(),
+        text: 'not overwritten',
+        bad: 'version not read',
+        detail: techCardErrorMessage(
           error,
-          'could not read the server’s version, nothing was written — try «keep mine & overwrite» ' +
-            'again from the chip',
+          'could not read the server’s version, nothing was written',
         ),
-        'error',
-      );
+        action: { label: 'retry', onClick: () => void keepMineAndOverwrite() },
+      });
       return;
     }
     // Through the autosave's queue as an EXPLICIT save. The operator's own choice is what lifts the
@@ -2762,10 +2858,12 @@ export function TechCardForm({
           before === 'off'
             ? 'this card is not saving right now — reload it'
             : flushRefusalSentence(before, autosave.errorsCount, autosave.refusalNow());
-        showMessage(
-          `${next === RELEASED ? 'not released' : 'not moved back to draft'}: ${why}`,
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: cardSubject(),
+          text: next === RELEASED ? 'not released' : 'not back to draft',
+          detail: why,
+        });
         return;
       }
     }
@@ -2792,10 +2890,13 @@ export function TechCardForm({
     // Typed while the release was on the wire: the card is frozen now and saves nothing more — and no
     // draft keeps it (O-64, D-63), so it is said plainly.
     if (landed && next === RELEASED && (bodyWorkOf(form) || staging.peek().length > 0)) {
-      showMessage(
-        'released. Edits made while it was being released were not saved — the card is frozen',
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: cardSubject(),
+        text: 'released',
+        bad: 'late edits not saved',
+        detail: 'edits made while it was being released were not saved — the card is frozen',
+      });
     }
   };
 
@@ -2863,7 +2964,9 @@ export function TechCardForm({
       // «ok» can also mean «the quiet re-read after a 409, then the operator's own edits» (B-07): the
       // stage is announced only if the saved card now carries it.
       const landedStage = (form.control._defaultValues as Partial<TechCardFormData>).stage;
-      if (r === 'ok' && landedStage === next) showMessage(`stage → ${stageLabel(next)}`, 'success');
+      // Background result (nobody clicked): a toast, never an inbox entry.
+      if (r === 'ok' && landedStage === next)
+        notify({ sev: 'ok', subject: cardSubject(), text: `stage → ${stageLabel(next)}` });
     });
     // `form` and `staging` are read live inside; the triggers are the readiness answer, the saved
     // stage, the form's stage and the autosave settling.
@@ -2874,11 +2977,8 @@ export function TechCardForm({
   const restoreHistory = (entry: HistoryEntry) => {
     const { next, changed } = restoreTextSections(form.getValues(), entry.values);
     if (changed.length === 0) return;
+    // The restored text on screen is the receipt.
     for (const key of changed) form.setValue(key, next[key] as never, { shouldDirty: true });
-    showMessage(
-      `restored ${changed.map((k) => TEXT_SECTION_LABEL[k]).join(', ')} from ${formatSavedAt(entry.at)}`,
-      'success',
-    );
     void autosave.flush('history');
   };
 
@@ -2935,7 +3035,13 @@ export function TechCardForm({
       // url приезжает с провода как `string | undefined`, но при EmitUnpopulated незаполненное
       // поле — ЯВНЫЙ null. Проверка на falsy покрывает оба, `=== undefined` не покрыло бы.
       if (!res.url) {
-        showMessage('export produced no link — try again', 'error');
+        notify({
+          sev: 'error',
+          subject: cardSubject(),
+          text: 'not exported',
+          bad: 'no link',
+          action: { label: 'retry', onClick: () => void handleExportArchive() },
+        });
         return;
       }
       const link = document.createElement('a');
@@ -2948,14 +3054,26 @@ export function TechCardForm({
       // Дыры архива (пропавшее медиа, нечитаемая выкройка) экспорт НЕ роняют — сервер перечисляет
       // их в манифесте. Молчать о них здесь значило бы отдать неполный архив как полный.
       const holes = res.manifest?.holes?.length ?? 0;
-      showMessage(
-        holes > 0
-          ? `archive exported — ${holes} item(s) could not be included`
-          : 'archive exported',
-        holes > 0 ? 'error' : 'success',
-      );
+      exported.flash();
+      if (holes > 0)
+        notify({
+          sev: 'warn',
+          subject: cardSubject(),
+          text: 'exported',
+          bad: `${holes} missing`,
+          detail: `${holes} item(s) could not be included`,
+        });
     } catch (error) {
-      showMessage(techCardErrorMessage(error, 'export failed'), 'error');
+      notify({
+        sev: 'error',
+        subject: cardSubject(),
+        text: 'not exported',
+        detail: techCardErrorMessage(error, 'export failed'),
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => void handleExportArchive() }
+            : undefined,
+      });
     } finally {
       setExportingArchive(false);
     }
@@ -3129,6 +3247,7 @@ export function TechCardForm({
                     variant='secondary'
                     size='sm'
                     loading={exportingArchive}
+                    done={exported.on && 'exported'}
                     onClick={handleExportArchive}
                   >
                     export archive
@@ -3368,6 +3487,15 @@ export function TechCardForm({
         </CalloutBox>
       )}
 
+      {/* A save refused on the form itself (no autosave line on this card). */}
+      {formError && (
+        <CalloutBox tone='error' className='mt-2.5'>
+          <Text size='micro' role='alert'>
+            <b>not saved</b> · {formError}
+          </Text>
+        </CalloutBox>
+      )}
+
       {/* Расхождение версий — не ошибка поля: ни один контрол не краснеет, зато сказано, ЧТО
           сервер не узнал и что карточка не сохранена. Стоит рядом с «сохранено 2 из 4» — оба
           про то, чем кончилась запись. */}
@@ -3590,10 +3718,12 @@ export function TechCardForm({
                     ? () =>
                         exitGuide.mutate(undefined, {
                           onError: (e) =>
-                            showMessage(
-                              techCardErrorMessage(e, 'could not leave the guide'),
-                              'error',
-                            ),
+                            notify({
+                              sev: 'error',
+                              subject: cardSubject(),
+                              text: 'guide not closed',
+                              detail: techCardErrorMessage(e, 'could not leave the guide'),
+                            }),
                         })
                     : undefined
                 }
@@ -4020,10 +4150,13 @@ export function TechCardForm({
         defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
         onCreated={(newId, material) => {
           if (material.section !== 'TECH_CARD_BOM_SECTION_PACKAGING') {
-            showMessage(
-              `«${material.name || 'material'}» created, but an aux card outputs a PACKAGING material — not selected`,
-              'error',
-            );
+            notify({
+              sev: 'warn',
+              subject: 'MATERIAL',
+              text: 'created',
+              bad: 'not selected',
+              detail: `«${material.name || 'material'}» is not packaging — an aux card outputs a packaging material`,
+            });
             return;
           }
           form.setValue('outputMaterialId', newId, { shouldDirty: true });

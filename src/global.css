@@ -99,6 +99,10 @@
 }
 
 * {
+  /* FeatureMono ships coding ligatures under `liga` (</ -> <= >> || …) and browsers turn `liga` on by
+     default, so typed text glued pairs into one glyph that overlapped its neighbours. Every character
+     stays its own cell. */
+  font-variant-ligatures: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 
@@ -302,6 +306,16 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 }
 .rdp-disabled {
   opacity: 0.3;
+}
+
+/* Toast job with no known total (snackbar.tsx): a third of the 2px track shuttles across. */
+@keyframes toastShuttle {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 
 /* Top-bar nav dropdowns (Radix NavigationMenu.Content). A short state-conveying

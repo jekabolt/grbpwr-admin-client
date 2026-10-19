@@ -11,7 +11,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { resolveMaterialPurpose } from 'components/managers/materials/components/purpose-options';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { useAddDevExpense } from './dev-expenses-field';
@@ -97,7 +97,6 @@ export function useAutoCreateSample({
   onOpen: (id: number) => void;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { canWriteCosting } = usePermissions();
   const qc = useQueryClient();
   const save = useSaveSample();
@@ -477,11 +476,22 @@ export function useAutoCreateSample({
           },
         });
       } catch (e) {
-        showMessage(saveSampleErrorMessage(e), 'error');
+        notify({
+          sev: 'error',
+          subject: 'SAMPLE',
+          text: 'not created',
+          detail: saveSampleErrorMessage(e),
+        });
         return;
       }
       if (!id) {
-        showMessage('sample created — open it from the board', 'error');
+        notify({
+          sev: 'warn',
+          subject: 'SAMPLE',
+          text: 'created',
+          bad: 'not opened',
+          detail: 'open it from the board',
+        });
         return;
       }
       await finish(id, p, ['subs', 'writeoff', 'rnd']);

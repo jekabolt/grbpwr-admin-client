@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useRef } from 'react';
 
 import { runHandle } from '../handles';
@@ -48,7 +48,6 @@ export function PlaygroundRecallIntake({
   onRecall: (key: WorkflowKey, draft: Draft) => void;
 }): null {
   const selection = useRecalledRun(techCardId);
-  const { showMessage } = useSnackBarStore();
   /** The run already taken, so a re-render does not re-lay the same form over an edited one. */
   const taken = useRef('');
   const answer = useRef(onRecall);
@@ -69,24 +68,34 @@ export function PlaygroundRecallIntake({
 
     const handle = runHandle(runId) || 'that run';
     if (disabled) {
-      showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not taken',
+        bad: 'read-only',
+        detail: `this card is read-only — nothing was taken from ${handle}`,
+      });
       return;
     }
 
     const key = workflowOfRun(run);
     const def = workflowByKey(key);
     if (!key || !def?.run?.recall) {
-      showMessage(
-        `${handle} cannot be laid out here — ${def ? `${def.title} is not on this build yet` : 'its kind is not a playground workflow'}`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not recalled',
+        detail: `${handle} cannot be laid out here — ${def ? `${def.title} is not on this build yet` : 'its kind is not a playground workflow'}`,
+      });
       return;
     }
     if (!workflowOpenable(def, band)) {
-      showMessage(
-        `${handle} cannot be laid out here — ${def.title} is ${whyNot(def, band) || 'not available'}`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not recalled',
+        detail: `${handle} cannot be laid out here — ${def.title} is ${whyNot(def, band) || 'not available'}`,
+      });
       return;
     }
 
@@ -106,7 +115,14 @@ export function PlaygroundRecallIntake({
       );
     }
     answer.current(key, back.draft);
-    showMessage(said.join(' · '), notes.length || back.lost ? 'error' : 'success');
+    if (notes.length || back.lost)
+      notify({
+        sev: 'warn',
+        subject: 'RECALL',
+        text: 'recalled',
+        bad: back.lost ? `${back.lost} pictures gone` : undefined,
+        detail: said.join(' · '),
+      });
     // The band is read at the moment of the recall, not followed: a later band must not re-lay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, disabled, techCardId]);

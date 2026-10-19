@@ -263,13 +263,14 @@ export function FileTile({
           //
           // Обрезка строками, а не символами: `line-clamp` считает по отрисованным строкам,
           // поэтому одинаково выглядит и на узкой плитке вложений задачи (от 130px), и на
-          // широкой холста. Сервер и так режет выдержку по 500 символов.
+          // широкой холста. Пяти строк хватает узнать заметку, но они не превращают превью в
+          // высокий текстовый блок. Сервер и так режет выдержку по 500 символов.
           <span className='flex aspect-square w-full flex-col justify-start overflow-hidden p-2'>
             <Text
-              size='micro'
+              size='nano'
               variant='label'
               component='span'
-              className='line-clamp-[9] whitespace-pre-wrap break-words text-left'
+              className='line-clamp-5 whitespace-pre-wrap break-words text-left'
             >
               {excerpt}
             </Text>

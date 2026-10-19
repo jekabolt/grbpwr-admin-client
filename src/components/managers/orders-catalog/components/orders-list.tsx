@@ -1,9 +1,10 @@
 import { common_Order } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, CalloutBox, Row, SkeletonLine, Text, EmptyCell } from 'ui';
+import { Button, CalloutBox, Row, SkeletonLine, Text, EmptyCell, useDoneFlash } from 'ui';
 import { OrderStatus } from './order-status';
 import { formatDateShort, getOrderStatusName } from './utility';
 
@@ -32,7 +33,9 @@ function shortUuid(uuid: string): string {
 
 export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }: Props) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // Receipt on the reference that was copied.
+  const copied = useDoneFlash();
+  const [copiedUuid, setCopiedUuid] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const open = (order: common_Order) => navigate(`${ROUTES.orders}/${order.uuid}`);
@@ -40,8 +43,13 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
   const copyReference = (uuid: string) => {
     navigator.clipboard
       .writeText(uuid)
-      .then(() => showMessage('order reference copied', 'success'))
-      .catch(() => showMessage('could not copy the order reference', 'error'));
+      .then(() => {
+        setCopiedUuid(uuid);
+        copied.flash();
+      })
+      .catch(() =>
+        notify({ sev: 'error', subject: `ORDER ${shortUuid(uuid)}`, text: 'not copied' }),
+      );
   };
 
   if (isLoading && !orders.length) {
@@ -120,6 +128,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                         variant='underline'
                         size='xs'
                         title='copy order reference'
+                        done={copied.on && copiedUuid === uuid && 'copied'}
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                           e.stopPropagation();
                           copyReference(uuid);
@@ -168,7 +177,11 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
  */
 function OrdersSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className='border border-borderColor bg-bgColor' aria-busy='true' aria-label='loading orders'>
+    <div
+      className='border border-borderColor bg-bgColor'
+      aria-busy='true'
+      aria-label='loading orders'
+    >
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}

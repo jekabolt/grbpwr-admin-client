@@ -10,7 +10,7 @@ import {
   useAnalyzeTechCardConstruction,
   useTechCardConstructionAudit,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
@@ -25,6 +25,7 @@ import {
   Placeholder,
   Text,
   ViewSwitch,
+  useDoneFlash,
 } from 'ui';
 import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
 import {
@@ -393,8 +394,10 @@ function FileControl({
 }: {
   frozen: boolean;
   busy: boolean;
-  onFile: () => void;
+  /** `done` marks this control «filed ✓»: the receipt stays where the click was. */
+  onFile: (done: () => void) => void;
 }) {
+  const filed = useDoneFlash();
   if (frozen) {
     return (
       <Chip
@@ -402,10 +405,10 @@ function FileControl({
         dashed
         className='shrink-0'
         disabled={busy}
-        onClick={onFile}
+        onClick={() => onFile(filed.flash)}
         title='file this on the issues tab of the released card'
       >
-        {busy ? 'filing…' : 'file as issue'}
+        {busy ? 'filing…' : filed.on ? 'filed ✓' : 'file as issue'}
       </Chip>
     );
   }
@@ -415,7 +418,8 @@ function FileControl({
       variant='underline'
       size='xs'
       className='shrink-0'
-      onClick={() => onFile()}
+      done={filed.on && 'filed'}
+      onClick={() => onFile(filed.flash)}
     >
       file as issue
     </Button>
@@ -438,7 +442,7 @@ function Finding({
 }: {
   finding: TechCardAnalysisFinding;
   onGo?: (r: string) => void;
-  onFile: (f: TechCardAnalysisFinding) => void;
+  onFile: (f: TechCardAnalysisFinding, done?: () => void) => void;
   /** RELEASED card: filing goes straight to the server instead of into the form. */
   frozen?: boolean;
   /** A direct filing call is in flight — the control says so and refuses a second press. */
@@ -592,7 +596,7 @@ function Finding({
               dismiss
             </Chip>
           )}
-          <FileControl frozen={frozen} busy={filing} onFile={() => onFile(finding)} />
+          <FileControl frozen={frozen} busy={filing} onFile={(done) => onFile(finding, done)} />
         </div>
       </div>
     </div>
@@ -764,7 +768,6 @@ export function ConstructionAudit({
   operationCount?: number;
 }) {
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
   const analyze = useAnalyzeTechCardConstruction();
   const addIssue = useAddTechCardIssue();
@@ -814,7 +817,7 @@ export function ConstructionAudit({
 
   // FILING, BOTH PATHS. `modelSlug` is passed by the AI block and by nothing else — that is what
   // puts the `(model …)` tail on a model finding and keeps it off a machine one.
-  const fileAsIssue = (f: TechCardAnalysisFinding, modelSlug?: string) => {
+  const fileAsIssue = (f: TechCardAnalysisFinding, done?: () => void, modelSlug?: string) => {
     const description = issueDescription(f, modelSlug);
     const operationNumber = firstOpNumber((f.refs ?? []).filter((r) => !!r?.trim()));
     if (frozen) {
@@ -829,12 +832,15 @@ export function ConstructionAudit({
           description,
         },
         {
-          onSuccess: () => showMessage('filed on the issues tab', 'success'),
+          onSuccess: () => done?.(),
           onError: (e: unknown) =>
-            showMessage(
-              `could not file the issue: ${e instanceof Error ? e.message : 'unknown error'}`,
-              'error',
-            ),
+            notify({
+              sev: 'error',
+              subject: 'ISSUE',
+              text: 'not filed',
+              detail: e instanceof Error ? e.message : undefined,
+              action: { label: 'retry', onClick: () => fileAsIssue(f, done, modelSlug) },
+            }),
         },
       );
       return;
@@ -857,7 +863,8 @@ export function ConstructionAudit({
     setValue('issues', [...(getValues('issues') ?? []), issue], { shouldDirty: true });
     // Никакой навигации: человек читает отчёт сверху вниз, и уводить его со списка на середине —
     // ровно тот способ подать одну претензию вместо пяти.
-    showMessage('filed on the issues tab — the card saves itself once it validates', 'success');
+    // The control reads «filed ✓»; the header chip carries the save.
+    done?.();
   };
 
   // ─── the Analyze control ─────────────────────────────────────────────────────────────────────
@@ -1227,7 +1234,7 @@ export function ConstructionAudit({
                                 key={uid}
                                 finding={modelFindings[i]}
                                 onGo={goRef}
-                                onFile={(f) => fileAsIssue(f, run.model)}
+                                onFile={(f, done) => fileAsIssue(f, done, run.model)}
                                 frozen={frozen}
                                 filing={addIssue.isPending}
                                 resolveOp={resolveOp}

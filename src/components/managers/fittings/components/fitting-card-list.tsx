@@ -1,7 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { sampleLabel } from 'components/managers/tech-card/components/sample-picker';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
@@ -14,7 +14,6 @@ const LIMIT = 24;
 
 export function FittingCardList() {
   const navigate = useNavigate();
-  const { showMessage } = useSnackBarStore();
   const deleteFitting = useDeleteFitting();
   const canEdit = usePermissions().canWrite(SECTION.fittings);
 
@@ -57,10 +56,16 @@ export function FittingCardList() {
 
   function confirmDelete() {
     if (!pendingDelete) return;
-    deleteFitting.mutate(pendingDelete.id, {
-      onSuccess: () => showMessage('fitting deleted', 'success'),
+    const id = pendingDelete.id;
+    // The tile leaving the list is the receipt.
+    deleteFitting.mutate(id, {
       onError: (error) =>
-        showMessage(error instanceof Error ? error.message : 'Failed to delete fitting', 'error'),
+        notify({
+          sev: 'error',
+          subject: `FITTING ${id}`,
+          text: 'not deleted',
+          detail: error instanceof Error ? error.message : undefined,
+        }),
     });
     setPendingDelete(null);
   }

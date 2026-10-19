@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { FileTopic, FileTopicStyle, LibraryFile } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { Button, CalloutBox, Chip, ChipRow, Pill, SectionHeader, Text, Tiles } from 'ui';
+import { Button, CalloutBox, Chip, ChipRow, Pill, SectionHeader, Text } from 'ui';
 import { plural } from '../upload/text';
 import { FailureText } from './failure-text';
 import { ARCHIVED_WORD, projectDates } from './topic-chips';
@@ -203,10 +203,10 @@ function filesWord(n: number): string {
 
 function ProjectSection({
   section,
-  renderTile,
+  renderFiles,
 }: {
   section: ProjectSectionView;
-  renderTile: (f: LibraryFile) => React.ReactNode;
+  renderFiles: (files: LibraryFile[]) => React.ReactNode;
 }) {
   const shown = section.files.length;
   const truncated = section.total > shown;
@@ -251,7 +251,7 @@ function ProjectSection({
           </>
         }
       />
-      <Tiles min={190}>{section.files.map(renderTile)}</Tiles>
+      {renderFiles(section.files)}
     </>
   );
 }
@@ -284,10 +284,10 @@ function FailedSection({ section, onRetry }: { section: ProjectSectionView; onRe
  */
 function SectionShell({
   section,
-  renderTile,
+  renderFiles,
 }: {
   section: ProjectSectionView;
-  renderTile: (f: LibraryFile) => React.ReactNode;
+  renderFiles: (files: LibraryFile[]) => React.ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [retried, setRetried] = useState(false);
@@ -311,7 +311,7 @@ function SectionShell({
           }}
         />
       ) : (
-        <ProjectSection section={section} renderTile={renderTile} />
+        <ProjectSection section={section} renderFiles={renderFiles} />
       )}
     </section>
   );
@@ -321,7 +321,7 @@ export function ProjectSections({
   sections,
   emptyRoles,
   pileEmpty,
-  renderTile,
+  renderFiles,
 }: {
   /** Только непустые (и сломавшиеся): пустая секция — это строка внизу, а не блок. */
   sections: ProjectSectionView[];
@@ -340,12 +340,12 @@ export function ProjectSections({
   emptyRoles: string[];
   /** Приёмной кучи нет — в проекте всё разобрано. Это хорошая новость, и её стоит сказать. */
   pileEmpty: boolean;
-  renderTile: (f: LibraryFile) => React.ReactNode;
+  renderFiles: (files: LibraryFile[]) => React.ReactNode;
 }) {
   return (
     <>
       {sections.map((s) => (
-        <SectionShell key={s.key} section={s} renderTile={renderTile} />
+        <SectionShell key={s.key} section={s} renderFiles={renderFiles} />
       ))}
       {(emptyRoles.length > 0 || pileEmpty) && (
         <div className='flex flex-col gap-1'>
@@ -357,9 +357,7 @@ export function ProjectSections({
           )}
           {pileEmpty && (
             <Text size='micro' variant='label'>
-              nothing to sort out: no file in this project is without a role. whatever gets
-              dropped here next shows up as a separate “without a role” section — uploading sets
-              no role.
+              nothing without a role
             </Text>
           )}
         </div>

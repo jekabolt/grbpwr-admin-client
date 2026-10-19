@@ -3,7 +3,7 @@ import { common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { DEFAULT_PRODUCT_LIMIT } from 'constants/filter';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useSearchParams } from 'react-router-dom';
@@ -31,7 +31,6 @@ export function InfinityScroll({
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState<common_Colorway[]>(firstItems);
   const [isLoading, setIsLoading] = useState(false);
-  const { showMessage } = useSnackBarStore();
   const { ref, inView } = useInView();
   const pageRef = useRef(2);
   const hasMoreRef = useRef(true);
@@ -87,7 +86,13 @@ export function InfinityScroll({
       setItems((prevItems) => [...prevItems, ...newProducts]);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to fetch more products';
-      showMessage(msg, 'error');
+      notify({
+        sev: 'error',
+        subject: 'PRODUCTS',
+        text: 'not loaded',
+        detail: msg,
+        action: { label: 'retry', onClick: () => void loadMoreData() },
+      });
     } finally {
       setIsLoading(false);
     }

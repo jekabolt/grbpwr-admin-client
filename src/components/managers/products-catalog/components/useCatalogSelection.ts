@@ -1,6 +1,6 @@
 import { adminService } from 'api/api';
 import { common_Colorway, common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useMemo, useState } from 'react';
 
 const ACTIVE: common_ColorwayLifecycleStatus = 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
@@ -12,9 +12,17 @@ interface Args {
 }
 
 // "hid 8 products" on a clean run; "hid 8 of 9 — 1 failed" when the batch was partial.
-function summarize(verb: string, ok: number, total: number, fail: number): string {
-  if (fail === 0) return `${verb} ${ok} ${ok === 1 ? 'product' : 'products'}`;
-  return `${verb} ${ok} of ${total} — ${fail} failed`;
+// One line for a bulk run: ok when all landed, warn with the failures otherwise.
+function summarize(verb: string, ok: number, total: number, fail: number) {
+  if (fail === 0) notify({ sev: 'ok', subject: 'PRODUCTS', text: `${verb} ${ok}` });
+  else
+    notify({
+      sev: 'warn',
+      subject: 'PRODUCTS',
+      text: `${verb} ${ok} of ${total}`,
+      bad: `${fail} failed`,
+      detail: 'the failed ones stay selected',
+    });
 }
 
 // Multi-select + bulk lifecycle actions for the catalog grid.
@@ -25,7 +33,6 @@ function summarize(verb: string, ok: number, total: number, fail: number): strin
 // back into the list so states refresh in place without a refetch — the catalog list is local state,
 // not a React Query cache, so there is no query to invalidate.
 export function useCatalogSelection({ items, setItems }: Args) {
-  const { showMessage } = useSnackBarStore();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -122,12 +129,12 @@ export function useCatalogSelection({ items, setItems }: Args) {
           return next;
         });
 
-        showMessage(summarize(verb, ok, valid.length, fail), fail ? 'error' : 'success');
+        summarize(verb, ok, valid.length, fail);
       } finally {
         setBusy(false);
       }
     },
-    [busy, setItems, showMessage],
+    [busy, setItems],
   );
 
   const hideSelected = useCallback(() => runBulk(hideable, HIDDEN, 'hid'), [runBulk, hideable]);

@@ -21,7 +21,8 @@ import {
   writeInsunits,
   type DxfLinearUnit,
 } from 'lib/nesting/dxf/insunits';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify, updateNotify } from 'lib/stores/store';
+import type { NotifyInput } from 'lib/stores/store-types';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
@@ -215,6 +216,45 @@ function messagesOf(e: unknown): string[] {
 }
 
 /** English count noun: 1 sheet, 2 sheets. */
+/** A file of one pick that did not make it: refused before upload, or failed on the way. */
+type FileFault = { name: string; why: string };
+
+/**
+ * One notification per pick of files. Nothing when all landed (the rows appear), unless a `job`
+ * was already up: that one settles in place.
+ */
+function settleFileBatch(
+  job: string | null,
+  total: number,
+  faults: FileFault[],
+  verb = 'uploaded',
+  badWord = 'failed',
+) {
+  const n = faults.length;
+  const detail = faults.map((f) => `${f.name}: ${f.why}`).join(' · ');
+  let input: NotifyInput | null = null;
+  if (n === 0) input = job ? { sev: 'ok', subject: 'PATTERNS', text: `${verb} ${total}` } : null;
+  else if (n >= total)
+    input = {
+      sev: 'error',
+      subject: 'PATTERNS',
+      text: `not ${verb}`,
+      bad: n === 1 ? faults[0].why : `${n} ${badWord}`,
+      detail,
+    };
+  else
+    input = {
+      sev: 'warn',
+      subject: 'PATTERNS',
+      text: `${verb} ${total - n} of ${total}`,
+      bad: `${n} ${badWord}`,
+      detail,
+    };
+  if (!input) return;
+  if (job) updateNotify(job, { ...input, progress: undefined });
+  else notify(input);
+}
+
 function plural(n: number, one: string, many = `${one}s`): string {
   return n === 1 ? one : many;
 }
@@ -366,7 +406,6 @@ export function PatternsField({
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
-  const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   // Live row values. `fields` is a snapshot that array actions refresh but setValue on a
@@ -886,14 +925,14 @@ export function PatternsField({
   // Ask the units of the DXFs that declare none; resolves the files to upload (rewritten where
   // asked) or null on cancel. Files with units pass through untouched; binary and UTF-16 DXFs
   // are refused here, before any rewrite reads them as latin1.
-  async function withUnits(picked: File[]): Promise<File[] | null> {
+  async function withUnits(picked: File[], faults: FileFault[]): Promise<File[] | null> {
     const problems = await Promise.all(
       picked.map(async (f) =>
         isDxfFile(f) ? asciiDxfProblem(new Uint8Array(await f.arrayBuffer())) : null,
       ),
     );
     picked.forEach((f, i) => {
-      if (problems[i]) showMessage(`${f.name}: ${problems[i]}`, 'error');
+      if (problems[i]) faults.push({ name: f.name, why: problems[i]! });
     });
     const files = picked.filter((_, i) => !problems[i]);
     if (files.length === 0) return null;
@@ -929,7 +968,10 @@ export function PatternsField({
   // the card does not have) onto the card's sizes: block names are rewritten and left-out sizes
   // removed before upload; an unsized file instead takes the picked size as its row's size.
   // Resolves null on cancel.
-  async function withSizes(file: File): Promise<{ file: File; sizeId?: number } | null> {
+  async function withSizes(
+    file: File,
+    faults: FileFault[],
+  ): Promise<{ file: File; sizeId?: number } | null> {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (asciiDxfProblem(bytes)) return null; // withUnits already said why
     const text = bytesToLatin1(bytes);
@@ -977,7 +1019,7 @@ export function PatternsField({
         file: new File([latin1ToBytes(out) as BlobPart], file.name, { type: file.type }),
       };
     } catch (e) {
-      showMessage(`${file.name}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      faults.push({ name: file.name, why: e instanceof Error ? e.message : String(e) });
       return null;
     }
   }
@@ -1009,11 +1051,21 @@ export function PatternsField({
   }
 
   // One DXF into one slot: no naming modal (the slot is the material, the name is the card's).
-  async function directUpload(scopeKey: string, picked: File) {
+  // `batch` = the pick it belongs to, which reports once; alone (the merge output) it reports itself.
+  async function directUpload(scopeKey: string, picked: File, batch?: FileFault[]): Promise<void> {
+    const faults = batch ?? [];
+    try {
+      await uploadOne(scopeKey, picked, faults);
+    } finally {
+      if (!batch) settleFileBatch(null, 1, faults);
+    }
+  }
+
+  async function uploadOne(scopeKey: string, picked: File, faults: FileFault[]) {
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
-    const fixed = await withUnits([picked]);
+    const fixed = await withUnits([picked], faults);
     if (!fixed) return;
-    const sized = await withSizes(fixed[0]);
+    const sized = await withSizes(fixed[0], faults);
     if (!sized) return;
     const file = sized.file;
     const bump = (d: number) =>
@@ -1035,7 +1087,7 @@ export function PatternsField({
       setPendingView({ scopeKey, urls: [up.url] });
     } catch (e) {
       console.error('UploadPattern failed', e);
-      showMessage(`${file.name}: ${patternUploadErrorMessage(e)}`, 'error');
+      faults.push({ name: file.name, why: patternUploadErrorMessage(e) });
     } finally {
       bump(-1);
     }
@@ -1054,20 +1106,31 @@ export function PatternsField({
       if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
       return f.size > MAX_PATTERN_BYTES ? 'too large, 40 MB at most' : null;
     };
-    const checked = files.map((f) => ({ f, err: errOf(f) }));
-    for (const x of checked) if (x.err) showMessage(`${x.f.name}: ${x.err}`, 'error');
-    const good = checked.filter((x) => !x.err).map((x) => x.f);
-    if (good.length === 0) return;
+    // The whole pick reports once: refusals and the upload's failure together.
+    const errs = files.map(errOf);
+    const faults: FileFault[] = files.flatMap((f, i) => {
+      const why = errs[i];
+      return why ? [{ name: f.name, why }] : [];
+    });
+    const good = files.filter((_, i) => !errs[i]);
+    // The rest goes on to a dialog: say now what stayed out.
+    const handOff = () => settleFileBatch(null, files.length, faults, 'accepted', 'refused');
+    if (good.length === 0) return handOff();
     setSelectedKey(scopeKey);
     if (good.every(isDxfFile)) {
       void (async () => {
-        const ready = await withUnits(good);
-        if (!ready) return;
-        if (ready.length === 1) void directUpload(scopeKey, ready[0]);
-        else setMerging({ scopeKey, files: ready });
+        const ready = await withUnits(good, faults);
+        if (ready && ready.length === 1) {
+          await directUpload(scopeKey, ready[0], faults);
+          settleFileBatch(null, files.length, faults);
+          return;
+        }
+        handOff();
+        if (ready) setMerging({ scopeKey, files: ready });
       })();
       return;
     }
+    handOff();
     setImporting({ scopeKey, files: good });
   }
 
@@ -1093,24 +1156,48 @@ export function PatternsField({
       rows.map(async (r) => unitlessText(await fetchMediaBlob(r.url!))),
     );
     setUnitsFetching(false);
+    // Download and upload failures of the run report once, at its end.
+    const faults: FileFault[] = [];
     const ready = rows.flatMap((row, i) => {
       const g = got[i];
       if (g.status === 'rejected') {
-        showMessage(`${labelOf(row)}: download failed`, 'error');
+        faults.push({ name: labelOf(row), why: 'download failed' });
         return [];
       }
       return g.value != null ? [{ row, text: g.value }] : [];
     });
-    if (ready.length === 0) return;
+    const total = ready.length + faults.length;
+    if (ready.length === 0) return settleFileBatch(null, total, faults, 'set');
     setUnitsAsk({
       items: ready.map(({ row, text }) => ({
         key: row.url!,
         name: labelOf(row),
         extents: drawingExtents(text),
       })),
-      cancel: () => setUnitsAsk(null),
+      cancel: () => {
+        setUnitsAsk(null);
+        if (faults.length) settleFileBatch(null, total, faults, 'set');
+      },
       confirm: async (units) => {
+        // N sheets go up one by one: one job, ticked in place.
+        const job =
+          ready.length > 1
+            ? notify({
+                sev: 'job',
+                subject: 'PATTERNS',
+                text: `setting units 0 of ${ready.length}`,
+                progress: 0,
+              })
+            : null;
+        let step = 0;
         for (const { row, text } of ready) {
+          if (job) {
+            updateNotify(job, {
+              text: `setting units ${step} of ${ready.length}`,
+              progress: step / ready.length,
+            });
+          }
+          step += 1;
           try {
             const file = fileWithUnits(
               text,
@@ -1131,10 +1218,11 @@ export function PatternsField({
             setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
           } catch (e) {
             console.error('UploadPattern failed', e);
-            showMessage(`${labelOf(row)}: ${patternUploadErrorMessage(e)}`, 'error');
+            faults.push({ name: labelOf(row), why: patternUploadErrorMessage(e) });
           }
         }
         setUnitsAsk(null);
+        settleFileBatch(job, total, faults, 'set');
       },
     });
   }

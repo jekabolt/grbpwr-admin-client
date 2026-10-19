@@ -7,7 +7,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -105,7 +105,6 @@ export function WhatModelGetsModal({
   params: common_DesignRunParams;
 }) {
   const { control } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const autosave = useTechCardAutosave();
   const preview = useFlatPreview(techCardId, params, open, autosave.status);
 
@@ -267,15 +266,14 @@ export function WhatModelGetsModal({
 
       <CopyWords
         words={words}
-        say={showMessage}
         doors={[
           {
             label: 'edit the words ▸',
-            onClick: () => openDoor('flatWords', 'the words are in INPUT, on FLAT', showMessage),
+            onClick: () => openDoor('flatWords', 'the words are in INPUT, on FLAT'),
           },
           {
             label: 'edit the fit ▸',
-            onClick: () => openDoor('fit', FIT_WHERE, showMessage),
+            onClick: () => openDoor('fit', FIT_WHERE),
           },
         ]}
       />

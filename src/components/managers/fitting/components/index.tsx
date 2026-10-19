@@ -1,3 +1,4 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -13,13 +14,15 @@ import { SamplePicker } from 'components/managers/tech-card/components/sample-pi
 import { useSamples } from 'components/managers/tech-card/components/useSamples';
 import { fittingStatusOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BackLink,
   Button,
+  CalloutBox,
   Section,
   SectionStack,
   Text,
@@ -27,6 +30,7 @@ import {
   InputField,
   SelectField,
   TextareaField,
+  useDoneFlash,
 } from 'ui';
 import {
   applyServerFieldErrors,
@@ -69,7 +73,11 @@ export function FittingForm({
   id?: string;
   fitting?: common_Fitting;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, []);
+  const saved = useDoneFlash();
+  // A refused save stands in the save bar until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const navigate = useNavigate();
   const createFitting = useCreateFitting();
   const updateFitting = useUpdateFitting();
@@ -170,6 +178,7 @@ export function FittingForm({
 
   async function handleSubmit(data: FittingFormData) {
     const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting, sampleSizeId);
+    setFormError(null);
     try {
       if (isEditMode) {
         await updateFitting.mutateAsync({
@@ -178,11 +187,11 @@ export function FittingForm({
           // S25: echo the lock_version the form loaded — a stale value is rejected (409).
           expectedLockVersion: fitting?.lockVersion ?? 0,
         });
-        showMessage('fitting updated', 'success');
+        saved.flash();
         form.reset(data);
       } else {
         await createFitting.mutateAsync(fittingInsert);
-        showMessage('fitting created', 'success');
+        // Leaving for the list is the receipt.
         navigate(returnTo || ROUTES.fittings);
       }
     } catch (error) {
@@ -203,14 +212,21 @@ export function FittingForm({
       // Список заметок может быть свёрнут — тогда подсветке не за что зацепиться, и человека
       // выручает тот же тост. Поэтому сообщение показывается всегда, а не «вместо».
       if (applied[0]) revealField(applied[0]);
-      showMessage(
-        // Путь поля читается ЧЕЛОВЕКОМ только вместе с описанием, поэтому для полевых отказов тост
-        // берётся из них; 409-й и сетевые остаются за прежним сообщением.
-        extractFieldViolations(error).length
-          ? fieldErrorSummary(error, 'Failed to save fitting')
-          : fittingSaveErrorMessage(error),
-        'error',
-      );
+      // Путь поля читается ЧЕЛОВЕКОМ только вместе с описанием, поэтому для полевых отказов текст
+      // берётся из них; 409-й и сетевые остаются за прежним сообщением.
+      const said = extractFieldViolations(error).length
+        ? fieldErrorSummary(error, 'Failed to save fitting')
+        : fittingSaveErrorMessage(error);
+      // A lost request is news; a refusal (or a 409) stands in the save bar.
+      if (failureClassOfError(error) === 'transient')
+        notify({
+          sev: 'error',
+          subject: `FITTING ${id ?? ''}`.trim(),
+          text: isEditMode ? 'not saved' : 'not added',
+          detail: said,
+          action: { label: 'retry', onClick: () => void handleSubmit(data) },
+        });
+      else setFormError(said);
       console.error('Failed to submit fitting', error);
     }
   }
@@ -220,7 +236,7 @@ export function FittingForm({
   // no red text). onInvalid fires whenever handleSubmit's own validation blocks the call, so a snackbar
   // always fires on a blocked submit; the field-level messages are additionally rendered inline below.
   function onInvalid() {
-    showMessage('Fix the highlighted fields before saving', 'error');
+    setFormError('fix the highlighted fields');
   }
   const submit = form.handleSubmit(handleSubmit, onInvalid);
   const techCardError = form.formState.errors.techCardId?.message;
@@ -358,10 +374,21 @@ export function FittingForm({
         </SectionStack>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
-        <Text variant='inactive' size='small'>
-          {form.formState.isDirty ? 'unsaved changes' : ' '}
-        </Text>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+      >
+        {formError ? (
+          <CalloutBox tone='error' className='min-w-0'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {formError}
+            </Text>
+          </CalloutBox>
+        ) : (
+          <Text variant='inactive' size='small'>
+            {form.formState.isDirty ? 'unsaved changes' : ' '}
+          </Text>
+        )}
         <div className='flex items-center gap-2'>
           <Button
             type='button'
@@ -380,6 +407,7 @@ export function FittingForm({
               className='uppercase cursor-pointer'
               disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
               loading={form.formState.isSubmitting}
+              done={saved.on}
               onClick={() => submit()}
             >
               {isEditMode ? 'save' : 'add'}

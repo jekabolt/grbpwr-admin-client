@@ -16,7 +16,7 @@ export { BarRow, WaterfallRow } from './components/bar-row';
 /** @primitive Kanban columns row */
 export { Board, BoardCard, BoardColumn, BoardEmpty } from './components/board';
 /** @primitive Clickable action, all styles */
-export { Button, buttonVariants } from './components/button';
+export { Button, buttonVariants, useDoneFlash } from './components/button';
 /** @primitive Close / remove ×  */
 export { Close } from './components/close';
 /** @primitive Inline message box */
@@ -121,6 +121,8 @@ export { ToggleSwitch } from './components/toggle-switch';
 export { Toolbar, ToolbarSpacer } from './components/toolbar';
 /** @primitive Hover hint */
 export { default as Tooltip, TooltipProvider } from './components/tooltip';
+/** @primitive Ghost row with undo */
+export { UndoRow } from './components/undo-row';
 /** @primitive Exclusive view switch */
 export { ViewSwitch, type ViewSwitchOption } from './components/view-switch';
 

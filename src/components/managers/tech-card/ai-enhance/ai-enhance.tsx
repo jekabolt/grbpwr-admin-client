@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { adminService } from 'api/api';
 import type { EnhanceTextField, EnhanceTextMode } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Button, Chip, GenericPopover } from 'ui';
 
@@ -251,7 +251,6 @@ export function AiEnhance({
   disabled?: boolean;
   className?: string;
 }) {
-  const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   /** Focus is on our own (the text, the trigger, the undo chip) or in the open menu — `inHome`. */
@@ -431,15 +430,23 @@ export function AiEnhance({
       const lateWhy = now.disabled ? 'locked' : now.value !== before ? 'changed' : null;
       const why = f.invalid ?? lateWhy;
       if (why) {
-        showMessage(
-          why === 'locked' ? 'not applied: field locked' : 'not applied: field changed',
-          'success',
-        );
+        notify({
+          sev: 'warn',
+          subject: 'AI',
+          text: 'not applied',
+          bad: why === 'locked' ? 'field locked' : 'field changed',
+        });
         return;
       }
       const next = after.trim();
       if (!next) {
-        showMessage('the model returned nothing — the text is unchanged', 'error');
+        notify({
+          sev: 'error',
+          subject: 'AI',
+          text: 'not enhanced',
+          bad: 'empty answer',
+          detail: 'the text is unchanged',
+        });
         return;
       }
       onApply(next);
@@ -451,14 +458,25 @@ export function AiEnhance({
     } catch (e) {
       if (ctrl.signal.aborted) return;
       const r = e instanceof EnhanceRefusal ? e.reason : 'OTHER';
-      showMessage(
-        r === 'AI_NOT_CONFIGURED'
-          ? 'AI is off on this server'
-          : r === 'AI_MODEL_UNAVAILABLE'
-            ? 'the configured model is not served by its provider — check the route in admin → AI providers'
-            : `could not enhance: ${e instanceof Error ? e.message : String(e)}`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'AI',
+        text: 'not enhanced',
+        bad:
+          r === 'AI_NOT_CONFIGURED'
+            ? 'AI off'
+            : r === 'AI_MODEL_UNAVAILABLE'
+              ? 'model unavailable'
+              : undefined,
+        detail:
+          r === 'AI_NOT_CONFIGURED'
+            ? 'AI is off on this server'
+            : r === 'AI_MODEL_UNAVAILABLE'
+              ? 'the configured model is not served by its provider — check the route in admin → AI providers'
+              : e instanceof Error
+                ? e.message
+                : String(e),
+      });
     } finally {
       if (!ctrl.signal.aborted) {
         setBusy(false);

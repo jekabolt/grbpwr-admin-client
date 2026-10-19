@@ -3,7 +3,6 @@ import { adminService } from 'api/api';
 import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -19,6 +18,7 @@ import {
   Chip,
 } from 'ui';
 import { CreateRunModal } from './components/create-run-modal';
+import { notifyFailure } from './components/feedback';
 import { isRunLocked, isRunOpen, isRunReceivable, runDetailPath } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
@@ -160,14 +160,16 @@ export function ProductionRuns() {
 
   const openCreate = () => setCreateOpen(true);
   const del = useDeleteProductionRun();
-  const { showMessage } = useSnackBarStore();
+  // The row leaving the list is the receipt; a refusal has no place once the dialog closes.
+  const deleteRun = (id: number): void =>
+    del.mutate(id, {
+      onError: (e) =>
+        notifyFailure(`PR-${id}`, 'not deleted', e, deleteRunErrorMessage(e), () => deleteRun(id)),
+    });
   const confirmDelete = () => {
     if (!deleting?.id) return;
-    del.mutate(deleting.id, {
-      onSuccess: () => showMessage('Run deleted', 'success'),
-      onError: (e) => showMessage(deleteRunErrorMessage(e), 'error'),
-      onSettled: () => setDeleting(undefined),
-    });
+    deleteRun(deleting.id);
+    setDeleting(undefined);
   };
 
   // The row's controls, in the order they are reached for: the batch's NEXT STEP first, then the

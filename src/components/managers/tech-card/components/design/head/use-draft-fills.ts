@@ -1,5 +1,5 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
@@ -426,7 +426,7 @@ function storeRefused(card: number, evicted = false): void {
   if (refusedCards.has(card)) return;
   refusedCards.add(card);
   try {
-    useSnackBarStore.getState().showMessage(STORE_REFUSED, 'error');
+    notify({ sev: 'error', subject: 'DRAFT', text: 'not stored', detail: STORE_REFUSED });
   } catch {
     // Снекбара нет (стенд без приложения) — отказ всё равно не молчит в консоли разработчика.
   }
@@ -448,7 +448,7 @@ function answerStale(card: number): void {
   if (staleCards.has(card)) return;
   staleCards.add(card);
   try {
-    useSnackBarStore.getState().showMessage(STALE_ANSWER, 'error');
+    notify({ sev: 'error', subject: 'DRAFT', text: 'not applied', detail: STALE_ANSWER });
   } catch {
     // Стенд без снекбара.
   }

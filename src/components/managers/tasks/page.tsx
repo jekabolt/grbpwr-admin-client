@@ -1,9 +1,10 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { filesService } from 'components/managers/files/api/filesService';
 import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -17,11 +18,12 @@ import {
   SideRailGroup,
   SideRailItem,
   SideRailLayout,
+  SkeletonLine,
   Text,
   Toolbar,
 } from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
-import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
+import { emptyFormValues, Task, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
@@ -37,8 +39,11 @@ import {
 } from './components/filters-bar';
 import { TAP } from './components/filters-bar';
 import { TaskFormModal } from './components/task-form-modal';
-import { useCreateTask, useTasks } from './hooks/useTasks';
+import { TaskSearchField, TaskSearchResults, TaskSearchScope } from './components/task-search';
+import { useSearchQuery } from './hooks/useSearchQuery';
+import { useCreateTask, useTaskSearch, useTasks } from './hooks/useTasks';
 import { BOARD_LABEL, BOARDS } from './utils/meta';
+import { searchTasks } from './utils/search';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 const FILTERS_KEY = 'grbpwr.kanban.filters';
@@ -88,6 +93,8 @@ export function Tasks() {
 
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, [writable]);
 
   // tskTabs v2 — the board is chosen from a left rail, persisted as before.
   const [activeBoard, setActiveBoard] = useState<TaskBoard>(
@@ -168,6 +175,38 @@ export function Tasks() {
    * ровно тогда, когда зажжён чип archived, — потому что именно тогда они и лежат в `tasks`.
    */
   const people = useMemo(() => assigneePiles(tasks, filters.assignee), [tasks, filters.assignee]);
+
+  // SEARCH — `?q=` in the address; a non-empty query swaps the board for the results list.
+  const search = useSearchQuery();
+  const searching = search.query.length > 0;
+  const [allBoards, setAllBoards] = useState(true);
+  const found = useTaskSearch(search.query);
+  const hits = useMemo(() => {
+    const all = searchTasks(found.data?.tasks ?? [], search.query);
+    return allBoards ? all : all.filter((h) => h.task.board === activeBoard);
+  }, [found.data, search.query, allBoards, activeBoard]);
+  // A hit opens the way a card does: search cleared, its board selected, then the task.
+  function openHit(task: Task) {
+    search.clear();
+    setActiveBoard(task.board);
+    navigate(`${ROUTES.tasks}/${task.id}`);
+  }
+  const phoneSearchField = (
+    <TaskSearchField
+      name='task-search-phone'
+      value={search.draft}
+      onChange={search.setDraft}
+      onClear={search.clear}
+    />
+  );
+  const searchScope = searching && (
+    <TaskSearchScope
+      allBoards={allBoards}
+      onScope={setAllBoards}
+      board={activeBoard}
+      count={found.data ? hits.length : undefined}
+    />
+  );
 
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
@@ -286,6 +325,8 @@ export function Tasks() {
               placeholder='board'
               onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
             />
+            {phoneSearchField}
+            {searchScope}
             {filtersOpen && (
               <div id='task-phone-filters'>
                 <PhoneFilterGroups
@@ -329,10 +370,44 @@ export function Tasks() {
               onClear={clearFilters}
               projectLabel={projectLabel}
               onClearProject={dropProject}
+              search={
+                <>
+                  {/* Phone gets its own copy in the header block above. */}
+                  <TaskSearchField
+                    value={search.draft}
+                    onChange={search.setDraft}
+                    onClear={search.clear}
+                    className='w-60 xl:w-90'
+                  />
+                  {searchScope}
+                </>
+              }
             />
           </Toolbar>
 
-          {isLoading ? (
+          {searching ? (
+            found.isError && !found.data ? (
+              <div className='flex items-center gap-3'>
+                <Text size='micro' variant='error' tracking='label' component='span'>
+                  {found.error instanceof Error ? found.error.message : 'search failed'}
+                </Text>
+                <Button variant='underline' size='xs' onClick={() => found.refetch()}>
+                  retry
+                </Button>
+              </div>
+            ) : !found.data ? (
+              <div
+                aria-busy
+                className='flex flex-col gap-3 border border-borderColor bg-bgColor p-block max-sm:border-x-0'
+              >
+                <SkeletonLine width='60%' />
+                <SkeletonLine width='45%' />
+                <SkeletonLine width='70%' />
+              </div>
+            ) : (
+              <TaskSearchResults hits={hits} query={search.query} onOpen={openHit} />
+            )
+          ) : isLoading ? (
             <BoardSkeleton />
           ) : isError ? (
             <div className='flex items-center gap-3'>
@@ -392,7 +467,10 @@ export function Tasks() {
       </SideRailLayout>
 
       {writable && (
-        <div className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:hidden'
+        >
           <Button
             variant='main'
             size='lg'

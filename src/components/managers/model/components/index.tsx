@@ -1,3 +1,5 @@
+import { useDockBottom } from 'hooks/useDockBottom';
+import { useRef } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Model } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -8,12 +10,15 @@ import {
 } from 'components/managers/models/components/useModelQuery';
 import { genderOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import {
   BackLink,
   Button,
+  CalloutBox,
   Section,
   SectionStack,
   Text,
@@ -21,6 +26,7 @@ import {
   InputField,
   SelectField,
   TextareaField,
+  useDoneFlash,
 } from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields } from './measurements-fields';
@@ -42,7 +48,11 @@ export function ModelForm({
   id?: string;
   model?: common_Model;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useDockBottom(saveBarRef, []);
+  const saved = useDoneFlash();
+  // A refused save stands in the save bar until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const navigate = useNavigate();
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
@@ -56,19 +66,28 @@ export function ModelForm({
 
   async function handleSubmit(data: ModelFormData) {
     const modelInsert = mapFormToModelInsert(data);
+    setFormError(null);
     try {
       if (isEditMode) {
         await updateModel.mutateAsync({ id: parseInt(id || '0', 10), model: modelInsert });
-        showMessage('model updated', 'success');
+        saved.flash();
         form.reset(data);
       } else {
         await createModel.mutateAsync(modelInsert);
-        showMessage('model created', 'success');
+        // Leaving for the list is the receipt.
         navigate(ROUTES.models);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to submit model';
-      showMessage(msg, 'error');
+      if (failureClassOfError(error) === 'transient')
+        notify({
+          sev: 'error',
+          subject: `MODEL ${id ?? ''}`.trim(),
+          text: isEditMode ? 'not saved' : 'not added',
+          detail: msg,
+          action: { label: 'retry', onClick: () => void handleSubmit(data) },
+        });
+      else setFormError(msg);
       console.error('Failed to submit model', error);
     }
   }
@@ -121,10 +140,21 @@ export function ModelForm({
         </SectionStack>
       </form>
 
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
-        <Text variant='inactive' size='small'>
-          {form.formState.isDirty ? 'unsaved changes' : ' '}
-        </Text>
+      <div
+        ref={saveBarRef}
+        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+      >
+        {formError ? (
+          <CalloutBox tone='error' className='min-w-0'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {formError}
+            </Text>
+          </CalloutBox>
+        ) : (
+          <Text variant='inactive' size='small'>
+            {form.formState.isDirty ? 'unsaved changes' : ' '}
+          </Text>
+        )}
         <div className='flex items-center gap-2'>
           <Button
             type='button'
@@ -143,6 +173,7 @@ export function ModelForm({
               className='uppercase cursor-pointer'
               disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
               loading={form.formState.isSubmitting}
+              done={saved.on}
               onClick={() => form.handleSubmit(handleSubmit)()}
             >
               {isEditMode ? 'save' : 'add'}

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService, requestHandler } from 'api/api';
 import type { common_DesignPicture } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { ConfirmationModal, Text } from 'ui';
 
@@ -132,7 +132,6 @@ export function useDeletePicture(
   siblings?: readonly common_DesignPicture[],
 ) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
   const pictureId = picture.id ?? 0;
   const pieces = descendantsOf(siblings ?? [], pictureId);
@@ -144,14 +143,18 @@ export function useDeletePicture(
   const remove = useMutation({
     mutationFn: () => deleteDesignPicture(pictureId),
     onSuccess: async (res) => {
-      showMessage(deletedSentence(res), 'success');
       await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
     },
     onError: (error) => {
       // Already gone: the band is stale, and a re-read takes the tile away by itself.
       if (refusalReason(error) === 'picture_not_found')
         qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
-      showMessage(refusalSentence(error), 'error');
+      notify({
+        sev: 'error',
+        subject: 'PICTURE',
+        text: 'not deleted',
+        detail: refusalSentence(error),
+      });
     },
   });
 

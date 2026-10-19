@@ -3,7 +3,7 @@
 import type { PatternDrawing } from 'lib/pattern-export/drawing';
 import { EXPORT_FORMATS, type ExportFormatId } from 'lib/pattern-export/formats';
 import type { PlotDrawing } from 'lib/pattern-export/hpgl';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, GenericPopover } from 'ui';
 import { downloadPatternExport, downloadPlotExport } from './download';
@@ -26,7 +26,6 @@ export function PatternExportItems({
   title?: string;
   onDone?: () => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const [busy, setBusy] = useState<ExportFormatId | null>(null);
   const run = async (id: ExportFormatId) => {
     setBusy(id);
@@ -37,10 +36,24 @@ export function PatternExportItems({
             ? await downloadPlotExport(plot)
             : []
           : await downloadPatternExport(drawing, id);
-      if (warnings.length > 0) showMessage(warnings.join(' · '), 'error');
+      // The file is saved; what it lost on the way is news.
+      if (warnings.length > 0)
+        notify({
+          sev: 'warn',
+          subject: `EXPORT ${id.toUpperCase()}`,
+          text: 'exported',
+          bad: `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`,
+          detail: warnings.join(' · '),
+        });
       onDone?.();
     } catch (e) {
-      showMessage(`export failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      notify({
+        sev: 'error',
+        subject: `EXPORT ${id.toUpperCase()}`,
+        text: 'not exported',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void run(id) },
+      });
     } finally {
       setBusy(null);
     }

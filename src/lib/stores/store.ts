@@ -1,163 +1,221 @@
 import { create } from 'zustand';
-import { Alert, AlertAction, SnackBarStore } from './store-types';
+import {
+  NotifyAction,
+  NotifyEntry,
+  NotifyInput,
+  NotifyOptions,
+  NotifyPatch,
+  NotifySev,
+  SnackBarStore,
+  Toast,
+} from './store-types';
 
-/**
- * ID SOURCE. A module counter, not the clock. `Date.now()` handed the same id to every toast
- * raised inside one millisecond — which is precisely a burst from a single gesture — so React got
- * duplicate keys and `closeMessage(id)` swept away every twin. A counter cannot collide, and
- * nothing outside this module ever reads the value except as an opaque handle.
- */
-let nextAlertId = 0;
-/** Activity clock for eviction order. Bumped on creation AND on every coalesced repeat. */
+/** Module counters, not the clock: a burst inside one millisecond must not share an id. */
+let nextToastId = 0;
 let nextSeq = 0;
+let nextKey = 0;
+
+/** Four still reads as a list at a glance; past it the column becomes a page. */
+const TOAST_CAP = 4;
+const HISTORY_CAP = 50;
+/** A read entry re-reported sooner than this stays read: a poll must not re-light the badge. */
+const RENOTIFY_MS = 60_000;
 
 /**
- * How many toasts are held at once. Four is the point where the column still reads as a list at a
- * glance; past it the stack stops being a footnote and becomes a page.
+ * The row under the operator's pointer, set by `SnackBar` on real pointer moves only. Eviction
+ * spares it, so a burst of new reports cannot destroy the row being read or selected. A module
+ * variable, not state: it changes on every move and must re-render nothing.
  */
-const MAX_ALERTS = 4;
+let readingToastId: number | null = null;
 
-/**
- * THE ROW THE OPERATOR IS READING, if any — set by the component from the pointer's real position.
- *
- * Why the store needs to know at all: the component's whole hover contract is "reading is exactly
- * the state in which nothing should disappear", but hover freezes TIMERS, and eviction is not a
- * timer. Without this, a burst of new reports destroyed the row under the cursor, wiping the text
- * selection the operator had just made on it — measured, and it is the precise gesture the
- * component's selection guard exists to protect.
- *
- * A module variable rather than store state on purpose: it changes with every pointer move and
- * must not re-render a single subscriber.
- */
-let readingAlertId: number | null = null;
-
-/**
- * Called by `SnackBar`. The id of the ROW, not of whatever pixel the pointer covers — the column
- * is bottom-pinned, so an eviction below the read row slides every survivor down a slot and a
- * position-derived answer migrates to the neighbour under a motionless cursor. `null` means
- * nothing is being read.
- *
- * ⚠ THIS DOES NOT MAKE A TOAST IMMORTAL, and the contract sentence below is not absolute: the
- * component's total-life ceiling closes a toast at twenty seconds whatever this says, mid-reading
- * and mid-selection included. That is a deliberate, owner-facing trade (a corner that never clears
- * is the complaint being fixed) and it is named here so the guarantee is not read as unconditional.
- */
-export function markAlertBeingRead(id: number | null) {
-  readingAlertId = id;
+export function markToastBeingRead(id: number | null) {
+  readingToastId = id;
 }
 
-/**
- * A message may occupy the corner for one ceiling, not forever. Without this the ceiling only
- * recycled the INSTANCE: it closed the toast at twenty seconds and the very next repeat opened an
- * identical one, so a caller polling every 1.5s turned "the corner never clears" into "the corner
- * blinks every twenty seconds" — measured, and no better for the operator. Muting is per exact
- * (severity, message), it SLIDES on every further repeat, so the corner stays free for as long as
- * the thing keeps happening, and it lifts once the message has been quiet — a report that stops
- * and later starts again is news, and is shown.
- */
-const REPEAT_MUTE_MS = 20000;
-const mutedUntil = new Map<string, number>();
-const repeatKey = (severity: string, message: string) => `${severity}\u0000${message}`;
+const isBad = (sev: NotifySev) => sev === 'error' || sev === 'warn';
+/** Receipts never enter the inbox. */
+const isLogged = (sev: NotifySev) => sev !== 'ok';
 
-/** Called by `SnackBar` when the LIFE CEILING ends a toast that had been repeating. */
-export function muteRepeats(severity: 'success' | 'error', message: string) {
-  mutedUntil.set(repeatKey(severity, message), Date.now() + REPEAT_MUTE_MS);
+const flat = (n: NotifyInput) => [n.subject, n.text, n.bad, n.detail].filter(Boolean).join(' · ');
+
+const sameNews = (a: NotifyInput, b: NotifyInput) =>
+  a.sev === b.sev &&
+  a.subject === b.subject &&
+  a.text === b.text &&
+  (a.bad ?? '') === (b.bad ?? '') &&
+  (a.detail ?? '') === (b.detail ?? '');
+
+/** The caller's fields only, so a merge never drags ids and counters along. */
+function inputOf(n: NotifyInput): NotifyInput {
+  const { sev, subject, text, bad, detail, action, progress } = n;
+  return { sev, subject, text, bad, detail, action, progress };
 }
 
-/**
- * WHO GOES WHEN THE COLUMN IS FULL.
- *
- * Two rules, in order:
- *   1. Never the row being read. Eviction is the one way a toast can vanish while the operator's
- *      pointer is on it, and a vanishing target mid-selection is the defect this spares.
- *   2. Otherwise the LEAST RECENTLY REPORTED success; only when there is no evictable success at
- *      all does the least recently reported error go.
- *
- * Ordering is by `seq` (activity), not by array index (arrival). A coalescing message keeps its
- * position so the column does not reshuffle under the pointer, and ordering by position therefore
- * made the most frequently repeating report — the most current thing on screen — the first victim.
- *
- * WHAT THIS STILL COSTS, SAID OUT LOUD: with a cap, a single gesture that raises FIVE distinct
- * errors at once loses one of them before it is ever painted. Dropping the newest instead would
- * lose a different one, equally unseen; there is no eviction rule that makes a cap free. Four
- * distinct errors — the "form reporting three invalid fields" case this is written for — fit.
- * A message that genuinely must survive being read is a `CalloutBox`, which DESIGN.md already
- * says stays until it is resolved: "a partial save is not a toast".
- */
-function evictOne(alerts: Alert[]): Alert[] {
-  const spared = alerts.filter((a) => a.id !== readingAlertId);
-  /* `spared` cannot actually run empty: only ONE row is ever held and the cap is above one, so at
-     least three candidates always remain. The fallback is here so that lowering `MAX_ALERTS` to 1
-     some day cannot make the `reduce` below throw on an empty array — not because a held row is
-     expected to be the last one standing. */
-  const pool = spared.length > 0 ? spared : alerts;
-  const successes = pool.filter((a) => a.severity === 'success');
-  const from = successes.length > 0 ? successes : pool;
-  const victim = from.reduce((oldest, a) => (a.seq < oldest.seq ? a : oldest));
-  return alerts.filter((a) => a !== victim);
+/** Receipts go first, errors last; within a rank the least recently reported. */
+const EVICT_RANK: Record<NotifySev, number> = { ok: 0, job: 1, warn: 2, error: 3 };
+
+function evictOne(toasts: Toast[]): Toast[] {
+  const spared = toasts.filter((t) => t.id !== readingToastId);
+  const pool = spared.length > 0 ? spared : toasts;
+  const victim = pool.reduce((v, t) => {
+    const d = EVICT_RANK[t.sev] - EVICT_RANK[v.sev];
+    return d < 0 || (d === 0 && t.seq < v.seq) ? t : v;
+  });
+  return toasts.filter((t) => t !== victim);
 }
 
-export const useSnackBarStore = create<SnackBarStore>((set) => ({
-  alerts: [],
-  /**
-   * The signature is frozen: 165 files call this and none of them is edited. Everything the
-   * round-14 complaint asked for (fewer, smaller, shorter-lived toasts) happens here and in the
-   * component, invisibly to callers.
-   */
-  showMessage: (message: string, severity: 'success' | 'error', action?: AlertAction) => {
-    /* Muted repeat: swallow it and PUSH THE WINDOW OUT, so a caller on a retry cadence keeps the
-       corner free rather than re-occupying it the instant the ceiling fires. Checked before `set`
-       so a swallowed report costs no re-render at all. */
-    const key = repeatKey(severity, message);
-    const until = mutedUntil.get(key);
-    if (until !== undefined) {
-      if (until > Date.now()) {
-        mutedUntil.set(key, Date.now() + REPEAT_MUTE_MS);
-        return;
-      }
-      mutedUntil.delete(key);
-    }
-    set((state) => {
-      /* COALESCING. An identical report while the first one is still on screen is not news; it is
-         the same news, again. It increments the counter in place — position kept, so the column
-         does not reshuffle under the pointer — and bumps `nonce` so the timer starts over, and
-         `seq` so eviction counts it as fresh. `bornAt` is deliberately NOT refreshed: the
-         component's life ceiling is measured from the first appearance, which is what stops a
-         message on a 1.5s retry cadence from living forever. */
-      const twin = state.alerts.findIndex((a) => a.severity === severity && a.message === message);
-      if (twin !== -1) {
-        const alerts = state.alerts.slice();
-        const held = alerts[twin];
-        alerts[twin] = {
-          ...held,
-          count: held.count + 1,
-          nonce: held.nonce + 1,
+type State = Pick<SnackBarStore, 'toasts' | 'history' | 'unread' | 'unreadError'>;
+
+function withHistory(history: NotifyEntry[]): Pick<State, 'history' | 'unread' | 'unreadError'> {
+  const unread = history.filter((h) => h.unread);
+  return { history, unread: unread.length, unreadError: unread.some((h) => isBad(h.sev)) };
+}
+
+const stale = (h: NotifyEntry) => Date.now() - h.at >= RENOTIFY_MS;
+
+/** Writes `next` under `key`. `prev` is what the key held before; undefined = new. */
+function put(
+  state: State,
+  key: string,
+  next: NotifyInput,
+  prev: NotifyInput | undefined,
+  toast: boolean,
+): Partial<State> {
+  const message = flat(next);
+  const out: Partial<State> = {};
+
+  /* A live toast updates in place. A dismissed one comes back with any change of state, never
+     for a progress tick of a running job. */
+  const live = state.toasts.findIndex((t) => t.key === key);
+  if (live !== -1) {
+    const toasts = state.toasts.slice();
+    const held = toasts[live];
+    toasts[live] = { ...held, ...next, key, message, nonce: held.nonce + 1, seq: (nextSeq += 1) };
+    out.toasts = toasts;
+  } else if (toast && !(prev?.sev === 'job' && next.sev === 'job')) {
+    const fresh: Toast = {
+      ...next,
+      key,
+      message,
+      id: (nextToastId += 1),
+      count: 1,
+      nonce: 0,
+      seq: (nextSeq += 1),
+    };
+    const kept = state.toasts.length < TOAST_CAP ? state.toasts : evictOne(state.toasts);
+    out.toasts = [...kept, fresh];
+  }
+
+  /* The inbox keeps errors, partial failures and jobs; a job's final state replaces its own
+     entry, `ok` included. */
+  const at = state.history.findIndex((h) => h.key === key);
+  if (at === -1 && !isLogged(next.sev)) return out;
+  const was = at === -1 ? undefined : state.history[at];
+  const unread =
+    isBad(next.sev) &&
+    (!was || !isBad(was.sev) || !sameNews(was, next) || was.unread || stale(was));
+  const entry: NotifyEntry = {
+    ...next,
+    key,
+    message,
+    unread,
+    at: Date.now(),
+    count: was?.count ?? 1,
+  };
+  /* A state change moves to the top; a progress tick keeps its place. */
+  const history =
+    was && was.sev === next.sev
+      ? state.history.map((h, i) => (i === at ? entry : h))
+      : [entry, ...state.history.filter((_, i) => i !== at)].slice(0, HISTORY_CAP);
+  return { ...out, ...withHistory(history) };
+}
+
+/** An identical report while the first is still up: ×N in place, timer NOT restarted. */
+function repeat(state: State, twin: Toast, action: NotifyAction | undefined): Partial<State> {
+  const toasts = state.toasts.map((t) =>
+    t === twin
+      ? {
+          ...t,
+          count: t.count + 1,
           seq: (nextSeq += 1),
-          action: held.action ?? action,
-        };
-        return { alerts };
-      }
+          action: t.action ?? action,
+        }
+      : t,
+  );
+  const at = state.history.findIndex((h) => h.key === twin.key);
+  if (at === -1) return { toasts };
+  const was = state.history[at];
+  const entry: NotifyEntry = {
+    ...was,
+    count: was.count + 1,
+    at: Date.now(),
+    unread: was.unread || (isBad(was.sev) && stale(was)),
+  };
+  return { toasts, ...withHistory([entry, ...state.history.filter((_, i) => i !== at)]) };
+}
 
-      const fresh: Alert = {
-        message,
-        severity,
-        id: (nextAlertId += 1),
-        action,
-        count: 1,
-        nonce: 0,
-        bornAt: Date.now(),
-        seq: (nextSeq += 1),
-      };
-      const kept = state.alerts.length < MAX_ALERTS ? state.alerts : evictOne(state.alerts);
-      return { alerts: [...kept, fresh] };
-    });
+export const useSnackBarStore = create<SnackBarStore>((set, get) => ({
+  toasts: [],
+  history: [],
+  unread: 0,
+  unreadError: false,
+
+  notify: (input, opts) => {
+    const toast = opts?.toast !== false;
+    const next = inputOf(input);
+    const state = get();
+    const twin =
+      next.sev === 'job'
+        ? undefined
+        : state.toasts.find(
+            (t) => (input.key === undefined ? toast : t.key === input.key) && sameNews(t, next),
+          );
+    if (twin) {
+      set(repeat(state, twin, next.action));
+      return twin.key;
+    }
+    const key = input.key ?? `n${(nextKey += 1)}`;
+    const prev =
+      state.toasts.find((t) => t.key === key) ?? state.history.find((h) => h.key === key);
+    set(put(state, key, next, prev, toast));
+    return key;
   },
-  closeMessage: (id: number) => {
-    set((state) => ({
-      alerts: state.alerts.filter((alert) => alert.id !== id),
-    }));
+
+  updateNotify: (key, patch, opts) => {
+    const state = get();
+    const prev =
+      state.toasts.find((t) => t.key === key) ?? state.history.find((h) => h.key === key);
+    if (!prev) return;
+    set(put(state, key, { ...inputOf(prev), ...patch }, prev, opts?.toast !== false));
   },
-  clearAll: () => {
-    set({ alerts: [] });
+
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  dismissAllToasts: () => set({ toasts: [] }),
+  removeNotify: (key) =>
+    set((s) => ({
+      toasts: s.toasts.filter((t) => t.key !== key),
+      ...withHistory(s.history.filter((h) => h.key !== key)),
+    })),
+  markAllRead: () =>
+    set((s) => withHistory(s.history.map((h) => (h.unread ? { ...h, unread: false } : h)))),
+  clearHistory: () => set(withHistory([])),
+
+  /* 553 call sites; none is edited. No subject words are invented for them. */
+  showMessage: (message, severity, action) => {
+    const said = message ?? '';
+    get().notify(
+      severity === 'success'
+        ? { sev: 'ok', subject: '', text: said, action }
+        : { sev: 'error', subject: '', text: '', bad: said, action },
+    );
   },
 }));
+
+/** `notify` outside React: upload queue, query callbacks. */
+export const notify = (input: NotifyInput, opts?: NotifyOptions) =>
+  useSnackBarStore.getState().notify(input, opts);
+
+export const updateNotify = (key: string, patch: NotifyPatch, opts?: NotifyOptions) =>
+  useSnackBarStore.getState().updateNotify(key, patch, opts);
+
+export const removeNotify = (key: string) => useSnackBarStore.getState().removeNotify(key);

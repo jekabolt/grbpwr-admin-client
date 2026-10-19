@@ -7,7 +7,7 @@ import type {
   common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import {
   useCallback,
   useEffect,
@@ -177,12 +177,12 @@ export function recallDesignRun(
     // ОТКАЗ ПРОИЗНОСИТСЯ ВСЛУХ И НИЧЕГО НЕ СОХРАНЯЕТ. Так выглядит эта дверь на сборке, где
     // композитор ещё не завёл переключатель: жест не копится до случайного монтажа приёмника, а
     // называет экран, на который человек может уйти сам.
-    useSnackBarStore
-      .getState()
-      .showMessage(
-        `recall hands this run to the ${kindLabel(kind)} screen, and this build cannot switch views by itself — open ${kindLabel(kind)} on the strip above and press recall there.`,
-        'error',
-      );
+    notify({
+      sev: 'error',
+      subject: 'RECALL',
+      text: 'not recalled',
+      detail: `recall hands this run to the ${kindLabel(kind)} screen, and this build cannot switch views by itself — open ${kindLabel(kind)} on the strip above and press recall there.`,
+    });
     return;
   }
 
@@ -1001,7 +1001,6 @@ export function RecalledRunPrompt({
   const selection = useRecalledRun(techCardId);
   const form = useFormContext<TechCardFormData>();
   const { setReferenceRole } = useDesignWrites(techCardId);
-  const { showMessage } = useSnackBarStore();
 
   /**
    * Какой жест этот приёмник уже взял — прогон И дверь: один прогон законно вспоминают дважды,
@@ -1028,7 +1027,13 @@ export function RecalledRunPrompt({
 
     const handle = runHandle(runId) || 'that run';
     if (disabled) {
-      showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not taken',
+        bad: 'read-only',
+        detail: `this card is read-only — nothing was taken from ${handle}`,
+      });
       return;
     }
     /* ВХОД ЗАНЯТ — РЕКОЛ ОТКАЗЫВАЕТСЯ (ревью раунда 3, m1). Идёт GENERATE (карточка сохраняется, запрос
@@ -1036,10 +1041,13 @@ export function RecalledRunPrompt({
        кроп, деталь): роли и строки, переписанные посреди этого, дали бы прогону не тот промпт, за
        который нажали. Жест не делает ничего и говорит об этом; повторить его можно, когда вход свободен. */
     if (flatInputBusy(readFlatInput(techCardId))) {
-      showMessage(
-        `the flat input is busy — a run is being saved or started, or the prompt is being changed; nothing was taken from ${handle}`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not taken',
+        bad: 'input busy',
+        detail: `the flat input is busy — a run is being saved or started, or the prompt is being changed; nothing was taken from ${handle}`,
+      });
       return;
     }
 
@@ -1056,14 +1064,17 @@ export function RecalledRunPrompt({
     });
 
     if (plan.empty) {
-      showMessage(
-        plan.gone > 0
-          ? `${handle} kept ${count(plan.gone, 'picture')}, and ${plan.gone === 1 ? 'it is' : 'they are'} gone from the card — there is nothing left to reuse`
-          : plan.already > 0
-            ? `nothing new came from ${handle} — its pictures are already on the moodboard`
-            : `${handle} kept nothing this door can reuse`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'nothing taken',
+        detail:
+          plan.gone > 0
+            ? `${handle} kept ${count(plan.gone, 'picture')}, and ${plan.gone === 1 ? 'it is' : 'they are'} gone from the card — there is nothing left to reuse`
+            : plan.already > 0
+              ? `nothing new came from ${handle} — its pictures are already on the moodboard`
+              : `${handle} kept nothing this door can reuse`,
+      });
       return;
     }
 
@@ -1168,13 +1179,20 @@ export function RecalledRunPrompt({
           );
         // Итог — только над карточкой, которая на экране (ревью раунда 4, MIN-5).
         if (cardOnScreen(card)) {
-          showMessage(said.join(' · '), roleFailed || result.refusal ? 'error' : 'success');
+          if (roleFailed || result.refusal)
+            notify({
+              sev: result.refusal && !added ? 'error' : 'warn',
+              subject: 'RECALL',
+              text: added ? `${added} taken` : 'not taken',
+              bad: roleFailed ? `${roleFailed} views not set` : undefined,
+              detail: said.join(' · '),
+            });
         }
       } finally {
         release();
       }
     })();
-    // `form`, `showMessage` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и
+    // `form` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и
     // перезапуск его от смены ссылки на мутацию был бы вторым приёмом того же жеста.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, host, disabled, techCardId]);
@@ -1209,7 +1227,6 @@ export function RecallBenchIntake({
   useRegisterRecallHost(techCardId, 'threed', true);
   const selection = useRecalledRun(techCardId);
   const { setBenchSlot } = useDesignWrites(techCardId);
-  const { showMessage } = useSnackBarStore();
   const taken = useRef('');
 
   useEffect(() => {
@@ -1226,7 +1243,13 @@ export function RecallBenchIntake({
 
     const handle = runHandle(runId) || 'that run';
     if (disabled) {
-      showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not taken',
+        bad: 'read-only',
+        detail: `this card is read-only — nothing was taken from ${handle}`,
+      });
       return;
     }
 
@@ -1235,10 +1258,13 @@ export function RecallBenchIntake({
       // оно ВИДНО САМО: полоса представлений меняет вид под пальцем. А на сборке без крючка
       // композитора перехода не будет вовсе, и фраза «moved to 3D» стала бы единственным враньём
       // в этом жесте. Итог говорит только то, за что отвечает приёмник.
-      showMessage(
-        `${handle}’s plates were not placed: they are 3D models, i.e. the output of a build. What a build READS is the FABRIC RENDER SLOTS of one colourway — fill those on FABRIC RENDER.`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'RECALL',
+        text: 'not placed',
+        bad: '3D models',
+        detail: `${handle}’s plates were not placed: they are 3D models, i.e. the output of a build. What a build READS is the FABRIC RENDER SLOTS of one colourway — fill those on FABRIC RENDER.`,
+      });
       return;
     }
 
@@ -1249,19 +1275,22 @@ export function RecallBenchIntake({
       ? `${count(retired, 'plate')} of a 3/4 view skipped — 3/4 views are retired`
       : '';
     if (!moving.length) {
-      showMessage(
-        [
-          unresolved > 0
-            ? `nothing was placed — ${count(unresolved, 'plate')} of ${handle} ${unresolved === 1 ? 'is' : 'are'} not on this page of the card`
-            : moves.length === 0
-              ? 'nothing was placed'
-              : `${retired > 0 ? 'every other plate' : `every plate ${handle} was given`} already stands in its slot — nothing to move`,
-          retiredSaid,
-        ]
-          .filter(Boolean)
-          .join(' · '),
-        unresolved > 0 ? 'error' : 'success',
-      );
+      if (unresolved > 0)
+        notify({
+          sev: 'error',
+          subject: 'RECALL',
+          text: 'not placed',
+          detail: [
+            unresolved > 0
+              ? `nothing was placed — ${count(unresolved, 'plate')} of ${handle} ${unresolved === 1 ? 'is' : 'are'} not on this page of the card`
+              : moves.length === 0
+                ? 'nothing was placed'
+                : `${retired > 0 ? 'every other plate' : `every plate ${handle} was given`} already stands in its slot — nothing to move`,
+            retiredSaid,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        });
       return;
     }
 
@@ -1294,7 +1323,14 @@ export function RecallBenchIntake({
       if (unresolved)
         said.push(`${count(unresolved, 'plate')} not on this page of the card, skipped`);
       if (retiredSaid) said.push(retiredSaid);
-      showMessage(said.join(' · '), failed.length || unresolved ? 'error' : 'success');
+      if (failed.length || unresolved)
+        notify({
+          sev: placed.length ? 'warn' : 'error',
+          subject: 'RECALL',
+          text: placed.length ? `${placed.length} placed` : 'not placed',
+          bad: `${failed.length + unresolved} failed`,
+          detail: said.join(' · '),
+        });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, disabled, techCardId]);

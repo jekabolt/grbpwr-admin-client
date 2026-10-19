@@ -4,7 +4,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useRef, useState, type ReactNode } from 'react';
 
 import { SplitModal } from './split-modal';
@@ -95,32 +95,12 @@ export function useSplitToInput({
    * кроп, вот из чьего медиа он вырезан») и не решает за экран, что с ним делать.
    */
   onCropped,
-  /**
-   * ═══ ЧТО СКАЗАТЬ ПОСЛЕ РЕЗА, КОГДА КАДРЫ НЕ ИДУТ ВО ВХОД (r3f) ═══════════════════════════════
-   *
-   * Умолчание — «mark them into slots from the band», и оно ВЕРНО ровно там, где под кадром стоит
-   * дверь `mark ▸`: на полосе рендеров и на верстаке флэтов. Полка 3D — третий вызывающий, и у неё
-   * этой двери нет и быть не может: слот верстака кадр рода `threed` не принимает вовсе, сервер
-   * отвечает `wrong_kind`. Одна и та же строка отправляла человека искать орган, которого на его
-   * экране не нарисовано ни одного, — то есть обещала жест, которого нет.
-   *
-   * ⚠ ПРОП, А НЕ РОД КАРТИНКИ, И ЭТО ТА ЖЕ ГРАНИЦА, ЧТО У `addToInput`. С картинки полосы нельзя
-   * прочесть, каким экраном её открыли: один и тот же лист рода `threed` мог бы резаться там, где
-   * слоты есть, а флэт — там, где их нет. Про свои двери знает ВЫЗЫВАЮЩИЙ, и утверждение делает он.
-   * Забытый проп даёт прежнюю строку, а не пустоту: умолчание — то, что стояло здесь всегда.
-   *
-   * `views` приезжает уже посчитанным («4 views» / «1 view»): множественное число — вопрос языка, а
-   * не экрана, и второе его написание в каждом вызывающем разошлось бы с первым на единице.
-   */
-  cutSays,
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
   onCropped?: (crop: common_DesignPicture, sourceMediaId: number) => void;
-  cutSays?: (views: string) => string;
 }) {
   const { registerUpload } = useDesignWrites(techCardId);
-  const { showMessage } = useSnackBarStore();
 
   const [target, setTarget] = useState<{
     picture: common_DesignPicture;
@@ -204,7 +184,13 @@ export function useSplitToInput({
           if (!picture) {
             // Сервер сказал «да» и не вернул картинку — это его нарушение контракта, но открыть
             // модалку не на чем, и молчать нельзя: клик выглядел бы съеденным.
-            showMessage('the upload was filed but no picture came back', 'error');
+            notify({
+              sev: 'error',
+              subject: 'CROP',
+              text: 'not opened',
+              bad: 'no picture',
+              detail: 'the upload was filed but no picture came back',
+            });
             return;
           }
           keep.picture = picture;
@@ -226,9 +212,8 @@ export function useSplitToInput({
    * Отсюда уходит только ДОКУМЕНТНАЯ половина референса — строка `kind = REFERENCE` на карточке,
    * которой серверу взять неоткуда: `tech_card_media` едет целиком с сейвом формы.
    */
-  function handleCrops(pictures: common_DesignPicture[]) {
-    saySlotsOnly(pictures.filter((p) => p.media?.id != null).length);
-  }
+  // The cut views land in the band: that is the receipt.
+  function handleCrops(_pictures: common_DesignPicture[]) {}
 
   /**
    * РАЗРЕЗ НЕ ДЛЯ ВХОДА: кадры остаются картинками полосы, а роли промпта, поставленные сервером
@@ -258,15 +243,6 @@ export function useSplitToInput({
    * промпта ли этот разрез, и роли, которых никто не просил, просто не появляются. Снимать
    * нечего, читать полосу перед каждым кадром не нужно, гонки нет.
    */
-  function saySlotsOnly(cut: number) {
-    const views = `${cut} view${cut === 1 ? '' : 's'}`;
-    /* Что стоит ПОСЛЕ счёта — утверждение вызывающего о СВОИХ дверях (разбор у пропа `cutSays`).
-       Умолчание — прежняя строка, слово в слово: забытый проп не меняет ни одного экрана. */
-    showMessage(
-      cutSays ? cutSays(views) : `${views} cut — mark them into slots from the band`,
-      'success',
-    );
-  }
 
   /**
    * КРОП — РОВНО ОДНА КАРТИНКА НА ВЫХОДЕ. Окно кропа отпускает только один кадр (`ready` там —
@@ -277,12 +253,14 @@ export function useSplitToInput({
   function handleCrop(pictures: common_DesignPicture[], sourceMediaId: number) {
     const withMedia = pictures.filter((p) => p.media?.id != null);
     if (withMedia.length !== 1) {
-      showMessage(
-        withMedia.length
+      notify({
+        sev: 'error',
+        subject: 'CROP',
+        text: 'not replaced',
+        detail: withMedia.length
           ? `the crop came back as ${withMedia.length} pictures — the reference is left as it was`
           : 'the crop was filed but no picture came back — the reference is left as it was',
-        'error',
-      );
+      });
       return;
     }
     onCropped?.(withMedia[0], sourceMediaId);

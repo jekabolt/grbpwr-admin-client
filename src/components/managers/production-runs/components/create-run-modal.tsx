@@ -15,13 +15,13 @@ import {
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, CalloutBox, Close, GroupLabel, Pill, Text } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
 import { runColorwayRows, runGridKey, unpublishedColorwayCount } from './run-composition';
 import {
@@ -86,7 +86,6 @@ export function CreateRunModal({
   /** Seed the tech card from the spine's [plan run] deep link (?techCardId=…&new=1). */
   initialTechCardId?: number;
 }) {
-  const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   const navigate = useNavigate();
   const create = useSaveProductionRun();
@@ -97,6 +96,8 @@ export function CreateRunModal({
   // Отказ гейта на create — со списком нарушений, каждое со стабильным ключом впереди описания.
   // Остаётся на экране до следующей попытки: это факт о запросе, а не тост.
   const [refusal, setRefusal] = useState<{ message: string; rows: string[] } | null>(null);
+  // A failed check or a plain refusal (no violation list): one line above the footer.
+  const [fail, setFail] = useState<string | null>(null);
   const [showPassed, setShowPassed] = useState(false);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export function CreateRunModal({
     setSelected([]);
     setQty({});
     setRefusal(null);
+    setFail(null);
   }, [open, initialTechCardId]);
 
   const { data: tcData } = useQuery({
@@ -311,9 +313,10 @@ export function CreateRunModal({
 
   const submit = () => {
     if (!d.techCardId) {
-      showMessage('select a tech card', 'error');
+      setFail('select a tech card');
       return;
     }
+    setFail(null);
     setRefusal(null);
     // Сетка едет ВМЕСТЕ с прогоном: гейт судил именно её, и создавать пустой прогон, чтобы набрать
     // те же цифры второй раз на детальной странице, значило бы выбросить и работу, и вердикт.
@@ -347,7 +350,7 @@ export function CreateRunModal({
       },
       {
         onSuccess: (res) => {
-          showMessage('run created', 'success');
+          // Navigation to the new run is the receipt.
           onOpenChange(false);
           const id = (res as { id?: number })?.id;
           if (id) navigate(runDetailPath(id));
@@ -364,7 +367,9 @@ export function CreateRunModal({
             });
             return;
           }
-          showMessage(e instanceof Error ? e.message : "couldn't create the run", 'error');
+          const sentence = e instanceof Error ? e.message : "couldn't create the run";
+          if (isRefusal(e)) setFail(sentence);
+          else notifyFailure('RUN', 'not created', e, sentence);
         },
       },
     );
@@ -399,6 +404,7 @@ export function CreateRunModal({
                     setSelected([]);
                     setQty({});
                     setRefusal(null);
+                    setFail(null);
                   }}
                 >
                   <option value={0}>— select —</option>
@@ -634,8 +640,8 @@ export function CreateRunModal({
                 <CalloutBox tone='error'>
                   <Text size='small'>
                     the readiness check failed. this is neither “ready” nor “not ready” — there is
-                    no verdict right now. the run can still be created: the gate is recomputed on the
-                    server at creation, and a refusal will come from there.
+                    no verdict right now. the run can still be created: the gate is recomputed on
+                    the server at creation, and a refusal will come from there.
                   </Text>
                 </CalloutBox>
               ) : !report ? (
@@ -666,7 +672,7 @@ export function CreateRunModal({
                   {/* НЕ ПРОВЕРЕНО — своя группа, своё слово, и она НИКОГДА не сворачивается вместе
                       с пройденными: «не проверяли» и «проверили, всё хорошо» — разные ответы. */}
                   <FindingGroup
-                    title="not checked — the server has no instrument for it"
+                    title='not checked — the server has no instrument for it'
                     findings={uncheckedRows}
                     techCardId={d.techCardId}
                   />
@@ -810,6 +816,7 @@ export function CreateRunModal({
                 </Text>
               </CalloutBox>
             ) : null}
+            <FailNote verb='not created' text={fail} />
           </div>
 
           <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>

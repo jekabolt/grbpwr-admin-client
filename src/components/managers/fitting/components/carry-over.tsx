@@ -4,7 +4,7 @@ import {
   useOpenFittingChangeRequests,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { Button, CalloutBox, Text, EmptyCell } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { crPieceIds } from './schema';
@@ -25,7 +25,6 @@ export function FittingCarryOver({
   // CREATE mode (no fitting id yet): append the carried item to the form instead of an RPC.
   onCarryToForm?: (source: common_FittingChangeRequest) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   // beforeRound = this fitting's round (0 = auto/not-yet-assigned → show every open item).
   const { data, isLoading } = useOpenFittingChangeRequests(techCardId, roundNumber, !!techCardId);
   const resolve = useUpdateFittingChangeRequest(fittingId, techCardId);
@@ -89,8 +88,14 @@ export function FittingCarryOver({
                 resolve.mutate(
                   { id: cr.id, changeRequest: asInsert(cr, false) },
                   {
-                    onSuccess: () => showMessage('Marked resolved', 'success'),
-                    onError: (e) => showMessage(fieldErrorSummary(e, 'Failed'), 'error'),
+                    // The item leaving the carry-over list is the receipt.
+                    onError: (e) =>
+                      notify({
+                        sev: 'error',
+                        subject: 'CHANGE REQUEST',
+                        text: 'not resolved',
+                        detail: fieldErrorSummary(e, 'Failed'),
+                      }),
                   },
                 )
               }
@@ -108,9 +113,15 @@ export function FittingCarryOver({
                   onCarryToForm(cr);
                   return;
                 }
+                // The item showing up in this round is the receipt.
                 add.mutate(asInsert(cr, true), {
-                  onSuccess: () => showMessage('Carried into this round', 'success'),
-                  onError: (e) => showMessage(fieldErrorSummary(e, 'Failed'), 'error'),
+                  onError: (e) =>
+                    notify({
+                      sev: 'error',
+                      subject: 'CHANGE REQUEST',
+                      text: 'not carried',
+                      detail: fieldErrorSummary(e, 'Failed'),
+                    }),
                 });
               }}
             >

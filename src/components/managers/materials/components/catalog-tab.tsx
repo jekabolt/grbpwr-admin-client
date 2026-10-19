@@ -7,7 +7,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notifyFailure } from 'components/managers/production-runs/components/feedback';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -301,7 +301,8 @@ function MaterialDetail({
                   latest
                 </Text>
                 <Text className='font-bold tabular-nums'>
-                  {materialPriceLabel(m) || `${decimalToInput(price.price)} ${price.currency ?? ''}`}
+                  {materialPriceLabel(m) ||
+                    `${decimalToInput(price.price)} ${price.currency ?? ''}`}
                 </Text>
               </div>
               <DetailRow k='valid from' v={price.validFrom ? price.validFrom.slice(0, 10) : '—'} />
@@ -334,7 +335,6 @@ function MaterialDetail({
 // fabric is a visual decision. Descriptive articles + latest price; balances live on the stock tab.
 export function CatalogTab() {
   const { canWrite, canReadCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   const canEdit = canWrite(SECTION.techCards);
   // Filters live in the URL (R-1) like the stock/movements tabs, so a filtered catalog is shareable.
   const [params, setParams] = useSearchParams();
@@ -422,12 +422,14 @@ export function CatalogTab() {
     archive.mutate(
       { id: m.id, archived: !m.archived },
       {
-        onSuccess: () =>
-          showMessage(restoring ? 'Material restored' : 'Material archived', 'success'),
+        // The tile moving in or out of the archive is the receipt.
         onError: (e) =>
-          showMessage(
-            e instanceof Error ? e.message : `Failed to ${restoring ? 'restore' : 'archive'}`,
-            'error',
+          notifyFailure(
+            (m.name || `MATERIAL ${m.id}`).toUpperCase(),
+            restoring ? 'not restored' : 'not archived',
+            e,
+            undefined,
+            () => toggleArchived(m),
           ),
       },
     );
@@ -559,7 +561,12 @@ export function CatalogTab() {
                       onClick={() => openDetail(m)}
                       media={
                         url ? (
-                          <Media src={url} alt={m.name || 'material'} aspectRatio='1/1' fit='cover' />
+                          <Media
+                            src={url}
+                            alt={m.name || 'material'}
+                            aspectRatio='1/1'
+                            fit='cover'
+                          />
                         ) : (
                           <Placeholder aspect='square' label='no image' />
                         )

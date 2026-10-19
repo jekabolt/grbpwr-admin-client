@@ -1,12 +1,13 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctJournalEntry, AcctJournalLineInput } from 'api/proto-http/admin';
 import { CreateSupplierModal } from 'components/managers/accounting/subledgers/components/create-supplier-modal';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BackLink,
   Button,
+  CalloutBox,
   ConfirmationModal,
   Input,
   Selector,
@@ -16,6 +17,7 @@ import {
 } from 'ui';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { Callout, CheckRow, CheckStrip, GroupHeader, Verdict } from '../../../components/kit';
+import { errorText, isRefused, reasonOf } from '../../../utils/feedback';
 import {
   useAcctPeriods,
   useCreateFixedAsset,
@@ -46,8 +48,9 @@ function fmt(n: number): string {
 
 export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
   const navigate = useNavigate();
-  const { showMessage } = useSnackBarStore();
   const { data: periodsData } = useAcctPeriods();
+  // A refusal of the review step stands over its buttons until the next attempt.
+  const [postError, setPostError] = useState<string | null>(null);
   const { data: suppliersData } = useSuppliers();
   const createEntry = useCreateJournalEntry();
   const createAsset = useCreateFixedAsset();
@@ -245,27 +248,40 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
       {
         onSuccess: (res) => {
           const entry = res.entry;
+          // Kept as a toast: it carries the «view» door back to an entry the list may not show,
+          // and the first follow-up step of the case.
           const suffix = monthInfo?.isPast ? ` in ${monthInfo.month}` : '';
-          showMessage(
-            `Entry #${entry?.id ?? '?'} posted${suffix}`,
-            'success',
-            entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
-          );
-          if (result.checklist.length > 0) {
-            showMessage(`after posting: ${result.checklist[0]}`, 'success');
-          }
+          notify({
+            sev: 'ok',
+            subject: `ENTRY ${entry?.id ?? ''}`.trim(),
+            text: `posted${suffix}`,
+            detail: result.checklist.length > 0 ? `next: ${result.checklist[0]}` : undefined,
+            action:
+              entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
+          });
           onClose();
         },
         onError: (e) => {
-          showMessage(
-            result.fixedAsset && assetCreatedRef.current
-              ? 'asset was registered but the ENTRY failed — retry posting; if you retry from ' +
-                  'scratch, delete the duplicate asset in reports → fixed assets'
-              : e instanceof Error
-                ? e.message
-                : 'Failed to create entry',
-            'error',
-          );
+          const halfDone = !!result.fixedAsset && assetCreatedRef.current;
+          const said = errorText(e, 'failed to create entry') ?? '';
+          if (isRefused(e)) {
+            setPostError(
+              halfDone
+                ? `asset registered, entry refused: ${said}. retry posting; starting over duplicates the asset`
+                : said,
+            );
+            return;
+          }
+          // No retry: a lost reply may still have posted the entry.
+          notify({
+            sev: halfDone ? 'warn' : 'error',
+            subject: 'ENTRY',
+            text: halfDone ? 'asset registered' : 'not posted',
+            bad: halfDone ? 'entry failed' : reasonOf(e),
+            detail: halfDone
+              ? 'retry posting; starting over duplicates the asset (reports → fixed assets)'
+              : said,
+          });
         },
       },
     );
@@ -273,13 +289,14 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
 
   const post = () => {
     if (!result || unbalanced || monthInfo?.closed) return;
+    setPostError(null);
     // The fixed asset goes first (the register drives depreciation); the entry follows only when
     // it succeeds. A retry after an entry-side failure skips straight to the entry.
     if (result.fixedAsset && !assetCreatedRef.current) {
       const fa = result.fixedAsset;
       const costBase = inputToDecimal(fa.cost);
       if (!costBase) {
-        showMessage('asset cost is invalid — go back and re-enter it', 'error');
+        setPostError('asset cost is invalid — go back and re-enter it');
         return;
       }
       createAsset.mutate(
@@ -294,11 +311,20 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
             assetCreatedRef.current = true;
             postEntry();
           },
-          onError: (e) =>
-            showMessage(
-              e instanceof Error ? e.message : 'Failed to register the fixed asset',
-              'error',
-            ),
+          onError: (e) => {
+            const said = errorText(e, 'failed to register the fixed asset') ?? '';
+            if (isRefused(e)) {
+              setPostError(said);
+              return;
+            }
+            notify({
+              sev: 'error',
+              subject: `ASSET ${fa.name}`,
+              text: 'not registered',
+              bad: reasonOf(e),
+              detail: said,
+            });
+          },
         },
       );
       return;
@@ -579,6 +605,8 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                 )}
 
                 {periodWarning}
+
+                {postError && <CalloutBox tone='error'>{postError}</CalloutBox>}
 
                 <div className='flex items-center justify-end gap-2'>
                   <Button type='button' variant='secondary' size='lg' onClick={() => setStep(2)}>
