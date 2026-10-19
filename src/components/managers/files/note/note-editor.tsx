@@ -219,6 +219,8 @@ export function NoteEditor({
   onLeaveEdit,
   sizeHint,
   banners,
+  wrapLines: wrapProp,
+  onWrapLinesChange,
 }: {
   handleRef?: RefObject<NoteEditorHandle | null>;
   name: string;
@@ -237,6 +239,10 @@ export function NoteEditor({
   /** Баннеры страницы (черновик, конфликт, различия) — между полосой и полем, а не поверх
    * текста: конфликт обязан стоять там, где на него смотрят, прежде чем нажать «save». */
   banners?: React.ReactNode;
+  /** Перенос строк поля — общий с режимом блоков (`note-page.tsx`). Выключен — `white-space:
+   * pre` и прокрутка вбок; текст не меняется. */
+  wrapLines?: boolean;
+  onWrapLinesChange?: (next: boolean) => void;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const { showMessage } = useSnackBarStore();
@@ -252,11 +258,12 @@ export function NoteEditor({
    */
   const phone = useMediaQuery(PHONE_QUERY);
   const [previewOpen, setPreviewOpen] = useState(false);
-  /** Перенос строк поля. Выключен — `white-space: pre` и прокрутка вбок; текст не меняется. */
-  const [wrapLines, setWrapLines] = useState(true);
   /** Набираемое имя в окне rename; `null` — окно закрыто. */
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const showPreview = !phone || previewOpen;
+  /** Свой перенос — только когда страница не держит общий (пробы рисуют редактор голым). */
+  const [ownWrap, setOwnWrap] = useState(true);
+  const wrapLines = wrapProp ?? ownWrap;
   useImperativeHandle(
     handleRef,
     () => ({
@@ -662,7 +669,11 @@ export function NoteEditor({
   ];
   const menuTail: FormatMenuItem[] = [
     { label: 'tidy with ai', run: tidy, disabled: working || !value.trim() },
-    { label: 'wrap lines', on: wrapLines, run: () => setWrapLines((v) => !v) },
+    {
+      label: 'wrap lines',
+      on: wrapLines,
+      run: () => (onWrapLinesChange ?? setOwnWrap)(!wrapLines),
+    },
   ];
 
   return (

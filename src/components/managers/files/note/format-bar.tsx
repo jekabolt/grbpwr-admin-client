@@ -112,7 +112,15 @@ export function FormatBar({
    * file и «•••». Остальное уходит в меню: сначала пункты редактора `lead`, потом свои
    * (numbering, quote, table, media), потом `tail`. Логика правок та же — меняется раскладка.
    */
-  phone?: { lead: FormatMenuItem[]; tail: FormatMenuItem[] };
+  phone?: {
+    lead: FormatMenuItem[];
+    tail: FormatMenuItem[];
+    /**
+     * РЯД В ПОТОКЕ, а не над клавиатурой: стоит там, где его отрисовали (лист правки блока сам
+     * занимает видимый вьюпорт, и ряду незачем ловить клавиатуру отдельно). Меню — вниз.
+     */
+    inFlow?: boolean;
+  };
   /**
    * КОМПАКТНАЯ ПОЛОСА ПОД ПОЛЕМ (форма заведения задачи): пять частых инструментов и «⋯»,
    * который раскрывает остальные. Логика правок та же — меняется только раскладка.
@@ -146,10 +154,11 @@ export function FormatBar({
    */
   const phoneBar = useRef<HTMLDivElement>(null);
   const isPhone = !!phone;
+  const inFlow = !!phone?.inFlow;
   useEffect(() => {
     const vv = window.visualViewport;
     const bar = phoneBar.current;
-    if (!isPhone || !vv || !bar) return;
+    if (!isPhone || inFlow || !vv || !bar) return;
     const place = () => {
       bar.style.top = `${vv.offsetTop + vv.height}px`;
       bar.style.bottom = 'auto';
@@ -162,7 +171,7 @@ export function FormatBar({
       vv.removeEventListener('resize', place);
       vv.removeEventListener('scroll', place);
     };
-  }, [isPhone]);
+  }, [inFlow, isPhone]);
 
   /**
    * РЕЖИМ ТАБЛИЦЫ: каретка стоит в таблице — значит стоит и полоса её правки.
@@ -572,6 +581,9 @@ export function FormatBar({
     </div>
   );
 
+  /** Ряд телефона: над клавиатурой — порталом в `body`, в потоке — там, где отрисован. */
+  const placePhoneRow = (row: React.ReactNode) => (inFlow ? row : createPortal(row, document.body));
+
   return (
     <>
       {phone ? null : compact ? (
@@ -748,12 +760,16 @@ export function FormatBar({
 
       {/* ── ТЕЛЕФОН: ОДИН РЯД НАД КЛАВИАТУРОЙ ───────────────────────────────────────────────
           Порталом в `body`: `fixed` внутри предка с `transform` встал бы не к экрану, а к
-          предку. Слой `--z-dock` — над страницей, под навигацией и модалками. */}
+          предку. Слой `--z-dock` — над страницей, под навигацией и модалками.
+          В ПОТОКЕ (`inFlow`) — тот же ряд без портала, на своём месте в листе блока. */}
       {phone &&
-        createPortal(
+        placePhoneRow(
           <div
             ref={phoneBar}
-            className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-pageBg md:hidden'
+            className={cn(
+              'border-borderColor bg-pageBg md:hidden',
+              inFlow ? 'border-b' : 'fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t',
+            )}
           >
             {tableBar}
             <div className='flex items-center gap-1.5 overflow-x-auto px-2 py-1.5'>
@@ -792,7 +808,7 @@ export function FormatBar({
                 className='w-56'
                 // Меню не забирает фокус у поля: клавиатура остаётся, каретка — на месте.
                 contentProps={{
-                  side: 'top',
+                  side: inFlow ? 'bottom' : 'top',
                   align: 'end',
                   onOpenAutoFocus: (e: Event) => e.preventDefault(),
                   onCloseAutoFocus: (e: Event) => e.preventDefault(),
@@ -849,7 +865,6 @@ export function FormatBar({
               </GenericPopover>
             </div>
           </div>,
-          document.body,
         )}
       {phone && (
         <span ref={mediaHost} className='hidden'>
