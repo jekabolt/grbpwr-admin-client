@@ -458,7 +458,7 @@ export const MediaExpander: FC<ExpanderProps> = ({
           </Text>
         </div>
 
-        <div className='grid min-h-0 flex-1 grid-rows-[minmax(0,46fr)_minmax(0,54fr)]'>
+        <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,46fr)_minmax(0,54fr)]'>
           <div
             ref={stageRef}
             data-probe='stage'
