@@ -1,7 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
-import { fittingKeys } from 'components/managers/fittings/components/useFittingQuery';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import {
   isRunLive,
@@ -26,15 +24,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *
  * THEN, CLIENT-SIDE: the alpha PNG is laid on pure white at the photo's own size (padded to 3:4 —
  * on white the padding is invisible, a crop would cut the person), uploaded as a new library media
- * through the ordinary image door, and it takes the photo's place in the form (`mediaIds = [new]`).
+ * through the ordinary image door, and it takes the photo's place in the form
+ * (the first of `mediaIds`).
  * The original stays in the library; the form still has to be saved, as after any pick.
+ *
+ * ⚠ NOT MOUNTED ANYWHERE (owner, 19.10: white bg is being re-specified — «not exactly a background
+ * cutout»). Kept as the wired route for when it comes back.
  *
  * ⚠ THE DOOR NEEDS A TECH CARD, AND A MODEL IS NOT ONE. `StartDesignRun` refuses `tech_card_id <= 0`
  * and loads the card, and `design_run.tech_card_id` is NOT NULL with a foreign key: every run lives
- * in some card's history. There is no card-free door without a backend change. Until there is one,
- * the run is booked on the card of the model's latest fitting (`useWhiteBgCard`) — a garment this
- * model actually tried on, so the cut-out lands in a history that has to do with her — and the
- * corner is off for a model with no such fitting (and for a model not yet saved).
+ * in some card's history. So `card` is an input here, and there is no honest value for it on a model
+ * form until the backend gives one (a card-free cutout, or a system card for model photos).
+ * Borrowing a garment's card from a fitting was tried and dropped: the paid run landed in that
+ * garment's history.
  */
 
 export const WHITE_BG_SCOPE = 'model:white-bg';
@@ -72,32 +74,6 @@ const sleep = (ms: number, signal: AbortSignal) =>
 
 const messageOf = (error: unknown, fallback: string) =>
   (error instanceof Error ? error.message : '').trim() || fallback;
-
-/**
- * THE CARD A MODEL'S CUT-OUT IS BOOKED ON — the tech card of her latest fitting, or 0 (no such
- * fitting, or the model is not saved yet). Its own small read: the fittings list below the form is
- * an infinite query with another key, and its filter `{ modelId: 0 }` would mean ALL fittings.
- */
-export function useWhiteBgCard(modelId?: number): number {
-  const id = modelId && modelId > 0 ? modelId : 0;
-  const { data } = useQuery({
-    queryKey: [...fittingKeys.list({ modelId: id }), 'white-bg-card'],
-    queryFn: async () => {
-      const res = await adminService.ListFittings({
-        limit: 20,
-        offset: 0,
-        orderFactor: 'ORDER_FACTOR_DESC',
-        productId: 0,
-        modelId: id,
-        techCardId: 0,
-      });
-      return (res.fittings ?? []).map((f) => f.fitting?.techCardId ?? 0).find((c) => c > 0) ?? 0;
-    },
-    enabled: id > 0,
-    staleTime: 5 * 60_000,
-  });
-  return data ?? 0;
-}
 
 /**
  * The cut-out on pure white, at the photo's own size, padded to 3:4. Returned as a JPEG `File` for
@@ -162,7 +138,7 @@ export function useWhiteBg({
   card,
   onLanded,
 }: {
-  /** The card the run is booked on (`useWhiteBgCard`); 0 = no door. */
+  /** The card the run is booked on; 0 = no door. */
   card: number;
   /** The white photo is uploaded. The caller decides whether it still has a place to go. */
   onLanded: (original: common_MediaFull, white: common_MediaFull) => void;
