@@ -37,6 +37,7 @@ export function DescriptionEditor({
   className,
   onKeyDown,
   autoFocus,
+  compactTools,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -53,9 +54,16 @@ export function DescriptionEditor({
    * (двойной щелчок, кнопка «edit») — после него печатают, а не ищут поле второй раз.
    */
   autoFocus?: boolean;
+  /**
+   * ФОРМА ЗАВЕДЕНИЯ: полоса форматирования ПОД полем, компактная (пять инструментов и «⋯»), и
+   * появляется только после первого фокуса или когда в поле уже есть текст. Переключатель показа
+   * разметки живёт под «⋯» — второго «preview» над полем нет.
+   */
+  compactTools?: boolean;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
+  const [toolsShown, setToolsShown] = useState(false);
 
   /** Фокус ставится ОДИН раз за открытие — но именно поставится, а не «попытается». */
   const focusedRef = useRef(false);
@@ -84,6 +92,66 @@ export function DescriptionEditor({
     // Сам `focus` — с `preventScroll`: его прокрутка ставит к краю по своему усмотрению.
     el.scrollIntoView({ block: 'nearest' });
   }, [autoFocus, disabled]);
+
+  if (compactTools) {
+    const showTools = toolsShown || preview || !!value.trim();
+    return (
+      <div className='flex flex-col gap-1.5'>
+        <div className='flex flex-col border border-borderColor'>
+          {preview ? (
+            <div className={cn('min-h-24 px-3 py-2', className)}>
+              {value.trim() ? (
+                <TaskDescriptionView text={value} media={media} />
+              ) : (
+                <Text size='micro' variant='label' component='span'>
+                  nothing yet
+                </Text>
+              )}
+            </div>
+          ) : (
+            <Textarea
+              ref={areaRef}
+              name='task-description'
+              aria-label={ariaLabel}
+              variant='secondary'
+              placeholder={placeholder}
+              className={cn('mb-0 max-h-[60vh] min-h-24 border-0 px-3 py-2', className)}
+              value={value}
+              disabled={disabled}
+              onFocus={() => setToolsShown(true)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
+              onKeyDown={onKeyDown}
+            />
+          )}
+          {showTools &&
+            (preview ? (
+              <div className='flex border-t border-hairline'>
+                <Button
+                  type='button'
+                  variant='default'
+                  aria-label='back to writing'
+                  onClick={() => setPreview(false)}
+                  className='min-h-11 flex-1 text-micro uppercase tracking-label md:min-h-8'
+                >
+                  write
+                </Button>
+              </div>
+            ) : (
+              <FormatBar
+                compact
+                areaRef={areaRef}
+                value={value}
+                onChange={onChange}
+                onTogglePreview={() => setPreview(true)}
+              />
+            ))}
+        </div>
+        {!preview && (
+          <MediaRefRow media={media} targetRef={areaRef} value={value} onChange={onChange} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className='flex flex-col gap-1.5'>

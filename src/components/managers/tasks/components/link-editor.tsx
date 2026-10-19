@@ -32,9 +32,9 @@ export type LinkField =
   | 'productionRunId'
   | 'projectTopicId';
 
-type LinkType = { field: LinkField; label: string; config: EntityConfig };
+export type LinkType = { field: LinkField; label: string; config: EntityConfig };
 
-const LINK_TYPES: LinkType[] = [
+export const LINK_TYPES: LinkType[] = [
   { field: 'techCardId', label: 'tech card', config: techCardConfig },
   { field: 'productId', label: 'product', config: productConfig },
   { field: 'orderUuid', label: 'order', config: orderConfig },
@@ -47,7 +47,7 @@ const LINK_TYPES: LinkType[] = [
 
 const typeItems = LINK_TYPES.map((t) => ({ value: t.field, label: t.label }));
 
-function isSet(value: number | string, empty: number | string) {
+export function isSet(value: number | string, empty: number | string) {
   return !(value === empty || value === 0 || value === '');
 }
 

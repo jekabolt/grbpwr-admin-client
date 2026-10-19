@@ -169,7 +169,7 @@ function TaskCombobox({
 }
 
 /** Дети карточки — фильтр того же списка (см. довод в `TaskRelations`). */
-function useChildren(taskId: number) {
+export function useChildren(taskId: number) {
   const childFilter = useMemo(() => ({ parentTaskId: taskId }), [taskId]);
   const { data } = useTasks(childFilter);
   return data?.tasks ?? EMPTY_TASKS;

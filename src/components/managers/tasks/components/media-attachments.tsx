@@ -10,6 +10,24 @@ import { annotationsOf, NotesMark, useTaskMediaViewer } from './task-media-viewe
 const ARROW =
   'flex min-h-11 w-full shrink-0 items-center justify-center text-micro leading-none text-labelColor hover:text-textColor disabled:text-borderColor disabled:hover:text-borderColor sm:size-4 sm:min-h-0 sm:w-4';
 
+/**
+ * Picked library media → the new id list. Remembers each picked item for the thumbnail cache,
+ * drops ids already attached. Shared by the add slot here and the task form's «+ add».
+ */
+export function mergePickedMedia(value: number[], picked: common_MediaFull[]): number[] {
+  const media = picked
+    .filter((m) => m.id != null)
+    .map((m) => ({
+      id: m.id as number,
+      thumbnail: m.media?.thumbnail?.mediaUrl,
+      fullSize: m.media?.fullSize?.mediaUrl,
+      blurhash: m.media?.blurhash,
+    }));
+  rememberMedia(media);
+  const next = media.map((m) => m.id).filter((id) => !value.includes(id));
+  return next.length ? [...value, ...next] : value;
+}
+
 // Attach reference images/files from the existing media bucket. Stores media ids
 // on the task; the MediaSelector (same one tech cards use) handles the gallery.
 // The first attachment also becomes the card cover (tskCard v3).
@@ -18,12 +36,15 @@ export function MediaAttachments({
   onChange,
   annotations = [],
   onAnnotationsChange,
+  hideSlot,
 }: {
   value: number[];
   onChange: (ids: number[]) => void;
   /** Указания на этих вложениях — часть содержимого карточки, редактируются той же формой. */
   annotations?: TaskMediaAnnotations[];
   onAnnotationsChange?: (next: TaskMediaAnnotations[]) => void;
+  /** No add slot: the caller has its own «+ add» (the task form). */
+  hideSlot?: boolean;
 }) {
   const resolved = resolveMedia(value);
 
@@ -39,17 +60,8 @@ export function MediaAttachments({
   });
 
   function handleAdd(picked: common_MediaFull[]) {
-    const media = picked
-      .filter((m) => m.id != null)
-      .map((m) => ({
-        id: m.id as number,
-        thumbnail: m.media?.thumbnail?.mediaUrl,
-        fullSize: m.media?.fullSize?.mediaUrl,
-        blurhash: m.media?.blurhash,
-      }));
-    rememberMedia(media);
-    const next = media.map((m) => m.id).filter((id) => !value.includes(id));
-    if (next.length) onChange([...value, ...next]);
+    const next = mergePickedMedia(value, picked);
+    if (next !== value) onChange(next);
   }
 
   return (
@@ -146,17 +158,19 @@ export function MediaAttachments({
 
         {/* Слот той же клеткой, что и вложения: 64 пикселя не вмещают ни глифа, ни подсказки,
             поэтому `compact` — но клик, ⌘V и бросок работают ровно так же. */}
-        <MediaSlot
-          aspectRatio={['Custom']}
-          frameAspect='1/1'
-          heightPx={64}
-          compact
-          label='+ media'
-          purpose='attachment'
-          allowMultiple
-          showVideos
-          onSelect={handleAdd}
-        />
+        {!hideSlot && (
+          <MediaSlot
+            aspectRatio={['Custom']}
+            frameAspect='1/1'
+            heightPx={64}
+            compact
+            label='+ media'
+            purpose='attachment'
+            allowMultiple
+            showVideos
+            onSelect={handleAdd}
+          />
+        )}
       </div>
 
       {viewer.node}

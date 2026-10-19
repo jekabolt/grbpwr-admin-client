@@ -133,7 +133,7 @@ export function FileAttachments({
  * Every tile is a toggle: a tile already in the set comes back out on the next click, so the
  * whole set can be assembled and taken apart without leaving the modal.
  */
-function FilePicker({
+export function FilePicker({
   selected,
   onToggle,
   onClose,
