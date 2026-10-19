@@ -3,6 +3,11 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import {
+  MediaViewer,
+  mediaFullToViewerItem,
+  useMediaViewer,
+} from 'components/shared/media-viewer/media-viewer';
+import {
   AnnotationDefs,
   CalloutShape,
   leaderTarget,
@@ -34,6 +39,7 @@ import { FittingFormData } from './schema';
 import { type PendingMark, useFittingWorkspace } from './workspace';
 
 type DrawingTool = 'pin' | 'label' | 'dim' | 'arc' | 'polygon' | 'ink';
+type ToolSelection = DrawingTool | 'none';
 
 type Gesture = {
   mediaId: number;
@@ -49,11 +55,12 @@ type SwipeGesture = {
   startClientX: number;
   startClientY: number;
   pinPoint?: ShapePoint;
+  openViewer?: boolean;
 };
 
 type FrameSize = { width: number; height: number };
 
-const TOOL_OPTIONS: readonly ViewSwitchOption<DrawingTool>[] = [
+const TOOL_OPTIONS: readonly ViewSwitchOption<ToolSelection>[] = [
   { value: 'pin', label: 'Pin' },
   { value: 'label', label: 'Leader' },
   { value: 'dim', label: 'Line' },
@@ -367,7 +374,9 @@ export function PhotoStage() {
     pendingMark,
     setPendingMark,
   } = useFittingWorkspace();
-  const [tool, setTool] = useState<DrawingTool>('pin');
+  const [tool, setTool] = useState<DrawingTool | null>(() =>
+    window.matchMedia('(min-width: 768px)').matches ? 'pin' : null,
+  );
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const swipeRef = useRef<SwipeGesture | null>(null);
@@ -375,6 +384,24 @@ export function PhotoStage() {
   const activeThumbnailRef = useRef<HTMLDivElement>(null);
   const [frameSize, setFrameSize] = useState<FrameSize>({ width: 0, height: 0 });
   const [removeId, setRemoveId] = useState<number | null>(null);
+  const viewer = useMediaViewer();
+
+  const viewerPhotos = useMemo(
+    () =>
+      mediaIds.flatMap((mediaId) => {
+        const media = mediaById.get(mediaId);
+        return media ? [{ mediaId, item: mediaFullToViewerItem(media) }] : [];
+      }),
+    [mediaById, mediaIds],
+  );
+
+  const openPhotoViewer = useCallback(
+    (mediaId: number) => {
+      const index = viewerPhotos.findIndex((photo) => photo.mediaId === mediaId);
+      if (index >= 0) viewer.openAt(index);
+    },
+    [viewer, viewerPhotos],
+  );
 
   const setLiveGesture = useCallback((next: Gesture | null) => {
     gestureRef.current = next;
@@ -502,7 +529,9 @@ export function PhotoStage() {
     const point = pointFromPointer(event);
     if (!point) return;
 
-    if (event.pointerType === 'touch' && mediaIds.length > 1 && (readOnly || tool === 'pin')) {
+    const opensViewer = readOnly || tool === null;
+    const tracksPinSwipe = event.pointerType === 'touch' && mediaIds.length > 1 && tool === 'pin';
+    if (opensViewer || tracksPinSwipe) {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       swipeRef.current = {
@@ -511,12 +540,13 @@ export function PhotoStage() {
         startedAt: event.timeStamp,
         startClientX: event.clientX,
         startClientY: event.clientY,
-        pinPoint: readOnly ? undefined : point,
+        pinPoint: tracksPinSwipe ? point : undefined,
+        openViewer: opensViewer,
       };
       return;
     }
 
-    if (readOnly) return;
+    if (readOnly || tool === null) return;
     event.preventDefault();
     if (tool === 'pin') {
       setPendingMark(pinMark(currentMediaId, point));
@@ -556,6 +586,8 @@ export function PhotoStage() {
         Math.abs(dx) > Math.abs(dy) * 2;
       if (isSwipe) {
         navigatePhoto(dx < 0 ? 1 : -1);
+      } else if (swipe.openViewer) {
+        openPhotoViewer(swipe.mediaId);
       } else if (swipe.pinPoint) {
         setPendingMark(pinMark(swipe.mediaId, swipe.pinPoint));
         focusComposer();
@@ -637,18 +669,33 @@ export function PhotoStage() {
       (callout.points?.length ?? 0) > 0,
   ).length;
 
+  const handleToolChange = (next: ToolSelection) => {
+    if (next === 'none') return;
+    setTool((current) => (current === next ? null : next));
+  };
+
+  const handleToolClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (readOnly) return;
+    const radio = (event.target as HTMLElement).closest('[role="radio"]');
+    if (radio?.getAttribute('aria-checked') !== 'true') return;
+    event.stopPropagation();
+    setTool(null);
+  };
+
   return (
     <>
       <Section title='Photos' className='min-w-0 lg:flex-[1.5]'>
         <Toolbar className='flex-nowrap overflow-x-auto max-md:border-0 max-md:p-0 md:flex-wrap md:overflow-x-visible'>
-          <ViewSwitch
-            value={tool}
-            options={TOOL_OPTIONS}
-            onChange={setTool}
-            label='drawing tool'
-            disabled={readOnly}
-            className='w-full shrink-0 md:w-auto max-md:[&>span]:flex-1 max-md:[&>span]:justify-center max-md:[&>span]:py-3'
-          />
+          <div className='contents' onClickCapture={handleToolClickCapture}>
+            <ViewSwitch
+              value={tool ?? 'none'}
+              options={TOOL_OPTIONS}
+              onChange={handleToolChange}
+              label='drawing tool'
+              disabled={readOnly}
+              className='w-full shrink-0 md:w-auto max-md:[&>span]:flex-1 max-md:[&>span]:justify-center max-md:[&>span]:py-3'
+            />
+          </div>
         </Toolbar>
 
         <div className='-mx-block flex min-h-0 items-center justify-center bg-pageBg md:mx-0 md:min-h-105'>
@@ -660,8 +707,11 @@ export function PhotoStage() {
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerCancel}
               className={cn(
-                'relative inline-block max-w-full touch-none select-none leading-none',
-                readOnly ? 'cursor-default' : 'cursor-crosshair',
+                'relative inline-block max-w-full select-none leading-none',
+                // No tool: the photo is a zoom target and the page still scrolls over it.
+                readOnly || tool === null
+                  ? 'cursor-zoom-in touch-pan-y'
+                  : 'cursor-crosshair touch-none',
               )}
             >
               <StageImage urls={currentUrls} alt='fitting photo' onLoad={measureFrame} />
@@ -755,6 +805,8 @@ export function PhotoStage() {
       </Section>
 
       {pasteIntake.dialog}
+
+      <MediaViewer items={viewerPhotos.map((photo) => photo.item)} {...viewer} />
 
       <ConfirmationModal
         open={removeId != null}
