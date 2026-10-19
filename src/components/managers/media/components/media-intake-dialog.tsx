@@ -3,7 +3,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Media, Pill, Text } from 'ui';
+import { Button, Close, Media, Pill, Text } from 'ui';
 import { formatBytes, usePendingFiles, type PreviewItem } from '../utils/usePendingFiles';
 import { MediaCropper } from './cropper';
 
@@ -140,17 +140,13 @@ function Tile({
               crop
             </Button>
           )}
-          <Button
-            size='xs'
-            variant='secondary'
-            className='border border-textColor'
+          <Close
+            size='sm'
             aria-label={`remove ${item.name} from the queue`}
             title={item.status === 'sending' ? 'already uploading, no way to cancel' : 'remove'}
             disabled={item.status === 'sending'}
             onClick={onDrop}
-          >
-            ×
-          </Button>
+          />
         </div>
       </div>
 
@@ -433,9 +429,7 @@ export function MediaIntakeDialog({
               add {purpose || 'media'}
               {previews.length > 1 ? ` · ${previews.length} frames` : ''}
             </DialogPrimitive.Title>
-            <Button className='cursor-pointer py-1' onClick={() => handleOpenChange(false)}>
-              [x]
-            </Button>
+            <Close onClick={() => handleOpenChange(false)} />
           </div>
 
           <DialogPrimitive.Description asChild>

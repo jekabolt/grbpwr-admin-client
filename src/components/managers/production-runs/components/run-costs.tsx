@@ -6,7 +6,7 @@ import {
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { runCostKindOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
@@ -262,17 +262,14 @@ export function RunCosts({
                 onChange={(e) => patchCost(i, { incurredAt: e.target.value })}
               />
               {canEditCosts ? (
-                <Button
-                  type='button'
-                  variant='secondary'
+                <Close
+                  size='sm'
                   aria-label='remove cost'
                   onClick={() => {
                     setDirty(true);
                     setCosts((prev) => prev.filter((_, j) => j !== i));
                   }}
-                >
-                  ✕
-                </Button>
+                />
               ) : null}
             </div>
           </div>

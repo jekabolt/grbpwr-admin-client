@@ -23,6 +23,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import {
+  BackLink,
   Button,
   CheckboxCommon,
   Chip,
@@ -32,6 +33,7 @@ import {
   Input,
   Pill,
   Text,
+  EmptyCell,
 } from 'ui';
 import type { CardContext } from '../client';
 import {
@@ -782,14 +784,9 @@ export function DetailsStep({
       default:
         body = PIECES_REASONS.has(b.reason) ? (
           onFixInPieces ? (
-            <Button
-              {...ask('details-blocked')}
-              variant='secondary'
-              size='xs'
-              onClick={() => fixInPieces(seed)}
-            >
-              ← fix in pieces
-            </Button>
+            <BackLink {...ask('details-blocked')} onClick={() => fixInPieces(seed)}>
+              fix in pieces
+            </BackLink>
           ) : (
             say('fixed on the pieces step')
           )
@@ -1802,7 +1799,7 @@ export function DetailsStep({
               </td>
               <td>
                 {!specs.length ? (
-                  '—'
+                  <EmptyCell />
                 ) : (
                   // A pair counts PER HAND (PieceSpec): 2 = two _L and two _R per garment.
                   // D3: a count no sheet text gives is marked until confirmed or edited.
@@ -2038,7 +2035,7 @@ export function DetailsStep({
                       `fabrics proposed: ${nameOf(sel)?.suggestion?.fabrics.length ?? '—'}`,
                     ].join(' · ')}
                   >
-                    piece {mark(sel)} · {nameOf(sel)?.displayName || '—'}
+                    piece {mark(sel)} · {nameOf(sel)?.displayName || <EmptyCell />}
                   </span>
                 ) : (
                   'piece'
@@ -2522,15 +2519,9 @@ function BlockedState({
         <Pill tone='warn'>{word}</Pill>
       </button>
       {go && (
-        <Button
-          variant='underline'
-          size='xs'
-          className='whitespace-nowrap'
-          title={detail}
-          onClick={stop(go)}
-        >
-          ← fix in {onPieces ? 'pieces' : 'sizes'}
-        </Button>
+        <BackLink className='whitespace-nowrap' title={detail} onClick={stop(go)}>
+          fix in {onPieces ? 'pieces' : 'sizes'}
+        </BackLink>
       )}
     </span>
   );

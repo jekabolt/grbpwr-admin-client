@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   CalloutBox,
+  Close,
   Input,
   Pill,
   GenericPopover,
@@ -17,6 +18,7 @@ import {
   Text,
   Toolbar,
   ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -217,7 +219,7 @@ function AssemblyTile({
       ) : null}
       <div className='mt-0.5 flex min-w-0 items-center gap-1'>
         <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-          {sizeLabel} · ×{row.qty.trim() || '—'}
+          {sizeLabel} · ×{row.qty.trim() || <EmptyCell />}
         </Text>
         {canEdit && (
           <Text component='span' variant='inactive' className='ml-auto shrink-0'>
@@ -313,16 +315,12 @@ function AssemblyTile({
       )}
     >
       {canEdit && (
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
+        <Close
+          size='sm'
           aria-label='remove assembly line'
           onClick={onRemove}
           className='absolute right-1 top-1 z-10'
-        >
-          ✕
-        </Button>
+        />
       )}
 
       {canEdit ? (

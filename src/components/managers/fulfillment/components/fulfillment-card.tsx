@@ -1,5 +1,5 @@
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { BoardCard, Button, Pill, Placeholder, Text } from 'ui';
+import { BoardCard, Button, Pill, Placeholder, Text, EmptyCell } from 'ui';
 import { FulfillmentCard as FulfillmentCardModel } from '../api/types';
 import { CardAssignee } from './card-assignee';
 import { cardAgeDays, COLUMN_ACTION, formatMoney, isOverdue } from '../utils/meta';
@@ -50,7 +50,7 @@ export function FulfillmentCard({
               {overdue && <Pill tone='warn'>overdue</Pill>}
             </div>
             <Text size='micro' variant='label' component='span'>
-              placed {formatDateShort(card.placed) || '—'}
+              placed {formatDateShort(card.placed) || <EmptyCell />}
               {isToPack && age > 0 ? ` · ${age}d` : ''}
             </Text>
           </div>

@@ -1,7 +1,7 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { Input, Text } from 'ui';
+import { Close, Input, Text } from 'ui';
 import { HeroSectionModal } from './hero-section-modal';
 
 interface TagPickerProps {
@@ -65,16 +65,7 @@ export function TagPicker({
           </Text>
           <span className='text-labelColor'>▾</span>
         </button>
-        {value && (
-          <button
-            type='button'
-            onClick={() => onChange('')}
-            aria-label='clear tag'
-            className='border border-textInactiveColor px-2 py-1.5 leading-none cursor-pointer text-textInactiveColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-          >
-            ×
-          </button>
-        )}
+        {value && <Close onClick={() => onChange('')} aria-label='clear tag' />}
       </div>
 
       <HeroSectionModal

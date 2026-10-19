@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from 'lib/utility';
-import { Button, Text } from 'ui';
+import { BackLink, Button, Text } from 'ui';
 
 export type OldPieceDecision = 'delete' | 'keep';
 
@@ -176,14 +176,7 @@ export function OldPiecesDecision({
   if (picking) {
     return (
       <div className='space-y-6'>
-        <Button
-          variant='underline'
-          size='sm'
-          className='h-11 px-0 font-normal'
-          onClick={() => onPickingChange(false)}
-        >
-          ← back
-        </Button>
+        <BackLink onClick={() => onPickingChange(false)} />
 
         <div className='space-y-4'>
           <Text size='micro' component='h3' className='uppercase'>

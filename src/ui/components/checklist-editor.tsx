@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { cn } from 'lib/utility';
 import { Button } from './button';
+import { Close } from './close';
 import Input from './input';
 import Text from './text';
 
@@ -106,8 +107,8 @@ export function ChecklistEditor({
                 {item.content}
               </Text>
               {canWrite && (
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label={`remove "${item.content}"`}
                   onClick={() => onDelete(item.id)}
                   /* ✕ ВИДЕН ВСЕГДА, НО ТИХИЙ. Он прятался за `opacity-0 group-hover:opacity-100`,
@@ -115,10 +116,7 @@ export function ChecklistEditor({
                      удаление пункта было там недостижимо — функция существовала end-to-end и
                      читалась как отсутствующая. Тишина теперь весом (серый → чёрный на ховере),
                      а не отсутствием: цвет прячет кнопку от взгляда, но не от пальца. */
-                  className='shrink-0 px-1 text-labelColor transition-colors hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                >
-                  ✕
-                </button>
+                />
               )}
             </li>
           ))}

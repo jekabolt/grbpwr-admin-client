@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Text } from 'ui';
+import { Chip, Text } from 'ui';
 
 const GENDER_LABELS: Record<string, string> = {
   GENDER_ENUM_FEMALE: 'women',
@@ -121,15 +121,9 @@ export function ActiveFilters() {
         filters:
       </Text>
       {chips.map((chip) => (
-        <button
-          key={chip.key}
-          type='button'
-          onClick={chip.remove}
-          className='flex items-center gap-1 border border-textInactiveColor px-2 py-0.5 text-textBaseSize uppercase transition-colors hover:bg-textColor hover:text-bgColor cursor-pointer'
-        >
+        <Chip key={chip.key} onClick={chip.remove} onRemove={chip.remove}>
           {chip.label}
-          <span aria-hidden>×</span>
-        </button>
+        </Chip>
       ))}
       <button
         type='button'

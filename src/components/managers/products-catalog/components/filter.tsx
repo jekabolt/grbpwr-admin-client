@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Button, Overlay, Text } from 'ui';
+import { Button, Close, Overlay, Text } from 'ui';
 import Color from './color';
 import FromTo from './from-to';
 import Gender from './gender';
@@ -32,7 +32,7 @@ export default function Filter({
             <div className='flex h-full flex-col'>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button onClick={toggleModal}>[x]</Button>
+                <Close onClick={toggleModal} />
               </div>
               <div className='h-full space-y-10 overflow-y-scroll py-6'>
                 <div className='space-y-6'>

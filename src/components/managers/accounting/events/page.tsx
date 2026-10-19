@@ -1,7 +1,7 @@
 import { AcctEvent } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Link } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { Button, Text, EmptyCell } from 'ui';
 import { Callout, Note } from '../components/kit';
 import { AcctSectionHeader } from '../components/section-header';
 import { ReportState } from '../reports/components/report-utils';
@@ -108,7 +108,7 @@ export function AcctEventsPage() {
                       </Text>
                     ) : null}
                     <span className='text-[10px] uppercase tracking-wide text-labelColor'>
-                      id {id ?? '—'} · occurred {e.occurredAt ? formatAcctDate(e.occurredAt) : '—'}{' '}
+                      id {id ?? <EmptyCell />} · occurred {e.occurredAt ? formatAcctDate(e.occurredAt) : <EmptyCell />}{' '}
                       · {e.attempts ?? 0} attempt{(e.attempts ?? 0) === 1 ? '' : 's'}
                     </span>
                   </div>

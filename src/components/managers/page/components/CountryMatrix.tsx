@@ -5,7 +5,7 @@ import type {
   GeographySection,
 } from 'api/proto-http/admin';
 import { FC, ReactNode, useState } from 'react';
-import { Text } from 'ui';
+import { Text, EmptyCell } from 'ui';
 import { countryDisplay, UNMATCHED_COUNTRY } from '../countries';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
@@ -117,7 +117,7 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
                     className='text-labelColor'
                     title={`${coverage.toFixed(0)}% of this country's revenue is costed`}
                   >
-                    —
+                    <EmptyCell />
                   </span>
                 )}
               </td>
@@ -130,7 +130,11 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
                 {formatCurrency(profitPerOrder)}
               </td>
               <td className='p-2 text-right'>
-                {ltvSample >= LTV_SAMPLE_FLOOR ? formatCurrency(parseDecimal(r.ltvAvg)) : '—'}
+                {ltvSample >= LTV_SAMPLE_FLOOR ? (
+                  formatCurrency(parseDecimal(r.ltvAvg))
+                ) : (
+                  <EmptyCell />
+                )}
                 <span className='text-labelColor'> n={ltvSample}</span>
               </td>
             </tr>
@@ -243,10 +247,12 @@ const DemandView: FC<{ rows: CountryDemandRow[] }> = ({ rows }) => {
                   sub={underserved ? 'demand without conversion' : undefined}
                 />
               </td>
-              <td className='p-2 text-right'>{sessions > 0 ? formatNumber(sessions) : '—'}</td>
+              <td className='p-2 text-right'>
+                {sessions > 0 ? formatNumber(sessions) : <EmptyCell />}
+              </td>
               <td className='p-2 text-right'>{formatNumber(r.orders ?? 0)}</td>
               <td className='p-2 text-right' title={r.caveat || undefined}>
-                {sessions > 0 ? `${conv.toFixed(1)}%` : '—'}
+                {sessions > 0 ? `${conv.toFixed(1)}%` : <EmptyCell />}
               </td>
               <td className='p-2 text-right'>{formatCurrency(parseDecimal(r.aov))}</td>
               <td className='p-2 text-right'>
@@ -258,7 +264,7 @@ const DemandView: FC<{ rows: CountryDemandRow[] }> = ({ rows }) => {
               </td>
               <td className='p-2'>
                 <span className='block max-w-[16rem] truncate text-labelColor' title={cats}>
-                  {cats || '—'}
+                  {cats || <EmptyCell />}
                 </span>
               </td>
             </tr>

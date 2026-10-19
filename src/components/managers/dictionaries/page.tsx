@@ -9,7 +9,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
-import { Button, CheckboxCommon, ConfirmationModal, Section, Text } from 'ui';
+import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell } from 'ui';
 import {
   archiveCollection,
   archiveColor,
@@ -418,7 +418,7 @@ export const Dictionaries: FC = () => {
               key: c.code ?? c.name ?? '',
               archived: !!c.archived,
               cells: [
-                <Text variant='uppercase'>{c.code || '—'}</Text>,
+                <Text variant='uppercase'>{c.code || <EmptyCell />}</Text>,
                 <Text>{c.name}</Text>,
                 <Text variant='inactive'>{c.countMen ?? 0}</Text>,
                 <Text variant='inactive'>{c.countWomen ?? 0}</Text>,

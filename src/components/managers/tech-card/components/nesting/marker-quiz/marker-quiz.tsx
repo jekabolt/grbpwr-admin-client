@@ -5,34 +5,20 @@
 import { useEffect, useState } from 'react';
 
 import type { SpreadMode } from 'lib/nesting/spread';
-import { Button, Chip, Input, Text } from 'ui';
+import { Button, Chip, Input, Text, EmptyCell } from 'ui';
 
 import type { LayMode } from '../use-lay-mode';
 import {
   EndsPicture,
   KnifePicture,
   LayersPicture,
-  MarkerTopPicture,
   SpreadChoicePicture,
   TablePicture,
-  type TopPiece,
 } from './pictures';
 
 export type QuizStep = 'spread' | 'confirm' | 'size' | 'knife' | 'what' | 'layers' | 'ends' | 'run';
 
 const ORDER: QuizStep[] = ['spread', 'confirm', 'size', 'knife', 'what', 'layers', 'ends', 'run'];
-
-// Имя шага в шапке: «confirm» и «size» — один шаг «table» с двумя экранами.
-const CHIP: Record<QuizStep, string> = {
-  spread: 'spread',
-  confirm: 'table',
-  size: 'table',
-  knife: 'knife',
-  what: 'what',
-  layers: 'layers',
-  ends: 'ends',
-  run: 'run',
-};
 
 const QUESTION: Record<QuizStep, string> = {
   spread: 'How do you spread the fabric?',
@@ -144,32 +130,6 @@ const ONE_SIZE = 'text-textBaseSize';
 const FRAMED = 'px-2.5 py-1 uppercase tracking-label';
 // Одна высота у всех контролов ряда: поле, сегменты.
 const CTRL_H = 'h-8';
-
-/** Шаги в шапке модалки: текущий залит, пройденные кликабельны. */
-export function QuizChips({ quiz }: { quiz: MarkerQuizState }) {
-  const names = [...new Set(quiz.flow.map((s) => CHIP[s]))];
-  const current = names.indexOf(CHIP[quiz.step]);
-  return (
-    <div className='flex flex-wrap items-center gap-1'>
-      {names.map((name, i) => {
-        const first = quiz.flow.find((s) => CHIP[s] === name) ?? quiz.step;
-        return i === current ? (
-          <Chip key={name} selected className={ONE_SIZE}>
-            {name}
-          </Chip>
-        ) : i < current ? (
-          <Chip key={name} className={ONE_SIZE} onClick={() => quiz.go(first)}>
-            {name}
-          </Chip>
-        ) : (
-          <Chip key={name} className={ONE_SIZE}>
-            {name}
-          </Chip>
-        );
-      })}
-    </div>
-  );
-}
 
 // Число из поля: пустое и мусор — null (поле держит строку, пока в фокусе).
 const parseNum = (raw: string, decimal: boolean): number | null => {
@@ -328,8 +288,78 @@ export type QuizRow = {
   min: number;
 };
 
-// Ячейка полосы шага «run», чей контрол живёт в модалке (ширина полотна, детали).
-export type QuizCell = { label: string; error?: boolean; control: React.ReactNode };
+// ВЕДОМОСТЬ ФАКТОВ — одна грамматика для шага «run» и для итога прогона в модалке: подпись слева
+// (labelColor, капслок), значение справа (чернило, табличные цифры), волосяная линия под строкой.
+// Строки с поповером или полем модалка собирает сама из FACT_ROW + FactLabel.
+export const FACT_ROW =
+  'flex w-full min-w-0 items-center justify-between gap-3 border-b border-hairline py-1.5 text-left text-textBaseSize tabular-nums';
+
+export function FactLabel({ children, error }: { children: React.ReactNode; error?: boolean }) {
+  return (
+    <Text
+      variant={error ? undefined : 'label'}
+      tracking='label'
+      component='span'
+      className={`shrink-0 uppercase ${error ? 'text-error' : ''}`}
+    >
+      {children}
+    </Text>
+  );
+}
+
+/** Строка ведомости; с onClick вся строка — кнопка. */
+export function Fact({
+  label,
+  error,
+  onClick,
+  disabled,
+  title,
+  children,
+}: {
+  label: React.ReactNode;
+  error?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const body = (
+    <>
+      <FactLabel error={error}>{label}</FactLabel>
+      <span className={`min-w-0 truncate text-right ${error ? 'text-error' : ''}`}>{children}</span>
+    </>
+  );
+  return onClick ? (
+    <Button className={FACT_ROW} disabled={disabled} title={title} onClick={onClick}>
+      {body}
+    </Button>
+  ) : (
+    <div className={FACT_ROW} title={title}>
+      {body}
+    </div>
+  );
+}
+
+/** Столбец строк под линией; `wide` — на широком экране строки встают в колонки. */
+export function FactList({
+  children,
+  wide,
+  className = '',
+}: {
+  children: React.ReactNode;
+  wide?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`w-full border-t border-hairline ${
+        wide ? 'grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3' : 'flex flex-col'
+      } ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
 
 export type QuizWarning = {
   text: string;
@@ -377,15 +407,14 @@ export type MarkerQuizProps = {
   // Длина маркера: готового прогона или оценка по площади до него.
   markerLengthCm: number;
   markerEstimate: boolean;
-  // Вид сверху: ширина полосы и контуры деталей на ней (размещения прогона или коробки оценки).
-  topWidthCm: number;
-  topPieces: readonly TopPiece[];
-  // Ширина полотна и детали — ячейки полосы со своими контролами модалки.
-  cloth?: QuizCell;
-  pieces?: QuizCell;
+  // Ширина полотна, детали, настройки раскладки — готовые строки ведомости (FACT_ROW) со своими
+  // полем и поповерами модалки.
+  cloth?: React.ReactNode;
+  pieces?: React.ReactNode;
+  nesting?: React.ReactNode;
   fabricCm: number | null;
   warnings: QuizWarning[];
-  // Тихий ряд шага «run»: выбор ткани, настройки раскладки — прежние поповеры.
+  // Под ведомостью: выбор ткани (слот BOM), если модалку открыли не со строки BOM.
   extras?: React.ReactNode;
   runDisabled: boolean;
   onRun: () => void;
@@ -549,7 +578,8 @@ export function MarkerQuiz(p: MarkerQuizProps) {
               faceToFace={faceToFace}
             />
             <Text component='p' className='text-center tabular-nums'>
-              {p.plies} layers × ({parts || '—'}) = {p.cutTotal + p.extraTotal}
+              {p.plies} {p.plies === 1 ? 'layer' : 'layers'} × ({parts || <EmptyCell />}) ={' '}
+              {p.cutTotal + p.extraTotal}
               {p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal} extra</span>}
             </Text>
             <Boxes count={askThickness ? 3 : 2}>
@@ -628,51 +658,26 @@ export function MarkerQuiz(p: MarkerQuizProps) {
           </>
         );
       case 'run': {
-        // Полоса фактов: подпись над значением, вся ячейка — дверь к своему шагу.
-        const cell = (label: string, to: QuizStep, value: React.ReactNode) => (
-          <Button
+        // Ведомость фактов: подпись слева, значение справа; строка — дверь к своему шагу.
+        const go = (label: string, to: QuizStep, value: React.ReactNode, error?: boolean) => (
+          <Fact
             key={label}
-            className='min-w-0 flex-1 border-l border-textColor px-2.5 py-1.5 text-left first:border-l-0'
+            label={label}
+            error={error}
             disabled={p.busy}
             onClick={() => quiz.go(to)}
           >
-            <span className='flex flex-col gap-0.5'>
-              <Label>{label}</Label>
-              <span className='truncate tabular-nums'>{value}</span>
-            </span>
-          </Button>
+            {value}
+          </Fact>
         );
-        // Ячейка с контролом модалки: клик по ней открывает прежнее поле или поповер.
-        const own = (c: QuizCell) => (
-          <div
-            key={c.label}
-            className='flex min-w-0 flex-1 flex-col gap-0.5 border-l border-textColor px-2.5 py-1.5 first:border-l-0'
-          >
-            <Text
-              variant={c.error ? undefined : 'label'}
-              tracking='label'
-              component='span'
-              className={c.error ? 'text-error uppercase' : 'uppercase'}
-            >
-              {c.label}
-            </Text>
-            {c.control}
-          </div>
-        );
-        const garments = cell(
-          'garments',
-          'what',
+        const sized = p.rows.filter((r) => r.qty > 0);
+        const garments = (
           <>
-            {p.cutTotal}
+            {sized.length > 0 && !(sized.length === 1 && sized[0].label === 'garments')
+              ? sized.map((r) => `${r.label} × ${r.qty}`).join(' · ')
+              : p.cutTotal}
             {table && p.extraTotal > 0 && <span className='text-labelColor'> +{p.extraTotal}</span>}
-          </>,
-        );
-        const fabric = cell(
-          'fabric m',
-          table ? 'ends' : 'what',
-          p.fabricCm == null
-            ? '—'
-            : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)}`,
+          </>
         );
         const fix = (w: QuizWarning) =>
           w.fix &&
@@ -697,37 +702,39 @@ export function MarkerQuiz(p: MarkerQuizProps) {
               {w.fix.label}
             </Button>
           ));
-        // Стопка: ширина полотна не в полосе — она уходит в тихий ряд прежней коробкой.
-        const quietCloth = table && p.cloth;
         return (
           <>
-            <MarkerTopPicture
-              lengthCm={p.markerLengthCm}
-              widthCm={p.topWidthCm}
-              pieces={p.topPieces}
-              estimate={p.markerEstimate}
-            />
-            <div className='flex w-full border border-textColor'>
-              {garments}
-              {table && cell('layers', 'layers', p.plies)}
+            <FactList className='max-w-xl'>
+              {go('garments', 'what', garments, p.cutTotal === 0)}
+              {table && go('layers', 'layers', p.plies)}
               {table &&
-                cell(
-                  'stack cm',
+                go(
+                  'stack',
                   'layers',
-                  <span className={p.stackOk ? undefined : 'text-error'}>
-                    {p.stackCm == null ? '—' : f1(p.stackCm)}
+                  <>
+                    {p.stackCm == null ? <EmptyCell /> : f1(p.stackCm)}
                     <span className='text-labelColor'>
                       {' '}
-                      / {p.stackLimitCm == null ? '—' : f1(p.stackLimitCm)}
-                    </span>
-                  </span>,
+                      / {p.stackLimitCm == null ? <EmptyCell /> : f1(p.stackLimitCm)}
+                    </span>{' '}
+                    cm
+                  </>,
+                  !p.stackOk,
                 )}
-              {fabric}
-              {!table && p.cloth && own(p.cloth)}
-              {p.pieces && own(p.pieces)}
-            </div>
+              {go(
+                'fabric',
+                table ? 'ends' : 'what',
+                p.fabricCm == null
+                  ? '—'
+                  : `${p.markerEstimate ? '≈ ' : ''}${(p.fabricCm / 100).toFixed(2)} m`,
+              )}
+              {p.cloth}
+              {p.pieces}
+              {p.nesting}
+            </FactList>
+            {p.extras && <div className='flex w-full max-w-xl justify-end'>{p.extras}</div>}
             {p.warnings.length > 0 && (
-              <ul className='flex w-full flex-col border-t border-hairline'>
+              <ul className='flex w-full max-w-xl flex-col border-t border-hairline'>
                 {p.warnings.map((w) => (
                   <li
                     key={w.text}
@@ -738,22 +745,6 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                   </li>
                 ))}
               </ul>
-            )}
-            {(p.extras || quietCloth) && (
-              <div className='flex w-full flex-wrap items-end gap-x-4 gap-y-1.5'>
-                {quietCloth && (
-                  <Box
-                    label={
-                      <span className={p.cloth?.error ? 'text-error' : undefined}>
-                        {p.cloth?.label}
-                      </span>
-                    }
-                  >
-                    {p.cloth?.control}
-                  </Box>
-                )}
-                {p.extras}
-              </div>
             )}
             <Button
               variant='underline'

@@ -18,7 +18,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { Button, Media, Text } from 'ui';
+import { Button, Close, Media, Text } from 'ui';
 import { COLORWAY_STATUS_LABEL } from './productPickerModal';
 import { HeroSchema } from './schema';
 import { SortableEntity } from './sortable-entity';
@@ -164,14 +164,7 @@ export const HeroProductTable: FC<
       </td>
       {isFeaturedProducts && (
         <td className='border border-text'>
-          <Button
-            type='button'
-            onClick={() => handleDelete(index)}
-            className='w-full'
-            aria-label='delete'
-          >
-            ×
-          </Button>
+          <Close size='sm' onClick={() => handleDelete(index)} aria-label='delete' />
         </td>
       )}
     </>

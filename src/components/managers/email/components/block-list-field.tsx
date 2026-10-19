@@ -2,7 +2,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { emailBlockTypes } from 'constants/email-campaign';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text } from 'ui';
+import { AddDoor, Text, Close } from 'ui';
 import { ProductSelectionApi } from '../../hero/components/useProductSelection';
 import { BlockEditor } from './block-editor';
 import { CampaignSchema } from './schema';
@@ -69,14 +69,7 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
                 >
                   ↓
                 </button>
-                <button
-                  type='button'
-                  aria-label='delete block'
-                  onClick={() => fa.remove(i)}
-                  className='px-1.5 leading-none text-textInactiveColor hover:text-textColor'
-                >
-                  ×
-                </button>
+                <Close size='sm' aria-label='delete block' onClick={() => fa.remove(i)} />
               </div>
             </div>
             <div className='p-2'>
@@ -92,14 +85,7 @@ export function BlockListField({ prefix, side, featuredProducts }: BlockListFiel
         );
       })}
 
-      <Button
-        type='button'
-        variant='secondary'
-        className='w-full px-2 py-1 uppercase'
-        onClick={() => setAddOpen(true)}
-      >
-        + add to {side}
-      </Button>
+      <AddDoor onClick={() => setAddOpen(true)}>{side}</AddDoor>
 
       <DialogPrimitives.Root open={addOpen} onOpenChange={setAddOpen}>
         <DialogPrimitives.Portal>

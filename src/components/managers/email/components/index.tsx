@@ -14,7 +14,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Button, Section, SectionStack, Text, Form, InputField, SelectField } from 'ui';
+import { BackLink, Button, Section, SectionStack, Text, Form, InputField, SelectField } from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
 import { useProductSelection } from '../../hero/components/useProductSelection';
@@ -246,14 +246,7 @@ export function CampaignBuilder() {
       <form onSubmit={(e) => e.preventDefault()} className='flex flex-col'>
         <div className='sticky top-0 z-10 -mx-2.5 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
           <div className='flex items-baseline gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              className='px-2 py-1'
-              onClick={() => navigate(ROUTES.emailCampaigns)}
-            >
-              ← campaigns
-            </Button>
+            <BackLink onClick={() => navigate(ROUTES.emailCampaigns)}>campaigns</BackLink>
             <Text variant='uppercase' size='large'>
               {routeId > 0 ? 'edit campaign' : 'new campaign'}
             </Text>

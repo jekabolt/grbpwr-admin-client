@@ -1,7 +1,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AdminAccount, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { useEffect, useState } from 'react';
-import { Button, Input, Text, ToggleSwitch } from 'ui';
+import { Button, Close, Input, Text, ToggleSwitch } from 'ui';
 import { useCreateAccount, useUpdateAccountPermissions } from '../utils/hooks';
 import { PermissionPicker } from './permission-picker';
 
@@ -89,9 +89,7 @@ export function AccountFormModal({
               {isEdit ? username : 'new account'}
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <Close />
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>

@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Chip, Combobox, type ComboboxGroup, Text } from 'ui';
+import { Button, Chip, Close, Combobox, type ComboboxGroup, Text } from 'ui';
 
 import { KIND_BY_WORK_TOKEN } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';
@@ -480,9 +480,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
               {unnamed} of {rows.length} not named
             </Text>
             <Dialog.Close asChild>
-              <button type='button' aria-label='close' className='ml-auto text-labelColor'>
-                ✕
-              </button>
+              <Close className='ml-auto' />
             </Dialog.Close>
           </div>
           <Dialog.Description className='sr-only'>

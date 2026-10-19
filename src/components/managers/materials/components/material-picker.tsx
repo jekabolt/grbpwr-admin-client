@@ -10,6 +10,7 @@ import {
   Button,
   Chip,
   ChipRow,
+  Close,
   ConfirmationModal,
   Input,
   Media,
@@ -20,6 +21,7 @@ import {
   Tiles,
   Tooltip,
   TooltipProvider,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
@@ -428,16 +430,16 @@ export function MaterialPicker({
 
               <div id={listId} role='listbox' className='min-h-0 flex-1 overflow-auto'>
                 {numId(value) > 0 ? (
-                  <button
-                    type='button'
-                    onClick={() => choose(undefined)}
-                    className='flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor hover:bg-bgZebra'
-                  >
-                    <span className='flex h-6 w-6 shrink-0 items-center justify-center'>✕</span>
+                  <div className='flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor'>
+                    <Close
+                      size='sm'
+                      aria-label='clear material selection'
+                      onClick={() => choose(undefined)}
+                    />
                     <Text component='span' variant='label' size='micro'>
                       clear selection
                     </Text>
-                  </button>
+                  </div>
                 ) : null}
 
                 {filtered.length === 0 ? (
@@ -476,7 +478,7 @@ export function MaterialPicker({
                             </Text>
                           ) : null}
                           <Text variant='label' size='micro' className='truncate'>
-                            {meta || '—'}
+                            {meta || <EmptyCell />}
                           </Text>
                         </span>
                         {current ? (

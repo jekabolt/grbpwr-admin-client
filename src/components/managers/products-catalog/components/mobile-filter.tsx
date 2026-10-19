@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import useFilter from 'lib/useFilter';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 
 import Color from './color';
 import FilterOptionButtons from './filter-buttons';
@@ -70,7 +70,7 @@ export function MobileFilter() {
             <DialogPrimitives.Close asChild>
               <div className='flex items-center justify-between'>
                 <Text variant='uppercase'>filter</Text>
-                <Button>[x]</Button>
+                <Close />
               </div>
             </DialogPrimitives.Close>
             <div className='h-full space-y-10 overflow-y-scroll pt-10'>

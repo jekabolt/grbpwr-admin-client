@@ -2,8 +2,8 @@ import { RelatedTasks } from 'components/managers/tasks/components/related-tasks
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useRef } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Button, Text } from 'ui';
+import { useParams } from 'react-router-dom';
+import { BackLink, Text } from 'ui';
 import { TechCardForm } from './components';
 import { TechCardStagingProvider } from './components/useTechCardStaging';
 
@@ -55,9 +55,7 @@ export function TechCard() {
         <Text variant='inactive' className='uppercase'>
           tech card not found
         </Text>
-        <Button asChild variant='main' size='lg' className='uppercase'>
-          <Link to={ROUTES.techCards}>← back to tech cards</Link>
-        </Button>
+        <BackLink to={ROUTES.techCards}>tech cards</BackLink>
       </div>
     );
   }

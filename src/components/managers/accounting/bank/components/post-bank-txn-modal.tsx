@@ -3,7 +3,7 @@ import { AcctBankTxn } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { Button, Form, ComboField, Input, Selector, Text } from 'ui';
+import { Button, Close, Form, ComboField, Input, Selector, Text } from 'ui';
 import { extractLeadingCode } from '../../journal/components/schema';
 import { formatBase, isNegative } from '../../utils/format';
 import { useAcctAccounts, usePostBankTxn, useSuppliers } from '../../utils/hooks';
@@ -112,9 +112,7 @@ export function PostBankTxnModal({ txn, onClose }: { txn: AcctBankTxn; onClose: 
             <DialogPrimitives.Title className='text-lg uppercase'>
               post transaction
             </DialogPrimitives.Title>
-            <Button type='button' className='shrink-0 cursor-pointer' onClick={onClose}>
-              [x]
-            </Button>
+            <Close onClick={onClose} />
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Book a journal entry for this bank inbox line

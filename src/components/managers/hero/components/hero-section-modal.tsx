@@ -1,6 +1,6 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { ReactNode } from 'react';
-import { Button, Text } from 'ui';
+import { Close, Text } from 'ui';
 
 interface HeroSectionModalProps {
   open: boolean;
@@ -29,9 +29,7 @@ export function HeroSectionModal({ open, onOpenChange, title, children }: HeroSe
                 </Text>
               </DialogPrimitives.Title>
               <DialogPrimitives.Close asChild>
-                <Button type='button' className='cursor-pointer px-2 py-1'>
-                  [x]
-                </Button>
+                <Close />
               </DialogPrimitives.Close>
             </div>
             <div className='min-h-0 flex-1 overflow-y-auto'>{children}</div>

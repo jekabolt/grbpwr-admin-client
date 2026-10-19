@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { moveItem } from 'components/managers/media/components/gallery-order';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { rememberMedia, resolveMedia } from '../api/tasksService';
 import type { TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark, useTaskMediaViewer } from './task-media-viewer';
@@ -87,15 +87,12 @@ export function MediaAttachments({
                     </Text>
                   </div>
                 )}
-                <button
-                  type='button'
+                <Close
+                  size='sm'
                   aria-label='remove attachment'
                   onClick={() => onChange(value.filter((v) => v !== id))}
-                  className='absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center bg-textColor text-nano leading-none text-bgColor'
-                >
-                  {/* Глиф удаления во всей подсистеме медиа один: ×. Здесь стоял `×` — знак
-                      умножения, четвёртое начертание одной и той же кнопки. */}×
-                </button>
+                  className='absolute -right-1 -top-1 z-10 bg-textColor text-bgColor hover:no-underline'
+                />
               </div>
               {/* ПРАВИЛО ОБЛОЖКИ ТЕПЕРЬ МОЖНО ВЫПОЛНИТЬ. Строка выше называла первое вложение
                   обложкой, а переставить вложения было НЕЧЕМ: чтобы сделать обложкой второй

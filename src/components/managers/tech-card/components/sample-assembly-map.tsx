@@ -1,7 +1,7 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { CalloutBox, GroupLabel, Media, Pill, Placeholder, Text } from 'ui';
+import { CalloutBox, GroupLabel, Media, Pill, Placeholder, Text, EmptyCell } from 'ui';
 import { mediaAspect } from './sample-cut-views';
 import { TechCardFormData } from './schema';
 import {
@@ -329,7 +329,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                   component='span'
                   className='shrink-0 tabular-nums uppercase'
                 >
-                  {Number.isFinite(t) && t > 0 ? `${Number(t)}′` : '—'}
+                  {Number.isFinite(t) && t > 0 ? `${Number(t)}′` : <EmptyCell />}
                 </Text>
               </div>
             );

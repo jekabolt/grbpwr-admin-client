@@ -47,7 +47,7 @@ export function SkeletonRows({
       {Array.from({ length: rows }).map((_, r) => (
         <tr key={r} className={className} aria-hidden>
           {widths.map((w, c) => (
-            <td key={c} className='border-b border-hairline px-1.5 py-1'>
+            <td key={c} className='border-b border-hairline px-1.5 py-1 [tr:last-child>&]:border-b-0'>
               <SkeletonLine width={w} />
             </td>
           ))}

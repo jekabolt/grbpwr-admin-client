@@ -22,6 +22,7 @@ import {
   Tiles,
   Toolbar,
   ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 import {
   GapCard,
@@ -292,7 +293,7 @@ export function FabricDirectionReport() {
         <Stat
           big
           label='lines to answer'
-          value={report.isPending ? '—' : totalOpenLines}
+          value={report.isPending ? <EmptyCell /> : totalOpenLines}
           sub={
             report.isPending
               ? 'reading'
@@ -304,7 +305,7 @@ export function FabricDirectionReport() {
         />
         <Stat
           label='deferred'
-          value={report.isPending ? '—' : withheldLines}
+          value={report.isPending ? <EmptyCell /> : withheldLines}
           sub={
             withheldLines > 0
               ? `${plural(withheldCards, 'card')} withheld — counted above`

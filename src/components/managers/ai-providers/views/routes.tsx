@@ -6,7 +6,7 @@ import type {
   GetAiProvidersConfigResponse,
 } from 'api/proto-http/admin';
 import { useId, useState } from 'react';
-import { GroupLabel, Input, Section, Select, Text } from 'ui';
+import { GroupLabel, Input, Section, Select, Text, EmptyCell } from 'ui';
 import { useSetAiDefaults, useSetAiRoute } from '../utils/hooks';
 import { WriteError } from './write-error';
 
@@ -160,7 +160,7 @@ export function RoutesView({
     <Section title='routes' question='which model answers which job'>
       {!config ? (
         <Text size='micro' variant='label'>
-          {loading ? 'loading…' : '—'}
+          {loading ? 'loading…' : <EmptyCell />}
         </Text>
       ) : (
         <>

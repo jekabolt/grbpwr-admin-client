@@ -3,7 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useNavigate } from 'react-router-dom';
-import { Button, CalloutBox, Row, SkeletonLine, Text } from 'ui';
+import { Button, CalloutBox, Row, SkeletonLine, Text, EmptyCell } from 'ui';
 import { OrderStatus } from './order-status';
 import { formatDateShort, getOrderStatusName } from './utility';
 
@@ -105,7 +105,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                 <span className='flex min-w-0 flex-col gap-0.5'>
                   <span className='flex flex-wrap items-center gap-1.5'>
                     <Text component='span' className='font-bold'>
-                      #{order.id ?? '—'}
+                      #{order.id ?? <EmptyCell />}
                     </Text>
                     <OrderStatus status={statusName} />
                     {who && (
@@ -144,7 +144,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
               value={
                 <span className='flex flex-col items-end gap-0.5'>
                   <Text component='span' className='font-bold'>
-                    {order.totalPrice?.value ?? '—'} {order.currency ?? ''}
+                    {order.totalPrice?.value ?? <EmptyCell />} {order.currency ?? ''}
                   </Text>
                   <Text size='micro' variant='label' component='span'>
                     {formatDateShort(order.placed)}

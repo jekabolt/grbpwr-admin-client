@@ -4,7 +4,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { CalloutBox, ConfirmationModal, FieldsGroupContainer, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, FieldsGroupContainer, Text, EmptyCell } from 'ui';
 import { ProductFormData } from '../utility/schema';
 import { formatSizeName, getFilteredSizes } from '../utility/sizes';
 import { useLastSizeOnly } from '../utility/useLastSizeOnly';
@@ -322,7 +322,7 @@ export function SizeMeasurements({
                               'text-textInactiveColor': !measurementValue,
                             })}
                           >
-                            {measurementValue || '—'}
+                            {measurementValue || <EmptyCell />}
                           </Text>
                         </td>
                       );

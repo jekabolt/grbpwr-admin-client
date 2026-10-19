@@ -1,7 +1,7 @@
 import type { ProfitabilitySection } from 'api/proto-http/admin';
 import { FC, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Text } from 'ui';
+import { Text, EmptyCell } from 'ui';
 import {
   formatCurrency,
   formatCurrencyDelta,
@@ -299,7 +299,9 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
             <UnitTile
               label='LTV : CAC'
               value={
-                <span className={ltvCacTone}>{ltvCac > 0 ? `${ltvCac.toFixed(1)}×` : '—'}</span>
+                <span className={ltvCacTone}>
+                  {ltvCac > 0 ? `${ltvCac.toFixed(1)}×` : <EmptyCell />}
+                </span>
               }
               sub='healthy ≥ 3'
               muted={ltvCac <= 0}

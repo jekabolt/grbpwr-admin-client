@@ -1,7 +1,7 @@
 import { ROUTES } from 'constants/routes';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ConfirmationModal, Button, Input, Text } from 'ui';
+import { ConfirmationModal, Button, Input, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { AuditFilters, useRunTierBackfill, useTierAuditLog } from '../utils/hooks';
 import { formatEur } from '../utils/tier-utils';
@@ -156,22 +156,22 @@ export function TierAudit() {
                     <Text size='small'>{formatDateShort(e.createdAt, true)}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{e.oldTier || '-'}</Text>
+                    <Text size='small'>{e.oldTier || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{e.newTier || '-'}</Text>
+                    <Text size='small'>{e.newTier || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{e.triggerType || '-'}</Text>
+                    <Text size='small'>{e.triggerType || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{e.actor || '-'}</Text>
+                    <Text size='small'>{e.actor || <EmptyCell />}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
                     <Text size='small'>{formatEur(e.spendEurAtChange)}</Text>
                   </td>
                   <td className='border border-textInactiveColor text-center px-2'>
-                    <Text size='small'>{e.reason || '-'}</Text>
+                    <Text size='small'>{e.reason || <EmptyCell />}</Text>
                   </td>
                 </tr>
               ))

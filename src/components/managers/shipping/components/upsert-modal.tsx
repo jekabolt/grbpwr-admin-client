@@ -1,5 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { Button, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 
 interface Props {
   open: boolean;
@@ -30,7 +30,7 @@ export function UpsertShippingModal({ open, children, onOpenChange, onSave }: Pr
             <DialogPrimitives.Close asChild>
               <div className='flex shrink-0 items-center justify-between'>
                 <Text variant='uppercase'>upsert shipping</Text>
-                <Button>[x]</Button>
+                <Close />
               </div>
             </DialogPrimitives.Close>
             <div className='min-h-0 flex-1 overflow-y-auto lg:overflow-visible'>{children}</div>

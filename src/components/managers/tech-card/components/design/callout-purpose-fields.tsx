@@ -364,15 +364,15 @@ function OwnPicture({
 }) {
   if (url)
     return (
-      // Миниатюра и «×» — одним куском: при переносе строки чипов они не расходятся.
+      // Миниатюра и Close — одним куском: при переносе строки чипов они не расходятся.
       <span className='inline-flex items-center gap-1'>
         <img
           src={url}
           alt=''
           className='h-[18px] w-[18px] border border-borderColor object-contain'
         />
-        <Chip disabled={disabled} onClick={onClear} title={clearTitle}>
-          × {label}
+        <Chip disabled={disabled} onClick={onClear} onRemove={onClear} title={clearTitle}>
+          {label}
         </Chip>
       </span>
     );

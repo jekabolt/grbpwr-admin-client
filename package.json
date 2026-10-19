@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:check": "tsc && vite build",
+    "test:ui-kit": "playwright test",
     "preview": "vite preview",
     "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
     "doll:check": "node scripts/doll/check.mjs",
@@ -165,6 +166,7 @@
     "doll:shape": "node scripts/doll/shape.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4.0.9",
     "@types/axios": "^0.14.0",
     "@types/lodash": "^4.17.15",
