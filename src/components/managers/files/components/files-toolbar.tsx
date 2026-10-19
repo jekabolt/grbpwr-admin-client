@@ -182,6 +182,9 @@ export function AddMenu({
       <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
         <Link to={ROUTES.fileTopics}>manage topics</Link>
       </Button>
+      <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
+        <Link to={ROUTES.filesShared}>shared</Link>
+      </Button>
     </GenericPopover>
   );
 }

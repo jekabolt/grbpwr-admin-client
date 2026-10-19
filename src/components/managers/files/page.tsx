@@ -915,7 +915,7 @@ export default function FilesPage() {
    */
   const renderFiles = (list: LibraryFile[]) =>
     view === 'grid' ? (
-      <Tiles min={190} className={phone ? 'grid-cols-2!' : undefined}>
+      <Tiles min={190} className='max-md:grid-cols-2!'>
         {list.map(tile)}
       </Tiles>
     ) : (

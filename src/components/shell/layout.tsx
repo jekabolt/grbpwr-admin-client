@@ -3,7 +3,6 @@ import { cn } from 'lib/utility';
 import { FC, ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui';
-import { Inbox } from './inbox';
 import { LeftSideNavMenu } from './left-side-nav-menu';
 import { NavDropdownMenu } from './nav-dropdown-menu';
 import { SnackBar } from './snackbar';
@@ -70,7 +69,6 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
               <Link to={ROUTES.me}>my profile</Link>
             </Button>
           </div>
-          <Inbox />
           <Button
             className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
             onClick={handleLogout}

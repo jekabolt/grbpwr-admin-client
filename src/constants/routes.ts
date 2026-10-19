@@ -211,13 +211,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
       { label: 'files', route: ROUTES.files, section: SECTION.files },
-      // Витрина открытого. В меню, а не только ссылкой с холста: экран отвечает на вопрос «что у
-      // нас сейчас лежит открытым наружу», а такой вопрос задают НЕ приходя за файлом — по нему
-      // и приходят. Гейт тот же files:read, поэтому у кого нет раздела, у того нет и витрины.
-      // Стоит ПОСЛЕ files: `usePermissions().homeRoute` берёт первый читаемый пункт по порядку, и
-      // аккаунт с одними файлами обязан приземляться на библиотеку, а не на витрину.
-      // Подпись английская — как у одиннадцати соседей по меню; сам экран русский целиком.
-      { label: 'shared files', route: ROUTES.filesShared, section: SECTION.files },
     ],
   },
   {
