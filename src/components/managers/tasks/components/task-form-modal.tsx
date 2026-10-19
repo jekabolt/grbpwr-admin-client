@@ -270,7 +270,6 @@ export function TaskFormModal({
         name='description'
         render={({ field }) => (
           <DescriptionEditor
-            compactTools
             ariaLabel='task description'
             placeholder='details'
             media={attachments}

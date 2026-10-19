@@ -2224,6 +2224,16 @@ export async function main(): Promise<number> {
       isTitleLabel(t, all, box);
     const front = [T('FRONT', 150, 300, 14)];
     ck(title(front[0], front), 'D3: «FRONT» alone in the piece → its title');
+    const flounce = [T('FLOUNCE', 150, 300, 8), T('RIC AND LINING', 150, 280, 5)];
+    ck(
+      title(flounce[0], flounce) && !title(flounce[1], flounce),
+      'D3: «FLOUNCE» is the title; tile-clipped «FABRIC AND LINING» is cut material, not LIN',
+    );
+    const dualMaterial = [flounce[1]];
+    ck(
+      !title(dualMaterial[0], dualMaterial),
+      'D3: tile-clipped «FABRIC AND LINING» is a cut-material instruction, not piece LIN',
+    );
     const palto = [
       T('Tascheneingriff', 50, 200),
       T('Besatz', 250, 100),

@@ -221,6 +221,27 @@ export async function main(): Promise<number> {
     ck(got === want, `«${t}» → ${want}`, got === want ? '' : `got ${got}`);
   }
   for (const t of [
+    'OF FABRIC AND LINING',
+    'OF FABRIC AND LININ',
+    'OF FABRIC AND LI',
+    'RIC AND LINING',
+  ]) {
+    const got = fabricKindsIn(t).map((h) => h.kind);
+    ck(
+      sameSet(got, ['main', 'lining']),
+      `«${t}» → main + lining`,
+      `got ${got.join(' + ') || 'none'}`,
+    );
+  }
+  ck(!fabricKindsIn('fabric').length, 'bare «fabric» does not guess main');
+  ck(
+    sameSet(
+      fabricKindsIn('lining fabric').map((h) => h.kind),
+      ['lining'],
+    ),
+    '«lining fabric» stays lining-only',
+  );
+  for (const t of [
     'Ärmelbündchen',
     'ribbon',
     'Stoffbruch',
