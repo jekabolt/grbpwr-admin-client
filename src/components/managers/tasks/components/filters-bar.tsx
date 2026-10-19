@@ -6,9 +6,13 @@ import { PRIORITIES, PRIORITY_LABEL } from '../utils/meta';
  * tskFilters v2 — the filter row is CHIPS, not selects. Priority is a single-select
  * chip group (click the lit one to clear it), "my tasks" scopes to the signed-in
  * assignee, and — tskArchive v3 — archived is just another chip here rather than a
- * whole-board mode flip. The old search box + column/priority selects are gone: a
- * board already IS its columns, so a status filter only emptied them, and free-text
- * search over six cards a column earned less than the chrome it cost.
+ * whole-board mode flip. The column/priority selects are gone: a board already IS its
+ * columns, so a status filter only emptied them.
+ *
+ * SEARCH IS BACK (2026-10-19), at the right end of this row — but not as the old filter over
+ * the six cards a column of the open board. It spans EVERY board and the archive, which no
+ * board view can answer, and a non-empty query swaps the board for a results list
+ * (`task-search.tsx`). The field is passed in as `search`; its state lives in the address.
  *
  * РЯД ЛИЦ (п.3 волны) — второй ярус того же ряда: «my tasks» отвечает только «по своим», а
  * доска обязана уметь и «по чужим». Сужение клиентское: вся доска и так прочитана целиком, а
@@ -137,6 +141,7 @@ export function FiltersBar({
   onClear,
   projectLabel,
   onClearProject,
+  search,
 }: {
   filters: TaskFilters;
   onChange: (f: TaskFilters) => void;
@@ -149,6 +154,8 @@ export function FiltersBar({
   /** Имя проекта из адреса; пусто = доска не сужена проектом. */
   projectLabel?: string;
   onClearProject?: () => void;
+  /** Search field (+ scope chips while searching), pinned to the right end of the row. */
+  search?: React.ReactNode;
 }) {
   const set = (patch: Partial<TaskFilters>) => onChange(setFilter(filters, patch));
   const dirty = filtersActive(filters) || showArchived || !!projectLabel;
@@ -226,6 +233,8 @@ export function FiltersBar({
           clear
         </Button>
       )}
+
+      {search && <div className='ml-auto flex flex-wrap items-center gap-1.5'>{search}</div>}
     </ChipRow>
   );
 }
