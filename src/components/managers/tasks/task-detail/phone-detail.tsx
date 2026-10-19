@@ -428,7 +428,7 @@ function StatusStrip({
             disabled={disabled}
             onClick={() => !on && onChange(s)}
             className={cn(
-              'flex min-h-11 min-w-0 flex-1 items-center justify-center border-r border-textColor px-0.5 text-center text-micro uppercase leading-tight last:border-r-0 disabled:cursor-default disabled:opacity-100',
+              'flex min-h-11 min-w-0 flex-1 items-center justify-center border-r border-textColor px-0.5 text-center text-micro uppercase leading-tight [hyphens:none] break-normal last:border-r-0 disabled:cursor-default disabled:opacity-100',
               on ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
             )}
           >
