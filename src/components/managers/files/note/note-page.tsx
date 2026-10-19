@@ -849,21 +849,25 @@ export function NotePage() {
   return (
     <PageShell>
       {editing ? (
-        <NoteEditor
-          handleRef={editorRef}
-          name={name}
-          onNameChange={setName}
-          value={value}
-          onChange={setValue}
-          dirty={dirty}
-          saving={saving}
-          savedLabel={savedLabel}
-          canSave={canSave}
-          onSave={() => void save(false)}
-          onLeaveEdit={leaveEdit}
-          sizeHint={sizeHint}
-          banners={banners}
-        />
+        // Тот же подъём, что у чтения: на телефоне правка начинается сразу под навигацией. На
+        // компьютере обёртка растворяется (`contents`) — раскладка прежняя.
+        <div className='-mt-10 flex flex-col gap-gutter md:contents'>
+          <NoteEditor
+            handleRef={editorRef}
+            name={name}
+            onNameChange={setName}
+            value={value}
+            onChange={setValue}
+            dirty={dirty}
+            saving={saving}
+            savedLabel={savedLabel}
+            canSave={canSave}
+            onSave={() => void save(false)}
+            onLeaveEdit={leaveEdit}
+            sizeHint={sizeHint}
+            banners={banners}
+          />
+        </div>
       ) : (
         <div className='-mt-10 flex flex-col gap-gutter md:mt-0'>
           <Toolbar className='grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-2 gap-y-1 md:hidden'>

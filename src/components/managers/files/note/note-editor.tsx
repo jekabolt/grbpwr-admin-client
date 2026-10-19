@@ -782,7 +782,7 @@ export function NoteEditor({
             autoCapitalize={phone ? 'off' : undefined}
             wrap={wrapLines ? 'soft' : 'off'}
             className={cn(
-              'block min-h-[60vh] w-full min-w-0 resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-reading leading-relaxed focus:outline-none md:text-textBaseSize lg:border-r lg:border-hairline',
+              'block h-[calc(100dvh-13.5rem)] w-full md:h-auto md:min-h-[60vh] min-w-0 resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-reading leading-relaxed focus:outline-none md:text-textBaseSize lg:border-r lg:border-hairline',
               !wrapLines && 'overflow-x-auto whitespace-pre',
             )}
           />
