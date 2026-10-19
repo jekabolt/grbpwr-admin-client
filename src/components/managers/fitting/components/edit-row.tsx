@@ -1,16 +1,8 @@
 import { cn } from 'lib/utility';
 import { CheckboxCommon, EmptyCell, Pin, Select } from 'ui';
-import { EditRow } from './edit-rows';
+import { categoryOf, EditRow } from './edit-rows';
 
 export const EDIT_CATEGORIES = ['', 'pattern', 'construction', 'material', 'grading', 'other'];
-
-// The select shows one of the five categories; a legacy free-text target («sleeve») reads as
-// «other» but is sent back untouched until someone picks a category.
-export function categoryValue(target: string): string {
-  const t = target.trim().toLowerCase();
-  if (!t) return '';
-  return EDIT_CATEGORIES.includes(t) ? t : 'other';
-}
 
 // The number cell: a pin when the edit has a mark, a dashed square when it is text only.
 export function EditNumber({
@@ -62,7 +54,7 @@ export function EditRowItem({
   onResolved: (resolved: boolean) => void;
 }) {
   const resolved = row.status === 'resolved';
-  const cat = categoryValue(row.target);
+  const cat = categoryOf(row.target);
   const hasMark = !!row.callout;
   return (
     <li
