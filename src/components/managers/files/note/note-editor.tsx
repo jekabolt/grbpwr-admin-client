@@ -723,15 +723,13 @@ export function NoteEditor({
             {saving ? 'saving…' : 'save ⌘s'}
           </Button>
 
-          <div className='w-full'>
-            <Text size='micro' variant='label'>
-              ⌘e or “finish editing” — leave editing, ⌘s — save. the pane beside the text shows the
-              note as it will read — pictures included — and follows the line you are editing. a
-              note is the same kind of library file: topics, owners, access and the discussion live
-              in its card.
-              {sizeHint ? ` ${sizeHint}` : ''}
-            </Text>
-          </div>
+          {sizeHint && (
+            <div className='w-full'>
+              <Text size='micro' variant='label'>
+                {sizeHint}
+              </Text>
+            </div>
+          )}
         </Toolbar>
       )}
 
