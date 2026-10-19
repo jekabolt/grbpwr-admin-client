@@ -1,5 +1,5 @@
 import type { common_DesignReference } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 
@@ -35,7 +35,6 @@ function withPurpose(live: BoardItemLike[], mediaId: number, role: string): Boar
 
 export function useBoardPick(techCardId: number, readOnly: boolean) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const { setReferenceRole, setBenchSlot } = useDesignWrites(techCardId);
   const flatInput = useFlatInput(techCardId);
   const [namingFor, setNamingFor] = useState<number | null>(null);
@@ -52,10 +51,16 @@ export function useBoardPick(techCardId: number, readOnly: boolean) {
   const busy = useCallback(
     (what: string) => {
       if (!flatInput.run && rowsWritable(readFlatInput(techCardId))) return false;
-      showMessage(`a flat run is being started — ${what} once it has started`, 'error');
+      notify({
+        sev: 'error',
+        subject: 'FLAT INPUT',
+        text: 'not changed',
+        bad: 'run starting',
+        detail: `a flat run is being started — ${what} once it has started`,
+      });
       return true;
     },
-    [flatInput.run, techCardId, showMessage],
+    [flatInput.run, techCardId],
   );
 
   const setPurpose = useCallback(
@@ -201,13 +206,18 @@ export function useBoardProposals(
  * held=false) under the input's hold — GENERATE waits for it — and the input's undo memory forgets it.
  */
 export function usePutBack(techCardId: number) {
-  const { showMessage } = useSnackBarStore();
   const { setReferenceHeld } = useDesignWrites(techCardId);
   return useCallback(
     async (mediaId: number): Promise<boolean> => {
       const card = techCardId;
       if (!rowsWritable(readFlatInput(card))) {
-        showMessage('a flat run is being started — send it again once it has started', 'error');
+        notify({
+          sev: 'error',
+          subject: 'FLAT INPUT',
+          text: 'not sent',
+          bad: 'run starting',
+          detail: 'a flat run is being started — send it again once it has started',
+        });
         return false;
       }
       const release = holdFlatInput(card);
@@ -216,12 +226,17 @@ export function usePutBack(techCardId: number) {
         forgetInputRemovalOf(card, mediaId);
         return true;
       } catch {
-        showMessage('could not put it back into the prompt — try again', 'error');
+        notify({
+          sev: 'error',
+          subject: 'FLAT INPUT',
+          text: 'not put back',
+          detail: 'could not put it back into the prompt — try again',
+        });
         return false;
       } finally {
         release();
       }
     },
-    [techCardId, setReferenceHeld, showMessage],
+    [techCardId, setReferenceHeld],
   );
 }

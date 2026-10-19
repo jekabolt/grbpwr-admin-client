@@ -15,7 +15,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -57,6 +57,7 @@ import {
   TILE_CORNER,
   TILE_QUIET,
   ViewSwitch,
+  useDoneFlash,
 } from 'ui';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
@@ -1140,7 +1141,6 @@ export function ArtifactsPanel({
   calloutHistory?: EditHistory<SheetCallout>;
 }): JSX.Element {
   const form = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   // The SAME cache entry the page reads and re-primes after every save. Not a second fetch.
   const { data: card } = useTechCard(techCardId);
   /* СЛОВАРЬ ЦВЕТОВ — ЗАПАСНОЙ ИСТОЧНИК СВОТЧА В ШАПКЕ ГРУППЫ, и он уже загружен приложением один
@@ -2008,18 +2008,6 @@ export function ArtifactsPanel({
       [...media, { mediaId: plate.mediaId, kind: mediaKind, caption: '' }],
       { shouldDirty: true },
     );
-    // ЧТО ГОВОРИТСЯ ЧЕЛОВЕКУ. Здесь стояло «it is not on the technical sheet, and callouts drawn
-    // on it are not either» — неправда: печать берёт `technicalMedia` целиком, и внесённая плита
-    // уходит на страницу технического эскиза вместе со своими выносками. Сообщение называет
-    // приобретённое СЛЕДСТВИЕ, потому что именно оно тут решается, а не «положил в список».
-    showMessage(
-      opts?.withCallout
-        ? `${plate.name} joined the card’s media with its first callout — it prints on the tech pack’s technical sketch page`
-        : plate.origin === 'bench'
-          ? 'taken into the card’s media as its bench view — you can draw on it now'
-          : 'taken into the card’s media: it prints on the tech pack’s technical sketch page, with any callout you draw on it',
-      'success',
-    );
   }
 
   /**
@@ -2063,10 +2051,13 @@ export function ArtifactsPanel({
       expectedSlotRev: slotRev,
     });
     if (items.length > 1) {
-      showMessage(
-        `one file per side — the first one went into ${viewLabel(view)}, the other ${items.length - 1} did not`,
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: 'SHEET',
+        text: 'partly added',
+        bad: `${items.length - 1} not added`,
+        detail: `one file per side — the first one went into ${viewLabel(view)}, the other ${items.length - 1} did not`,
+      });
     }
   }
 
@@ -2122,12 +2113,16 @@ export function ArtifactsPanel({
     const have = new Set(media.map((m) => m.mediaId ?? 0));
     const fresh = items.filter((it) => it.id != null && !have.has(it.id));
     if (!fresh.length) {
-      showMessage(
-        items.length === 1
-          ? 'that picture is already on the sheet — nothing was added'
-          : 'every one of those pictures is already on the sheet — nothing was added',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'SHEET',
+        text: 'not added',
+        bad: 'already there',
+        detail:
+          items.length === 1
+            ? 'that picture is already on the sheet — nothing was added'
+            : 'every one of those pictures is already on the sheet — nothing was added',
+      });
       return;
     }
     const uploadedKind: common_TechCardMediaKind =
@@ -2150,14 +2145,6 @@ export function ArtifactsPanel({
     const lands = artifactKindOf(fresh[0].id as number, runKinds, uploadedKind);
     if (lands !== kind) {
       setKind(lands);
-      showMessage(
-        // ЧТО ИМЕННО ЛЕГЛО НЕ ТУДА — НАЗЫВАЕТСЯ ТЕМ СЛОВОМ, КОТОРОЕ ЧЕЛОВЕК ВЫБРАЛ САМ. Фраза была
-        // прибита к «turntable frame», и с появлением сегмента плиток она стала бы врать: человек
-        // кладёт файл в PATTERNS, а ему отвечают про поворотный стол. У словаря медиа карточки нет
-        // члена ни для того, ни для другого — и это две разные новости, а не одна.
-        `the card’s media has no kind for ${kind === 'pattern' ? 'a repeating tile' : kind === 'onmodel' ? 'an on-model photograph' : 'a 3D model'}, so this one is filed as a render — it is listed under ${ARTIFACT_KINDS.find((k) => k.value === lands)?.label ?? lands}, and it prints like any other plate`,
-        'success',
-      );
     }
   }
 
@@ -2290,6 +2277,8 @@ export function ArtifactsPanel({
         : list.filter((x) => live.has(x.mediaId ?? 0)),
     );
   }, [liveFlatsKey]);
+  // «Nothing to suggest» stands on the chip itself for a moment.
+  const noneFound = useDoneFlash();
   const runSuggest = async () => {
     if (suggestAbort.current) {
       cancelSuggest();
@@ -2309,7 +2298,12 @@ export function ArtifactsPanel({
       }
       if (stale()) return;
       if (!flushAllowsRun(flushed)) {
-        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        notify({
+          sev: 'error',
+          subject: 'CALLOUTS',
+          text: 'not suggested',
+          detail: flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal),
+        });
         return;
       }
       const res = await abortableAdminService(control.signal).SuggestCallouts({
@@ -2324,13 +2318,20 @@ export function ArtifactsPanel({
       setSuggestBasis(next);
       setSuggestHot(null);
       if (next.length === 0) {
-        showMessage('nothing to suggest', 'success');
+        noneFound.flash();
         return;
       }
       setSuggestOpen(true);
       if (calloutsShell.collapsed) calloutsShell.hold();
     } catch (error) {
-      if (!stale()) showMessage(techCardErrorMessage(error, 'suggest failed'), 'error');
+      if (!stale())
+        notify({
+          sev: 'error',
+          subject: 'CALLOUTS',
+          text: 'not suggested',
+          detail: techCardErrorMessage(error, 'suggest failed'),
+          action: { label: 'retry', onClick: () => void runSuggest() },
+        });
     } finally {
       if (!stale()) {
         suggestAbort.current = null;
@@ -2620,7 +2621,7 @@ export function ArtifactsPanel({
                       onClick={() => void runSuggest()}
                       title={suggesting ? 'cancel' : 'suggest callouts from the card'}
                     >
-                      {suggesting ? 'thinking…' : 'suggest ✦'}
+                      {suggesting ? 'thinking…' : noneFound.on ? 'none ✓' : 'suggest ✦'}
                     </Chip>
                   ) : undefined
                 }

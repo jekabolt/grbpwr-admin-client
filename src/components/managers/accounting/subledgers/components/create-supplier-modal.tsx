@@ -1,9 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { ConfirmationModal, Form, InputField, TextareaField } from 'ui';
+import { CalloutBox, ConfirmationModal, Form, InputField, TextareaField } from 'ui';
 import { applyServerFieldErrors } from 'utils/field-errors';
 import { z } from 'zod';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { useCreateSupplier } from '../../utils/hooks';
 
 const schema = z.object({
@@ -23,8 +25,9 @@ export function CreateSupplierModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { showMessage } = useSnackBarStore();
   const create = useCreateSupplier();
+  // A refusal no field took stands over the form until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const form = useForm<SupplierForm>({
     resolver: zodResolver(schema),
@@ -32,19 +35,31 @@ export function CreateSupplierModal({
   });
 
   const onSubmit: SubmitHandler<SupplierForm> = (data) => {
+    setRefusal(null);
     create.mutate(
       { name: data.name, vatId: data.vatId, notes: data.notes },
       {
+        // No receipt: the supplier appears in the list.
         onSuccess: () => {
-          showMessage('Supplier created', 'success');
           form.reset({ name: '', vatId: '', notes: '' });
           onOpenChange(false);
         },
         onError: (e) => {
-          applyServerFieldErrors(e, form.setError, {
+          const { applied, unmapped } = applyServerFieldErrors(e, form.setError, {
             allow: (p) => ['name', 'vatId', 'notes'].includes(p),
           });
-          showMessage(e instanceof Error ? e.message : 'Failed to create supplier', 'error');
+          const said = errorText(e, 'failed to create supplier') ?? '';
+          if (isRefused(e)) {
+            if (applied.length === 0 || unmapped.length > 0) setRefusal(said);
+            return;
+          }
+          notify({
+            sev: 'error',
+            subject: `SUPPLIER ${data.name}`,
+            text: 'not created',
+            bad: reasonOf(e),
+            detail: said,
+          });
         },
       },
     );
@@ -65,7 +80,12 @@ export function CreateSupplierModal({
           <div className='flex flex-col gap-4'>
             <InputField name='name' label='name' placeholder='supplier name' autoFocus />
             <InputField name='vatId' label='VAT id (optional)' placeholder='VAT number' />
-            <TextareaField name='notes' label='notes (optional)' placeholder='anything to remember' />
+            <TextareaField
+              name='notes'
+              label='notes (optional)'
+              placeholder='anything to remember'
+            />
+            {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
           </div>
         </Form>
       </div>

@@ -3,10 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runStatusLabel, runStatusOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
@@ -60,14 +60,16 @@ export function ProductionRunModal({
   onOpenChange: (v: boolean) => void;
   run?: common_ProductionRun;
 }) {
-  const { showMessage } = useSnackBarStore();
   const update = useUpdateRunSection();
   const isEdit = !!run?.id;
   const busy = update.isPending;
   const [d, setD] = useState<Draft>(emptyDraft);
+  // The server's refusal stands above the save button; a lost request goes to the inbox.
+  const [fail, setFail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     const ins = run?.run;
     setD(
       ins
@@ -130,9 +132,10 @@ export function ProductionRunModal({
     // No create branch: this modal is only ever opened on an existing run. A missing id here is a
     // caller bug, not an operator one — refuse loudly rather than silently minting a run.
     if (!isEdit || !run?.id) {
-      showMessage('no run to edit — creation lives in a separate modal', 'error');
+      setFail('no run to edit');
       return;
     }
+    setFail(null);
     // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
     update.mutate(
       {
@@ -150,11 +153,12 @@ export function ProductionRunModal({
         },
       },
       {
-        onSuccess: () => {
-          showMessage('Run updated', 'success');
-          onOpenChange(false);
-        },
-        onError: (e) => showMessage(updateRunErrorMessage(e), 'error'),
+        // The run's own page / row shows the change.
+        onSuccess: () => onOpenChange(false),
+        onError: (e) =>
+          isRefusal(e)
+            ? setFail(updateRunErrorMessage(e))
+            : notifyFailure(`PR-${run.id}`, 'not saved', e, updateRunErrorMessage(e), submit),
       },
     );
   };
@@ -294,7 +298,8 @@ export function ProductionRunModal({
             </label>
           </div>
 
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
+            <FailNote verb='not saved' text={fail} className='w-full' />
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>

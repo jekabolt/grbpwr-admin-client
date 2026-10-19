@@ -8,7 +8,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -226,7 +226,6 @@ export function planUnifiedAdd(input: {
  * Под удержанием входа, как `writeLabel`: GENERATE ждёт эту запись.
  */
 function useInputHold(techCardId: number) {
-  const { showMessage } = useSnackBarStore();
   const { setReferenceHeld } = useDesignWrites(techCardId);
   const [inflight, setInflight] = useState<ReadonlySet<number>>(new Set());
   const mark = (ids: number[], on: boolean) =>
@@ -243,7 +242,13 @@ function useInputHold(techCardId: number) {
     async (mediaIds: number[], held: boolean): Promise<number[]> => {
       const card = techCardId;
       if (!rowsWritable(readFlatInput(card))) {
-        showMessage('a flat run is being started — change the input once it has started', 'error');
+        notify({
+          sev: 'error',
+          subject: 'FLAT INPUT',
+          text: 'not changed',
+          bad: 'run starting',
+          detail: 'a flat run is being started — change the input once it has started',
+        });
         return [];
       }
       const release = holdFlatInput(card);
@@ -262,16 +267,18 @@ function useInputHold(techCardId: number) {
         release();
       }
       if (failed.length)
-        showMessage(
-          held
+        notify({
+          sev: 'error',
+          subject: 'FLAT INPUT',
+          text: held ? 'not taken out' : 'not put back',
+          detail: held
             ? 'could not take it out of the prompt — it is back; try again'
             : 'could not put it back into the prompt — try again',
-          'error',
-        );
+        });
       return failed;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [techCardId, setReferenceHeld, showMessage],
+    [techCardId, setReferenceHeld],
   );
 
   /** Take pictures of one group out of the prompt. */
@@ -325,7 +332,6 @@ export function FlatInputPictures({
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
   const detailSlots = useMemo(() => photoDetailSlots(band.bench), [band.bench]);
   const { getValues, setValue, control } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
 
   // Картинка ждёт ярлыка — полоса перечитывается и здесь: доска на шаге FLAT не смонтирована.
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
@@ -366,7 +372,13 @@ export function FlatInputPictures({
   const onAdd = (media: common_MediaFull[]) => {
     const card = techCardId;
     if (!rowsWritable(readFlatInput(card))) {
-      showMessage('a flat run is being started — add the picture once it has started', 'error');
+      notify({
+        sev: 'error',
+        subject: 'FLAT INPUT',
+        text: 'not added',
+        bad: 'run starting',
+        detail: 'a flat run is being started — add the picture once it has started',
+      });
       return;
     }
     const plan = planUnifiedAdd({
@@ -376,14 +388,8 @@ export function FlatInputPictures({
       held: (id) => isHeld(labels.get(id)),
       max: MOOD_MAX,
     });
-    if (plan.refusal) showMessage(plan.refusal, 'error');
-    else if (plan.already && !plan.accepted.length && !plan.putBack.length)
-      showMessage(
-        plan.already === 1
-          ? 'already on the board — it is in the input'
-          : `${plan.already} already on the board — they are in the input`,
-        'success',
-      );
+    if (plan.refusal)
+      notify({ sev: 'error', subject: 'FLAT INPUT', text: 'not added', detail: plan.refusal });
     if (plan.putBack.length) {
       for (const id of plan.putBack) forgetInputRemovalOf(card, id);
       hold.putBack(plan.putBack);
@@ -681,7 +687,6 @@ function DetailGroup({
   on: boolean;
 }) {
   const id = slot.id ?? 0;
-  const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(shared.techCardId);
   // Нажатие детали — ровно как у GENERATE: `flatRunParams(slotId, null, [])`.
   const params = useMemo(() => flatRunParams(id, null, []), [id]);
@@ -695,10 +700,13 @@ function DetailGroup({
         onCommit: (next: string) => {
           const card = shared.techCardId;
           if (!rowsWritable(readFlatInput(card))) {
-            showMessage(
-              'a flat run is being started — rename the detail once it has started',
-              'error',
-            );
+            notify({
+              sev: 'error',
+              subject: 'FLAT INPUT',
+              text: 'not renamed',
+              bad: 'run starting',
+              detail: 'a flat run is being started — rename the detail once it has started',
+            });
             return;
           }
           const release = holdFlatInput(card);

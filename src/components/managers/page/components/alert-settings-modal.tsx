@@ -3,9 +3,10 @@ import { adminService } from 'api/api';
 import { AlertSettings } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal, Text } from 'ui';
+import { CalloutBox, ConfirmationModal, Text } from 'ui';
 
 const cell =
   'w-24 border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
@@ -74,13 +75,17 @@ const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
 export function AlertSettingsModal({
   open,
   onOpenChange,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Saved and closed: the opener flashes its receipt. */
+  onSaved?: () => void;
 }) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite(SECTION.analytics);
-  const { showMessage } = useSnackBarStore();
+  // A refusal stands in the dialog until the next attempt.
+  const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
   const [d, setD] = useState<Draft>({
     coverageWarnPct: '',
@@ -101,6 +106,7 @@ export function AlertSettingsModal({
 
   useEffect(() => {
     if (!open) return;
+    setError(null);
     const s = data?.settings;
     setD({
       coverageWarnPct: s?.coverageWarnPct != null ? String(s.coverageWarnPct) : '',
@@ -119,14 +125,27 @@ export function AlertSettingsModal({
     mutationFn: (settings: AlertSettings) => adminService.UpsertAlertSettings({ settings }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['alertSettings'] });
-      showMessage('Alert thresholds saved', 'success');
       onOpenChange(false);
+      onSaved?.();
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to save thresholds', 'error'),
+    onError: (e, vars) => {
+      const msg = e instanceof Error ? e.message : 'Failed to save thresholds';
+      if (failureClassOfError(e) === 'refused') return setError(msg);
+      notify({
+        sev: 'error',
+        subject: 'ALERT THRESHOLDS',
+        text: 'not saved',
+        detail: msg,
+        action:
+          failureClassOfError(e) === 'transient'
+            ? { label: 'retry', onClick: () => save.mutate(vars) }
+            : undefined,
+      });
+    },
   });
 
-  const handleSave = () =>
+  const handleSave = () => {
+    setError(null);
     save.mutate({
       coverageWarnPct: numOrUndef(d.coverageWarnPct),
       refundRateWarnPct: numOrUndef(d.refundRateWarnPct),
@@ -137,6 +156,7 @@ export function AlertSettingsModal({
       acctPostingLagHours: numOrUndef(d.acctPostingLagHours),
       targetMarginPct: numOrUndef(d.targetMarginPct),
     });
+  };
 
   return (
     <ConfirmationModal
@@ -146,6 +166,7 @@ export function AlertSettingsModal({
       title='Alert thresholds'
       confirmLabel={save.isPending ? 'saving…' : 'save'}
       confirmDisabled={!canEdit || save.isPending}
+      closeOnConfirm={false}
     >
       <div className='flex min-w-[min(90vw,32rem)] flex-col gap-3'>
         <Text variant='inactive' size='small'>
@@ -175,6 +196,13 @@ export function AlertSettingsModal({
           ))
         )}
       </div>
+      {error && (
+        <CalloutBox tone='error' className='mt-3'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {error}
+          </Text>
+        </CalloutBox>
+      )}
     </ConfirmationModal>
   );
 }

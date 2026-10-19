@@ -4,10 +4,11 @@ import { common_TechCardDevExpense, common_TechCardDevExpenseInsert } from 'api/
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useStyleEconomics } from 'components/managers/page/useStyleEconomics';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
-import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { notify } from 'lib/stores/store';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  CalloutBox,
   Close,
   ConfirmationModal,
   DataTable,
@@ -21,8 +22,12 @@ import {
   Row,
   Select,
   Text,
+  UndoRow,
+  useDoneFlash,
 } from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { extractFieldViolations } from 'utils/field-errors';
+import { failureClassOfError, serverSentenceOf } from './useTechCardAutosave';
 import { HelpMark, noFx } from './costing-vocab';
 import { SamplePicker } from './sample-picker';
 import { sampleKeys, useSamples } from './useSamples';
@@ -198,7 +203,6 @@ export function DevExpensesField({
 }) {
   const scoped = !!scopedSampleId;
   const { canReadCosting, canWriteCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   const { data, isLoading } = useDevExpenses(techCardId);
 
   // Per-card sample numbers for labelling rows (`образец #N` rather than the DB id). Cached from
@@ -218,7 +222,13 @@ export function DevExpensesField({
     incurredAt: '',
     sampleId: scopedSampleId ?? 0,
   });
-  const [form, setForm] = useState(blankForm);
+  const [form, setFormState] = useState(blankForm);
+  // The server's refusal of the composer: stands in the dialog until the next edit or attempt.
+  const [addError, setAddError] = useState<{ text: string; fields: Set<string> } | null>(null);
+  const setForm: typeof setFormState = (next) => {
+    setAddError(null);
+    setFormState(next);
+  };
   // The composer is a modal, not a permanent strip: an expense is logged rarely, and six inline
   // fields cost the section its whole width every time someone comes here to READ the ledger.
   const [addOpen, setAddOpen] = useState(false);
@@ -226,6 +236,8 @@ export function DevExpensesField({
     setAddOpen(false);
     setForm(blankForm());
   };
+  // Receipt at the door that opened the composer: the dialog is gone by the time it lands.
+  const added = useDoneFlash();
 
   const addMutation = useAddDevExpense(techCardId);
   const add = {
@@ -247,28 +259,71 @@ export function DevExpensesField({
           // filled form standing instead of dismissing the dialog and wiping what was typed.
           onSuccess: () => {
             closeAdd();
-            showMessage('expense added', 'success');
+            added.flash();
           },
-          onError: (e) =>
-            showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
+          onError: (e) => {
+            const sentence = e instanceof Error ? e.message : "couldn't add the expense";
+            // A refusal of what was typed stays in the dialog; a lost request is news.
+            if (failureClassOfError(e) === 'refused') {
+              const fields = new Set(
+                extractFieldViolations(e).map((v) => v.field.split('.').pop() ?? v.field),
+              );
+              setAddError({ text: sentence, fields });
+              return;
+            }
+            notify({
+              sev: 'error',
+              subject: 'EXPENSE',
+              text: 'not added',
+              detail: serverSentenceOf(e) ?? sentence,
+              action:
+                failureClassOfError(e) === 'transient'
+                  ? { label: 'retry', onClick: () => add.mutate() }
+                  : undefined,
+            });
+          },
         },
       ),
   };
 
+  // DELETE WITH UNDO. Server-side a delete is final, so nothing is sent while the ghost row offers
+  // undo: the row is hidden, and the RPC goes out only when the ghost runs out (or the panel leaves).
   const delMutation = useDeleteDevExpense(techCardId);
-  const del = {
-    mutate: (id: number) =>
-      delMutation.mutate(id, {
-        onSuccess: () => showMessage('expense deleted', 'success'),
-        onError: (e) => showMessage(e instanceof Error ? e.message : "couldn't delete", 'error'),
-      }),
+  const [ghosts, setGhosts] = useState<Set<number>>(() => new Set());
+  // Committed: hidden until the refetch drops them; a failed one comes back.
+  const [gone, setGone] = useState<Set<number>>(() => new Set());
+  const without = (set: Set<number>, id: number) => {
+    const next = new Set(set);
+    next.delete(id);
+    return next;
   };
+  const commitDelete = (id: number) => {
+    setGhosts((g) => without(g, id));
+    setGone((g) => new Set(g).add(id));
+    delMutation.mutate(id, {
+      onError: (e) => {
+        setGone((g) => without(g, id));
+        notify({
+          sev: 'error',
+          subject: 'EXPENSE',
+          text: 'not deleted',
+          detail: e instanceof Error ? e.message : undefined,
+          action:
+            failureClassOfError(e) === 'transient'
+              ? { label: 'retry', onClick: () => commitDelete(id) }
+              : undefined,
+        });
+      },
+    });
+  };
+  // Leaving with a ghost on screen keeps the delete that was asked for.
+  const pendingGhosts = useRef(ghosts);
+  pendingGhosts.current = ghosts;
+  const commitRef = useRef(commitDelete);
+  commitRef.current = commitDelete;
+  useEffect(() => () => pendingGhosts.current.forEach((id) => commitRef.current(id)), []);
 
-  // Deleting a financial record is immediate and permanent server-side (no undo) — confirm first,
-  // same as every other destructive delete in this app (materials/, order/, tech-cards list).
-  const [pendingDelete, setPendingDelete] = useState<common_TechCardDevExpense | null>(null);
-
-  const allExpenses = data?.expenses ?? [];
+  const allExpenses = (data?.expenses ?? []).filter((e) => !gone.has(e.id ?? 0));
   const expenses = scoped ? allExpenses.filter((e) => e.sampleId === scopedSampleId) : allExpenses;
   const summary = data?.summary;
   // In scoped mode the card summary is misleading — subtotal just this sample's rows.
@@ -388,37 +443,57 @@ export function DevExpensesField({
             </tr>
           </thead>
           <tbody>
-            {sortedExpenses.map((e) => (
-              <tr key={e.id}>
-                <td>{shortDate(e.incurredAt) || <EmptyCell />}</td>
-                <td>{e.description || <EmptyCell />}</td>
-                <td>{kindLabel(e.kind) || <EmptyCell />}</td>
-                {!scoped && (
+            {sortedExpenses.map((e) =>
+              e.id && ghosts.has(e.id) ? (
+                <UndoRow
+                  key={e.id}
+                  colSpan={5 + (scoped ? 0 : 1) + (canWriteCosting ? 1 : 0)}
+                  name={[
+                    kindLabel(e.kind),
+                    e.description,
+                    `${decimalToInput(e.amount)} ${e.currency ?? ''}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  onUndo={() => setGhosts((g) => without(g, e.id ?? 0))}
+                  onCommit={() => commitDelete(e.id ?? 0)}
+                />
+              ) : (
+                <tr key={e.id}>
+                  <td>{shortDate(e.incurredAt) || <EmptyCell />}</td>
+                  <td>{e.description || <EmptyCell />}</td>
+                  <td>{kindLabel(e.kind) || <EmptyCell />}</td>
+                  {!scoped && (
+                    <td>
+                      {e.sampleId ? (
+                        `#${sampleNumberById.get(e.sampleId) || e.sampleId}`
+                      ) : (
+                        <EmptyCell />
+                      )}
+                    </td>
+                  )}
                   <td>
-                    {e.sampleId ? (
-                      `#${sampleNumberById.get(e.sampleId) || e.sampleId}`
+                    {decimalToInput(e.amount) || <EmptyCell />} {e.currency}
+                  </td>
+                  <td>
+                    {e.amountBase?.value ? (
+                      decimalToInput(e.amountBase)
                     ) : (
-                      <EmptyCell />
+                      <Pill tone='warn'>{noFx(e.currency)}</Pill>
                     )}
                   </td>
-                )}
-                <td>
-                  {decimalToInput(e.amount) || <EmptyCell />} {e.currency}
-                </td>
-                <td>
-                  {e.amountBase?.value ? (
-                    decimalToInput(e.amountBase)
-                  ) : (
-                    <Pill tone='warn'>{noFx(e.currency)}</Pill>
+                  {canWriteCosting && (
+                    <td>
+                      <Close
+                        size='sm'
+                        onClick={() => e.id && setGhosts((g) => new Set(g).add(e.id ?? 0))}
+                        aria-label='delete'
+                      />
+                    </td>
                   )}
-                </td>
-                {canWriteCosting && (
-                  <td>
-                    <Close size='sm' onClick={() => setPendingDelete(e)} aria-label='delete' />
-                  </td>
-                )}
-              </tr>
-            ))}
+                </tr>
+              ),
+            )}
           </tbody>
           <tfoot>
             <TotalRow>
@@ -574,7 +649,13 @@ export function DevExpensesField({
           spend it did not have. Everything above stays readable. */}
       {canWriteCosting && (
         <div>
-          <Button type='button' variant='secondary' size='sm' onClick={() => setAddOpen(true)}>
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            done={added.on && 'added'}
+            onClick={() => setAddOpen(true)}
+          >
             add an expense
           </Button>
         </div>
@@ -606,6 +687,7 @@ export function DevExpensesField({
             <Field label='date'>
               <Input
                 name='dev-expense-date'
+                aria-invalid={addError?.fields.has('incurred_at') || undefined}
                 type='date'
                 value={form.incurredAt}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -617,6 +699,7 @@ export function DevExpensesField({
           <Field label='description'>
             <Input
               name='dev-expense-description'
+              aria-invalid={addError?.fields.has('description') || undefined}
               placeholder='what was bought'
               value={form.description}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -628,6 +711,7 @@ export function DevExpensesField({
             <Field label='amount'>
               <Input
                 name='dev-expense-amount'
+                aria-invalid={addError?.fields.has('amount') || undefined}
                 type='number'
                 step='0.01'
                 min='0'
@@ -659,32 +743,14 @@ export function DevExpensesField({
               </Field>
             )}
           </div>
+          {addError && (
+            <CalloutBox tone='error' className='mt-1'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not added</b> · {addError.text}
+              </Text>
+            </CalloutBox>
+          )}
         </div>
-      </ConfirmationModal>
-
-      <ConfirmationModal
-        open={!!pendingDelete}
-        onOpenChange={(open) => !open && setPendingDelete(null)}
-        onConfirm={() => pendingDelete?.id && del.mutate(pendingDelete.id)}
-        title='delete the expense?'
-        confirmLabel='delete expense'
-        width='sm'
-        hideCancel
-      >
-        <Row label='kind' value={kindLabel(pendingDelete?.kind) || <EmptyCell />} />
-        {pendingDelete?.description && (
-          <Row label='description' value={pendingDelete.description} />
-        )}
-        <Row
-          label='amount'
-          value={
-            pendingDelete ? (
-              `${decimalToInput(pendingDelete.amount)} ${pendingDelete.currency ?? ''}`
-            ) : (
-              <EmptyCell />
-            )
-          }
-        />
       </ConfirmationModal>
     </div>
   );

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { useEffect, useRef } from 'react';
 import { adminService } from 'api/api';
 import type { AiRouteCandidate, GetAiProvidersConfigResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { extractFieldViolations, fieldErrorSummary, violationReason } from 'utils/field-errors';
 
 // admin → AI providers. Every RPC behind these hooks is SuperOnly on the server; the page asks
@@ -104,10 +104,10 @@ function expectedVersion(qc: QueryClient): number {
 // (WriteError, role=alert), and that line IS the announcement: a snackbar saying it again would
 // interrupt a screen reader twice for one answer. So a refusal goes to the snackbar only when its
 // owner is gone — the panel closed or the view switched before the answer came — and there is no
-// line left to stand in. The reads (config, spend) keep their own callouts.
-function useAiWrite(failed: string) {
+// line left to stand in. The reads (config, spend) keep their own callouts. Success says nothing:
+// the switch, the select or the probe line under the key already shows what was written.
+function useAiWrite(subject: string, failed: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const ownerOnScreen = useRef(false);
   useEffect(() => {
     ownerOnScreen.current = true;
@@ -117,19 +117,18 @@ function useAiWrite(failed: string) {
   }, []);
   return {
     qc,
-    done: (config: GetAiProvidersConfigResponse | undefined, message: string) => {
+    done: (config: GetAiProvidersConfigResponse | undefined) => {
       if (config) qc.setQueryData(aiKeys.config(), config);
-      showMessage(message, 'success');
     },
     onError: (error: unknown) => {
       if (ownerOnScreen.current) return;
-      // Said away from its control, the sentence names the write it answers.
-      showMessage(
-        isStaleConfigError(error)
-          ? STALE_CONFIG_MESSAGE
-          : `${failed}: ${fieldErrorSummary(error, failed)}`,
-        'error',
-      );
+      // Said away from its control, the subject names the write it answers.
+      notify({
+        sev: 'error',
+        subject,
+        text: failed,
+        detail: isStaleConfigError(error) ? STALE_CONFIG_MESSAGE : fieldErrorSummary(error, failed),
+      });
     },
     // Success or not, the screen is re-read: a refused autosave must snap its control back to what
     // the server holds. Returned, so the next queued write waits for the fresh config.
@@ -154,7 +153,7 @@ export type UpdateAiProviderVars = { providerKey: string; enabled: boolean };
 
 // The provider's switch. Off stops new calls through it; its routes stay and skip it.
 export function useUpdateAiProvider() {
-  const w = useAiWrite("couldn't switch the provider");
+  const w = useAiWrite('AI PROVIDER', 'not switched');
   const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: UpdateAiProviderVars) =>
@@ -163,8 +162,7 @@ export function useUpdateAiProvider() {
         enabled: vars.enabled,
         expectedVersion: expectedVersion(w.qc),
       }),
-    onSuccess: (resp, vars) =>
-      w.done(resp.config, `${vars.providerKey} switched ${vars.enabled ? 'on' : 'off'}`),
+    onSuccess: (resp) => w.done(resp.config),
     onError: w.onError,
     onSettled: w.onSettled,
   });
@@ -182,7 +180,7 @@ export type SetAiProviderKeyVars = { providerKey: string; kind: AiKeyKind; value
 // The value is write-only: it is never put in a message, and the finished mutation — whose
 // variables hold it — is dropped from the cache at once instead of lingering for five minutes.
 export function useSetAiProviderKey() {
-  const w = useAiWrite("couldn't save the key");
+  const w = useAiWrite('AI KEY', 'not saved');
   const m = useMutation({
     ...WRITE_OPTIONS,
     gcTime: 0,
@@ -192,10 +190,7 @@ export function useSetAiProviderKey() {
         kind: vars.kind,
         value: vars.value,
       }),
-    onSuccess: (resp, vars) => {
-      const slot = vars.kind === 'admin' ? 'reconciliation key' : 'key';
-      w.done(resp.config, `${vars.providerKey} ${slot} ${vars.value ? 'saved' : 'cleared'}`);
-    },
+    onSuccess: (resp) => w.done(resp.config),
     onError: w.onError,
     // THE SECRET IS BLANKED THE MOMENT THE WRITE SETTLES, in the mutation's own variables — the
     // very object the cache holds — before the re-read is awaited. The view's per-call reset()
@@ -220,7 +215,7 @@ export type SetAiDefaultsVars = {
 };
 
 export function useSetAiDefaults() {
-  const w = useAiWrite("couldn't save the defaults");
+  const w = useAiWrite('AI DEFAULTS', 'not saved');
   const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: SetAiDefaultsVars) =>
@@ -230,7 +225,7 @@ export function useSetAiDefaults() {
         applyToRoutes: !!vars.applyToRoutes,
         expectedVersion: expectedVersion(w.qc),
       }),
-    onSuccess: (resp) => w.done(resp.config, 'defaults saved'),
+    onSuccess: (resp) => w.done(resp.config),
     onError: w.onError,
     onSettled: w.onSettled,
   });
@@ -246,7 +241,7 @@ export type SetAiRouteVars = {
 };
 
 export function useSetAiRoute() {
-  const w = useAiWrite("couldn't save the route");
+  const w = useAiWrite('AI ROUTE', 'not saved');
   const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: SetAiRouteVars) =>
@@ -256,7 +251,7 @@ export function useSetAiRoute() {
         fallback: vars.fallback,
         expectedVersion: expectedVersion(w.qc),
       }),
-    onSuccess: (resp) => w.done(resp.config, 'route saved'),
+    onSuccess: (resp) => w.done(resp.config),
     onError: w.onError,
     onSettled: w.onSettled,
   });

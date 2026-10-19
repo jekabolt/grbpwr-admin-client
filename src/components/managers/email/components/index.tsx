@@ -14,11 +14,21 @@ import {
 } from 'constants/email-campaign';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useBlockNavigation } from 'hooks/useBlockNavigation';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BackLink, Button, Section, SectionStack, Text, Form, InputField, SelectField } from 'ui';
+import {
+  BackLink,
+  Button,
+  Section,
+  SectionStack,
+  Text,
+  Form,
+  InputField,
+  SelectField,
+  useDoneFlash,
+} from 'ui';
 import { UnifiedTranslationFields } from 'components/shared/translation/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
 import { useProductSelection } from '../../hero/components/useProductSelection';
@@ -47,7 +57,11 @@ export function CampaignBuilder() {
   const routeId = idParam && /^\d+$/.test(idParam) ? Number(idParam) : 0;
   const navigate = useNavigate();
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  // Receipts on the controls: save, the translate count, the test send's door.
+  const { on: savedOn, flash: flashSaved } = useDoneFlash();
+  const { on: translatedOn, flash: flashTranslated } = useDoneFlash();
+  const [translatedCount, setTranslatedCount] = useState(0);
+  const testSent = useDoneFlash();
 
   const { data: campaignData, isLoading, isError, refetch } = useCampaign(routeId);
   const saveCampaign = useSaveCampaign();
@@ -189,12 +203,12 @@ export function CampaignBuilder() {
       setTimeout(() => {
         isResettingRef.current = false;
       }, 0);
-      showMessage('campaign saved', 'success');
+      flashSaved();
       if (routeId === 0 && res?.id) navigate(`${ROUTES.emailCampaigns}/${res.id}`);
     } catch {
       // error toast surfaced by useSaveCampaign.onError
     }
-  }, [form, buildInsert, saveCampaign, routeId, navigate, showMessage]);
+  }, [form, buildInsert, saveCampaign, routeId, navigate, flashSaved]);
 
   // Auto-translate runs server-side over the LAST SAVED copy and then refetches the
   // campaign, so firing it with unsaved edits would translate stale copy and pull a
@@ -203,11 +217,25 @@ export function CampaignBuilder() {
   const handleAutoTranslate = useCallback(() => {
     if (!routeId || readOnly) return;
     if (hasUserMadeChanges || form.formState.isDirty) {
-      showMessage('save your changes first — auto-translate runs on the saved campaign', 'error');
+      notify({
+        sev: 'error',
+        subject: `CAMPAIGN ${routeId}`,
+        text: 'not translated',
+        bad: 'unsaved changes',
+        detail: 'save first — auto-translate runs on the saved campaign',
+      });
       return;
     }
-    autoTranslate.mutate({ id: routeId });
-  }, [routeId, readOnly, hasUserMadeChanges, form, autoTranslate, showMessage]);
+    autoTranslate.mutate(
+      { id: routeId },
+      {
+        onSuccess: (res) => {
+          setTranslatedCount(res?.translatedCount ?? 0);
+          flashTranslated();
+        },
+      },
+    );
+  }, [routeId, readOnly, hasUserMadeChanges, form, autoTranslate, flashTranslated]);
 
   // Cmd/Ctrl+S saves (when editable and no sub-modal is open).
   useEffect(() => {
@@ -280,6 +308,7 @@ export function CampaignBuilder() {
                 saveCampaign.isPending
               }
               loading={autoTranslate.isPending}
+              done={translatedOn && `translated ${translatedCount}`}
               title={
                 readOnly
                   ? 'auto-translate can only run on a draft.'
@@ -295,6 +324,7 @@ export function CampaignBuilder() {
               className='uppercase'
               onClick={() => setTestOpen(true)}
               disabled={!canWrite(SECTION.marketing)}
+              done={testSent.on && 'sent'}
             >
               test send
             </Button>
@@ -306,6 +336,7 @@ export function CampaignBuilder() {
               onClick={handleSave}
               disabled={!canEdit || saveCampaign.isPending}
               loading={saveCampaign.isPending}
+              done={savedOn}
             >
               save
             </Button>
@@ -463,6 +494,7 @@ export function CampaignBuilder() {
           onOpenChange={setTestOpen}
           buildDraft={buildInsert}
           campaignId={routeId || undefined}
+          onSent={testSent.flash}
         />
       </form>
     </Form>

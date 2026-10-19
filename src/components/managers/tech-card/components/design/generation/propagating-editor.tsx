@@ -4,7 +4,7 @@ import type {
   common_DesignPicture,
 } from 'api/proto-http/admin';
 import { useCallback, useRef } from 'react';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { useFormContext, useWatch, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
@@ -216,7 +216,6 @@ function EditorOver({
   form: SheetForm | null;
   sheet?: Parameters<typeof overwriteClosed>[2];
 }) {
-  const { showMessage } = useSnackBarStore();
   /** The picture and its row as of the last render — what `closedNow` judges. */
   const latest = useRef({ picture, siblings });
   latest.current = { picture, siblings };
@@ -248,11 +247,7 @@ function EditorOver({
       }
       disabled={disabled}
       onFlattened={(edit) => {
-        if (carryOntoSheet(form, latest.current.picture, edit))
-          showMessage(
-            'the edit took the original’s place on the technical sheet, callouts included — save the card to keep it',
-            'success',
-          );
+        carryOntoSheet(form, latest.current.picture, edit);
         onFlattened?.(edit);
       }}
     />

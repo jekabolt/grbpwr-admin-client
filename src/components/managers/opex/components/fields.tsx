@@ -87,11 +87,13 @@ export function AmountInput({
   onChange,
   id,
   autoFocus,
+  invalid,
 }: {
   value: string;
   onChange: (v: string) => void;
   id?: string;
   autoFocus?: boolean;
+  invalid?: boolean;
 }) {
   return (
     <input
@@ -103,6 +105,7 @@ export function AmountInput({
       inputMode='decimal'
       placeholder='0.00'
       autoFocus={autoFocus}
+      aria-invalid={invalid || undefined}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -114,11 +117,13 @@ export function MonthInput({
   onChange,
   id,
   min,
+  invalid,
 }: {
   value: string;
   onChange: (v: string) => void;
   id?: string;
   min?: string;
+  invalid?: boolean;
 }) {
   return (
     <input
@@ -127,6 +132,7 @@ export function MonthInput({
       type='month'
       value={value}
       min={min}
+      aria-invalid={invalid || undefined}
       onChange={(e) => onChange(e.target.value)}
     />
   );

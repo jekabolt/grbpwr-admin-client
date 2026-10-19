@@ -20,7 +20,7 @@ import {
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -184,10 +184,15 @@ function fillAutoFields(
 // so for a non-costing account every article would look price-less.
 function useNoPriceWarning() {
   const { canReadCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   return (m: common_Material) => {
     if (!canReadCosting || m.latestPrice?.price?.value) return;
-    showMessage(`${m.name || 'this material'}: no purchase price, costing counts 0`, 'error');
+    notify({
+      sev: 'warn',
+      subject: `MATERIAL ${m.name || ''}`.trim(),
+      text: 'linked',
+      bad: 'no price',
+      detail: 'no purchase price, costing counts 0',
+    });
   };
 }
 
@@ -636,7 +641,6 @@ export function BomField({
   canEdit?: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const warnNoPrice = useNoPriceWarning();
   const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
@@ -819,8 +823,8 @@ export function BomField({
   };
 
   const goToColorway = (colorwayId: number) => {
+    // The recipe opening is the answer.
     openRecipe(colorwayId);
-    showMessage('remove this article from the colourway recipe and save it', 'success');
   };
 
   // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so

@@ -20,7 +20,8 @@ import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { failureClassOfError } from './useTechCardAutosave';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -208,7 +209,6 @@ export function SampleScreen({
   const { dictionary } = useDictionary();
   const save = useSaveSample();
   const patch = usePatchSampleNow();
-  const { showMessage } = useSnackBarStore();
   const sampleId = sample.id ?? 0;
   const staging = useTechCardStaging();
   const stagedSnapshot = useStagedSnapshot();
@@ -433,7 +433,12 @@ export function SampleScreen({
       if (d.status !== base.status) set({ status: unscrapTo });
       return true;
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : "couldn't unscrap the sample", 'error');
+      notify({
+        sev: 'error',
+        subject: 'SAMPLE',
+        text: 'not unscrapped',
+        detail: e instanceof Error ? e.message : undefined,
+      });
       return false;
     }
   };
@@ -784,7 +789,6 @@ function MaterialsBlock({
   scrapped: boolean;
   onUnscrap: () => Promise<boolean>;
 }) {
-  const { showMessage } = useSnackBarStore();
   const [, setParams] = useSearchParams();
   const stock = useStockIndex();
   const issued = useSampleIssued(sampleId);
@@ -915,7 +919,12 @@ function MaterialsBlock({
       // still-short tile would otherwise issue the same remainder twice.
       await qc.invalidateQueries({ queryKey: warehouseKeys.movements({ sampleId }, 50) });
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : "couldn't write the material off", 'error');
+      notify({
+        sev: 'error',
+        subject: 'SAMPLE MATERIAL',
+        text: 'not written off',
+        detail: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setPendingKey('');
     }
@@ -1098,7 +1107,6 @@ function RndBlock({
 }) {
   const { dictionary } = useDictionary();
   const { canWriteCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   const { data } = useDevExpenses(techCardId);
   const add = useAddDevExpense(techCardId);
   const del = useDeleteDevExpense(techCardId);
@@ -1149,8 +1157,18 @@ function RndBlock({
       },
       {
         onSuccess: () => setDraft(null),
+        // The draft row stays filled; the reason goes to the inbox.
         onError: (e) =>
-          showMessage(e instanceof Error ? e.message : "couldn't add the expense", 'error'),
+          notify({
+            sev: 'error',
+            subject: 'EXPENSE',
+            text: 'not added',
+            detail: e instanceof Error ? e.message : undefined,
+            action:
+              failureClassOfError(e) === 'transient'
+                ? { label: 'retry', onClick: submit }
+                : undefined,
+          }),
       },
     );
   };
@@ -1192,7 +1210,12 @@ function RndBlock({
                   setConfirmId(0);
                   del.mutate(e.id ?? 0, {
                     onError: (err) =>
-                      showMessage(err instanceof Error ? err.message : "couldn't delete", 'error'),
+                      notify({
+                        sev: 'error',
+                        subject: 'EXPENSE',
+                        text: 'not deleted',
+                        detail: err instanceof Error ? err.message : undefined,
+                      }),
                   });
                 }}
                 onBlur={() => setConfirmId(0)}

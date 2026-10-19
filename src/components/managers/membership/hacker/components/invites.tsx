@@ -2,6 +2,7 @@ import { GenerateHackerInviteResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
 import { Button, CalloutBox, CopyToClipboard, Input, Section, Text, EmptyCell } from 'ui';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
@@ -20,10 +21,13 @@ export function HackerInvites() {
   const [email, setEmail] = useState('');
   const [expiresInDays, setExpiresInDays] = useState('14');
   const [lastGenerated, setLastGenerated] = useState<GenerateHackerInviteResponse | null>(null);
+  // The server's refusal of the form stands under it until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const invites = data?.invites ?? [];
 
   const handleGenerate = () => {
+    setRefusal(null);
     generate.mutate(
       {
         email: email || undefined,
@@ -34,6 +38,7 @@ export function HackerInvites() {
           setLastGenerated(res);
           setEmail('');
         },
+        onError: (e) => isRefusal(e) && setRefusal(errorSentence(e, 'not generated')),
       },
     );
   };
@@ -74,6 +79,14 @@ export function HackerInvites() {
             Generate invite
           </Button>
         </div>
+      )}
+
+      {refusal && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not generated</b> · {refusal}
+          </Text>
+        </CalloutBox>
       )}
 
       {lastGenerated && (
@@ -131,10 +144,7 @@ export function HackerInvites() {
                       ? 'active'
                       : 'expired';
                 return (
-                  <tr
-                    key={inv.id}
-                    className='border-b border-borderColor last:border-b-0 h-9'
-                  >
+                  <tr key={inv.id} className='border-b border-borderColor last:border-b-0 h-9'>
                     <td className='border border-borderColor text-center px-2'>
                       <Text size='small'>{inv.id}</Text>
                     </td>

@@ -2,9 +2,13 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { createFiber } from 'components/managers/dictionaries/dictionary-adapters';
 import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import {
+  FailNote,
+  isRefusal,
+  notifyFailure,
+} from 'components/managers/production-runs/components/feedback';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Text, EmptyCell, Close } from 'ui';
+import { Button, Text, EmptyCell, Close, useDoneFlash } from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 
 // #37: one structured fibre share — a dictionary fibre code + a percent (edited as a plain string,
@@ -42,7 +46,9 @@ export function CompositionWizard({
   onSave: (entries: CompRow[]) => void;
 }) {
   const { dictionary, refetch } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  // The fibre landing in the blend is the receipt; the create button flashes for it.
+  const added = useDoneFlash();
+  const [fail, setFail] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>('fibres');
   const [rows, setRows] = useState<CompRow[]>([]);
@@ -116,8 +122,9 @@ export function CompositionWizard({
   const createAndSelect = async () => {
     const code = newCode.trim();
     const name = newName.trim();
+    setFail(null);
     if (!code || !name) {
-      showMessage('Fibre code and name are required', 'error');
+      setFail('fibre code and name are required');
       return;
     }
     // Already in the dictionary (possibly typed by mistake) — just select it, no duplicate create.
@@ -127,7 +134,7 @@ export function CompositionWizard({
       );
       setNewCode('');
       setNewName('');
-      showMessage('Fibre already exists — selected it', 'success');
+      added.flash();
       return;
     }
     setCreating(true);
@@ -141,9 +148,11 @@ export function CompositionWizard({
       );
       setNewCode('');
       setNewName('');
-      showMessage(`Fibre “${name}” created`, 'success');
+      added.flash();
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to create fibre', 'error');
+      const sentence = e instanceof Error ? e.message : "couldn't create the fibre";
+      if (isRefusal(e)) setFail(sentence);
+      else notifyFailure(`FIBRE ${code}`, 'not created', e, sentence);
     } finally {
       setCreating(false);
     }
@@ -289,11 +298,13 @@ export function CompositionWizard({
                       variant='secondary'
                       className='uppercase'
                       disabled={creating || !newCode.trim() || !newName.trim()}
+                      done={added.on && 'added'}
                       onClick={createAndSelect}
                     >
                       {creating ? 'creating…' : '＋ create fibre'}
                     </Button>
                   </div>
+                  <FailNote verb='not created' text={fail} />
                 </div>
               </>
             )}

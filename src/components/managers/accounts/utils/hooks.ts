@@ -1,7 +1,8 @@
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { AccessLevel, AdminPermission } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { isRefusal, notifyFailure } from 'components/shared/notify-failure';
 
 export const accountsKeys = {
   all: ['accounts'] as const,
@@ -47,7 +48,6 @@ export function useAccounts(enabled = true) {
 
 export function useCreateAccount() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: {
       username: string;
@@ -63,16 +63,15 @@ export function useCreateAccount() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: accountsKeys.list() });
-      showMessage('Account created', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to create account', 'error'),
+    // A refusal stands in the form (account-form-modal); a lost request is news.
+    onError: (error, vars) =>
+      !isRefusal(error) && notifyFailure(`ACCOUNT ${vars.username}`, 'not created', error),
   });
 }
 
 export function useUpdateAccountPermissions() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { username: string; isSuper: boolean; permissions: AdminPermission[] }) =>
       adminService.UpdateAccountPermissions({
@@ -83,36 +82,41 @@ export function useUpdateAccountPermissions() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: accountsKeys.list() });
       queryClient.invalidateQueries({ queryKey: accountsKeys.current() });
-      showMessage('Permissions updated', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to update permissions', 'error'),
+    // A refusal stands in the form (account-form-modal); a lost request is news.
+    onError: (error, vars) =>
+      !isRefusal(error) && notifyFailure(`ACCOUNT ${vars.username}`, 'not saved', error),
   });
 }
 
 export function useSetAccountDisabled() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
-  return useMutation({
+  // Retry re-sends through the same mutation, so its pending state stays honest.
+  const again = useRef<(vars: { username: string; disabled: boolean }) => void>(() => undefined);
+  const m = useMutation({
     mutationFn: (vars: { username: string; disabled: boolean }) =>
       adminService.SetAccountDisabled(vars),
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: accountsKeys.list() });
-      showMessage(vars.disabled ? 'Account disabled' : 'Account enabled', 'success');
-    },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to update account', 'error'),
+    // The enable / disable label flips: that is the receipt.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: accountsKeys.list() }),
+    onError: (error, vars) =>
+      notifyFailure(
+        `ACCOUNT ${vars.username}`,
+        vars.disabled ? 'not disabled' : 'not enabled',
+        error,
+        () => again.current(vars),
+      ),
   });
+  again.current = m.mutate;
+  return m;
 }
 
 export function useResetAccountPassword() {
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { username: string; newPassword: string }) =>
       adminService.ResetAccountPassword(vars),
-    onSuccess: () => showMessage('Password reset', 'success'),
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to reset password', 'error'),
+    // A refusal stands in the dialog (reset-password-modal); a lost request is news.
+    onError: (error, vars) =>
+      !isRefusal(error) && notifyFailure(`ACCOUNT ${vars.username}`, 'password not reset', error),
   });
 }
 
@@ -125,7 +129,6 @@ export function useResetAccountPassword() {
  */
 export function useSetAccountSpecialties() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     // Словарь приезжает клиенту ИМЕНАМИ (`ListAdminsResponse.specialties`), без id — id
     // специальности в контракте не публикуется вовсе. Поэтому весь выбранный набор уезжает
@@ -145,27 +148,21 @@ export function useSetAccountSpecialties() {
       // tech-card/components/useRoles). Без этой строки новая специальность не нашлась бы
       // поиском по людям до перезагрузки вкладки.
       queryClient.invalidateQueries({ queryKey: ['admins'] });
-      showMessage('specialties saved', 'success');
     },
-    onError: (error) =>
-      showMessage(
-        error instanceof Error ? error.message : "couldn't save the specialties",
-        'error',
-      ),
+    // The chips roll back (specialties-field); the reason goes to the inbox.
+    onError: (error, vars) =>
+      notifyFailure(`ACCOUNT ${vars.username}`, 'specialties not saved', error),
   });
 }
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { username: string }) => adminService.DeleteAccount(vars),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: accountsKeys.list() });
-      showMessage('Account deleted', 'success');
     },
-    onError: (error) =>
-      showMessage(error instanceof Error ? error.message : 'Failed to delete account', 'error'),
+    onError: (error, vars) => notifyFailure(`ACCOUNT ${vars.username}`, 'not deleted', error),
   });
 }
 

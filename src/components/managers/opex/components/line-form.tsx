@@ -1,7 +1,8 @@
 import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { errorText, isRefused, reasonOf } from 'components/managers/accounting/utils/feedback';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { ConfirmationModal, Text, EmptyCell } from 'ui';
+import { CalloutBox, ConfirmationModal, Text, EmptyCell } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import { isRecurringLine, opexVatRegimeOptions } from '../utils/options';
@@ -69,8 +70,9 @@ export function LineFormModal({
   existing?: OpexLine;
   lines?: OpexLine[];
 }) {
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOpexLines();
+  // A check or refusal stands over the form until the next edit or attempt; `field` goes red.
+  const [formError, setFormError] = useState<{ text: string; field?: keyof Draft } | null>(null);
   const del = useDeleteOpexLine();
   const busy = upsert.isPending || del.isPending;
 
@@ -81,6 +83,7 @@ export function LineFormModal({
 
   useEffect(() => {
     if (!open) return;
+    setFormError(null);
     setDocOpen(hasDoc(existing));
     setD(
       existing
@@ -101,7 +104,11 @@ export function LineFormModal({
     );
   }, [existing, open]);
 
-  const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<Draft>) => {
+    setFormError(null);
+    setD((prev) => ({ ...prev, ...patch }));
+  };
+  const bad = (field: keyof Draft) => formError?.field === field;
 
   // A line with a VAT amount but no document identity is still deducted in the app summary but
   // dropped from the generated JPK register — surface it as a soft caveat, not a blocker.
@@ -112,12 +119,15 @@ export function LineFormModal({
 
   const submit = async () => {
     if (!d.label.trim() || !d.amount.trim()) {
-      showMessage('Enter a label and amount', 'error');
+      setFormError({
+        text: 'enter a label and amount',
+        field: d.label.trim() ? 'amount' : 'label',
+      });
       return;
     }
     const amountNum = parseDecimalNumber(d.amount);
     if (!Number.isFinite(amountNum) || amountNum < 0) {
-      showMessage('Amount must be a non-negative number', 'error');
+      setFormError({ text: 'amount must be a non-negative number', field: 'amount' });
       return;
     }
     // opxVat v2: mirror the backend rule — a VAT amount needs a regime (and vice-versa is fine: a
@@ -125,11 +135,16 @@ export function LineFormModal({
     if (d.vatAmount.trim()) {
       const vatNum = parseDecimalNumber(d.vatAmount);
       if (!Number.isFinite(vatNum) || vatNum < 0) {
-        showMessage('VAT amount must be a non-negative number', 'error');
+        setFormError({ text: 'VAT amount must be a non-negative number', field: 'vatAmount' });
+        setDocOpen(true);
         return;
       }
       if (!d.vatRegime) {
-        showMessage('A VAT amount needs a regime (domestic PL / UK)', 'error');
+        setFormError({
+          text: 'a VAT amount needs a regime (domestic PL / UK)',
+          field: 'vatRegime',
+        });
+        setDocOpen(true);
         return;
       }
     }
@@ -158,14 +173,15 @@ export function LineFormModal({
         (l.label || '') === line.label,
     );
     if (collision) {
-      showMessage(
-        isRecurringLine(collision)
-          ? 'A recurring (⟳) line already uses this category + label this month'
-          : 'A line with this category + label already exists this month — edit that line instead',
-        'error',
-      );
+      setFormError({
+        text: isRecurringLine(collision)
+          ? 'a recurring (⟳) line already uses this category + label this month'
+          : 'a line with this category + label already exists this month — edit that line instead',
+        field: 'label',
+      });
       return;
     }
+    setFormError(null);
     try {
       // Write the new row first, THEN drop the old one when the natural key changed: the reverse
       // order loses the line entirely if the upsert fails after the delete.
@@ -178,19 +194,33 @@ export function LineFormModal({
       if (existing?.id && keyChanged) {
         try {
           await del.mutateAsync(existing.id);
-        } catch {
-          showMessage(
-            'Line saved under the new name, but the old line could not be removed — delete it manually',
-            'error',
-          );
+        } catch (e) {
+          notify({
+            sev: 'warn',
+            subject: `OPEX ${line.label}`,
+            text: 'saved',
+            bad: 'old line not removed',
+            detail: errorText(e, 'delete the old line manually'),
+          });
           onOpenChange(false);
           return;
         }
       }
-      showMessage(existing ? 'Line saved' : 'Line added', 'success');
+      // No receipt: the line shows in the month's table.
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save line', 'error');
+      const said = errorText(e, 'failed to save line') ?? '';
+      if (isRefused(e)) {
+        setFormError({ text: said });
+        return;
+      }
+      notify({
+        sev: 'error',
+        subject: `OPEX ${line.label}`,
+        text: 'not saved',
+        bad: reasonOf(e),
+        detail: said,
+      });
     }
   };
 
@@ -213,13 +243,18 @@ export function LineFormModal({
           <input
             className={fieldCls}
             value={d.label}
+            aria-invalid={bad('label') || undefined}
             onChange={(e) => set({ label: e.target.value })}
             placeholder='e.g. seamstress Maria'
           />
         </Field>
         <div className='grid grid-cols-[1fr_7rem] gap-2'>
           <Field label='amount'>
-            <AmountInput value={d.amount} onChange={(v) => set({ amount: v })} />
+            <AmountInput
+              value={d.amount}
+              invalid={bad('amount')}
+              onChange={(v) => set({ amount: v })}
+            />
           </Field>
           <Field label='currency'>
             <CurrencySelect value={d.currency} onChange={(v) => set({ currency: v })} />
@@ -259,12 +294,17 @@ export function LineFormModal({
             <div className='mt-2 flex flex-col gap-2.5'>
               <div className='grid grid-cols-[1fr_9rem] gap-2'>
                 <Field label='VAT amount' hint={`in ${d.currency}`}>
-                  <AmountInput value={d.vatAmount} onChange={(v) => set({ vatAmount: v })} />
+                  <AmountInput
+                    value={d.vatAmount}
+                    invalid={bad('vatAmount')}
+                    onChange={(v) => set({ vatAmount: v })}
+                  />
                 </Field>
                 <Field label='VAT regime'>
                   <select
                     className={fieldCls}
                     value={d.vatRegime}
+                    aria-invalid={bad('vatRegime') || undefined}
                     onChange={(e) => set({ vatRegime: e.target.value })}
                   >
                     {opexVatRegimeOptions.map((o) => (
@@ -319,6 +359,7 @@ export function LineFormModal({
             </div>
           )}
         </div>
+        {formError && <CalloutBox tone='error'>{formError.text}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

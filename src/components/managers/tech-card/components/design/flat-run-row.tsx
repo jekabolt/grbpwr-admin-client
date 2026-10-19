@@ -6,7 +6,7 @@ import type {
   common_DesignRunParams,
 } from 'api/proto-http/admin';
 import { abortableAdminService, adminService } from 'api/api';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -535,7 +535,6 @@ export function FlatRunRow({
   const speaks = serverSpeaksDesign();
   const qc = useQueryClient();
   const startRun = useStartRun(techCardId);
-  const { showMessage } = useSnackBarStore();
 
   /* ЧЕРНОВИК — С ЗАПРОСА В ПОЛЁТЕ, ИНАЧЕ ПАМЯТЬ ВКЛАДКИ (ревью раунда 3, m2; гейт волны 3, W1): ряд,
      вернувшийся после смены шага, рисует то, за что уже платят; ряд, не перемонтированный при смене
@@ -766,7 +765,13 @@ export function FlatRunRow({
       if (!gateNow.ok) return;
       if (!(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS))) {
         if (cardOnScreen(card)) {
-          showMessage('the input is still being saved — try again; nothing was started', 'error');
+          notify({
+            sev: 'error',
+            subject: 'FLAT RUN',
+            text: 'not started',
+            bad: 'input saving',
+            detail: 'the input is still being saved — try again; nothing was started',
+          });
         }
         return;
       }
@@ -801,14 +806,26 @@ export function FlatRunRow({
         freshBand = await rereadBand(qc, card);
       } catch {
         if (cardOnScreen(card)) {
-          showMessage('could not re-read the input — nothing was started; try again', 'error');
+          notify({
+            sev: 'error',
+            subject: 'FLAT RUN',
+            text: 'not started',
+            bad: 'input unread',
+            detail: 'could not re-read the input — nothing was started; try again',
+          });
         }
         return;
       }
       // D5: a flat run started meanwhile (another tab, or this press's band not re-read yet).
       if (flatRunInFlight(freshBand)) {
         if (cardOnScreen(card)) {
-          showMessage('a flat run is already drawing — nothing was started', 'error');
+          notify({
+            sev: 'error',
+            subject: 'FLAT RUN',
+            text: 'not started',
+            bad: 'run drawing',
+            detail: 'a flat run is already drawing — nothing was started',
+          });
         }
         return;
       }
@@ -878,10 +895,13 @@ export function FlatRunRow({
       } catch (e) {
         if (!isUnimplemented(e)) {
           if (cardOnScreen(card)) {
-            showMessage(
-              'could not read what the model gets — nothing was started; try again',
-              'error',
-            );
+            notify({
+              sev: 'error',
+              subject: 'FLAT RUN',
+              text: 'not started',
+              bad: 'prompt unread',
+              detail: 'could not read what the model gets — nothing was started; try again',
+            });
           }
           return;
         }
@@ -890,7 +910,13 @@ export function FlatRunRow({
       }
       if (flatRunInFlight(freshBand)) {
         if (cardOnScreen(card)) {
-          showMessage('a flat run is already drawing — nothing was started', 'error');
+          notify({
+            sev: 'error',
+            subject: 'FLAT RUN',
+            text: 'not started',
+            bad: 'run drawing',
+            detail: 'a flat run is already drawing — nothing was started',
+          });
         }
         return;
       }

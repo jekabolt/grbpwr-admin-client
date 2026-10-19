@@ -5,9 +5,9 @@ import { MaterialPickerDialog } from 'components/managers/materials/components/m
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AddDoor,
   Button,
@@ -19,8 +19,26 @@ import {
   Text,
   EmptyCell,
   Close,
+  UndoRow,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
+import { failureClassOfError, serverSentenceOf } from './useTechCardAutosave';
+
+/** A colour write that failed off-screen (a row action): the inbox, with RETRY when it can help. */
+function notifyColourFailure(
+  code: string | undefined,
+  text: string,
+  e: unknown,
+  retry: () => void,
+) {
+  notify({
+    sev: 'error',
+    subject: `COLOUR ${code || ''}`.trim(),
+    text,
+    detail: serverSentenceOf(e) ?? techCardErrorMessage(e, text),
+    action: failureClassOfError(e) === 'transient' ? { label: 'retry', onClick: retry } : undefined,
+  });
+}
 
 // 0252 — colour variants of an AUXILIARY card's warehouse output. An aux card sewn in several
 // colours (a кофр in black and in bone) needs one stock bucket PER COLOUR — its own on-hand, its own
@@ -172,8 +190,9 @@ function AddColourDialog({
   note?: React.ReactNode;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOutputVariant(techCardId);
+  // What stops the dialog: an unanswered field, or the server's refusal of the answers.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [colorCode, setColorCode] = useState('');
   const [mode, setMode] = useState<'auto' | 'existing'>('auto');
   const [materialId, setMaterialId] = useState(0);
@@ -189,7 +208,10 @@ function AddColourDialog({
     setMaterialId(seedMaterialId);
     setMaterialName('');
     setPickerOpen(false);
+    setRefusal(null);
   }, [open, seedMaterialId]);
+  // An edit answers the refusal.
+  useEffect(() => setRefusal(null), [colorCode, mode, materialId]);
 
   const availableColors = useMemo(
     () => (dictionary?.colors ?? []).filter((c) => !c.archived && c.code),
@@ -201,7 +223,7 @@ function AddColourDialog({
 
   const submit = () => {
     if (!ready) {
-      showMessage(colorCode ? 'pick a material' : 'pick a colour', 'error');
+      setRefusal(colorCode ? 'pick a material' : 'pick a colour');
       return;
     }
     upsert.mutate(
@@ -213,15 +235,18 @@ function AddColourDialog({
         active: true,
       }),
       {
-        onSuccess: () => {
-          showMessage(`colour ${colorCode} registered`, 'success');
-          onOpenChange(false);
-        },
+        // The new row in the list is the receipt.
+        onSuccess: () => onOpenChange(false),
         // Every refusal behind this RPC (duplicate colour, a bucket another card already claims, a
         // unit that disagrees with the sibling colours, a unitless or archived material, a sellable
-        // or released card) arrives as a 400 with readable text — pass it through verbatim.
-        onError: (error) =>
-          showMessage(techCardErrorMessage(error, 'could not register the colour'), 'error'),
+        // or released card) arrives as a 400 with readable text — shown verbatim in the dialog.
+        onError: (error) => {
+          if (failureClassOfError(error) === 'refused') {
+            setRefusal(techCardErrorMessage(error, 'could not register the colour'));
+            return;
+          }
+          notifyColourFailure(colorCode, 'not registered', error, submit);
+        },
       },
     );
   };
@@ -260,6 +285,7 @@ function AddColourDialog({
               <span className='flex items-center gap-2'>
                 <Swatch hex={picked?.hex} title={picked?.name ?? undefined} />
                 <select
+                  aria-invalid={refusal === 'pick a colour' || undefined}
                   className={cn(cell, 'w-full')}
                   value={colorCode}
                   disabled={upsert.isPending}
@@ -310,6 +336,13 @@ function AddColourDialog({
                 </div>
               )}
             </div>
+            {refusal && (
+              <CalloutBox tone='error'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not registered</b> · {refusal}
+                </Text>
+              </CalloutBox>
+            )}
           </div>
         )}
       </ConfirmationModal>
@@ -346,11 +379,36 @@ export function OutputVariantsPanel({
   canEdit: boolean;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOutputVariant(techCardId);
   const del = useDeleteOutputVariant(techCardId);
   const [addOpen, setAddOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<common_TechCardOutputVariant | null>(null);
+  // DELETE WITH UNDO: nothing is sent while the ghost row offers undo; the RPC goes out when it
+  // runs out (or the panel leaves). A variant owns stock, so a failed delete brings the row back.
+  const [ghosts, setGhosts] = useState<Set<number>>(() => new Set());
+  const [gone, setGone] = useState<Set<number>>(() => new Set());
+  const without = (set: Set<number>, id: number) => {
+    const next = new Set(set);
+    next.delete(id);
+    return next;
+  };
+  const commitDelete = (v: common_TechCardOutputVariant) => {
+    const id = v.id ?? 0;
+    setGhosts((g) => without(g, id));
+    // An id-less row cannot be deleted (sending 0 buys a raw gateway complaint).
+    if (!id) return;
+    setGone((g) => new Set(g).add(id));
+    del.mutate(id, {
+      onError: (error) => {
+        setGone((g) => without(g, id));
+        notifyColourFailure(v.colorCode, 'not deleted', error, () => commitDelete(v));
+      },
+    });
+  };
+  const pendingGhosts = useRef<common_TechCardOutputVariant[]>([]);
+  pendingGhosts.current = variants.filter((v) => ghosts.has(v.id ?? 0));
+  const commitRef = useRef(commitDelete);
+  commitRef.current = commitDelete;
+  useEffect(() => () => pendingGhosts.current.forEach((v) => commitRef.current(v)), []);
 
   const hexByCode = useMemo(() => {
     const m = new Map<string, string>();
@@ -375,31 +433,11 @@ export function OutputVariantsPanel({
         active: !v.active,
       }),
       {
-        onSuccess: () =>
-          showMessage(
-            `${v.colorCode ?? 'colour'} ${v.active ? 'retired' : 'reactivated'}`,
-            'success',
-          ),
+        // The row's own pill and button flip: that is the receipt.
         onError: (error) =>
-          showMessage(techCardErrorMessage(error, 'could not update the colour'), 'error'),
+          notifyColourFailure(v.colorCode, 'not updated', error, () => toggleActive(v)),
       },
     );
-  };
-
-  const confirmDelete = () => {
-    const v = pendingDelete;
-    // An id-less row cannot be deleted, and sending 0 only buys a raw gateway complaint about a
-    // missing required field. Every row here comes back from the server with an id, so this is a
-    // guard against a shape we do not expect rather than a case with a story.
-    if (!v?.id) return;
-    del.mutate(v.id, {
-      onSuccess: () => {
-        showMessage(`${v.colorCode ?? 'colour'} deleted`, 'success');
-        setPendingDelete(null);
-      },
-      onError: (error) =>
-        showMessage(techCardErrorMessage(error, 'could not delete the colour'), 'error'),
-    });
   };
 
   const busy = upsert.isPending || del.isPending;
@@ -410,6 +448,16 @@ export function OutputVariantsPanel({
         colour variants · {variants.length} ({liveCount} active)
       </GroupLabel>
       {variants.map((v) => {
+        if (gone.has(v.id ?? 0)) return null;
+        if (ghosts.has(v.id ?? 0))
+          return (
+            <UndoRow
+              key={v.id}
+              name={[v.colorCode, v.colorName, v.materialName].filter(Boolean).join(' · ')}
+              onUndo={() => setGhosts((g) => without(g, v.id ?? 0))}
+              onCommit={() => commitDelete(v)}
+            />
+          );
         // '—' is not '0': UNSET means the bucket has no stock row at all, which is a different
         // statement from "none left" (mirrors StockLine in the aux picker).
         const onHand = decimalToInput(v.onHand);
@@ -448,7 +496,7 @@ export function OutputVariantsPanel({
                       size='sm'
                       aria-label={`delete colour ${v.colorCode ?? ''}`}
                       disabled={busy}
-                      onClick={() => setPendingDelete(v)}
+                      onClick={() => setGhosts((g) => new Set(g).add(v.id ?? 0))}
                     />
                   </>
                 )}
@@ -474,28 +522,6 @@ export function OutputVariantsPanel({
         title='register colour'
         confirmLabel='register'
       />
-
-      {pendingDelete && (
-        <ConfirmationModal
-          open
-          width='sm'
-          // Closable mid-flight for the same reason as the add dialog — see there.
-          onOpenChange={(next) => !next && setPendingDelete(null)}
-          title={`delete colour ${pendingDelete.colorCode || ''}?`}
-          confirmLabel='delete colour'
-          hideCancel
-          confirmDisabled={del.isPending}
-          closeOnConfirm={false}
-          onConfirm={confirmDelete}
-        >
-          <Row label='colour' value={pendingDelete.colorCode || <EmptyCell />} />
-          <Row label='bucket' value={pendingDelete.materialName || <EmptyCell />} />
-          <Row label='on hand' value={decimalToInput(pendingDelete.onHand) || <EmptyCell />} />
-          {variants.length === 1 && (
-            <Row label='last colour' value='card goes back to one output' />
-          )}
-        </ConfirmationModal>
-      )}
     </div>
   );
 }

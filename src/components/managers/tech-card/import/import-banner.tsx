@@ -15,7 +15,7 @@ import { productionRunKeys } from 'components/managers/production-runs/component
 import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, CalloutBox, Drawer, Text } from 'ui';
 import {
@@ -59,7 +59,6 @@ function useImportReport(techCardId: number | undefined) {
 export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
   const { data } = useImportReport(techCardId);
   const { canWrite } = usePermissions();
-  const { showMessage } = useSnackBarStore();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
 
@@ -76,7 +75,12 @@ export function TechCardImportBanner({ techCardId }: { techCardId: number }) {
       setOpen(false);
     },
     onError: (error: unknown) =>
-      showMessage(error instanceof Error ? error.message : 'could not dismiss the report', 'error'),
+      notify({
+        sev: 'error',
+        subject: 'IMPORT REPORT',
+        text: 'not dismissed',
+        detail: error instanceof Error ? error.message : undefined,
+      }),
   });
 
   // ЧИТАТЕЛЬ ВИДИТ ОТЧЁТ, НО НЕ ЗАКРЫВАЕТ ЕГО. Права у двух вызовов РАЗНЫЕ (см.

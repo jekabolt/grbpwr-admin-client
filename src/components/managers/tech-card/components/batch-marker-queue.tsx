@@ -53,7 +53,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { useQueryClient } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify, updateNotify } from 'lib/stores/store';
 import type { NestResult, PieceDTO } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
@@ -170,7 +170,6 @@ export function BatchMarkerQueue({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   // ПРАВО НА НАСТИЛ — ЭТО ПРАВО НА ПРОИЗВОДСТВО, а не на тех-карты. Настил принадлежит прогону, и
   // `canEdit` этого компонента (tech_cards:write) про него не говорит НИЧЕГО: раскройщик, которому
   // открыты партии и закрыты карточки, обязан собрать настил, а тот, кому открыты карточки и
@@ -652,7 +651,10 @@ export function BatchMarkerQueue({
 
   // Обновление состояния ПОСЛЕ размонтирования — не только предупреждение React: это правка
   // экрана, которого нет, из цикла, который обязан был остановиться.
+  // The loop's own read of the statuses: `runs` is a render behind it.
+  const statusRef = useRef(new Map<string, JobStatus>());
   const patch = (id: string, next: Partial<JobRun>) => {
+    if (next.status) statusRef.current.set(id, next.status);
     if (!aliveRef.current) return;
     setRuns((prev) => ({ ...prev, [id]: { ...(prev[id] ?? blankRun()), ...next } }));
   };
@@ -746,8 +748,24 @@ export function BatchMarkerQueue({
       (a, b) => a.scopeKey.localeCompare(b.scopeKey) || a.sizeId - b.sizeId,
     );
     setRuns(Object.fromEntries(queue.map((j) => [j.id, blankRun()])));
+    statusRef.current = new Map(queue.map((j) => [j.id, 'queued' as JobStatus]));
+    // One job for the queue. The table prints each row, so the run lives in the inbox; only a
+    // failure at the end toasts.
+    const subject = `MARKERS RUN ${run.id ?? ''}`.trim();
+    const total = queue.length;
+    const jobKey = notify(
+      { sev: 'job', subject, text: `0 of ${total}`, progress: 0 },
+      { toast: false },
+    );
+    let step = 0;
     try {
       for (const job of queue) {
+        updateNotify(
+          jobKey,
+          { text: `${step} of ${total}`, progress: step / total },
+          { toast: false },
+        );
+        step += 1;
         // Проверяется КАЖДУЮ итерацию, а не только stopRef: размонтирование ставит оба флага, но
         // «жив» — сильнее: при нём цикл обязан выйти, ничего больше не записав на сервер.
         if (!aliveRef.current) return;
@@ -818,6 +836,20 @@ export function BatchMarkerQueue({
       // только что сохранила: пересчёт отправил бы новую раскладку с id = 0 и получил отказ по
       // уникальности имени. Тот же ключ читает и страница партии.
       if (batchRunId > 0) qc.invalidateQueries({ queryKey: layKeys.list(batchRunId) });
+      // Stopped or skipped rows are the operator's own call, not a failure.
+      const st = [...statusRef.current.values()];
+      const saved = st.filter((x) => x === 'done' || x === 'draft').length;
+      const failed = st.filter((x) => x === 'failed').length;
+      updateNotify(
+        jobKey,
+        {
+          sev: failed === 0 ? 'ok' : saved === 0 ? 'error' : 'warn',
+          text: failed > 0 && saved === 0 ? 'not saved' : `saved ${saved} of ${total}`,
+          bad: failed > 0 ? `${failed} failed` : undefined,
+          progress: undefined,
+        },
+        { toast: failed > 0 },
+      );
       if (!aliveRef.current) return;
       setPhase('ready');
       stopRef.current = false;
@@ -864,7 +896,7 @@ export function BatchMarkerQueue({
   const stopAll = () => {
     stopRef.current = true;
     cancelRef.current?.();
-    showMessage('the queue is stopping — the markers already saved stay', 'success');
+    // The rows turn «stopped» and the queue's job settles: that is the receipt.
   };
   const skipCurrent = () => {
     skipRef.current = true;

@@ -6,7 +6,7 @@ import {
   common_TechCardMachineType,
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -1529,6 +1529,11 @@ function TrayChip({
  */
 type RenameOutcome = { ok: true } | { ok: false; why: string };
 
+/** A refused gesture of the sequence editor: no field holds the answer, so it goes to the inbox. */
+function refuseGesture(subject: string, text: string, detail: string) {
+  notify({ sev: 'error', subject, text, detail });
+}
+
 /**
  * КОД УЗЛА — ПОДТВЕРЖДАЕМЫЙ АКТ, А НЕ ЖИВОЕ ПОЛЕ ФОРМЫ.
  *
@@ -1646,6 +1651,7 @@ function useUnitCodeAct({
         name={id}
         ref={ref}
         value={draft ?? outputKey}
+        aria-invalid={refusal !== null || tooLong !== null || undefined}
         placeholder='SHELL'
         title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1750,7 +1756,6 @@ function ProducesBlock({
   onEdit?: () => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const outputKey = (useWatch({ name: `operations.${index}.outputUnitKey` }) ?? '') as string;
   const outputName = (useWatch({ name: `operations.${index}.outputUnitName` }) ?? '') as string;
 
@@ -1788,17 +1793,19 @@ function ProducesBlock({
 
   const declare = () => {
     if (usable.length < 2) {
-      showMessage(
+      refuseGesture(
+        `STEP ${index + 1}`,
+        'not a unit',
         'a unit made of a single input is processing, not a unit: take at least two inputs into the step',
-        'error',
       );
       return;
     }
     const code = suggest();
     if (byKey.has(code)) {
-      showMessage(
+      refuseGesture(
+        `STEP ${index + 1}`,
+        'not a unit',
         `the key “${code}” is taken by a piece — pieces and units share one namespace`,
-        'error',
       );
       return;
     }
@@ -1885,7 +1892,6 @@ function BootstrapEatenRefs({
   assembly: AssemblyView;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ inputKeys?: string[] }>;
 
   // Узел должен быть произведён ЭТИМ шагом — или им поглощён. Иначе кнопки быть не должно вовсе.
@@ -1930,11 +1936,8 @@ function BootstrapEatenRefs({
       if (!placed && !next.includes(outputKey)) next.unshift(outputKey);
       setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
     });
+    // The chip goes with the work it asked for: that is the receipt.
     setValue('assemblyCleared', false, { shouldDirty: true });
-    showMessage(
-      `references to consumed pieces replaced with unit ${outputKey} in ${affected.length} steps`,
-      'success',
-    );
   };
 
   return (
@@ -1979,7 +1982,6 @@ function ClearOperationMediaButton({
   frozen?: boolean;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const [confirming, setConfirming] = useState(false);
 
   // Диалог рисуется ПОРТАЛОМ в body, куда внешний `<fieldset disabled>` не достаёт: карточку
@@ -1999,8 +2001,8 @@ function ClearOperationMediaButton({
     list.forEach((_, i) => setValue(`operations.${i}.media`, [], { shouldDirty: true }));
     // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
     setValue('mediaCleared', true, { shouldDirty: true });
+    // The photos leave the steps on screen; the header chip carries the save.
     setConfirming(false);
-    showMessage('the step photos are cleared — the card saves itself once it validates', 'success');
   };
 
   return (
@@ -2044,7 +2046,6 @@ function ClearAssemblyButton({
   frozen?: boolean;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const view = useAssemblyView(pieces);
   const [confirming, setConfirming] = useState(false);
 
@@ -2081,7 +2082,6 @@ function ClearAssemblyButton({
     // Префиксный проход: n ≤ 60 шагов, стоимость незаметна, а альтернатива — хранить снимки
     // замыканий в движке ради одной кнопки.
     const unitsBefore = (i: number) => assemblySweep(sweepPieces, allSteps.slice(0, i)).units;
-    let droppedDangling = 0;
     ops.forEach((o, i) => {
       const seen = new Set<string>();
       const expanded: string[] = [];
@@ -2092,10 +2092,7 @@ function ClearAssemblyButton({
         // «piece deleted») при распаковке ОТБРАСЫВАЕТСЯ. Оставь его — и запись со снятой
         // разметкой всё равно «несёт узлы» с точки зрения сервера, то есть кнопка ломала бы
         // собственный контракт: обещает состояние, которое сервер примет, а отдаёт отказ.
-        if (!unit && !pieceKeys.has(k)) {
-          droppedDangling++;
-          continue;
-        }
+        if (!unit && !pieceKeys.has(k)) continue;
         for (const leaf of unit ? unit.leaves : [k]) {
           if (!seen.has(leaf)) {
             seen.add(leaf);
@@ -2109,13 +2106,8 @@ function ClearAssemblyButton({
     });
     // Намерение объявляется ровно на это сохранение.
     setValue('assemblyCleared', true, { shouldDirty: true });
+    // The markup leaves the steps on screen; the header chip carries the save.
     setConfirming(false);
-    showMessage(
-      droppedDangling > 0
-        ? `the unit markup is cleared; dangling references dropped: ${droppedDangling} — the card saves itself once it validates`
-        : 'the unit markup is cleared — it applies once the card has saved',
-      'success',
-    );
   };
 
   return (
@@ -3847,7 +3839,6 @@ function OperationEditor({
     setPrefilled((prev) => prev.filter((f) => f.field !== field));
   };
 
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   const rememberDefault = useMutation({
     mutationFn: (v: { workToken: string; field: string; value: string }) =>
       adminService.RememberOperationWorkDefault({
@@ -3859,14 +3850,19 @@ function OperationEditor({
     onSuccess: () => {
       // Каталог перечитывается: дефолт, только что записанный, обязан подставиться на следующем
       // же шаге, а не через перезагрузку страницы.
+      // The re-read marks the button `✓`: that is the receipt.
       refreshCatalog();
-      showMessage('remembered as your default for this kind of work', 'success');
     },
     onError: (e: unknown) => {
       // ОТКАЗ ПОКАЗЫВАЕТСЯ ДОСЛОВНО. Сервер отвечает ИМЕНЕМ поля («у этой настройки своя лестница
       // наследования»), и переписывать это своими словами значило бы прятать единственное
       // объяснение, которое у человека есть.
-      showMessage(e instanceof Error ? e.message : 'could not remember that default', 'error');
+      notify({
+        sev: 'error',
+        subject: 'DEFAULT',
+        text: 'not remembered',
+        detail: e instanceof Error ? e.message : 'could not remember that default',
+      });
     },
   });
 
@@ -6315,7 +6311,7 @@ export function OperationsField({
     // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
     // обратно без единого слова. Инлайновую ручку глушит внешний fieldset, снекбар не спамит.
     if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
     if (from === to) return;
@@ -6597,7 +6593,6 @@ export function OperationsField({
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
-  const showMessage = useSnackBarStore((st) => st.showMessage);
 
   // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
   // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
@@ -6824,11 +6819,12 @@ export function OperationsField({
     if (!available.includes(key)) {
       const eater = res.consumedBy.get(key);
       const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
-      showMessage(
+      refuseGesture(
+        `STEP ${index + 1}`,
+        'input refused',
         into
           ? `“${key}” is already inside unit ${into} at this step — it cannot be taken again`
           : `“${key}” is not on the table yet at this step`,
-        'error',
       );
       return;
     }
@@ -7113,9 +7109,8 @@ export function OperationsField({
     const act = unitRenameAct(formOps, stepIndex, next, pieces);
     if (act.kind === 'noop') return { ok: true }; // побайтно то же самое: жеста не было
     if (act.kind === 'refuse') {
-      // ОТКАЗ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ, причём и в снекбар, и возвратом: снекбар
-      // гаснет, а поле с набранным, но не применённым кодом остаётся на экране.
-      showMessage(act.why, 'error');
+      // ОТКАЗ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ: возвратом, и поле с набранным кодом
+      // показывает его под собой (useUnitCodeAct) — тоста нет.
       return { ok: false, why: act.why };
     }
     if (act.kind === 'dissolve') {
@@ -7172,12 +7167,7 @@ export function OperationsField({
     // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет седьмую точку сброса. Щит
     // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
     settleGesture();
-    // УСПЕХ ПРОИЗНОСИТСЯ, и число в нём считает ВСЕ ТРИ ВИДА МЕСТ: перенумерация шагов не молчит
-    // (R9), а переименование, переписавшее полкарточки, — тем более.
-    showMessage(
-      `renamed ${from} → ${to} in ${plan.steps} ${plan.steps === 1 ? 'step' : 'steps'}`,
-      'success',
-    );
+    // The count is promised under the field before Enter; the renamed node is the receipt.
     return { ok: true };
   };
 
@@ -7356,13 +7346,13 @@ export function OperationsField({
     const rec = peekUndo(history.current);
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
     if (rec.kind !== 'move' && frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
     if (rec.kind === 'skeleton') {
       const refused = undoSkeleton(rec);
       if (refused) {
-        showMessage(refused, 'error');
+        refuseGesture('SEQUENCE', 'not undone', refused);
         onSkeletonUndone?.({ nonce: rec.nonce, undone: 0, refused });
       }
       return;
@@ -7371,7 +7361,7 @@ export function OperationsField({
       // Ряд строк уехал (чаще всего — ресет формы после save). Умирает ВСЯ формовая половина
       // истории, а не одна запись: они все из той же, уже несуществующей эпохи. Раскладочные живут.
       setHistory(dropForm(history.current));
-      showMessage('the sequence has changed — nothing to undo', 'error');
+      refuseGesture('SEQUENCE', 'nothing to undo', 'the sequence has changed since');
       return;
     }
     if (rec.kind === 'move') {
@@ -7410,12 +7400,12 @@ export function OperationsField({
     const rec = peekRedo(history.current);
     if (!rec) return; // та же тишина: возвращать нечего
     if (rec.kind !== 'move' && frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
+      refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
     if (!canRedo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
       setHistory(dropForm(history.current));
-      showMessage('the sequence has changed — nothing to redo', 'error');
+      refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
       return;
     }
     if (rec.kind === 'move') {

@@ -8,7 +8,7 @@ import { MediaRecropDialog } from 'components/managers/media/components/media-re
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { CropFrame } from 'lib/features/getCropped';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DesignQuizQuestion } from 'api/proto-http/admin';
@@ -545,7 +545,6 @@ export function MoodBoard({
   guide?: GuideFace;
 }): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
 
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const items = useMemo(() => all.filter(isBoardRow), [all]);
@@ -581,7 +580,13 @@ export function MoodBoard({
   const flatInput = useFlatInput(techCardId);
   const boardBusy = () => {
     if (!flatInput.run && rowsWritable(readFlatInput(techCardId))) return false;
-    showMessage('a flat run is being started — change the board once it has started', 'error');
+    notify({
+      sev: 'error',
+      subject: 'MOODBOARD',
+      text: 'not changed',
+      bad: 'run starting',
+      detail: 'a flat run is being started — change the board once it has started',
+    });
     return true;
   };
 
@@ -666,7 +671,8 @@ export function MoodBoard({
     });
     // ОТКАЗ ГОВОРИТСЯ ВСЛУХ. Дверь при полной доске остаётся на месте и объясняет себя (Д19):
     // исчезнувшая дверь читается как «сюда добавлять нельзя вообще».
-    if (result.refusal) showMessage(result.refusal, 'error');
+    if (result.refusal)
+      notify({ sev: 'error', subject: 'MOODBOARD', text: 'not added', detail: result.refusal });
     if (!result.accepted.length) return [];
     setPicked((prev) => [...prev, ...result.accepted]);
     writeItems(result.next);
@@ -717,10 +723,14 @@ export function MoodBoard({
     });
     const placed: Placed = { mode: plan.mode, carried: null, carry: null };
     if (plan.mode === 'refused') {
-      showMessage(
-        'the board is full — the crop is in the library; the original keeps its place and notes',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'MOODBOARD',
+        text: 'not placed',
+        bad: 'board full',
+        detail:
+          'the board is full — the crop is in the library; the original keeps its place and notes',
+      });
       return placed;
     }
     setPicked((prev) => [...prev, full]);
@@ -728,11 +738,6 @@ export function MoodBoard({
     if (plan.callouts !== liveCallouts)
       setValue('callouts', plan.callouts as TechCardFormData['callouts'], { shouldDirty: true });
 
-    if (plan.mode === 'next-to')
-      showMessage(
-        'the crop is on the board, right after the original — the original keeps its notes',
-        'success',
-      );
     if (plan.mode !== 'replace') return placed;
     const carried = labelsNow.current.get(originalId);
     if (!isPersonLabel(carried) || toId === originalId) return placed;
@@ -780,25 +785,35 @@ export function MoodBoard({
     // The whole frame keeps every callout, so this is a replace; any other plan said its own words.
     // The picture's number keeps two landings' toasts (and their undo) apart.
     if (placed.mode === 'replace')
-      showMessage(
-        `picture ${n}: background removed — the original stays in the library`,
-        'success',
-        {
-          label: 'undo',
-          onClick: () => undoCutout.current(original, cut.id ?? 0, placed),
-        },
-      );
+      notify({
+        sev: 'ok',
+        subject: `PICTURE ${n}`,
+        text: 'background removed',
+        action: { label: 'undo', onClick: () => undoCutout.current(original, cut.id ?? 0, placed) },
+      });
     return 'placed';
   }
   /** One tap back: the original takes its place again; the cut-out's carried label stops riding. */
   const undoCutout = useRef((_original: common_MediaFull, _cutId: number, _landed: Placed) => {});
   undoCutout.current = (original, cutId, landed) => {
     if (!alive.current) {
-      showMessage('the moodboard was closed — nothing was undone', 'error');
+      notify({
+        sev: 'error',
+        subject: 'MOODBOARD',
+        text: 'not undone',
+        bad: 'board closed',
+        detail: 'the moodboard was closed — nothing was undone',
+      });
       return;
     }
     if (!(cutId > 0) || !onBoard(cutId)) {
-      showMessage('the cut-out is no longer on the board — nothing to undo', 'error');
+      notify({
+        sev: 'error',
+        subject: 'MOODBOARD',
+        text: 'not undone',
+        bad: 'cut-out gone',
+        detail: 'the cut-out is no longer on the board — nothing to undo',
+      });
       return;
     }
     const now = labelsNow.current.get(cutId);
@@ -927,10 +942,13 @@ export function MoodBoard({
     const current = ((getValues('concept') ?? '') as string).trim();
     const next = current ? `${current}\n${legacyNote}` : legacyNote;
     if (next.length > CONCEPT_MAX) {
-      showMessage(
-        `the note does not fit — the description holds ${CONCEPT_MAX} characters and it is already ${current.length}; shorten it first`,
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: 'MOODBOARD',
+        text: 'not added',
+        bad: 'too long',
+        detail: `the note does not fit — the description holds ${CONCEPT_MAX} characters and it is already ${current.length}; shorten it first`,
+      });
       return;
     }
     setValue('concept', next, { shouldDirty: true, shouldValidate: true });
@@ -1102,7 +1120,12 @@ export function MoodBoard({
         flushed = 'error';
       }
       if (!flushAllowsRun(flushed)) {
-        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        notify({
+          sev: 'error',
+          subject: 'MOODBOARD',
+          text: 'not described',
+          detail: flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal),
+        });
         return;
       }
       const res = await describeRun.mutateAsync(newClientRequestId());
@@ -1440,7 +1463,6 @@ export function MoodBoard({
                    moves onto it unchanged. The original stays in the library. */
                 if (full) {
                   placeCropped(editing.mediaId, full, WHOLE_FRAME);
-                  showMessage('the edit took the original’s place on the board', 'success');
                 }
               }}
             />

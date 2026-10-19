@@ -1,6 +1,5 @@
 import { adminService } from 'api/api';
 import { getBase64File } from 'lib/features/getBase64';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   MAX_PATTERN_FILENAME,
@@ -141,8 +140,7 @@ export function PatternUploadModal({
   // while the operator still has the file in front of them. PDFs stay optional — a sheet a human
   // reads does not need a cloth.
   const missingSlot =
-    slots.length > 0 &&
-    staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.scopeKey);
+    slots.length > 0 && staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.scopeKey);
 
   async function uploadAll() {
     setBusy(true);
@@ -295,7 +293,6 @@ export function PatternUploadButton({
   dxfOnly,
   quiet,
 }: Props) {
-  const { showMessage } = useSnackBarStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `pattern-upload-${useId().replace(/:/g, '')}`;
   const [picked, setPicked] = useState<File[] | null>(null);
@@ -310,8 +307,8 @@ export function PatternUploadButton({
     const bad = files
       .map((f) => ({ f, err: patternFileError(f, { dxfOnly }) }))
       .filter((x) => x.err);
-    for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
-    if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `${bad.length} files rejected`);
+    // Said once, under the button: the names with their reasons.
+    if (bad.length > 0) setError(bad.map((x) => `${x.f.name}: ${x.err}`).join(' · '));
     const good = files.filter((f) => !patternFileError(f, { dxfOnly }));
     if (good.length > 0) setPicked(good);
   }

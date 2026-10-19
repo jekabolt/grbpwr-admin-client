@@ -1,6 +1,6 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import type { JSX } from 'react';
 import { Text } from 'ui';
 
@@ -164,7 +164,6 @@ export function PictureSlotEmpty({
 }
 
 export function ImageSlots(props: ImageSlotsProps): JSX.Element {
-  const { showMessage } = useSnackBarStore();
   const { band, techCardId, sources, purpose = 'playground', disabled } = props;
 
   if (props.mode === 'fixed') {
@@ -234,7 +233,13 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
     // Say it when a paste or a pick brought more than there was room for: the strip shows what went
     // in, and silence would let a person think the rest went in too.
     if (fresh.length > kept.length) {
-      showMessage(`took ${kept.length} of ${fresh.length}: the list holds ${max} at most`, 'error');
+      notify({
+        sev: 'warn',
+        subject: 'PICTURES',
+        text: 'partly added',
+        bad: `${fresh.length - kept.length} dropped`,
+        detail: `took ${kept.length} of ${fresh.length}: the list holds ${max} at most`,
+      });
     }
     if (kept.length) onChange([...value, ...kept]);
   };

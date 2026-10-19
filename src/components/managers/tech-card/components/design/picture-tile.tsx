@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   createContext,
@@ -397,7 +397,6 @@ export function PictureGalleryProvider({
    *     прогона — отдельное решение владельца, а не догадка здесь. Рендер заводится
    *     неатрибутированным, ровно как всякий рендер, загруженный руками.
    */
-  const { showMessage } = useSnackBarStore();
   const writes = useDesignWrites(techCardId);
   const { registerUpload } = writes;
 
@@ -425,17 +424,25 @@ export function PictureGalleryProvider({
       const source = pictureOfMedia(mediaId);
       const kind = source ? source.kind || 'flat' : null;
       if (!kind) {
-        showMessage(
-          'this frame is not a picture of the band, so there is no kind to give the copy. Open it from a bench, reference or output tile.',
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'PICTURE',
+          text: 'not copied',
+          bad: 'no kind',
+          detail:
+            'this frame is not a picture of the band, so there is no kind to give the copy. Open it from a bench, reference or output tile.',
+        });
         return;
       }
       if (kind === 'pattern') {
-        showMessage(
-          'a pattern tile cannot be filed as a new picture: the band takes flat, render and 3d only, and filing a repeating tile as a flat would make it pickable as the front of the garment.',
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'PICTURE',
+          text: 'not copied',
+          bad: 'pattern tile',
+          detail:
+            'a pattern tile cannot be filed as a new picture: the band takes flat, render and 3d only, and filing a repeating tile as a flat would make it pickable as the front of the garment.',
+        });
         return;
       }
       const media = await uploadRaster(dataUrl);
@@ -457,9 +464,8 @@ export function PictureGalleryProvider({
           },
         ],
       });
-      showMessage('the corrected copy is in the band', 'success');
     },
-    [pictureOfMedia, registerUpload, showMessage],
+    [pictureOfMedia, registerUpload],
   );
 
   const api = useMemo<GalleryApi>(() => ({ register, openAt }), [register, openAt]);
