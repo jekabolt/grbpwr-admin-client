@@ -28,7 +28,9 @@ export type FittingWorkspace = {
   fittingId: number;
   techCardId: number;
   roundNumber: number;
-  // Finished fitting (status done): the screen is read-only.
+  // Finished fitting (status done): only the outcome dock is locked; everything else stays editable.
+  done: boolean;
+  // No write access to fittings: the screen is read-only.
   readOnly: boolean;
   mediaById: Map<number, common_MediaFull>;
   addPicked: (items: common_MediaFull[]) => void;

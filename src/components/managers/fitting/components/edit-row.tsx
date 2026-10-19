@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { CheckboxCommon, EmptyCell, Pin, Select } from 'ui';
+import { CheckboxCommon, Close, EmptyCell, Pin, Select } from 'ui';
 import { categoryOf, EditRow } from './edit-rows';
 
 export const EDIT_CATEGORIES = ['', 'pattern', 'construction', 'material', 'grading', 'other'];
@@ -43,6 +43,7 @@ export function EditRowItem({
   onHover,
   onCategory,
   onResolved,
+  onDelete,
 }: {
   row: EditRow;
   hot: boolean;
@@ -52,6 +53,7 @@ export function EditRowItem({
   onHover: (on: boolean) => void;
   onCategory: (target: string) => void;
   onResolved: (resolved: boolean) => void;
+  onDelete: () => void;
 }) {
   const resolved = row.status === 'resolved';
   const cat = categoryOf(row.target);
@@ -103,6 +105,16 @@ export function EditRowItem({
         disabled={readOnly || busy}
         onChange={(v: boolean) => onResolved(v)}
       />
+      {!readOnly && (
+        <Close
+          type='button'
+          size='sm'
+          aria-label='delete edit'
+          className='mt-0.5 text-labelColor hover:text-textColor'
+          disabled={busy}
+          onClick={onDelete}
+        />
+      )}
     </li>
   );
 }

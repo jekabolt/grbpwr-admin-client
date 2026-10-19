@@ -1,11 +1,12 @@
 import {
   useAddFittingChangeRequest,
+  useDeleteFittingChangeRequest,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
 import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, FoldCaret, Section } from 'ui';
+import { Button, ConfirmationModal, FoldCaret, Section, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { CarryOverRows } from './carry-over';
 import { DraftRows, DraftsAddAll } from './draft-rows';
@@ -22,27 +23,79 @@ type Patch = { target?: string; status?: 'open' | 'resolved' };
 // line, then the composer. An edit is a change request; its mark is the callout with its number.
 export function EditsList() {
   const ws = useFittingWorkspace();
-  const { fittingId, techCardId, readOnly, currentMediaId, hotNumber, setHotNumber } = ws;
-  const { control } = useFormContext<FittingFormData>();
+  const { fittingId, techCardId, readOnly, currentMediaId, hotNumber, setHotNumber, saveNow } = ws;
+  const { control, getValues, setValue } = useFormContext<FittingFormData>();
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const { changeRequests, pendingNumbers } = useEditChangeRequests();
   const add = useAddFittingChangeRequest(fittingId, techCardId);
   const update = useUpdateFittingChangeRequest(fittingId, techCardId);
+  const del = useDeleteFittingChangeRequest(fittingId, techCardId);
 
   // Optimistic category / resolved per edit number, dropped once the server copy agrees.
   const [overrides, setOverrides] = useState<Map<number, Patch>>(new Map());
   // Legacy marks (no change request yet) whose first change is creating one right now.
   const [creating, setCreating] = useState<Set<number>>(new Set());
   const [showResolved, setShowResolved] = useState(false);
+  // The row whose delete waits for confirmation; then the numbers being deleted (hidden at once).
+  const [confirmDelete, setConfirmDelete] = useState<EditRow | null>(null);
+  const [deleting, setDeleting] = useState<Set<number>>(new Set());
 
   const serverRows = useMemo(
     () => buildEditRows(callouts, changeRequests),
     [callouts, changeRequests],
   );
   const rows: EditRow[] = useMemo(
-    () => serverRows.map((r) => ({ ...r, ...overrides.get(r.number) })),
-    [serverRows, overrides],
+    () =>
+      serverRows
+        .filter((r) => !deleting.has(r.number))
+        .map((r) => ({ ...r, ...overrides.get(r.number) })),
+    [serverRows, overrides, deleting],
   );
+
+  // A deleted number stays hidden until the server copy (and the form) no longer carry it.
+  useEffect(() => {
+    if (deleting.size === 0) return;
+    const has = new Set(serverRows.map((r) => r.number));
+    if ([...deleting].some((n) => !has.has(n)))
+      setDeleting(new Set([...deleting].filter((n) => has.has(n))));
+  }, [serverRows, deleting]);
+
+  // Delete = the change request (if any) goes, then the mark(s) with its number leave the form.
+  const remove = (row: EditRow) => {
+    const n = row.number;
+    setDeleting((s) => new Set(s).add(n));
+    const dropMarks = () => {
+      const now = (getValues('callouts') ?? []) as FormCallout[];
+      if (!now.some((c) => c.number === n)) return;
+      setValue(
+        'callouts',
+        now.filter((c) => c.number !== n),
+        { shouldDirty: true },
+      );
+      saveNow();
+    };
+    if (hotNumber === n) setHotNumber(null);
+    if (!row.crId) {
+      dropMarks();
+      return;
+    }
+    del.mutate(row.crId, {
+      onSuccess: dropMarks,
+      onError: (e) => {
+        setDeleting((s) => {
+          const next = new Set(s);
+          next.delete(n);
+          return next;
+        });
+        notify({
+          sev: 'error',
+          subject: 'EDIT',
+          text: 'not deleted',
+          detail: fieldErrorSummary(e, 'Failed'),
+        });
+      },
+    });
+  };
 
   useEffect(() => {
     if (overrides.size === 0) return;
@@ -161,6 +214,7 @@ export function EditsList() {
       }}
       onCategory={(target) => save(row, { target })}
       onResolved={(resolved) => save(row, { status: resolved ? 'resolved' : 'open' })}
+      onDelete={() => setConfirmDelete(row)}
     />
   );
 
@@ -198,6 +252,21 @@ export function EditsList() {
         )}
       </div>
       {!readOnly && <EditComposer nextNumber={nextNumber} />}
+      <ConfirmationModal
+        open={!!confirmDelete}
+        onOpenChange={(o) => !o && setConfirmDelete(null)}
+        onConfirm={() => {
+          if (confirmDelete) remove(confirmDelete);
+          setConfirmDelete(null);
+        }}
+        title={confirmDelete ? `delete edit ${confirmDelete.number}` : 'delete edit'}
+        confirmLabel='delete'
+        width='sm'
+      >
+        <Text size='micro' component='span'>
+          {confirmDelete?.note || `edit ${confirmDelete?.number ?? ''}`}
+        </Text>
+      </ConfirmationModal>
     </Section>
   );
 }

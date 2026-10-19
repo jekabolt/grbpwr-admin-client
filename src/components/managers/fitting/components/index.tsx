@@ -271,7 +271,7 @@ function FittingWorkspaceScreen({
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const done = status === 'FITTING_STATUS_DONE';
-  const readOnly = done || !canWrite(SECTION.fittings);
+  const readOnly = !canWrite(SECTION.fittings);
   const changeRequests = fitting.fitting?.changeRequests;
 
   const workspace = useMemo<FittingWorkspace>(
@@ -279,6 +279,7 @@ function FittingWorkspaceScreen({
       fittingId,
       techCardId,
       roundNumber: sampleRoundNumber,
+      done,
       readOnly,
       mediaById,
       addPicked: (items) => setPicked((prev) => [...prev, ...items]),
@@ -298,6 +299,7 @@ function FittingWorkspaceScreen({
       fittingId,
       techCardId,
       sampleRoundNumber,
+      done,
       readOnly,
       mediaById,
       changeRequests,

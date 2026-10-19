@@ -26,30 +26,33 @@ function fromForm(outcome: string | undefined): OutcomeKey | '' {
 }
 
 // Docked outcome bar: pick rework / approved / dropped, then Finish closes the fitting
-// (status done + outcome, saved at once). After Finish the screen is read-only.
+// (status done + outcome, saved at once). After Finish the outcome is shown and locked; the rest
+// of the screen stays editable.
 export function OutcomeDock({ saveError }: { saveError: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
   useDockBottom(ref, []);
   const { control, setValue } = useFormContext<FittingFormData>();
-  const { readOnly, changeRequests, roundNumber, saveNow } = useFittingWorkspace();
+  const { done, readOnly, changeRequests, roundNumber, saveNow } = useFittingWorkspace();
   const outcome = fromForm(useWatch({ control, name: 'outcome' }));
 
   const open = changeRequests.filter((cr) => (cr.status || 'open') !== 'resolved').length;
 
+  const locked = done || readOnly;
+
   function pick(next: OutcomeKey | '') {
-    if (readOnly) return;
+    if (locked) return;
     const value = !next || next === outcome ? 'undecided' : TO_FORM[next];
     setValue('outcome', value, { shouldDirty: true });
   }
 
   function finish() {
-    if (!outcome || readOnly) return;
+    if (!outcome || locked) return;
     setValue('status', 'FITTING_STATUS_DONE', { shouldDirty: true });
     saveNow();
   }
 
   let summary: React.ReactNode = null;
-  if (readOnly) {
+  if (done) {
     summary = (
       <Pill tone='ok'>
         {outcome === 'rework'
@@ -84,7 +87,7 @@ export function OutcomeDock({ saveError }: { saveError: string | null }) {
           value={outcome}
           options={OPTIONS}
           onChange={pick}
-          disabled={readOnly}
+          disabled={locked}
           className='flex-[2] md:flex-none [&>span]:flex-1 [&>span]:justify-center [&>span]:py-2 md:[&>span]:py-1'
         />
         <span className='hidden md:inline-flex'>{summary}</span>
@@ -106,10 +109,10 @@ export function OutcomeDock({ saveError }: { saveError: string | null }) {
           variant='main'
           size='lg'
           className='flex-1 py-2 md:flex-none md:py-2.5'
-          disabled={!outcome || readOnly}
+          disabled={!outcome || locked}
           onClick={finish}
         >
-          {readOnly ? 'Done' : 'Finish'}
+          {done ? 'Done' : 'Finish'}
         </Button>
       </div>
     </div>
