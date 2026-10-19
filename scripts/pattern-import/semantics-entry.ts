@@ -1506,7 +1506,7 @@ export async function main(): Promise<number> {
       'gate passes (the fold line = the mirror line on layer 6)',
       gateLine(g.report),
     );
-    const r12 = await gate(d.output.pieces, inp.sizeMap, d.wallsOf, SOURCE, 'aama-r12');
+    const r12 = await gate(d.output.pieces, inp.sizeMap, d.wallsOf, SOURCE, 'r12');
     ck(
       r12.report.passed,
       'gate passes on AAMA R12 (one mirror line on layer 6)',
