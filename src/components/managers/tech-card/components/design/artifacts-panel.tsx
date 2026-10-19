@@ -58,6 +58,7 @@ import {
   TILE_QUIET,
   ViewSwitch,
   useDoneFlash,
+  Glyph,
 } from 'ui';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
@@ -3894,24 +3895,6 @@ function SlotTile({
   );
 }
 
-/** Глиф модели — куб, как у двери «принести свою модель»: фотография обещала бы картинку. */
-function ModelGlyph({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-      className={cn('h-8 w-8', className)}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-    >
-      <path d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
-      <path d='M3.5 7 12 11.25 20.5 7' />
-      <path d='M12 11.25v10' />
-    </svg>
-  );
-}
-
 /**
  * ═══ ПЛИТА-МОДЕЛЬ: РЕЗУЛЬТАТ 3D БЕЗ РАСТРА (D-26) ═══════════════════════════════════════════════
  *
@@ -3971,7 +3954,7 @@ function ModelPlateTile({
         className='flex w-auto max-w-[85vw] cursor-pointer flex-col items-center justify-center gap-2 border border-borderColor bg-pageBg text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         style={{ height: PLATE_FRAME_HEIGHT, aspectRatio: '4/5' }}
       >
-        <ModelGlyph />
+        <Glyph name='model' className='size-8' />
         <Text size='micro' variant='label' component='span' className='uppercase'>
           open the model ▸
         </Text>
