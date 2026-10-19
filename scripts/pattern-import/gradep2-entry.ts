@@ -1006,7 +1006,14 @@ async function honesty(): Promise<number> {
   console.log(
     `D shared: ${sh.length} true stretches, ${sh.filter((r) => r.ok).length} accepted (${sh.filter((r) => r.ok && r.sharedRuns > 0).length} on the shared line) · mutations taking a shared run: ${badShared.length}`,
   );
-  const fail = bad.length + badShared.length;
+  // not vacuous (Codex r1): with D on, true shared stretches are run on and the local grade
+  // accepts somewhere — else a broken shared pass / fallback would refuse everything and pass
+  const vacuous =
+    !process.env.GRADE_D_OFF &&
+    (sh.filter((r) => r.ok && r.sharedRuns > 0).length === 0 ||
+      rows.filter((r) => r.variant === 'local' && r.ok).length === 0);
+  if (vacuous) console.log('FAIL  vacuous: no shared stretch run on, or no local-grade accept');
+  const fail = bad.length + badShared.length + (vacuous ? 1 : 0);
   console.log(
     `${fail ? 'FAIL' : 'PASS'}  honesty: ${rows.length} attempts, ${acc.length} accepted, ${bad.length} accepted beyond tolerance (max error of accepts ${r2(mx([0, ...acc.map((r) => r.errMax)]))} mm), ${badShared.length} shared runs taken by a mutation · ${Date.now() - t1} ms`,
   );

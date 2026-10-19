@@ -366,8 +366,10 @@ export function repairSize(
           k++;
           continue;
         }
+        // one run = one shared line: where the nearest shared line changes, the run ends (two lines
+        // in a row, each landed on at one side only, are not one junction-bounded run — Codex r1)
         let k2 = k;
-        while (k2 < n && sh[(firstCovered + k2) % n]) k2++;
+        while (k2 < n && sh[(firstCovered + k2) % n]?.w === sh[i]!.w) k2++;
         const iPrev = (firstCovered + k - 1 + n) % n;
         const iNext = (firstCovered + k2) % n;
         const sp = snaps[iPrev];
