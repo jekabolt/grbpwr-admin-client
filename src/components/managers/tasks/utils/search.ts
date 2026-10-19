@@ -3,13 +3,12 @@ import type { Task, TaskBoard } from '../api/types';
 /**
  * TASK SEARCH — matching, snippet and highlight helpers (pure, no React).
  *
- * The request goes to `ListTasks` with `query` and no board (all boards, archive included). Until
- * the backend filters by `query` (T2) it ignores the unknown parameter and returns every card, so
- * the client decides what matched. Once T2 lands, flip `SERVER_FILTERS_QUERY`: then every card
- * the server returned is a hit, even one whose match the client cannot see (comment text is not
- * in the list payload).
+ * The request goes to `ListTasks` with `query` and no board (all boards, archive included); the
+ * backend filters by `query` (title, description, #id, comments, checklist). Every card it returns
+ * is a hit, even one whose match the client cannot see (comment text is not in the list payload).
+ * `false` = fall back to client-side matching over the whole list.
  */
-export const SERVER_FILTERS_QUERY = false;
+export const SERVER_FILTERS_QUERY = true;
 
 /** Where the hit is. `null` = the server says it matched, the client cannot tell where. */
 export type MatchField = 'id' | 'title' | 'description' | 'checklist' | 'comment';
