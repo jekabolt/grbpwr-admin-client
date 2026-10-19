@@ -182,6 +182,9 @@ export function AddMenu({
       <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
         <Link to={ROUTES.fileTopics}>manage topics</Link>
       </Button>
+      <Button asChild className={`${item} text-labelColor hover:text-textColor`}>
+        <Link to={ROUTES.filesShared}>shared</Link>
+      </Button>
     </GenericPopover>
   );
 }
@@ -202,6 +205,9 @@ export function StatusLine({
   onSort,
   view,
   onView,
+  selecting,
+  selectedCount = 0,
+  onToggleSelecting,
 }: {
   /** `undefined` — ответ ещё не приехал. */
   matched?: number;
@@ -215,6 +221,14 @@ export function StatusLine({
   onSort: (v: FilesSort) => void;
   view: FilesView;
   onView: (v: FilesView) => void;
+  /**
+   * ТЕЛЕФОННЫЙ ВХОД В ВЫБОР — САМО ЧИСЛО. «6 files» подчёркнуто и включает выбор; в режиме
+   * то же место говорит «N selected · done». Отдельного слова «select» нет: оно стояло рядом с
+   * сортировкой и видом и читалось третьим переключателем. На десктопе пропы не передаются.
+   */
+  selecting?: boolean;
+  selectedCount?: number;
+  onToggleSelecting?: () => void;
 }) {
   const next = SORT_CYCLE[(SORT_CYCLE.indexOf(sort) + 1) % SORT_CYCLE.length];
   return (
@@ -224,22 +238,49 @@ export function StatusLine({
     >
       {/* Одна строка всегда: число впереди и не режется, фильтры уходят в многоточие. */}
       <span className='flex min-w-0 items-center gap-2.5'>
-        <span className='min-w-0 truncate'>
-          <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
-          {matched === 1 ? 'file' : 'files'}
-          {untopiced && (
-            <>
-              {' · '}
-              <span className='text-error'>unsorted</span>
-            </>
-          )}
-          {parts.map((p) => (
-            <span key={p}>
-              {' · '}
-              <span className='text-textColor'>{p}</span>
+        {selecting && onToggleSelecting ? (
+          <span className='flex min-w-0 items-center gap-1'>
+            <span className='min-w-0 truncate'>
+              <span className='font-bold tabular-nums text-textColor'>{selectedCount}</span>{' '}
+              selected
             </span>
-          ))}
-        </span>
+            <span aria-hidden>·</span>
+            <Button
+              variant='underline'
+              aria-pressed
+              className='shrink-0 text-textColor'
+              onClick={onToggleSelecting}
+            >
+              done
+            </Button>
+          </span>
+        ) : (
+          <span className='min-w-0 truncate'>
+            {onToggleSelecting ? (
+              <Button variant='underline' aria-pressed={false} onClick={onToggleSelecting}>
+                <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
+                {matched === 1 ? 'file' : 'files'}
+              </Button>
+            ) : (
+              <>
+                <span className='font-bold tabular-nums text-textColor'>{matched ?? '…'}</span>{' '}
+                {matched === 1 ? 'file' : 'files'}
+              </>
+            )}
+            {untopiced && (
+              <>
+                {' · '}
+                <span className='text-error'>unsorted</span>
+              </>
+            )}
+            {parts.map((p) => (
+              <span key={p}>
+                {' · '}
+                <span className='text-textColor'>{p}</span>
+              </span>
+            ))}
+          </span>
+        )}
         {filtered && (
           <Button variant='underline' className='shrink-0 text-textColor' onClick={onReset}>
             reset

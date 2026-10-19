@@ -675,6 +675,22 @@ export type ListMediaMonthsResponse = {
   months: MonthCount[] | undefined;
 };
 
+export type ListMediaFacetsRequest = {
+};
+
+export type MediaFacetRow = {
+  isVideo: boolean | undefined;
+  width: number | undefined;
+  height: number | undefined;
+  inUse: boolean | undefined;
+  count: number | undefined;
+};
+
+export type ListMediaFacetsResponse = {
+  rows: MediaFacetRow[] | undefined;
+  total: number | undefined;
+};
+
 export type GetMediaUsageRequest = {
   mediaIds: number[] | undefined;
 };
@@ -18967,6 +18983,11 @@ export interface AdminService {
   // in the same direction. Months are UTC; the client labels items in UTC to match. Empty
   // months are omitted.
   ListMediaMonths(request: ListMediaMonthsRequest): Promise<ListMediaMonthsResponse>;
+  // ListMediaFacets counts the whole media library as a small cube, so the library's filter rail
+  // can show true counts before (and independent of) paging. One row per distinct
+  // (is_video, width, height, in_use); the client folds rows into its own ratio buckets and
+  // computes faceted counts (each shelf excluding its own filter) by summing rows.
+  ListMediaFacets(request: ListMediaFacetsRequest): Promise<ListMediaFacetsResponse>;
   // CreateColorway creates a new DRAFT colourway attached to an existing style (R2/R4 write
   // decomposition; replaces the coupled UpsertColorway). It writes only colourway-owned fields — no
   // style facts (UpdateStyle), no variants (CreateVariant), no size chart (UpdateStyleSizeChart). The
@@ -21030,6 +21051,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListMediaMonths",
       }) as Promise<ListMediaMonthsResponse>;
+    },
+    ListMediaFacets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/content/facets`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMediaFacets",
+      }) as Promise<ListMediaFacetsResponse>;
     },
     CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways`; // eslint-disable-line quotes

@@ -1178,14 +1178,17 @@ export function buildPieceSpecsDetailed(
       region: famBox,
       ...(darts.length ? { darts } : {}),
     };
-    // SHAPE: notch marks (small closed marks centred on the line) are notches, never outline —
-    // read over every size of the family at once (semantics/notch-marks.ts)
+    // NOTCH: compact closed marks are cleaned off the outline, then classified across the family:
+    // numeric balloons are size tags (never layer 4); proven filled triangles / other marks are
+    // notches. Read every size at once so repeated graded copies are independent evidence.
     const markReads =
       traced || p.all.some(({ c }) => featuresOf(c).length)
         ? new Map<number, MarkRead>()
         : readNotchMarks(
             p.all.map(({ c }) => c),
             set,
+            undefined,
+            { paths: sheet.paths, styles: sheet.styles, texts: sheet.texts, run },
           );
 
     // GRADE P1: a notch drawn AS the outline (a bump / dip of notch shape) at a grade-consistent

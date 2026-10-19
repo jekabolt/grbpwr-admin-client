@@ -4,7 +4,10 @@ import { isProjectTopic } from '../hooks/useFiles';
 import { extensionOf, formatBytes, formatDay, stemOf } from '../utils/format';
 import { hasViewPath, type FileTile } from './file-tile';
 
-export type FileRowProps = Parameters<typeof FileTile>[0];
+export type FileRowProps = Parameters<typeof FileTile>[0] & {
+  /** Телефонный режим выбора: обе прежние мишени строки отмечают файл вместо открытия. */
+  selectOnClick?: boolean;
+};
 
 const DETAIL_COLUMNS =
   'grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_11.25rem_5.625rem_5rem_1.875rem]';
@@ -77,6 +80,7 @@ export function FileRow({
   onView,
   onPreviewError,
   children,
+  selectOnClick,
 }: FileRowProps) {
   const name = file.fileName ?? '';
   const uploader = file.uploadedBy ?? '';
@@ -132,11 +136,22 @@ export function FileRow({
           />
         )}
 
-        <div className='relative z-10 grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 md:grid-cols-[2.5rem_minmax(0,1fr)]'>
+        <div
+          className={cn(
+            'relative z-10 grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 md:grid-cols-[2.5rem_minmax(0,1fr)]',
+            selectOnClick && 'pointer-events-none',
+          )}
+        >
           {onView ? (
             <Button
-              onClick={viewable ? onView : onDetails}
-              aria-label={previewLabel}
+              onClick={selectOnClick ? onToggleSelect : viewable ? onView : onDetails}
+              aria-label={
+                selectOnClick
+                  ? selected
+                    ? `remove ${name} from the selection`
+                    : `select ${name}`
+                  : previewLabel
+              }
               title={name}
               className='pointer-events-auto flex size-12 items-center justify-center overflow-hidden border border-hairline bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor md:size-10'
             >
@@ -207,8 +222,14 @@ export function FileRow({
         </div>
 
         <Button
-          onClick={onDetails}
-          aria-label={detailsLabel}
+          onClick={selectOnClick ? onToggleSelect : onDetails}
+          aria-label={
+            selectOnClick
+              ? selected
+                ? `remove ${name} from the selection`
+                : `select ${name}`
+              : detailsLabel
+          }
           title={name}
           className='absolute inset-0 z-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
         >

@@ -46,6 +46,7 @@ import {
   downloadMediaOriginals,
   useDeleteMedia,
   useInfiniteMedia,
+  useMediaFacets,
   useMediaMonths,
   useMediaUsage,
   useMediaWindow,
@@ -230,6 +231,9 @@ export function MediaManager({
     pendingFilesHook.addFiles,
   );
 
+  // Счётчики всей библиотеки — и странице, и пикеру. Без ответа `useFilter` считает по загруженному.
+  const libraryFacets = useMediaFacets();
+
   const handleUploadClick = () => fileInputRef.current?.click();
 
   /**
@@ -261,6 +265,7 @@ export function MediaManager({
     typeCounts,
     ratioCounts,
     usageCounts,
+    counted,
     isFiltered,
     setType,
     setOrder,
@@ -268,7 +273,14 @@ export function MediaManager({
     setRatio,
     setUsageShelf,
     reset,
-  } = useFilter(media, aspectRatio, videoSizes, showVideos === false ? 'image' : undefined, usage);
+  } = useFilter(
+    media,
+    aspectRatio,
+    videoSizes,
+    showVideos === false ? 'image' : undefined,
+    usage,
+    libraryFacets.data,
+  );
 
   const selection = useSelection({
     allowMultiple,
@@ -290,10 +302,15 @@ export function MediaManager({
   useEffect(() => {
     const justEnteredView = inView && !prevInViewRef.current;
     prevInViewRef.current = inView;
-    if (justEnteredView && hasNextPage && !isFetchingNextPage) {
+    // ПОД ОТБОРОМ СТРАНИЦЫ ДОКАЧИВАЮТСЯ ДО КОНЦА. Счётчики рельса теперь по всей библиотеке
+    // («2:1 — 90»), а сетка отбирает из загруженного: в отфильтрованной сетке маячок не уходит с
+    // экрана, «вход в экран» больше не случается, и сетка застывала на двух кадрах из обещанных
+    // девяноста. Библиотека — тысяча с небольшим записей, это несколько страниц.
+    const wantsMore = justEnteredView || (hasClientFilter && !virtual);
+    if (wantsMore && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage, hasClientFilter, virtual]);
 
   const handleVideoLoad = (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => {
     const video = event.target as HTMLVideoElement;
@@ -513,6 +530,12 @@ export function MediaManager({
     }
   };
   const libraryCount = virtual ? monthTotal : shown;
+  // ШАПКА СЧИТАЕТ ТАК ЖЕ, КАК РЕЛЬС: по кубу — всю библиотеку и то, что под отбором; без куба —
+  // загруженное, как раньше.
+  const headTotal = counted ? counted.total : virtual ? monthTotal : media.length;
+  const headShown = counted ? (virtual ? counted.total : counted.matching) : libraryCount;
+  const deskTotal = counted ? counted.total : media.length;
+  const deskShown = counted ? counted.matching : shown;
   // Выбранное показывается ЦЕЛИКОМ, мимо фильтров: набор переживает смену отбора.
   const gridMedia =
     selecting && selectView === 'selected' ? selection.selectedMedia : filteredMedia || [];
@@ -631,8 +654,8 @@ export function MediaManager({
             />
           ) : (
             <MobileLibraryHead
-              loaded={virtual ? monthTotal : media.length}
-              shown={libraryCount}
+              loaded={headTotal}
+              shown={headShown}
               search={search}
               order={order}
               facets={facets}
@@ -712,9 +735,9 @@ export function MediaManager({
             <Text variant='uppercase' size='large'>
               Media
             </Text>
-            {media.length > 0 && (
+            {deskTotal > 0 && (
               <Text variant='label'>
-                {shown === media.length ? media.length : `${shown} / ${media.length}`}
+                {deskShown === deskTotal ? deskTotal : `${deskShown} / ${deskTotal}`}
               </Text>
             )}
           </div>
@@ -796,7 +819,7 @@ export function MediaManager({
               usagePending={usagePending}
               usageFailed={usageFailed}
               isFiltered={isFiltered}
-              loaded={media.length}
+              loaded={counted ? null : media.length}
               onType={setType}
               onRatio={setRatio}
               onUsage={setUsageShelf}

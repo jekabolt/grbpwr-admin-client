@@ -35,6 +35,7 @@ export const PIECE_CODES: readonly PieceCode[] = [
   { code: 'LIN', name: 'lining' },
   { code: 'GST', name: 'gusset' },
   { code: 'SK', name: 'skirt' },
+  { code: 'RUF', name: 'ruffle / flounce' },
   { code: 'HB', name: 'hem band' },
 ];
 
